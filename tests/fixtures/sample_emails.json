@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "priority_expectation": "URGENT",
+    "subject": "[URGENT] Khắc phục sự cố sập DB Server Production",
+    "sender": "devops-alert@company.com",
+    "body": "Chào nhóm DevOps,\n\nHệ thống DB Node 2 đang bị dính lỗi Connection Timeout khiến API thanh toán bị gián đoạn.\nĐề nghị kiểm tra log và deploy bản hotfix khẩn cấp trước 14:00 chiều nay."
+  },
+  {
+    "id": 2,
+    "priority_expectation": "HIGH",
+    "subject": "Lịch họp duyệt Proposal dự án Q3 với khách hàng Acme",
+    "sender": "pm@company.com",
+    "body": "Chào mọi người,\n\nChúng ta có buổi họp quan trọng với bên khách hàng Acme vào 10h sáng mai.\nNhờ bạn cập nhật lại file báo giá ngân sách và gửi lại cho mình trước 8h sáng mai để chuẩn bị slide trình chiếu."
+  },
+  {
+    "id": 3,
+    "priority_expectation": "HIGH",
+    "subject": "Yêu cầu xác nhận thanh toán hóa đơn server Cloud tháng 7",
+    "sender": "billing@cloud-provider.com",
+    "body": "Kính gửi phòng Kế toán,\n\nHóa đơn dịch vụ đám mây AWS tháng 7 có tổng chi phí $1,250 và cần thanh toán trước ngày 05/08 để tránh bị tạm khóa tài nguyên.\nNhờ chị duyệt chi và chuyển khoản sớm giúp bên em."
+  },
+  {
+    "id": 4,
+    "priority_expectation": "MEDIUM",
+    "subject": "Review PR #45: Tích hợp module mã hóa token OAuth",
+    "sender": "lead-dev@company.com",
+    "body": "Hi Anh,\n\nEm vừa tạo PR #45 bổ sung Fernet encryption cho refresh token Gmail.\nNhờ anh review code và merge vào branch dev trước cuối ngày hôm nay giúp em."
+  },
+  {
+    "id": 5,
+    "priority_expectation": "MEDIUM",
+    "subject": "Báo cáo lỗi hiển thị giao diện trên thiết bị di động iOS",
+    "sender": "qa-lead@company.com",
+    "body": "Chào team UI/UX,\n\nKhách hàng phản hồi nút bấm Submit trên iPhone 15 bị che khuất bởi thanh điều hướng.\nNhờ bạn kiểm tra CSS responsive và chỉnh lại layout trong bản cập nhật tuần này."
+  },
+  {
+    "id": 6,
+    "priority_expectation": "MEDIUM",
+    "subject": "Khách hàng VIP yêu cầu xuất dữ liệu báo cáo tháng 7",
+    "sender": "support@company.com",
+    "body": "Chào bộ phận Data,\n\nCông ty TechCorp cần export toàn bộ dữ liệu giao dịch định dạng CSV trong tháng 7 vừa qua.\nNhờ bạn kết xuất dữ liệu và gửi file đính kèm cho họ trước thứ Sáu."
+  },
+  {
+    "id": 7,
+    "priority_expectation": "LOW",
+    "subject": "Nhắc nhở cập nhật Timesheet và Kế hoạch công việc tuần mới",
+    "sender": "hr@company.com",
+    "body": "Thông báo tới toàn bộ nhân sự,\n\nMọi người vui lòng điền đầy đủ Timesheet tuần này trên Jira trước 17:00 chiều thứ Sáu."
+  },
+  {
+    "id": 8,
+    "priority_expectation": "LOW",
+    "subject": "[Newsletter] Bản tin Công nghệ AI & Python hàng tuần #15",
+    "sender": "newsletter@techdigest.io",
+    "body": "Chào bạn,\n\nCùng điểm qua các công cụ AI mới nhất tuần này: GPT-4o update, Streamlit release và các mẹo tối ưu hóa Python code.\nChúc bạn một tuần làm việc hiệu quả!"
+  },
+  {
+    "id": 9,
+    "priority_expectation": "LOW",
+    "subject": "[Ưu Đãi] Giảm giá 30% cho khóa học Python Advanced",
+    "sender": "promo@edu-online.com",
+    "body": "Cơ hội duy nhất trong tháng 8!\n\nĐăng ký ngay khóa học Lập trình Python Nâng cao để nhận ưu đãi giảm 30% học phí khi nhập mã PYTHON30."
+  },
+  {
+    "id": 10,
+    "priority_expectation": "MEDIUM",
+    "subject": "Thông báo bảo trì hệ thống định kỳ cuối tuần",
+    "sender": "admin@company.com",
+    "body": "Kính gửi toàn thể nhân viên,\n\nHệ thống Email và Portal nội bộ sẽ tạm dừng bảo trì từ 23:00 thứ Bảy đến 02:00 Chủ Nhật.\nXin vui lòng hoàn thành công việc và lưu dữ liệu trước thời gian trên."
+  }
+]
