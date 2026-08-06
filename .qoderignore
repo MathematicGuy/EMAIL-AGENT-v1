@@ -1,0 +1,26 @@
+# Specify files or folders to ignore during indexing. The same as .gitignore rules, glob patterns like *.log，my-security/ are supported.
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+
+# Tooling caches and state (already gitignored, no semantic value for retrieval)
+.mypy_cache/
+.pytest_cache/
+.pytest-adr003/
+.ruff_cache/
+.deepeval/
+.serena/
+.tokensave/
+
+# Generated packaging metadata
+src/module_mail.egg-info/
+
+# Local runtime data
+.data/
+
+# Other-provider agent assets
+.claude/
+
+# Harness report outputs
+.qoder/better-harness/

@@ -26,3 +26,6 @@ htmlcov/
 .build/
 .tokensave
 .serena
+.wgm
+.qoder
+.pytest-adr003

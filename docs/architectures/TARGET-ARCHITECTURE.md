@@ -7,7 +7,7 @@
 **Agent pattern:** Deterministic single-agent workflow with conditional retrieval<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Primary use case:** Read daily Gmail messages, extract Action Items, optionally retrieve company knowledge, and generate cited Action Plans.
+**Primary use case:** Read selected Gmail messages, extract Action Items, optionally retrieve company knowledge, and generate cited Action Plans.
 
 ---
 
@@ -32,7 +32,7 @@ Persisted task output and system-generated episode
 ### Current workflow characteristics
 
 - Gmail is accessed through a read-only Google integration.
-- The Cowork feature runs on a schedule and may also be invoked with `@Email`.
+- The Cowork feature is invoked manually with `@Email`.
 - The workflow is deterministic and one-shot.
 - The LLM does not freely loop over arbitrary tools.
 - The Agent Core owns orchestration and routing.
@@ -54,14 +54,12 @@ flowchart TB
     %% ENTRY AND CONTROL PLANE
     %% =========================================================
     subgraph ENTRY["1. ENTRY & CONTROL PLANE"]
-        SCH["Scheduler Service<br/>Daily configured run"]
         CMD["@Email Command<br/>Manual feature invocation"]
         API["Cowork Feature API<br/>Create Email Action Plan Run"]
         QUEUE[("Job Queue<br/>run_id · tenant_id · user_id")]
         DLQ[("Dead-Letter Queue<br/>failed jobs")]
     end
 
-    SCH --> API
     CMD --> API
     API --> QUEUE
     QUEUE -. exhausted retries .-> DLQ
@@ -72,7 +70,7 @@ flowchart TB
     subgraph EMAIL["2. EMAIL MODULE"]
         TOKEN[("OAuth Token Store<br/>encrypted credentials")]
         GMAIL["Google Gmail API<br/>read-only access"]
-        FETCH["Email Reader Service<br/>fetch selected/daily messages"]
+        FETCH["Email Reader Service<br/>fetch selected messages"]
         NORMALIZE["Email Normalizer<br/>headers · body · sender · date"]
         ENVELOPE["EphemeralEmailEnvelope<br/>message_id · Gmail link<br/>normalized body · metadata"]
     end
@@ -239,7 +237,7 @@ flowchart LR
     end
 
     subgraph EMAIL["EMAIL MODULE"]
-        API["Email Module API<br/>read_daily_messages()"]
+        API["Email Module API<br/>read_messages()"]
         AUTH["OAuth Credential Manager"]
         TOKENS[("Encrypted Token Store")]
         CONNECTOR["Gmail Connector"]
@@ -846,7 +844,7 @@ flowchart LR
 
 | Component | Owns | Must not own |
 |---|---|---|
-| Scheduler / Queue | Run scheduling and delivery | Email content |
+| Job Queue | Run delivery | Email content |
 | Email Module | OAuth, Gmail fetching, normalization | Tasks or durable memories |
 | Agent Core | Workflow decisions and generation | Company document storage |
 | Short-Term Memory | Current run state and temporary email context | Durable user facts |
@@ -1157,7 +1155,7 @@ system_generated
 → rejected
 ```
 
-High-impact external actions—sending email, changing company systems, purchasing, deleting, or scheduling on behalf of the user—must remain outside this baseline unless a human approval gate is added.
+High-impact external actions—sending email, changing company systems, purchasing, deleting, or creating calendar events on behalf of the user—must remain outside this baseline unless a human approval gate is added.
 
 ---
 
@@ -1365,7 +1363,7 @@ task:
 # 19. Baseline Summary
 
 ```text
-Scheduler or @Email
+@Email
 → queue
 → Gmail read
 → normalize email

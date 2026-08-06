@@ -2,11 +2,13 @@
 
 Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc, tuân thủ kiến trúc **Cowork Agent Specification** với Agent Core, Hệ thống Bộ nhớ 4 thành phần (Four-Type Memory System) và Module RAG.
 
+> **Trạng thái tài liệu — đọc trước khi dùng:** README này mô tả cả **hiện trạng** (mục 4, 5) và **kiến trúc mục tiêu** (mục 1, 2). Bản MVP hiện tại chỉ triển khai pipeline trích xuất một lượt với SQLite + bộ nhớ in-process; các module `memory/`, `rag/`, `runtime/`, `ops/`, queue/DLQ và PostgreSQL **chưa tồn tại trong mã nguồn**. Phân tích đầy đủ hiện trạng ↔ mục tiêu và các milestone di cư: [`docs/master-comparison.md`](docs/master-comparison.md).
+
 ---
 
-## 1. Quy trình xử lý cốt lõi (Core Workflow)
+## 1. Quy trình xử lý cốt lõi (Core Workflow) — KIẾN TRÚC MỤC TIÊU, CHƯA TRIỂN KHAI ĐẦY ĐỦ
 
-Quy trình tự động hóa email diễn ra theo các bước định hình sẵn (deterministic pipeline):
+Quy trình tự động hóa email **theo kiến trúc mục tiêu** diễn ra theo các bước định hình sẵn (deterministic pipeline):
 
 ```text
 Trigger (Scheduled / Manual)
@@ -21,104 +23,60 @@ Trigger (Scheduled / Manual)
                             └── Cleanup Temporary Email State & Short-Term Memory
 ```
 
+**Đã triển khai trong MVP:** Gmail Fetch & Normalization → một lượt gọi LLM (phân loại + trích xuất kế hoạch gộp trong `features/email_action_plan/workflow.py`) → lọc/ưu tiên/sắp xếp deterministic → lưu kết quả in-memory. Chưa có classifier/router riêng, RAG, memory system hay queue. Chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md).
+
 ---
 
-## 2. Cấu trúc dự án (Project Structure)
+## 2. Cấu trúc dự án (Project Structure) — HIỆN TRẠNG
 
-Dự án được tổ chức theo cấu trúc module nghiệp vụ của Cowork Agent Specification (`src/cowork_agent/`):
+Dự án được tổ chức theo module nghiệp vụ của Cowork Agent Specification (`src/cowork_agent/`). Dưới đây là cấu trúc **thực tế đang tồn tại trong mã nguồn**:
 
 ```text
-cowork-agent/
+email-agent-v1/
 ├── pyproject.toml
 ├── README.md
-├── Makefile
-├── .env.example
 ├── AGENTS.md
-├── CLAUDE.md
+├── .env.example
 │
 ├── src/
 │   └── cowork_agent/
-│       ├── __init__.py
-│       ├── app.py                      # FastAPI Application entry point
-│       ├── config.py                   # System configuration & environment loaders
-│       │
-│       ├── domain/                     # Pure business models, enums, errors, identifiers
-│       │   ├── models.py
-│       │   ├── enums.py
-│       │   ├── errors.py
-│       │   └── identifiers.py
-│       │
+│       ├── app.py                      # FastAPI composition root; entry point `mail-todo-api`
+│       ├── config.py                   # Environment settings loaders (Gmail, Gemini, Groq)
+│       ├── api/                        # HTTP handlers / response serialization
+│       │   └── handlers.py
+│       ├── domain/                     # Pure business models
+│       │   └── models.py
 │       ├── features/                   # Core business features
-│       │   └── email_action_plan/      # Email-to-Action-Plan Agent Core
-│       │       ├── workflow.py         # Complete workflow orchestrator
-│       │       ├── state.py            # Workflow execution state
-│       │       ├── classifier.py       # Intent & knowledge sufficiency classifier
-│       │       ├── router.py           # Deterministic route resolver
-│       │       ├── generator.py        # Final Action Plan generator
-│       │       ├── validators.py       # Output & grounding validators
+│       │   └── email_action_plan/      # Email-to-Action-Plan workflow (combined extraction)
+│       │       ├── workflow.py         # Workflow orchestrator
 │       │       ├── policies.py         # Route & planning policies
-│       │       ├── schemas.py          # Feature Pydantic schemas
-│       │       └── prompts/            # Prompt templates (classify.md, generate.md)
-│       │
-│       ├── runtime/                    # Session lifecycle & in-memory context execution
-│       │   ├── session.py
-│       │   ├── context.py
-│       │   ├── state.py
-│       │   └── cleanup.py
-│       │
-│       ├── integrations/               # External service boundaries & clients
-│       │   ├── gmail/                  # Gmail provider, API client, OAuth & normalizer
-│       │   └── llm/                    # LLM multi-provider client (Gemini, OpenAI, Anthropic)
-│       │
-│       ├── memory/                     # Four-Type Memory System
-│       │   ├── service.py              # Unified Memory Service boundary
-│       │   ├── scope.py                # Tenant, User, Feature, Run scoping
-│       │   ├── short_term/             # Temporary run context (Local in-memory / Redis)
-│       │   ├── long_term/              # User preferences & system settings (PostgreSQL)
-│       │   ├── episodic/               # Task execution history & outcomes
-│       │   └── semantic/               # Semantic memory boundary connecting to RAG
-│       │
-│       ├── rag/                        # Modular RAG System (Company KB Retrieval)
-│       │   ├── ingestion/              # Loaders, parsers, chunkers, enrichers, embedders
-│       │   ├── indexing/               # Dense (pgvector/Chroma) & Lexical (BM25) vector stores
-│       │   ├── retrieval/              # Dense, Sparse, Hybrid retrievers & Rerankers
-│       │   └── context/                # Context builder, token budget & citations
-│       │
-│       ├── persistence/                # Durable database repositories & migrations
-│       │   ├── database.py
-│       │   └── repositories/           # Task & Run repositories
-│       │
-│       ├── orchestration/              # Worker & job scheduling
-│       │   ├── scheduler.py
-│       │   ├── queue.py                # Job queue & Dead-letter queue (DLQ)
-│       │   ├── worker.py               # Idempotent execution worker
-│       │   └── retry.py                # Retry policies & backoff timers
-│       │
-│       └── ops/                        # Observability & Tracing
-│           ├── logging.py
-│           ├── tracing.py
-│           └── events.py
+│       │       ├── ports.py            # Provider/repository protocols
+│       │       └── schemas.py          # Feature schemas
+│       ├── gui/                        # Streamlit testing GUI
+│       │   └── app.py
+│       ├── integrations/               # External service boundaries
+│       │   ├── gmail/                  # OAuth, Gmail adapter, deterministic fakes
+│       │   └── llm/                    # Gemini & Groq providers, fakes
+│       ├── orchestration/              # In-process local orchestration
+│       │   └── local.py
+│       └── persistence/                # SQLite mailbox-connection repo
+│           ├── repositories/
+│           └── migrations/             # SQL migrations (no runner wired yet)
 │
-├── tests/                              # Software Test Suites
-│   ├── unit/                           # Unit tests for features, memory, rag
-│   ├── integration/                    # Integration tests for Gmail, DB, RAG
-│   └── contracts/                      # Contract tests for memory, chunking, embedding
+├── scripts/
+│   └── run_gui.py                      # Streamlit testing GUI launcher
 │
-├── configs/                            # Environment & RAG configurations
-│   ├── rag/
-│   ├── memory/
-│   └── environments/
-│
-├── scripts/                            # Utility scripts
-│   ├── run_email.py                    # Manual execution script
-│   ├── run_gui.py                      # Streamlit testing GUI
-│   ├── ingest.py                       # RAG document ingestion script
-│   └── rebuild_index.py                # Rebuild vector index script
+├── tests/
+│   ├── unit/                           # Unit tests (policies, providers)
+│   └── integration/                    # Integration tests (server, workflow)
 │
 └── docs/                               # Documentation & Specifications
-    ├── architectures/                  # Architecture specs & Target designs
-    └── references/                     # Cowork project structure spec
+    ├── adr/                            # Architecture Decision Records (ADR-001..003)
+    ├── architectures/                  # Target architecture & gap analysis
+    └── references/                     # Specs & experience registry
 ```
+
+**Chưa tồn tại (thuộc kiến trúc mục tiêu):** `memory/`, `rag/`, `runtime/`, `ops/`, `orchestration/queue.py|worker.py|scheduler.py`, `tests/contracts/`, `configs/`, `Makefile`, `CLAUDE.md`, `scripts/run_email.py`. Chỉ scaffold các module này khi yêu cầu trích dẫn rõ một milestone trong [`docs/master-comparison.md`](docs/master-comparison.md).
 
 ---
 
@@ -154,10 +112,10 @@ python -m pip install -e ".[dev,gui]"
 
 ### 4.2 Cấu hình môi trường (`.env`)
 
-Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng:
+Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng (`.env.example` hiện chỉ chứa các biến mà bản MVP **thực sự đọc** — cấu hình PostgreSQL/queue thuộc kiến trúc mục tiêu chưa triển khai):
 
 ```env
-# Key xoay vòng Gemini (hoặc OpenAI/Anthropic)
+# Key xoay vòng Gemini (hoặc Groq)
 GEMINI_API_KEY_1="your_key_1"
 GEMINI_API_KEY_2="your_key_2"
 GEMINI_API_KEY_3="your_key_3"
@@ -184,11 +142,6 @@ OAUTH_STATE_SECRET="your_oauth_state_secret"
   ```
   Giao diện sẽ khởi chạy tại `http://localhost:8501`.
 
-- **Chạy Script xử lý thủ công (CLI):**
-  ```powershell
-  python scripts/run_email.py
-  ```
-
 ---
 
 ## 5. Kiểm tra chất lượng & Testing (Quality Assurance)
@@ -209,5 +162,10 @@ python -m pytest -q
 ---
 
 ## 6. Tài liệu tham khảo (References)
+- **Hiện trạng ↔ Mục tiêu & Milestone di cư:** [`docs/master-comparison.md`](docs/master-comparison.md)
+- **Kiến trúc mục tiêu:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
+- **Architecture Decision Records:** [`docs/adr/`](docs/adr/) (ADR-003 thay thế phạm vi attachment của ADR-001/002)
+- **Product Requirements:** [`docs/PRD-v1-Core-Email-and-RAG.md`](docs/PRD-v1-Core-Email-and-RAG.md) và [`docs/PRD-v2-Memory-Extension.md`](docs/PRD-v2-Memory-Extension.md)
 - **Project Structure Spec:** [`docs/references/cowork-project-structure-spec.md`](docs/references/cowork-project-structure-spec.md)
+- **Experience Registry cho coding agents:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
 

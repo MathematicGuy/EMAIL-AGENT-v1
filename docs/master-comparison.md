@@ -1,6 +1,6 @@
 # Master Comparison — Current Architecture vs Target Cowork Agent
 
-**Alignment status:** Corrected against `TARGET-ARCHITECTURE.md`<br>
+**Alignment status:** Corrected against `TARGET-ARCHITECTURE.md`; Step 7 decomposed against `PRD-v1-Core-Email-and-RAG.md` and `PRD-v2-Memory-Extension.md`<br>
 **Authoritative target:** `TARGET-ARCHITECTURE.md` — Baseline target architecture<br>
 **Current-code baseline:** commit `cf2fd49801d5932b26de82af9d104d730cf58271`, branch `main`<br>
 **Date:** 2026-08-07
@@ -50,7 +50,6 @@ This means:
 | Classifier/generator calls | Reused the existing extraction-and-plan call as classifier and draft generator | Split into bounded classifier batch calls and exactly one final generator call per resolved task candidate |
 | RAG path | Draft first, retrieve, regenerate only on RAG route | Classify first, retrieve conditionally, then generate once |
 | RAG failure | Keep the pass-one draft | Generate a partial plan and expose missing context |
-| Scheduler | Deferred | Required baseline entry path alongside `@Email` |
 | Queue and DLQ | Deferred after deleting the fake queue | Delete fake queue, then implement a real queue worker and DLQ as target control plane |
 | Long-term and episodic storage | SQLite recommended | PostgreSQL is the target initial durable store; SQLite may remain local-development only |
 | Attachments | Existing extraction retained and extended | Attachment processing is out of scope; record presence only |
@@ -105,7 +104,7 @@ One deployable: the FastAPI process created by `create_app()` (`server.py:44-292
 | `infrastructure/security.py` | Fernet token cipher, HMAC-signed OAuth state manager |
 | `infrastructure/config.py` | `GmailSettings`, `GeminiSettings`, `GroqSettings` from environment |
 
-**No RAG module. No agent module. No memory module. No scheduler.**
+**No RAG module. No agent module. No memory module.**
 
 ### 1.3 APIs
 
@@ -118,7 +117,7 @@ Nine endpoints: `GET /health`; OAuth connect and callback; connection list and d
 | `mailbox_connections` | SQLite, default `.data/mail_todo.db` | Durable |
 | Runs and idempotency map | `InMemoryRunRepository` | Process lifetime |
 | Action items, warnings, processed metadata | `InMemoryResultRepository` | Process lifetime |
-| `migrations/001_mail_todo.sql` | PostgreSQL DDL for connections, schedules, runs, schedule occurrences, action items, attachment extractions, outbox | **Not wired** — `create_app()` instantiates no PostgreSQL adapter |
+| `migrations/001_mail_todo.sql` | PostgreSQL DDL for connections, runs, action items, attachment extractions, outbox | **Not wired** — `create_app()` instantiates no PostgreSQL adapter |
 
 ### 1.5 Queues
 
@@ -209,7 +208,6 @@ This is the most useful part of the extraction, because three of the four target
 | Gmail ingestion | Read-only Gmail adapter with OAuth, paging, and normalization | External Email Module with read-only Gmail access | yes | yes | | | Keep adapter; add target retries, timeout, and partial-batch contract |
 | Email envelope | `EmailEnvelope` and `ThreadContext` | `EphemeralEmailEnvelope` with Gmail pointer and normalized body | yes | yes | | | Consolidate into the target contract; delete state after run |
 | Attachments | Existing bounded text extraction | Attachments present may be reported, but processing is out of scope | | | yes | | Disable attachment extraction in this baseline; set `attachments_processed=false` |
-| Scheduler | No runtime scheduler | Daily Scheduler Service plus manual `@Email` invocation | | | | yes | Implement scheduler as a target entry path |
 | Queue and DLQ | Fake write-only in-memory queue; actual FastAPI background task | Real Job Queue and Dead-Letter Queue consumed by a run worker | | yes | yes | yes | Remove fake queue; add real worker-backed queue and DLQ |
 | Run coordinator | `DigestWorker` owns the workflow | Agent Worker / Run Coordinator owns lifecycle | yes | yes | | | Evolve `DigestWorker`; no additional deployable Agent service is required |
 | Classifier call | Classification and plan extraction occur in the same LLM response | One structured Actionability + Knowledge-Sufficiency classifier call | | yes | | | Split classifier from final generation |
@@ -254,7 +252,7 @@ Current fake InMemoryQueue
 → exhausted infrastructure retries enter DLQ
 ```
 
-A Scheduler Service and `@Email` command both create runs through the same Feature API and queue. **[T]**
+The `@Email` command creates runs through the same Feature API and queue. **[T]**
 
 ## 3.2 Delete the unwired `MailTodoApi`
 
@@ -407,8 +405,7 @@ Attachment extraction, OCR, sandboxing, and attachment-derived evidence belong t
 
 | Component | Purpose |
 |---|---|
-| Scheduler Service | Daily configured runs |
-| Cowork Feature API and Job Queue | Unified manual/scheduled run creation and delivery |
+| Cowork Feature API and Job Queue | Manual `@Email` run creation and delivery |
 | Dead-Letter Queue | Exhausted job failures without raw email payload by default |
 | Short-Term Run State | Explicit runtime state and cleanup |
 | Memory Gateway / Facade | Namespace and memory policy enforcement |
@@ -457,7 +454,6 @@ flowchart TB
     end
 
     subgraph TARGET["TARGET BASELINE"]
-        SCH["Scheduler Service"]
         CMD["@Email"]
         API["Cowork Feature API"]
         Q[("Job Queue")]
@@ -479,7 +475,6 @@ flowchart TB
     API0 --> BG0 --> W0 --> G0 --> L0 --> M0
     API0 -.-> Q0
 
-    SCH --> API
     CMD --> API
     API --> Q --> W
     Q -. exhausted retries .-> DLQ
@@ -572,24 +567,33 @@ minimal paraphrase + plan + citations + Gmail pointer"]
     TASK --> EPI
 ```
 
-## Diagram 5 — Migration Order
+## Diagram 5 — Migration Order (PRD-aligned)
 
 ```mermaid
 flowchart TB
-    P1["1. Shared contracts"] --> P2["2. EphemeralEmailEnvelope"]
-    P2 --> P3["3. Run coordinator + real queue worker"]
-    P3 --> P4["4. Short-term state + cleanup"]
-    P4 --> P5["5. Compact long-term profile"]
-    P5 --> P6["6. Structured route classifier"]
-    P6 --> P7["7. Deterministic route resolver"]
-    P7 --> P8["8. SemanticMemoryPort around RAG"]
-    P8 --> P9["9. Action Plan Generator + validators"]
-    P9 --> P10["10. Task persistence + idempotency"]
-    P10 --> P11["11. Episodic writes: system_generated"]
-    P11 --> P12["12. Enforce retrieval_eligible=false"]
-    P12 --> P13["13. Events, dev trace, prod telemetry"]
-    P13 --> P14["14. Labeled routing evaluation dataset"]
-    P14 --> P15["15. Future approval transitions"]
+    P0["Phase 0 — authority, fixtures, blocking decisions"]
+
+    subgraph V1["PRD-v1 — Core Email + Conditional RAG"]
+        V1M1["V1-M1 contracts, @Email entry, envelope, cleanup"]
+        V1M2["V1-M2 classifier, correlation, route resolver"]
+        V1M3["V1-M3 RAG port, generator, validators"]
+        V1M4["V1-M4 task persistence, presentation, telemetry"]
+        V1H["V1-H durable PostgreSQL, queue + DLQ, observability"]
+        V1M1 --> V1M2 --> V1M3 --> V1M4 --> V1H
+    end
+
+    subgraph V2["PRD-v2 — Memory Extension"]
+        V2M1["V2-M1 Memory Gateway + namespace"]
+        V2M2["V2-M2 long-term declarative profile"]
+        V2M3["V2-M3 episodic writes, ineligible by default"]
+        V2M4["V2-M4 approve / complete / reject"]
+        V2M5["V2-M5 selective episodic retrieval + context"]
+        V2M6["V2-M6 evaluation, retention, launch gates"]
+        V2M1 --> V2M2 --> V2M3 --> V2M4 --> V2M5 --> V2M6
+    end
+
+    P0 --> V1M1
+    V1H --> V2M1
 ```
 
 ---
@@ -911,7 +915,50 @@ content_policy:
 
 ---
 
-# Step 7 — Final Change Plan
+# Step 7 — Final Change Plan, Aligned to PRD-v1 and PRD-v2
+
+This step decomposes the migration into two PRD-scoped milestone groups so each implementation scope matches exactly one PRD:
+
+- **PRD-v1** — `docs/PRD-v1-Core-Email-and-RAG.md`: manual `@Email` workflow, classification, routing, retrieval-only RAG, single generation, validation, minimal task persistence, telemetry. Long-term and episodic memory are explicitly deferred.
+- **PRD-v2** — `docs/PRD-v2-Memory-Extension.md`: Memory Gateway, long-term declarative memory, episodic memory, validation lifecycle, selective episodic retrieval.
+
+Decomposition rules:
+
+1. Every work item cites the PRD sections/FRs it satisfies; an item with no citation is out of scope for that phase.
+2. PRD-v1 §15 acceptance criteria gate the v1 group; PRD-v2 §16 acceptance criteria gate the v2 group.
+3. Phase 0 is the shared prerequisite; each blocking decision is tagged with the PRD it gates.
+4. The old Milestone 0–3 numbering is replaced to avoid collision with the PRDs' own delivery milestones: phases are now `Phase 0`, `V1-M*`, `V1-H`, `V2-M*`, where `V1-M1..M4` mirror PRD-v1 §16 Milestones 1–4 and `V2-M1..M6` mirror PRD-v2 §17 Milestones 1–6.
+
+## 7.1 Scope mapping — master-comparison concerns to PRD phases
+
+The Step 2 gap rows and Step 6 contracts are assigned here:
+
+| Concern / contract | Assigned phase | PRD basis |
+|---|---|---|
+| `EphemeralEmailEnvelope` (6.1), attachment non-processing, cleanup/TTL | V1-M1 | PRD-v1 FR-04, FR-14; ADR-003 |
+| Verified tenant/user principal | V1-M1 | PRD-v1 §13 |
+| `EmailRouteDecision` (6.2), classifier split, resolver, guards | V1-M2 | PRD-v1 FR-05..FR-07, §12.2 |
+| `SemanticRetrievalRequest`/`Response` (6.4/6.5), live RAG, partial-plan fallback | V1-M3 | PRD-v1 FR-08, FR-11, §12.3 |
+| Generator call, schema/grounding/citation validators | V1-M3 | PRD-v1 FR-09, FR-10, §12.4 |
+| `ActionPlanOutput` (6.6), idempotent task persistence, presentation, basic telemetry, development trace | V1-M4 | PRD-v1 FR-12..FR-16, §12.5 |
+| Labeled routing evaluation dataset | V1-M2, grown through V1-H | PRD-v1 §14, §16 |
+| PostgreSQL run/result/outbox repositories, real queue + DLQ, lifecycle events, production observability, launch gates | V1-H | PRD-v1 FR-02, §16 hardening |
+| `MemoryContextRequest` (6.3), Memory Gateway, namespaces | V2-M1 | PRD-v2 FR-01, FR-02 |
+| Long-term profile store, compact loading, degraded fallback | V2-M2 | PRD-v2 FR-03..FR-05, FR-18 |
+| `TaskEpisode` (6.7), episodic writes, `retrieval_eligible=false` | V2-M3 | PRD-v2 FR-06, FR-08 |
+| Approve/complete/reject transitions | V2-M4 | PRD-v2 FR-07, §12 |
+| Selective episodic retrieval, labeled generation context, conflict rules | V2-M5 | PRD-v2 FR-09..FR-13 |
+| `TraceEvent` memory fields (6.8), retention, deletion, memory evaluation | V2-M6 | PRD-v2 FR-15..FR-17, §15 |
+
+## 7.2 Scope conflicts resolved by this alignment
+
+| Conflict | Original master-comparison position | PRD position | Resolution |
+|---|---|---|---|
+| Queue/DLQ timing | Real queue + DLQ required before classifier work (old Milestone 1) | PRD-v1 FR-02 permits the existing runtime for the MVP; queue/DLQ listed under §16 hardening | The MVP loop (V1-M1..M4) runs on the in-process runtime but must enforce idempotent creation and at-most-one execution; durable queue/DLQ ships in V1-H |
+| Live RAG placement | Bundled with memory in old Milestone 3 | PRD-v1 includes conditional RAG; PRD-v2 adds memory | Live RAG lands in V1-M3; all memory work lands in the V2 group |
+| Episode writes | Bundled with task persistence | PRD-v1 persists the minimal task artifact only; episodes are a v2 capability | Task persistence in V1-M4; episodic records in V2-M3 |
+| Generator inputs | Profile/episode context anticipated in the generator call | PRD-v1 FR-09 excludes long-term and episodic context | Generator context is extended only in V2-M5 |
+| PostgreSQL-first durability | Durable repositories before workflow changes | PRD-v1 allows the MVP on the existing runtime | Task/run repositories are port interfaces from V1-M4; PostgreSQL adapters land in V1-H; §3.10 stands — PostgreSQL remains the production target |
 
 ## Authority and migration decisions
 
@@ -926,7 +973,7 @@ The current codebase provides useful seams but not the production control plane:
 - the application wires in-memory run/result/outbox adapters;
 - the HTTP route invokes `DigestWorker` through FastAPI `BackgroundTasks`, bypassing queue
   consumption;
-- PostgreSQL DDL exists for runs, schedules, action items, attachment extraction history, and
+- PostgreSQL DDL exists for runs, action items, attachment extraction history, and
   outbox events, but production run/result repository adapters are not wired;
 - no `tenant_id`, Memory Gateway, semantic-memory port, or RAG adapter exists in this repository.
 
@@ -967,139 +1014,316 @@ Compatibility is a required migration contract, not “where possible”:
 The old combined `ActionExtractorPort` may remain behind a temporary compatibility adapter while
 callers migrate. Production removal happens only after the compatibility tests pass.
 
-## Milestone 0 — Authority, baseline, and blocking decisions
+## Phase 0 — Authority, baseline, and blocking decisions
 
-Complete before implementation refactors:
+Complete before implementation refactors. Tags mark which PRD group each item gates.
 
-1. Record ADR-003 and mark ADR-002 superseded.
-2. Freeze current API/result fixtures, priority ordering, batching, correlation, dedupe, and
+1. **[both]** Record ADR-003 and mark ADR-002 superseded.
+2. **[v1]** Freeze current API/result fixtures, priority ordering, batching, correlation, dedupe, and
    privacy behavior as compatibility tests.
-3. Build the first labeled routing fixture set and capture the existing combined-extractor
+3. **[v1]** Build the first labeled routing fixture set and capture the existing combined-extractor
    quality, latency, call-count, and cost baseline.
-4. Define the task-candidate correlation contract and generator cardinality above.
-5. Resolve the verified principal source and mandatory `tenant_id` + `user_id` namespace.
-6. Select PostgreSQL deployment/migration ownership and the durable queue/DLQ technology.
-7. Decide whether the RAG provider is external or must be built, and identify corpus/ACL
+4. **[v1]** Define the task-candidate correlation contract and generator cardinality above.
+5. **[v1]** Resolve the verified principal source and mandatory `tenant_id` + `user_id` namespace.
+6. **[v1-H / v2]** Select PostgreSQL deployment/migration ownership and the durable queue/DLQ
+   technology.
+7. **[v1]** Decide whether the RAG provider is external or must be built, and identify corpus/ACL
    ownership.
 
 **Exit criteria:**
 
-- no dependent implementation relies on an unverified query-parameter identity;
-- queue, database, and RAG ownership decisions have named owners;
-- compatibility and routing fixtures can detect regressions before provider prompts change;
-- attachment scope is unambiguous across PRD, Target Architecture, ADRs, and this comparison.
+- **[v1]** no dependent implementation relies on an unverified query-parameter identity;
+- **[v1-H]** queue, database, and RAG ownership decisions have named owners;
+- **[v1]** compatibility and routing fixtures can detect regressions before provider prompts change;
+- **[both]** attachment scope is unambiguous across the PRDs, Target Architecture, ADRs, and this
+  comparison.
 
-## Milestone 1 — Durable control plane without live RAG
+## PRD-v1 milestone group — Core Email and Conditional RAG
 
-1. Define versioned `EphemeralEmailEnvelope`, `EmailRouteDecision`, `ActionPlanOutput`,
-   `TaskEpisode`, and trace contracts, including `source_message_ids`, `incident_key`, and
-   `urgent`.
-2. Introduce a verified principal boundary that supplies `tenant_id` and `user_id`; remove
+### V1-M1 — Core contracts and Gmail entry
+
+Maps to PRD-v1 §16 Milestone 1; satisfies FR-01, FR-03, FR-04, FR-14, and §13.
+
+1. Define versioned `EphemeralEmailEnvelope`, `EmailRouteDecision`, `ActionPlanOutput`, and trace
+   contracts, including `source_message_ids`, `incident_key`, and `urgent`. (`TaskEpisode` and
+   `MemoryContextRequest` are deferred to V2-M1.)
+2. Implement the verified principal boundary that supplies `tenant_id` and `user_id`; remove
    authorization decisions based only on caller-provided query parameters.
-3. Implement PostgreSQL run/result/outbox repositories using the existing schema as a migration
-   input, with atomic idempotent create and compare-and-set claim semantics.
-4. Wire a durable queue producer and worker consumer with bounded retry and DLQ behavior.
-5. Route both manual and scheduled triggers through the same run-creation service.
-6. Replace the FastAPI `BackgroundTasks` worker bypass. Keep a functional local adapter and
-   deterministic queue fake for development/tests.
-7. Implement explicit short-term run-state cleanup plus a safety TTL.
-8. Disable production attachment download/extraction under ADR-003 and record presence only.
-9. Remove the unwired `MailTodoApi` after endpoint compatibility tests cover the live FastAPI
-   routes.
-10. Emit metadata-only run lifecycle events through the durable outbox.
+3. Route manual `@Email` invocation through the run-creation service with atomic idempotent
+   creation and at-most-one logical execution.
+4. Consolidate `EmailEnvelope`/`ThreadContext` into `EphemeralEmailEnvelope`; disable attachment
+   download/extraction under ADR-003 and record `attachments_present` only.
+5. Implement explicit short-term run-state cleanup plus a safety TTL.
+6. Delete the write-only fake queue wiring and the unwired `MailTodoApi` after endpoint
+   compatibility tests cover the live FastAPI routes; retain deterministic fakes for tests.
 
 **Exit criteria:**
 
-- an API-created run is visible to a separate worker process;
-- duplicate requests create and enqueue one logical run;
-- only one worker can claim a run;
-- retry exhaustion reaches the DLQ without email body, attachment bytes, or OAuth tokens;
-- process restart does not lose run status or completed output;
+- duplicate create requests produce exactly one logical run;
+- the run/status/result compatibility suite passes;
 - attachment presence never invokes download/extraction;
-- the existing run/status/result API contract passes its compatibility suite.
+- no raw email content survives run completion (cleanup and TTL tested);
+- Gmail access is gated by verified identity.
 
-## Milestone 2 — Classifier, resolver, and direct plans
+### V1-M2 — Classification and routing
 
-1. Split provider integration into `RouteClassifierPort` and `ActionPlanGeneratorPort`.
-2. Move parsing-only code behind provider adapters, but move deterministic plan shaping,
-   correlation, dedupe, priority, and ordering into application-owned services.
-3. Implement bounded classifier batching with one validated decision per selected email.
-4. Implement deterministic task-candidate correlation and the route resolver with hard policy
-   guards.
-5. Implement `NO_ACTION` and `DIRECT_PLAN`.
-6. Put `RETRIEVE_RAG` behind a null `SemanticMemoryPort` that returns a structured
-   `no_results` response.
-7. Implement one final generator invocation per resolved non-`NO_ACTION` task candidate.
-8. Add schema, grounding, privacy, and unsupported-procedure validators.
-9. Run the frozen compatibility and labeled-routing evaluations after each provider migration.
+Maps to PRD-v1 §16 Milestone 2; satisfies FR-05, FR-06, FR-07, and §12.2.
+
+1. Split provider integration into `RouteClassifierPort` and `ActionPlanGeneratorPort`; move
+   deterministic plan shaping, correlation, dedupe, priority, and ordering out of vendor adapters
+   into application-owned services.
+2. Implement bounded classifier batching with one schema-validated decision per selected email.
+3. Implement deterministic task-candidate correlation by thread/incident, preserving
+   `source_message_ids` and `incident_key`.
+4. Implement the deterministic route resolver with hard policy guards: `NO_ACTION`,
+   `DIRECT_PLAN`, `RETRIEVE_RAG`, and partial-mode direct fallback.
+5. Implement classifier failure fallback: retry once, then route conservatively to `RETRIEVE_RAG`.
+6. Grow the labeled routing fixture set and run the routing evaluation after every prompt or
+   provider change.
 
 **Exit criteria:**
 
 - classifier batch count and per-email decisions are observable and schema-valid;
 - correlation preserves current related-message/incident behavior;
-- `DIRECT_PLAN` performs no semantic retrieval;
-- generator count equals the number of resolved non-`NO_ACTION` task candidates;
-- a null/no-result semantic response yields an explicit partial plan with missing information;
-- raw email is absent from task and episode persistence.
+- the resolver is pure and deterministic, with guard categories covered by tests;
+- the fallback sequence matches PRD-v1 §12.2 exactly.
 
-## Milestone 3 — Memory, live RAG, and durable task episodes
+### V1-M3 — RAG, generation, and validation
 
-1. Implement the logical Memory Gateway with mandatory tenant/user/feature namespace enforcement.
-2. Load the compact long-term profile from PostgreSQL with a documented degraded fallback.
-3. Implement idempotent task persistence and write episodes as `system_generated`.
-4. Enforce `retrieval_eligible=false` at write and read boundaries for unvalidated episodes.
-5. Implement the external retrieval-only `SemanticMemoryPort` adapter with authorization/ACL
+Maps to PRD-v1 §16 Milestone 3; satisfies FR-08..FR-11, §12.3, and §12.4.
+
+1. Implement the retrieval-only `SemanticMemoryPort`: a null adapter returning structured
+   `no_results` first, then the production adapter against the external RAG with ACL/tenant
    filtering before ranking.
-6. Add retrieval thresholds, citation packaging, grounding validation, timeout/no-result
-   behavior, and partial-plan fallback.
-7. Add event stream integration, development trace TTL/purge, production metrics, alerts, and
-   retention audits.
-8. Add human approval/completion/rejection transitions only after baseline routing and
-   persistence are stable.
+2. Implement exactly one final generator call per resolved non-`NO_ACTION` task candidate; v1
+   inputs are limited to email context, route decision, retrieved RAG context, and system defaults.
+3. Implement schema, grounding, citation, privacy (no raw body in output), and
+   unsupported-procedure validators.
+4. Implement the RAG failure path: bounded retry once, structured empty result, partial plan with
+   explicit `missing_information`.
+5. Implement the generation failure path: one schema-repair retry, then fail per the user-facing
+   error policy.
+6. `DIRECT_PLAN` performs zero semantic retrieval.
 
 **Exit criteria:**
 
-- cross-tenant and cross-user access tests fail closed;
-- RAG returns context/citations only and never generates the final plan;
-- unsupported company-specific steps cannot survive validation;
-- system-generated episodes cannot be retrieved;
-- task/episode writes are idempotent and contain no raw email body;
-- routing, retrieval, citation, latency, and cost gates meet the launch thresholds.
+- generator count equals the number of resolved non-`NO_ACTION` task candidates;
+- a null/no-result semantic response yields an explicit partial plan with missing information;
+- company-specific steps survive validation only with a current-retrieval citation;
+- `DIRECT_PLAN` performs no retrieval;
+- raw email is absent from generated output.
+
+### V1-M4 — Persistence and product presentation
+
+Maps to PRD-v1 §16 Milestone 4; satisfies FR-12, FR-13, FR-15, FR-16, and §12.5.
+
+1. Implement idempotent task persistence behind a repository port, keyed
+   `tenant_id:user_id:gmail_message_id:pipeline_version`; local adapter first, PostgreSQL adapter
+   in V1-H.
+2. Provide the versioned compatibility mapper from persisted task outputs to the legacy result
+   shape (`actionItems`, `nextActions`, warnings, empty-state message).
+3. Show tasks with Gmail pointer, citations, priority/deadline, and missing-information warnings
+   in the Cowork surface.
+4. Emit metadata-only basic telemetry: run status, message id, route/reason codes, confidence,
+   retrieval status/count, validation status, stage latency, errors, fallback use.
+5. Implement the development trace with the mandated marker, encryption at rest, TTL, restricted
+   access, and a hard production guard.
+
+**Exit criteria:**
+
+- task rows contain no raw email body; idempotent replay is safe;
+- the compatibility suite passes against persisted outputs;
+- production telemetry is metadata-only; development trace cannot be enabled in production.
+
+### V1-H — Engineering hardening (durable control plane)
+
+Maps to PRD-v1 §16 future engineering hardening and FR-02's optional production-grade execution.
+These items close the durability gaps from old Milestone 1 without gating the MVP product loop.
+
+1. Implement PostgreSQL run/result/outbox repositories using the existing schema as migration
+   input, with atomic idempotent create and compare-and-set claim semantics; migrate from the
+   local adapters.
+2. Wire a durable queue producer and worker consumer with bounded retry and DLQ; replace the
+   FastAPI `BackgroundTasks` bypass. DLQ payloads must not contain email body, attachment bytes,
+   or OAuth tokens.
+3. Replace the unreadable outbox with observable metadata-only lifecycle events wired to trace
+   and metrics sinks.
+4. Apply target timeout/retry budgets per external operation: Gmail backoff/jitter, token
+   refresh, partial-batch continuation.
+5. Add advanced observability, alerts, numeric launch gates, and the scaled evaluation harness.
+
+**Exit criteria (carried from old Milestone 1):**
+
+- an API-created run is visible to a separate worker process;
+- only one worker can claim a run;
+- retry exhaustion reaches the DLQ without email body, attachment bytes, or OAuth tokens;
+- process restart does not lose run status or completed output.
+
+**PRD-v1 is complete when** PRD-v1 §15 acceptance criteria 1–19 pass and the V1-H exit criteria
+hold.
+
+## PRD-v2 milestone group — Long-Term and Episodic Memory Extension
+
+Depends on a stable PRD-v1. `V2-M1..M6` mirror PRD-v2 §17 Milestones 1–6.
+
+### V2-M1 — Memory contracts and namespace
+
+Satisfies PRD-v2 FR-01, FR-02.
+
+1. Define `TaskEpisode`, long-term profile, episodic retrieval, transition, and provenance
+   contracts, plus `MemoryContextRequest`.
+2. Implement the logical Memory Gateway (in-process allowed): namespace resolution, read/write
+   eligibility, provenance, degraded responses, memory-type isolation; fail closed on missing or
+   inconsistent namespace.
+3. Route all Agent Core memory access through the gateway, including short-term and semantic
+   access.
+
+**Exit criteria:** cross-tenant and cross-user access tests fail closed; no memory access
+bypasses the gateway.
+
+### V2-M2 — Long-term declarative memory
+
+Satisfies PRD-v2 FR-03..FR-05, FR-15, FR-16, FR-18.
+
+1. Implement the PostgreSQL profile store and the explicit-only write path (user configuration,
+   explicit remember request, trusted admin config); no inference from email bodies.
+2. Implement compact profile loading into Email Action Plan runs with a degraded fallback:
+   default profile, continue, warning event.
+3. Implement preference/profile deletion and retention behavior.
+
+**Exit criteria:** stored preferences change later plan output; profile read failure never blocks
+the v1 workflow; long-term writes are explicit-only.
+
+### V2-M3 — Episodic persistence
+
+Satisfies PRD-v2 FR-06, FR-08, FR-14, FR-18.
+
+1. Write one episode per successfully persisted task: `system_generated`,
+   `retrieval_eligible=false`, idempotent and retry-safe; an episode write failure preserves the
+   task and never duplicates it.
+2. Enforce retrieval eligibility at both write and read boundaries in code, not prompts.
+3. Make provenance and lifecycle metadata mandatory; validate that episodes contain no raw email
+   body.
+
+**Exit criteria:** system-generated episodes cannot be retrieved; writes are idempotent; episodes
+contain derived task output and Gmail pointer only.
+
+### V2-M4 — Validation lifecycle
+
+Satisfies PRD-v2 FR-07 and §12.
+
+1. Implement approve/complete/reject transitions through an API or minimal Cowork task control;
+   transitions are transactional and idempotent.
+2. Enforce the `retrieval_eligible` rule table on every transition.
+3. Record provenance and timestamps for each transition.
+
+**Exit criteria:** approval/completion makes an episode retrieval-eligible; rejection keeps it
+ineligible; invalid transitions are refused.
+
+### V2-M5 — Selective episodic retrieval and context integration
+
+Satisfies PRD-v2 FR-09..FR-13.
+
+1. Implement the episodic retrieval request with eligibility filters (`user_approved`,
+   `completed`, `retrieval_eligible=true`), bounded results, and relevance scoring.
+2. Implement the selective trigger policy: episodes are retrieved only when deterministic policy
+   or classifier metadata indicates value, never on every run.
+3. Extend the generator context assembler with labeled source types: current email, explicit
+   preference, validated episode, company evidence.
+4. Implement conflict precedence: current instruction > current company evidence > stored
+   preference > advisory episode; never invent to resolve conflicts.
+
+**Exit criteria:** retrieval returns approved/completed episodes only, even when directly
+requested by the model; generation context sources are labeled; episodic retrieval failure skips
+episodes and continues.
+
+### V2-M6 — Evaluation and governance
+
+Satisfies PRD-v2 §15, §16 Milestone 6, FR-16, FR-17.
+
+1. Evaluate memory-enabled output against the v1 baseline on a labeled set.
+2. Define retention periods; implement background purge, deletion audits, and index propagation.
+3. Add memory safety metrics and alerts: unvalidated retrieval, cross-tenant incidents,
+   raw-email violations, rejected-episode retrieval, expired-record retrieval — all must hold at
+   zero.
+4. Establish launch thresholds.
+
+**Exit criteria:** PRD-v2 §16 acceptance criteria 1–20 pass; safety counters remain at zero under
+test.
+
+## DEMO — Showcase frontend (after both PRD groups)
+
+A demonstration frontend that exercises the complete value loop end-to-end in
+a browser. Full specification: `docs/SPEC-Demo-Frontend.md`.
+
+1. Increment A (PRD-v1 showcase) starts only after PRD-v1 §15 acceptance
+   passes; Increment B (PRD-v2 showcase) only after PRD-v2 §16 passes.
+2. The demo is a pure API client: no workflow, routing, generation, or
+   memory-policy logic in the client; no scaffolding of unimplemented
+   milestone capabilities.
+3. Privacy invariants hold in the UI: raw email bodies are never rendered or
+   cached; attachments are presence-only; Gmail stays read-only.
+4. Verification is live: backend + GUI run locally and the full loop is
+   walked in a real browser with screenshot evidence (SPEC §9).
+
+**Exit criteria:** all SPEC-Demo-Frontend §8 acceptance criteria pass with
+browser-verified evidence.
 
 ## Recommended implementation order
 
-| Order | Work | Dependency or proof |
-|---:|---|---|
-| 0 | Resolve authority and record ADR-003 | Attachment scope agreed |
-| 1 | Freeze API/behavior compatibility fixtures | Current behavior captured |
-| 2 | Build initial labeled routing and cost baseline | Split-call regression gate |
-| 3 | Resolve verified principal, PostgreSQL owner, queue technology, and RAG/ACL owner | Named blocking decisions |
-| 4 | Define shared versioned contracts and task-candidate cardinality | Contract review |
-| 5 | Implement verified tenant/user boundary | Authorization tests |
-| 6 | Implement durable PostgreSQL run/result/outbox adapters | Restart and atomic-claim tests |
-| 7 | Implement queue producer/consumer, retry, DLQ, and scheduler | Separate-process integration test |
-| 8 | Implement ephemeral envelope, short-term state, cleanup, and attachment non-processing | Privacy and no-download tests |
-| 9 | Split classifier/generator ports and move deterministic shaping to application services | Provider contract tests |
-| 10 | Implement bounded classification, correlation, and deterministic route resolution | Labeled routing evaluation |
-| 11 | Implement direct/null-RAG generation and validators | Call-count and fallback tests |
-| 12 | Implement idempotent task and system-generated episode persistence | Persistence/privacy tests |
-| 13 | Implement Memory Gateway and validated-only episodic policy | Namespace and eligibility tests |
-| 14 | Integrate retrieval-only RAG with ACL-first filtering | Retrieval/citation evaluation |
-| 15 | Add telemetry, retention, purge, and launch gates | Operational verification |
-| 16 | Add future human-approval transitions | Baseline stability evidence |
+| Order | Phase | Work | Dependency or proof |
+|---:|---|---|---|
+| 0 | Phase 0 | Resolve authority and record ADR-003 | Attachment scope agreed |
+| 1 | Phase 0 | Freeze API/behavior compatibility fixtures | Current behavior captured |
+| 2 | Phase 0 | Build initial labeled routing and cost baseline | Split-call regression gate |
+| 3 | Phase 0 | Resolve verified principal, PostgreSQL owner, queue technology, and RAG/ACL owner | Named blocking decisions |
+| 4 | V1-M1 | Define shared versioned contracts and task-candidate cardinality | Contract review |
+| 5 | V1-M1 | Implement verified tenant/user boundary | Authorization tests |
+| 6 | V1-M1 | `@Email` run creation, envelope, cleanup/TTL, attachment non-processing, fake-queue/`MailTodoApi` removal | Privacy, idempotency, no-download tests |
+| 7 | V1-M2 | Split classifier/generator ports; move deterministic shaping to application services | Provider contract tests |
+| 8 | V1-M2 | Implement bounded classification, correlation, deterministic route resolution | Labeled routing evaluation |
+| 9 | V1-M3 | Implement `SemanticMemoryPort` (null then live), generator, validators, fallbacks | Call-count, citation, fallback tests |
+| 10 | V1-M4 | Implement idempotent task persistence, presentation, telemetry, development trace | Persistence/privacy/compatibility tests |
+| 11 | V1 | PRD-v1 §15 acceptance review | v1 launch readiness |
+| 12 | V1-H | Implement durable PostgreSQL run/result/outbox adapters | Restart and atomic-claim tests |
+| 13 | V1-H | Implement queue producer/consumer, retry, and DLQ | Separate-process integration test |
+| 14 | V1-H | Add telemetry sinks, retention, purge, and launch gates | Operational verification |
+| 15 | V2-M1 | Implement Memory Gateway, namespaces, memory contracts | Namespace and fail-closed tests |
+| 16 | V2-M2 | Implement long-term profile store, loading, fallback, deletion | Preference application tests |
+| 17 | V2-M3 | Implement idempotent system-generated episode writes | Eligibility and privacy tests |
+| 18 | V2-M4 | Implement approve/complete/reject transitions | Transition and eligibility tests |
+| 19 | V2-M5 | Implement selective episodic retrieval and labeled generation context | Retrieval and conflict tests |
+| 20 | V2-M6 | Evaluation vs v1 baseline, retention, deletion audits, launch gates | Operational verification |
+| 21 | DEMO | Build showcase frontend per `docs/SPEC-Demo-Frontend.md` (Increment A after PRD-v1 §15, Increment B after PRD-v2 §16) | SPEC §8 acceptance + browser-verified evidence |
 
 ## Blocking decisions
 
 These decisions do not reopen the target behavior, but they block the dependent implementation:
 
-| Decision | Must be resolved before |
+| Decision | Must be resolved before | Gates |
+|---|---|---|
+| ~~Verified principal source and tenant/user binding~~ | Any durable task, memory, or RAG access (V1-M1) | PRD-v1 — **resolved 2026-08-07, see below** |
+| PostgreSQL deployment and migration owner | Durable run/task adapters (V1-H) and profile/episode stores (V2-M2/M3) | PRD-v1 hardening + PRD-v2 |
+| ~~Queue/DLQ technology and retry ownership~~ | Real worker integration (V1-H) | PRD-v1 hardening — **resolved 2026-08-07, see below** |
+| ~~Corpus owner and ACL model~~ | Live semantic retrieval (V1-M3) | PRD-v1 — **resolved 2026-08-07, see below** |
+| ~~External RAG availability versus in-repo build~~ | `SemanticMemoryPort` production adapter (V1-M3) | PRD-v1 — **resolved 2026-08-07, see below** |
+| Routing/retrieval/citation/latency/cost thresholds | Classifier/RAG launch approval (V1-H gates) | PRD-v1 launch |
+| Preference field set and approval/completion UI shape | Long-term writes (V2-M2) and transitions (V2-M4) | PRD-v2 |
+| Episodic relevance algorithm and thresholds | Selective retrieval (V2-M5) | PRD-v2 |
+| Retention periods and memory quality-improvement threshold | Launch approval (V2-M6) | PRD-v2 launch |
+
+### Blocking decision resolutions (2026-08-07)
+
+Resolved with the product owner; do not reopen without cause.
+
+| Decision | Resolution |
 |---|---|
-| Verified principal source and tenant/user binding | Any durable task, memory, or RAG access |
-| PostgreSQL deployment and migration owner | Durable run/task/profile/episode adapters |
-| Queue/DLQ technology and retry ownership | Real worker and scheduler integration |
-| Corpus owner and ACL model | Live semantic retrieval |
-| External RAG availability versus in-repo build | `SemanticMemoryPort` production adapter |
-| Routing/retrieval/citation/latency/cost thresholds | Classifier/RAG launch approval |
+| Verified principal source | **Mailbox-Connection principal.** `user_id` is the Gmail account email from the verified OAuth grant (Mailbox Connection); `tenant_id` is a fixed local-tenant constant for the MVP. The caller-provided `user_id` query parameter is removed; all Gmail/task/RAG access is scoped to the connection owner. Land in V1-M1. |
+| External vs in-repo RAG | **Build a minimal in-repo RAG** (embedding + vector store) inside V1-M3, exposed through the retrieval-only `SemanticMemoryPort`. |
+| Corpus owner and ACL model | Corpus is local to this repository (owner: this project); ACL = tenant/user namespace filtering applied before ranking/return, enforced in the port adapter. |
+| Queue/DLQ technology | **Redis Streams** (consumer groups, retry/claim, DLQ stream) at V1-H; the MVP loop (V1-M1..M4) stays on the in-process runtime per PRD-v1 FR-02. |
+
+Still open: PostgreSQL deployment/migration owner (decide before V1-H).
 
 ## Resolved decisions that should not be reopened
 
@@ -1110,9 +1334,12 @@ These decisions do not reopen the target behavior, but they block the dependent 
 - Deterministic application logic forms task candidates and preserves cross-message correlation.
 - The final generator is called exactly once per resolved non-`NO_ACTION` task candidate.
 - `urgent` remains a supported priority during and after compatibility migration.
-- Durable run state precedes and is shared by the real queue worker.
+- Durable run state precedes and is shared by the real queue worker (V1-H internal ordering).
 - Long-term and episodic production storage is PostgreSQL.
-- Scheduler, queue worker, and DLQ are part of the baseline target.
+- Queue worker and DLQ remain part of the target baseline; PRD-v1 delivers them in V1-H
+  hardening rather than gating the MVP product loop (PRD-v1 FR-02).
+- PRD-v1 ships without long-term and episodic memory; those capabilities belong exclusively to
+  the PRD-v2 group.
 - Production attachment processing is out of scope under ADR-003; presence is recorded only.
 - Queue fakes/local adapters remain valid for tests and local development, not production wiring.
 - Raw email is not long-term, episodic, or semantic memory.

@@ -1,53 +1,67 @@
 # Coding Agent Guidelines
 
-## EXPERIENCE
+Operating guide for EMAIL-AGENT-v1. Keep this file under ~80 lines; anything
+that is not an always-needed constraint belongs in a linked doc.
 
-This section stores durable reasoning lessons, not session history.
+## Project
 
-### Admission Rules
+Cowork Agent (Email-to-Action-Plan): FastAPI app that converts unread Gmail
+into structured action plans via one LLM provider (Gemini or Groq). Local MVP:
+SQLite for mailbox connections, in-memory run/result stores, in-process dispatch.
 
-Add an experience only when all of these are true:
+## Layout (implemented)
 
-1. **Real:** It comes from an observed event in this repository or workflow, not speculation.
-2. **Evidenced:** A command result, test, diff, commit, review finding, or explicit user correction supports it.
-3. **Compressed:** Its seed is fewer than 12 words and cannot be shortened without losing the lesson.
-4. **Generative:** It guides more than the incident that produced it.
-5. **Falsifiable:** The entry names what concretely fails when the lesson is ignored.
-6. **Decompressible:** Another agent can recover the intended reasoning without reading the original session.
-7. **Novel:** It does not duplicate an existing rule, seed, or repository authority.
-
-Before adding any seed, compare it with the lessons observed in the current session and ask: **“If I could save only three experiences from this session, would this be one, and why?”** Admit no more than the session's top three; admitting fewer or none is expected.
-
-Use this schema:
-
-```markdown
-#### "Seed under 12 words"
-- **Pattern:** Reusable reasoning rule.
-- **Evidence:** Durable proof or a concise description of the verified event.
-- **Failure state:** Specific breakage caused by ignoring the rule.
-- **Deploy when:** Situations where the rule should activate.
+```text
+src/cowork_agent/
+├── app.py                       # FastAPI composition root; entry point `mail-todo-api`
+├── config.py                    # env settings loaders (Gmail, Gemini, Groq)
+├── api/                         # HTTP handlers / response serialization
+├── domain/models.py             # pure domain models (no framework imports)
+├── features/email_action_plan/  # workflow, policies, ports, schemas
+├── gui/app.py                   # Streamlit test GUI
+├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
+├── integrations/llm/            # Gemini/Groq providers, fakes
+├── orchestration/local.py       # in-process local orchestration
+└── persistence/                 # SQLite mailbox-connection repo; migrations/
 ```
 
-Do not save:
+Dependency direction: `domain` ← `features` ← `integrations` / `orchestration`
+/ `persistence` ← `app`. Tests mirror this under `tests/unit` and
+`tests/integration`; providers ship fakes for deterministic local runs.
 
-- status updates, task summaries, plans, or handoff content;
-- guesses, unverified impressions, or lessons inferred only from an agent's claim;
-- user preferences that belong in explicit project rules;
-- secrets, credentials, personal data, transient process IDs, or disposable paths;
-- verbose incident narratives, generic advice, or tool-specific trivia with no reusable pattern.
+## Commands
 
-The registry may grow across sessions. Keep it append-only except when removing an exact duplicate or an entry whose evidence is proven false. Before adding anything, search the registry and merge lessons with the same underlying invariant. If a later seed expresses a distinct improvement, preserve the older entry and mark it `Superseded by: "new seed"` and or remove the old seed.
+- Install: `python -m pip install -e ".[dev,gui]"`
+- Test: `python -m pytest -q` (pythonpath/testpaths preconfigured)
+- Lint: `python -m ruff check .`
+- Types: `python -m mypy src` (strict)
+- Run API: `mail-todo-api` (host/port via `APP_HOST` / `APP_PORT`)
+- GUI: `python scripts/run_gui.py`
 
-### Distilled Experience Registry
+## Verification rule
 
-#### "Test narrow, prove broad"
-- **Pattern:** Match review and test scope to risk: use quick supervisor checks and the smallest deterministic test first; expand only when a failure, relevant change, or coupled contract leaves risk unproven.
-- **Evidence:** Repeated broad reviews delayed the plan, while focused assertions found defects quickly and risk-directed regression checks supplied confidence without rerunning every related test.
-- **Failure state:** Low-risk work stalls behind redundant gates, high-risk integration defects receive shallow review, or verification expands without a concrete risk.
-- **Deploy when:** Choosing review depth, handling feedback, or planning the focused-to-broader verification sequence.
+Run the smallest pytest scope covering the edit (e.g.
+`python -m pytest tests/unit/features -q`); when `src/` changed, also run
+`ruff check` and `mypy`. Expand to the full suite only on failure or when a
+shared contract (ports, schemas, migrations) changed. See the
+[experience registry](docs/references/agent-experience-registry.md) before
+review-heavy work.
 
-#### "Fresh passing evidence needs no echo"
-- **Pattern:** Track successful test commands and their covered surfaces. While those surfaces remain unchanged, run only tests implicated by new edits; do not repeat a passing command merely as another gate. If later work fails, rerun the last passing scope after the fix to confirm recovery.
-- **Evidence:** Agents reran tests that had passed one or two minutes earlier without intervening changes, adding delay but no new confidence.
-- **Failure state:** Redundant test runs slow implementation, obscure which change introduced a failure, and consume review time without increasing evidence.
-- **Deploy when:** Iterating through red-green-refactor cycles, applying review feedback, or selecting the next verification command within one session.
+## Authoritative docs
+
+- Architecture decisions: `docs/adr/ADR-001..003`
+- Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
+- Current-vs-target gap analysis and migration milestones:
+  `docs/master-comparison.md`
+- Product requirements: `docs/PRD-v1-Core-Email-and-RAG.md` and
+  `docs/PRD-v2-Memory-Extension.md`
+
+## Non-negotiable invariants
+
+1. Raw email bodies and attachment content are never persisted or logged;
+   they exist only as transient in-run state.
+2. Gmail access stays read-only: only the `gmail.readonly` scope.
+3. Attachment processing is out of scope (ADR-003): record presence only.
+4. Target-state components (PostgreSQL, durable queue/DLQ, RAG, four-type
+   memory system) are not implemented yet; do not scaffold them unless the
+   request explicitly cites a `master-comparison.md` milestone.
