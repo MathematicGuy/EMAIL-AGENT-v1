@@ -47,6 +47,10 @@ shared contract (ports, schemas, migrations) changed. See the
 [experience registry](docs/references/agent-experience-registry.md) before
 review-heavy work.
 
+**Context compaction:** before compacting the conversation context at any
+point, always invoke the `handoff` skill first and save the handoff document
+to the OS temp directory so continuity is preserved.
+
 ## Authoritative docs
 
 - Architecture decisions: `docs/adr/ADR-001..003`
