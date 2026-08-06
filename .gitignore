@@ -22,6 +22,7 @@ dist/
 .coverage
 htmlcov/
 .data/
+.runtime/
 .build/
 .tokensave
 .serena

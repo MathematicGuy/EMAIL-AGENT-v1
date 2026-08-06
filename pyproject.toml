@@ -30,7 +30,7 @@ gui = [
 ]
 
 [project.scripts]
-mail-todo-api = "mail_todo.api.server:main"
+mail-todo-api = "cowork_agent.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

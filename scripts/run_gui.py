@@ -25,7 +25,7 @@ def main():
         "-m",
         "streamlit",
         "run",
-        os.path.join(src_dir, "mail_todo", "gui", "app.py"),
+        os.path.join(src_dir, "cowork_agent", "gui", "app.py"),
     ]
 
     try:
