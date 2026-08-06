@@ -23,3 +23,5 @@ dist/
 htmlcov/
 .data/
 .build/
+.tokensave
+.serena
