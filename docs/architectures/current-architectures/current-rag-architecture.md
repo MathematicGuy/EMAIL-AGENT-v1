@@ -241,14 +241,15 @@ Generation is explicitly inside the Email workflow and bypasses any RAG search s
 
 ## Source evidence
 
-- Live package tree: `src/mail_todo/` contains `api`, `application`, `domain`, `gui`, and `infrastructure`; no `knowledge` or RAG package.
-- Runtime composition has no RAG dependency: `src/mail_todo/api/server.py:44-95`.
-- Orchestration and final `ActionItem` construction (the worker copies `action_plan` unchanged at `:218`, it does not create it): `src/mail_todo/application/services.py:85-244`.
-- Action extractor port: `src/mail_todo/application/ports.py:52-56`.
-- Email/attachment context contracts: `src/mail_todo/application/contracts.py:30-71`.
-- Generated action/evidence models: `src/mail_todo/domain/models.py:111-153`.
-- Gemini generation and retry loop: `src/mail_todo/infrastructure/gemini.py:60-152`.
-- Adapter-side parsing of provider JSON into `ExtractionBatch`: `src/mail_todo/infrastructure/gemini.py:366-419`.
-- Action Plan sanitization, capping, and correlated merge: `src/mail_todo/infrastructure/gemini.py:431-466`, `:469-535`, `:548-570`.
-- Groq generation: `src/mail_todo/infrastructure/groq.py:39-137`; it reuses the Gemini prompt, schema, parser, and merge helpers by direct import at `:14-21`.
+- Live package tree: `src/cowork_agent/` contains `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` plus `api` and `gui` presentation adapters; no `knowledge` or working RAG implementation in live source.
+- Runtime composition has no RAG dependency: `src/cowork_agent/app.py:49-98`.
+- Orchestration and final `ActionItem` construction (the worker copies `action_plan` unchanged at `:218`, it does not create it): `src/cowork_agent/features/email_action_plan/workflow.py:85-244`.
+- Action extractor port: `src/cowork_agent/features/email_action_plan/ports.py:27-34`.
+- Email/attachment context contracts: `src/cowork_agent/features/email_action_plan/schemas.py:30-71`.
+- Generated action/evidence models: `src/cowork_agent/domain/models.py:111-153`.
+- Gemini generation and retry loop: `src/cowork_agent/integrations/llm/providers/gemini.py:60-152`.
+- Adapter-side parsing of provider JSON into `ExtractionBatch`: `src/cowork_agent/integrations/llm/providers/gemini.py:366-419`.
+- Action Plan sanitization, capping, and correlated merge: `src/cowork_agent/integrations/llm/providers/gemini.py:431-466`, `:469-535`, `:548-570`.
+- Groq generation: `src/cowork_agent/integrations/llm/providers/groq.py:39-137`; it reuses the Gemini prompt, schema, parser, and merge helpers by direct import at `:14-25`.
 - Installed runtime dependencies: `pyproject.toml`.
+

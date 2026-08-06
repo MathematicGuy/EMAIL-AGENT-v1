@@ -1,0 +1,7 @@
+consent: false
+auto_report: false
+sources:
+  - dogfood
+  - swarm
+  - issues
+  - cross-pollinate

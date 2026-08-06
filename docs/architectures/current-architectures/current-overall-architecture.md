@@ -2,7 +2,7 @@
 
 ## Extraction status
 
-This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
+This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
 
 **Current architecture in one sentence:** a caller starts and polls an in-process FastAPI email-digest run; the application reads Gmail, extracts bounded attachment text, calls Gemini or Groq directly for structured action extraction, stores the run and results in memory, and returns Action Items whose Action Plans were generated inside the Email workflow.
 
@@ -14,30 +14,30 @@ This document describes the implementation in commit `cf2fd49801d5932b26de82af9d
 
 | Category | Implemented component | Runtime responsibility |
 |---|---|---|
-| API service | FastAPI app in `mail_todo.api.server` | Gmail OAuth/connection endpoints, unread preview, run creation, polling, and result delivery. |
+| API service | FastAPI app in `cowork_agent.app` | Gmail OAuth/connection endpoints, unread preview, run creation, polling, and result delivery. |
 | Test UI | Streamlit app launched by `scripts/run_gui.py` | Human-facing client for exercising the API; not a separate backend. |
 | Application services | `GmailConnectionService`, `CreateDigestRun`, `DigestWorker`, `GetDigestResult` | Connection lifecycle, run creation, digest orchestration, and result assembly. |
 | Email adapter | `GmailMailboxAdapter` | Builds a Gmail v1 client, searches unread inbox messages, fetches threads and attachments, and normalizes messages. |
 | Attachment adapter | `SafeTextAttachmentExtractor` | Extracts bounded UTF-8 text from text, CSV, and JSON attachments in process. |
 | Generation adapters | `GeminiActionExtractor` or `GroqActionExtractor` | Builds provider prompts, requests structured extraction, parses classifications and Action Plans, and merges correlated email results. The two are not independent: `groq.py` imports the schema, system instruction, batching, prompt builder, parser, and merge helpers from `gemini.py`, so only the transport and error mapping differ. |
-| Domain policy | `mail_todo.domain.policies` | Normalizes Gmail queries, validates limits, fingerprints/deduplicates actions, and calculates priority. |
+| Domain policy | `cowork_agent.features.email_action_plan.policies` | Normalizes Gmail queries, validates limits, fingerprints/deduplicates actions, and calculates priority. |
 | RAG module | **Absent** | No ingestion, retrieval, knowledge context, or RAG generation is composed. |
 
-The source package has `api`, `application`, `domain`, `gui`, and `infrastructure` areas. It has no independently deployed internal service boundary; these components run in the API process except for calls to external providers.
+The source package has `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` areas, plus retained `api` and `gui` presentation adapters. It has no independently deployed internal service boundary; these components run in the API process except for calls to external providers.
 
 ### 1.2 State, queues, workers, and scheduling
 
 | Category | Current implementation | Boundary |
 |---|---|---|
 | Database | SQLite `mailbox_connections`, default `.data/mail_todo.db` | Durable mailbox ownership and encrypted refresh tokens only. |
-| Run store | `InMemoryRunRepository` | Process-local run state and idempotency map. |
-| Result store | `InMemoryResultRepository` | Process-local Action Items, attachment warnings, and processed-email metadata. |
-| Queue-shaped adapter | `InMemoryQueue` | Records unique run IDs during creation; nothing consumes this list. It does not dispatch work. |
-| Completion outbox | `InMemoryOutbox` | Records one completion event per run; no publisher or consumer is wired. |
+| Run store | `InMemoryRunRepository` in `src/cowork_agent/persistence/repositories/local.py` | Process-local run state and idempotency map. |
+| Result store | `InMemoryResultRepository` in `src/cowork_agent/persistence/repositories/local.py` | Process-local Action Items, attachment warnings, and processed-email metadata. |
+| Queue-shaped adapter | `InMemoryQueue` in `src/cowork_agent/orchestration/local.py` | Records unique run IDs during creation; nothing consumes this list. It does not dispatch work. |
+| Completion outbox | `InMemoryOutbox` in `src/cowork_agent/orchestration/local.py` | Records one completion event per run; no publisher or consumer is wired. |
 | Actual worker dispatch | FastAPI `BackgroundTasks` | Calls `DigestWorker.execute` after the run-creation response; not durable and not a broker. |
 | Scheduler | **Absent** | No cron, scheduled-job loop, schedule repository, or scheduler entry point is composed. |
 | Cache | **Absent** | No explicit cache exists. Process-local repositories are operational state, not caches in front of durable stores. |
-| PostgreSQL schema | `migrations/001_mail_todo.sql` | Not current runtime storage because `create_app()` wires no PostgreSQL adapter. |
+| PostgreSQL schema | `src/cowork_agent/persistence/migrations/001_mail_todo.sql` | Not current runtime storage because `create_app()` wires no PostgreSQL adapter. |
 
 ### 1.3 APIs
 
@@ -80,7 +80,7 @@ Only one LLM provider is selected at startup through `LLM_PROVIDER`. The same pr
 
 1. A caller starts Gmail OAuth with a query-string `user_id`.
 2. `OAuthStateManager` signs state and holds the PKCE verifier in process memory.
-3. Google returns to the callback; the application exchanges the code, compares the granted scopes with the configured read-only scope, and fetches the Gmail account identity. That comparison is exact tuple equality and falls back to the configured value when the token response carries no scopes, so it does not independently prove what Google granted (`gmail.py:85`, `gmail.py:133-134`).
+3. Google returns to the callback; the application exchanges the code, compares the granted scopes with the configured read-only scope, and fetches the Gmail account identity. That comparison is exact tuple equality and falls back to the configured value when the token response carries no scopes, so it does not independently prove what Google granted (`src/cowork_agent/integrations/gmail/provider.py:85`, `:133-134`).
 4. `GmailConnectionService` encrypts the refresh token and upserts the mailbox connection in SQLite.
 
 The application checks later requests against the supplied `user_id`, but it does not authenticate that value through a session or JWT. Identity is caller-asserted.
@@ -114,10 +114,10 @@ The `InMemoryQueue` is not on the execution path after it records the run ID. Fa
 |---|---|
 | Raw email | Gmail is the system of record. Fetched content is held transiently by `GmailMailboxAdapter`/`DigestWorker` and is not persisted locally. |
 | Normalized email | Transient `EmailEnvelope` and `ThreadContext` objects owned by the Email workflow for one worker call. |
-| Current run state | `InMemoryRunRepository`; process lifetime only. |
+| Current run state | `InMemoryRunRepository` (`src/cowork_agent/persistence/repositories/local.py`); process lifetime only. |
 | User profile | No application user-profile model or store exists. Only caller-supplied `user_id` and Gmail account identity on the mailbox connection are present. |
 | Retrieved documents | None; no RAG retrieval occurs. |
-| Action Item | Constructed by `DigestWorker` from provider candidates and owned by `InMemoryResultRepository` for the process lifetime. |
+| Action Item | Constructed by `DigestWorker` from provider candidates and owned by `InMemoryResultRepository` (`src/cowork_agent/persistence/repositories/local.py`) for the process lifetime. |
 | Action Plan | Generated in the configured Gemini/Groq Email action extractor, parsed into candidate steps, then assigned to final `ActionItem.action_plan` by `DigestWorker`. |
 | Citations | No RAG citations exist. `ActionItem.evidence` is email/attachment evidence owned with the in-memory Action Item. |
 | Task history | No durable task-history model exists. Prior in-process Action Items are scanned only for fingerprint freshness until restart. |
@@ -127,11 +127,11 @@ Additional owned state:
 
 | State | Owner and lifetime |
 |---|---|
-| Mailbox connection and encrypted refresh token | `SQLiteMailboxConnectionRepository`; durable until explicit disconnect or database removal. |
-| OAuth pending nonce and PKCE verifier | `OAuthStateManager`; unusable after its TTL, but only evicted from memory by a later consume sweep, its own consumption, or process restart. |
+| Mailbox connection and encrypted refresh token | `SQLiteMailboxConnectionRepository` (`src/cowork_agent/persistence/repositories/mailbox_connections.py`); durable until explicit disconnect or database removal. |
+| OAuth pending nonce and PKCE verifier | `OAuthStateManager` (`src/cowork_agent/integrations/gmail/auth.py`); unusable after its TTL, but only evicted from memory by a later consume sweep, its own consumption, or process restart. |
 | Extracted attachment text | Transient `SafeTextAttachmentExtractor` result passed into the LLM prompt, then discarded after the run. |
-| Attachment warnings and processed metadata | `InMemoryResultRepository`; process lifetime. |
-| Completion event | `InMemoryOutbox`; process lifetime, with no publisher. |
+| Attachment warnings and processed metadata | `InMemoryResultRepository` (`src/cowork_agent/persistence/repositories/local.py`); process lifetime. |
+| Completion event | `InMemoryOutbox` (`src/cowork_agent/orchestration/local.py`); process lifetime, with no publisher. |
 
 ## 4. Control ownership
 
@@ -283,21 +283,23 @@ Only gaps evidenced by the current checkout are listed:
 
 ## Source evidence
 
-- Runtime composition, dispatch, and endpoints: `src/mail_todo/api/server.py:44-292`
-- API result serialization: `src/mail_todo/api/handlers.py:11-65`
-- Run creation, orchestration, filtering, final Action Item construction, and failure handling: `src/mail_todo/application/services.py:48-347`
-- Application ports: `src/mail_todo/application/ports.py:20-88`
-- Email, attachment, and provider contracts: `src/mail_todo/application/contracts.py:16-71`
-- Run, Action Item, evidence, and completion-event models: `src/mail_todo/domain/models.py:47-196`
-- Gmail OAuth, retrieval, and error mapping: `src/mail_todo/infrastructure/gmail.py:42-384`
-- Durable mailbox connection store: `src/mail_todo/infrastructure/connections.py:11-112`
-- In-memory repositories, queue/outbox, and attachment extraction: `src/mail_todo/infrastructure/memory.py:27-196`
-- OAuth state and token encryption: `src/mail_todo/infrastructure/security.py:14-97`
-- Gemini generation, key rotation, and retry loop: `src/mail_todo/infrastructure/gemini.py:26-152`
-- Provider JSON parsed into application `ExtractionBatch` contracts by the adapter, not the provider: `src/mail_todo/infrastructure/gemini.py:366-419`
-- Action Plan sanitization, capping, and cross-email merge: `src/mail_todo/infrastructure/gemini.py:431-466`, `:469-535`, `:548-570`
-- Groq generation and error mapping: `src/mail_todo/infrastructure/groq.py:27-137`
-- Groq reuses the Gemini prompt, schema, parser, and merge helpers by direct import: `src/mail_todo/infrastructure/groq.py:14-21`
-- Runtime settings and dependency inventory: `src/mail_todo/infrastructure/config.py`, `pyproject.toml`
-- Unused target/different-runtime tables: `migrations/001_mail_todo.sql`
+- Runtime composition, dispatch, and endpoints: `src/cowork_agent/app.py:49-297`
+- API result serialization: `src/cowork_agent/api/handlers.py:11-65`
+- Run creation, orchestration, filtering, final Action Item construction, and failure handling: `src/cowork_agent/features/email_action_plan/workflow.py:48-347`
+- Application ports: `src/cowork_agent/features/email_action_plan/ports.py:20-88`
+- Email, attachment, and provider contracts: `src/cowork_agent/features/email_action_plan/schemas.py:16-71`
+- Run, Action Item, evidence, and completion-event models: `src/cowork_agent/domain/models.py:47-196`
+- Gmail OAuth, retrieval, and error mapping: `src/cowork_agent/integrations/gmail/provider.py:42-384`
+- Durable mailbox connection store: `src/cowork_agent/persistence/repositories/mailbox_connections.py:11-112`
+- In-memory repositories: `src/cowork_agent/persistence/repositories/local.py:11-90`
+- Queue and outbox adapters: `src/cowork_agent/orchestration/local.py:11-60`
+- Attachment extraction fake and text extractor: `src/cowork_agent/integrations/gmail/fakes.py:11-80`
+- OAuth state and token encryption: `src/cowork_agent/integrations/gmail/auth.py:14-97`
+- Gemini generation, key rotation, and retry loop: `src/cowork_agent/integrations/llm/providers/gemini.py:26-152`
+- Provider JSON parsed into application `ExtractionBatch` contracts by the adapter, not the provider: `src/cowork_agent/integrations/llm/providers/gemini.py:366-419`
+- Action Plan sanitization, capping, and cross-email merge: `src/cowork_agent/integrations/llm/providers/gemini.py:431-466`, `:469-535`, `:548-570`
+- Groq generation and error mapping: `src/cowork_agent/integrations/llm/providers/groq.py:27-137`
+- Groq reuses the Gemini prompt, schema, parser, and merge helpers by direct import: `src/cowork_agent/integrations/llm/providers/groq.py:14-21`
+- Runtime settings and dependency inventory: `src/cowork_agent/config.py`, `pyproject.toml`
+- Unused target/different-runtime tables: `src/cowork_agent/persistence/migrations/001_mail_todo.sql`
 

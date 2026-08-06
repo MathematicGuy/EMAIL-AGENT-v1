@@ -7,7 +7,6 @@ from uuid import uuid4
 from cowork_agent.domain import (
     ActionFreshness,
     ActionItem,
-    AttachmentWarning,
     DigestCompletedEvent,
     DigestRun,
     EmailEnvelope,
@@ -94,9 +93,11 @@ class DigestWorker:
         *,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
+        # ADR-003 retains this injection surface temporarily for callers/tests, but the
+        # production baseline must not download or extract attachment content.
+        del attachments, extraction_limits
         self._runs, self._results, self._mailbox = runs, results, mailbox
-        self._attachments, self._actions, self._outbox = attachments, actions, outbox
-        self._limits = extraction_limits or ExtractionLimits()
+        self._actions, self._outbox = actions, outbox
 
     async def execute(
         self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
@@ -105,7 +106,6 @@ class DigestWorker:
         run = await self._runs.claim(run_id, clock)
         if run is None:
             return await self._runs.get(run_id)
-        partial = False
         try:
             threads = await self._fetch_threads(run)
             await self._results.save_processed_emails(
@@ -125,38 +125,10 @@ class DigestWorker:
             contexts: list[ThreadContext] = []
             messages: dict[str, EmailEnvelope] = {}
             for thread in threads:
-                extracted = []
                 for message in thread:
                     messages[message.provider_message_id] = message
                     run.attachments_found += len(message.attachments)
-                    for ref in message.attachments:
-                        if ref.size_bytes is not None and ref.size_bytes > self._limits.max_bytes:
-                            partial = True
-                            await self._warn(run, ref.filename, "ATTACHMENT_TOO_LARGE")
-                            continue
-                        try:
-                            result = await self._attachments.extract(
-                                ref.attachment_id,
-                                ref.filename,
-                                ref.declared_mime_type,
-                                self._mailbox.download_attachment(
-                                    run.mailbox_connection_id,
-                                    message.provider_message_id,
-                                    ref.attachment_id,
-                                    self._limits.max_bytes,
-                                ),
-                                self._limits,
-                            )
-                            if result.warning_code:
-                                partial = True
-                                await self._warn(run, ref.filename, result.warning_code)
-                            else:
-                                run.attachments_extracted += 1
-                                extracted.append(result)
-                        except Exception:
-                            partial = True
-                            await self._warn(run, ref.filename, "ATTACHMENT_EXTRACTION_FAILED")
-                contexts.append(ThreadContext(thread, tuple(extracted)))
+                contexts.append(ThreadContext(thread, ()))
 
             batch = await self._actions.extract(user_timezone, clock, contexts)
             items: list[ActionItem] = []
@@ -233,7 +205,7 @@ class DigestWorker:
             run.emails_actionable = len(actionable)
             run.action_items_count = len(items)
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))
-            run.status = RunStatus.PARTIAL if partial else RunStatus.SUCCEEDED
+            run.status = RunStatus.SUCCEEDED
         except Exception as exc:
             logger.exception("Digest run %s failed", run.id)
             run.status = RunStatus.FAILED
@@ -280,19 +252,6 @@ class DigestWorker:
         if run.emails_matched == 0:
             run.emails_matched = run.emails_processed
         return threads
-
-    async def _warn(self, run: DigestRun, filename: str, code: str) -> None:
-        run.attachment_warnings_count += 1
-        messages = {
-            "ATTACHMENT_TOO_LARGE": "File vượt quá giới hạn kích thước.",
-            "ATTACHMENT_UNSUPPORTED": "Định dạng file chưa được hỗ trợ.",
-            "ATTACHMENT_TYPE_MISMATCH": "Loại file không khớp khai báo.",
-            "ATTACHMENT_EXTRACTION_FAILED": "Không thể đọc nội dung file.",
-        }
-        await self._results.save_warning(
-            run.id, AttachmentWarning(filename, code, messages.get(code, "File đã bị bỏ qua."))
-        )
-
 
 def _safe_run_error(exc: Exception) -> tuple[str, str]:
     """Return explicitly public error details without exposing secrets or email content."""

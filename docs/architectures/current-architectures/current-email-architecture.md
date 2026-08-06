@@ -2,7 +2,7 @@
 
 ## Extraction status
 
-This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. It describes runtime code, not the broader architecture claimed in `docs/references/ARCHITECHTURE.md` or the unused PostgreSQL schema in `migrations/001_mail_todo.sql`.
+This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. It describes runtime code, not the broader architecture claimed in `docs/references/ARCHITECHTURE.md` or the unused PostgreSQL schema in `src/cowork_agent/persistence/migrations/001_mail_todo.sql`.
 
 **Key ownership finding:** final Action Plan generation happens in the Email workflow, and it is shared between the LLM and the provider adapter. `DigestWorker` sends Gmail thread and attachment context to the configured `GeminiActionExtractor` or `GroqActionExtractor`. The LLM authors the candidate `actionPlan` steps, but the adapter then shapes them deterministically:
 
@@ -30,7 +30,7 @@ It does not send, modify, label, archive, or mark Gmail messages as read.
 
 | Type | Entry point | Current behavior |
 |---|---|---|
-| CLI | `mail-todo-api` -> `mail_todo.api.server:main` | Starts Uvicorn and the FastAPI app. |
+| CLI | `mail-todo-api` -> `cowork_agent.app:main` | Starts Uvicorn and the FastAPI app. |
 | Script | `python scripts/run_gui.py` | Starts the Streamlit test UI. |
 | API | `GET /health` | Liveness response only. |
 | API | `GET /v1/mail-todo/oauth/gmail/connect` | Starts Gmail OAuth for query-string `user_id`. |
@@ -47,7 +47,7 @@ It does not send, modify, label, archive, or mark Gmail messages as read.
 - No scheduler, cron trigger, schedule repository, or scheduled-job loop is wired into runtime.
 - No independent queue worker or broker exists. `InMemoryQueue` only records run IDs; FastAPI `BackgroundTasks` performs actual execution.
 - `DigestCompletedEvent` is added to `InMemoryOutbox`, but no publisher or consumer is wired.
-- PostgreSQL schedule/run/outbox tables in `migrations/001_mail_todo.sql` are not used by `create_app()`.
+- PostgreSQL schedule/run/outbox tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` are not used by `create_app()`.
 
 ## 3. Authentication
 
@@ -61,7 +61,7 @@ It does not send, modify, label, archive, or mark Gmail messages as read.
 6. `GoogleOAuthDriver` exchanges the authorization response and fetches the Gmail profile email.
 7. `GmailConnectionService.complete` compares the granted scopes against the configured scopes, encrypts the refresh token with Fernet, and upserts the mailbox connection in SQLite.
 
-Two caveats on that scope check (`gmail.py:85`, `gmail.py:133-134`): the comparison is exact tuple equality, so a differently ordered scope list from Google would be rejected; and `GmailOAuthGrant.scopes` falls back to the configured scopes when the token response carries none, in which case the check compares the configured value with itself and cannot fail. It is therefore a configuration-consistency check, not an independent verification that Google granted read-only access.
+Two caveats on that scope check (`src/cowork_agent/integrations/gmail/provider.py:85`, `:133-134`): the comparison is exact tuple equality, so a differently ordered scope list from Google would be rejected; and `GmailOAuthGrant.scopes` falls back to the configured scopes when the token response carries none, in which case the check compares the configured value with itself and cannot fail. It is therefore a configuration-consistency check, not an independent verification that Google granted read-only access.
 
 ### Token storage and refresh
 
@@ -213,7 +213,7 @@ Each `actionItems[]`/`nextActions[]` entry uses snake_case fields from `ActionIt
 | Extracted attachment content | Not persisted | Worker-call lifetime | LLM extraction input. |
 | Logs | Python logging destination configured by host | Host-defined | Failed-run traceback. |
 
-`migrations/001_mail_todo.sql` defines PostgreSQL tables for future/different runtime persistence, but `create_app()` instantiates only SQLite connection storage plus in-memory run/result/outbox adapters.
+`src/cowork_agent/persistence/migrations/001_mail_todo.sql` defines PostgreSQL tables for future/different runtime persistence, but `create_app()` instantiates only SQLite connection storage plus in-memory run/result/outbox adapters.
 
 ## 7. Reliability
 
@@ -391,17 +391,19 @@ flowchart LR
 
 ## Source evidence
 
-- Composition and endpoints: `src/mail_todo/api/server.py:38-332`
-- API serialization: `src/mail_todo/api/handlers.py:11-65`
-- Run orchestration and final Action Plan ownership: `src/mail_todo/application/services.py:48-347`
-- Internal contracts: `src/mail_todo/application/contracts.py:16-71`
-- Domain/result fields: `src/mail_todo/domain/models.py:47-196`
-- Gmail OAuth/retrieval/parser: `src/mail_todo/infrastructure/gmail.py:42-384`
-- SQLite mailbox storage: `src/mail_todo/infrastructure/connections.py:11-112`
-- In-memory runtime and attachment extraction: `src/mail_todo/infrastructure/memory.py:27-196`
-- Security state/token handling: `src/mail_todo/infrastructure/security.py:14-97`
-- Provider behavior: `src/mail_todo/infrastructure/gemini.py:26-152`, `src/mail_todo/infrastructure/groq.py:27-137`
-- Action Plan parsing, sanitization, and cross-email merge: `src/mail_todo/infrastructure/gemini.py:366-419` (`_parse_batch`), `:431-466` (`_parse_action_plan`), `:469-535` (`_merge_correlated_emails`, `_merge_actions`), `:548-570` (`_select_merged_steps`)
-- Shared provider internals: `src/mail_todo/infrastructure/groq.py:14-21` imports `EXTRACTION_SCHEMA`, `SYSTEM_INSTRUCTION`, `_batch_threads`, `_build_prompt`, `_merge_correlated_emails`, and `_parse_batch` from `gemini.py`, so the two adapters share prompt, schema, batching, parsing, and merge behavior rather than being independent.
-- Runtime settings: `src/mail_todo/infrastructure/config.py:14-141`
+- Composition and endpoints: `src/cowork_agent/app.py:49-342`
+- API serialization: `src/cowork_agent/api/handlers.py:11-65`
+- Run orchestration and final Action Plan ownership: `src/cowork_agent/features/email_action_plan/workflow.py:48-347`
+- Internal contracts: `src/cowork_agent/features/email_action_plan/schemas.py:16-71`
+- Domain/result fields: `src/cowork_agent/domain/models.py:47-196`
+- Gmail OAuth/retrieval/parser: `src/cowork_agent/integrations/gmail/provider.py:42-384`
+- SQLite mailbox storage: `src/cowork_agent/persistence/repositories/mailbox_connections.py:11-112`
+- In-memory repositories: `src/cowork_agent/persistence/repositories/local.py:11-90`
+- Queue and outbox adapters: `src/cowork_agent/orchestration/local.py:11-60`
+- Attachment extraction fake and text extractor: `src/cowork_agent/integrations/gmail/fakes.py:11-80`
+- Security state/token handling: `src/cowork_agent/integrations/gmail/auth.py:14-97`
+- Provider behavior: `src/cowork_agent/integrations/llm/providers/gemini.py:26-152`, `src/cowork_agent/integrations/llm/providers/groq.py:27-137`
+- Action Plan parsing, sanitization, and cross-email merge: `src/cowork_agent/integrations/llm/providers/gemini.py:366-419` (`_parse_batch`), `:431-466` (`_parse_action_plan`), `:469-535` (`_merge_correlated_emails`, `_merge_actions`), `:548-570` (`_select_merged_steps`)
+- Shared provider internals: `src/cowork_agent/integrations/llm/providers/groq.py:14-21` imports `EXTRACTION_SCHEMA`, `SYSTEM_INSTRUCTION`, `_batch_threads`, `_build_prompt`, `_merge_correlated_emails`, and `_parse_batch` from `gemini.py`, so the two adapters share prompt, schema, batching, parsing, and merge behavior rather than being independent.
+- Runtime settings: `src/cowork_agent/config.py:14-141`
 

@@ -6,10 +6,10 @@
 |---|---|
 | Product | Cowork Agent — Email to Action Plan |
 | Document status | Baseline MVP PRD |
-| Version | 1.0 |
+| Version | 1.1 |
 | Date | 2026-08-07 |
-| Authoritative architecture | `TARGET-ARCHITECTURE.md` |
-| Current-to-target reference | `master-comparison-aligned.md` |
+| Authoritative architecture | `docs\architectures\TARGET-ARCHITECTURE.md` |
+| Current-to-target reference | `docs\architectures\master-comparison.md` |
 | Agent pattern | Deterministic single-agent workflow with conditional retrieval |
 | Memory model | Short-term, Long-term Declarative, Episodic, Semantic |
 | Reflexion | Out of scope |
@@ -30,11 +30,9 @@ When the email is self-contained, the system generates the plan directly. When c
 The workflow is deterministic and one-shot:
 
 ```text
-One or more bounded classifier batch calls
-→ one route decision per selected email
-→ deterministic thread/incident correlation into task candidates
-→ zero or one RAG retrieval per task candidate
-→ one Action Plan generation call per task candidate
+One classifier call
+→ zero or one RAG retrieval
+→ one Action Plan generation call
 → validate and persist output
 → write a system-generated episode
 → delete ephemeral email state
@@ -123,7 +121,7 @@ The following are outside the MVP baseline:
 - Automatic email replies.
 - Sending, deleting, moving, or modifying email.
 - External task execution.
-- Email attachment processing; ADR-003 requires presence-only metadata for the baseline.
+- Email attachment processing.
 - Automatic extraction of long-term preferences from emails.
 - Automatic ingestion of emails into semantic memory or the RAG index.
 - Retrieval of unvalidated system-generated episodes.
@@ -233,11 +231,9 @@ Use when the message is actionable, the email is insufficient, and the missing k
 
 Expected product behavior:
 
-- exactly one RAG retrieval operation is performed per task candidate, with one bounded technical
-  retry when required;
+- exactly one RAG retrieval operation is performed, with one bounded technical retry when required;
 - RAG returns chunks, citations, and scores, not the final plan;
-- the Action Plan Generator is called once for the task candidate using its source emails and
-  retrieved context;
+- the Action Plan Generator is called once using the email and retrieved context;
 - company-grounded steps include valid citations.
 
 ---
@@ -376,9 +372,7 @@ The Cowork workflow shall not call a RAG `retrieve_and_answer` operation.
 
 ### FR-10 — Action Plan generation
 
-After per-email route resolution, deterministic thread/incident correlation, and optional
-retrieval, Agent Core shall perform one structured Action Plan generation call per resolved task
-candidate.
+After route resolution and optional retrieval, Agent Core shall perform one structured Action Plan generation call.
 
 Generation input may include:
 
@@ -647,8 +641,6 @@ task:
   run_id: string
   gmail_message_id: string
   gmail_url: string
-  source_message_ids: [string]
-  incident_key: string | null
 
   title: string
   request_summary: string
@@ -656,7 +648,7 @@ task:
   actionability: action_required | action_suggested | informational
   route: no_action | direct_plan | retrieve_rag
 
-  priority: low | medium | high | urgent | null
+  priority: low | medium | high | null
   deadline: datetime | null
 
   action_plan:
@@ -735,8 +727,7 @@ The MVP is accepted when all of the following are true:
 6. Every email resolves deterministically to `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG` before final generation.
 7. `DIRECT_PLAN` performs no RAG retrieval.
 8. `RETRIEVE_RAG` calls the semantic port and the RAG module returns context and citations rather than a final plan.
-9. Agent Core performs one final Action Plan generation call per resolved task candidate after
-   route resolution, deterministic correlation, and optional retrieval.
+9. Agent Core performs one final Action Plan generation call after route resolution and optional retrieval.
 10. Company-knowledge-based plan steps cannot survive validation without a valid citation.
 11. RAG failure results in a partial plan with exposed missing information and no invented company procedure.
 12. Actionable outputs are persisted with a Gmail pointer and without the raw email body.
@@ -769,7 +760,8 @@ The MVP is accepted when all of the following are true:
 
 ### Milestone 3 — RAG, generation, and validation
 
-- Wrap the RAG module behind `SemanticMemoryPort`.
+- Build the RAG ingestion and retrieval planes from scratch for this project.
+- Expose the project-built RAG capability behind `SemanticMemoryPort` as a pluggable semantic-memory module.
 - Implement retrieval-only Cowork integration.
 - Implement the final Action Plan Generator.
 - Implement schema, grounding, and citation validators.
@@ -807,7 +799,7 @@ After the deterministic baseline is stable:
 - LLM providers capable of strict structured output.
 - PostgreSQL for long-term and episodic memory and durable task output.
 - Redis or equivalent short-term run-state storage, or an in-process implementation with safety TTL for the initial deployment.
-- External RAG module with ingestion, authorization, hybrid retrieval, reranking, and citation packaging.
+- Project-built, externally pluggable RAG module with ingestion, authorization, hybrid retrieval, reranking, and citation packaging.
 - Cowork Daily Brief UI.
 - Event, trace, metrics, alerting, retention, and purge infrastructure.
 - Verified tenant and user identity propagated to all modules.
@@ -830,22 +822,52 @@ After the deterministic baseline is stable:
 
 ---
 
-## 19. Open Questions
+## 19. Product and Platform Decisions
 
-These items are not resolved by the source architecture and require product or engineering decisions:
+This section resolves only the previously open product and platform questions using the verified current-codebase architecture and the product direction supplied by the product owner. It does **not** change the PRD hypothesis, goals, scope, user stories, requirements, memory policy, or target workflow.
 
-1. What exact Gmail selection rule defines a daily run: unread inbox only, labels, time window, user-selected query, or a combination?
-2. What are the numeric confidence thresholds for route resolution?
-3. Which policy categories must force RAG retrieval in the first release?
-4. What is the initial knowledge-corpus scope: company-wide, workspace-level, or user-scoped?
-5. Who owns corpus ingestion, document lifecycle, and ACL administration?
-6. What are the retention periods for development traces, production telemetry, tasks, episodes, and long-term preferences?
-7. What user-facing information should be shown for `NO_ACTION` results, if any?
-8. How should the Daily Brief visually distinguish direct, RAG-supported, and partial plans?
-9. What degraded informational output is acceptable after generation repair fails?
-10. What authentication layer supplies the verified tenant and user principal?
-11. What numeric launch thresholds define acceptable precision, recall, latency, cost, and citation coverage?
-12. Does the external RAG module already exist outside the reviewed codebase, or must its ingestion and retrieval planes be delivered by this project?
+### 19.1 Resolved decisions
+
+| Decision | Resolution | Basis and boundary |
+|---|---|---|
+| MVP Gmail selection rule | Scheduled and manual MVP runs process Gmail messages matching the existing guarded scope: `is:unread in:inbox`. A caller-provided query may further narrow that set, but it must not broaden the baseline beyond unread inbox mail in the MVP. Broader label, time-window, and custom-query experiences are post-MVP product extensions. | The current Email workflow already enforces unread inbox constraints. Reusing this behavior minimizes product and migration risk without changing the target workflow. |
+| RAG availability | No external or existing RAG provider is assumed. The project shall build the required ingestion and retrieval planes from scratch to satisfy this PRD. | The reviewed runtime contains no ingestion pipeline, knowledge store, index, retriever, reranker, citation contract, or RAG dependencies. |
+| RAG product boundary | The project-built RAG capability remains an independently pluggable semantic-memory module. It returns retrieved chunks, provenance, citations, and scores; Agent Core remains the only owner of the final Cowork Action Plan. | “External/pluggable” describes the architecture boundary, not a pre-existing third-party provider. |
+| Existing Email capability | Reuse the current read-only Gmail OAuth, connection, fetching, and normalization capability where it satisfies the target contracts. The current combined classification-and-plan extraction behavior is migration input, not the target product behavior. | The current code already provides a useful Gmail foundation, but classification and candidate plan generation occur in the same provider response today. |
+| Attachment behavior | Email attachments remain outside the MVP even though the current code can extract bounded text from some attachment types. The target product records attachment presence but does not process attachment content. | Current implementation capability does not override the PRD non-goal. |
+| Production execution path | The current `InMemoryQueue`, in-memory outbox, and FastAPI `BackgroundTasks` path are not accepted as the production queue, scheduler, worker, or DLQ required by this PRD. | The current queue and outbox have no consumer; no scheduler or durable crash-recovery path exists. |
+| Verified identity requirement | Production launch requires a verified tenant and user principal before Gmail, memory, task, or RAG operations. Caller-supplied `user_id` alone is insufficient. | The current API trusts a query-string `user_id`; the exact authentication technology is delegated to implementation. |
+| Initial force-retrieval categories | The first release shall force or strongly bias `RETRIEVE_RAG` for actionable requests that depend on company policy, governance, procedures, tax or regulatory guidance, forms, templates, or unresolved internal terminology. | These categories reflect the target policy guards and the core product risk of inventing company-specific steps. |
+
+### 19.2 Remaining product decisions
+
+These decisions remain with the product owner because they determine user-visible behavior, governance, or launch policy:
+
+1. **Knowledge-corpus scope:** whether the initial corpus is company-wide, workspace-scoped, or narrower. Regardless of the selection, every retrieval remains tenant-authorized and ACL-filtered.
+2. **Corpus operating ownership:** who may add, update, retire, or restrict documents, and whether an administrator-facing management experience is part of the same release or a separate product surface.
+3. **Retention policy:** retention periods for development traces, production telemetry, task outputs, episodic records, and long-term preferences.
+4. **`NO_ACTION` experience:** whether users see ignored-email counts, explanations, an audit view, or no user-facing result.
+5. **Daily Brief presentation:** how direct, RAG-supported, and partial plans are visually distinguished and how citations and missing-context warnings are exposed.
+6. **Unrecoverable generation outcome:** the user-visible result after the generation call and one repair attempt both fail—for example, omit the task, show a failed item, or show a minimal request summary without a plan.
+7. **Launch policy:** acceptable precision, recall, missed-retrieval rate, citation coverage, latency, and cost thresholds for MVP release.
+
+### 19.3 Technical decisions delegated to the coding agent
+
+The following are implementation decisions and do not require product resolution before coding begins, provided the PRD contracts and acceptance criteria remain satisfied:
+
+- exact classifier-confidence thresholds and calibration procedure;
+- classifier and generator model/provider selection;
+- embedding model, chunking strategy, vector or hybrid index, reranker, and relevance thresholds;
+- queue, scheduler, worker, DLQ, outbox, and deployment technologies;
+- authentication framework used to produce the verified principal;
+- PostgreSQL schemas, migration mechanics, repository implementation, and transaction strategy;
+- Redis versus an equivalent short-term-state implementation;
+- concrete retry, timeout, backoff, batching, and concurrency tuning within the PRD reliability boundaries;
+- API decomposition, internal service topology, and port/adapter implementation details;
+- exact implementation of deterministic policy guards and the evaluation harness;
+- durable representation of `NO_ACTION` metadata when no user-visible task is created.
+
+The product owner retains approval over user-visible behavior, corpus governance, privacy and retention policy, and numeric launch gates. Engineering owns the implementation choices used to meet those decisions.
 
 ---
 
@@ -854,6 +876,7 @@ These items are not resolved by the source architecture and require product or e
 - `TARGET-ARCHITECTURE.md` defines the authoritative product and architecture baseline.
 - `master-comparison-aligned.md` defines the verified current-state gaps and the migration interpretation.
 - Current-code observations must not be presented as already implemented target capabilities.
+- `current-overall-architecture.md`, `current-email-architecture.md`, `current-rag-architecture.md`, and `current-architecture-review.md` are authoritative only for verified current-state facts. They may resolve whether a capability exists, but they must not override this PRD or `TARGET-ARCHITECTURE.md`.
 - Implementation simplifications are acceptable only when they preserve the target product behavior, contracts, privacy boundary, and ownership model.
 
 ---

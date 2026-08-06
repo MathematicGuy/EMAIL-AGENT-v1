@@ -177,7 +177,15 @@ def test_same_idempotency_key_creates_and_enqueues_only_one_run() -> None:
     asyncio.run(scenario())
 
 
-def test_attachment_failure_makes_partial_run_but_preserves_actions() -> None:
+def test_attachment_is_recorded_without_download_or_extraction() -> None:
+    class AttachmentDownloadMustNotRunMailbox(FakeMailbox):
+        def download_attachment(self, *args: object) -> object:
+            raise AssertionError("ADR-003 forbids attachment download")
+
+    class AttachmentExtractionMustNotRun:
+        async def extract(self, *args: object) -> object:
+            raise AssertionError("ADR-003 forbids attachment extraction")
+
     async def scenario() -> None:
         ref = AttachmentRef("a1", "spec.pdf", "application/pdf", 100)
         message = email("m1", "t1", "Duyệt tài liệu", (ref,))
@@ -192,16 +200,18 @@ def test_attachment_failure_makes_partial_run_but_preserves_actions() -> None:
         worker = DigestWorker(
             runs,
             results,
-            FakeMailbox([message], {"a1": b"%PDF-test"}),
-            SafeTextAttachmentExtractor(),
+            AttachmentDownloadMustNotRunMailbox([message]),
+            AttachmentExtractionMustNotRun(),
             FakeActionExtractor(batch),
             InMemoryOutbox(),
         )
         completed = await worker.execute(run.id, now=NOW)
-        assert completed is not None and completed.status is RunStatus.PARTIAL
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert completed.action_items_count == 1
-        warnings = await results.list_warnings(run.id)
-        assert warnings[0].code == "ATTACHMENT_UNSUPPORTED"
+        assert completed.attachments_found == 1
+        assert completed.attachments_extracted == 0
+        assert completed.attachment_warnings_count == 0
+        assert await results.list_warnings(run.id) == ()
 
     asyncio.run(scenario())
 
