@@ -1,177 +1,213 @@
-# Module Mail
+# Cowork Agent (Email-to-Action-Plan)
 
-Module Python biến email Gmail chưa đọc thành danh sách công việc có cấu trúc.
+Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc, tuân thủ kiến trúc **Cowork Agent Specification** với Agent Core, Hệ thống Bộ nhớ 4 thành phần (Four-Type Memory System) và Module RAG.
 
-## Công nghệ nền
+---
 
-- Python 3.11+
-- PostgreSQL
-- Durable job queue
+## 1. Quy trình xử lý cốt lõi (Core Workflow)
 
-## Cấu trúc dự án
+Quy trình tự động hóa email diễn ra theo các bước định hình sẵn (deterministic pipeline):
 
 ```text
-.
+Trigger (Scheduled / Manual)
+└── Gmail Fetch & Provider Normalization
+    └── Load Context (Long-term profile, Episodic memory)
+        └── Intent & Knowledge-Sufficiency Classification
+            └── Route Decision: [NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG]
+                ├── (Optionally) Semantic Memory / RAG Retrieval
+                └── Action Item & Action Plan Generation (Agent Core)
+                    └── Output Schema & Grounding Validation
+                        └── Persist Task & Persist Episode (system_generated)
+                            └── Cleanup Temporary Email State & Short-Term Memory
+```
+
+---
+
+## 2. Cấu trúc dự án (Project Structure)
+
+Dự án được tổ chức theo cấu trúc module nghiệp vụ của Cowork Agent Specification (`src/cowork_agent/`):
+
+```text
+cowork-agent/
+├── pyproject.toml
+├── README.md
+├── Makefile
+├── .env.example
+├── AGENTS.md
+├── CLAUDE.md
+│
 ├── src/
-│   └── mail_todo/
-│       ├── domain/          # Model và quy tắc nghiệp vụ thuần
-│       ├── application/     # Use case, pipeline và port
-│       ├── infrastructure/  # Gmail, DB, queue, LLM, attachment adapter
-│       ├── api/             # HTTP handler và event handler
-│       ├── gui/             # Streamlit testing interface
-│       └── __init__.py      # Public API của package
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/            # Dữ liệu mẫu cho test
-├── scripts/                 # Script tiện ích (launcher, tools)
-├── migrations/              # SQL migration files
-└── docs/
-    ├── adr/
-    ├── product_requirements.md
-    └── technical_spec.md
+│   └── cowork_agent/
+│       ├── __init__.py
+│       ├── app.py                      # FastAPI Application entry point
+│       ├── config.py                   # System configuration & environment loaders
+│       │
+│       ├── domain/                     # Pure business models, enums, errors, identifiers
+│       │   ├── models.py
+│       │   ├── enums.py
+│       │   ├── errors.py
+│       │   └── identifiers.py
+│       │
+│       ├── features/                   # Core business features
+│       │   └── email_action_plan/      # Email-to-Action-Plan Agent Core
+│       │       ├── workflow.py         # Complete workflow orchestrator
+│       │       ├── state.py            # Workflow execution state
+│       │       ├── classifier.py       # Intent & knowledge sufficiency classifier
+│       │       ├── router.py           # Deterministic route resolver
+│       │       ├── generator.py        # Final Action Plan generator
+│       │       ├── validators.py       # Output & grounding validators
+│       │       ├── policies.py         # Route & planning policies
+│       │       ├── schemas.py          # Feature Pydantic schemas
+│       │       └── prompts/            # Prompt templates (classify.md, generate.md)
+│       │
+│       ├── runtime/                    # Session lifecycle & in-memory context execution
+│       │   ├── session.py
+│       │   ├── context.py
+│       │   ├── state.py
+│       │   └── cleanup.py
+│       │
+│       ├── integrations/               # External service boundaries & clients
+│       │   ├── gmail/                  # Gmail provider, API client, OAuth & normalizer
+│       │   └── llm/                    # LLM multi-provider client (Gemini, OpenAI, Anthropic)
+│       │
+│       ├── memory/                     # Four-Type Memory System
+│       │   ├── service.py              # Unified Memory Service boundary
+│       │   ├── scope.py                # Tenant, User, Feature, Run scoping
+│       │   ├── short_term/             # Temporary run context (Local in-memory / Redis)
+│       │   ├── long_term/              # User preferences & system settings (PostgreSQL)
+│       │   ├── episodic/               # Task execution history & outcomes
+│       │   └── semantic/               # Semantic memory boundary connecting to RAG
+│       │
+│       ├── rag/                        # Modular RAG System (Company KB Retrieval)
+│       │   ├── ingestion/              # Loaders, parsers, chunkers, enrichers, embedders
+│       │   ├── indexing/               # Dense (pgvector/Chroma) & Lexical (BM25) vector stores
+│       │   ├── retrieval/              # Dense, Sparse, Hybrid retrievers & Rerankers
+│       │   └── context/                # Context builder, token budget & citations
+│       │
+│       ├── persistence/                # Durable database repositories & migrations
+│       │   ├── database.py
+│       │   └── repositories/           # Task & Run repositories
+│       │
+│       ├── orchestration/              # Worker & job scheduling
+│       │   ├── scheduler.py
+│       │   ├── queue.py                # Job queue & Dead-letter queue (DLQ)
+│       │   ├── worker.py               # Idempotent execution worker
+│       │   └── retry.py                # Retry policies & backoff timers
+│       │
+│       └── ops/                        # Observability & Tracing
+│           ├── logging.py
+│           ├── tracing.py
+│           └── events.py
+│
+├── tests/                              # Software Test Suites
+│   ├── unit/                           # Unit tests for features, memory, rag
+│   ├── integration/                    # Integration tests for Gmail, DB, RAG
+│   └── contracts/                      # Contract tests for memory, chunking, embedding
+│
+├── configs/                            # Environment & RAG configurations
+│   ├── rag/
+│   ├── memory/
+│   └── environments/
+│
+├── scripts/                            # Utility scripts
+│   ├── run_email.py                    # Manual execution script
+│   ├── run_gui.py                      # Streamlit testing GUI
+│   ├── ingest.py                       # RAG document ingestion script
+│   └── rebuild_index.py                # Rebuild vector index script
+│
+└── docs/                               # Documentation & Specifications
+    ├── architectures/                  # Architecture specs & Target designs
+    └── references/                     # Cowork project structure spec
 ```
 
-## Nguyên tắc tổ chức
+---
 
-- Tổ chức theo module nghiệp vụ trước, không gom toàn bộ dự án theo loại file.
-- `domain` không phụ thuộc framework, database, Gmail hoặc LLM.
-- `application` điều phối nghiệp vụ và khai báo các port cần thiết.
-- `infrastructure` hiện thực các port và chứa chi tiết kỹ thuật.
-- `api` chỉ chuyển đổi request/event sang lời gọi application.
-- Chỉ tạo thư mục con khi một nhóm đã có ít nhất vài file liên quan.
-- Chưa tạo `shared/`; chỉ tách mã dùng chung sau khi có ít nhất hai nơi thật sự sử dụng.
+## 3. Nguyên tắc kiến trúc & Phụ thuộc (Architecture Boundaries)
 
-## Bắt đầu
+- **Định hướng phụ thuộc (Dependency Direction):**
+  $$\text{domain} \leftarrow \text{features} \leftarrow \text{runtime / orchestration} \leftarrow \text{app entry points}$$
+  `domain` hoàn toàn thuần khiết, không phụ thuộc vào framework, database, Gmail SDK hay LLM providers.
+- **Phân định trách nhiệm rõ ràng:**
+  - **Classifier** xác định tính hành động (`actionability`) và tính đầy đủ của thông tin (`knowledge_sufficiency`).
+  - **Router** quyết định luồng chuyển hướng (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`).
+  - **Agent Core** làm chủ việc sinh Action Plan cuối cùng; RAG chỉ cung cấp thông tin ngữ cảnh và trích dẫn (citations).
+- **Quyền riêng tư & Bảo vệ dữ liệu (Data Privacy First):**
+  - Thư gốc (raw email) và nội dung chưa chuẩn hóa chỉ tồn tại ở `short_term` memory và bị xóa sạch sau khi hoàn tất lượt chạy (`cleanup`).
+  - Tuyệt đối không lưu raw email vào Long-term memory, Episodic memory hay Semantic index.
+
+---
+
+## 4. Hướng dẫn khởi chạy (Getting Started)
+
+### 4.1 Cài đặt môi trường
 
 ```bash
+# Tạo môi trường ảo Python
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-python -m pip install -e ".[dev]"
-python -m pytest
+
+# Kích hoạt môi trường ảo (Windows PowerShell)
+.\.venv\Scripts\activate
+
+# Cài đặt package ở chế độ editable cùng dev & gui dependencies
+python -m pip install -e ".[dev,gui]"
 ```
 
-## MVP hiện có
+### 4.2 Cấu hình môi trường (`.env`)
 
-Repository hiện cung cấp Milestone 1 có thể chạy hoàn toàn bằng fixture, không cần
-tài khoản Gmail hoặc lời gọi AI thật:
+Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng:
 
-- Domain model và deterministic policy cho query, priority, fingerprint/dedupe.
-- Use case tạo run có idempotency, worker claim `queued -> running` và result service.
-- Port cho mailbox, attachment extractor, action extractor, queue, repository và outbox.
-- Adapter in-memory, fake mailbox/action extractor và text attachment extractor giới hạn.
-- HTTP handler không phụ thuộc framework, bám theo response contract trong `technical_spec.md`.
-- PostgreSQL migration và rollback cho các bảng chính, constraint và index.
+```env
+# Key xoay vòng Gemini (hoặc OpenAI/Anthropic)
+GEMINI_API_KEY_1="your_key_1"
+GEMINI_API_KEY_2="your_key_2"
+GEMINI_API_KEY_3="your_key_3"
 
-Các adapter fake nằm trong `mail_todo.infrastructure` để test pipeline mà không đưa
-OAuth token, email body hay attachment vào queue/database. Gmail OAuth, LLM thật và
-sandbox parser cho PDF/Office/OCR là các integration tiếp theo theo Milestone 2–3
-trong Technical Spec; không nên dùng text adapter hiện tại thay cho sandbox production.
+# Gmail OAuth Credentials
+GMAIL_CLIENT_ID="your_gmail_client_id"
+GMAIL_CLIENT_SECRET="your_gmail_client_secret"
 
-### Gemini với API-key rotation
-
-Điền `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2` và `GEMINI_API_KEY_3` trong `.env`, sau đó
-khởi tạo adapter từ environment:
-
-```python
-from mail_todo.infrastructure import GeminiActionExtractor
-
-action_extractor = GeminiActionExtractor.from_env()
+# Secret Keys mã hóa
+TOKEN_ENCRYPTION_KEY="your_fernet_key"
+OAUTH_STATE_SECRET="your_oauth_state_secret"
 ```
 
-Mỗi request bắt đầu bằng key kế tiếp theo round-robin. Khi API trả `429`, adapter thử
-key tiếp theo, tối đa `GEMINI_MAX_ATTEMPTS_PER_REQUEST`. Nội dung email và attachment
-được đặt trong data delimiter, Gemini chỉ nhận structured-output schema và không có tool.
+### 4.3 Khởi chạy dịch vụ
 
-### Kết nối Gmail thật
+- **Chạy API Server (FastAPI):**
+  ```powershell
+  .\.venv\Scripts\mail-todo-api.exe
+  ```
 
-1. Trong Google Cloud Console, bật Gmail API, cấu hình OAuth consent screen và tạo
-   OAuth Client ID loại **Web application**.
-2. Đăng ký Authorized redirect URI chính xác:
+- **Chạy Giao diện Kiểm thử Streamlit GUI:**
+  ```powershell
+  python scripts/run_gui.py
+  ```
+  Giao diện sẽ khởi chạy tại `http://localhost:8501`.
 
-   ```text
-   http://localhost:8000/v1/mail-todo/oauth/gmail/callback
-   ```
+- **Chạy Script xử lý thủ công (CLI):**
+  ```powershell
+  python scripts/run_email.py
+  ```
 
-3. Copy `.env.example` thành `.env`, điền `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
-   ba Gemini key và tạo hai secret local:
+---
 
-   ```powershell
-   .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
-   ```
+## 5. Kiểm tra chất lượng & Testing (Quality Assurance)
 
-   Dùng kết quả đầu cho `TOKEN_ENCRYPTION_KEY`, kết quả sau cho `OAUTH_STATE_SECRET`.
-   `OAUTHLIB_INSECURE_TRANSPORT=1` chỉ dùng cho callback HTTP trên localhost; xóa biến
-   này khi deploy HTTPS production.
-
-4. Chạy API:
-
-   ```powershell
-   .\.venv\Scripts\mail-todo-api.exe
-   ```
-
-5. Mở URL sau trong trình duyệt và chấp thuận quyền Gmail read-only:
-
-   ```text
-   http://localhost:8000/v1/mail-todo/oauth/gmail/connect?user_id=local-user
-   ```
-
-Callback trả về `connection.id`. Có thể kiểm tra email chưa đọc thật bằng:
-
-```text
-http://localhost:8000/v1/mail-todo/connections/{connection.id}/unread-preview?user_id=local-user
-```
-
-Tạo một digest thật bằng Gmail + Gemini:
-
-```powershell
-$payload = @{
-  mailboxConnectionId = "mbx_..."
-  query = "is:unread in:inbox"
-  maxEmails = 50
-} | ConvertTo-Json
-
-$run = Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:8000/v1/mail-todo/runs?user_id=local-user" `
-  -Headers @{ "Idempotency-Key" = [guid]::NewGuid().ToString() } `
-  -ContentType "application/json" `
-  -Body $payload
-
-$run
-```
-
-Dùng `statusUrl` trong response để theo dõi, sau đó gọi
-`/v1/mail-todo/runs/{runId}/result?user_id=local-user` khi trạng thái đã hoàn tất.
-
-Refresh token được mã hóa trước khi lưu ở `.data/mail_todo.db`. API không yêu cầu
-scope gửi, sửa, đánh dấu đã đọc hoặc xóa email. Tham số `user_id` hiện dành cho local
-development; production phải lấy user ID từ session/JWT đã xác thực, không tin query string.
-Run/queue/result của server local hiện nằm trong memory và mất khi restart; Gmail connection
-được lưu bền vững. Production vẫn cần thay bằng PostgreSQL và durable queue theo ADR-001.
-
-## Streamlit Testing Interface
-
-Dự án cung cấp giao diện trực quan với Streamlit để kiểm thử toàn bộ các tính năng (OAuth, Unread Preview, Digest Runs, Gemini API Key Rotation, và Offline Sandbox Fixture):
+Chạy bộ công cụ kiểm tra chất lượng mã nguồn:
 
 ```bash
-# Cài đặt dependency GUI (nếu chưa cài)
-python -m pip install -e ".[gui]"
-
-# Chạy giao diện Streamlit
-python scripts/run_gui.py
-```
-
-Giao diện sẽ mở tại `http://localhost:8501`.
-
-## Kiểm tra chất lượng
-
-```bash
+# Kiểm tra linter & code style
 python -m ruff check .
+
+# Kiểm tra kiểu tĩnh (Static Type Check)
 python -m mypy src
+
+# Chạy toàn bộ Unit, Integration và Contract tests
 python -m pytest -q
-python -m pip wheel . --no-deps --wheel-dir .build
 ```
 
-Chi tiết sản phẩm và kiến trúc nằm trong [Product Requirements](docs/product_requirements.md), [Technical Spec](docs/technical_spec.md) và các ADR trong [docs/adr](docs/adr).
+---
+
+## 6. Tài liệu tham khảo (References)
+- **Project Structure Spec:** [`docs/references/cowork-project-structure-spec.md`](docs/references/cowork-project-structure-spec.md)
+
