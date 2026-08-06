@@ -1,8 +1,11 @@
 # ADR-002 — Trích xuất attachment trong sandbox với format allowlist
 
-- Trạng thái: Accepted
+- Trạng thái: Superseded by ADR-003 (2026-08-07)
 - Ngày: 2026-08-03
 - Người quyết định: Product/Engineering/Security team
+
+ADR này được giữ lại như hồ sơ lịch sử. Baseline target hiện tại chỉ ghi nhận attachment
+có tồn tại và không tải hoặc xử lý nội dung; xem ADR-003.
 
 ## Bối cảnh
 

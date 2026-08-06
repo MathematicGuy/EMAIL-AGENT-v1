@@ -1,6 +1,6 @@
 # ADR-001 — Dùng async pipeline và ports/adapters cho Email To-Do Summarizer
 
-- Trạng thái: Accepted
+- Trạng thái: Accepted; các điều khoản xử lý attachment được supersede bởi ADR-003
 - Ngày: 2026-08-03
 - Người quyết định: Product/Engineering team
 
@@ -17,7 +17,8 @@ Triển khai module như một bounded module trong backend hiện tại, dùng 
 - HTTP API hoặc scheduler chỉ tạo `DigestRun` và enqueue job.
 - Worker sở hữu toàn bộ pipeline: fetch, attachment extraction, preprocess, action extraction, normalize, dedupe, persist và publish completion event.
 - Gmail chỉ được gọi qua `MailboxPort` read-only.
-- File chỉ được đọc qua `AttachmentExtractorPort`; chi tiết isolation được quyết định trong ADR-002.
+- Việc xử lý nội dung attachment trong baseline target được quyết định lại tại ADR-003;
+  ADR-002 chỉ còn là hồ sơ lịch sử cho phương án sandboxed extraction.
 - LLM chỉ được gọi qua `ActionExtractorPort` với structured output; extractor không được cấp tool.
 - PostgreSQL là source of truth cho run, action item, schedule và outbox.
 - Durable queue chịu trách nhiệm delivery/retry; mọi handler phải idempotent.
