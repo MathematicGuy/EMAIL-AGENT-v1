@@ -3,6 +3,7 @@
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import NamedTuple
 from uuid import uuid4
 
 from cowork_agent.domain import (
@@ -53,6 +54,15 @@ from .schemas import ExtractionLimits, GenerationContext
 from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
+
+
+class _GeneratedCandidate(NamedTuple):
+    """One resolved candidate's generation context, consumed by validation and mapping."""
+
+    resolution: RouteResolution
+    retrieval: SemanticRetrievalResponse | None
+    envelopes: tuple[EphemeralEmailEnvelope, ...]
+    output: ActionPlanOutput
 
 
 class RunNotFoundError(LookupError):
@@ -165,14 +175,7 @@ class DigestWorker:
             run_context = GenerationContext(
                 run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
             )
-            outputs: list[
-                tuple[
-                    RouteResolution,
-                    SemanticRetrievalResponse | None,
-                    tuple[EphemeralEmailEnvelope, ...],
-                    ActionPlanOutput,
-                ]
-            ] = []
+            outputs: list[_GeneratedCandidate] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
                 if resolution.route is Route.NO_ACTION:
@@ -187,7 +190,7 @@ class DigestWorker:
                 # one Generator call per resolved non-NO_ACTION Task
                 # Candidate; RETRIEVE_RAG adds zero-or-one retrieval call.
                 outputs.append(
-                    (
+                    _GeneratedCandidate(
                         resolution,
                         retrieval,
                         candidate_envelopes,
@@ -218,12 +221,12 @@ class DigestWorker:
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
-            for resolution, retrieval, candidate_envelopes, output in outputs:
+            for generated in outputs:
                 validation = validate_action_plan(
-                    output,
-                    resolution=resolution,
-                    retrieval=retrieval,
-                    envelopes=candidate_envelopes,
+                    generated.output,
+                    resolution=generated.resolution,
+                    retrieval=generated.retrieval,
+                    envelopes=generated.envelopes,
                 )
                 if validation.task is None:
                     logger.warning(
@@ -377,6 +380,7 @@ class DigestWorker:
                     type(exc).__name__,
                 )
         return _empty_retrieval()
+
 
 def _empty_retrieval() -> SemanticRetrievalResponse:
     """Structured empty retrieval result (§12.3 degraded path)."""

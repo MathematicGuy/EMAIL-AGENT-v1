@@ -88,10 +88,12 @@ def contains_body_fragment(field: str, body: str) -> bool:
     must reappear whole; longer bodies match when any window-sized contiguous
     slice (stepping by 40 characters) reappears.
     """
-    collapsed_body = _collapse(body)
+    return _fragment_in(_collapse(field), _collapse(body))
+
+
+def _fragment_in(collapsed_field: str, collapsed_body: str) -> bool:
     if len(collapsed_body) < _LEAK_MINIMUM:
         return False
-    collapsed_field = _collapse(field)
     if len(collapsed_body) <= _LEAK_WINDOW:
         return collapsed_body in collapsed_field
     return any(
@@ -125,14 +127,18 @@ def _renumber_steps(task: Task) -> Task:
 
 
 def _sanitize_citations(
-    task: Task, retrieval: SemanticRetrievalResponse | None
+    task: Task,
+    resolution: RouteResolution,
+    retrieval: SemanticRetrievalResponse | None,
 ) -> tuple[Task, tuple[ValidationViolation, ...]]:
     cited = bool(task.supporting_documents) or any(
         step.supporting_citation_ids for step in task.action_plan
     )
     if not cited:
         return task, ()
-    if task.route is Route.DIRECT_PLAN:
+    # The Route Resolver's route is authoritative; the Task's own route is
+    # model-reported output and is not trusted for policy decisions.
+    if resolution.route is Route.DIRECT_PLAN:
         # DIRECT_PLAN runs without retrieval, so no Citation can be grounded.
         stripped = replace(
             task,
@@ -151,33 +157,14 @@ def _sanitize_citations(
         if retrieval is not None
         else frozenset()
     )
-    kept_documents = tuple(
-        document for document in task.supporting_documents if document.citation_id in known_ids
-    )
-    stripped_document_ids = tuple(
-        dict.fromkeys(
-            document.citation_id
-            for document in task.supporting_documents
-            if document.citation_id not in known_ids
-        )
-    )
-    kept_plan = tuple(
-        replace(
-            step,
-            supporting_citation_ids=tuple(
-                citation_id
-                for citation_id in step.supporting_citation_ids
-                if citation_id in known_ids
-            ),
-        )
-        for step in task.action_plan
-    )
-    if kept_documents == task.supporting_documents and kept_plan == task.action_plan:
-        return task, ()
     stripped_ids = tuple(
         dict.fromkeys(
             (
-                *stripped_document_ids,
+                *(
+                    document.citation_id
+                    for document in task.supporting_documents
+                    if document.citation_id not in known_ids
+                ),
                 *(
                     citation_id
                     for step in task.action_plan
@@ -187,12 +174,28 @@ def _sanitize_citations(
             )
         )
     )
+    if not stripped_ids:
+        return task, ()
     sanitized = replace(
         task,
-        supporting_documents=kept_documents,
-        action_plan=kept_plan,
+        supporting_documents=tuple(
+            document
+            for document in task.supporting_documents
+            if document.citation_id in known_ids
+        ),
+        action_plan=tuple(
+            replace(
+                step,
+                supporting_citation_ids=tuple(
+                    citation_id
+                    for citation_id in step.supporting_citation_ids
+                    if citation_id in known_ids
+                ),
+            )
+            for step in task.action_plan
+        ),
         missing_information=task.missing_information
-        + tuple(_missing_citation_note(citation_id) for citation_id in stripped_document_ids),
+        + tuple(_missing_citation_note(citation_id) for citation_id in stripped_ids),
     )
     detail = (
         f"Các trích dẫn không có trong kết quả truy xuất: {', '.join(stripped_ids)}; "
@@ -220,9 +223,7 @@ def validate_action_plan(
     Fatal checks (required fields, allowed Actionability, raw-body privacy
     leaks against the Ephemeral Envelopes) drop the Task; when none fire,
     step numbers are normalized to 1..N and Citations are sanitized against
-    the Route and the retrieval result. ``resolution`` is accepted as the
-    validation context for future rules; ``retrieval`` stays None until
-    retrieval is wired in T3.5.
+    the resolved Route (authoritative) and the retrieval result.
     """
     task = output.task
     violations: list[ValidationViolation] = []
@@ -253,9 +254,10 @@ def validate_action_plan(
             )
         )
     fields = _privacy_sensitive_fields(task)
+    collapsed_bodies = tuple(_collapse(envelope.normalized_body) for envelope in envelopes)
     if any(
-        contains_body_fragment(field, envelope.normalized_body)
-        for envelope in envelopes
+        _fragment_in(_collapse(field), body)
+        for body in collapsed_bodies
         for field in fields
     ):
         violations.append(
@@ -268,5 +270,5 @@ def validate_action_plan(
     if violations:
         return ValidationResult(task=None, violations=tuple(violations))
     sanitized = _renumber_steps(task)
-    sanitized, repairable = _sanitize_citations(sanitized, retrieval)
+    sanitized, repairable = _sanitize_citations(sanitized, resolution, retrieval)
     return ValidationResult(task=sanitized, violations=repairable)

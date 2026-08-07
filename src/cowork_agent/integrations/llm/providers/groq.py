@@ -32,11 +32,11 @@ from .gemini import (
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
     GENERATION_SCHEMA,
-    GENERATOR_REPAIR_INSTRUCTION,
     GENERATOR_SYSTEM_INSTRUCTION,
     _build_generation_prompt,
     _build_prompt,
     _classified_messages_for,
+    _generate_with_schema_repair,
     _parse_action_plan_output,
     _validated_decisions,
 )
@@ -88,25 +88,17 @@ class GroqActionPlanGenerator:
         prompt = _build_generation_prompt(
             user_timezone, current_time, envelopes, candidate, resolution, retrieval
         )
-        payload = await self._complete(prompt)
         try:
-            return _parse_action_plan_output(
-                payload,
-                run_context=run_context,
-                candidate=candidate,
-                first_envelope=envelopes[0],
-                current_time=current_time,
-            )
-        except (KeyError, TypeError, ValueError):
-            pass
-        repaired = await self._complete(prompt + GENERATOR_REPAIR_INSTRUCTION)
-        try:
-            return _parse_action_plan_output(
-                repaired,
-                run_context=run_context,
-                candidate=candidate,
-                first_envelope=envelopes[0],
-                current_time=current_time,
+            return await _generate_with_schema_repair(
+                self._complete,
+                prompt,
+                lambda payload: _parse_action_plan_output(
+                    payload,
+                    run_context=run_context,
+                    candidate=candidate,
+                    first_envelope=envelopes[0],
+                    current_time=current_time,
+                ),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise GroqAPIError(

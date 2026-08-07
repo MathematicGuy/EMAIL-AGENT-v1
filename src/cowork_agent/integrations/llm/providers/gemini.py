@@ -5,7 +5,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, Protocol, cast
@@ -176,26 +176,17 @@ class GeminiActionPlanGenerator:
         prompt = _build_generation_prompt(
             user_timezone, current_time, envelopes, candidate, resolution, retrieval
         )
-        payload = await self._generate(prompt)
         try:
-            return _parse_action_plan_output(
-                payload,
-                run_context=run_context,
-                candidate=candidate,
-                first_envelope=envelopes[0],
-                current_time=current_time,
-            )
-        except (KeyError, TypeError, ValueError):
-            pass
-        # PRD-v1 §12.4: one schema-repair retry, mirroring the classifier.
-        repaired = await self._generate(prompt + GENERATOR_REPAIR_INSTRUCTION)
-        try:
-            return _parse_action_plan_output(
-                repaired,
-                run_context=run_context,
-                candidate=candidate,
-                first_envelope=envelopes[0],
-                current_time=current_time,
+            return await _generate_with_schema_repair(
+                self._generate,
+                prompt,
+                lambda payload: _parse_action_plan_output(
+                    payload,
+                    run_context=run_context,
+                    candidate=candidate,
+                    first_envelope=envelopes[0],
+                    current_time=current_time,
+                ),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise GenerationSchemaError(
@@ -731,6 +722,23 @@ GENERATOR_REPAIR_INSTRUCTION = (
     " steps numbered from 1, and every supportingCitationId referencing a citationId"
     " from the retrievedContext (empty arrays when none apply)."
 )
+
+
+async def _generate_with_schema_repair(
+    complete: Callable[[str], Awaitable[Mapping[str, Any]]],
+    prompt: str,
+    parse: Callable[[Mapping[str, Any]], ActionPlanOutput],
+) -> ActionPlanOutput:
+    """§12.4 ladder shared by both providers: parse, one repair retry, raise.
+
+    A still-invalid payload re-raises the parse error; each adapter wraps it
+    into its provider-specific user-safe error.
+    """
+    try:
+        return parse(await complete(prompt))
+    except (KeyError, TypeError, ValueError):
+        pass
+    return parse(await complete(prompt + GENERATOR_REPAIR_INSTRUCTION))
 
 
 #: Conservative PRD-v1 §12.2 fallback for still-missing/invalid messages. It
