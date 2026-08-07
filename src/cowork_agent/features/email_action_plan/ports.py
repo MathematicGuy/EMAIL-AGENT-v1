@@ -13,7 +13,11 @@ from cowork_agent.domain import (
     ProcessedEmail,
     RunStatus,
 )
-from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
+from cowork_agent.domain.target_contracts import (
+    EphemeralEmailEnvelope,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
+)
 
 from .schemas import ClassificationResult, ExtractionBatch, ExtractionLimits, SearchPage
 
@@ -98,6 +102,18 @@ class ResultRepository(Protocol):
         self, run_id: str, emails: Sequence[ProcessedEmail]
     ) -> None: ...
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]: ...
+
+
+class SemanticMemoryPort(Protocol):
+    """Retrieval-only Semantic Memory boundary (PRD-v1 FR-08, §6.4/§6.5).
+
+    Returns chunks, citation metadata, and scores only. There is no
+    retrieve-and-answer operation: generation stays in the Generator.
+    """
+
+    async def retrieve(
+        self, request: SemanticRetrievalRequest
+    ) -> SemanticRetrievalResponse: ...
 
 
 TERMINAL_STATUSES = frozenset({RunStatus.SUCCEEDED, RunStatus.PARTIAL, RunStatus.FAILED})

@@ -21,7 +21,13 @@ from cowork_agent.domain.target_contracts import (
     FetchStatus,
     PlanStep,
     ReasonCode,
+    RetrievalFilters,
+    RetrievalLimits,
+    RetrievalStatus,
     Route,
+    SemanticChunk,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
     SupportingDocument,
     Task,
     TraceEvent,
@@ -277,10 +283,65 @@ def test_frozen_rejects_mutation(build, field):
 
 
 def test_target_contracts_version():
-    assert TARGET_CONTRACTS_VERSION == "1.0.0"
+    assert TARGET_CONTRACTS_VERSION == "1.1.0"
 
 
 def test_trace_content_policy_constants():
     assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
     assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
     assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
+
+
+def _retrieval_request() -> SemanticRetrievalRequest:
+    return SemanticRetrievalRequest(
+        run_id="run-1",
+        tenant_id="tenant-local",
+        user_id="user@example.com",
+        query="quarterly report template",
+        knowledge_gaps=("template location",),
+        filters=RetrievalFilters(tenant_scope="tenant-local", document_status=("ready",)),
+        limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1500),
+    )
+
+
+def _retrieval_response() -> SemanticRetrievalResponse:
+    return SemanticRetrievalResponse(
+        query_id="q-1",
+        tenant_id="tenant-local",
+        chunks=(
+            SemanticChunk(
+                chunk_id="doc#0",
+                document_id="doc",
+                document_title="Quarterly Report Template",
+                section="Usage",
+                text="Use the shared template.",
+                source_url="data/extracted/doc.md",
+                document_version=None,
+                relevance_score=0.91,
+                rerank_score=None,
+            ),
+        ),
+        retrieval_status=RetrievalStatus.SUCCESS,
+        latency_ms=42,
+    )
+
+
+@pytest.mark.parametrize(
+    "build", [_retrieval_request, _retrieval_response], ids=["request", "response"]
+)
+def test_retrieval_contract_round_trip(build):
+    instance = build()
+    payload = instance.to_dict()
+    assert type(instance).from_dict(payload) == instance
+    text = json.dumps(payload)
+    assert type(instance).from_dict(json.loads(text)) == instance
+
+
+def test_retrieval_status_values():
+    assert {member.value for member in RetrievalStatus} == {
+        "success",
+        "no_results",
+        "timeout",
+        "authorization_denied",
+        "partial",
+    }

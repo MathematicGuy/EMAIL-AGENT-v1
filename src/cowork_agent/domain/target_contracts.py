@@ -5,13 +5,15 @@ Pure-stdlib domain contracts implementing Step 6 of
 
 - §6.1 ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
 - §6.2 ``EmailRouteDecision`` — the Classifier's Route Decision
+- §6.4/§6.5 ``SemanticRetrievalRequest``/``SemanticRetrievalResponse`` —
+  the retrieval-only Semantic Memory boundary
 - §6.6 ``ActionPlanOutput``, ``Task``, ``PlanStep``, ``SupportingDocument``
 - §6.8 ``TraceEvent`` with ``TraceLatency``
 
 :data:`TARGET_CONTRACTS_VERSION` versions this contract set; the dataclasses
 carry no per-instance version fields. Contracts assigned to later milestones
-by ``tasks/plan.md`` (``TaskEpisode``, ``MemoryContextRequest``, semantic
-retrieval request/response) are intentionally absent.
+by ``tasks/plan.md`` (``TaskEpisode``, ``MemoryContextRequest``) are
+intentionally absent.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from typing import Literal, Self, TypeVar
 
 from .models import Priority
 
-TARGET_CONTRACTS_VERSION = "1.0.0"
+TARGET_CONTRACTS_VERSION = "1.1.0"
 
 
 class Actionability(StrEnum):
@@ -98,6 +100,16 @@ class TraceStatus(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+class RetrievalStatus(StrEnum):
+    """Outcome status of one semantic retrieval call (§6.5)."""
+
+    SUCCESS = "success"
+    NO_RESULTS = "no_results"
+    TIMEOUT = "timeout"
+    AUTHORIZATION_DENIED = "authorization_denied"
+    PARTIAL = "partial"
 
 
 _T = TypeVar("_T")
@@ -485,6 +497,135 @@ class TraceEvent:
             generation_status=_optional(data["generation_status"], _as_str),
             validation_status=_optional(data["validation_status"], _as_str),
             latency_ms=TraceLatency.from_dict(_as_mapping(data["latency_ms"])),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticChunk:
+    """One retrieved company-knowledge chunk with citation metadata (§6.5)."""
+
+    chunk_id: str
+    document_id: str
+    document_title: str
+    section: str | None
+    text: str
+    source_url: str
+    document_version: str | None
+    relevance_score: float
+    rerank_score: float | None
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            chunk_id=_as_str(data["chunk_id"]),
+            document_id=_as_str(data["document_id"]),
+            document_title=_as_str(data["document_title"]),
+            section=_optional(data["section"], _as_str),
+            text=_as_str(data["text"]),
+            source_url=_as_str(data["source_url"]),
+            document_version=_optional(data["document_version"], _as_str),
+            relevance_score=_as_float(data["relevance_score"]),
+            rerank_score=_optional(data["rerank_score"], _as_float),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalFilters:
+    """Namespace/status filters applied to a semantic retrieval (§6.4)."""
+
+    tenant_scope: str
+    document_status: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            tenant_scope=_as_str(data["tenant_scope"]),
+            document_status=_as_str_tuple(data["document_status"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalLimits:
+    """Bounded retrieval limits (§6.4)."""
+
+    top_k: int
+    min_score: float
+    timeout_ms: int
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            top_k=_as_int(data["top_k"]),
+            min_score=_as_float(data["min_score"]),
+            timeout_ms=_as_int(data["timeout_ms"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticRetrievalRequest:
+    """Retrieval-only Semantic Memory request (§6.4).
+
+    Constraint from master-comparison §6.4: the response returns chunks,
+    citation metadata, and scores only — never a generated Action Plan.
+    """
+
+    run_id: str
+    tenant_id: str
+    user_id: str
+    query: str
+    knowledge_gaps: tuple[str, ...]
+    filters: RetrievalFilters
+    limits: RetrievalLimits
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            run_id=_as_str(data["run_id"]),
+            tenant_id=_as_str(data["tenant_id"]),
+            user_id=_as_str(data["user_id"]),
+            query=_as_str(data["query"]),
+            knowledge_gaps=_as_str_tuple(data["knowledge_gaps"]),
+            filters=RetrievalFilters.from_dict(_as_mapping(data["filters"])),
+            limits=RetrievalLimits.from_dict(_as_mapping(data["limits"])),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticRetrievalResponse:
+    """Structured semantic retrieval result (§6.5)."""
+
+    query_id: str
+    tenant_id: str
+    chunks: tuple[SemanticChunk, ...]
+    retrieval_status: RetrievalStatus
+    latency_ms: int
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            query_id=_as_str(data["query_id"]),
+            tenant_id=_as_str(data["tenant_id"]),
+            chunks=tuple(
+                SemanticChunk.from_dict(_as_mapping(item))
+                for item in _as_sequence(data["chunks"])
+            ),
+            retrieval_status=_as_enum(data["retrieval_status"], RetrievalStatus),
+            latency_ms=_as_int(data["latency_ms"]),
         )
 
 
