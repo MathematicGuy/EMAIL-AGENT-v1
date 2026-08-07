@@ -13,10 +13,12 @@ from cowork_agent.domain.target_contracts import (
     ReasonCode,
     Route,
 )
+from cowork_agent.features.email_action_plan.correlation import TaskCandidate
 from cowork_agent.features.email_action_plan.routing import (
     GUARD_REASON_BY_DOCUMENT_TYPE,
     RouteResolution,
     apply_policy_guards,
+    resolve_candidate_route,
     resolve_route,
 )
 
@@ -300,3 +302,72 @@ def test_resolution_is_pure_under_environment_changes(monkeypatch: pytest.Monkey
     monkeypatch.setenv("COWORK_AGENT_TEST_ENV", "two")
     second = resolve_route(decision)
     assert first == second
+
+
+def _candidate(*decisions: EmailRouteDecision) -> TaskCandidate:
+    return TaskCandidate(
+        candidate_key="thread-1",
+        gmail_thread_id="thread-1",
+        incident_key=None,
+        source_message_ids=tuple(f"m{i + 1}" for i in range(len(decisions))),
+        decisions=tuple((f"m{i + 1}", decision) for i, decision in enumerate(decisions)),
+    )
+
+
+def test_candidate_route_retrieve_rag_wins_over_direct_plan() -> None:
+    candidate = _candidate(
+        _decision(),  # sufficient -> DIRECT_PLAN
+        _decision(
+            email_is_sufficient=False,
+            knowledge_gaps=("policy location",),
+            reason_codes=(ReasonCode.POLICY_REQUIRED,),
+        ),  # -> RETRIEVE_RAG
+    )
+    resolution = resolve_candidate_route(candidate)
+    assert resolution.route is Route.RETRIEVE_RAG
+    # Only the winning member's codes are carried, in member order.
+    assert resolution.reason_codes == (ReasonCode.POLICY_REQUIRED,)
+
+
+def test_candidate_route_direct_plan_beats_no_action() -> None:
+    candidate = _candidate(
+        _decision(actionability=Actionability.INFORMATIONAL, reason_codes=()),
+        _decision(),
+    )
+    resolution = resolve_candidate_route(candidate)
+    assert resolution.route is Route.DIRECT_PLAN
+    assert resolution.reason_codes == (ReasonCode.EMAIL_SELF_CONTAINED,)
+
+
+def test_candidate_route_all_no_action() -> None:
+    candidate = _candidate(
+        _decision(actionability=Actionability.INFORMATIONAL, reason_codes=()),
+        _decision(actionability=Actionability.IRRELEVANT, reason_codes=()),
+    )
+    resolution = resolve_candidate_route(candidate)
+    assert resolution.route is Route.NO_ACTION
+    assert resolution.forced_by_guard is False
+
+
+def test_candidate_route_propagates_guard_and_partial_mode() -> None:
+    guarded = _candidate(
+        _decision(
+            reason_codes=(ReasonCode.TEMPLATE_REQUIRED,),
+            expected_document_types=(ExpectedDocumentType.TEMPLATE,),
+        ),
+    )
+    forced = resolve_candidate_route(guarded)
+    assert forced.route is Route.RETRIEVE_RAG
+    assert forced.forced_by_guard is True
+
+    partial = _candidate(
+        _decision(
+            email_is_sufficient=False,
+            knowledge_gaps=(),
+            retrieval_query=None,
+            actionability=Actionability.ACTION_REQUIRED,
+        ),
+    )
+    fallback = resolve_candidate_route(partial)
+    assert fallback.route is Route.DIRECT_PLAN
+    assert fallback.mode == "partial"

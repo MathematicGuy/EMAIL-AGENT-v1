@@ -17,6 +17,7 @@ from cowork_agent.domain.target_contracts import (
     FetchStatus,
 )
 from cowork_agent.features.email_action_plan.schemas import (
+    ClassificationResult,
     EmailExtraction,
     ExtractedAction,
     ExtractionBatch,
@@ -29,7 +30,7 @@ from cowork_agent.features.email_action_plan.workflow import (
 )
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
-from cowork_agent.integrations.llm.fakes import FakeActionExtractor
+from cowork_agent.integrations.llm.fakes import FakePlanGenerator, FakeRouteClassifier
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -103,7 +104,8 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(batch),
+            FakeRouteClassifier(),
+            FakePlanGenerator(batch),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -154,7 +156,8 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(batch),
+            FakeRouteClassifier(),
+            FakePlanGenerator(batch),
             ShortTermStore(),
         )
 
@@ -210,7 +213,8 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             results,
             AttachmentDownloadMustNotRunMailbox([message]),
             AttachmentExtractionMustNotRun(),
-            FakeActionExtractor(batch),
+            FakeRouteClassifier(),
+            FakePlanGenerator(batch),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -236,7 +240,8 @@ def test_result_has_explicit_empty_state_message() -> None:
             results,
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(ExtractionBatch(())),
+            FakeRouteClassifier(),
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
         await worker.execute(run.id, now=NOW)
@@ -248,13 +253,13 @@ def test_result_has_explicit_empty_state_message() -> None:
 
 
 def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
-    class PublicExtractorError(RuntimeError):
+    class PublicClassifierError(RuntimeError):
         error_code = "GROQ_API_ERROR"
         safe_message = "Groq từ chối yêu cầu (HTTP 400)."
 
-    class FailingExtractor:
-        async def extract(self, *args: object) -> ExtractionBatch:
-            raise PublicExtractorError("private diagnostic containing request data")
+    class FailingClassifier:
+        async def classify(self, *args: object) -> ClassificationResult:
+            raise PublicClassifierError("private diagnostic containing request data")
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
@@ -266,7 +271,8 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
             results,
             FakeMailbox([email("m1", "t1", "Test")]),
             SafeTextAttachmentExtractor(),
-            FailingExtractor(),
+            FailingClassifier(),
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
 
@@ -281,8 +287,8 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
 
 
 def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
-    class FailingExtractor:
-        async def extract(self, *args: object) -> ExtractionBatch:
+    class FailingClassifier:
+        async def classify(self, *args: object) -> ClassificationResult:
             raise RuntimeError("secret token and private email body")
 
     async def scenario() -> None:
@@ -295,7 +301,8 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
             results,
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
-            FailingExtractor(),
+            FailingClassifier(),
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
 
@@ -324,13 +331,14 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             idempotency_key="limit-two",
             max_emails=2,
         )
-        extractor = FakeActionExtractor(ExtractionBatch(()))
+        classifier = FakeRouteClassifier()
         worker = DigestWorker(
             runs,
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
-            extractor,
+            classifier,
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -338,7 +346,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
         assert completed.emails_matched == 3
         assert completed.emails_processed == 2
         assert completed.truncated is True
-        assert [item.gmail_message_id for item in extractor.received_envelopes] == [
+        assert [item.gmail_message_id for item in classifier.received_envelopes] == [
             "m1",
             "m2",
         ]
@@ -353,19 +361,20 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="stamp"
         )
-        extractor = FakeActionExtractor(ExtractionBatch(()))
+        classifier = FakeRouteClassifier()
         worker = DigestWorker(
             runs,
             results,
             FakeMailbox([email("m1", "t1", "Việc một"), email("m2", "t2", "Việc hai")]),
             SafeTextAttachmentExtractor(),
-            extractor,
+            classifier,
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert extractor.received_envelopes
-        for envelope in extractor.received_envelopes:
+        assert classifier.received_envelopes
+        for envelope in classifier.received_envelopes:
             assert envelope.run_id == run.id
             assert envelope.run_id != ""
             assert envelope.tenant_id == LOCAL_TENANT_ID
@@ -391,7 +400,8 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(batch),
+            FakeRouteClassifier(),
+            FakePlanGenerator(batch),
             store,
         )
 
@@ -404,18 +414,19 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
 
 
 def test_failed_run_finalizer_clears_short_term_memory() -> None:
-    class FailingExtractor:
+    class FailingClassifier:
         def __init__(self) -> None:
             self.received_envelopes: list[EphemeralEmailEnvelope] = []
 
-        async def extract(
+        async def classify(
             self,
             user_timezone: str,
             current_time: datetime,
             messages: Sequence[EphemeralEmailEnvelope],
-        ) -> ExtractionBatch:
+        ) -> ClassificationResult:
+            del user_timezone, current_time
             self.received_envelopes.extend(messages)
-            raise RuntimeError("extraction backend failure")
+            raise RuntimeError("classifier backend failure")
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
@@ -423,21 +434,22 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-failure"
         )
         store = ShortTermStore()
-        extractor = FailingExtractor()
+        classifier = FailingClassifier()
         worker = DigestWorker(
             runs,
             results,
             FakeMailbox([email("m1", "t1", "Việc cần làm")]),
             SafeTextAttachmentExtractor(),
-            extractor,
+            classifier,
+            FakePlanGenerator(ExtractionBatch(())),
             store,
         )
 
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.FAILED
-        # The raw body reached extraction (via Short-Term Memory) before the failure...
-        assert [item.gmail_message_id for item in extractor.received_envelopes] == ["m1"]
+        # The raw body reached classification (via Short-Term Memory) before the failure...
+        assert [item.gmail_message_id for item in classifier.received_envelopes] == ["m1"]
         # ...and the finalizer still cleared it.
         assert store.get(run.id) is None
 

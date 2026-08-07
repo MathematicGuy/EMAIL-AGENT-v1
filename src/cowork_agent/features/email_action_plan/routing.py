@@ -21,6 +21,8 @@ from cowork_agent.domain.target_contracts import (
     Route,
 )
 
+from .correlation import TaskCandidate
+
 #: Policy Guard table (PRD-v1 FR-07): each Expected Document Type maps to the
 #: reason code that forces retrieval. Cross-checked against
 #: ``tests/fixtures/routing/README.md`` ("FR-07 guard category coverage").
@@ -168,4 +170,45 @@ def resolve_route(
         reason_codes=decision.reason_codes,
         forced_by_guard=False,
         mode="partial",
+    )
+
+
+#: Route precedence for candidate-level aggregation: the most knowledge-hungry
+#: member route wins so a Task Candidate never skips retrieval it needs.
+_ROUTE_PRECEDENCE: Mapping[Route, int] = {
+    Route.RETRIEVE_RAG: 2,
+    Route.DIRECT_PLAN: 1,
+    Route.NO_ACTION: 0,
+}
+
+
+def resolve_candidate_route(
+    candidate: TaskCandidate, *, confidence_floor: float = 0.5
+) -> RouteResolution:
+    """Resolve the single Route for one Task Candidate (frozen contract rule 4).
+
+    Every member Route Decision is resolved with :func:`resolve_route`; the
+    candidate route is the highest-precedence member route (RETRIEVE_RAG >
+    DIRECT_PLAN > NO_ACTION). ``reason_codes`` keep member order, deduplicated,
+    restricted to the winning members; ``forced_by_guard`` and ``mode``
+    propagate from those winners (any guard / any partial).
+    """
+    resolutions = tuple(
+        resolve_route(decision, confidence_floor=confidence_floor)
+        for _message_id, decision in candidate.decisions
+    )
+    winning_route = max(
+        (resolution.route for resolution in resolutions),
+        key=lambda route: _ROUTE_PRECEDENCE[route],
+    )
+    winners = tuple(
+        resolution for resolution in resolutions if resolution.route is winning_route
+    )
+    return RouteResolution(
+        route=winning_route,
+        reason_codes=tuple(
+            dict.fromkeys(code for resolution in winners for code in resolution.reason_codes)
+        ),
+        forced_by_guard=any(resolution.forced_by_guard for resolution in winners),
+        mode="partial" if any(resolution.mode == "partial" for resolution in winners) else "full",
     )

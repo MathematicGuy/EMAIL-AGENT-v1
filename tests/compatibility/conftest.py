@@ -29,7 +29,7 @@ from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
-from cowork_agent.integrations.llm.fakes import FakeActionExtractor
+from cowork_agent.integrations.llm.fakes import FakePlanGenerator, FakeRouteClassifier
 
 OWNER_EMAIL = "compat@example.com"
 CONNECTION_ID = "mbx-compat"
@@ -110,7 +110,8 @@ class CompatSession:
             self.app.state.result_repository,
             self.mailbox or FakeMailbox(list(self.messages)),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(self.batch or ExtractionBatch(())),
+            FakeRouteClassifier(),
+            FakePlanGenerator(self.batch or ExtractionBatch(())),
             ShortTermStore(),
         )
         self.client = httpx.AsyncClient(

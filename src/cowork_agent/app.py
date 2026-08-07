@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field
 
 from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings
 from cowork_agent.domain import DigestRun, MailboxConnection
-from cowork_agent.features.email_action_plan.ports import ActionExtractorPort
+from cowork_agent.features.email_action_plan.ports import (
+    ActionPlanGeneratorPort,
+    RouteClassifierPort,
+)
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
@@ -35,8 +38,15 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxReauthRequiredError,
     MailboxTemporaryError,
 )
-from cowork_agent.integrations.llm.providers.gemini import GeminiActionExtractor
-from cowork_agent.integrations.llm.providers.groq import GroqActionExtractor
+from cowork_agent.integrations.llm.providers.compatibility_generator import (
+    GeminiCompatibilityPlanGenerator,
+    GroqCompatibilityPlanGenerator,
+)
+from cowork_agent.integrations.llm.providers.gemini import (
+    GeminiActionExtractor,
+    GeminiRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.groq import GroqActionExtractor, GroqRouteClassifier
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -85,11 +95,18 @@ def create_app() -> FastAPI:
             app.state.result_repository = result_repository
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-                actions: ActionExtractorPort
+                classifier: RouteClassifierPort
+                generator: ActionPlanGeneratorPort
                 if provider == "gemini":
-                    actions = GeminiActionExtractor(GeminiSettings.from_env())
+                    gemini_settings = GeminiSettings.from_env()
+                    classifier = GeminiRouteClassifier(gemini_settings)
+                    generator = GeminiCompatibilityPlanGenerator(
+                        GeminiActionExtractor(gemini_settings)
+                    )
                 elif provider == "groq":
-                    actions = GroqActionExtractor(GroqSettings.from_env())
+                    groq_settings = GroqSettings.from_env()
+                    classifier = GroqRouteClassifier(groq_settings)
+                    generator = GroqCompatibilityPlanGenerator(GroqActionExtractor(groq_settings))
                 else:
                     raise ValueError("LLM_PROVIDER must be either 'gemini' or 'groq'")
                 app.state.digest_worker = DigestWorker(
@@ -97,7 +114,8 @@ def create_app() -> FastAPI:
                     result_repository,
                     app.state.gmail_mailbox,
                     SafeTextAttachmentExtractor(),
-                    actions,
+                    classifier,
+                    generator,
                     ShortTermStore(),
                 )
                 app.state.gemini_configuration_error = None

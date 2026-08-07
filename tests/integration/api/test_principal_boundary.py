@@ -28,7 +28,7 @@ from cowork_agent.identity import LOCAL_TENANT_ID, principal_for_connection
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailConnectionService, GmailOAuthGrant
-from cowork_agent.integrations.llm.fakes import FakeActionExtractor
+from cowork_agent.integrations.llm.fakes import FakePlanGenerator, FakeRouteClassifier
 
 OWNER_EMAIL = "owner@example.com"
 CONNECTION_ID = "mbx-principal"
@@ -59,7 +59,8 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
             app.state.result_repository,
             FakeMailbox([]),
             SafeTextAttachmentExtractor(),
-            FakeActionExtractor(ExtractionBatch(())),
+            FakeRouteClassifier(),
+            FakePlanGenerator(ExtractionBatch(())),
             ShortTermStore(),
         )
         client = httpx.AsyncClient(

@@ -52,15 +52,6 @@ class AttachmentExtractorPort(Protocol):
     ) -> ExtractedAttachment: ...
 
 
-class ActionExtractorPort(Protocol):
-    async def extract(
-        self,
-        user_timezone: str,
-        current_time: datetime,
-        messages: Sequence[EphemeralEmailEnvelope],
-    ) -> ExtractionBatch: ...
-
-
 class RouteClassifierPort(Protocol):
     """One structured Route Decision per selected email (PRD-v1 FR-05, §6.2).
 

@@ -13,7 +13,7 @@ from cowork_agent.domain import (
     RunStatus,
     RunTrigger,
 )
-from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope, Route
 from cowork_agent.features.email_action_plan.policies import (
     action_fingerprint,
     calculate_priority,
@@ -23,15 +23,18 @@ from cowork_agent.features.email_action_plan.policies import (
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
 
+from .correlation import correlate_candidates
 from .ports import (
     TERMINAL_STATUSES,
-    ActionExtractorPort,
+    ActionPlanGeneratorPort,
     AttachmentExtractorPort,
     MailboxPort,
     ResultRepository,
+    RouteClassifierPort,
     RunRepository,
 )
-from .schemas import ExtractionLimits
+from .routing import resolve_candidate_route
+from .schemas import EmailExtraction, ExtractionBatch, ExtractionLimits
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,8 @@ class DigestWorker:
         results: ResultRepository,
         mailbox: MailboxPort,
         attachments: AttachmentExtractorPort,
-        actions: ActionExtractorPort,
+        classifier: RouteClassifierPort,
+        generator: ActionPlanGeneratorPort,
         short_term: ShortTermStore,
         *,
         extraction_limits: ExtractionLimits | None = None,
@@ -94,7 +98,7 @@ class DigestWorker:
         # production baseline must not download or extract attachment content.
         del attachments, extraction_limits
         self._runs, self._results, self._mailbox = runs, results, mailbox
-        self._actions = actions
+        self._classifier, self._generator = classifier, generator
         self._short_term = short_term
 
     async def execute(
@@ -132,7 +136,38 @@ class DigestWorker:
             stored_envelopes = self._short_term.get(run.id)
             if stored_envelopes is None:  # defensive only: put() above guarantees presence
                 stored_envelopes = ()
-            batch = await self._actions.extract(user_timezone, clock, stored_envelopes)
+            classification = await self._classifier.classify(
+                user_timezone, clock, stored_envelopes
+            )
+            decisions = {
+                classified.gmail_message_id: classified.decision
+                for classified in classification.decisions
+            }
+            candidates = correlate_candidates(decisions, messages)
+            extracted_emails: list[EmailExtraction] = []
+            generated_count = 0
+            for task_candidate in candidates:
+                resolution = resolve_candidate_route(task_candidate)
+                if resolution.route is Route.NO_ACTION:
+                    continue
+                candidate_envelopes = tuple(
+                    messages[message_id] for message_id in task_candidate.source_message_ids
+                )
+                # Cardinality (frozen contract): exactly one Generator call per
+                # resolved non-NO_ACTION Task Candidate.
+                candidate_batch = await self._generator.generate(
+                    user_timezone, clock, candidate_envelopes
+                )
+                generated_count += 1
+                extracted_emails.extend(candidate_batch.emails)
+            logger.debug(
+                "Run %s routed %d candidate(s): %d classifier batch(es), %d generation call(s)",
+                run.id,
+                len(candidates),
+                classification.batch_count,
+                generated_count,
+            )
+            batch = ExtractionBatch(emails=tuple(extracted_emails))
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
