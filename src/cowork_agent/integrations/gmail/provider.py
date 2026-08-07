@@ -120,13 +120,14 @@ class GmailConnectionService:
         self._state_manager = state_manager
         self._driver = driver or GoogleOAuthDriver(settings)
 
-    def begin(self, user_id: str) -> str:
+    def begin(self) -> str:
+        """Start the OAuth flow; identity is bound at callback from the verified grant."""
         code_verifier = secrets.token_urlsafe(96)
-        state = self._state_manager.issue(user_id, context=code_verifier)
+        state = self._state_manager.issue(context=code_verifier)
         return self._driver.authorization_url(state, code_verifier)
 
     async def complete(self, state: str, authorization_response: str) -> MailboxConnection:
-        user_id, code_verifier = await self._state_manager.consume_with_context(state)
+        code_verifier = await self._state_manager.consume(state)
         if not code_verifier:
             raise ValueError("OAuth PKCE code verifier is missing")
         grant = await self._driver.exchange(state, authorization_response, code_verifier)
@@ -135,7 +136,7 @@ class GmailConnectionService:
         now = datetime.now(UTC)
         connection = MailboxConnection(
             id=f"mbx_{uuid4().hex}",
-            user_id=user_id,
+            user_id=grant.email_address,
             provider="gmail",
             external_account_id=grant.email_address.lower(),
             email_address=grant.email_address,
@@ -146,9 +147,6 @@ class GmailConnectionService:
             updated_at=now,
         )
         return await self._repository.upsert(connection)
-
-    async def list_connections(self, user_id: str) -> Sequence[MailboxConnection]:
-        return await self._repository.list_for_user(user_id)
 
     async def disconnect(self, connection_id: str, user_id: str) -> bool:
         return await self._repository.delete(connection_id, user_id)

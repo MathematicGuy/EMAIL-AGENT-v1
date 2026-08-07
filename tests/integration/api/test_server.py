@@ -28,13 +28,13 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 assert (await client.get("/health")).json() == {"status": "ok"}
                 response = await client.get(
-                    "/v1/mail-todo/oauth/gmail/connect?user_id=local-user",
+                    "/v1/mail-todo/oauth/gmail/connect",
                     follow_redirects=False,
                 )
                 assert response.status_code == 302
                 assert response.headers["location"].startswith("https://accounts.google.com/")
                 assert "gmail.readonly" in response.headers["location"]
-                connections = await client.get("/v1/mail-todo/connections?user_id=local-user")
+                connections = await client.get("/v1/mail-todo/connections")
                 assert connections.json() == {"connections": []}
 
     asyncio.run(scenario())

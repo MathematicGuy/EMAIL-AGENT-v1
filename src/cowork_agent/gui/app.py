@@ -104,7 +104,6 @@ st.markdown(
 
 # Configuration & Defaults
 API_BASE_URL = os.getenv("APP_HOST_URL", "http://localhost:8000")
-USER_ID = "local-user"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 if LLM_PROVIDER == "groq":
     LLM_MAX_EMAILS_PER_BATCH = max(1, int(os.getenv("GROQ_MAX_EMAILS_PER_BATCH", "5")))
@@ -146,7 +145,7 @@ st.markdown(
     '### <span class="step-number">1</span> Kết Nối Tài Khoản Gmail', unsafe_allow_html=True
 )
 
-conn_code, conn_res = api_request("GET", f"/v1/mail-todo/connections?user_id={USER_ID}")
+conn_code, conn_res = api_request("GET", "/v1/mail-todo/connections")
 connections = (
     conn_res.get("connections", []) if conn_code == 200 and isinstance(conn_res, dict) else []
 )
@@ -170,7 +169,7 @@ with col1:
         st.warning("Chưa có tài khoản Gmail nào được kết nối.")
 
 with col2:
-    connect_url = f"{API_BASE_URL.rstrip('/')}/v1/mail-todo/oauth/gmail/connect?user_id={USER_ID}"
+    connect_url = f"{API_BASE_URL.rstrip('/')}/v1/mail-todo/oauth/gmail/connect"
     st.link_button(
         "🔑 Kết Nối Gmail Mới",
         connect_url,
@@ -215,7 +214,7 @@ if scan_clicked and selected_connection_id:
 
         run_code, run_res = api_request(
             "POST",
-            f"/v1/mail-todo/runs?user_id={USER_ID}",
+            "/v1/mail-todo/runs",
             headers=headers,
             json=payload,
         )
@@ -238,7 +237,7 @@ if scan_clicked and selected_connection_id:
         progress_line = st.empty()
         while time.monotonic() < poll_deadline:
             time.sleep(POLL_INTERVAL_SECONDS)
-            s_code, s_res = api_request("GET", f"/v1/mail-todo/runs/{run_id}?user_id={USER_ID}")
+            s_code, s_res = api_request("GET", f"/v1/mail-todo/runs/{run_id}")
             if s_code == 200 and isinstance(s_res, dict):
                 current_status = s_res.get("status")
                 progress = s_res.get("progress", {})
@@ -311,9 +310,7 @@ st.markdown(
 display_run_id = st.session_state.get("last_run_id")
 
 if display_run_id:
-    res_code, res_data = api_request(
-        "GET", f"/v1/mail-todo/runs/{display_run_id}/result?user_id={USER_ID}"
-    )
+    res_code, res_data = api_request("GET", f"/v1/mail-todo/runs/{display_run_id}/result")
 
     if res_code == 200 and isinstance(res_data, dict):
         items = res_data.get("actionItems", [])

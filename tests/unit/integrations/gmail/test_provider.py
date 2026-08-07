@@ -63,11 +63,11 @@ def test_oauth_state_is_signed_expiring_and_single_use() -> None:
             60,
             clock=lambda: now[0],
         )
-        state = manager.issue("user-1")
-        assert await manager.consume(state) == "user-1"
+        state = manager.issue(context="verifier-1")
+        assert await manager.consume(state) == "verifier-1"
         with pytest.raises(ValueError, match="already been used"):
             await manager.consume(state)
-        expired = manager.issue("user-2")
+        expired = manager.issue(context="verifier-2")
         now[0] += 61
         with pytest.raises(ValueError, match="expired"):
             await manager.consume(expired)
@@ -109,12 +109,13 @@ def test_oauth_completion_encrypts_and_persists_refresh_token(tmp_path: Path) ->
             OAuthStateManager(settings.oauth_state_secret, 600),
             driver,
         )
-        url = service.begin("user-1")
+        url = service.begin()
         assert url.startswith("https://accounts.google.test/")
         connection = await service.complete(
             driver.state,
             f"{settings.redirect_uri}?state={driver.state}&code=test-code",
         )
+        assert connection.user_id == "owner@example.com"
         assert connection.email_address == "owner@example.com"
         assert connection.encrypted_refresh_token != "refresh-token"
         assert cipher.decrypt(connection.encrypted_refresh_token) == "refresh-token"

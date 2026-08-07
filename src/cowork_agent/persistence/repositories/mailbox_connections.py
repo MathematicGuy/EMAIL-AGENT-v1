@@ -95,6 +95,16 @@ class SQLiteMailboxConnectionRepository:
             ).fetchall()
         return tuple(_from_row(row) for row in rows)
 
+    async def list_all(self) -> tuple[MailboxConnection, ...]:
+        return await asyncio.to_thread(self._list_all_sync)
+
+    def _list_all_sync(self) -> tuple[MailboxConnection, ...]:
+        with self._connect() as database:
+            rows = database.execute(
+                "SELECT * FROM mailbox_connections ORDER BY created_at"
+            ).fetchall()
+        return tuple(_from_row(row) for row in rows)
+
     async def delete(self, connection_id: str, user_id: str) -> bool:
         return await asyncio.to_thread(self._delete_sync, connection_id, user_id)
 

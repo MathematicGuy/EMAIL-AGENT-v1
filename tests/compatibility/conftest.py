@@ -26,7 +26,7 @@ from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmen
 from cowork_agent.integrations.llm.fakes import FakeActionExtractor
 from cowork_agent.orchestration.local import InMemoryOutbox
 
-USER_ID = "local-user"
+OWNER_EMAIL = "compat@example.com"
 CONNECTION_ID = "mbx-compat"
 
 
@@ -83,10 +83,10 @@ class CompatSession:
         await self.app.state.connection_repository.upsert(
             MailboxConnection(
                 id=CONNECTION_ID,
-                user_id=USER_ID,
+                user_id=OWNER_EMAIL,
                 provider="gmail",
                 external_account_id="compat-account",
-                email_address="compat@example.com",
+                email_address=OWNER_EMAIL,
                 encrypted_refresh_token="compat-token",
                 scopes=(GMAIL_READONLY_SCOPE,),
                 status="active",
@@ -125,16 +125,16 @@ class CompatSession:
         if max_emails is not None:
             payload["maxEmails"] = max_emails
         return await self.client.post(
-            f"/v1/mail-todo/runs?user_id={USER_ID}",
+            "/v1/mail-todo/runs",
             json=payload,
             headers={"Idempotency-Key": idempotency_key},
         )
 
     async def get_run(self, run_id: str) -> httpx.Response:
-        return await self.client.get(f"/v1/mail-todo/runs/{run_id}?user_id={USER_ID}")
+        return await self.client.get(f"/v1/mail-todo/runs/{run_id}")
 
     async def get_result(self, run_id: str) -> httpx.Response:
-        return await self.client.get(f"/v1/mail-todo/runs/{run_id}/result?user_id={USER_ID}")
+        return await self.client.get(f"/v1/mail-todo/runs/{run_id}/result")
 
 
 @pytest.fixture()

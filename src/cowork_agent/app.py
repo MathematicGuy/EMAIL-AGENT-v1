@@ -11,11 +11,19 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings
+from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.features.email_action_plan.ports import ActionExtractorPort
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
     DigestWorker,
     GetDigestResult,
+)
+from cowork_agent.identity import (
+    LOCAL_TENANT_ID,
+    ConnectionNotOwnedError,
+    VerifiedPrincipal,
+    ensure_principal_owns_connection,
+    principal_for_connection,
 )
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
@@ -107,12 +115,9 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/v1/mail-todo/oauth/gmail/connect")
-    async def connect_gmail(
-        request: Request,
-        user_id: str = Query(min_length=1, description="Local user identifier"),
-    ) -> RedirectResponse:
+    async def connect_gmail(request: Request) -> RedirectResponse:
         service = _connection_service(request)
-        return RedirectResponse(service.begin(user_id), status_code=302)
+        return RedirectResponse(service.begin(), status_code=302)
 
     @app.get("/v1/mail-todo/oauth/gmail/callback")
     async def gmail_callback(
@@ -138,19 +143,21 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/v1/mail-todo/connections")
-    async def list_connections(
-        request: Request, user_id: str = Query(min_length=1)
-    ) -> dict[str, Any]:
-        connections = await _connection_service(request).list_connections(user_id)
+    async def list_connections(request: Request) -> dict[str, Any]:
+        # Local single-user MVP: no identity parameter, so every Mailbox Connection is listed.
+        repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+        connections = await repository.list_all()
         return {"connections": [_public_connection(item) for item in connections]}
 
     @app.delete("/v1/mail-todo/connections/{connection_id}")
-    async def disconnect_gmail(
-        connection_id: str,
-        request: Request,
-        user_id: str = Query(min_length=1),
-    ) -> dict[str, bool]:
-        deleted = await _connection_service(request).disconnect(connection_id, user_id)
+    async def disconnect_gmail(connection_id: str, request: Request) -> dict[str, bool]:
+        repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+        connection = await repository.get(connection_id)
+        if connection is None:
+            raise HTTPException(status_code=404, detail="Gmail connection not found")
+        principal = principal_for_connection(connection)
+        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        deleted = await _connection_service(request).disconnect(connection_id, principal.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Gmail connection not found")
         return {"disconnected": True}
@@ -159,13 +166,14 @@ def create_app() -> FastAPI:
     async def unread_preview(
         connection_id: str,
         request: Request,
-        user_id: str = Query(min_length=1),
         limit: int = Query(default=10, ge=1, le=20),
     ) -> dict[str, Any]:
         repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
         connection = await repository.get(connection_id)
-        if connection is None or connection.user_id != user_id:
+        if connection is None:
             raise HTTPException(status_code=404, detail="Gmail connection not found")
+        principal = principal_for_connection(connection)
+        _require_owned_connection(principal, connection, detail="Gmail connection not found")
         try:
             page = await _gmail_mailbox(request).search_unread(
                 connection_id, "is:unread in:inbox", limit
@@ -210,15 +218,16 @@ def create_app() -> FastAPI:
         payload: CreateRunRequest,
         request: Request,
         background_tasks: BackgroundTasks,
-        user_id: str = Query(min_length=1),
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
     ) -> dict[str, str]:
         connection_repository: SQLiteMailboxConnectionRepository = (
             request.app.state.connection_repository
         )
         connection = await connection_repository.get(payload.mailbox_connection_id)
-        if connection is None or connection.user_id != user_id:
+        if connection is None:
             raise HTTPException(status_code=404, detail="Gmail connection not found")
+        principal = principal_for_connection(connection)
+        _require_owned_connection(principal, connection, detail="Gmail connection not found")
         worker = _digest_worker(request)
         if worker is None:
             raise HTTPException(
@@ -227,7 +236,7 @@ def create_app() -> FastAPI:
             )
         creator = cast(CreateDigestRun, request.app.state.create_run)
         run = await creator.execute(
-            user_id=user_id,
+            user_id=principal.user_id,
             mailbox_connection_id=payload.mailbox_connection_id,
             idempotency_key=idempotency_key,
             query=payload.query,
@@ -237,17 +246,16 @@ def create_app() -> FastAPI:
         return {
             "id": run.id,
             "status": run.status.value,
-            "statusUrl": f"/v1/mail-todo/runs/{run.id}?user_id={user_id}",
+            "statusUrl": f"/v1/mail-todo/runs/{run.id}",
         }
 
     @app.get("/v1/mail-todo/runs/{run_id}")
-    async def get_digest_run(
-        run_id: str, request: Request, user_id: str = Query(min_length=1)
-    ) -> dict[str, Any]:
+    async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
         repository = cast(InMemoryRunRepository, request.app.state.run_repository)
         run = await repository.get(run_id)
-        if run is None or run.user_id != user_id:
+        if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
+        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
         response: dict[str, Any] = {
             "id": run.id,
             "status": run.status.value,
@@ -279,13 +287,12 @@ def create_app() -> FastAPI:
         return response
 
     @app.get("/v1/mail-todo/runs/{run_id}/result")
-    async def get_digest_result(
-        run_id: str, request: Request, user_id: str = Query(min_length=1)
-    ) -> dict[str, Any]:
+    async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
         repository = cast(InMemoryRunRepository, request.app.state.run_repository)
         run = await repository.get(run_id)
-        if run is None or run.user_id != user_id:
+        if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
+        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
         if run.status.value in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
         result_service = cast(GetDigestResult, request.app.state.get_result)
@@ -299,6 +306,28 @@ def create_app() -> FastAPI:
 
 def _connection_service(request: Request) -> GmailConnectionService:
     return cast(GmailConnectionService, request.app.state.gmail_connections)
+
+
+def _require_owned_connection(
+    principal: VerifiedPrincipal, connection: MailboxConnection, *, detail: str
+) -> None:
+    """Translate the centralized ownership guard into the HTTP 404 contract."""
+    try:
+        ensure_principal_owns_connection(principal, connection)
+    except ConnectionNotOwnedError as exc:
+        raise HTTPException(status_code=404, detail=detail) from exc
+
+
+async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
+    """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
+    connection_repository: SQLiteMailboxConnectionRepository = (
+        request.app.state.connection_repository
+    )
+    connection = await connection_repository.get(run.mailbox_connection_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail=detail)
+    principal = VerifiedPrincipal(tenant_id=LOCAL_TENANT_ID, user_id=run.user_id)
+    _require_owned_connection(principal, connection, detail=detail)
 
 
 def _gmail_settings(request: Request) -> GmailSettings:

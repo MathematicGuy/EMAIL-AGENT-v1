@@ -28,4 +28,4 @@ htmlcov/
 .serena
 .wgm
 .qoder
-.pytest-adr003.pytest-tmp/
+.pytest-tmp/

@@ -47,22 +47,17 @@ class OAuthStateManager:
         self._pending_context: dict[str, tuple[float, str | None]] = {}
         self._lock = asyncio.Lock()
 
-    def issue(self, user_id: str, *, context: str | None = None) -> str:
-        if not user_id.strip() or "\x1f" in user_id or len(user_id) > 200:
-            raise ValueError("user_id is required")
+    def issue(self, *, context: str | None = None) -> str:
         issued_at = int(self._clock())
         nonce = secrets.token_urlsafe(18)
         self._pending_context[nonce] = (issued_at + self._ttl_seconds, context)
-        payload = f"{user_id}\x1f{issued_at}\x1f{nonce}".encode()
+        payload = f"{issued_at}\x1f{nonce}".encode()
         encoded = urlsafe_b64encode(payload).rstrip(b"=")
         signature = hmac.new(self._secret, encoded, hashlib.sha256).digest()
         return f"{encoded.decode()}.{urlsafe_b64encode(signature).rstrip(b'=').decode()}"
 
-    async def consume(self, state: str) -> str:
-        user_id, _ = await self.consume_with_context(state)
-        return user_id
-
-    async def consume_with_context(self, state: str) -> tuple[str, str | None]:
+    async def consume(self, state: str) -> str | None:
+        """Validate signature, expiry and single use, then return the pending context."""
         try:
             encoded_text, signature_text = state.split(".", 1)
             encoded = encoded_text.encode()
@@ -71,7 +66,7 @@ class OAuthStateManager:
             if not hmac.compare_digest(signature, expected):
                 raise ValueError
             payload = _decode_base64(encoded_text).decode()
-            user_id, issued_text, nonce = payload.split("\x1f", 2)
+            issued_text, nonce = payload.split("\x1f", 1)
             issued_at = int(issued_text)
         except (UnicodeDecodeError, ValueError) as exc:
             raise ValueError("Invalid OAuth state") from exc
@@ -94,7 +89,7 @@ class OAuthStateManager:
             if pending is None:
                 raise ValueError("OAuth state is not pending on this server")
             self._used_nonces[nonce] = issued_at + self._ttl_seconds
-        return user_id, pending[1]
+        return pending[1]
 
 
 def _decode_base64(value: str) -> bytes:

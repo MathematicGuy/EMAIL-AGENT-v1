@@ -1,0 +1,221 @@
+"""Verified Principal boundary: authorization behavior of the local MVP API.
+
+Covers master-comparison §7 V1-M1 item 2: identity comes from the verified
+OAuth grant stored on the Mailbox Connection, never from caller-provided
+query parameters.
+"""
+
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import httpx
+import pytest
+from cryptography.fernet import Fernet
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+
+from cowork_agent.app import CreateRunRequest, create_app
+from cowork_agent.config import GMAIL_READONLY_SCOPE
+from cowork_agent.domain import DigestRun, MailboxConnection, RunStatus, RunTrigger
+from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
+from cowork_agent.features.email_action_plan.workflow import DigestWorker
+from cowork_agent.identity import LOCAL_TENANT_ID, principal_for_connection
+from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
+from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
+from cowork_agent.integrations.gmail.provider import GmailConnectionService, GmailOAuthGrant
+from cowork_agent.integrations.llm.fakes import FakeActionExtractor
+from cowork_agent.orchestration.local import InMemoryOutbox
+
+OWNER_EMAIL = "owner@example.com"
+CONNECTION_ID = "mbx-principal"
+
+
+@pytest.fixture()
+def principal_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("GMAIL_CLIENT_ID", "principal.apps.googleusercontent.com")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "principal-secret")
+    monkeypatch.setenv(
+        "GMAIL_REDIRECT_URI", "http://localhost:8000/v1/mail-todo/oauth/gmail/callback"
+    )
+    monkeypatch.setenv("GMAIL_SCOPES", GMAIL_READONLY_SCOPE)
+    monkeypatch.setenv("GMAIL_CONNECTION_DB_PATH", str(tmp_path / "principal-connections.db"))
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("OAUTH_STATE_SECRET", "principal-state-secret-at-least-32-characters")
+    monkeypatch.setenv("APP_ENV", "development")
+
+
+@asynccontextmanager
+async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
+    app = create_app()
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    try:
+        app.state.digest_worker = DigestWorker(
+            app.state.run_repository,
+            app.state.result_repository,
+            FakeMailbox([]),
+            SafeTextAttachmentExtractor(),
+            FakeActionExtractor(ExtractionBatch(())),
+            InMemoryOutbox(),
+        )
+        client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://principal.test"
+        )
+        await client.__aenter__()
+        try:
+            yield app, client
+        finally:
+            await client.__aexit__(None, None, None)
+    finally:
+        await lifespan.__aexit__(None, None, None)
+
+
+class FakeOAuthDriver:
+    def __init__(self) -> None:
+        self.state = ""
+
+    def authorization_url(self, state: str, code_verifier: str) -> str:
+        self.state = state
+        return f"https://accounts.google.test/auth?state={state}"
+
+    async def exchange(
+        self, state: str, authorization_response: str, code_verifier: str
+    ) -> GmailOAuthGrant:
+        assert state == self.state
+        assert "code=test-code" in authorization_response
+        return GmailOAuthGrant(OWNER_EMAIL, "refresh-token", (GMAIL_READONLY_SCOPE,))
+
+
+def _seed_connection(user_id: str, email_address: str) -> MailboxConnection:
+    now = datetime.now(UTC)
+    return MailboxConnection(
+        id=CONNECTION_ID,
+        user_id=user_id,
+        provider="gmail",
+        external_account_id=email_address.lower(),
+        email_address=email_address,
+        encrypted_refresh_token="not-used-by-fakes",
+        scopes=(GMAIL_READONLY_SCOPE,),
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_connect_flow_stores_verified_identity(principal_env) -> None:
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            settings = app.state.gmail_settings
+            app.state.gmail_connections = GmailConnectionService(
+                settings,
+                app.state.connection_repository,
+                TokenCipher(settings.token_encryption_key),
+                OAuthStateManager(
+                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                ),
+                FakeOAuthDriver(),
+            )
+            redirect = await client.get(
+                "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
+            )
+            assert redirect.status_code == 302
+            location = urlparse(redirect.headers["location"])
+            state = parse_qs(location.query)["state"][0]
+            callback = await client.get(
+                "/v1/mail-todo/oauth/gmail/callback",
+                params={"state": state, "code": "test-code"},
+            )
+            assert callback.status_code == 200
+            connections = await app.state.connection_repository.list_all()
+            assert len(connections) == 1
+            connection = connections[0]
+            assert connection.user_id == OWNER_EMAIL == connection.email_address
+            principal = principal_for_connection(connection)
+            assert principal.tenant_id == LOCAL_TENANT_ID
+            assert principal.user_id == OWNER_EMAIL
+
+    asyncio.run(scenario())
+
+
+def test_no_route_accepts_caller_provided_identity(principal_env) -> None:
+    async def scenario() -> None:
+        async with running_app() as (app, _):
+            routes = [route for route in app.routes if isinstance(route, APIRoute)]
+            assert routes
+            for route in routes:
+                parameters = (
+                    *route.dependant.path_params,
+                    *route.dependant.query_params,
+                    *route.dependant.header_params,
+                    *route.dependant.cookie_params,
+                )
+                assert all(param.name != "user_id" for param in parameters), route.path
+            assert "user_id" not in CreateRunRequest.model_fields
+
+    asyncio.run(scenario())
+
+
+def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            connection = _seed_connection(user_id="legacy-caller-id", email_address=OWNER_EMAIL)
+            await app.state.connection_repository.upsert(connection)
+            legacy_run = DigestRun(
+                id="run_legacy",
+                user_id="legacy-caller-id",
+                mailbox_connection_id=CONNECTION_ID,
+                trigger=RunTrigger.ON_DEMAND,
+                status=RunStatus.QUEUED,
+                query="is:unread in:inbox",
+                idempotency_key="legacy-key",
+                max_emails=10,
+            )
+            await app.state.run_repository.save(legacy_run)
+            orphan_run = DigestRun(
+                id="run_orphan",
+                user_id=OWNER_EMAIL,
+                mailbox_connection_id="mbx-missing",
+                trigger=RunTrigger.ON_DEMAND,
+                status=RunStatus.QUEUED,
+                query="is:unread in:inbox",
+                idempotency_key="orphan-key",
+                max_emails=10,
+            )
+            await app.state.run_repository.save(orphan_run)
+
+            assert (await client.get("/v1/mail-todo/runs/run_legacy")).status_code == 404
+            assert (
+                await client.get("/v1/mail-todo/runs/run_legacy/result")
+            ).status_code == 404
+            assert (await client.get("/v1/mail-todo/runs/run_orphan")).status_code == 404
+            assert (
+                await client.delete(f"/v1/mail-todo/connections/{CONNECTION_ID}")
+            ).status_code == 404
+            assert await app.state.connection_repository.get(CONNECTION_ID) is not None
+
+    asyncio.run(scenario())
+
+
+def test_create_run_persists_verified_identity(principal_env) -> None:
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
+            await app.state.connection_repository.upsert(connection)
+            response = await client.post(
+                "/v1/mail-todo/runs",
+                json={"mailboxConnectionId": CONNECTION_ID},
+                headers={"Idempotency-Key": "principal-1"},
+            )
+            assert response.status_code == 202
+            payload = response.json()
+            assert payload["statusUrl"] == f"/v1/mail-todo/runs/{payload['id']}"
+            assert "user_id" not in payload["statusUrl"]
+            run = await app.state.run_repository.get(payload["id"])
+            assert run is not None
+            assert run.user_id == OWNER_EMAIL == connection.email_address
+
+    asyncio.run(scenario())
