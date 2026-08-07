@@ -20,13 +20,13 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] Checkpoint: V1-M1 exit criteria (plan.md)
 
 ## V1-M2 — Classification and routing
-- [ ] 2.1 Split RouteClassifierPort/ActionPlanGeneratorPort; move shaping out of provider adapters
-- [ ] 2.2 Bounded classifier batching; schema-valid decision per email; repair retry
-- [ ] 2.3 Deterministic task-candidate correlation (source_message_ids, incident_key) — needs 2.2
-- [ ] 2.4 Pure route resolver + FR-07 policy guards (parallel-safe with 2.1/2.2)
-- [ ] 2.5 Classifier fallback: retry once → conservative RETRIEVE_RAG
-- [ ] 2.6 Routing evaluation harness over routing_labels.json
-- [ ] Checkpoint: V1-M2 exit criteria
+- [x] 2.1 Split RouteClassifierPort/ActionPlanGeneratorPort; move shaping out of provider adapters
+- [x] 2.2 Bounded classifier batching; schema-valid decision per email; repair retry
+- [x] 2.3 Deterministic task-candidate correlation (source_message_ids, incident_key) — needs 2.2
+- [x] 2.4 Pure route resolver + FR-07 policy guards (parallel-safe with 2.1/2.2)
+- [x] 2.5 Classifier fallback: retry once → conservative RETRIEVE_RAG
+- [x] 2.6 Routing evaluation harness over routing_labels.json
+- [x] Checkpoint: V1-M2 exit criteria
 
 ## V1-M3 — RAG, generation, validation
 - [ ] 3.1 SemanticMemoryPort + null adapter (Lane RAG)
