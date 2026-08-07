@@ -54,8 +54,8 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] 5.2 Redis Streams queue + DLQ worker (no sensitive payloads in DLQ) — needs 5.1
 - [x] 5.3 Observable metadata-only lifecycle events (outbox replacement)
 - [x] 5.4 Timeout/retry budgets (Gmail backoff/jitter, token refresh, partial batch)
-- [ ] 5.5 Advanced observability, alerts, numeric launch gates, scaled evaluation
-- [ ] Checkpoint: V1-H exit criteria (separate-process claim, restart durability)
+- [ ] 5.5 Advanced observability, alerts, numeric launch gates, scaled evaluation (lifecycle publication + DLQ events delivered at `479bf2d`; numeric gates/scaled eval BLOCKED on user threshold decisions + authorized live runs)
+- [ ] Checkpoint: V1-H exit criteria (separate-process claim, restart durability) — mechanics evidenced by T5.1/T5.2/T5.4 tests; formal sign-off waits on 5.5 blocked items
 
 ## V2-M1 — Memory Gateway
 - [ ] Memory contracts: TaskEpisode, MemoryContextRequest, profile/transition/provenance
