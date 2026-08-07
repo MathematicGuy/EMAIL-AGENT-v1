@@ -3,46 +3,18 @@
 import asyncio
 from datetime import UTC, datetime
 
-from conftest import make_email
-
-from cowork_agent.domain import ActionPlanStep, Confidence, DeadlineSource, EvidenceRef
-from cowork_agent.features.email_action_plan.schemas import (
-    EmailExtraction,
-    ExtractedAction,
-    ExtractionBatch,
-)
+from conftest import make_email, make_task
 
 EMPTY_STATE_MESSAGE = "Không có công việc cần xử lý"
 
 
-def _action(message_id: str, title: str) -> ExtractedAction:
-    return ExtractedAction(
-        provider_message_id=message_id,
-        title=title,
-        summary="Yêu cầu cần xử lý.",
-        deadline_at=None,
-        deadline_text=None,
-        deadline_source=DeadlineSource.NONE,
-        action_plan=(ActionPlanStep(1, title, "email"),),
-        evidence=(EvidenceRef("email_body", None, None, "Vui lòng thực hiện yêu cầu."),),
-        confidence=Confidence.HIGH,
-    )
-
-
-def _batch_for(*message_ids: str) -> ExtractionBatch:
-    return ExtractionBatch(
-        tuple(
-            EmailExtraction(
-                message_id, "actionable", "Có yêu cầu", (_action(message_id, f"Việc {message_id}"),)
-            )
-            for message_id in message_ids
-        )
-    )
+def _tasks_for(*message_ids: str) -> tuple:
+    return tuple(make_task(message_id, f"Việc {message_id}") for message_id in message_ids)
 
 
 def test_create_run_returns_202_with_pollable_shape(compat_session) -> None:
     async def scenario() -> None:
-        async with compat_session([make_email("m1", "t1", "Gửi báo cáo")], _batch_for("m1")) as s:
+        async with compat_session([make_email("m1", "t1", "Gửi báo cáo")], _tasks_for("m1")) as s:
             response = await s.post_run("contract-create")
             assert response.status_code == 202
             payload = response.json()
@@ -67,7 +39,7 @@ def test_duplicate_idempotency_key_returns_same_run(compat_session) -> None:
 
 def test_get_run_exposes_progress_and_error_shape(compat_session) -> None:
     async def scenario() -> None:
-        async with compat_session([make_email("m1", "t1", "Việc")], _batch_for("m1")) as s:
+        async with compat_session([make_email("m1", "t1", "Việc")], _tasks_for("m1")) as s:
             created = await s.post_run("status-shape")
             run_id = created.json()["id"]
             response = await s.get_run(run_id)
@@ -100,7 +72,7 @@ def test_result_before_terminal_state_returns_run_not_complete(compat_session) -
         gate = asyncio.Event()
         messages = [make_email("m1", "t1", "Việc")]
         mailbox = GatedMailbox(messages, gate)
-        async with compat_session(messages, _batch_for("m1"), mailbox=mailbox) as s:
+        async with compat_session(messages, _tasks_for("m1"), mailbox=mailbox) as s:
             post_task = asyncio.create_task(s.post_run("blocked-run"))
             run_id = None
             for _ in range(200):
@@ -120,7 +92,7 @@ def test_result_before_terminal_state_returns_run_not_complete(compat_session) -
 
 def test_result_shape_keys_are_exactly_the_frozen_set(compat_session) -> None:
     async def scenario() -> None:
-        async with compat_session([make_email("m1", "t1", "Việc")], _batch_for("m1")) as s:
+        async with compat_session([make_email("m1", "t1", "Việc")], _tasks_for("m1")) as s:
             created = await s.post_run("result-keys")
             payload = (await s.get_result(created.json()["id"])).json()
             assert set(payload) == {
@@ -140,30 +112,15 @@ def test_result_shape_keys_are_exactly_the_frozen_set(compat_session) -> None:
 def test_next_actions_are_first_three_action_items(compat_session) -> None:
     async def scenario() -> None:
         messages = [make_email(f"m{index}", f"t{index}", f"Chủ đề {index}") for index in range(5)]
-        batch = ExtractionBatch(
-            tuple(
-                EmailExtraction(
-                    f"m{index}",
-                    "actionable",
-                    "Có yêu cầu",
-                    (
-                        ExtractedAction(
-                            provider_message_id=f"m{index}",
-                            title=f"Việc {index}",
-                            summary="Yêu cầu.",
-                            deadline_at=datetime(2026, 8, 10 + index, tzinfo=UTC),
-                            deadline_text=None,
-                            deadline_source=DeadlineSource.EXPLICIT,
-                            action_plan=(ActionPlanStep(1, f"Việc {index}", "email"),),
-                            evidence=(EvidenceRef("email_body", None, None, "Trích dẫn."),),
-                            confidence=Confidence.HIGH,
-                        ),
-                    ),
-                )
-                for index in range(5)
+        tasks = tuple(
+            make_task(
+                f"m{index}",
+                f"Việc {index}",
+                deadline=datetime(2026, 8, 10 + index, tzinfo=UTC),
             )
+            for index in range(5)
         )
-        async with compat_session(messages, batch) as s:
+        async with compat_session(messages, tasks) as s:
             created = await s.post_run("next-actions")
             payload = (await s.get_result(created.json()["id"])).json()
             assert len(payload["actionItems"]) == 5
@@ -186,7 +143,7 @@ def test_empty_run_returns_explicit_empty_state_message(compat_session) -> None:
 
 def test_processed_emails_are_development_only(compat_session, monkeypatch) -> None:
     async def scenario() -> None:
-        async with compat_session([make_email("m1", "t1", "Việc")], _batch_for("m1")) as s:
+        async with compat_session([make_email("m1", "t1", "Việc")], _tasks_for("m1")) as s:
             created = await s.post_run("dev-metadata")
             run_id = created.json()["id"]
 

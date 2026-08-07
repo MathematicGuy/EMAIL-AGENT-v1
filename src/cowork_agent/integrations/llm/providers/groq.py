@@ -1,4 +1,4 @@
-"""Groq adapter for structured email action extraction."""
+"""Groq adapter for structured Action Plan generation and classification."""
 
 import asyncio
 import json
@@ -10,28 +10,33 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from cowork_agent.config import GroqSettings
-from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
+from cowork_agent.domain.target_contracts import (
+    ActionPlanOutput,
+    EphemeralEmailEnvelope,
+    SemanticRetrievalResponse,
+)
+from cowork_agent.features.email_action_plan.correlation import TaskCandidate
+from cowork_agent.features.email_action_plan.routing import RouteResolution
 from cowork_agent.features.email_action_plan.schemas import (
     ClassificationResult,
     ClassifiedMessage,
-    EmailExtraction,
-    ExtractionBatch,
+    GenerationContext,
 )
 from cowork_agent.features.email_action_plan.shaping import (
     batch_messages,
     group_by_thread,
-    merge_correlated_emails,
 )
 
 from .gemini import (
     CLASSIFICATION_SCHEMA,
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
-    EXTRACTION_SCHEMA,
-    SYSTEM_INSTRUCTION,
+    GENERATION_SCHEMA,
+    GENERATOR_SYSTEM_INSTRUCTION,
+    _build_generation_prompt,
     _build_prompt,
     _classified_messages_for,
-    _parse_batch,
+    _parse_action_plan_output,
     _validated_decisions,
 )
 
@@ -55,43 +60,61 @@ class GroqAPIError(RuntimeError):
         )
 
 
-class GroqActionExtractor:
+class GroqActionPlanGenerator:
+    """ActionPlanGeneratorPort adapter for Groq (PRD-v1 FR-09, §6.6).
+
+    Performs exactly one structured generation call per resolved
+    non-``NO_ACTION`` Task Candidate (master-comparison §3.8) and returns
+    exactly one Task. Schema/parse failures wrap into :class:`GroqAPIError`
+    so the run reports ``GROQ_API_ERROR``; the schema-repair retry arrives
+    with T3.6.
+    """
+
     def __init__(self, settings: GroqSettings) -> None:
         self._settings = settings
 
-    async def extract(
+    async def generate(
         self,
+        *,
         user_timezone: str,
         current_time: datetime,
-        messages: Sequence[EphemeralEmailEnvelope],
-    ) -> ExtractionBatch:
-        email_results: list[EmailExtraction] = []
-        threads = group_by_thread(messages)
-        for batch in batch_messages(threads, self._settings.max_emails_per_batch):
-            prompt = _build_prompt(user_timezone, current_time, batch)
-            payload = await self._complete(prompt)
-            try:
-                email_results.extend(_parse_batch(payload).emails)
-            except (KeyError, TypeError, ValueError) as exc:
-                raise GroqAPIError(
-                    "Groq response did not match the extraction schema",
-                    safe_message=(
-                        "Groq trả về dữ liệu không đúng cấu trúc task yêu cầu. "
-                        "Vui lòng thử lại hoặc kiểm tra schema extraction."
-                    ),
-                ) from exc
-        return ExtractionBatch(merge_correlated_emails(email_results))
+        run_context: GenerationContext,
+        candidate: TaskCandidate,
+        envelopes: Sequence[EphemeralEmailEnvelope],
+        resolution: RouteResolution,
+        retrieval: SemanticRetrievalResponse | None,
+    ) -> ActionPlanOutput:
+        prompt = _build_generation_prompt(
+            user_timezone, current_time, envelopes, candidate, resolution, retrieval
+        )
+        payload = await self._complete(prompt)
+        try:
+            return _parse_action_plan_output(
+                payload,
+                run_context=run_context,
+                candidate=candidate,
+                first_envelope=envelopes[0],
+                current_time=current_time,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GroqAPIError(
+                "Groq response did not match the generation schema",
+                safe_message=(
+                    "Groq trả về dữ liệu không đúng cấu trúc task yêu cầu. "
+                    "Vui lòng thử lại hoặc kiểm tra schema generation."
+                ),
+            ) from exc
 
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
         request_body = {
             "model": self._settings.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "system", "content": GENERATOR_SYSTEM_INSTRUCTION},
                 {
                     "role": "user",
                     "content": (
                         f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
-                        f"{json.dumps(EXTRACTION_SCHEMA, ensure_ascii=False)}"
+                        f"{json.dumps(GENERATION_SCHEMA, ensure_ascii=False)}"
                     ),
                 },
             ],

@@ -14,12 +14,15 @@ from cowork_agent.domain import (
     RunStatus,
 )
 from cowork_agent.domain.target_contracts import (
+    ActionPlanOutput,
     EphemeralEmailEnvelope,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
 )
 
-from .schemas import ClassificationResult, ExtractionBatch, ExtractionLimits, SearchPage
+from .correlation import TaskCandidate
+from .routing import RouteResolution
+from .schemas import ClassificationResult, ExtractionLimits, GenerationContext, SearchPage
 
 
 class MailboxPort(Protocol):
@@ -72,17 +75,28 @@ class RouteClassifierPort(Protocol):
 
 
 class ActionPlanGeneratorPort(Protocol):
-    """Compatibility bridge used by the V1-M2 rewiring.
+    """One structured generation call per resolved Task Candidate.
 
-    V1-M3 T3.3 replaces it with the ActionPlanOutput-based Generator.
+    PRD-v1 FR-09 / master-comparison §3.8: after route resolution and
+    optional retrieval, the Generator is called exactly once per resolved
+    non-``NO_ACTION`` Task Candidate and returns exactly one Task
+    (master-comparison §6.6). Inputs are the ephemeral email context, the
+    Route Decisions, the Route Resolution, and retrieved RAG context only —
+    v1 never feeds long-term or episodic memory. ``retrieval`` stays
+    ``None`` until T3.5 wires the Semantic Memory port.
     """
 
     async def generate(
         self,
+        *,
         user_timezone: str,
         current_time: datetime,
-        messages: Sequence[EphemeralEmailEnvelope],
-    ) -> ExtractionBatch: ...
+        run_context: GenerationContext,
+        candidate: TaskCandidate,
+        envelopes: Sequence[EphemeralEmailEnvelope],
+        resolution: RouteResolution,
+        retrieval: SemanticRetrievalResponse | None,
+    ) -> ActionPlanOutput: ...
 
 
 class RunRepository(Protocol):

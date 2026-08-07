@@ -5,15 +5,21 @@ from datetime import datetime
 
 from cowork_agent.domain.target_contracts import (
     Actionability,
+    ActionPlanOutput,
     EmailRouteDecision,
     EphemeralEmailEnvelope,
     ReasonCode,
     Route,
+    SemanticRetrievalResponse,
+    Task,
+    ValidationStatus,
 )
+from cowork_agent.features.email_action_plan.correlation import TaskCandidate
+from cowork_agent.features.email_action_plan.routing import RouteResolution
 from cowork_agent.features.email_action_plan.schemas import (
     ClassificationResult,
     ClassifiedMessage,
-    ExtractionBatch,
+    GenerationContext,
 )
 
 #: Default Route Decision for fake classification: actionable and
@@ -59,30 +65,59 @@ class FakeRouteClassifier:
 
 
 class FakePlanGenerator:
-    """Deterministic ActionPlanGeneratorPort fake serving a canned batch.
+    """Deterministic ActionPlanGeneratorPort fake serving canned Tasks.
 
-    ``generate`` returns the canned batch filtered to the requested
-    envelopes' Gmail message ids, preserving canned order — mirroring the
-    one-call-per-candidate cardinality of the production pipeline.
+    ``generate`` returns the canned Task whose ``gmail_message_id`` matches
+    one of the candidate's source message ids (first canned match wins);
+    otherwise it builds a deterministic default Task for the candidate.
+    One call per candidate mirrors the production cardinality (frozen
+    contract rule 6).
     """
 
-    def __init__(self, batch: ExtractionBatch) -> None:
-        self.batch = batch
-        self.received_envelopes: tuple[EphemeralEmailEnvelope, ...] = ()
+    def __init__(self, tasks: tuple[Task, ...] = ()) -> None:
+        self.tasks = tasks
+        self.received_candidates: tuple[TaskCandidate, ...] = ()
         self.call_count = 0
 
     async def generate(
         self,
+        *,
         user_timezone: str,
         current_time: datetime,
-        messages: Sequence[EphemeralEmailEnvelope],
-    ) -> ExtractionBatch:
-        del user_timezone, current_time
-        self.received_envelopes = tuple(messages)
+        run_context: GenerationContext,
+        candidate: TaskCandidate,
+        envelopes: Sequence[EphemeralEmailEnvelope],
+        resolution: RouteResolution,
+        retrieval: SemanticRetrievalResponse | None,
+    ) -> ActionPlanOutput:
+        del user_timezone, retrieval
+        self.received_candidates += (candidate,)
         self.call_count += 1
-        requested = {message.gmail_message_id for message in messages}
-        return ExtractionBatch(
-            emails=tuple(
-                email for email in self.batch.emails if email.provider_message_id in requested
+        source_ids = frozenset(candidate.source_message_ids)
+        for task in self.tasks:
+            if task.gmail_message_id in source_ids:
+                return ActionPlanOutput(task=task)
+        first_message_id = candidate.source_message_ids[0]
+        return ActionPlanOutput(
+            task=Task(
+                task_id=f"task_fake_{first_message_id}",
+                run_id=run_context.run_id,
+                gmail_message_id=first_message_id,
+                gmail_url=envelopes[0].gmail_url,
+                source_message_ids=candidate.source_message_ids,
+                incident_key=candidate.incident_key,
+                title="Công việc từ email",
+                request_summary="Yêu cầu từ email.",
+                actionability=Actionability.ACTION_REQUIRED,
+                route=resolution.route,
+                priority=None,
+                deadline=None,
+                action_plan=(),
+                supporting_documents=(),
+                missing_information=(),
+                classifier_confidence=0.9,
+                generation_confidence=0.9,
+                validation_status=ValidationStatus.SYSTEM_GENERATED,
+                created_at=current_time,
             )
         )

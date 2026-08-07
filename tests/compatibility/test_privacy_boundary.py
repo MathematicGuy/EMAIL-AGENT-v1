@@ -4,14 +4,7 @@ import asyncio
 import json
 from dataclasses import asdict
 
-from conftest import make_email
-
-from cowork_agent.domain import ActionPlanStep, Confidence, DeadlineSource, EvidenceRef
-from cowork_agent.features.email_action_plan.schemas import (
-    EmailExtraction,
-    ExtractedAction,
-    ExtractionBatch,
-)
+from conftest import make_email, make_task
 
 SECRET_BODY = (
     "BÍ MẬT KB-9173: ngân sách thưởng quý 4 là 2.4 tỷ đồng, "
@@ -21,21 +14,16 @@ SECRET_BODY = (
 
 def test_email_body_never_appears_in_responses_or_stored_records(compat_session) -> None:
     async def scenario() -> None:
-        action = ExtractedAction(
-            provider_message_id="m1",
-            title="Xác nhận kế hoạch quý",
-            summary="Yêu cầu xác nhận kế hoạch.",
-            deadline_at=None,
-            deadline_text=None,
-            deadline_source=DeadlineSource.NONE,
-            action_plan=(ActionPlanStep(1, "Xác nhận kế hoạch quý", "email"),),
-            evidence=(EvidenceRef("email_body", None, None, "Nhờ bạn xác nhận kế hoạch."),),
-            confidence=Confidence.HIGH,
+        tasks = (
+            make_task(
+                "m1",
+                "Xác nhận kế hoạch quý",
+                summary="Yêu cầu xác nhận kế hoạch.",
+            ),
         )
-        batch = ExtractionBatch((EmailExtraction("m1", "actionable", "Có yêu cầu", (action,)),))
         messages = [make_email("m1", "t1", "Kế hoạch quý 4", body=SECRET_BODY)]
 
-        async with compat_session(messages, batch) as s:
+        async with compat_session(messages, tasks) as s:
             created = await s.post_run("privacy")
             run_id = created.json()["id"]
 

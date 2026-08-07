@@ -1,27 +1,21 @@
 import asyncio
 from collections.abc import Sequence
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from cowork_agent.domain import (
-    ActionPlanStep,
-    Confidence,
-    DeadlineSource,
-    EvidenceRef,
-    Priority,
-    RunStatus,
-)
+from cowork_agent.domain import Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
+    Actionability,
     BodyFormat,
+    EmailRouteDecision,
     EphemeralEmailEnvelope,
     FetchStatus,
+    PlanStep,
+    ReasonCode,
+    Route,
+    Task,
+    ValidationStatus,
 )
-from cowork_agent.features.email_action_plan.schemas import (
-    ClassificationResult,
-    EmailExtraction,
-    ExtractedAction,
-    ExtractionBatch,
-)
+from cowork_agent.features.email_action_plan.schemas import ClassificationResult
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
@@ -66,46 +60,69 @@ def email(
     )
 
 
-def action(message_id: str, title: str, deadline: datetime | None = None) -> ExtractedAction:
-    return ExtractedAction(
-        message_id,
-        title,
-        "Yêu cầu cần được xử lý.",
-        deadline,
-        deadline.isoformat() if deadline else None,
-        DeadlineSource.EXPLICIT if deadline else DeadlineSource.NONE,
-        (ActionPlanStep(1, "Kiểm tra yêu cầu", "email"), ActionPlanStep(2, title, "email")),
-        (EvidenceRef("email_body", None, None, "Vui lòng thực hiện yêu cầu"),),
-        Confidence.HIGH,
+def task_for(
+    message_id: str,
+    title: str,
+    deadline: datetime | None = None,
+    *,
+    priority: Priority | None = None,
+) -> Task:
+    """Canned §6.6 Task standing in for one Generator call's output."""
+    return Task(
+        task_id=f"task_{message_id}",
+        run_id="run-test",
+        gmail_message_id=message_id,
+        gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
+        source_message_ids=(message_id,),
+        incident_key=None,
+        title=title,
+        request_summary="Yêu cầu cần được xử lý.",
+        actionability=Actionability.ACTION_REQUIRED,
+        route=Route.DIRECT_PLAN,
+        priority=priority,
+        deadline=deadline,
+        action_plan=(PlanStep(1, "Kiểm tra yêu cầu", ()), PlanStep(2, title, ())),
+        supporting_documents=(),
+        missing_information=(),
+        classifier_confidence=0.9,
+        generation_confidence=0.9,
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        created_at=NOW,
     )
+
+
+#: Route Decision resolving informational emails to NO_ACTION (the legacy
+#: "newsletter" classification): routing skips generation for these.
+INFORMATIONAL_DECISION = EmailRouteDecision(
+    actionability=Actionability.INFORMATIONAL,
+    route=Route.NO_ACTION,
+    candidate_action_item=None,
+    email_is_sufficient=True,
+    knowledge_gaps=(),
+    retrieval_query=None,
+    expected_document_types=(),
+    reason_codes=(ReasonCode.NO_ACTION,),
+    confidence=0.9,
+)
 
 
 def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo"), email("m2", "t2", "Newsletter")]
-        batch = ExtractionBatch(
-            (
-                EmailExtraction(
-                    "m1",
-                    "actionable",
-                    "Có yêu cầu",
-                    (action("m1", "Gửi báo cáo", NOW + timedelta(hours=20)),),
-                ),
-                EmailExtraction("m2", "newsletter", "Nội dung marketing", ()),
-            )
-        )
+        tasks = (task_for("m1", "Gửi báo cáo", NOW + timedelta(hours=20)),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-1", now=NOW
         )
+        generator = FakePlanGenerator(tasks)
         worker = DigestWorker(
             runs,
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
-            FakeRouteClassifier(),
-            FakePlanGenerator(batch),
+            FakeRouteClassifier({"m2": INFORMATIONAL_DECISION}),
+            generator,
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -117,6 +134,12 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         assert len(saved) == 1 and saved[0].priority is Priority.URGENT
         processed = await results.list_processed_emails(run.id)
         assert [item.subject for item in processed] == ["Gửi báo cáo", "Newsletter"]
+        # Cardinality (frozen contract rule 6): exactly one Generator call per
+        # resolved non-NO_ACTION candidate — the informational email is skipped.
+        assert generator.call_count == 1
+        assert [
+            candidate.source_message_ids for candidate in generator.received_candidates
+        ] == [("m1",)]
 
     asyncio.run(scenario())
 
@@ -128,24 +151,10 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             email("urgent", "tu", "Nguy cơ mất dữ liệu"),
             email("high", "th", "Build production bị chặn"),
         ]
-        batch = ExtractionBatch(
-            (
-                EmailExtraction(
-                    "medium", "actionable", "Cần xử lý", (action("medium", "Việc thường"),)
-                ),
-                EmailExtraction(
-                    "urgent",
-                    "actionable",
-                    "Nguy cơ mất dữ liệu",
-                    (replace(action("urgent", "Giữ dữ liệu"), impact="data_loss_risk"),),
-                ),
-                EmailExtraction(
-                    "high",
-                    "actionable",
-                    "Production bị chặn",
-                    (replace(action("high", "Sửa build"), impact="production_blocked"),),
-                ),
-            )
+        tasks = (
+            task_for("medium", "Việc thường"),
+            task_for("urgent", "Giữ dữ liệu", priority=Priority.URGENT),
+            task_for("high", "Sửa build", priority=Priority.HIGH),
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         run = await CreateDigestRun(runs).execute(
@@ -157,7 +166,7 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeRouteClassifier(),
-            FakePlanGenerator(batch),
+            FakePlanGenerator(tasks),
             ShortTermStore(),
         )
 
@@ -200,9 +209,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
 
     async def scenario() -> None:
         message = email("m1", "t1", "Duyệt tài liệu", attachments_present=True)
-        batch = ExtractionBatch(
-            (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Duyệt tài liệu"),)),)
-        )
+        tasks = (task_for("m1", "Duyệt tài liệu"),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
@@ -214,7 +221,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             AttachmentDownloadMustNotRunMailbox([message]),
             AttachmentExtractionMustNotRun(),
             FakeRouteClassifier(),
-            FakePlanGenerator(batch),
+            FakePlanGenerator(tasks),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -241,7 +248,7 @@ def test_result_has_explicit_empty_state_message() -> None:
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
             FakeRouteClassifier(),
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             ShortTermStore(),
         )
         await worker.execute(run.id, now=NOW)
@@ -272,7 +279,7 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
             FakeMailbox([email("m1", "t1", "Test")]),
             SafeTextAttachmentExtractor(),
             FailingClassifier(),
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             ShortTermStore(),
         )
 
@@ -302,7 +309,7 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
             FailingClassifier(),
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             ShortTermStore(),
         )
 
@@ -338,7 +345,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             classifier,
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -368,7 +375,7 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             FakeMailbox([email("m1", "t1", "Việc một"), email("m2", "t2", "Việc hai")]),
             SafeTextAttachmentExtractor(),
             classifier,
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -387,9 +394,7 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
 def test_successful_run_finalizer_clears_short_term_memory() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]
-        batch = ExtractionBatch(
-            (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Gửi báo cáo"),)),)
-        )
+        tasks = (task_for("m1", "Gửi báo cáo"),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-success"
@@ -401,7 +406,7 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeRouteClassifier(),
-            FakePlanGenerator(batch),
+            FakePlanGenerator(tasks),
             store,
         )
 
@@ -441,7 +446,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
             FakeMailbox([email("m1", "t1", "Việc cần làm")]),
             SafeTextAttachmentExtractor(),
             classifier,
-            FakePlanGenerator(ExtractionBatch(())),
+            FakePlanGenerator(),
             store,
         )
 

@@ -8,12 +8,21 @@ from uuid import uuid4
 from cowork_agent.domain import (
     ActionFreshness,
     ActionItem,
+    ActionPlanStep,
+    Confidence,
+    DeadlineSource,
     DigestRun,
+    EvidenceRef,
     ProcessedEmail,
     RunStatus,
     RunTrigger,
 )
-from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope, Route
+from cowork_agent.domain.target_contracts import (
+    ActionPlanOutput,
+    EphemeralEmailEnvelope,
+    Route,
+    Task,
+)
 from cowork_agent.features.email_action_plan.policies import (
     action_fingerprint,
     calculate_priority,
@@ -34,7 +43,7 @@ from .ports import (
     RunRepository,
 )
 from .routing import resolve_candidate_route
-from .schemas import EmailExtraction, ExtractionBatch, ExtractionLimits
+from .schemas import ExtractionLimits, GenerationContext
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +153,10 @@ class DigestWorker:
                 for classified in classification.decisions
             }
             candidates = correlate_candidates(decisions, messages)
-            extracted_emails: list[EmailExtraction] = []
-            generated_count = 0
+            run_context = GenerationContext(
+                run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
+            )
+            outputs: list[ActionPlanOutput] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
                 if resolution.route is Route.NO_ACTION:
@@ -153,90 +164,68 @@ class DigestWorker:
                 candidate_envelopes = tuple(
                     messages[message_id] for message_id in task_candidate.source_message_ids
                 )
-                # Cardinality (frozen contract): exactly one Generator call per
-                # resolved non-NO_ACTION Task Candidate.
-                candidate_batch = await self._generator.generate(
-                    user_timezone, clock, candidate_envelopes
+                # Cardinality (frozen contract rule 6, PRD-v1 FR-09): exactly
+                # one Generator call per resolved non-NO_ACTION Task
+                # Candidate. Retrieval stays None until T3.5 wires it.
+                outputs.append(
+                    await self._generator.generate(
+                        user_timezone=user_timezone,
+                        current_time=clock,
+                        run_context=run_context,
+                        candidate=task_candidate,
+                        envelopes=candidate_envelopes,
+                        resolution=resolution,
+                        retrieval=None,
+                    )
                 )
-                generated_count += 1
-                extracted_emails.extend(candidate_batch.emails)
             logger.debug(
                 "Run %s routed %d candidate(s): %d classifier batch(es), %d generation call(s)",
                 run.id,
                 len(candidates),
                 classification.batch_count,
-                generated_count,
+                len(outputs),
             )
-            batch = ExtractionBatch(emails=tuple(extracted_emails))
+            # Routing owns selection (master-comparison §3.8): the legacy
+            # "actionable" classification filter and the empty-evidence /
+            # low-confidence skips disappear with the combined batch — every
+            # generated Task becomes an Action Item unless it duplicates a
+            # fingerprint already produced in this run.
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
-            for email_result in batch.emails:
-                source = messages.get(email_result.provider_message_id)
-                if source is None or email_result.classification != "actionable":
+            for output in outputs:
+                task = output.task
+                source = messages.get(task.gmail_message_id)
+                if source is None:
                     continue
-                actionable.add(source.gmail_message_id)
-                for candidate in email_result.action_items:
-                    if not candidate.evidence or candidate.confidence.value == "low":
-                        continue
-                    actionable.update(
-                        message_id
-                        for message_id in candidate.related_message_ids
-                        if message_id in messages
+                actionable.update(
+                    message_id
+                    for message_id in task.source_message_ids
+                    if message_id in messages
+                )
+                fingerprint = action_fingerprint(
+                    run.mailbox_connection_id,
+                    task.incident_key or source.gmail_thread_id,
+                    task.title,
+                    task.deadline,
+                )
+                if fingerprint in fingerprints:
+                    continue
+                fingerprints.add(fingerprint)
+                seen = await self._results.fingerprint_seen(
+                    run.mailbox_connection_id, fingerprint
+                )
+                items.append(
+                    _action_item_from_task(
+                        task,
+                        source,
+                        connection_id=run.mailbox_connection_id,
+                        run_id=run.id,
+                        fingerprint=fingerprint,
+                        clock=clock,
+                        seen=seen,
                     )
-                    fingerprint = action_fingerprint(
-                        run.mailbox_connection_id,
-                        candidate.incident_key or source.gmail_thread_id,
-                        candidate.title,
-                        candidate.deadline_at,
-                    )
-                    if fingerprint in fingerprints:
-                        continue
-                    fingerprints.add(fingerprint)
-                    priority, reason = calculate_priority(
-                        candidate.deadline_at,
-                        clock,
-                        required=candidate.required,
-                        explicit_blocker=candidate.explicit_blocker,
-                        impact=candidate.impact,
-                    )
-                    seen = await self._results.fingerprint_seen(
-                        run.mailbox_connection_id, fingerprint
-                    )
-                    items.append(
-                        ActionItem(
-                            id=f"act_{uuid4().hex}",
-                            run_id=run.id,
-                            mailbox_connection_id=run.mailbox_connection_id,
-                            provider_message_id=source.gmail_message_id,
-                            provider_thread_id=source.gmail_thread_id,
-                            fingerprint=fingerprint,
-                            freshness=ActionFreshness.SEEN if seen else ActionFreshness.NEW,
-                            title=candidate.title.strip(),
-                            summary=candidate.summary.strip(),
-                            sender_name=source.sender_name or None,
-                            sender_address=source.sender_email,
-                            email_subject=source.subject,
-                            email_received_at=source.received_at,
-                            email_deep_link=source.gmail_url,
-                            deadline_at=candidate.deadline_at,
-                            deadline_source=candidate.deadline_source,
-                            deadline_text=candidate.deadline_text,
-                            priority=priority,
-                            priority_reason=reason,
-                            action_plan=candidate.action_plan,
-                            evidence=candidate.evidence,
-                            confidence=candidate.confidence,
-                            created_at=clock,
-                            impact=candidate.impact,
-                            incident_key=candidate.incident_key,
-                            related_message_ids=tuple(
-                                message_id
-                                for message_id in candidate.related_message_ids
-                                if message_id in messages
-                            ),
-                        )
-                    )
+                )
             items.sort(key=lambda item: _action_item_sort_key(item, clock))
             await self._results.save_items(run.id, items)
             run.emails_actionable = len(actionable)
@@ -315,6 +304,81 @@ def _safe_run_error(exc: Exception) -> tuple[str, str]:
         return error_code[:80], safe_message[:500]
     return "RUN_PROCESSING_FAILED", (
         "Xử lý email thất bại do lỗi nội bộ. Chi tiết kỹ thuật đã được ghi vào log backend."
+    )
+
+
+def _action_item_from_task(
+    task: Task,
+    first_envelope: EphemeralEmailEnvelope,
+    *,
+    connection_id: str,
+    run_id: str,
+    fingerprint: str,
+    clock: datetime,
+    seen: bool,
+) -> ActionItem:
+    """Map one generated §6.6 Task onto the legacy ActionItem surface.
+
+    The Task owns content and priority; the first envelope supplies the
+    Gmail pointers. ``fingerprint``/``seen`` come from the unchanged
+    freshness + dedupe machinery surrounding this mapping.
+    """
+    if task.priority is not None:
+        priority, priority_reason = task.priority, "generated"
+    else:
+        priority, priority_reason = calculate_priority(task.deadline, clock)
+    generation_confidence = task.generation_confidence
+    if generation_confidence is None:
+        confidence = Confidence.MEDIUM
+    elif generation_confidence >= 0.8:
+        confidence = Confidence.HIGH
+    elif generation_confidence >= 0.5:
+        confidence = Confidence.MEDIUM
+    else:
+        confidence = Confidence.LOW
+    return ActionItem(
+        id=f"act_{uuid4().hex}",
+        run_id=run_id,
+        mailbox_connection_id=connection_id,
+        provider_message_id=first_envelope.gmail_message_id,
+        provider_thread_id=first_envelope.gmail_thread_id,
+        fingerprint=fingerprint,
+        freshness=ActionFreshness.SEEN if seen else ActionFreshness.NEW,
+        title=task.title.strip(),
+        summary=task.request_summary.strip(),
+        sender_name=first_envelope.sender_name or None,
+        sender_address=first_envelope.sender_email,
+        email_subject=first_envelope.subject,
+        email_received_at=first_envelope.received_at,
+        email_deep_link=first_envelope.gmail_url,
+        deadline_at=task.deadline,
+        deadline_source=DeadlineSource.EXPLICIT if task.deadline else DeadlineSource.NONE,
+        deadline_text=None,
+        priority=priority,
+        priority_reason=priority_reason,
+        action_plan=tuple(
+            ActionPlanStep(
+                step.step,
+                step.instruction,
+                "suggestion" if step.supporting_citation_ids else "inference",
+            )
+            for step in task.action_plan
+        ),
+        evidence=tuple(
+            EvidenceRef(
+                source_kind="rag",
+                filename=document.title,
+                location=document.section,
+                excerpt="",
+                source_message_id=None,
+            )
+            for document in task.supporting_documents
+        ),
+        confidence=confidence,
+        created_at=clock,
+        impact="none",
+        incident_key=task.incident_key,
+        related_message_ids=task.source_message_ids[1:],
     )
 
 

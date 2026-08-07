@@ -6,13 +6,21 @@ from typing import Any
 import pytest
 
 from cowork_agent.config import GeminiSettings
+from cowork_agent.domain.target_contracts import (
+    Actionability,
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
+    Route,
+    ValidationStatus,
+)
+from cowork_agent.features.email_action_plan.correlation import TaskCandidate
+from cowork_agent.features.email_action_plan.routing import RouteResolution
+from cowork_agent.features.email_action_plan.schemas import GenerationContext
 from cowork_agent.integrations.llm.providers.gemini import (
-    EXTRACTION_SCHEMA,
-    SYSTEM_INSTRUCTION,
-    GeminiActionExtractor,
+    GeminiActionPlanGenerator,
     GeminiKeyRotator,
     GeminiRateLimitError,
-    _parse_batch,
 )
 
 
@@ -34,14 +42,6 @@ def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None
     settings = GeminiSettings.from_env(environment(), load_env_file=False)
     assert settings.api_keys == ("key-one", "key-two", "key-three")
     assert "key-one" not in repr(settings)
-
-
-def test_system_instruction_uses_requested_unread_email_prompt() -> None:
-    assert SYSTEM_INSTRUCTION.startswith("Unread Email To-Do Summarizer")
-    assert "is:unread in:inbox" in SYSTEM_INSTRUCTION
-    assert "Đề xuất Bước Tiếp theo" in SYSTEM_INSTRUCTION
-    assert "Viết toàn bộ title" in SYSTEM_INSTRUCTION
-    assert "relatedMessageIds" in SYSTEM_INSTRUCTION
 
 
 def test_placeholder_keys_are_not_accepted_as_credentials() -> None:
@@ -80,6 +80,56 @@ def test_round_robin_starts_each_request_with_the_next_key() -> None:
     asyncio.run(scenario())
 
 
+def envelope(message_id: str) -> EphemeralEmailEnvelope:
+    return EphemeralEmailEnvelope(
+        run_id="run-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        gmail_message_id=message_id,
+        gmail_thread_id=f"thread-{message_id}",
+        gmail_url=f"https://mail.example.com/{message_id}",
+        sender_name="Sender",
+        sender_email="sender@example.com",
+        recipients=("user@example.com",),
+        subject=f"Subject {message_id}",
+        received_at=datetime(2026, 1, 1, tzinfo=UTC),
+        labels=("INBOX",),
+        normalized_body=f"body-{message_id}",
+        body_format=BodyFormat.TEXT,
+        attachments_present=False,
+        fetch_status=FetchStatus.COMPLETE,
+    )
+
+
+def candidate(message_id: str) -> TaskCandidate:
+    return TaskCandidate(
+        candidate_key=f"thread-{message_id}",
+        gmail_thread_id=f"thread-{message_id}",
+        incident_key=None,
+        source_message_ids=(message_id,),
+        decisions=(),
+    )
+
+
+VALID_TASK_PAYLOAD: dict[str, Any] = {
+    "task": {
+        "taskId": "provider-task-id",
+        "title": "Xử lý yêu cầu",
+        "requestSummary": "Yêu cầu từ email.",
+        "actionability": "action_required",
+        "route": "direct_plan",
+        "priority": None,
+        "deadline": None,
+        "actionPlan": [{"step": 1, "instruction": "Kiểm tra yêu cầu", "supportingCitationIds": []}],
+        "supportingDocuments": [],
+        "missingInformation": [],
+        "classifierConfidence": 0.9,
+        "generationConfidence": 0.9,
+        "validationStatus": "system_generated",
+    }
+}
+
+
 class RecordingTransport:
     def __init__(self, rate_limited_keys: set[str] | None = None) -> None:
         self.keys: list[str] = []
@@ -94,104 +144,38 @@ class RecordingTransport:
         prompt: str,
         schema: Mapping[str, object],
         timeout_seconds: int,
+        system_instruction: str | None = None,
     ) -> Mapping[str, Any]:
-        del model, schema, timeout_seconds
+        del model, schema, timeout_seconds, system_instruction
         self.keys.append(api_key)
         self.prompts.append(prompt)
         if api_key in self.rate_limited_keys:
             self.rate_limited_keys.remove(api_key)
             raise GeminiRateLimitError("quota")
-        return {"emails": []}
+        return VALID_TASK_PAYLOAD
 
 
-def test_extractor_rotates_to_next_key_after_rate_limit() -> None:
+def test_generator_rotates_to_next_key_after_rate_limit() -> None:
     async def scenario() -> None:
         settings = GeminiSettings.from_env(environment(), load_env_file=False)
         transport = RecordingTransport({"key-one"})
-        extractor = GeminiActionExtractor(settings, transport)
-        result = await extractor.extract("Asia/Ho_Chi_Minh", datetime.now(UTC), ())
-        assert result.emails == ()
+        generator = GeminiActionPlanGenerator(settings, transport)
+        output = await generator.generate(
+            user_timezone="Asia/Ho_Chi_Minh",
+            current_time=datetime.now(UTC),
+            run_context=GenerationContext("run-1", "tenant-1", "user-1"),
+            candidate=candidate("msg-1"),
+            envelopes=(envelope("msg-1"),),
+            resolution=RouteResolution(
+                route=Route.DIRECT_PLAN, reason_codes=(), forced_by_guard=False, mode="full"
+            ),
+            retrieval=None,
+        )
+        assert output.task.title == "Xử lý yêu cầu"
+        assert output.task.priority is None
+        assert output.task.actionability is Actionability.ACTION_REQUIRED
+        assert output.task.validation_status is ValidationStatus.SYSTEM_GENERATED
+        assert output.task.route is Route.DIRECT_PLAN
         assert transport.keys == ["key-one", "key-two"]
 
     asyncio.run(scenario())
-
-
-def test_schema_and_parser_preserve_incident_correlation_and_impact() -> None:
-    properties = EXTRACTION_SCHEMA["properties"]
-    assert isinstance(properties, dict)
-    emails_schema = properties["emails"]
-    assert isinstance(emails_schema, dict)
-    email_items = emails_schema["items"]
-    assert isinstance(email_items, dict)
-    email_properties = email_items["properties"]
-    assert isinstance(email_properties, dict)
-    actions_schema = email_properties["actionItems"]
-    assert isinstance(actions_schema, dict)
-    action_items = actions_schema["items"]
-    assert isinstance(action_items, dict)
-    assert "explicitBlocker" in action_items["required"]
-    assert "relatedMessageIds" in action_items["required"]
-
-    result = _parse_batch(
-        {
-            "emails": [
-                {
-                    "providerMessageId": "build-message",
-                    "classification": "actionable",
-                    "classificationReason": "Build production bị chặn.",
-                    "actionItems": [
-                        {
-                            "title": "Xử lý build production HR-Chatbot",
-                            "summary": "Build production thất bại.",
-                            "deadlineText": None,
-                            "deadlineSource": "none",
-                            "required": True,
-                            "explicitBlocker": True,
-                            "impact": "production_blocked",
-                            "incidentKey": "railway:eloquent-victory:hr-chatbot:production",
-                            "relatedMessageIds": ["build-message", "volume-message"],
-                            "actionPlan": [
-                                {
-                                    "instruction": "Mở build logs để tìm lỗi đầu tiên.",
-                                    "basis": "email",
-                                },
-                                {
-                                    "instruction": (
-                                        "// a single parseable JSON array. "
-                                        "Follow the schema provided in the context. "
-                                        "Unread Email To-Do Summarizer "
-                                        "relatedMessageIds"
-                                    ),
-                                    "basis": "suggestion",
-                                },
-                                {
-                                    "instruction": "Sửa lỗi và chạy lại bản build để xác minh.",
-                                    "basis": "suggestion",
-                                }
-                            ],
-                            "evidence": [
-                                {
-                                    "sourceKind": "email_body",
-                                    "filename": None,
-                                    "location": None,
-                                    "excerpt": "Build failed!",
-                                    "sourceMessageId": "build-message",
-                                }
-                            ],
-                            "confidence": "high",
-                        }
-                    ],
-                }
-            ]
-        }
-    )
-
-    action = result.emails[0].action_items[0]
-    assert action.explicit_blocker is True
-    assert action.impact == "production_blocked"
-    assert action.related_message_ids == ("build-message", "volume-message")
-    assert action.evidence[0].source_message_id == "build-message"
-    assert [step.instruction for step in action.action_plan] == [
-        "Mở build logs để tìm lỗi đầu tiên.",
-        "Sửa lỗi và chạy lại bản build để xác minh.",
-    ]

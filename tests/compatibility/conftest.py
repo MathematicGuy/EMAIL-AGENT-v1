@@ -7,7 +7,7 @@ contract" promises.
 
 import asyncio
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,13 +19,19 @@ from cryptography.fernet import Fernet
 
 from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
-from cowork_agent.domain import MailboxConnection
+from cowork_agent.domain import MailboxConnection, Priority
 from cowork_agent.domain.target_contracts import (
+    Actionability,
     BodyFormat,
+    EmailRouteDecision,
     EphemeralEmailEnvelope,
     FetchStatus,
+    PlanStep,
+    ReasonCode,
+    Route,
+    Task,
+    ValidationStatus,
 )
-from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
@@ -78,12 +84,61 @@ def make_email(
     )
 
 
+def make_task(
+    message_id: str,
+    title: str,
+    *,
+    summary: str = "Yêu cầu cần xử lý.",
+    deadline: datetime | None = None,
+    priority: Priority | None = None,
+    incident_key: str | None = None,
+) -> Task:
+    """Canned §6.6 Task standing in for one Generator call's output."""
+    return Task(
+        task_id=f"task_{message_id}",
+        run_id="run-compat",
+        gmail_message_id=message_id,
+        gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
+        source_message_ids=(message_id,),
+        incident_key=incident_key,
+        title=title,
+        request_summary=summary,
+        actionability=Actionability.ACTION_REQUIRED,
+        route=Route.DIRECT_PLAN,
+        priority=priority,
+        deadline=deadline,
+        action_plan=(PlanStep(1, title, ()),),
+        supporting_documents=(),
+        missing_information=(),
+        classifier_confidence=0.9,
+        generation_confidence=0.9,
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        created_at=datetime(2026, 8, 3, 8, tzinfo=UTC),
+    )
+
+
+#: Classifier override resolving informational emails to NO_ACTION, so the
+#: Route Resolver skips generation for them (the legacy "newsletter" case).
+INFORMATIONAL_DECISION = EmailRouteDecision(
+    actionability=Actionability.INFORMATIONAL,
+    route=Route.NO_ACTION,
+    candidate_action_item=None,
+    email_is_sufficient=True,
+    knowledge_gaps=(),
+    retrieval_query=None,
+    expected_document_types=(),
+    reason_codes=(ReasonCode.NO_ACTION,),
+    confidence=0.9,
+)
+
+
 @dataclass
 class CompatSession:
     """App + client wired to deterministic fakes for compatibility assertions."""
 
     messages: Sequence[EphemeralEmailEnvelope] = ()
-    batch: ExtractionBatch | None = None
+    tasks: tuple[Task, ...] = ()
+    decisions: Mapping[str, EmailRouteDecision] | None = None
     mailbox: object | None = None
 
     async def __aenter__(self) -> "CompatSession":
@@ -110,8 +165,8 @@ class CompatSession:
             self.app.state.result_repository,
             self.mailbox or FakeMailbox(list(self.messages)),
             SafeTextAttachmentExtractor(),
-            FakeRouteClassifier(),
-            FakePlanGenerator(self.batch or ExtractionBatch(())),
+            FakeRouteClassifier(self.decisions),
+            FakePlanGenerator(self.tasks),
             ShortTermStore(),
         )
         self.client = httpx.AsyncClient(
@@ -156,10 +211,11 @@ def compat_session(compat_env: None):
     @asynccontextmanager
     async def factory(
         messages: Sequence[EphemeralEmailEnvelope] = (),
-        batch: ExtractionBatch | None = None,
+        tasks: tuple[Task, ...] = (),
+        decisions: Mapping[str, EmailRouteDecision] | None = None,
         mailbox: object | None = None,
     ):
-        async with CompatSession(messages, batch, mailbox) as session:
+        async with CompatSession(messages, tasks, decisions, mailbox) as session:
             yield session
 
     return factory

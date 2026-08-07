@@ -38,15 +38,14 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxReauthRequiredError,
     MailboxTemporaryError,
 )
-from cowork_agent.integrations.llm.providers.compatibility_generator import (
-    GeminiCompatibilityPlanGenerator,
-    GroqCompatibilityPlanGenerator,
-)
 from cowork_agent.integrations.llm.providers.gemini import (
-    GeminiActionExtractor,
+    GeminiActionPlanGenerator,
     GeminiRouteClassifier,
 )
-from cowork_agent.integrations.llm.providers.groq import GroqActionExtractor, GroqRouteClassifier
+from cowork_agent.integrations.llm.providers.groq import (
+    GroqActionPlanGenerator,
+    GroqRouteClassifier,
+)
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -100,13 +99,11 @@ def create_app() -> FastAPI:
                 if provider == "gemini":
                     gemini_settings = GeminiSettings.from_env()
                     classifier = GeminiRouteClassifier(gemini_settings)
-                    generator = GeminiCompatibilityPlanGenerator(
-                        GeminiActionExtractor(gemini_settings)
-                    )
+                    generator = GeminiActionPlanGenerator(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)
-                    generator = GroqCompatibilityPlanGenerator(GroqActionExtractor(groq_settings))
+                    generator = GroqActionPlanGenerator(groq_settings)
                 else:
                     raise ValueError("LLM_PROVIDER must be either 'gemini' or 'groq'")
                 app.state.digest_worker = DigestWorker(
