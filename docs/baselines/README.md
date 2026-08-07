@@ -1,38 +1,15 @@
 # Baselines
 
-Regression baselines captured before pipeline migrations. See
-`tasks/plan.md` Phase 0 (P0-C) for the rationale: the split-call migration
-(V1-M2) must not regress the combined-extractor quality/latency/call-count
-baseline recorded here.
+Regression baselines for pipeline migrations. See `tasks/plan.md` Phase 0
+(P0-C) for the original rationale.
 
-## combined-extractor-baseline-*.json
+## combined-extractor-baseline-*.json (retired)
 
-Produced by `scripts/capture_baseline.py`. Captures the configured combined
-classify+plan extractor (`LLM_PROVIDER`, default `gemini`) over the labeled
-routing fixtures (`tests/fixtures/routing/routing_labels.json`):
-
-- per-case classification agreement vs human labels (the current
-  classifications `actionable` / `informational` / `newsletter` /
-  `automated_no_action` map to PRD-v1 actionability labels per the
-  `ACTIONABILITY_BY_CLASSIFICATION` table in the script);
-- one extractor call per case (call count) and per-case latency;
-- summary agreement rate and total latency.
-
-Reports store case ids and statistics only — never email bodies or subjects.
-
-## Regenerate
-
-```powershell
-# Live capture (needs provider API keys in .env; skips gracefully without them)
-python scripts/capture_baseline.py
-
-# Deterministic smoke run without keys
-python scripts/capture_baseline.py --dry-run
-```
-
-Live capture requires API keys and costs provider calls; the user authorizes
-and runs it. Commit the resulting JSON together with the prompt/provider
-version context noted in the PR.
+`scripts/capture_baseline.py` captured the combined classify+plan extractor
+over the routing fixtures as the regression gate for the V1-M2 split-call
+migration. The combined extractor was deleted in the V1-M3 generator
+migration (T3.3), so the script was retired; no live capture was ever
+authorized. The standing regression harness is the routing evaluation below.
 
 ## Routing evaluation
 
