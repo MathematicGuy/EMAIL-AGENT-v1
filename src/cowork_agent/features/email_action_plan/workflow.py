@@ -20,7 +20,12 @@ from cowork_agent.domain import (
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
     EphemeralEmailEnvelope,
+    RetrievalFilters,
+    RetrievalLimits,
+    RetrievalStatus,
     Route,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
     Task,
 )
 from cowork_agent.features.email_action_plan.policies import (
@@ -32,7 +37,7 @@ from cowork_agent.features.email_action_plan.policies import (
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
 
-from .correlation import correlate_candidates
+from .correlation import TaskCandidate, correlate_candidates
 from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
@@ -41,6 +46,7 @@ from .ports import (
     ResultRepository,
     RouteClassifierPort,
     RunRepository,
+    SemanticMemoryPort,
 )
 from .routing import RouteResolution, resolve_candidate_route
 from .schemas import ExtractionLimits, GenerationContext
@@ -102,6 +108,7 @@ class DigestWorker:
         generator: ActionPlanGeneratorPort,
         short_term: ShortTermStore,
         *,
+        semantic_memory: SemanticMemoryPort | None = None,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
@@ -109,6 +116,7 @@ class DigestWorker:
         del attachments, extraction_limits
         self._runs, self._results, self._mailbox = runs, results, mailbox
         self._classifier, self._generator = classifier, generator
+        self._semantic_memory = semantic_memory
         self._short_term = short_term
 
     async def execute(
@@ -158,7 +166,12 @@ class DigestWorker:
                 run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
             )
             outputs: list[
-                tuple[RouteResolution, tuple[EphemeralEmailEnvelope, ...], ActionPlanOutput]
+                tuple[
+                    RouteResolution,
+                    SemanticRetrievalResponse | None,
+                    tuple[EphemeralEmailEnvelope, ...],
+                    ActionPlanOutput,
+                ]
             ] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
@@ -167,12 +180,16 @@ class DigestWorker:
                 candidate_envelopes = tuple(
                     messages[message_id] for message_id in task_candidate.source_message_ids
                 )
+                retrieval: SemanticRetrievalResponse | None = None
+                if resolution.route is Route.RETRIEVE_RAG:
+                    retrieval = await self._retrieve_for_candidate(run, task_candidate)
                 # Cardinality (frozen contract rule 6, PRD-v1 FR-09): exactly
                 # one Generator call per resolved non-NO_ACTION Task
-                # Candidate. Retrieval stays None until T3.5 wires it.
+                # Candidate; RETRIEVE_RAG adds zero-or-one retrieval call.
                 outputs.append(
                     (
                         resolution,
+                        retrieval,
                         candidate_envelopes,
                         await self._generator.generate(
                             user_timezone=user_timezone,
@@ -181,7 +198,7 @@ class DigestWorker:
                             candidate=task_candidate,
                             envelopes=candidate_envelopes,
                             resolution=resolution,
-                            retrieval=None,
+                            retrieval=retrieval,
                         ),
                     )
                 )
@@ -201,11 +218,11 @@ class DigestWorker:
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
-            for resolution, candidate_envelopes, output in outputs:
+            for resolution, retrieval, candidate_envelopes, output in outputs:
                 validation = validate_action_plan(
                     output,
                     resolution=resolution,
-                    retrieval=None,
+                    retrieval=retrieval,
                     envelopes=candidate_envelopes,
                 )
                 if validation.task is None:
@@ -311,6 +328,66 @@ class DigestWorker:
         if run.emails_matched == 0:
             run.emails_matched = run.emails_processed
         return threads
+
+    async def _retrieve_for_candidate(
+        self, run: DigestRun, candidate: TaskCandidate
+    ) -> SemanticRetrievalResponse:
+        """Zero-or-one semantic retrieval per RETRIEVE_RAG candidate (§12.3).
+
+        Builds the request from the member Route Decisions; on any port
+        failure retries exactly once, then degrades to a structured empty
+        ``no_results`` response so the Generator continues in partial mode
+        instead of inventing knowledge.
+        """
+        gaps = tuple(
+            dict.fromkeys(
+                gap
+                for _, decision in candidate.decisions
+                for gap in decision.knowledge_gaps
+            )
+        )
+        query = next(
+            (
+                decision.retrieval_query
+                for _, decision in candidate.decisions
+                if decision.retrieval_query
+            ),
+            None,
+        )
+        if self._semantic_memory is None or (query is None and not gaps):
+            return _empty_retrieval()
+        request = SemanticRetrievalRequest(
+            run_id=run.id,
+            tenant_id=LOCAL_TENANT_ID,
+            user_id=run.user_id,
+            query=query or "; ".join(gaps),
+            knowledge_gaps=gaps,
+            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=()),
+            limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
+        )
+        for attempt in (1, 2):
+            try:
+                return await self._semantic_memory.retrieve(request)
+            except Exception as exc:
+                # §12.3: metadata only, never email content.
+                logger.warning(
+                    "Run %s retrieval attempt %d failed: %s",
+                    run.id,
+                    attempt,
+                    type(exc).__name__,
+                )
+        return _empty_retrieval()
+
+def _empty_retrieval() -> SemanticRetrievalResponse:
+    """Structured empty retrieval result (§12.3 degraded path)."""
+    return SemanticRetrievalResponse(
+        query_id=f"q_{uuid4().hex}",
+        tenant_id=LOCAL_TENANT_ID,
+        chunks=(),
+        retrieval_status=RetrievalStatus.NO_RESULTS,
+        latency_ms=0,
+    )
+
 
 def _safe_run_error(exc: Exception) -> tuple[str, str]:
     """Return explicitly public error details without exposing secrets or email content."""

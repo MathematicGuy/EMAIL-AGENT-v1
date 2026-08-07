@@ -9,10 +9,14 @@ from cowork_agent.domain.target_contracts import (
     BodyFormat,
     EmailRouteDecision,
     EphemeralEmailEnvelope,
+    ExpectedDocumentType,
     FetchStatus,
     PlanStep,
     ReasonCode,
+    RetrievalStatus,
     Route,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
     SupportingDocument,
     Task,
     ValidationStatus,
@@ -26,7 +30,12 @@ from cowork_agent.features.email_action_plan.workflow import (
 )
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
-from cowork_agent.integrations.llm.fakes import FakePlanGenerator, FakeRouteClassifier
+from cowork_agent.integrations.llm.fakes import (
+    FailingPlanGenerator,
+    FakePlanGenerator,
+    FakeRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -539,5 +548,218 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
         assert [item.gmail_message_id for item in classifier.received_envelopes] == ["m1"]
         # ...and the finalizer still cleared it.
         assert store.get(run.id) is None
+
+    asyncio.run(scenario())
+
+#: Route Decision resolving to RETRIEVE_RAG with explicit gaps and query.
+RAG_DECISION = EmailRouteDecision(
+    actionability=Actionability.ACTION_REQUIRED,
+    route=Route.RETRIEVE_RAG,
+    candidate_action_item=None,
+    email_is_sufficient=False,
+    knowledge_gaps=("quy trình nghỉ phép",),
+    retrieval_query="quy trình nghỉ phép",
+    expected_document_types=(),
+    reason_codes=(ReasonCode.DOMAIN_KNOWLEDGE_REQUIRED,),
+    confidence=0.9,
+)
+
+#: Guard-forced RETRIEVE_RAG without any query or gaps (expected document
+#: type triggers the Policy Guard): retrieval must be skipped, not guessed.
+GUARDED_RAG_DECISION = EmailRouteDecision(
+    actionability=Actionability.ACTION_REQUIRED,
+    route=Route.RETRIEVE_RAG,
+    candidate_action_item=None,
+    email_is_sufficient=True,
+    knowledge_gaps=(),
+    retrieval_query=None,
+    expected_document_types=(ExpectedDocumentType.PROCEDURE,),
+    reason_codes=(ReasonCode.EMAIL_SELF_CONTAINED,),
+    confidence=0.9,
+)
+
+
+class RecordingMemory:
+    """SemanticMemoryPort fake: records requests, replays one canned response."""
+
+    def __init__(self, *, fail_times: int = 0) -> None:
+        self.requests: list[SemanticRetrievalRequest] = []
+        self.fail_times = fail_times
+        self.response = SemanticRetrievalResponse(
+            query_id="q_test",
+            tenant_id=LOCAL_TENANT_ID,
+            chunks=(),
+            retrieval_status=RetrievalStatus.NO_RESULTS,
+            latency_ms=1,
+        )
+
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
+        self.requests.append(request)
+        if len(self.requests) <= self.fail_times:
+            raise TimeoutError("simulated retrieval failure")
+        return self.response
+
+
+def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Xin nghỉ phép")]
+        memory = RecordingMemory()
+        generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-1", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": RAG_DECISION}),
+            generator,
+            ShortTermStore(),
+            semantic_memory=memory,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert completed.action_items_count == 1
+        assert len(memory.requests) == 1
+        request = memory.requests[0]
+        assert request.run_id == run.id
+        assert request.tenant_id == LOCAL_TENANT_ID
+        assert request.user_id == "u1"
+        assert request.query == "quy trình nghỉ phép"
+        assert request.knowledge_gaps == ("quy trình nghỉ phép",)
+        assert request.filters.tenant_scope == LOCAL_TENANT_ID
+        assert generator.received_retrievals == (memory.response,)
+
+    asyncio.run(scenario())
+
+
+def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        memory = RecordingMemory()
+        generator = FakePlanGenerator((task_for("m1", "Gửi báo cáo"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-2", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+            semantic_memory=memory,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        # V1-M3 exit criterion: DIRECT_PLAN never touches Semantic Memory.
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert memory.requests == []
+        assert generator.received_retrievals == (None,)
+
+    asyncio.run(scenario())
+
+
+def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Xin nghỉ phép")]
+        memory = RecordingMemory(fail_times=2)
+        generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-3", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": RAG_DECISION}),
+            generator,
+            ShortTermStore(),
+            semantic_memory=memory,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        # §12.3: retry once, then structured empty -> partial generation.
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert len(memory.requests) == 2
+        degraded = generator.received_retrievals[0]
+        assert degraded is not None
+        assert degraded.chunks == ()
+        assert degraded.retrieval_status is RetrievalStatus.NO_RESULTS
+
+    asyncio.run(scenario())
+
+
+def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Xin nghỉ phép")]
+        memory = RecordingMemory()
+        generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-4", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": GUARDED_RAG_DECISION}),
+            generator,
+            ShortTermStore(),
+            semantic_memory=memory,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert memory.requests == []
+        empty = generator.received_retrievals[0]
+        assert empty is not None and empty.chunks == ()
+        assert empty.retrieval_status is RetrievalStatus.NO_RESULTS
+
+    asyncio.run(scenario())
+
+
+def test_generation_failure_fails_run_with_safe_error() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo", body="Nội dung email tuyệt mật.")]
+        generator = FailingPlanGenerator(
+            GenerationSchemaError("secret internal detail: stack trace here")
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="fail-gen", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        # §12.4: generation failure after repair -> run FAILED with the
+        # adapter's safe error, never internal detail or email content.
+        assert completed is not None and completed.status is RunStatus.FAILED
+        assert completed.error_code == "GENERATION_SCHEMA_ERROR"
+        assert completed.error_message_safe is not None
+        assert "secret internal detail" not in completed.error_message_safe
+        assert "Nội dung email tuyệt mật." not in completed.error_message_safe
+        assert await results.list_items(run.id) == ()
 
     asyncio.run(scenario())

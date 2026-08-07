@@ -25,10 +25,12 @@ from cowork_agent.features.email_action_plan.routing import RouteResolution
 from cowork_agent.features.email_action_plan.schemas import GenerationContext
 from cowork_agent.integrations.llm.providers.gemini import (
     GENERATION_SCHEMA,
+    GENERATOR_REPAIR_INSTRUCTION,
     GENERATOR_SYSTEM_INSTRUCTION,
     GeminiActionPlanGenerator,
+    GenerationSchemaError,
 )
-from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator
+from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator, GroqAPIError
 
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
 RUN_CONTEXT = GenerationContext(run_id="run-9", tenant_id="tenant-1", user_id="user-1")
@@ -247,11 +249,31 @@ def test_generator_stamps_task_and_run_identity_server_side() -> None:
     asyncio.run(scenario())
 
 
-def test_generator_rejects_invalid_enum_payload() -> None:
+def test_generator_repair_retry_recovers_from_invalid_payload() -> None:
     async def scenario() -> None:
-        transport = RecordingTransport([{"task": task_payload(actionability="not_an_enum")}])
-        with pytest.raises(ValueError, match="not a valid Actionability"):
+        transport = RecordingTransport(
+            [{"task": task_payload(actionability="not_an_enum")}, {"task": task_payload()}]
+        )
+        output = await generate_once(gemini_generator(transport))
+
+        assert output.task.actionability is Actionability.ACTION_REQUIRED
+        assert len(transport.prompts) == 2
+        assert not transport.prompts[0].endswith(GENERATOR_REPAIR_INSTRUCTION)
+        assert transport.prompts[1].endswith(GENERATOR_REPAIR_INSTRUCTION)
+
+    asyncio.run(scenario())
+
+
+def test_generator_raises_safe_error_after_failed_repair_retry() -> None:
+    async def scenario() -> None:
+        transport = RecordingTransport([{"task": {}}, {"task": {}}])
+        with pytest.raises(GenerationSchemaError) as excinfo:
             await generate_once(gemini_generator(transport))
+
+        assert excinfo.value.error_code == "GENERATION_SCHEMA_ERROR"
+        # User-facing message never quotes email content.
+        assert "body-msg-1" not in excinfo.value.safe_message
+        assert len(transport.prompts) == 2
 
     asyncio.run(scenario())
 
@@ -300,3 +322,52 @@ def test_groq_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
     assert isinstance(user_content, str)
     assert json.dumps(GENERATION_SCHEMA, ensure_ascii=False) in user_content
     assert "<untrusted_data>" in user_content
+
+
+def test_groq_generator_repair_retry_recovers_then_fails_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads: list[dict[str, object]] = [
+        {"task": {}},
+        {"task": task_payload()},
+        {"task": {}},
+        {"task": {}},
+    ]
+    captured: list[dict[str, object]] = []
+
+    def fake_post_json(
+        url: str, api_key: str, body: dict[str, object], timeout_seconds: int
+    ) -> dict[str, object]:
+        del url, api_key, timeout_seconds
+        captured.append(body)
+        return {
+            "choices": [{"message": {"content": json.dumps(payloads.pop(0))}}]
+        }
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.groq._post_json", fake_post_json
+    )
+
+    async def generate_once_groq() -> None:
+        settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
+        await GroqActionPlanGenerator(settings).generate(
+            user_timezone="Asia/Ho_Chi_Minh",
+            current_time=CURRENT_TIME,
+            run_context=RUN_CONTEXT,
+            candidate=candidate("msg-1"),
+            envelopes=(envelope("msg-1"),),
+            resolution=RESOLUTION,
+            retrieval=None,
+        )
+
+    async def scenario() -> None:
+        await generate_once_groq()  # first payload invalid, repaired second wins
+        assert len(captured) == 2
+        # json.dumps escapes newlines, so match a newline-free fragment of
+        # GENERATOR_REPAIR_INSTRUCTION unique to the generator retry.
+        assert "steps numbered from 1" in json.dumps(captured[1], ensure_ascii=False)
+        with pytest.raises(GroqAPIError):
+            await generate_once_groq()  # both payloads invalid -> safe failure
+        assert len(captured) == 4
+
+    asyncio.run(scenario())

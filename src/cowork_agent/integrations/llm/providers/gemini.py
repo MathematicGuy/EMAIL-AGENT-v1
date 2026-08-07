@@ -125,13 +125,27 @@ class GoogleGenAITransport:
         return cast(Mapping[str, Any], parsed)
 
 
+class GenerationSchemaError(RuntimeError):
+    """Gemini generation failed schema validation even after the repair retry."""
+
+    error_code = "GENERATION_SCHEMA_ERROR"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.safe_message = (
+            "Mô hình tạo kế hoạch trả về dữ liệu không đúng cấu trúc yêu cầu. "
+            "Vui lòng thử lại; chi tiết kỹ thuật đã được ghi vào log backend."
+        )
+
+
 class GeminiActionPlanGenerator:
     """ActionPlanGeneratorPort adapter for Gemini (PRD-v1 FR-09, §6.6).
 
     Performs exactly one structured generation call per resolved
     non-``NO_ACTION`` Task Candidate (master-comparison §3.8) and returns
     exactly one Task. Key rotation on rate limits mirrors the classifier;
-    an invalid payload raises — the schema-repair retry arrives with T3.6.
+    an invalid payload triggers exactly one schema-repair retry (PRD-v1
+    §12.4) before raising :class:`GenerationSchemaError`.
     """
 
     def __init__(
@@ -163,13 +177,30 @@ class GeminiActionPlanGenerator:
             user_timezone, current_time, envelopes, candidate, resolution, retrieval
         )
         payload = await self._generate(prompt)
-        return _parse_action_plan_output(
-            payload,
-            run_context=run_context,
-            candidate=candidate,
-            first_envelope=envelopes[0],
-            current_time=current_time,
-        )
+        try:
+            return _parse_action_plan_output(
+                payload,
+                run_context=run_context,
+                candidate=candidate,
+                first_envelope=envelopes[0],
+                current_time=current_time,
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
+        # PRD-v1 §12.4: one schema-repair retry, mirroring the classifier.
+        repaired = await self._generate(prompt + GENERATOR_REPAIR_INSTRUCTION)
+        try:
+            return _parse_action_plan_output(
+                repaired,
+                run_context=run_context,
+                candidate=candidate,
+                first_envelope=envelopes[0],
+                current_time=current_time,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GenerationSchemaError(
+                "Gemini generation payload failed schema validation after repair retry"
+            ) from exc
 
     async def _generate(self, prompt: str) -> Mapping[str, Any]:
         keys = await self._rotator.candidates(self._settings.max_attempts)
@@ -691,6 +722,14 @@ CLASSIFIER_REPAIR_INSTRUCTION = (
     " Repair it: return ONLY one valid JSON object matching the schema exactly, with one"
     " entry in `emails` for every input message (same providerMessageId values), valid"
     " enum values only, all required fields present, and confidence between 0 and 1."
+)
+
+GENERATOR_REPAIR_INSTRUCTION = (
+    "\nYour previous response was invalid or did not match the generation schema."
+    " Repair it: return ONLY one valid JSON object matching the schema exactly, with one"
+    " `task` object, valid enum values only, all required fields present, actionPlan"
+    " steps numbered from 1, and every supportingCitationId referencing a citationId"
+    " from the retrievedContext (empty arrays when none apply)."
 )
 
 

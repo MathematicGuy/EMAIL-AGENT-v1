@@ -1,8 +1,10 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 
 import uvicorn
@@ -15,6 +17,7 @@ from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
+    SemanticMemoryPort,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
@@ -46,6 +49,10 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
 )
+from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
+from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -55,6 +62,11 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 )
 
 from .api.handlers import _jsonable
+
+logger = logging.getLogger(__name__)
+
+#: Committed in-repo knowledge corpus (V1-M3), resolved from the package root.
+_RAG_CORPUS_PATH = Path(__file__).resolve().parents[2] / "data" / "extracted"
 
 
 class CreateRunRequest(BaseModel):
@@ -100,10 +112,12 @@ def create_app() -> FastAPI:
                     gemini_settings = GeminiSettings.from_env()
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
+                    semantic_memory = await _build_semantic_memory(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)
                     generator = GroqActionPlanGenerator(groq_settings)
+                    semantic_memory = NullSemanticMemory()
                 else:
                     raise ValueError("LLM_PROVIDER must be either 'gemini' or 'groq'")
                 app.state.digest_worker = DigestWorker(
@@ -114,6 +128,7 @@ def create_app() -> FastAPI:
                     classifier,
                     generator,
                     ShortTermStore(),
+                    semantic_memory=semantic_memory,
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:
@@ -371,6 +386,26 @@ def _public_connection(connection: Any) -> dict[str, Any]:
         "status": connection.status,
         "createdAt": connection.created_at.isoformat(),
     }
+
+
+async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort:
+    """Best-effort in-repo RAG store; null memory on any setup failure.
+
+    RETRIEVE_RAG candidates degrade to structured empty retrieval (§12.3)
+    when the corpus or the embedding API is unavailable, so a missing index
+    never blocks digest runs.
+    """
+    try:
+        documents = load_corpus(_RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
+        memory = InRepoSemanticMemory(documents, GeminiEmbeddingAdapter(settings))
+        await memory.build_index()
+        return memory
+    except Exception as exc:
+        logger.warning(
+            "Semantic memory unavailable (%s); retrieval returns structured empty results",
+            type(exc).__name__,
+        )
+        return NullSemanticMemory()
 
 
 def main() -> None:

@@ -77,6 +77,7 @@ class FakePlanGenerator:
     def __init__(self, tasks: tuple[Task, ...] = ()) -> None:
         self.tasks = tasks
         self.received_candidates: tuple[TaskCandidate, ...] = ()
+        self.received_retrievals: tuple[SemanticRetrievalResponse | None, ...] = ()
         self.call_count = 0
 
     async def generate(
@@ -90,8 +91,9 @@ class FakePlanGenerator:
         resolution: RouteResolution,
         retrieval: SemanticRetrievalResponse | None,
     ) -> ActionPlanOutput:
-        del user_timezone, retrieval
+        del user_timezone
         self.received_candidates += (candidate,)
+        self.received_retrievals += (retrieval,)
         self.call_count += 1
         source_ids = frozenset(candidate.source_message_ids)
         for task in self.tasks:
@@ -121,3 +123,16 @@ class FakePlanGenerator:
                 created_at=current_time,
             )
         )
+
+
+class FailingPlanGenerator:
+    """ActionPlanGeneratorPort fake that always raises (PRD-v1 §12.4 tests)."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.call_count = 0
+
+    async def generate(self, **kwargs: object) -> ActionPlanOutput:
+        del kwargs
+        self.call_count += 1
+        raise self.error

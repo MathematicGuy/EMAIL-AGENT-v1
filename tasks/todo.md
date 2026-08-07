@@ -29,13 +29,13 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] Checkpoint: V1-M2 exit criteria
 
 ## V1-M3 — RAG, generation, validation
-- [ ] 3.1 SemanticMemoryPort + null adapter (Lane RAG)
-- [ ] 3.2 In-repo RAG adapter: corpus loader + embeddings + vector store + ACL filter (Lane RAG) — needs 3.1
-- [ ] 3.3 Generator: one call per non-NO_ACTION candidate (Lane Core)
-- [ ] 3.4 Validators: schema, grounding, citation, privacy, unsupported-procedure — needs 3.3
-- [ ] 3.5 RAG failure → Partial Plan path — needs 3.2, 3.3
-- [ ] 3.6 Generation failure → schema-repair retry path; DIRECT_PLAN zero-retrieval test
-- [ ] Checkpoint: V1-M3 exit criteria
+- [x] 3.1 SemanticMemoryPort + null adapter (Lane RAG)
+- [x] 3.2 In-repo RAG adapter: corpus loader + embeddings + vector store + ACL filter (Lane RAG) — needs 3.1
+- [x] 3.3 Generator: one call per non-NO_ACTION candidate (Lane Core)
+- [x] 3.4 Validators: schema, grounding, citation, privacy, unsupported-procedure — needs 3.3
+- [x] 3.5 RAG failure → Partial Plan path — needs 3.2, 3.3
+- [x] 3.6 Generation failure → schema-repair retry path; DIRECT_PLAN zero-retrieval test
+- [x] Checkpoint: V1-M3 exit criteria
 
 ## V1-M4 — Persistence and presentation
 - [ ] 4.1 Task persistence port + local adapter (idempotent key)

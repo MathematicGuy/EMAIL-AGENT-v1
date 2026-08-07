@@ -32,6 +32,7 @@ from .gemini import (
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
     GENERATION_SCHEMA,
+    GENERATOR_REPAIR_INSTRUCTION,
     GENERATOR_SYSTEM_INSTRUCTION,
     _build_generation_prompt,
     _build_prompt,
@@ -65,9 +66,9 @@ class GroqActionPlanGenerator:
 
     Performs exactly one structured generation call per resolved
     non-``NO_ACTION`` Task Candidate (master-comparison §3.8) and returns
-    exactly one Task. Schema/parse failures wrap into :class:`GroqAPIError`
-    so the run reports ``GROQ_API_ERROR``; the schema-repair retry arrives
-    with T3.6.
+    exactly one Task. Schema/parse failures trigger one repair retry
+    (PRD-v1 §12.4); a still-invalid payload wraps into
+    :class:`GroqAPIError` so the run reports ``GROQ_API_ERROR``.
     """
 
     def __init__(self, settings: GroqSettings) -> None:
@@ -91,6 +92,17 @@ class GroqActionPlanGenerator:
         try:
             return _parse_action_plan_output(
                 payload,
+                run_context=run_context,
+                candidate=candidate,
+                first_envelope=envelopes[0],
+                current_time=current_time,
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
+        repaired = await self._complete(prompt + GENERATOR_REPAIR_INSTRUCTION)
+        try:
+            return _parse_action_plan_output(
+                repaired,
                 run_context=run_context,
                 candidate=candidate,
                 first_envelope=envelopes[0],
