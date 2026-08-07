@@ -5,10 +5,10 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 (main agent) task; others are subagent-dispatchable.
 
 ## Phase 0 — Fixtures, baseline, contract freeze
-- [ ] P0-A Compatibility test suite (`tests/compatibility/`) — lanes: API contract · ordering/dedupe · query guard · privacy
-- [ ] P0-B Labeled routing fixture set (`tests/fixtures/routing/`, ≥25 cases)
-- [ ] P0-C Combined-extractor baseline capture (`scripts/capture_baseline.py` + `docs/baselines/`) — needs P0-B
-- [ ] [O] P0-D Correlation contract freeze (`docs/references/task-candidate-correlation-contract.md`)
+- [x] P0-A Compatibility test suite (`tests/compatibility/`) — lanes: API contract · ordering/dedupe · query guard · privacy
+- [x] P0-B Labeled routing fixture set (`tests/fixtures/routing/`, ≥25 cases)
+- [x] P0-C Combined-extractor baseline capture (`scripts/capture_baseline.py` + `docs/baselines/`) — needs P0-B
+- [x] [O] P0-D Correlation contract freeze (`docs/references/task-candidate-correlation-contract.md`)
 - [ ] Checkpoint: full `pytest` + `ruff` + `mypy` green; commit; user review
 
 ## V1-M1 — Core contracts and Gmail entry

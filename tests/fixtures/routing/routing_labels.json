@@ -1,0 +1,366 @@
+[
+  {
+    "id": "r-001",
+    "subject": "Review PR #45: Tích hợp module mã hóa token OAuth",
+    "sender": "lead-dev@company.com",
+    "body": "Hi Anh,\n\nEm vừa tạo PR #45 bổ sung Fernet encryption cho refresh token Gmail.\nNhờ anh review code và merge vào branch dev trước cuối ngày hôm nay giúp em.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": true,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  },
+  {
+    "id": "r-002",
+    "subject": "Khách hàng yêu cầu hoàn tiền đơn hàng #88213",
+    "sender": "support@company.com",
+    "body": "Chào bộ phận CSKH,\n\nKhách hàng đơn #88213 yêu cầu hoàn tiền do sản phẩm lỗi.\nNhờ bạn xử lý theo đúng quy trình hoàn tiền của công ty và phản hồi khách trong hôm nay.",
+    "thread_id": "T-refund",
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["company_procedure_required"]
+    }
+  },
+  {
+    "id": "r-003",
+    "subject": "Đề xuất làm việc từ xa tuần tới",
+    "sender": "an.tran@company.com",
+    "body": "Chị ơi,\n\nEm muốn đăng ký làm việc từ xa từ thứ Hai đến thứ Tư tuần tới vì lý do gia đình.\nChị duyệt giúp em theo chính sách remote của công ty ạ.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["policy_required"]
+    }
+  },
+  {
+    "id": "r-004",
+    "subject": "Contract renewal needs approval for Acme account",
+    "sender": "legal@company.com",
+    "body": "Hi,\n\nThe Acme contract renewal is above the standard value band.\nPlease route it through the approval matrix and confirm who signs before Friday.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["governance_required"]
+    }
+  },
+  {
+    "id": "r-005",
+    "subject": "Gửi báo giá cho khách hàng TechCorp",
+    "sender": "sales@company.com",
+    "body": "Chào team,\n\nKhách TechCorp cần báo giá gói Enterprise.\nNhờ bạn soạn báo giá theo đúng mẫu báo giá chuẩn của công ty và gửi trước ngày mai.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["template_required"]
+    }
+  },
+  {
+    "id": "r-006",
+    "subject": "Submit your travel expense claim for the Hanoi trip",
+    "sender": "finance@company.com",
+    "body": "Hi,\n\nPlease submit the travel expense claim for last week's Hanoi trip.\nUse the standard expense claim form and attach receipts; finance needs it before payroll cutoff.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["company_procedure_required"]
+    }
+  },
+  {
+    "id": "r-007",
+    "subject": "Hướng dẫn xuất hóa đơn VAT cho hợp đồng mới",
+    "sender": "ketoan@company.com",
+    "body": "Chào bạn,\n\nHợp đồng dịch vụ tháng 8 cần xuất hóa đơn VAT 10%.\nBạn làm theo quy định thuế hiện hành của công ty và gửi hóa đơn cho khách trước ngày 10 nhé.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["domain_knowledge_required"]
+    }
+  },
+  {
+    "id": "r-008",
+    "subject": "Update the Project Phoenix tracker before standup",
+    "sender": "pm@company.com",
+    "body": "Hey,\n\nBefore standup, please update the Project Phoenix tracker with the latest burn-down.\nThe tracker is the one the Phoenix team uses for the migration work.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["internal_term_unresolved"]
+    }
+  },
+  {
+    "id": "r-009",
+    "subject": "Duyệt giảm giá 25% cho khách hàng lớn",
+    "sender": "sales-manager@company.com",
+    "body": "Chào bạn,\n\nKhách hàng muốn mức chiết khấu 25% cho hợp đồng năm.\nBạn duyệt giúp mình mức này nhé, cần trả lời khách trước chiều nay.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["policy_required"]
+    }
+  },
+  {
+    "id": "r-010",
+    "subject": "Suggestion: add retry logging to the import job",
+    "sender": "dev-lead@company.com",
+    "body": "Hi,\n\nThe nightly import job failed silently twice this week.\nIt would help to add retry logging with attempt counts; feel free to pick it up if you have time this sprint.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_suggested",
+      "email_is_sufficient": true,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  },
+  {
+    "id": "r-011",
+    "subject": "Nên tổ chức buổi đào tạo nội bộ về bảo mật",
+    "sender": "security@company.com",
+    "body": "Chào team,\n\nGần đây có nhiều vụ tấn công phishing nhắm vào nhân viên.\nMình đề xuất tổ chức một buổi đào tạo theo chương trình nâng cao nhận thức bảo mật của công ty trong tháng này.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_suggested",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["domain_knowledge_required"]
+    }
+  },
+  {
+    "id": "r-012",
+    "subject": "Thông báo bảo trì hệ thống định kỳ cuối tuần",
+    "sender": "admin@company.com",
+    "body": "Kính gửi toàn thể nhân viên,\n\nHệ thống Email và Portal nội bộ sẽ tạm dừng bảo trì từ 23:00 thứ Bảy đến 02:00 Chủ Nhật.\nXin vui lòng hoàn thành công việc và lưu dữ liệu trước thời gian trên.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "informational",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-013",
+    "subject": "FYI: Q3 status report is published",
+    "sender": "office@company.com",
+    "body": "Hi all,\n\nThe Q3 status report is now available on the internal portal.\nNo response needed; this is for information only.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "informational",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-014",
+    "subject": "[Newsletter] Bản tin Công nghệ AI & Python hàng tuần #15",
+    "sender": "newsletter@techdigest.io",
+    "body": "Chào bạn,\n\nCùng điểm qua các công cụ AI mới nhất tuần này: GPT-4o update, Streamlit release và các mẹo tối ưu hóa Python code.\nChúc bạn một tuần làm việc hiệu quả!",
+    "thread_id": null,
+    "labels": {
+      "actionability": "irrelevant",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-015",
+    "subject": "[Ưu Đãi] Giảm giá 30% cho khóa học Python Advanced",
+    "sender": "promo@edu-online.com",
+    "body": "Cơ hội duy nhất trong tháng 8!\n\nĐăng ký ngay khóa học Lập trình Python Nâng cao để nhận ưu đãi giảm 30% học phí khi nhập mã PYTHON30.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "irrelevant",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-016",
+    "subject": "Need the usual fix for the Omega sync issue",
+    "sender": "ops@company.com",
+    "body": "Hi,\n\nThe Omega sync is failing again like last quarter.\nCan you apply the usual remediation we follow for this and confirm once done?",
+    "thread_id": null,
+    "labels": {
+      "actionability": "unclear",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["internal_term_unresolved", "company_procedure_required"]
+    }
+  },
+  {
+    "id": "r-017",
+    "subject": "Can someone look into the numbers from yesterday?",
+    "sender": "manager@company.com",
+    "body": "Hi team,\n\nThe numbers from yesterday don't look right.\nSomebody please check and let me know what happened.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "unclear",
+      "email_is_sufficient": true,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  },
+  {
+    "id": "r-018",
+    "subject": "Yêu cầu hoàn tiền cho khách đơn #88213",
+    "sender": "support@company.com",
+    "body": "Chào bộ phận CSKH,\n\nKhách đơn #88213 báo sản phẩm bị lỗi và muốn hoàn tiền.\nNhờ bạn kiểm tra điều kiện hoàn tiền theo quy trình và phản hồi khách sớm.",
+    "thread_id": "T-refund",
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["company_procedure_required"]
+    }
+  },
+  {
+    "id": "r-019",
+    "subject": "Re: Yêu cầu hoàn tiền cho khách đơn #88213",
+    "sender": "support@company.com",
+    "body": "Chào bạn,\n\nKhách đang hỏi lại vụ hoàn tiền đơn #88213 vì chưa thấy phản hồi.\nBạn đẩy nhanh giúp mình theo quy trình hoàn tiền nhé.",
+    "thread_id": "T-refund",
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["company_procedure_required"]
+    }
+  },
+  {
+    "id": "r-020",
+    "subject": "Deploy freeze this week",
+    "sender": "release@company.com",
+    "body": "Hi all,\n\nReminder that a deploy freeze is in effect until Friday 18:00 due to the platform migration.\nPlan your releases accordingly.",
+    "thread_id": "T-deploy",
+    "labels": {
+      "actionability": "informational",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-021",
+    "subject": "Re: Deploy freeze this week",
+    "sender": "release@company.com",
+    "body": "Hi,\n\nYour hotfix request needs an exception approval during the freeze.\nPlease submit it through the freeze exception process so the release board can review it today.",
+    "thread_id": "T-deploy",
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["governance_required"]
+    }
+  },
+  {
+    "id": "r-022",
+    "subject": "[URGENT] Khắc phục sự cố sập DB Server Production",
+    "sender": "devops-alert@company.com",
+    "body": "Chào nhóm DevOps,\n\nHệ thống DB Node 2 đang bị dính lỗi Connection Timeout khiến API thanh toán bị gián đoạn.\nĐề nghị kiểm tra log và deploy bản hotfix khẩn cấp trước 14:00 chiều nay.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": true,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  },
+  {
+    "id": "r-023",
+    "subject": "Lịch họp duyệt Proposal dự án Q3 với khách hàng Acme",
+    "sender": "pm@company.com",
+    "body": "Chào mọi người,\n\nChúng ta có buổi họp quan trọng với bên khách hàng Acme vào 10h sáng mai.\nNhờ bạn cập nhật lại file báo giá ngân sách và gửi lại cho mình trước 8h sáng mai để chuẩn bị slide trình chiếu.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_suggested",
+      "email_is_sufficient": true,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  },
+  {
+    "id": "r-024",
+    "subject": "Prepare the onboarding deck for the new hires",
+    "sender": "hr@company.com",
+    "body": "Hi,\n\nTwo new engineers start Monday.\nPlease prepare the onboarding session using the standard onboarding deck template and send invites today.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["template_required"]
+    }
+  },
+  {
+    "id": "r-025",
+    "subject": "Nhắc nhở cập nhật Timesheet và Kế hoạch công việc tuần mới",
+    "sender": "hr@company.com",
+    "body": "Thông báo tới toàn bộ nhân sự,\n\nMọi người vui lòng điền đầy đủ Timesheet tuần này trên Jira trước 17:00 chiều thứ Sáu.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "informational",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-026",
+    "subject": "Customer data deletion request under retention rules",
+    "sender": "privacy@company.com",
+    "body": "Hi,\n\nWe received a data deletion request from a customer.\nPlease handle it according to our data retention policy and confirm the timeline with legal.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "RETRIEVE_RAG",
+      "reason_codes": ["policy_required"]
+    }
+  },
+  {
+    "id": "r-027",
+    "subject": "Out of office: auto reply",
+    "sender": "colleague@company.com",
+    "body": "I am out of the office until Monday with limited access to email.\nThis is an automatic reply.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "irrelevant",
+      "email_is_sufficient": false,
+      "expected_route": "NO_ACTION",
+      "reason_codes": ["no_action"]
+    }
+  },
+  {
+    "id": "r-028",
+    "subject": "Xác nhận lại yêu cầu tùy chỉnh của khách hàng",
+    "sender": "account-manager@company.com",
+    "body": "Chào bạn,\n\nKhách hàng muốn tùy chỉnh báo cáo theo ý riêng nhưng chưa nói rõ định dạng nào, chỉ nói 'làm giống lần trước gặp mặt'.\nBạn giúp mình chốt phương án với khách; phần này chưa có tài liệu nào ghi lại.",
+    "thread_id": null,
+    "labels": {
+      "actionability": "action_required",
+      "email_is_sufficient": false,
+      "expected_route": "DIRECT_PLAN",
+      "reason_codes": ["email_self_contained"]
+    }
+  }
+]
