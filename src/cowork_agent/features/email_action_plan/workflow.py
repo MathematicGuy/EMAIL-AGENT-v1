@@ -42,8 +42,9 @@ from .ports import (
     RouteClassifierPort,
     RunRepository,
 )
-from .routing import resolve_candidate_route
+from .routing import RouteResolution, resolve_candidate_route
 from .schemas import ExtractionLimits, GenerationContext
+from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,9 @@ class DigestWorker:
             run_context = GenerationContext(
                 run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
             )
-            outputs: list[ActionPlanOutput] = []
+            outputs: list[
+                tuple[RouteResolution, tuple[EphemeralEmailEnvelope, ...], ActionPlanOutput]
+            ] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
                 if resolution.route is Route.NO_ACTION:
@@ -168,14 +171,18 @@ class DigestWorker:
                 # one Generator call per resolved non-NO_ACTION Task
                 # Candidate. Retrieval stays None until T3.5 wires it.
                 outputs.append(
-                    await self._generator.generate(
-                        user_timezone=user_timezone,
-                        current_time=clock,
-                        run_context=run_context,
-                        candidate=task_candidate,
-                        envelopes=candidate_envelopes,
-                        resolution=resolution,
-                        retrieval=None,
+                    (
+                        resolution,
+                        candidate_envelopes,
+                        await self._generator.generate(
+                            user_timezone=user_timezone,
+                            current_time=clock,
+                            run_context=run_context,
+                            candidate=task_candidate,
+                            envelopes=candidate_envelopes,
+                            resolution=resolution,
+                            retrieval=None,
+                        ),
                     )
                 )
             logger.debug(
@@ -188,13 +195,27 @@ class DigestWorker:
             # Routing owns selection (master-comparison §3.8): the legacy
             # "actionable" classification filter and the empty-evidence /
             # low-confidence skips disappear with the combined batch — every
-            # generated Task becomes an Action Item unless it duplicates a
-            # fingerprint already produced in this run.
+            # generated Task that passes the FR-10 output validators becomes
+            # an Action Item unless it duplicates a fingerprint already
+            # produced in this run.
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
-            for output in outputs:
-                task = output.task
+            for resolution, candidate_envelopes, output in outputs:
+                validation = validate_action_plan(
+                    output,
+                    resolution=resolution,
+                    retrieval=None,
+                    envelopes=candidate_envelopes,
+                )
+                if validation.task is None:
+                    logger.warning(
+                        "Run %s dropped generated task: %s",
+                        run.id,
+                        [v.code for v in validation.violations],
+                    )
+                    continue
+                task = validation.task
                 source = messages.get(task.gmail_message_id)
                 if source is None:
                     continue

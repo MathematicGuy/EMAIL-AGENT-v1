@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from cowork_agent.domain import Priority, RunStatus
@@ -12,6 +13,7 @@ from cowork_agent.domain.target_contracts import (
     PlanStep,
     ReasonCode,
     Route,
+    SupportingDocument,
     Task,
     ValidationStatus,
 )
@@ -39,6 +41,7 @@ def email(
     subject: str,
     *,
     attachments_present: bool = False,
+    body: str = "Nội dung",
 ) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="",
@@ -53,7 +56,7 @@ def email(
         subject=subject,
         received_at=NOW,
         labels=(),
-        normalized_body="Nội dung",
+        normalized_body=body,
         body_format=BodyFormat.TEXT,
         attachments_present=attachments_present,
         fetch_status=FetchStatus.COMPLETE,
@@ -140,6 +143,85 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         assert [
             candidate.source_message_ids for candidate in generator.received_candidates
         ] == [("m1",)]
+
+    asyncio.run(scenario())
+
+
+def test_validation_drops_generated_task_leaking_raw_email_body() -> None:
+    leaked_body = "Vui lòng gửi báo cáo tài chính quý ba cho ban giám đốc trước thứ Sáu."
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Báo cáo quý ba", body=leaked_body)]
+        leaked_task = replace(task_for("m1", "Gửi báo cáo"), request_summary=leaked_body)
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1",
+            mailbox_connection_id="mbx1",
+            idempotency_key="validation-leak",
+            now=NOW,
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((leaked_task,)),
+            ShortTermStore(),
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert completed.action_items_count == 0
+        assert completed.emails_actionable == 0
+        assert completed.ignored_emails_count == 1
+        assert await results.list_items(run.id) == ()
+
+    asyncio.run(scenario())
+
+
+def test_validation_strips_bogus_citations_from_direct_plan_task() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        bogus_task = replace(
+            task_for("m1", "Gửi báo cáo"),
+            supporting_documents=(
+                SupportingDocument(
+                    citation_id="cit_bogus",
+                    document_id="doc_1",
+                    title="Sổ tay quy trình",
+                    section=None,
+                    url="https://docs.example.com/doc_1",
+                    relevance_score=0.9,
+                ),
+            ),
+            action_plan=(PlanStep(1, "Kiểm tra yêu cầu", ("cit_bogus",)),),
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1",
+            mailbox_connection_id="mbx1",
+            idempotency_key="validation-citations",
+            now=NOW,
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((bogus_task,)),
+            ShortTermStore(),
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        saved = await results.list_items(run.id)
+        assert len(saved) == 1
+        assert saved[0].title == "Gửi báo cáo"
+        assert saved[0].evidence == ()
 
     asyncio.run(scenario())
 
