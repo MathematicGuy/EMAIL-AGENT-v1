@@ -40,6 +40,35 @@ class InMemoryRunRepository:
     async def save(self, run: DigestRun) -> None:
         self.runs[run.id] = run
 
+    async def list_stuck_runs(
+        self, *, running_before: datetime, queued_before: datetime
+    ) -> tuple[DigestRun, ...]:
+        stuck: list[DigestRun] = []
+        for run in self.runs.values():
+            if (
+                run.status is RunStatus.RUNNING
+                and run.started_at is not None
+                and run.started_at < running_before
+            ) or (
+                run.status is RunStatus.QUEUED
+                and run.created_at is not None
+                and run.created_at < queued_before
+            ):
+                stuck.append(run)
+        return tuple(stuck)
+
+    async def reset_stuck_run(self, run_id: str, *, started_before: datetime) -> bool:
+        run = self.runs.get(run_id)
+        if (
+            run is None
+            or run.status is not RunStatus.RUNNING
+            or run.started_at is None
+            or run.started_at >= started_before
+        ):
+            return False
+        run.status, run.started_at = RunStatus.QUEUED, None
+        return True
+
 
 class InMemoryResultRepository:
     def __init__(self) -> None:

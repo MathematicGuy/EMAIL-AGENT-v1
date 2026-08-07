@@ -28,6 +28,10 @@ from .routing import RouteResolution
 from .schemas import ClassificationResult, ExtractionLimits, GenerationContext, SearchPage
 
 
+class MailboxTemporaryError(RuntimeError):
+    """Transient mailbox failure; safe to retry or skip (V1-H T5.4)."""
+
+
 class MailboxPort(Protocol):
     async def search_unread(
         self, connection_id: str, query: str, page_size: int, cursor: str | None = None
@@ -107,6 +111,18 @@ class RunRepository(Protocol):
     async def get(self, run_id: str) -> DigestRun | None: ...
     async def claim(self, run_id: str, started_at: datetime) -> DigestRun | None: ...
     async def save(self, run: DigestRun) -> None: ...
+    async def list_stuck_runs(
+        self, *, running_before: datetime, queued_before: datetime
+    ) -> Sequence[DigestRun]:
+        """Runs stuck in RUNNING past ``running_before`` or in QUEUED past
+        ``queued_before`` (V1-H T5.4 recovery sweep)."""
+        ...
+
+    async def reset_stuck_run(self, run_id: str, *, started_before: datetime) -> bool:
+        """Compare-and-set recovery reset: back to QUEUED only if the run is
+        still RUNNING with ``started_at`` before ``started_before``. Returns
+        whether the reset happened (V1-H T5.4)."""
+        ...
 
 
 class ResultRepository(Protocol):

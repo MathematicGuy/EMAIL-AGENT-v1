@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import html
+import random
 import re
 import secrets
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -12,7 +13,7 @@ from email.utils import getaddresses, parseaddr
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow  # type: ignore[import-untyped]
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
@@ -25,7 +26,10 @@ from cowork_agent.domain.target_contracts import (
     EphemeralEmailEnvelope,
     FetchStatus,
 )
-from cowork_agent.features.email_action_plan.ports import MailboxConnectionRepository
+from cowork_agent.features.email_action_plan.ports import (
+    MailboxConnectionRepository,
+    MailboxTemporaryError,
+)
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
 
 from .auth import OAuthStateManager, TokenCipher
@@ -39,8 +43,19 @@ class MailboxReauthRequiredError(RuntimeError):
     pass
 
 
-class MailboxTemporaryError(RuntimeError):
-    pass
+#: V1-H T5.4 bounded retry budget for transient Gmail failures. Delays use
+#: full jitter (uniform in [0, exponential cap]) so concurrent workers do
+#: not thunder-herd the API after an outage.
+_RETRY_ATTEMPTS = 3
+_RETRY_BASE_DELAY_SECONDS = 0.5
+_RETRY_MAX_DELAY_SECONDS = 4.0
+_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def _retry_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff for the given 1-based attempt."""
+    ceiling = min(_RETRY_MAX_DELAY_SECONDS, _RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+    return random.uniform(0.0, ceiling)
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,15 +275,29 @@ class GmailMailboxAdapter:
         )
 
     async def _call(self, operation: Callable[[], Mapping[str, Any]]) -> Mapping[str, Any]:
-        try:
-            return cast(Mapping[str, Any], await asyncio.to_thread(operation))
-        except RefreshError as exc:
-            raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
-        except HttpError as exc:
-            status = getattr(exc.resp, "status", None)
-            if status in {401, 403}:
+        """Bounded retry budget (T5.4): transient API/transport failures —
+        including token-refresh hiccups, which surface as transport errors —
+        are retried with jittered backoff; authorization failures surface
+        immediately and exhaust no budget."""
+        for attempt in range(1, _RETRY_ATTEMPTS + 1):
+            try:
+                return cast(Mapping[str, Any], await asyncio.to_thread(operation))
+            except RefreshError as exc:
                 raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
-            raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
+            except HttpError as exc:
+                status = getattr(exc.resp, "status", None)
+                if status in {401, 403}:
+                    raise MailboxReauthRequiredError(
+                        "Gmail authorization must be renewed"
+                    ) from exc
+                if attempt >= _RETRY_ATTEMPTS or status not in _RETRYABLE_STATUSES:
+                    raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
+                await asyncio.sleep(_retry_delay(attempt))
+            except TransportError as exc:
+                if attempt >= _RETRY_ATTEMPTS:
+                    raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
+                await asyncio.sleep(_retry_delay(attempt))
+        raise AssertionError("unreachable: retry loop always returns or raises")
 
 
 def _get_profile_email(credentials: Credentials) -> str:

@@ -13,7 +13,7 @@ import os
 import selectors
 import sys
 from collections.abc import Callable, Coroutine, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -140,6 +140,35 @@ class StubRunRepository:
 
     async def save(self, run: DigestRun) -> None:
         self.runs[run.id] = run
+
+    async def list_stuck_runs(
+        self, *, running_before: datetime, queued_before: datetime
+    ) -> tuple[DigestRun, ...]:
+        stuck: list[DigestRun] = []
+        for run in self.runs.values():
+            if (
+                run.status is RunStatus.RUNNING
+                and run.started_at is not None
+                and run.started_at < running_before
+            ) or (
+                run.status is RunStatus.QUEUED
+                and run.created_at is not None
+                and run.created_at < queued_before
+            ):
+                stuck.append(run)
+        return tuple(stuck)
+
+    async def reset_stuck_run(self, run_id: str, *, started_before: datetime) -> bool:
+        run = self.runs.get(run_id)
+        if (
+            run is None
+            or run.status is not RunStatus.RUNNING
+            or run.started_at is None
+            or run.started_at >= started_before
+        ):
+            return False
+        run.status, run.started_at = RunStatus.QUEUED, None
+        return True
 
 
 class RecordingExecutor:
@@ -413,6 +442,43 @@ def test_consumer_drives_real_digest_worker_end_to_end() -> None:
             assert len(await tasks.list_for_run(run.id)) == 1
             pending = await client.xpending(DEFAULT_STREAM, "test-group")
             assert pending["pending"] == 0
+        finally:
+            await client.aclose()
+
+    _run_scenario(scenario)
+
+
+def test_sweep_resets_crashed_running_and_reenqueues_orphans() -> None:
+    async def scenario() -> None:
+        client = AsyncRedis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            runs = StubRunRepository(("run_crashed", "run_orphan"))
+            ancient = datetime(2020, 1, 1, tzinfo=UTC)
+            runs.runs["run_crashed"].status = RunStatus.RUNNING
+            runs.runs["run_crashed"].started_at = ancient
+            runs.runs["run_orphan"].created_at = ancient
+            consumer = RedisRunConsumer(
+                client,
+                runs,
+                RecordingExecutor(runs),
+                group="test-group",
+                consumer_name="worker-sweep",
+                block_ms=10,
+                claim_min_idle_ms=0,
+                running_timeout=timedelta(hours=1),
+                queued_timeout=timedelta(hours=1),
+            )
+
+            recovered = await consumer.sweep_stuck()
+
+            assert recovered == 2
+            assert runs.runs["run_crashed"].status is RunStatus.QUEUED
+            assert runs.runs["run_crashed"].started_at is None
+            entries = await client.xrange(DEFAULT_STREAM)
+            assert {fields["run_id"] for _message_id, fields in entries} == {
+                "run_crashed",
+                "run_orphan",
+            }
         finally:
             await client.aclose()
 

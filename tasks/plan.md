@@ -435,7 +435,10 @@ owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
   partial-batch continuation. Also owns stuck-run recovery: sweep orphaned
   runs in RUNNING (hard worker crash, or execution longer than the queue's
   claim idle threshold) AND QUEUED-without-message (enqueue-after-create
-  crash; requeue/reset race), re-enqueueing or failing them safely.
+  crash; requeue/reset race), re-enqueueing or failing them safely. Done
+  2026-08-08: 3-attempt full-jitter backoff (429/5xx/transport; auth errors
+  immediate); thread-level skip continues the run and marks it PARTIAL;
+  compare-and-set `reset_stuck_run` keeps concurrent sweepers safe.
 - **T5.5 Observability + launch gates:** alerts, numeric gates, scaled
   evaluation harness. Also owns lifecycle-event publication: a publisher
   consuming `CompletionOutboxPort.pending()`/`mark_published` into

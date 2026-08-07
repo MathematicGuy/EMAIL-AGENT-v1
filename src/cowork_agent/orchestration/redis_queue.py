@@ -22,8 +22,9 @@ Delivery semantics:
 import asyncio
 import logging
 import socket
+import time
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import uuid4
 
@@ -32,6 +33,12 @@ from redis.exceptions import ResponseError
 
 from cowork_agent.domain import DigestRun, RunStatus
 from cowork_agent.features.email_action_plan.ports import RunRepository
+from cowork_agent.identity import LOCAL_TENANT_ID
+from cowork_agent.orchestration.recovery import (
+    DEFAULT_QUEUED_TIMEOUT,
+    DEFAULT_RUNNING_TIMEOUT,
+    sweep_stuck_runs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +94,9 @@ class RedisRunConsumer:
         max_retries: int = 3,
         block_ms: int = 500,
         claim_min_idle_ms: int = 30_000,
+        sweep_interval_seconds: float = 300.0,
+        running_timeout: timedelta = DEFAULT_RUNNING_TIMEOUT,
+        queued_timeout: timedelta = DEFAULT_QUEUED_TIMEOUT,
     ) -> None:
         self._redis = redis
         self._runs = runs
@@ -98,6 +108,10 @@ class RedisRunConsumer:
         self._max_retries = max_retries
         self._block_ms = block_ms
         self._claim_min_idle_ms = claim_min_idle_ms
+        self._sweep_interval_seconds = sweep_interval_seconds
+        self._running_timeout = running_timeout
+        self._queued_timeout = queued_timeout
+        self._queue = RedisRunQueue(redis, stream=stream)
 
     async def ensure_group(self) -> None:
         try:
@@ -126,9 +140,35 @@ class RedisRunConsumer:
 
     async def run_forever(self, stop: asyncio.Event | None = None) -> None:
         await self.ensure_group()
+        next_sweep = time.monotonic() + self._sweep_interval_seconds
         while stop is None or not stop.is_set():
+            if time.monotonic() >= next_sweep:
+                try:
+                    await self.sweep_stuck()
+                except Exception:
+                    # Maintenance must never kill the consumer; the next
+                    # interval retries.
+                    logger.exception("Stuck-run sweep failed; retrying next interval")
+                next_sweep = time.monotonic() + self._sweep_interval_seconds
             await self.deliver_once()
         logger.info("Run consumer %s stopped", self._consumer)
+
+    async def sweep_stuck(self) -> int:
+        """T5.4: recover crashed-RUNNING and orphaned-QUEUED runs."""
+        return await sweep_stuck_runs(
+            self._runs,
+            now=datetime.now(UTC),
+            requeue=self._reenqueue,
+            running_timeout=self._running_timeout,
+            queued_timeout=self._queued_timeout,
+        )
+
+    async def _reenqueue(self, run: DigestRun) -> None:
+        # Idempotent by design: if the original message merely arrived
+        # late, the CAS claim keeps execution single.
+        await self._queue.enqueue_digest_run(
+            run.id, user_id=run.user_id, tenant_id=LOCAL_TENANT_ID
+        )
 
     async def claim_stale(self) -> int:
         """Reclaim messages idle past the threshold; dead-letter exhausted ones."""

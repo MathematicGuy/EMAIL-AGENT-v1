@@ -1,18 +1,25 @@
 import asyncio
 import base64
+import random
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
+from google.auth.exceptions import TransportError
+from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from cowork_agent.config import GMAIL_READONLY_SCOPE, GmailSettings
 from cowork_agent.domain.target_contracts import BodyFormat, FetchStatus
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
+    GmailMailboxAdapter,
     GmailOAuthGrant,
     GoogleOAuthDriver,
+    MailboxReauthRequiredError,
+    MailboxTemporaryError,
     _parse_message,
+    _retry_delay,
 )
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
@@ -247,3 +254,103 @@ def test_gmail_message_parser_marks_partial_fetch_without_usable_body() -> None:
     assert missing_payload.normalized_body == ""
     assert missing_payload.fetch_status is FetchStatus.PARTIAL
     assert missing_payload.attachments_present is False
+
+
+class _Resp:
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.reason = "simulated failure"
+
+
+def _http_error(status: int) -> "HttpError":
+    return HttpError(_Resp(status), b"unavailable")  # type: ignore[arg-type]
+
+
+def _adapter() -> GmailMailboxAdapter:
+    # _call touches none of the dependencies, so placeholders suffice.
+    return GmailMailboxAdapter(object(), object(), object())  # type: ignore[arg-type]
+
+
+def test_call_retries_transient_errors_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def flaky() -> dict[str, object]:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise _http_error(503)
+        return {"ok": True}
+
+    result = asyncio.run(_adapter()._call(flaky))
+    assert result == {"ok": True}
+    assert calls["count"] == 3
+    assert len(sleeps) == 2
+    assert all(delay >= 0.0 for delay in sleeps)
+
+
+def test_call_exhausts_budget_into_temporary_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def always_down() -> dict[str, object]:
+        calls["count"] += 1
+        raise _http_error(503)
+
+    with pytest.raises(MailboxTemporaryError):
+        asyncio.run(_adapter()._call(always_down))
+    assert calls["count"] == 3
+
+
+def test_call_never_retries_authorization_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        raise AssertionError("authorization errors must not sleep/retry")
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def forbidden() -> dict[str, object]:
+        calls["count"] += 1
+        raise _http_error(403)
+
+    with pytest.raises(MailboxReauthRequiredError):
+        asyncio.run(_adapter()._call(forbidden))
+    assert calls["count"] == 1
+
+
+def test_transport_errors_are_retried_like_api_throttling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def flaky_refresh() -> dict[str, object]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TransportError("token refresh hiccup")
+        return {"ok": True}
+
+    result = asyncio.run(_adapter()._call(flaky_refresh))
+    assert result == {"ok": True}
+    assert calls["count"] == 2 and len(sleeps) == 1
+
+
+def test_retry_delay_is_bounded_and_jittered() -> None:
+    random.seed(5441)
+    delays = [_retry_delay(attempt) for attempt in (1, 2, 3) for _ in range(50)]
+    assert all(delay >= 0.0 for delay in delays)
+    assert all(delay <= 4.0 for delay in delays)
+    # Jitter: 100 samples of attempt 1 cannot all be identical.
+    assert len({_retry_delay(1) for _ in range(100)}) > 1

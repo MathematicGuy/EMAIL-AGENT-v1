@@ -47,6 +47,7 @@ from .ports import (
     AttachmentExtractorPort,
     CompletionOutboxPort,
     MailboxPort,
+    MailboxTemporaryError,
     PersistedTask,
     ResultRepository,
     RouteClassifierPort,
@@ -170,7 +171,7 @@ class DigestWorker:
         persistence_ms: int | None = None
         try:
             fetch_started = time.monotonic()
-            threads = await self._fetch_threads(run)
+            threads, skipped_threads = await self._fetch_threads(run)
             email_ms = int((time.monotonic() - fetch_started) * 1000)
             await self._results.save_processed_emails(
                 run.id,
@@ -357,7 +358,11 @@ class DigestWorker:
             run.emails_actionable = len(actionable)
             run.action_items_count = len(records)
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))
-            run.status = RunStatus.SUCCEEDED
+            # T5.4: a run that had to skip threads after their retry budget
+            # is PARTIAL, not SUCCEEDED — degradation must stay visible.
+            run.status = (
+                RunStatus.PARTIAL if skipped_threads else RunStatus.SUCCEEDED
+            )
         except Exception as exc:
             logger.exception("Digest run %s failed", run.id)
             run.status = RunStatus.FAILED
@@ -393,8 +398,9 @@ class DigestWorker:
 
     async def _fetch_threads(
         self, run: DigestRun
-    ) -> list[tuple[EphemeralEmailEnvelope, ...]]:
+    ) -> tuple[list[tuple[EphemeralEmailEnvelope, ...]], int]:
         threads: list[tuple[EphemeralEmailEnvelope, ...]] = []
+        skipped_threads = 0
         message_ids: set[str] = set()
         messages_by_thread: dict[str, list[str]] = {}
         cursor: str | None = None
@@ -416,7 +422,19 @@ class DigestWorker:
                 break
 
         for thread_id, selected_ids in messages_by_thread.items():
-            thread = await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
+            try:
+                thread = await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
+            except MailboxTemporaryError:
+                # T5.4 partial-batch continuation: one thread's transient
+                # failure must not abort the run; the adapter already
+                # exhausted its retry budget, so skip and continue.
+                skipped_threads += 1
+                logger.warning(
+                    "Run %s skipping thread %s after transient mailbox failure",
+                    run.id,
+                    thread_id,
+                )
+                continue
             selected_id_set = set(selected_ids)
             # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
             selected = tuple(
@@ -437,7 +455,7 @@ class DigestWorker:
         run.truncated = cursor is not None or run.emails_matched > run.emails_processed
         if run.emails_matched == 0:
             run.emails_matched = run.emails_processed
-        return threads
+        return threads, skipped_threads
 
     async def _retrieve_for_candidate(
         self, run: DigestRun, candidate: TaskCandidate

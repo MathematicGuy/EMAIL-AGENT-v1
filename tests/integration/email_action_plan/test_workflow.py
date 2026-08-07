@@ -34,6 +34,7 @@ from cowork_agent.features.email_action_plan.observability import (
     EncryptedDevTraceSink,
     InMemoryTraceSink,
 )
+from cowork_agent.features.email_action_plan.ports import MailboxTemporaryError
 from cowork_agent.features.email_action_plan.schemas import ClassificationResult
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
@@ -520,6 +521,52 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             assert envelope.tenant_id == LOCAL_TENANT_ID
             assert envelope.user_id == "u1"
             assert envelope.attachments_processed is False
+
+    asyncio.run(scenario())
+
+
+class _FlakyThreadMailbox(FakeMailbox):
+    """Raises a transient failure for one thread after the adapter's retry
+    budget would have been exhausted."""
+
+    def __init__(self, messages: object, flaky_thread_id: str) -> None:
+        super().__init__(messages)  # type: ignore[arg-type]
+        self._flaky_thread_id = flaky_thread_id
+
+    async def get_thread(self, connection_id: str, thread_id: str):  # type: ignore[override]
+        if thread_id == self._flaky_thread_id:
+            raise MailboxTemporaryError("transient thread failure")
+        return await super().get_thread(connection_id, thread_id)
+
+
+def test_transient_thread_failure_skips_thread_and_continues() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Thread một"), email("m2", "t2", "Thread hai")]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="flaky", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            _FlakyThreadMailbox(messages, "t2"),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((task_for("m1", "Thread một"),)),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        # T5.4: one thread's transient failure skips that thread; the run
+        # continues with the healthy one and reports PARTIAL, not SUCCEEDED.
+        assert completed is not None and completed.status is RunStatus.PARTIAL
+        assert completed.emails_processed == 1
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.gmail_message_id == "m1"
 
     asyncio.run(scenario())
 

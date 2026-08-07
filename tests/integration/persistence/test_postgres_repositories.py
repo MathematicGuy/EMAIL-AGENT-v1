@@ -13,7 +13,7 @@ import os
 import selectors
 import sys
 from collections.abc import Callable, Coroutine, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -302,6 +302,50 @@ def test_save_round_trips_progress_and_safe_error_fields() -> None:
             assert stored.error_message_safe == "Generation failed safely."
             assert stored.completed_at == NOW
             assert await repository.get("missing") is None
+        finally:
+            await pool.close()
+
+    _run_scenario(scenario)
+
+
+def test_list_stuck_runs_filters_by_status_and_age() -> None:
+    async def scenario() -> None:
+        pool = await _pool()
+        try:
+            await apply_migrations(pool)
+            repository = PostgresRunRepository(pool)
+            await repository.create(_run("run_1"))
+            await repository.create(_run("run_2", key="k2"))
+            wall_now = datetime.now(UTC)
+            await repository.claim("run_1", wall_now)
+
+            far_future = wall_now + timedelta(hours=1)
+            stuck = await repository.list_stuck_runs(
+                running_before=far_future, queued_before=far_future
+            )
+            assert {run.id for run in stuck} == {"run_1", "run_2"}
+
+            long_ago = wall_now - timedelta(hours=1)
+            assert (
+                await repository.list_stuck_runs(
+                    running_before=long_ago, queued_before=long_ago
+                )
+                == ()
+            )
+
+            # CAS reset: succeeds while still RUNNING-past-threshold, then
+            # refuses once the run is back in QUEUED.
+            assert await repository.reset_stuck_run(
+                "run_1", started_before=far_future
+            )
+            reset_again = await repository.reset_stuck_run(
+                "run_1", started_before=far_future
+            )
+            assert reset_again is False
+            reloaded = await repository.get("run_1")
+            assert reloaded is not None
+            assert reloaded.status is RunStatus.QUEUED
+            assert reloaded.started_at is None
         finally:
             await pool.close()
 

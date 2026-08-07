@@ -28,6 +28,7 @@ from cowork_agent.features.email_action_plan.observability import (
 )
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
+    MailboxTemporaryError,
     RouteClassifierPort,
     RunRepository,
     SemanticMemoryPort,
@@ -53,7 +54,6 @@ from cowork_agent.integrations.gmail.provider import (
     GmailMailboxAdapter,
     MailboxNotConnectedError,
     MailboxReauthRequiredError,
-    MailboxTemporaryError,
 )
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,

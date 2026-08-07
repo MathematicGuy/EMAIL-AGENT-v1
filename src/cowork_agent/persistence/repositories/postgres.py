@@ -132,6 +132,34 @@ class PostgresRunRepository:
                 ),
             )
 
+    async def list_stuck_runs(
+        self, *, running_before: datetime, queued_before: datetime
+    ) -> tuple[DigestRun, ...]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"""
+                SELECT {_RUN_COLUMNS} FROM digest_runs
+                WHERE (status = 'running' AND started_at < %s)
+                   OR (status = 'queued' AND created_at < %s)
+                ORDER BY created_at
+                """,
+                (running_before, queued_before),
+            )
+            rows = await cursor.fetchall()
+        return tuple(_run_from_row(row) for row in rows)
+
+    async def reset_stuck_run(self, run_id: str, *, started_before: datetime) -> bool:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE digest_runs
+                SET status = 'queued', started_at = NULL
+                WHERE id = %s AND status = 'running' AND started_at < %s
+                """,
+                (run_id, started_before),
+            )
+            return cursor.rowcount == 1
+
 
 class PostgresTaskRepository:
     def __init__(self, pool: AsyncConnectionPool) -> None:
