@@ -72,3 +72,24 @@ The registry may grow across sessions. Keep it append-only except when removing 
 - **Evidence:** V1-M4 T4.2 review: ordering ties (equal priority+deadline) sorted by random `task_id` uuids, so `nextActions[:3]` membership could flip between reads; fixed with `ORDER BY task_run_links.rowid` and dict insertion order (commit 50d9dfd).
 - **Failure state:** Frozen ordering contracts pass most runs yet intermittently flip on tie cases, producing non-reproducible legacy-shape diffs.
 - **Deploy when:** Relocating serialization/mapping from write to read path, or adding ORDER BY over rows with random producer ids.
+
+#### "Guard the script entry so UI modules import clean"
+- **Version:** v1 (2026-08-08)
+- **Pattern:** Streamlit scripts that run side effects at import are untestable; keep pure presentation helpers module-level, put all `st.*` work in `main()`, and call it only under `__name__ == "__main__"` (what `streamlit run` provides).
+- **Evidence:** DEMO-A rewrote `gui/app.py` this way and `tests/unit/gui/` imports the module and unit-tests escaping/i18n helpers with no runtime — closing the documented §15-gate "zero GUI tests" finding.
+- **Failure state:** GUI code ships with no automated checks because importing it triggers page config, network calls, or `st.stop()`.
+- **Deploy when:** Adding or restructuring Streamlit/script-style entry points that need any automated coverage.
+
+#### "Narrow once, reuse the narrowed name"
+- **Version:** v1 (2026-08-08)
+- **Pattern:** Under mypy strict, `isinstance(x.get(k), dict)` narrows nothing for a *second* `x.get(k)` call; assign `raw = x.get(k)` once, narrow the variable, then reuse it.
+- **Evidence:** DEMO-A GUI: six `union-attr` errors on repeated `s_res.get("progress"/"error")` calls all cleared by introducing `raw_*` locals; `Sequence` extraction also needed a `not isinstance(str)` guard.
+- **Failure state:** Strict type checks fail on dict-of-Any API payloads, or worse, a bare `str` payload is iterated character-by-character at runtime.
+- **Deploy when:** Consuming loosely-typed JSON payloads (dict[str, Any]) in strict-typed code.
+
+#### "Cross-rerun messages must carry severity"
+- **Version:** v1 (2026-08-08)
+- **Pattern:** Any message stashed in session state for the next Streamlit rerun (flash/toast pattern) must store `{message, level}`; a bare string forces one renderer and lies about failures.
+- **Evidence:** DEMO-A reviewer finding S-2: disconnect failures were stored as plain strings and always rendered with `st.success`, showing errors in a green success box.
+- **Failure state:** Users see error outcomes presented as successes, so retryable failures go unnoticed.
+- **Deploy when:** Implementing flash messages, toasts, or any deferred notification across reruns/redirects.

@@ -1,0 +1,119 @@
+"""Automated checks for the demo GUI (SPEC-Demo-Frontend; closes the
+documented §15-gate gap of zero GUI tests). Pure presentation helpers are
+unit-tested here; live behavior is proven per SPEC §9."""
+
+from typing import Any
+
+from cowork_agent.gui import app as gui
+
+SAMPLE_TASK: dict[str, Any] = {
+    "task_id": "t1",
+    "run_id": "r1",
+    "gmail_message_id": "m1",
+    "gmail_url": "https://mail.google.com/mail/u/0#all/xyz",
+    "source_message_ids": ["m1", "m2"],
+    "incident_key": None,
+    "title": "Gia hạn hợp đồng <script>alert(1)</script>",
+    "request_summary": "Ký lại hợp đồng trước hạn",
+    "actionability": "action_required",
+    "route": "retrieve_rag",
+    "priority": "urgent",
+    "deadline": "2026-08-15T17:00:00+00:00",
+    "action_plan": [
+        {"step": 1, "instruction": "Đọc quy trình", "supporting_citation_ids": ["c1"]}
+    ],
+    "supporting_documents": [
+        {
+            "citation_id": "c1",
+            "document_id": "d1",
+            "title": "Quy trình & <b>hướng dẫn</b>",
+            "section": None,
+            "url": "https://docs.example.com/x",
+            "relevance_score": 0.9,
+        }
+    ],
+    "missing_information": ["Thiếu ngày bắt đầu"],
+    "classifier_confidence": 0.92,
+    "generation_confidence": 0.8,
+    "validation_status": "system_generated",
+    "created_at": "2026-08-08T00:00:00+00:00",
+}
+
+
+def test_module_is_importable_and_main_is_guarded() -> None:
+    assert callable(gui.main)
+    assert set(gui.SUPPORTED_LANGUAGES) == {"vi", "en"}
+
+
+def test_string_catalogs_are_parallel_across_languages() -> None:
+    vi_keys = set(gui.STRINGS["vi"])
+    for lang, catalog in gui.STRINGS.items():
+        assert set(catalog) == vi_keys, f"catalog drift in {lang}"
+    for kind, values in gui.ENUM_LABELS.items():
+        for value, labels in values.items():
+            assert set(labels) == {"vi", "en"}, f"enum label drift: {kind}.{value}"
+
+
+def test_tr_formats_placeholders() -> None:
+    assert gui.tr("en", "tasks_found", count=3) == (
+        "🎉 Found and extracted **3 tasks** from unread emails!"
+    )
+    assert gui.tr("vi", "correlated", count=2) == "Tổng hợp từ 2 email"
+
+
+def test_citation_chip_escapes_title_and_restricts_scheme() -> None:
+    safe = gui.citation_chip_html("Doc <b>", "https://example.com/?a=1&b=2")
+    assert 'href="https://example.com/?a=1&amp;b=2"' in safe
+    assert "Doc &lt;b&gt;" in safe
+    assert "javascript:alert(1)" not in gui.citation_chip_html("X", "javascript:alert(1)")
+    assert "<a" not in gui.citation_chip_html("X", "javascript:alert(1)")
+
+
+def test_build_task_card_escapes_llm_text_and_marks_partial_plan() -> None:
+    card = gui.build_task_card_html(SAMPLE_TASK, 1, "en")
+    assert "<script>" not in card
+    assert "&lt;script&gt;" in card
+    assert "priority-urgent" in card
+    assert "partial-plan" in card
+    assert "PARTIAL PLAN" in card
+    assert "Correlated from 2 emails" in card
+    assert "92%" in card
+
+
+def test_build_task_card_handles_missing_priority_and_single_source() -> None:
+    task = dict(SAMPLE_TASK)
+    task["priority"] = None
+    task["missing_information"] = []
+    task["source_message_ids"] = ["m1"]
+    card = gui.build_task_card_html(task, 2, "vi")
+    assert "priority-unknown" in card
+    assert "partial-plan" not in card
+    assert "Tổng hợp từ" not in card
+
+
+def test_route_summary_counts_routes_retrieval_and_partial_plans() -> None:
+    second = dict(SAMPLE_TASK)
+    second["task_id"] = "t2"
+    second["route"] = "direct_plan"
+    second["missing_information"] = []
+    second["supporting_documents"] = []
+    summary = gui.route_summary([SAMPLE_TASK, second])
+    assert summary["routes"] == {"retrieve_rag": 1, "direct_plan": 1}
+    assert summary["retrieval_tasks"] == 1
+    assert summary["document_count"] == 1
+    assert summary["partial_plans"] == 1
+    assert summary["total"] == 2
+
+
+def test_format_deadline_and_confidence_fallbacks() -> None:
+    assert gui.format_deadline("2026-08-15T17:00:00+00:00", "en") == "2026-08-15 17:00"
+    assert gui.format_deadline(None, "en") == "Unknown"
+    assert gui.format_confidence(0.92) == "92%"
+    assert gui.format_confidence("n/a") == "?"
+
+
+def test_safe_url_allows_only_http_schemes() -> None:
+    assert gui.safe_url("https://mail.google.com/x") == "https://mail.google.com/x"
+    assert gui.safe_url("http://example.com") == "http://example.com"
+    assert gui.safe_url("javascript:alert(1)") is None
+    assert gui.safe_url(None) is None

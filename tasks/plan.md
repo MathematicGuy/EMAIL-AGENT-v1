@@ -493,6 +493,10 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   Partial-Plan treatment; citation chips; all states (loading/empty/error/
   success); bilingual-ready copy. Live-verify per SPEC §9 with browser-use MCP
   + RunPreview; screenshot evidence in the merge record.
+  - Status 2026-08-08: five-screen implementation + `tests/unit/gui/` helper
+    suite landed (import-safe module, VI/EN catalogs, Idempotency-Key reuse on
+    retry); ruff/mypy/full suite green; reviewer SHOULD-FIX items applied.
+    Outstanding: SPEC §9 live-browser verification with the user's Gmail OAuth.
 - **DEMO-B (Increment B, after §16):** Preferences / Task lifecycle / Memory
   insight / Memory effect / Deletion screens, feature-flagged off until
   endpoints exist.
