@@ -21,6 +21,7 @@ from cowork_agent.features.email_action_plan.policies import (
     normalize_query,
     validate_max_emails,
 )
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
 
 from .ports import (
@@ -92,6 +93,7 @@ class DigestWorker:
         attachments: AttachmentExtractorPort,
         actions: ActionExtractorPort,
         outbox: CompletionOutboxPort,
+        short_term: ShortTermStore,
         *,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
@@ -100,6 +102,7 @@ class DigestWorker:
         del attachments, extraction_limits
         self._runs, self._results, self._mailbox = runs, results, mailbox
         self._actions, self._outbox = actions, outbox
+        self._short_term = short_term
 
     async def execute(
         self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
@@ -132,7 +135,11 @@ class DigestWorker:
                     run.attachments_found += int(message.attachments_present)
                 envelopes.extend(thread)
 
-            batch = await self._actions.extract(user_timezone, clock, envelopes)
+            self._short_term.put(run.id, envelopes)
+            stored_envelopes = self._short_term.get(run.id)
+            if stored_envelopes is None:  # defensive only: put() above guarantees presence
+                stored_envelopes = ()
+            batch = await self._actions.extract(user_timezone, clock, stored_envelopes)
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
@@ -212,6 +219,9 @@ class DigestWorker:
             logger.exception("Digest run %s failed", run.id)
             run.status = RunStatus.FAILED
             run.error_code, run.error_message_safe = _safe_run_error(exc)
+        finally:
+            # Run finalizer (FR-14): raw bodies never outlive the run, on any outcome.
+            self._short_term.clear(run.id)
         run.completed_at = clock
         await self._runs.save(run)
         await self._outbox.add(DigestCompletedEvent(run.id, run.user_id, run.status, clock))

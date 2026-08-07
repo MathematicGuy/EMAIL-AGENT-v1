@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +21,7 @@ from cowork_agent.features.email_action_plan.schemas import (
     ExtractedAction,
     ExtractionBatch,
 )
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
     DigestWorker,
@@ -109,6 +111,7 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(batch),
             outbox,
+            ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
@@ -161,6 +164,7 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(batch),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
 
         await worker.execute(run.id, now=NOW)
@@ -217,6 +221,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             AttachmentExtractionMustNotRun(),
             FakeActionExtractor(batch),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
@@ -243,6 +248,7 @@ def test_result_has_explicit_empty_state_message() -> None:
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(ExtractionBatch(())),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         await worker.execute(run.id, now=NOW)
         result = await GetDigestResult(runs, results).execute(run.id)
@@ -273,6 +279,7 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
             SafeTextAttachmentExtractor(),
             FailingExtractor(),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -302,6 +309,7 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
             SafeTextAttachmentExtractor(),
             FailingExtractor(),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -337,6 +345,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             SafeTextAttachmentExtractor(),
             extractor,
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None
@@ -366,6 +375,7 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             SafeTextAttachmentExtractor(),
             extractor,
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
@@ -376,5 +386,76 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             assert envelope.tenant_id == LOCAL_TENANT_ID
             assert envelope.user_id == "u1"
             assert envelope.attachments_processed is False
+
+    asyncio.run(scenario())
+
+
+def test_successful_run_finalizer_clears_short_term_memory() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        batch = ExtractionBatch(
+            (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Gửi báo cáo"),)),)
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-success"
+        )
+        store = ShortTermStore()
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeActionExtractor(batch),
+            InMemoryOutbox(),
+            store,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert store.get(run.id) is None  # no raw body survives run completion
+
+    asyncio.run(scenario())
+
+
+def test_failed_run_finalizer_clears_short_term_memory() -> None:
+    class FailingExtractor:
+        def __init__(self) -> None:
+            self.received_envelopes: list[EphemeralEmailEnvelope] = []
+
+        async def extract(
+            self,
+            user_timezone: str,
+            current_time: datetime,
+            messages: Sequence[EphemeralEmailEnvelope],
+        ) -> ExtractionBatch:
+            self.received_envelopes.extend(messages)
+            raise RuntimeError("extraction backend failure")
+
+    async def scenario() -> None:
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-failure"
+        )
+        store = ShortTermStore()
+        extractor = FailingExtractor()
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox([email("m1", "t1", "Việc cần làm")]),
+            SafeTextAttachmentExtractor(),
+            extractor,
+            InMemoryOutbox(),
+            store,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.FAILED
+        # The raw body reached extraction (via Short-Term Memory) before the failure...
+        assert [item.gmail_message_id for item in extractor.received_envelopes] == ["m1"]
+        # ...and the finalizer still cleared it.
+        assert store.get(run.id) is None
 
     asyncio.run(scenario())

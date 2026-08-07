@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.features.email_action_plan.ports import ActionExtractorPort
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
     DigestWorker,
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
                     SafeTextAttachmentExtractor(),
                     actions,
                     InMemoryOutbox(),
+                    ShortTermStore(),
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:

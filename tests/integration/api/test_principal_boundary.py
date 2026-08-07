@@ -22,6 +22,7 @@ from cowork_agent.app import CreateRunRequest, create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import DigestRun, MailboxConnection, RunStatus, RunTrigger
 from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.identity import LOCAL_TENANT_ID, principal_for_connection
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
@@ -61,6 +62,7 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(ExtractionBatch(())),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://principal.test"

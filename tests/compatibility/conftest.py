@@ -26,6 +26,7 @@ from cowork_agent.domain.target_contracts import (
     FetchStatus,
 )
 from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.llm.fakes import FakeActionExtractor
@@ -112,6 +113,7 @@ class CompatSession:
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(self.batch or ExtractionBatch(())),
             InMemoryOutbox(),
+            ShortTermStore(),
         )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://compat.test"
