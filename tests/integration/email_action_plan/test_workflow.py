@@ -1,10 +1,13 @@
 import asyncio
+import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from cowork_agent.domain import Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
+    TASK_PIPELINE_VERSION,
     Actionability,
     BodyFormat,
     EmailRouteDecision,
@@ -39,7 +42,9 @@ from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
+    InMemoryTaskRepository,
 )
+from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 NOW = datetime(2026, 8, 3, 8, tzinfo=UTC)
 
@@ -78,11 +83,12 @@ def task_for(
     deadline: datetime | None = None,
     *,
     priority: Priority | None = None,
+    run_id: str = "run-test",
 ) -> Task:
     """Canned §6.6 Task standing in for one Generator call's output."""
     return Task(
         task_id=f"task_{message_id}",
-        run_id="run-test",
+        run_id=run_id,
         gmail_message_id=message_id,
         gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
         source_message_ids=(message_id,),
@@ -763,3 +769,132 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
         assert await results.list_items(run.id) == ()
 
     asyncio.run(scenario())
+
+
+def test_validated_tasks_are_persisted_with_identity_and_pipeline_version() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo"), email("m2", "t2", "Newsletter")]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="persist-1", now=NOW
+        )
+        tasks = (task_for("m1", "Gửi báo cáo", run_id=run.id),)
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m2": INFORMATIONAL_DECISION}),
+            FakePlanGenerator(tasks),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task_id == "task_m1"
+        assert stored[0].run_id == run.id
+        (tenant_id, user_id, message_id, pipeline_version), = task_repository.tasks
+        assert tenant_id == LOCAL_TENANT_ID
+        assert user_id == "u1"
+        assert message_id == "m1"
+        assert pipeline_version == TASK_PIPELINE_VERSION
+
+    asyncio.run(scenario())
+
+
+def test_persisted_tasks_are_idempotent_across_replayed_runs() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        task_repository = InMemoryTaskRepository()
+        for key in ("persist-2a", "persist-2b"):
+            runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+            run = await CreateDigestRun(runs).execute(
+                user_id="u1", mailbox_connection_id="mbx1", idempotency_key=key, now=NOW
+            )
+            worker = DigestWorker(
+                runs,
+                results,
+                FakeMailbox(messages),
+                SafeTextAttachmentExtractor(),
+                FakeRouteClassifier(),
+                FakePlanGenerator((task_for("m1", "Gửi báo cáo", run_id=run.id),)),
+                ShortTermStore(),
+                task_repository=task_repository,
+            )
+            completed = await worker.execute(run.id, now=NOW)
+            assert completed is not None and completed.status is RunStatus.SUCCEEDED
+
+        # Same tenant:user:gmail_message_id:pipeline_version — one durable row.
+        assert len(task_repository.tasks) == 1
+
+    asyncio.run(scenario())
+
+
+def test_validation_dropped_task_is_never_persisted() -> None:
+    leaked_body = "Vui lòng gửi báo cáo tài chính quý ba cho ban giám đốc trước thứ Sáu."
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Báo cáo quý ba", body=leaked_body)]
+        leaked_task = replace(task_for("m1", "Gửi báo cáo"), request_summary=leaked_body)
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="persist-3", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((leaked_task,)),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert task_repository.tasks == {}
+        assert await task_repository.list_for_run(run.id) == ()
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_persisted_tasks_are_body_free(tmp_path: Path) -> None:
+    raw_body = "MẬT-KHẨU-NỘI-DUNG: kế hoạch ngân sách quý bốn chưa công bố."
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo", body=raw_body)]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = SQLiteTaskRepository(tmp_path / "tasks.db")
+        await task_repository.initialize()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="persist-4", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((task_for("m1", "Gửi báo cáo", run_id=run.id),)),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert len(await task_repository.list_for_run(run.id)) == 1
+
+    asyncio.run(scenario())
+    database = sqlite3.connect(tmp_path / "tasks.db")
+    dump = "\n".join(database.iterdump())
+    database.close()
+    assert raw_body not in dump

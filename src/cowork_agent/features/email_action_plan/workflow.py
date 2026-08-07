@@ -19,6 +19,7 @@ from cowork_agent.domain import (
     RunTrigger,
 )
 from cowork_agent.domain.target_contracts import (
+    TASK_PIPELINE_VERSION,
     ActionPlanOutput,
     EphemeralEmailEnvelope,
     RetrievalFilters,
@@ -48,6 +49,7 @@ from .ports import (
     RouteClassifierPort,
     RunRepository,
     SemanticMemoryPort,
+    TaskRepository,
 )
 from .routing import RouteResolution, resolve_candidate_route
 from .schemas import ExtractionLimits, GenerationContext
@@ -119,6 +121,7 @@ class DigestWorker:
         short_term: ShortTermStore,
         *,
         semantic_memory: SemanticMemoryPort | None = None,
+        task_repository: TaskRepository | None = None,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
@@ -127,6 +130,7 @@ class DigestWorker:
         self._runs, self._results, self._mailbox = runs, results, mailbox
         self._classifier, self._generator = classifier, generator
         self._semantic_memory = semantic_memory
+        self._task_repository = task_repository
         self._short_term = short_term
 
     async def execute(
@@ -219,6 +223,7 @@ class DigestWorker:
             # an Action Item unless it duplicates a fingerprint already
             # produced in this run.
             items: list[ActionItem] = []
+            validated_tasks: list[Task] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
             for generated in outputs:
@@ -253,6 +258,7 @@ class DigestWorker:
                 if fingerprint in fingerprints:
                     continue
                 fingerprints.add(fingerprint)
+                validated_tasks.append(task)
                 seen = await self._results.fingerprint_seen(
                     run.mailbox_connection_id, fingerprint
                 )
@@ -269,6 +275,18 @@ class DigestWorker:
                 )
             items.sort(key=lambda item: _action_item_sort_key(item, clock))
             await self._results.save_items(run.id, items)
+            if self._task_repository is not None:
+                # FR-12: persist validated, deduplicated Tasks only once the
+                # whole run loop succeeded — idempotent on
+                # tenant:user:gmail_message_id:pipeline_version, so replays
+                # update rather than duplicate.
+                for task in validated_tasks:
+                    await self._task_repository.save_task(
+                        tenant_id=LOCAL_TENANT_ID,
+                        user_id=run.user_id,
+                        pipeline_version=TASK_PIPELINE_VERSION,
+                        task=task,
+                    )
             run.emails_actionable = len(actionable)
             run.action_items_count = len(items)
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))

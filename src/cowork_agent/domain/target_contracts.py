@@ -28,6 +28,12 @@ from .models import Priority
 
 TARGET_CONTRACTS_VERSION = "1.1.0"
 
+#: Pipeline version — fourth component of the idempotent task persistence key
+#: ``tenant_id:user_id:gmail_message_id:pipeline_version`` (V1-M4 T4.1).
+#: Bump whenever persisted Task semantics change so replays never collide
+#: with rows written by an older pipeline.
+TASK_PIPELINE_VERSION = "1"
+
 
 class Actionability(StrEnum):
     """Classifier actionability label for one email (§6.2)."""

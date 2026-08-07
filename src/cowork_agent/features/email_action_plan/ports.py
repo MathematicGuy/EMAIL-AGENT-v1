@@ -18,6 +18,7 @@ from cowork_agent.domain.target_contracts import (
     EphemeralEmailEnvelope,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
+    Task,
 )
 
 from .correlation import TaskCandidate
@@ -116,6 +117,25 @@ class ResultRepository(Protocol):
         self, run_id: str, emails: Sequence[ProcessedEmail]
     ) -> None: ...
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]: ...
+
+
+class TaskRepository(Protocol):
+    """Durable persistence for validated §6.6 Tasks (PRD-v1 FR-12, T4.1).
+
+    ``save_task`` is idempotent on the key
+    ``tenant_id:user_id:gmail_message_id:pipeline_version``: re-saving a Task
+    for the same Gmail message under the same pipeline version updates the
+    stored row instead of duplicating it, so idempotent run replays stay safe.
+    Rows never contain raw email bodies (invariant 1) — the Task contract
+    itself is body-free, and implementations must not add body-bearing
+    columns.
+    """
+
+    async def save_task(
+        self, *, tenant_id: str, user_id: str, pipeline_version: str, task: Task
+    ) -> None: ...
+
+    async def list_for_run(self, run_id: str) -> Sequence[Task]: ...
 
 
 class SemanticMemoryPort(Protocol):

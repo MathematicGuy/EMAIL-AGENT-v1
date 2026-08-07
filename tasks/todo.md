@@ -38,7 +38,7 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] Checkpoint: V1-M3 exit criteria
 
 ## V1-M4 — Persistence and presentation
-- [ ] 4.1 Task persistence port + local adapter (idempotent key)
+- [x] 4.1 Task persistence port + local adapter (idempotent key)
 - [ ] 4.2 Versioned compatibility mapper (Tasks → legacy result shape) — needs 4.1
 - [ ] 4.3 Cowork GUI task presentation — needs 4.2
 - [ ] 4.4 Basic metadata-only telemetry (parallel with 4.1/4.2)

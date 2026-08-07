@@ -10,6 +10,7 @@ from cowork_agent.domain import (
     ProcessedEmail,
     RunStatus,
 )
+from cowork_agent.domain.target_contracts import Task
 
 
 class InMemoryRunRepository:
@@ -69,3 +70,22 @@ class InMemoryResultRepository:
 
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]:
         return tuple(self.processed_emails.get(run_id, ()))
+
+
+class InMemoryTaskRepository:
+    def __init__(self) -> None:
+        self.tasks: dict[tuple[str, str, str, str], Task] = {}
+
+    async def save_task(
+        self, *, tenant_id: str, user_id: str, pipeline_version: str, task: Task
+    ) -> None:
+        key = (tenant_id, user_id, task.gmail_message_id, pipeline_version)
+        self.tasks[key] = task
+
+    async def list_for_run(self, run_id: str) -> Sequence[Task]:
+        return tuple(
+            sorted(
+                (task for task in self.tasks.values() if task.run_id == run_id),
+                key=lambda task: (task.created_at, task.task_id),
+            )
+        )

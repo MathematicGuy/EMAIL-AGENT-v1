@@ -60,6 +60,7 @@ from cowork_agent.persistence.repositories.local import (
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
 )
+from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 from .api.handlers import _jsonable
 
@@ -100,10 +101,15 @@ def create_app() -> FastAPI:
             )
             run_repository = InMemoryRunRepository()
             result_repository = InMemoryResultRepository()
+            task_repository = SQLiteTaskRepository(
+                settings.connection_db_path.parent / "tasks.db"
+            )
+            await task_repository.initialize()
             app.state.run_repository = run_repository
             app.state.create_run = CreateDigestRun(run_repository)
             app.state.get_result = GetDigestResult(run_repository, result_repository)
             app.state.result_repository = result_repository
+            app.state.task_repository = task_repository
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 classifier: RouteClassifierPort
@@ -129,6 +135,7 @@ def create_app() -> FastAPI:
                     generator,
                     ShortTermStore(),
                     semantic_memory=semantic_memory,
+                    task_repository=task_repository,
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:
