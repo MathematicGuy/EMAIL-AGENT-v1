@@ -58,3 +58,17 @@ The registry may grow across sessions. Keep it append-only except when removing 
 - **Evidence:** `.pytest-tmp/` was assumed ignored (handoff and intent), but the checked-in entry was a stale typo (`.pytest-adr003.pytest-tmp/`); dozens of temp test databases and a baseline JSON had been committed until discovered via `git status` during review.
 - **Failure state:** Generated artifacts (temp DBs, caches, reports) silently enter version control, bloat history, and surface as confusing `D`/untracked noise in every later status check.
 - **Deploy when:** Adding ignore rules, onboarding to a repo's ignore assumptions, or when temp artifacts appear in `git status` unexpectedly.
+
+#### "Upsert links belong on the stable key, not the mutable id"
+- **Version:** v2 (2026-08-07)
+- **Pattern:** When a row is upserted on a business key but carries a producer-minted id that changes every write, key every association table on the stable business key; the mutable id can only decorate the current content.
+- **Evidence:** V1-M4 T4.2: `task_run_links` first referenced `tasks.task_id`, but the generator mints a new `task_id` each run and the upsert overwrites it — earlier runs' links would dangle. Re-keying links on `task_key` (tenant:user:message:pipeline) fixed per-run result views (commit 50d9dfd).
+- **Failure state:** After any upsert from a later run, earlier runs' result reads return empty or partial views even though their rows still exist.
+- **Deploy when:** Designing idempotent persistence with per-producer links, run/task association tables, or any ON CONFLICT DO UPDATE schema.
+
+#### "Read-time mappers must inherit the producer's deterministic order"
+- **Version:** v2 (2026-08-07)
+- **Pattern:** When mapping logic relocates from write time to read time, preserve the original input ordering (insertion order / link rowid) as the tie-break; never re-derive order from producer-minted random ids.
+- **Evidence:** V1-M4 T4.2 review: ordering ties (equal priority+deadline) sorted by random `task_id` uuids, so `nextActions[:3]` membership could flip between reads; fixed with `ORDER BY task_run_links.rowid` and dict insertion order (commit 50d9dfd).
+- **Failure state:** Frozen ordering contracts pass most runs yet intermittently flip on tie cases, producing non-reproducible legacy-shape diffs.
+- **Deploy when:** Relocating serialization/mapping from write to read path, or adding ORDER BY over rows with random producer ids.
