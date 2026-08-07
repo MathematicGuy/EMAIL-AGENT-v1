@@ -362,6 +362,57 @@ dev trace prod-guarded. **Deps:** V1-M3. **Scope total:** L (5 tasks).
 Walk acceptance criteria 1–19 with test evidence; only then start V1-H and
 DEMO Increment A.
 
+**Verdict: PASS (2026-08-08, orchestrator).** Suite 255 passed at `d93ec3b`.
+Evidence per criterion (file::test; `tw` = `tests/integration/email_action_plan/test_workflow.py`):
+
+1. Idempotent run — `tw::test_same_idempotency_key_creates_only_one_run`,
+   `tests/compatibility/test_api_contract.py::test_duplicate_idempotency_key_returns_same_run`.
+2. Read-only scope — `tests/unit/integrations/gmail/*::test_gmail_settings_allow_readonly_scope_and_redact_secrets`,
+   `::test_gmail_settings_reject_write_scope`.
+3. Scope unbroadenable — `tests/compatibility/test_query_guard.py::test_broadening_attempts_always_keep_unread_inbox_guard`,
+   `tests/unit/features/email_action_plan/test_policies.py::test_query_is_always_read_only_unread_inbox_scope`.
+4. Ephemeral envelopes — `tw::test_envelopes_reaching_extraction_carry_stamped_run_identity` + gmail parser tests.
+5. Attachments presence-only — `tw::test_attachment_is_recorded_without_download_or_extraction`,
+   `tests/unit/domain/test_target_contracts.py::test_attachments_processed_rejects_true`.
+6. Classifier decision or §12.2 fallback — `tests/unit/integrations/llm/*::test_both_attempts_invalid_fall_back_only_for_affected_messages`,
+   `::test_transport_outage_falls_back_for_every_message_without_raising`.
+7. Three-route resolution — `tests/unit/features/test_routing.py::test_resolve_route_reproduces_fixture_labels`,
+   `::test_candidate_route_retrieve_rag_wins_over_direct_plan`, `::test_candidate_route_all_no_action`.
+8. DIRECT_PLAN zero retrieval — `tw::test_direct_plan_candidate_makes_zero_retrieval_calls`,
+   `tests/unit/features/test_validation.py::test_direct_plan_strips_all_citations_even_supported`.
+9. Retrieval-only semantic interface — `tests/unit/features/test_ports.py::test_semantic_memory_port_is_retrieval_only`,
+   `tw::test_retrieve_rag_candidate_retrieves_once_and_feeds_generator`.
+10. One generation per actionable candidate — `tw::test_pipeline_orders_items_by_priority_before_deadline`
+    (`call_count == 3`), `tw::test_generation_failure_fails_run_with_safe_error` (`call_count == 1`).
+11. Valid current-retrieval citations — `test_validation.py::test_supported_citations_pass_without_violation`,
+    `::test_only_unsupported_citations_are_stripped`, `::test_empty_retrieval_strips_every_citation`.
+12. RAG failure → partial plan + missing info — `tw::test_retrieval_failure_retries_once_then_degrades_to_structured_empty`,
+    `tw::test_genuine_empty_retrieval_marks_missing_info_without_degraded_marker`.
+13. Persisted with Gmail pointers, body-free — `tw::test_validated_tasks_are_persisted_with_identity_and_pipeline_version`,
+    `tw::test_sqlite_persisted_tasks_are_body_free`,
+    `tests/compatibility/test_privacy_boundary.py::test_email_body_never_appears_in_responses_or_stored_records`.
+14. Tasks visible in Cowork — API: `tests/compatibility/test_api_contract.py::test_tasks_endpoint_exposes_persisted_task_contracts`.
+    **Documented gap:** GUI (`src/cowork_agent/gui/app.py`) has no automated tests; live-browser
+    verification deferred to DEMO Increment A screens work.
+15. Ephemeral content cleared/TTL — `tests/unit/features/test_short_term.py` (TTL, sweep, finalizer),
+    `tw::test_successful_run_finalizer_clears_short_term_memory`, `tw::test_failed_run_finalizer_clears_short_term_memory`.
+16. Telemetry metadata-only — `tw::test_telemetry_emits_metadata_only_candidate_and_run_events` (dump-scan),
+    `tw::test_telemetry_marks_failed_run_with_error_code_only`.
+17. Dev trace guarded + TTL — `tests/unit/features/email_action_plan/test_observability.py`
+    (`::test_dev_trace_sink_refuses_construction_in_production`, `::test_dev_trace_write_read_round_trip_is_encrypted_markered_ttls`,
+    `::test_dev_trace_expired_records_are_not_returned`), `tw::test_dev_trace_writes_encrypted_full_content_with_marker`.
+18. Metrics emitted — `tw::test_telemetry_emits_metadata_only_candidate_and_run_events` (routing/validation/latency),
+    `tw::test_telemetry_marks_degraded_retrieval_fallback` (retrieval), error-code-only events.
+    NIT: emitted `reason_codes` only covered via contract round-trip.
+19. No scheduler — no scheduler/schedule-config/recurring code in `src/` (SCHEDULED/schedule_id
+    removed at `d93ec3b`); `digest_schedules` SQL remains only in the `001_mail_todo.sql` lineage
+    (V1-H T5.1 decides keep/drop).
+
+Follow-ups (non-blocking): GUI live verification via DEMO-A; emitted
+`reason_codes` assertion; FR-11 note localization; `digest_schedules`
+keep/drop in T5.1. Live routing-accuracy evaluation (§14 metrics, T2.6)
+remains pending user-authorized runs but is not a §15 criterion.
+
 ---
 
 ## V1-H — Durable control plane (hardening)

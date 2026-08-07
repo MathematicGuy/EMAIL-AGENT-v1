@@ -46,7 +46,7 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] Checkpoint: V1-M4 exit criteria
 
 ## Gate: PRD-v1 §15 acceptance review (19 criteria, evidence-backed)
-- [ ] [O] Acceptance review passed → unlock V1-H and DEMO Increment A
+- [x] [O] Acceptance review passed → unlock V1-H and DEMO Increment A (PASSED 2026-08-08; verdict + evidence in plan.md gate section)
 
 ## V1-H — Durable control plane
 - [x] [O] Resolve PostgreSQL deployment/migration owner with user (resolved 2026-08-07: orchestrator owns; see plan.md Open Questions)
