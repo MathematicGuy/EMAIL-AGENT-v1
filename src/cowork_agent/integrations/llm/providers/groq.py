@@ -14,14 +14,16 @@ from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
     ExtractionBatch,
 )
+from cowork_agent.features.email_action_plan.shaping import (
+    batch_messages,
+    group_by_thread,
+    merge_correlated_emails,
+)
 
 from .gemini import (
     EXTRACTION_SCHEMA,
     SYSTEM_INSTRUCTION,
-    _batch_threads,
     _build_prompt,
-    _group_by_thread,
-    _merge_correlated_emails,
     _parse_batch,
 )
 
@@ -52,8 +54,8 @@ class GroqActionExtractor:
         messages: Sequence[EphemeralEmailEnvelope],
     ) -> ExtractionBatch:
         email_results: list[EmailExtraction] = []
-        threads = _group_by_thread(messages)
-        for batch in _batch_threads(threads, self._settings.max_emails_per_batch):
+        threads = group_by_thread(messages)
+        for batch in batch_messages(threads, self._settings.max_emails_per_batch):
             prompt = _build_prompt(user_timezone, current_time, batch)
             payload = await self._complete(prompt)
             try:
@@ -66,7 +68,7 @@ class GroqActionExtractor:
                         "Vui lòng thử lại hoặc kiểm tra schema extraction."
                     ),
                 ) from exc
-        return ExtractionBatch(_merge_correlated_emails(email_results))
+        return ExtractionBatch(merge_correlated_emails(email_results))
 
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
         request_body = {

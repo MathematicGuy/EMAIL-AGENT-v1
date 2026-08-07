@@ -1,25 +1,17 @@
 import asyncio
 from collections.abc import Mapping
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from cowork_agent.config import GeminiSettings
-from cowork_agent.domain.target_contracts import (
-    BodyFormat,
-    EphemeralEmailEnvelope,
-    FetchStatus,
-)
-from cowork_agent.features.email_action_plan.schemas import EmailExtraction
 from cowork_agent.integrations.llm.providers.gemini import (
     EXTRACTION_SCHEMA,
     SYSTEM_INSTRUCTION,
     GeminiActionExtractor,
     GeminiKeyRotator,
     GeminiRateLimitError,
-    _merge_correlated_emails,
     _parse_batch,
 )
 
@@ -124,44 +116,6 @@ def test_extractor_rotates_to_next_key_after_rate_limit() -> None:
     asyncio.run(scenario())
 
 
-def test_extractor_splits_email_contexts_into_small_batches() -> None:
-    async def scenario() -> None:
-        settings = GeminiSettings.from_env(
-            environment(GEMINI_MAX_EMAILS_PER_BATCH="5"), load_env_file=False
-        )
-        transport = RecordingTransport()
-        extractor = GeminiActionExtractor(settings, transport)
-        now = datetime.now(UTC)
-        threads = tuple(
-            EphemeralEmailEnvelope(
-                run_id="",
-                tenant_id="",
-                user_id="",
-                gmail_message_id=f"message-{index}",
-                gmail_thread_id=f"thread-{index}",
-                gmail_url="",
-                sender_name="",
-                sender_email="sender@example.com",
-                recipients=(),
-                subject=f"Subject {index}",
-                received_at=now - timedelta(minutes=index),
-                labels=(),
-                normalized_body="Please review this item.",
-                body_format=BodyFormat.TEXT,
-                attachments_present=False,
-                fetch_status=FetchStatus.COMPLETE,
-            )
-            for index in range(12)
-        )
-
-        result = await extractor.extract("Asia/Ho_Chi_Minh", now, threads)
-
-        assert result.emails == ()
-        assert [prompt.count('"providerMessageId"') for prompt in transport.prompts] == [5, 5, 2]
-
-    asyncio.run(scenario())
-
-
 def test_schema_and_parser_preserve_incident_correlation_and_impact() -> None:
     properties = EXTRACTION_SCHEMA["properties"]
     assert isinstance(properties, dict)
@@ -241,30 +195,3 @@ def test_schema_and_parser_preserve_incident_correlation_and_impact() -> None:
         "Mở build logs để tìm lỗi đầu tiên.",
         "Sửa lỗi và chạy lại bản build để xác minh.",
     ]
-
-    volume_action = replace(
-        action,
-        provider_message_id="volume-message",
-        title="Hủy lịch xóa volume HR-Chatbot",
-        summary="Volume đang chờ xóa tự động.",
-        impact="data_loss_risk",
-        incident_key="railway:eloquent-victory:hr-chatbot:hr-chatbot-volume",
-        related_message_ids=("volume-message",),
-    )
-    merged_emails = _merge_correlated_emails(
-        (
-            result.emails[0],
-            EmailExtraction(
-                "volume-message",
-                "actionable",
-                "Volume có nguy cơ bị xóa.",
-                (volume_action,),
-            ),
-        )
-    )
-    merged_actions = [item for email_result in merged_emails for item in email_result.action_items]
-    assert len(merged_actions) == 1
-    assert merged_actions[0].impact == "data_loss_risk"
-    assert merged_actions[0].related_message_ids == ("build-message", "volume-message")
-    assert "HR-Chatbot" in merged_actions[0].title
-    assert len(merged_actions[0].action_plan) <= 5

@@ -5,7 +5,6 @@
 import asyncio
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from datetime import datetime
 from typing import Any, Protocol, cast
 
@@ -13,12 +12,19 @@ from google import genai
 from google.genai import errors, types
 
 from cowork_agent.config import GeminiSettings
-from cowork_agent.domain import ActionPlanStep, Confidence, DeadlineSource, EvidenceRef
+from cowork_agent.domain import Confidence, DeadlineSource, EvidenceRef
 from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
     ExtractedAction,
     ExtractionBatch,
+)
+from cowork_agent.features.email_action_plan.shaping import (
+    batch_messages,
+    group_by_thread,
+    merge_correlated_emails,
+    parse_action_plan,
+    parse_iso_datetime,
 )
 
 _Thread = tuple[EphemeralEmailEnvelope, ...]
@@ -121,11 +127,11 @@ class GeminiActionExtractor:
         messages: Sequence[EphemeralEmailEnvelope],
     ) -> ExtractionBatch:
         email_results: list[EmailExtraction] = []
-        batches = _batch_threads(_group_by_thread(messages), self._settings.max_emails_per_batch)
+        batches = batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch)
         for batch in batches:
             result = await self._extract_batch(user_timezone, current_time, batch)
             email_results.extend(result.emails)
-        return ExtractionBatch(_merge_correlated_emails(email_results))
+        return ExtractionBatch(merge_correlated_emails(email_results))
 
     async def _extract_batch(
         self,
@@ -151,37 +157,6 @@ class GeminiActionExtractor:
                 if not self._settings.rotate_on_rate_limit:
                     raise
         raise last_error or RuntimeError("No Gemini API key was attempted")
-
-
-def _group_by_thread(messages: Sequence[EphemeralEmailEnvelope]) -> tuple[_Thread, ...]:
-    """Regroup the flat envelope list into threads, preserving first-seen order."""
-    grouped: dict[str, list[EphemeralEmailEnvelope]] = {}
-    for message in messages:
-        grouped.setdefault(message.gmail_thread_id, []).append(message)
-    return tuple(tuple(thread) for thread in grouped.values())
-
-
-def _batch_threads(
-    threads: Sequence[_Thread], max_emails: int
-) -> tuple[tuple[_Thread, ...], ...]:
-    """Group whole threads without exceeding the target email count when possible."""
-    if not threads:
-        return ((),)
-
-    batches: list[tuple[_Thread, ...]] = []
-    current: list[_Thread] = []
-    current_email_count = 0
-    for thread in threads:
-        thread_email_count = len(thread)
-        if current and current_email_count + thread_email_count > max_emails:
-            batches.append(tuple(current))
-            current = []
-            current_email_count = 0
-        current.append(thread)
-        current_email_count += thread_email_count
-    if current:
-        batches.append(tuple(current))
-    return tuple(batches)
 
 
 SYSTEM_INSTRUCTION = """Unread Email To-Do Summarizer
@@ -387,10 +362,10 @@ def _parse_batch(payload: Mapping[str, Any]) -> ExtractionBatch:
                     provider_message_id=str(raw_email["providerMessageId"]),
                     title=str(raw["title"]),
                     summary=str(raw["summary"]),
-                    deadline_at=_parse_iso_datetime(deadline_text),
+                    deadline_at=parse_iso_datetime(deadline_text),
                     deadline_text=deadline_text,
                     deadline_source=DeadlineSource(raw["deadlineSource"]),
-                    action_plan=_parse_action_plan(raw["actionPlan"]),
+                    action_plan=parse_action_plan(raw["actionPlan"]),
                     evidence=tuple(
                         EvidenceRef(
                             str(item["sourceKind"]),
@@ -420,165 +395,3 @@ def _parse_batch(payload: Mapping[str, Any]) -> ExtractionBatch:
             )
         )
     return ExtractionBatch(tuple(emails))
-
-
-def _parse_iso_datetime(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _parse_action_plan(value: object) -> tuple[ActionPlanStep, ...]:
-    if not isinstance(value, list):
-        raise ValueError("actionPlan must be an array")
-    blocked_markers = (
-        "single parseable json",
-        "schema provided in the context",
-        "unread email to-do summarizer",
-        "relatedmessageids",
-        "explicitblocker",
-        "classificationreason",
-        "<untrusted_data>",
-        '"actionplan"',
-        '"providermessageid"',
-    )
-    cleaned: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for raw_step in value:
-        if not isinstance(raw_step, Mapping):
-            continue
-        instruction = str(raw_step.get("instruction", "")).strip()
-        normalized = " ".join(instruction.casefold().split())
-        if (
-            not instruction
-            or len(instruction) > 600
-            or any(marker in normalized for marker in blocked_markers)
-            or normalized in seen
-        ):
-            continue
-        seen.add(normalized)
-        cleaned.append((instruction, str(raw_step.get("basis", "suggestion"))))
-        if len(cleaned) == 5:
-            break
-    return tuple(
-        ActionPlanStep(index, instruction, basis)
-        for index, (instruction, basis) in enumerate(cleaned, 1)
-    )
-
-
-def _merge_correlated_emails(
-    emails: Sequence[EmailExtraction],
-) -> tuple[EmailExtraction, ...]:
-    """Deterministically consolidate actions that the model assigned to one incident."""
-    actions_by_email: list[list[ExtractedAction]] = [[] for _ in emails]
-    correlated: dict[str, list[tuple[int, ExtractedAction]]] = {}
-    for email_index, email_result in enumerate(emails):
-        for action in email_result.action_items:
-            incident_key = _normalize_incident_key(action.incident_key)
-            if incident_key:
-                correlated.setdefault(incident_key, []).append((email_index, action))
-            else:
-                actions_by_email[email_index].append(action)
-
-    for group in correlated.values():
-        if len(group) == 1:
-            email_index, action = group[0]
-            actions_by_email[email_index].append(action)
-            continue
-        primary_index, primary = max(group, key=lambda pair: _impact_rank(pair[1].impact))
-        merged = _merge_actions(primary, [action for _, action in group])
-        actions_by_email[primary_index].append(merged)
-
-    return tuple(
-        replace(email_result, action_items=tuple(actions_by_email[index]))
-        for index, email_result in enumerate(emails)
-    )
-
-
-def _merge_actions(primary: ExtractedAction, actions: Sequence[ExtractedAction]) -> ExtractedAction:
-    titles = list(dict.fromkeys(action.title.strip() for action in actions if action.title.strip()))
-    summaries = list(
-        dict.fromkeys(action.summary.strip() for action in actions if action.summary.strip())
-    )
-    related_ids = list(
-        dict.fromkeys(
-            message_id
-            for action in actions
-            for message_id in (action.provider_message_id, *action.related_message_ids)
-        )
-    )
-    deadlines = [action for action in actions if action.deadline_at is not None]
-    deadline_action = min(deadlines, key=_deadline_sort_key) if deadlines else None
-    steps = _select_merged_steps(actions, max_steps=5)
-    evidence = list(dict.fromkeys(item for action in actions for item in action.evidence))
-    confidence = min(
-        (action.confidence for action in actions),
-        key=lambda value: {"low": 0, "medium": 1, "high": 2}[value.value],
-    )
-    return replace(
-        primary,
-        title=" & ".join(titles),
-        summary=" ".join(summaries),
-        deadline_at=deadline_action.deadline_at if deadline_action else None,
-        deadline_text=deadline_action.deadline_text if deadline_action else None,
-        deadline_source=(deadline_action.deadline_source if deadline_action else DeadlineSource.NONE),
-        action_plan=tuple(
-            ActionPlanStep(index, instruction, basis)
-            for index, (instruction, basis) in enumerate(steps, 1)
-        ),
-        evidence=tuple(evidence),
-        confidence=confidence,
-        required=any(action.required for action in actions),
-        explicit_blocker=any(action.explicit_blocker for action in actions),
-        impact=max((action.impact for action in actions), key=_impact_rank),
-        related_message_ids=tuple(related_ids),
-    )
-
-
-def _impact_rank(impact: str) -> int:
-    return {
-        "none": 0,
-        "production_blocked": 1,
-        "service_outage": 2,
-        "security_risk": 3,
-        "data_loss_risk": 4,
-    }.get(impact, 0)
-
-
-def _select_merged_steps(
-    actions: Sequence[ExtractedAction], *, max_steps: int
-) -> list[tuple[str, str]]:
-    """Interleave plans so every correlated event contributes concise remediation steps."""
-    plans = [
-        [(step.instruction.strip(), step.basis) for step in action.action_plan]
-        for action in actions
-    ]
-    selected: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    step_index = 0
-    while len(selected) < max_steps and any(step_index < len(plan) for plan in plans):
-        for plan in plans:
-            if step_index >= len(plan):
-                continue
-            step = plan[step_index]
-            if step[0] and step not in seen:
-                seen.add(step)
-                selected.append(step)
-                if len(selected) >= max_steps:
-                    break
-        step_index += 1
-    return selected
-
-
-def _normalize_incident_key(value: str | None) -> str:
-    parts = [part.strip().casefold() for part in (value or "").split(":") if part.strip()]
-    return ":".join(parts[:3])
-
-
-def _deadline_sort_key(action: ExtractedAction) -> datetime:
-    if action.deadline_at is None:
-        raise ValueError("Cannot sort an action without a deadline")
-    return action.deadline_at
