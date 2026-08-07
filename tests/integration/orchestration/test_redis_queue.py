@@ -38,6 +38,9 @@ from cowork_agent.domain.target_contracts import (  # noqa: E402
     Task,
     ValidationStatus,
 )
+from cowork_agent.features.email_action_plan.ports import (  # noqa: E402
+    CompletionOutboxPort,
+)
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore  # noqa: E402
 from cowork_agent.features.email_action_plan.workflow import (  # noqa: E402
     CreateDigestRun,
@@ -51,6 +54,7 @@ from cowork_agent.integrations.llm.fakes import (  # noqa: E402
     FakePlanGenerator,
     FakeRouteClassifier,
 )
+from cowork_agent.orchestration.local import InMemoryOutbox  # noqa: E402
 from cowork_agent.orchestration.redis_queue import (  # noqa: E402
     DEFAULT_DLQ_STREAM,
     DEFAULT_STREAM,
@@ -199,6 +203,7 @@ def _consumer(
     *,
     consumer_name: str = "worker-a",
     max_retries: int = 3,
+    completion_outbox: CompletionOutboxPort | None = None,
 ) -> RedisRunConsumer:
     return RedisRunConsumer(
         client,
@@ -209,6 +214,7 @@ def _consumer(
         max_retries=max_retries,
         block_ms=10,
         claim_min_idle_ms=0,
+        completion_outbox=completion_outbox,
     )
 
 
@@ -291,7 +297,10 @@ def test_failed_execution_retries_then_dead_letters_metadata_only() -> None:
             queue = RedisRunQueue(client)
             runs = StubRunRepository(("run_1",))
             executor = RecordingExecutor(runs, fail_times={"run_1": 99})
-            consumer = _consumer(client, runs, executor, max_retries=2)
+            outbox = InMemoryOutbox()
+            consumer = _consumer(
+                client, runs, executor, max_retries=2, completion_outbox=outbox
+            )
             await consumer.ensure_group()
             await queue.enqueue_digest_run("run_1", user_id="u1", tenant_id="local")
 
@@ -314,6 +323,11 @@ def test_failed_execution_retries_then_dead_letters_metadata_only() -> None:
             assert runs.runs["run_1"].error_code == "RETRY_EXHAUSTED"
             pending = await client.xpending(DEFAULT_STREAM, "test-group")
             assert pending["pending"] == 0
+            # T5.5: a DLQ-forced terminal run is observable like any other.
+            events = await outbox.pending()
+            assert [(e.run_id, e.status) for e in events] == [
+                ("run_1", RunStatus.FAILED)
+            ]
         finally:
             await client.aclose()
 

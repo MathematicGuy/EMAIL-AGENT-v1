@@ -444,6 +444,10 @@ owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
   consuming `CompletionOutboxPort.pending()`/`mark_published` into
   trace/metrics sinks, and completion events for runs forced terminal by
   DLQ retry exhaustion (T5.3 review: those currently get no event).
+  Delivered 2026-08-08: `LifecycleEventPublisher` (outbox → trace sink,
+  at-least-once), DLQ completion events, worker wiring. **Blocked:**
+  numeric launch gates/alerts + scaled evaluation need the user's
+  threshold decisions (Open Questions) and user-authorized live runs.
 
 **Exit criteria (old Milestone 1):** API-created run visible to a separate
 worker process; single-claim enforced; retry exhaustion reaches DLQ without

@@ -1,20 +1,25 @@
-"""T4.4 telemetry + T4.5 development trace unit tests."""
+"""T4.4 telemetry + T4.5 development trace + T5.5 lifecycle publication tests."""
 
+import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
 
+from cowork_agent.domain import DigestCompletedEvent, RunStatus
 from cowork_agent.domain.target_contracts import TraceEvent, TraceLatency, TraceStatus
 from cowork_agent.features.email_action_plan.observability import (
     DEV_TRACE_MARKER,
     EncryptedDevTraceSink,
     InMemoryTraceSink,
+    LifecycleEventPublisher,
     ProductionTraceForbiddenError,
     dev_trace_sink_from_env,
     is_production_env,
 )
+from cowork_agent.orchestration.local import InMemoryOutbox
 
 KEY = Fernet.generate_key().decode()
 
@@ -99,3 +104,60 @@ def test_in_memory_trace_sink_records_json_safe_events() -> None:
     sink.record(event)
     assert sink.events == [event]
     json.dumps(event.to_dict())
+
+
+def test_lifecycle_publisher_relays_and_marks_published() -> None:
+    async def scenario() -> None:
+        outbox = InMemoryOutbox()
+        sink = InMemoryTraceSink()
+        now = datetime(2026, 8, 8, 10, tzinfo=UTC)
+        await outbox.add(
+            DigestCompletedEvent(
+                run_id="run-1", user_id="u1", status=RunStatus.SUCCEEDED, occurred_at=now
+            )
+        )
+        await outbox.add(
+            DigestCompletedEvent(
+                run_id="run-2", user_id="u1", status=RunStatus.PARTIAL, occurred_at=now
+            )
+        )
+        await outbox.add(
+            DigestCompletedEvent(
+                run_id="run-3", user_id="u1", status=RunStatus.FAILED, occurred_at=now
+            )
+        )
+        publisher = LifecycleEventPublisher(outbox, sink)
+
+        published = await publisher.publish_pending()
+
+        assert published == 3
+        assert [(e.run_id, e.status) for e in sink.events] == [
+            ("run-1", TraceStatus.SUCCESS),
+            ("run-2", TraceStatus.PARTIAL),
+            ("run-3", TraceStatus.FAILED),
+        ]
+        assert all(e.event_name == LifecycleEventPublisher.EVENT_NAME for e in sink.events)
+        assert await outbox.pending() == ()
+        # Drained: a second pass relays nothing.
+        assert await publisher.publish_pending() == 0
+
+    asyncio.run(scenario())
+
+
+def test_lifecycle_publisher_without_sink_still_drains_outbox() -> None:
+    async def scenario() -> None:
+        outbox = InMemoryOutbox()
+        await outbox.add(
+            DigestCompletedEvent(
+                run_id="run-1",
+                user_id="u1",
+                status=RunStatus.SUCCEEDED,
+                occurred_at=datetime(2026, 8, 8, 10, tzinfo=UTC),
+            )
+        )
+        publisher = LifecycleEventPublisher(outbox, None)
+
+        assert await publisher.publish_pending() == 1
+        assert await outbox.pending() == ()
+
+    asyncio.run(scenario())

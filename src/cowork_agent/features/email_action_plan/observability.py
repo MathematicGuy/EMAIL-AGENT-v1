@@ -19,8 +19,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from cowork_agent.domain.target_contracts import TraceEvent
+from cowork_agent.domain import RunStatus
+from cowork_agent.domain.target_contracts import (
+    TraceEvent,
+    TraceLatency,
+    TraceStatus,
+)
+from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.auth import TokenCipher
+
+from .ports import CompletionOutboxPort
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +64,64 @@ class InMemoryTraceSink:
 
     def record(self, event: TraceEvent) -> None:
         self.events.append(event)
+
+
+_LIFECYCLE_TRACE_STATUS = {
+    RunStatus.SUCCEEDED: TraceStatus.SUCCESS,
+    RunStatus.PARTIAL: TraceStatus.PARTIAL,
+    RunStatus.FAILED: TraceStatus.FAILED,
+}
+
+
+class LifecycleEventPublisher:
+    """Relays durable completion events to observers (V1-H T5.5).
+
+    The outbox is the durable record; publication is at-least-once — the
+    outbox row is idempotent per run, but relays can duplicate (crash
+    between record and mark, or concurrent workers relaying before either
+    marks). Harmless for logging sinks; revisit before a counting sink.
+    """
+
+    EVENT_NAME = "digest_run_completed"
+
+    def __init__(
+        self, outbox: CompletionOutboxPort, trace_sink: TraceSink | None
+    ) -> None:
+        self._outbox = outbox
+        self._trace_sink = trace_sink
+
+    async def publish_pending(self) -> int:
+        published = 0
+        for event in await self._outbox.pending():
+            if self._trace_sink is not None:
+                try:
+                    trace_status = _LIFECYCLE_TRACE_STATUS[event.status]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"Lifecycle event for run {event.run_id} carries"
+                        f" non-terminal status {event.status!r}"
+                    ) from exc
+                self._trace_sink.record(
+                    TraceEvent(
+                        run_id=event.run_id,
+                        tenant_id=LOCAL_TENANT_ID,
+                        user_id=event.user_id,
+                        gmail_message_id=None,
+                        event_name=self.EVENT_NAME,
+                        status=trace_status,
+                        route=None,
+                        reason_codes=(),
+                        classifier_confidence=None,
+                        rag_result_count=None,
+                        retrieval_status=None,
+                        generation_status=None,
+                        validation_status=None,
+                        latency_ms=TraceLatency(),
+                    )
+                )
+            await self._outbox.mark_published(event.run_id)
+            published += 1
+        return published
 
 
 def is_production_env(environ: Mapping[str, str] | None = None) -> bool:

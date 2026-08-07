@@ -31,8 +31,14 @@ from uuid import uuid4
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
-from cowork_agent.domain import DigestRun, RunStatus
-from cowork_agent.features.email_action_plan.ports import RunRepository
+from cowork_agent.domain import DigestCompletedEvent, DigestRun, RunStatus
+from cowork_agent.features.email_action_plan.observability import (
+    LifecycleEventPublisher,
+)
+from cowork_agent.features.email_action_plan.ports import (
+    CompletionOutboxPort,
+    RunRepository,
+)
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.orchestration.recovery import (
     DEFAULT_QUEUED_TIMEOUT,
@@ -97,6 +103,8 @@ class RedisRunConsumer:
         sweep_interval_seconds: float = 300.0,
         running_timeout: timedelta = DEFAULT_RUNNING_TIMEOUT,
         queued_timeout: timedelta = DEFAULT_QUEUED_TIMEOUT,
+        completion_outbox: CompletionOutboxPort | None = None,
+        publisher: LifecycleEventPublisher | None = None,
     ) -> None:
         self._redis = redis
         self._runs = runs
@@ -112,6 +120,8 @@ class RedisRunConsumer:
         self._running_timeout = running_timeout
         self._queued_timeout = queued_timeout
         self._queue = RedisRunQueue(redis, stream=stream)
+        self._completion_outbox = completion_outbox
+        self._publisher = publisher
 
     async def ensure_group(self) -> None:
         try:
@@ -149,6 +159,15 @@ class RedisRunConsumer:
                     # Maintenance must never kill the consumer; the next
                     # interval retries.
                     logger.exception("Stuck-run sweep failed; retrying next interval")
+                if self._publisher is not None:
+                    try:
+                        await self._publisher.publish_pending()
+                    except Exception:
+                        # Independent of the sweep: durable completion
+                        # events keep flowing even if Redis is degraded.
+                        logger.exception(
+                            "Lifecycle publication failed; retrying next interval"
+                        )
                 next_sweep = time.monotonic() + self._sweep_interval_seconds
             await self.deliver_once()
         logger.info("Run consumer %s stopped", self._consumer)
@@ -267,6 +286,22 @@ class RedisRunConsumer:
         run.error_message_safe = "Run processing exhausted its retry budget."
         run.completed_at = datetime.now(UTC)
         await self._runs.save(run)
+        if self._completion_outbox is not None:
+            try:
+                await self._completion_outbox.add(
+                    DigestCompletedEvent(
+                        run_id=run.id,
+                        user_id=run.user_id,
+                        status=run.status,
+                        occurred_at=run.completed_at,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Completion event for DLQ run %s could not be appended (%s)",
+                    run.id,
+                    type(exc).__name__,
+                )
 
     async def dlq_entries(self) -> Sequence[Mapping[str, str]]:
         """Inspect the DLQ (operations + tests); entries are metadata-only."""

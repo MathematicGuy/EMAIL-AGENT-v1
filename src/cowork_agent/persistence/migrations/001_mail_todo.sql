@@ -12,6 +12,8 @@
 --   producing run stays linked with its save-time freshness. Run
 --   attribution lives solely in task_run_links (the lineage's per-row
 --   run_id is dropped).
+-- - attachment_extractions dropped: attachment processing is out of scope
+--   (ADR-003); presence-only metadata lives on run counters.
 -- - "trigger" is quoted because TRIGGER is a reserved keyword.
 -- - No foreign keys to mailbox_connections yet: the mailbox connection
 --   store still lives in SQLite (V1-M1 lineage) and migrates separately;
@@ -81,19 +83,6 @@ CREATE TABLE task_run_links (
     freshness text NOT NULL CHECK (freshness IN ('new', 'seen')),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (task_key, run_id)
-);
-
-CREATE TABLE attachment_extractions (
-    id bigserial PRIMARY KEY,
-    run_id text NOT NULL REFERENCES digest_runs(id) ON DELETE CASCADE,
-    attachment_id text NOT NULL,
-    filename text NOT NULL,
-    detected_mime_type text,
-    sha256 char(64),
-    status text NOT NULL,
-    warning_code text,
-    units_count integer NOT NULL DEFAULT 0,
-    created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE outbox_events (

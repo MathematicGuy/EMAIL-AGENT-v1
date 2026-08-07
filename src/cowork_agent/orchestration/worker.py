@@ -21,6 +21,7 @@ from cowork_agent.config import (
     redis_url,
 )
 from cowork_agent.features.email_action_plan.observability import (
+    LifecycleEventPublisher,
     LoggingTraceSink,
     dev_trace_sink_from_env,
 )
@@ -133,7 +134,13 @@ async def run_worker() -> None:
             ),
             completion_outbox=outbox,
         )
-        consumer = RedisRunConsumer(redis_client, runs, digest_worker)
+        consumer = RedisRunConsumer(
+            redis_client,
+            runs,
+            digest_worker,
+            completion_outbox=outbox,
+            publisher=LifecycleEventPublisher(outbox, LoggingTraceSink()),
+        )
         logger.info("Worker ready; consuming the durable run queue")
         await consumer.run_forever()
     finally:
