@@ -1,6 +1,11 @@
 """Concrete LLM provider adapters."""
 
-from .gemini import GeminiActionExtractor
-from .groq import GroqActionExtractor
+from .gemini import GeminiActionExtractor, GeminiRouteClassifier
+from .groq import GroqActionExtractor, GroqRouteClassifier
 
-__all__ = ["GeminiActionExtractor", "GroqActionExtractor"]
+__all__ = [
+    "GeminiActionExtractor",
+    "GeminiRouteClassifier",
+    "GroqActionExtractor",
+    "GroqRouteClassifier",
+]

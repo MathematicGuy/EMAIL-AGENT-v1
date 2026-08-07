@@ -15,7 +15,7 @@ from cowork_agent.domain import (
 )
 from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 
-from .schemas import ExtractionBatch, ExtractionLimits, SearchPage
+from .schemas import ClassificationResult, ExtractionBatch, ExtractionLimits, SearchPage
 
 
 class MailboxPort(Protocol):
@@ -54,6 +54,35 @@ class AttachmentExtractorPort(Protocol):
 
 class ActionExtractorPort(Protocol):
     async def extract(
+        self,
+        user_timezone: str,
+        current_time: datetime,
+        messages: Sequence[EphemeralEmailEnvelope],
+    ) -> ExtractionBatch: ...
+
+
+class RouteClassifierPort(Protocol):
+    """One structured Route Decision per selected email (PRD-v1 FR-05, §6.2).
+
+    Implementations decide actionability and knowledge sufficiency only; the
+    deterministic Route Resolver owns the final route (master-comparison §3.6).
+    """
+
+    async def classify(
+        self,
+        user_timezone: str,
+        current_time: datetime,
+        messages: Sequence[EphemeralEmailEnvelope],
+    ) -> ClassificationResult: ...
+
+
+class ActionPlanGeneratorPort(Protocol):
+    """Compatibility bridge used by the V1-M2 rewiring.
+
+    V1-M3 T3.3 replaces it with the ActionPlanOutput-based Generator.
+    """
+
+    async def generate(
         self,
         user_timezone: str,
         current_time: datetime,

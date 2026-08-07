@@ -9,6 +9,7 @@ from cowork_agent.domain import (
     DeadlineSource,
     EvidenceRef,
 )
+from cowork_agent.domain.target_contracts import EmailRouteDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,3 +62,24 @@ class EmailExtraction:
 @dataclass(frozen=True, slots=True)
 class ExtractionBatch:
     emails: tuple[EmailExtraction, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedMessage:
+    """One selected email bound to its schema-validated Route Decision (§6.2)."""
+
+    gmail_message_id: str
+    decision: EmailRouteDecision
+
+
+@dataclass(frozen=True, slots=True)
+class ClassificationResult:
+    """Outcome of one bounded classification stage (PRD-v1 FR-05).
+
+    ``decisions`` holds exactly one Route Decision per selected email; the
+    §12.2 conservative fallback counts as a decision. ``batch_count`` is the
+    number of bounded classifier batch calls the stage performed.
+    """
+
+    decisions: tuple[ClassifiedMessage, ...]
+    batch_count: int
