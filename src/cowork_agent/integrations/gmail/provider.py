@@ -8,7 +8,7 @@ import secrets
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
@@ -19,7 +19,12 @@ from googleapiclient.discovery import build  # type: ignore[import-untyped]
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from cowork_agent.config import GmailSettings
-from cowork_agent.domain import AttachmentRef, EmailEnvelope, MailboxConnection
+from cowork_agent.domain import MailboxConnection
+from cowork_agent.domain.target_contracts import (
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
+)
 from cowork_agent.features.email_action_plan.ports import MailboxConnectionRepository
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
 
@@ -199,7 +204,9 @@ class GmailMailboxAdapter:
             estimated_total=int(response.get("resultSizeEstimate", len(messages))),
         )
 
-    async def get_thread(self, connection_id: str, thread_id: str) -> Sequence[EmailEnvelope]:
+    async def get_thread(
+        self, connection_id: str, thread_id: str
+    ) -> Sequence[EphemeralEmailEnvelope]:
         service = await self._service(connection_id)
 
         def execute() -> Mapping[str, Any]:
@@ -216,6 +223,7 @@ class GmailMailboxAdapter:
         attachment_id: str,
         max_bytes: int,
     ) -> AsyncIterator[bytes]:
+        """Deprecated (ADR-003 transition clause): compatibility code, never wired in production."""
         service = await self._service(connection_id)
 
         def execute() -> Mapping[str, Any]:
@@ -272,31 +280,46 @@ def _get_profile_email(credentials: Credentials) -> str:
     return email_address
 
 
-def _parse_message(raw: Mapping[str, Any]) -> EmailEnvelope:
+def _parse_message(raw: Mapping[str, Any]) -> EphemeralEmailEnvelope:
+    has_payload = "payload" in raw
     payload = cast(Mapping[str, Any], raw.get("payload", {}))
     headers = {
         str(item.get("name", "")).lower(): str(item.get("value", ""))
         for item in payload.get("headers", ())
     }
     sender_name, sender_address = parseaddr(headers.get("from", ""))
+    recipients = tuple(
+        address
+        for _, address in getaddresses([headers.get("to", ""), headers.get("cc", "")])
+        if address
+    )
     timestamp = datetime.fromtimestamp(int(raw.get("internalDate", 0)) / 1000, tz=UTC)
     message_id = str(raw["id"])
     thread_id = str(raw["threadId"])
-    return EmailEnvelope(
-        provider_message_id=message_id,
-        provider_thread_id=thread_id,
-        deep_link=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+    normalized_body, body_format = _extract_text(payload)
+    return EphemeralEmailEnvelope(
+        run_id="",
+        tenant_id="",
+        user_id="",
+        gmail_message_id=message_id,
+        gmail_thread_id=thread_id,
+        gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+        sender_name=sender_name or "",
+        sender_email=sender_address,
+        recipients=recipients,
         subject=headers.get("subject", "(Không có chủ đề)"),
-        sender_name=sender_name or None,
-        sender_address=sender_address,
-        sent_at=timestamp,
         received_at=timestamp,
-        text_body=_extract_text(payload),
-        attachments=tuple(_extract_attachments(payload)),
+        labels=tuple(str(label) for label in raw.get("labelIds", ())),
+        normalized_body=normalized_body,
+        body_format=body_format,
+        attachments_present=_has_attachments(payload),
+        fetch_status=(
+            FetchStatus.COMPLETE if has_payload and normalized_body else FetchStatus.PARTIAL
+        ),
     )
 
 
-def _extract_text(part: Mapping[str, Any]) -> str:
+def _extract_text(part: Mapping[str, Any]) -> tuple[str, BodyFormat]:
     plain: list[str] = []
     rich: list[str] = []
 
@@ -317,31 +340,22 @@ def _extract_text(part: Mapping[str, Any]) -> str:
         missing_links = [link for link in dict.fromkeys(links) if link not in plain_text]
         if missing_links:
             plain_text += "\n\nLiên kết trong email:\n" + "\n".join(missing_links)
-        return plain_text
-    return _html_to_text("\n".join(rich)).strip()
+        return plain_text, BodyFormat.TEXT
+    if not rich:
+        return "", BodyFormat.TEXT
+    return _html_to_text("\n".join(rich)).strip(), BodyFormat.HTML_CONVERTED
 
 
-def _extract_attachments(part: Mapping[str, Any]) -> list[AttachmentRef]:
-    attachments: list[AttachmentRef] = []
+def _has_attachments(part: Mapping[str, Any]) -> bool:
+    """Presence-only detection per ADR-003: attachment content is never downloaded."""
 
-    def visit(current: Mapping[str, Any]) -> None:
+    def visit(current: Mapping[str, Any]) -> bool:
         body = cast(Mapping[str, Any], current.get("body", {}))
-        filename = str(current.get("filename", "")).strip()
-        attachment_id = body.get("attachmentId")
-        if filename and attachment_id:
-            attachments.append(
-                AttachmentRef(
-                    attachment_id=str(attachment_id),
-                    filename=filename,
-                    declared_mime_type=str(current.get("mimeType", "application/octet-stream")),
-                    size_bytes=int(body["size"]) if body.get("size") is not None else None,
-                )
-            )
-        for child in current.get("parts", ()):
-            visit(cast(Mapping[str, Any], child))
+        if str(current.get("filename", "")).strip() and body.get("attachmentId"):
+            return True
+        return any(visit(cast(Mapping[str, Any], child)) for child in current.get("parts", ()))
 
-    visit(part)
-    return attachments
+    return visit(part)
 
 
 def _decode_gmail_data(value: str) -> bytes:

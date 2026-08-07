@@ -67,28 +67,6 @@ class ProcessedEmail:
 
 
 @dataclass(frozen=True, slots=True)
-class AttachmentRef:
-    attachment_id: str
-    filename: str
-    declared_mime_type: str
-    size_bytes: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class EmailEnvelope:
-    provider_message_id: str
-    provider_thread_id: str
-    deep_link: str | None
-    subject: str
-    sender_name: str | None
-    sender_address: str
-    sent_at: datetime
-    received_at: datetime
-    text_body: str
-    attachments: tuple[AttachmentRef, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class ExtractedUnit:
     kind: str
     label: str

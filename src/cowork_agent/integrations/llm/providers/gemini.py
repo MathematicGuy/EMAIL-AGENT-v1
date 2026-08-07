@@ -14,12 +14,14 @@ from google.genai import errors, types
 
 from cowork_agent.config import GeminiSettings
 from cowork_agent.domain import ActionPlanStep, Confidence, DeadlineSource, EvidenceRef
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
     ExtractedAction,
     ExtractionBatch,
-    ThreadContext,
 )
+
+_Thread = tuple[EphemeralEmailEnvelope, ...]
 
 
 class GeminiRateLimitError(RuntimeError):
@@ -116,10 +118,10 @@ class GeminiActionExtractor:
         self,
         user_timezone: str,
         current_time: datetime,
-        threads: Sequence[ThreadContext],
+        messages: Sequence[EphemeralEmailEnvelope],
     ) -> ExtractionBatch:
         email_results: list[EmailExtraction] = []
-        batches = _batch_threads(threads, self._settings.max_emails_per_batch)
+        batches = _batch_threads(_group_by_thread(messages), self._settings.max_emails_per_batch)
         for batch in batches:
             result = await self._extract_batch(user_timezone, current_time, batch)
             email_results.extend(result.emails)
@@ -129,7 +131,7 @@ class GeminiActionExtractor:
         self,
         user_timezone: str,
         current_time: datetime,
-        threads: Sequence[ThreadContext],
+        threads: Sequence[_Thread],
     ) -> ExtractionBatch:
         prompt = _build_prompt(user_timezone, current_time, threads)
         keys = await self._rotator.candidates(self._settings.max_attempts)
@@ -151,18 +153,26 @@ class GeminiActionExtractor:
         raise last_error or RuntimeError("No Gemini API key was attempted")
 
 
+def _group_by_thread(messages: Sequence[EphemeralEmailEnvelope]) -> tuple[_Thread, ...]:
+    """Regroup the flat envelope list into threads, preserving first-seen order."""
+    grouped: dict[str, list[EphemeralEmailEnvelope]] = {}
+    for message in messages:
+        grouped.setdefault(message.gmail_thread_id, []).append(message)
+    return tuple(tuple(thread) for thread in grouped.values())
+
+
 def _batch_threads(
-    threads: Sequence[ThreadContext], max_emails: int
-) -> tuple[tuple[ThreadContext, ...], ...]:
+    threads: Sequence[_Thread], max_emails: int
+) -> tuple[tuple[_Thread, ...], ...]:
     """Group whole threads without exceeding the target email count when possible."""
     if not threads:
         return ((),)
 
-    batches: list[tuple[ThreadContext, ...]] = []
-    current: list[ThreadContext] = []
+    batches: list[tuple[_Thread, ...]] = []
+    current: list[_Thread] = []
     current_email_count = 0
     for thread in threads:
-        thread_email_count = len(thread.messages)
+        thread_email_count = len(thread)
         if current and current_email_count + thread_email_count > max_emails:
             batches.append(tuple(current))
             current = []
@@ -325,7 +335,7 @@ EXTRACTION_SCHEMA: dict[str, object] = {
 }
 
 
-def _build_prompt(timezone: str, now: datetime, threads: Sequence[ThreadContext]) -> str:
+def _build_prompt(timezone: str, now: datetime, threads: Sequence[_Thread]) -> str:
     data = {
         "userTimezone": timezone,
         "currentTime": now.isoformat(),
@@ -333,23 +343,17 @@ def _build_prompt(timezone: str, now: datetime, threads: Sequence[ThreadContext]
             {
                 "messages": [
                     {
-                        "providerMessageId": message.provider_message_id,
-                        "threadId": message.provider_thread_id,
+                        "providerMessageId": message.gmail_message_id,
+                        "threadId": message.gmail_thread_id,
                         "subject": message.subject,
                         "senderName": message.sender_name,
-                        "sender": message.sender_address,
-                        "sentAt": message.sent_at.isoformat(),
-                        "body": message.text_body,
+                        "sender": message.sender_email,
+                        "sentAt": message.received_at.isoformat(),
+                        "body": message.normalized_body,
+                        # ADR-003: presence only — attachment content is never processed.
+                        "attachmentsPresent": message.attachments_present,
                     }
-                    for message in thread.messages
-                ],
-                "attachments": [
-                    {
-                        "filename": item.filename,
-                        "text": item.text,
-                        "units": [{"label": unit.label, "text": unit.text} for unit in item.units],
-                    }
-                    for item in thread.attachments
+                    for message in thread
                 ],
             }
             for thread in threads

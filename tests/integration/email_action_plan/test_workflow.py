@@ -4,13 +4,16 @@ from datetime import UTC, datetime, timedelta
 
 from cowork_agent.domain import (
     ActionPlanStep,
-    AttachmentRef,
     Confidence,
     DeadlineSource,
-    EmailEnvelope,
     EvidenceRef,
     Priority,
     RunStatus,
+)
+from cowork_agent.domain.target_contracts import (
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
 )
 from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
@@ -22,6 +25,7 @@ from cowork_agent.features.email_action_plan.workflow import (
     DigestWorker,
     GetDigestResult,
 )
+from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.llm.fakes import FakeActionExtractor
 from cowork_agent.orchestration.local import InMemoryOutbox, InMemoryQueue
@@ -34,19 +38,29 @@ NOW = datetime(2026, 8, 3, 8, tzinfo=UTC)
 
 
 def email(
-    message_id: str, thread_id: str, subject: str, attachments: tuple[AttachmentRef, ...] = ()
-) -> EmailEnvelope:
-    return EmailEnvelope(
-        message_id,
-        thread_id,
-        f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
-        subject,
-        "Nguyễn An",
-        "an@example.com",
-        NOW,
-        NOW,
-        "Nội dung",
-        attachments,
+    message_id: str,
+    thread_id: str,
+    subject: str,
+    *,
+    attachments_present: bool = False,
+) -> EphemeralEmailEnvelope:
+    return EphemeralEmailEnvelope(
+        run_id="",
+        tenant_id="",
+        user_id="",
+        gmail_message_id=message_id,
+        gmail_thread_id=thread_id,
+        gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
+        sender_name="Nguyễn An",
+        sender_email="an@example.com",
+        recipients=(),
+        subject=subject,
+        received_at=NOW,
+        labels=(),
+        normalized_body="Nội dung",
+        body_format=BodyFormat.TEXT,
+        attachments_present=attachments_present,
+        fetch_status=FetchStatus.COMPLETE,
     )
 
 
@@ -187,8 +201,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             raise AssertionError("ADR-003 forbids attachment extraction")
 
     async def scenario() -> None:
-        ref = AttachmentRef("a1", "spec.pdf", "application/pdf", 100)
-        message = email("m1", "t1", "Duyệt tài liệu", (ref,))
+        message = email("m1", "t1", "Duyệt tài liệu", attachments_present=True)
         batch = ExtractionBatch(
             (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Duyệt tài liệu"),)),)
         )
@@ -330,9 +343,38 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
         assert completed.emails_matched == 3
         assert completed.emails_processed == 2
         assert completed.truncated is True
-        assert [item.provider_message_id for item in extractor.received_threads[0].messages] == [
+        assert [item.gmail_message_id for item in extractor.received_envelopes] == [
             "m1",
             "m2",
         ]
+
+    asyncio.run(scenario())
+
+
+def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
+    async def scenario() -> None:
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        creator = CreateDigestRun(runs, InMemoryQueue())
+        run = await creator.execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="stamp"
+        )
+        extractor = FakeActionExtractor(ExtractionBatch(()))
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox([email("m1", "t1", "Việc một"), email("m2", "t2", "Việc hai")]),
+            SafeTextAttachmentExtractor(),
+            extractor,
+            InMemoryOutbox(),
+        )
+        completed = await worker.execute(run.id, now=NOW)
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert extractor.received_envelopes
+        for envelope in extractor.received_envelopes:
+            assert envelope.run_id == run.id
+            assert envelope.run_id != ""
+            assert envelope.tenant_id == LOCAL_TENANT_ID
+            assert envelope.user_id == "u1"
+            assert envelope.attachments_processed is False
 
     asyncio.run(scenario())

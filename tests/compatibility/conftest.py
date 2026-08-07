@@ -19,7 +19,12 @@ from cryptography.fernet import Fernet
 
 from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
-from cowork_agent.domain import EmailEnvelope, MailboxConnection
+from cowork_agent.domain import MailboxConnection
+from cowork_agent.domain.target_contracts import (
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
+)
 from cowork_agent.features.email_action_plan.schemas import ExtractionBatch
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
@@ -51,19 +56,25 @@ def make_email(
     subject: str,
     body: str = "Nội dung thân email.",
     received_at: datetime | None = None,
-) -> EmailEnvelope:
+) -> EphemeralEmailEnvelope:
     stamp = received_at or datetime(2026, 8, 3, 8, tzinfo=UTC)
-    return EmailEnvelope(
-        provider_message_id=message_id,
-        provider_thread_id=thread_id,
-        deep_link=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
-        subject=subject,
+    return EphemeralEmailEnvelope(
+        run_id="",
+        tenant_id="",
+        user_id="",
+        gmail_message_id=message_id,
+        gmail_thread_id=thread_id,
+        gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
         sender_name="Người Gửi",
-        sender_address=f"{message_id}@example.com",
-        sent_at=stamp,
+        sender_email=f"{message_id}@example.com",
+        recipients=(),
+        subject=subject,
         received_at=stamp,
-        text_body=body,
-        attachments=(),
+        labels=(),
+        normalized_body=body,
+        body_format=BodyFormat.TEXT,
+        attachments_present=False,
+        fetch_status=FetchStatus.COMPLETE,
     )
 
 
@@ -71,7 +82,7 @@ def make_email(
 class CompatSession:
     """App + client wired to deterministic fakes for compatibility assertions."""
 
-    messages: Sequence[EmailEnvelope] = ()
+    messages: Sequence[EphemeralEmailEnvelope] = ()
     batch: ExtractionBatch | None = None
     mailbox: object | None = None
 
@@ -143,7 +154,7 @@ def compat_session(compat_env: None):
 
     @asynccontextmanager
     async def factory(
-        messages: Sequence[EmailEnvelope] = (),
+        messages: Sequence[EphemeralEmailEnvelope] = (),
         batch: ExtractionBatch | None = None,
         mailbox: object | None = None,
     ):

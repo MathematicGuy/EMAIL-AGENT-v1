@@ -3,7 +3,8 @@
 import hashlib
 from collections.abc import AsyncIterator, Sequence
 
-from cowork_agent.domain import EmailEnvelope, ExtractedAttachment, ExtractedUnit
+from cowork_agent.domain import ExtractedAttachment, ExtractedUnit
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 from cowork_agent.features.email_action_plan.schemas import (
     ExtractionLimits,
     MessageRef,
@@ -16,7 +17,7 @@ class FakeMailbox:
 
     def __init__(
         self,
-        messages: Sequence[EmailEnvelope] = (),
+        messages: Sequence[EphemeralEmailEnvelope] = (),
         attachment_bytes: dict[str, bytes] | None = None,
     ) -> None:
         self.messages = tuple(messages)
@@ -29,16 +30,19 @@ class FakeMailbox:
         start = int(cursor or 0)
         page = self.messages[start : start + page_size]
         next_cursor = str(start + page_size) if start + page_size < len(self.messages) else None
-        refs = tuple(MessageRef(item.provider_message_id, item.provider_thread_id) for item in page)
+        refs = tuple(MessageRef(item.gmail_message_id, item.gmail_thread_id) for item in page)
         return SearchPage(refs, next_cursor, len(self.messages))
 
-    async def get_thread(self, connection_id: str, thread_id: str) -> Sequence[EmailEnvelope]:
+    async def get_thread(
+        self, connection_id: str, thread_id: str
+    ) -> Sequence[EphemeralEmailEnvelope]:
         del connection_id
-        return tuple(item for item in self.messages if item.provider_thread_id == thread_id)
+        return tuple(item for item in self.messages if item.gmail_thread_id == thread_id)
 
     async def download_attachment(
         self, connection_id: str, message_id: str, attachment_id: str, max_bytes: int
     ) -> AsyncIterator[bytes]:
+        """Deprecated (ADR-003 transition clause): compatibility code, never wired in production."""
         del connection_id, message_id
         data = self.attachment_bytes[attachment_id]
         for offset in range(0, len(data), 64 * 1024):

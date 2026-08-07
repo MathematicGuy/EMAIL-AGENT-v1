@@ -9,10 +9,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from cowork_agent.config import GroqSettings
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
     ExtractionBatch,
-    ThreadContext,
 )
 
 from .gemini import (
@@ -20,6 +20,7 @@ from .gemini import (
     SYSTEM_INSTRUCTION,
     _batch_threads,
     _build_prompt,
+    _group_by_thread,
     _merge_correlated_emails,
     _parse_batch,
 )
@@ -48,9 +49,10 @@ class GroqActionExtractor:
         self,
         user_timezone: str,
         current_time: datetime,
-        threads: Sequence[ThreadContext],
+        messages: Sequence[EphemeralEmailEnvelope],
     ) -> ExtractionBatch:
         email_results: list[EmailExtraction] = []
+        threads = _group_by_thread(messages)
         for batch in _batch_threads(threads, self._settings.max_emails_per_batch):
             prompt = _build_prompt(user_timezone, current_time, batch)
             payload = await self._complete(prompt)

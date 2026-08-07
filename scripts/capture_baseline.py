@@ -53,22 +53,32 @@ def load_routing_cases():
 
 
 def build_envelopes(cases):
-    from cowork_agent.domain import EmailEnvelope
+    from cowork_agent.domain.target_contracts import (
+        BodyFormat,
+        EphemeralEmailEnvelope,
+        FetchStatus,
+    )
 
     now = datetime.now(UTC)
     envelopes = {}
     for case in cases:
-        envelopes[case.id] = EmailEnvelope(
-            provider_message_id=case.id,
-            provider_thread_id=case.thread_id or case.id,
-            deep_link=None,
+        envelopes[case.id] = EphemeralEmailEnvelope(
+            run_id="",
+            tenant_id="",
+            user_id="",
+            gmail_message_id=case.id,
+            gmail_thread_id=case.thread_id or case.id,
+            gmail_url="",
+            sender_name="",
+            sender_email=case.sender,
+            recipients=(),
             subject=case.subject,
-            sender_name=None,
-            sender_address=case.sender,
-            sent_at=now,
             received_at=now,
-            text_body=case.body,
-            attachments=(),
+            labels=(),
+            normalized_body=case.body,
+            body_format=BodyFormat.TEXT,
+            attachments_present=False,
+            fetch_status=FetchStatus.COMPLETE,
         )
     return envelopes
 
@@ -99,7 +109,7 @@ class DryRunExtractor:
         self._classification = classification_by_case_id
         self.call_count = 0
 
-    async def extract(self, user_timezone, current_time, threads):
+    async def extract(self, user_timezone, current_time, messages):
         from cowork_agent.features.email_action_plan.schemas import (
             EmailExtraction,
             ExtractionBatch,
@@ -109,13 +119,12 @@ class DryRunExtractor:
         return ExtractionBatch(
             tuple(
                 EmailExtraction(
-                    message.provider_message_id,
-                    self._classification[message.provider_message_id],
+                    message.gmail_message_id,
+                    self._classification[message.gmail_message_id],
                     "dry-run",
                     (),
                 )
-                for thread in threads
-                for message in thread.messages
+                for message in messages
             )
         )
 
@@ -133,15 +142,12 @@ def build_dry_run_extractor(cases):
 
 
 async def capture(cases, extractor) -> tuple[list[CaseResult], int]:
-    from cowork_agent.features.email_action_plan.schemas import ThreadContext
-
     envelopes = build_envelopes(cases)
     results: list[CaseResult] = []
     call_count = 0
     for case in cases:
-        thread = ThreadContext((envelopes[case.id],), ())
         started = time.perf_counter()
-        batch = await extractor.extract("UTC", datetime.now(UTC), [thread])
+        batch = await extractor.extract("UTC", datetime.now(UTC), [envelopes[case.id]])
         latency_ms = int((time.perf_counter() - started) * 1000)
         call_count += 1
         classification = batch.emails[0].classification if batch.emails else "missing"

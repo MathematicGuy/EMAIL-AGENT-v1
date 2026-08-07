@@ -9,14 +9,14 @@ from cowork_agent.domain import (
     AttachmentWarning,
     DigestCompletedEvent,
     DigestRun,
-    EmailEnvelope,
     ExtractedAttachment,
     MailboxConnection,
     ProcessedEmail,
     RunStatus,
 )
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 
-from .schemas import ExtractionBatch, ExtractionLimits, SearchPage, ThreadContext
+from .schemas import ExtractionBatch, ExtractionLimits, SearchPage
 
 
 class MailboxPort(Protocol):
@@ -24,11 +24,15 @@ class MailboxPort(Protocol):
         self, connection_id: str, query: str, page_size: int, cursor: str | None = None
     ) -> SearchPage: ...
 
-    async def get_thread(self, connection_id: str, thread_id: str) -> Sequence[EmailEnvelope]: ...
+    async def get_thread(
+        self, connection_id: str, thread_id: str
+    ) -> Sequence[EphemeralEmailEnvelope]: ...
 
     def download_attachment(
         self, connection_id: str, message_id: str, attachment_id: str, max_bytes: int
-    ) -> AsyncIterator[bytes]: ...
+    ) -> AsyncIterator[bytes]:
+        """Deprecated (ADR-003 transition clause): compatibility code, never wired in production."""
+        ...
 
 
 class MailboxConnectionRepository(Protocol):
@@ -51,7 +55,10 @@ class AttachmentExtractorPort(Protocol):
 
 class ActionExtractorPort(Protocol):
     async def extract(
-        self, user_timezone: str, current_time: datetime, threads: Sequence[ThreadContext]
+        self,
+        user_timezone: str,
+        current_time: datetime,
+        messages: Sequence[EphemeralEmailEnvelope],
     ) -> ExtractionBatch: ...
 
 

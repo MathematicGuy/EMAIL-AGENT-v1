@@ -7,9 +7,7 @@ from cowork_agent.domain import (
     ActionPlanStep,
     Confidence,
     DeadlineSource,
-    EmailEnvelope,
     EvidenceRef,
-    ExtractedAttachment,
 )
 
 
@@ -32,12 +30,6 @@ class ExtractionLimits:
     max_units: int = 100
     max_characters: int = 200_000
     timeout_seconds: int = 60
-
-
-@dataclass(frozen=True, slots=True)
-class ThreadContext:
-    messages: tuple[EmailEnvelope, ...]
-    attachments: tuple[ExtractedAttachment, ...]
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from cowork_agent.config import GMAIL_READONLY_SCOPE, GmailSettings
+from cowork_agent.domain.target_contracts import BodyFormat, FetchStatus
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
@@ -132,10 +133,13 @@ def test_gmail_message_parser_reads_text_headers_and_attachment() -> None:
             "id": "msg-1",
             "threadId": "thread-1",
             "internalDate": "1785729600000",
+            "labelIds": ["INBOX", "UNREAD"],
             "payload": {
                 "headers": [
                     {"name": "Subject", "value": "Báo cáo tuần"},
                     {"name": "From", "value": "Nguyễn An <an@example.com>"},
+                    {"name": "To", "value": "Bình <binh@example.com>"},
+                    {"name": "Cc", "value": "chi@example.com, Trưởng Phòng <truong@example.com>"},
                 ],
                 "parts": [
                     {"mimeType": "text/plain", "body": {"data": encoded_body}},
@@ -149,9 +153,16 @@ def test_gmail_message_parser_reads_text_headers_and_attachment() -> None:
         }
     )
     assert message.subject == "Báo cáo tuần"
-    assert message.sender_address == "an@example.com"
-    assert message.text_body == "Vui lòng gửi báo cáo"
-    assert message.attachments[0].attachment_id == "att-1"
+    assert message.sender_name == "Nguyễn An"
+    assert message.sender_email == "an@example.com"
+    assert message.recipients == ("binh@example.com", "chi@example.com", "truong@example.com")
+    assert message.labels == ("INBOX", "UNREAD")
+    assert message.normalized_body == "Vui lòng gửi báo cáo"
+    assert message.body_format is BodyFormat.TEXT
+    assert message.fetch_status is FetchStatus.COMPLETE
+    assert message.attachments_present is True
+    assert message.attachments_processed is False
+    assert message.run_id == "" and message.tenant_id == "" and message.user_id == ""
 
 
 def test_gmail_message_parser_preserves_html_action_links() -> None:
@@ -177,5 +188,62 @@ def test_gmail_message_parser_preserves_html_action_links() -> None:
         }
     )
 
-    assert "Build failed for HR-Chatbot" in message.text_body
-    assert "View build logs [https://railway.app/project/build-123]" in message.text_body
+    assert "Build failed for HR-Chatbot" in message.normalized_body
+    assert "View build logs [https://railway.app/project/build-123]" in message.normalized_body
+    assert message.body_format is BodyFormat.TEXT
+    assert message.fetch_status is FetchStatus.COMPLETE
+
+
+def test_gmail_message_parser_marks_html_only_bodies_as_html_converted() -> None:
+    html_body = '<p>Thông báo bảo trì hệ thống</p><a href="https://example.com">Chi tiết</a>'
+    rich = base64.urlsafe_b64encode(html_body.encode()).decode()
+    message = _parse_message(
+        {
+            "id": "msg-html",
+            "threadId": "thread-html",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Bảo trì"},
+                    {"name": "From", "value": "noreply@example.com"},
+                ],
+                "parts": [
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert "Thông báo bảo trì hệ thống" in message.normalized_body
+    assert message.body_format is BodyFormat.HTML_CONVERTED
+    assert message.fetch_status is FetchStatus.COMPLETE
+
+
+def test_gmail_message_parser_marks_partial_fetch_without_usable_body() -> None:
+    bodyless = _parse_message(
+        {
+            "id": "msg-empty",
+            "threadId": "thread-empty",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Không có nội dung"},
+                    {"name": "From", "value": "an@example.com"},
+                ],
+                "parts": [],
+            },
+        }
+    )
+    assert bodyless.normalized_body == ""
+    assert bodyless.fetch_status is FetchStatus.PARTIAL
+
+    missing_payload = _parse_message(
+        {
+            "id": "msg-no-payload",
+            "threadId": "thread-no-payload",
+            "internalDate": "1785729600000",
+        }
+    )
+    assert missing_payload.normalized_body == ""
+    assert missing_payload.fetch_status is FetchStatus.PARTIAL
+    assert missing_payload.attachments_present is False

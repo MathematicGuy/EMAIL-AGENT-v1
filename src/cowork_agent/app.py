@@ -192,13 +192,14 @@ def create_app() -> FastAPI:
                 message = thread[-1]
                 messages.append(
                     {
-                        "messageId": message.provider_message_id,
-                        "threadId": message.provider_thread_id,
+                        "messageId": message.gmail_message_id,
+                        "threadId": message.gmail_thread_id,
                         "subject": message.subject,
-                        "sender": message.sender_address,
+                        "sender": message.sender_email,
                         "receivedAt": message.received_at.isoformat(),
-                        "attachmentCount": len(message.attachments),
-                        "deepLink": message.deep_link,
+                        # ADR-003: presence only — attachment content is never processed.
+                        "attachmentsPresent": message.attachments_present,
+                        "deepLink": message.gmail_url,
                     }
                 )
             return {

@@ -7,8 +7,12 @@ from typing import Any
 import pytest
 
 from cowork_agent.config import GeminiSettings
-from cowork_agent.domain import EmailEnvelope
-from cowork_agent.features.email_action_plan.schemas import EmailExtraction, ThreadContext
+from cowork_agent.domain.target_contracts import (
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
+)
+from cowork_agent.features.email_action_plan.schemas import EmailExtraction
 from cowork_agent.integrations.llm.providers.gemini import (
     EXTRACTION_SCHEMA,
     SYSTEM_INSTRUCTION,
@@ -129,21 +133,23 @@ def test_extractor_splits_email_contexts_into_small_batches() -> None:
         extractor = GeminiActionExtractor(settings, transport)
         now = datetime.now(UTC)
         threads = tuple(
-            ThreadContext(
-                (
-                    EmailEnvelope(
-                        provider_message_id=f"message-{index}",
-                        provider_thread_id=f"thread-{index}",
-                        deep_link=None,
-                        subject=f"Subject {index}",
-                        sender_name=None,
-                        sender_address="sender@example.com",
-                        sent_at=now - timedelta(minutes=index),
-                        received_at=now - timedelta(minutes=index),
-                        text_body="Please review this item.",
-                    ),
-                ),
-                (),
+            EphemeralEmailEnvelope(
+                run_id="",
+                tenant_id="",
+                user_id="",
+                gmail_message_id=f"message-{index}",
+                gmail_thread_id=f"thread-{index}",
+                gmail_url="",
+                sender_name="",
+                sender_email="sender@example.com",
+                recipients=(),
+                subject=f"Subject {index}",
+                received_at=now - timedelta(minutes=index),
+                labels=(),
+                normalized_body="Please review this item.",
+                body_format=BodyFormat.TEXT,
+                attachments_present=False,
+                fetch_status=FetchStatus.COMPLETE,
             )
             for index in range(12)
         )

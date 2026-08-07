@@ -1,6 +1,7 @@
 """Run creation, execution and result use cases."""
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -9,17 +10,18 @@ from cowork_agent.domain import (
     ActionItem,
     DigestCompletedEvent,
     DigestRun,
-    EmailEnvelope,
     ProcessedEmail,
     RunStatus,
     RunTrigger,
 )
+from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
 from cowork_agent.features.email_action_plan.policies import (
     action_fingerprint,
     calculate_priority,
     normalize_query,
     validate_max_emails,
 )
+from cowork_agent.identity import LOCAL_TENANT_ID
 
 from .ports import (
     TERMINAL_STATUSES,
@@ -31,7 +33,7 @@ from .ports import (
     ResultRepository,
     RunRepository,
 )
-from .schemas import ExtractionLimits, ThreadContext
+from .schemas import ExtractionLimits
 
 logger = logging.getLogger(__name__)
 
@@ -112,25 +114,25 @@ class DigestWorker:
                 run.id,
                 tuple(
                     ProcessedEmail(
-                        provider_message_id=message.provider_message_id,
-                        provider_thread_id=message.provider_thread_id,
+                        provider_message_id=message.gmail_message_id,
+                        provider_thread_id=message.gmail_thread_id,
                         subject=message.subject,
-                        sender_address=message.sender_address,
+                        sender_address=message.sender_email,
                         received_at=message.received_at,
                     )
                     for thread in threads
                     for message in thread
                 ),
             )
-            contexts: list[ThreadContext] = []
-            messages: dict[str, EmailEnvelope] = {}
+            envelopes: list[EphemeralEmailEnvelope] = []
+            messages: dict[str, EphemeralEmailEnvelope] = {}
             for thread in threads:
                 for message in thread:
-                    messages[message.provider_message_id] = message
-                    run.attachments_found += len(message.attachments)
-                contexts.append(ThreadContext(thread, ()))
+                    messages[message.gmail_message_id] = message
+                    run.attachments_found += int(message.attachments_present)
+                envelopes.extend(thread)
 
-            batch = await self._actions.extract(user_timezone, clock, contexts)
+            batch = await self._actions.extract(user_timezone, clock, envelopes)
             items: list[ActionItem] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
@@ -138,7 +140,7 @@ class DigestWorker:
                 source = messages.get(email_result.provider_message_id)
                 if source is None or email_result.classification != "actionable":
                     continue
-                actionable.add(source.provider_message_id)
+                actionable.add(source.gmail_message_id)
                 for candidate in email_result.action_items:
                     if not candidate.evidence or candidate.confidence.value == "low":
                         continue
@@ -149,7 +151,7 @@ class DigestWorker:
                     )
                     fingerprint = action_fingerprint(
                         run.mailbox_connection_id,
-                        candidate.incident_key or source.provider_thread_id,
+                        candidate.incident_key or source.gmail_thread_id,
                         candidate.title,
                         candidate.deadline_at,
                     )
@@ -171,17 +173,17 @@ class DigestWorker:
                             id=f"act_{uuid4().hex}",
                             run_id=run.id,
                             mailbox_connection_id=run.mailbox_connection_id,
-                            provider_message_id=source.provider_message_id,
-                            provider_thread_id=source.provider_thread_id,
+                            provider_message_id=source.gmail_message_id,
+                            provider_thread_id=source.gmail_thread_id,
                             fingerprint=fingerprint,
                             freshness=ActionFreshness.SEEN if seen else ActionFreshness.NEW,
                             title=candidate.title.strip(),
                             summary=candidate.summary.strip(),
-                            sender_name=source.sender_name,
-                            sender_address=source.sender_address,
+                            sender_name=source.sender_name or None,
+                            sender_address=source.sender_email,
                             email_subject=source.subject,
                             email_received_at=source.received_at,
-                            email_deep_link=source.deep_link,
+                            email_deep_link=source.gmail_url,
                             deadline_at=candidate.deadline_at,
                             deadline_source=candidate.deadline_source,
                             deadline_text=candidate.deadline_text,
@@ -215,8 +217,10 @@ class DigestWorker:
         await self._outbox.add(DigestCompletedEvent(run.id, run.user_id, run.status, clock))
         return run
 
-    async def _fetch_threads(self, run: DigestRun) -> list[tuple[EmailEnvelope, ...]]:
-        threads: list[tuple[EmailEnvelope, ...]] = []
+    async def _fetch_threads(
+        self, run: DigestRun
+    ) -> list[tuple[EphemeralEmailEnvelope, ...]]:
+        threads: list[tuple[EphemeralEmailEnvelope, ...]] = []
         message_ids: set[str] = set()
         messages_by_thread: dict[str, list[str]] = {}
         cursor: str | None = None
@@ -240,8 +244,16 @@ class DigestWorker:
         for thread_id, selected_ids in messages_by_thread.items():
             thread = await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
             selected_id_set = set(selected_ids)
+            # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
             selected = tuple(
-                message for message in thread if message.provider_message_id in selected_id_set
+                replace(
+                    message,
+                    run_id=run.id,
+                    tenant_id=LOCAL_TENANT_ID,
+                    user_id=run.user_id,
+                )
+                for message in thread
+                if message.gmail_message_id in selected_id_set
             )
             run.emails_processed += len(selected)
             if selected:
