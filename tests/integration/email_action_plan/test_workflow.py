@@ -1,9 +1,12 @@
 import asyncio
+import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from cryptography.fernet import Fernet
 
 from cowork_agent.domain import ActionFreshness, Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
@@ -22,7 +25,13 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalResponse,
     SupportingDocument,
     Task,
+    TraceStatus,
     ValidationStatus,
+)
+from cowork_agent.features.email_action_plan.observability import (
+    DEV_TRACE_MARKER,
+    EncryptedDevTraceSink,
+    InMemoryTraceSink,
 )
 from cowork_agent.features.email_action_plan.schemas import ClassificationResult
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
@@ -937,3 +946,167 @@ def test_sqlite_persisted_tasks_are_body_free(tmp_path: Path) -> None:
     dump = "\n".join(database.iterdump())
     database.close()
     assert raw_body not in dump
+
+
+def test_telemetry_emits_metadata_only_candidate_and_run_events() -> None:
+    secret_body = "Nội dung email tuyệt đối không được xuất hiện trong telemetry."
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo", body=secret_body)]
+        sink = InMemoryTraceSink()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="telemetry-1", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((task_for("m1", "Gửi báo cáo"),)),
+            ShortTermStore(),
+            InMemoryTaskRepository(),
+            trace_sink=sink,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        candidate_events = [e for e in sink.events if e.event_name == "task_candidate"]
+        run_events = [e for e in sink.events if e.event_name == "digest_run"]
+        assert len(candidate_events) == 1 and len(run_events) == 1
+        candidate = candidate_events[0]
+        assert candidate.status is TraceStatus.SUCCESS
+        assert candidate.route is Route.DIRECT_PLAN
+        assert candidate.gmail_message_id == "m1"
+        assert candidate.classifier_confidence == 0.9
+        assert candidate.retrieval_status is None  # DIRECT_PLAN: zero retrieval
+        assert candidate.validation_status == ValidationStatus.SYSTEM_GENERATED.value
+        assert candidate.latency_ms.generation is not None
+        outcome = run_events[0]
+        assert outcome.status is TraceStatus.SUCCESS
+        assert outcome.generation_status is None  # no error/fallback marker
+        assert outcome.latency_ms.email is not None
+        assert outcome.latency_ms.classifier is not None
+        assert outcome.latency_ms.persistence is not None
+        for event in sink.events:
+            assert secret_body not in json.dumps(event.to_dict(), ensure_ascii=False)
+
+    asyncio.run(scenario())
+
+
+def test_telemetry_marks_failed_run_with_error_code_only() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo", body="Nội dung email riêng tư.")]
+        sink = InMemoryTraceSink()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="telemetry-2", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FailingPlanGenerator(GenerationSchemaError("secret detail")),
+            ShortTermStore(),
+            InMemoryTaskRepository(),
+            trace_sink=sink,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.FAILED
+        outcome = [e for e in sink.events if e.event_name == "digest_run"][0]
+        assert outcome.status is TraceStatus.FAILED
+        assert outcome.generation_status == "GENERATION_SCHEMA_ERROR"
+        for event in sink.events:
+            assert "secret detail" not in json.dumps(event.to_dict(), ensure_ascii=False)
+            assert "Nội dung email riêng tư." not in json.dumps(
+                event.to_dict(), ensure_ascii=False
+            )
+
+    asyncio.run(scenario())
+
+
+def test_dev_trace_writes_encrypted_full_content_with_marker(tmp_path: Path) -> None:
+    full_body = "Toàn văn email cần truy vết trong giai đoạn phát triển."
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo", body=full_body)]
+        dev_trace = EncryptedDevTraceSink(
+            tmp_path / "dev_trace.jsonl.enc",
+            Fernet.generate_key().decode(),
+            enabled=True,
+            ttl_seconds=3600,
+            environ={"APP_ENV": "development"},
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="devtrace-1", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((task_for("m1", "Gửi báo cáo"),)),
+            ShortTermStore(),
+            InMemoryTaskRepository(),
+            dev_trace=dev_trace,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        raw = (tmp_path / "dev_trace.jsonl.enc").read_text(encoding="utf-8")
+        assert full_body not in raw  # encrypted at rest
+        records = dev_trace.read()
+        assert {str(record["kind"]) for record in records} == {
+            "classifier_input",
+            "generated_output",
+        }
+        for record in records:
+            assert record["marker"] == DEV_TRACE_MARKER
+            assert record["run_id"] == run.id
+        classifier_input = [r for r in records if r["kind"] == "classifier_input"][0]
+        assert full_body in json.dumps(classifier_input["payload"], ensure_ascii=False)
+
+    asyncio.run(scenario())
+
+
+def test_telemetry_marks_degraded_retrieval_fallback() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Xin nghỉ phép")]
+        sink = InMemoryTraceSink()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="telemetry-3", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": RAG_DECISION}),
+            FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),)),
+            ShortTermStore(),
+            InMemoryTaskRepository(),
+            semantic_memory=RecordingMemory(fail_times=2),
+            trace_sink=sink,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        # §12.3: both attempts failed → structured empty retrieval; telemetry
+        # must expose the fallback, not just a silent empty result.
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
+        assert candidate.generation_status == "RETRIEVAL_DEGRADED"
+        assert candidate.rag_result_count == 0
+        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
+
+    asyncio.run(scenario())

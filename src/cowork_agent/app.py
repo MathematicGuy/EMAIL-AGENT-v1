@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 
 from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings
 from cowork_agent.domain import DigestRun, MailboxConnection
+from cowork_agent.features.email_action_plan.observability import (
+    LoggingTraceSink,
+    dev_trace_sink_from_env,
+)
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
@@ -138,6 +142,10 @@ def create_app() -> FastAPI:
                     ShortTermStore(),
                     task_repository,
                     semantic_memory=semantic_memory,
+                    trace_sink=LoggingTraceSink(),
+                    dev_trace=dev_trace_sink_from_env(
+                        settings.connection_db_path.parent, settings.token_encryption_key
+                    ),
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:

@@ -1,6 +1,8 @@
 """Run creation, execution and result use cases."""
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import NamedTuple
@@ -22,6 +24,10 @@ from cowork_agent.domain.target_contracts import (
     Route,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
+    Task,
+    TraceEvent,
+    TraceLatency,
+    TraceStatus,
 )
 from cowork_agent.features.email_action_plan.policies import (
     action_fingerprint,
@@ -33,6 +39,7 @@ from cowork_agent.identity import LOCAL_TENANT_ID
 
 from .compat_mapper import legacy_result_shape
 from .correlation import TaskCandidate, correlate_candidates
+from .observability import EncryptedDevTraceSink, TraceSink
 from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
@@ -54,12 +61,16 @@ logger = logging.getLogger(__name__)
 
 
 class _GeneratedCandidate(NamedTuple):
-    """One resolved candidate's generation context, consumed by validation and mapping."""
+    """One resolved candidate's generation context, consumed by validation,
+    telemetry, and mapping."""
 
+    candidate: TaskCandidate
     resolution: RouteResolution
     retrieval: SemanticRetrievalResponse | None
     envelopes: tuple[EphemeralEmailEnvelope, ...]
     output: ActionPlanOutput
+    retrieval_ms: int | None
+    generation_ms: int
 
 
 class RunNotFoundError(LookupError):
@@ -117,6 +128,8 @@ class DigestWorker:
         task_repository: TaskRepository,
         *,
         semantic_memory: SemanticMemoryPort | None = None,
+        trace_sink: TraceSink | None = None,
+        dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
@@ -127,6 +140,8 @@ class DigestWorker:
         self._semantic_memory = semantic_memory
         self._task_repository = task_repository
         self._short_term = short_term
+        self._trace_sink = trace_sink
+        self._dev_trace = dev_trace
 
     async def execute(
         self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
@@ -135,8 +150,13 @@ class DigestWorker:
         run = await self._runs.claim(run_id, clock)
         if run is None:
             return await self._runs.get(run_id)
+        email_ms: int | None = None
+        classifier_ms: int | None = None
+        persistence_ms: int | None = None
         try:
+            fetch_started = time.monotonic()
             threads = await self._fetch_threads(run)
+            email_ms = int((time.monotonic() - fetch_started) * 1000)
             await self._results.save_processed_emails(
                 run.id,
                 tuple(
@@ -163,9 +183,16 @@ class DigestWorker:
             stored_envelopes = self._short_term.get(run.id)
             if stored_envelopes is None:  # defensive only: put() above guarantees presence
                 stored_envelopes = ()
+            self._write_dev_trace(
+                run.id,
+                "classifier_input",
+                lambda: [envelope.to_dict() for envelope in stored_envelopes],
+            )
+            classify_started = time.monotonic()
             classification = await self._classifier.classify(
                 user_timezone, clock, stored_envelopes
             )
+            classifier_ms = int((time.monotonic() - classify_started) * 1000)
             decisions = {
                 classified.gmail_message_id: classified.decision
                 for classified in classification.decisions
@@ -183,25 +210,33 @@ class DigestWorker:
                     messages[message_id] for message_id in task_candidate.source_message_ids
                 )
                 retrieval: SemanticRetrievalResponse | None = None
+                retrieval_ms: int | None = None
                 if resolution.route is Route.RETRIEVE_RAG:
+                    retrieval_started = time.monotonic()
                     retrieval = await self._retrieve_for_candidate(run, task_candidate)
+                    retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
                 # Cardinality (frozen contract rule 6, PRD-v1 FR-09): exactly
                 # one Generator call per resolved non-NO_ACTION Task
                 # Candidate; RETRIEVE_RAG adds zero-or-one retrieval call.
+                generation_started = time.monotonic()
+                output = await self._generator.generate(
+                    user_timezone=user_timezone,
+                    current_time=clock,
+                    run_context=run_context,
+                    candidate=task_candidate,
+                    envelopes=candidate_envelopes,
+                    resolution=resolution,
+                    retrieval=retrieval,
+                )
                 outputs.append(
                     _GeneratedCandidate(
+                        task_candidate,
                         resolution,
                         retrieval,
                         candidate_envelopes,
-                        await self._generator.generate(
-                            user_timezone=user_timezone,
-                            current_time=clock,
-                            run_context=run_context,
-                            candidate=task_candidate,
-                            envelopes=candidate_envelopes,
-                            resolution=resolution,
-                            retrieval=retrieval,
-                        ),
+                        output,
+                        retrieval_ms,
+                        int((time.monotonic() - generation_started) * 1000),
                     )
                 )
             logger.debug(
@@ -227,13 +262,18 @@ class DigestWorker:
                     envelopes=generated.envelopes,
                 )
                 if validation.task is None:
+                    violation_codes = [v.code for v in validation.violations]
                     logger.warning(
                         "Run %s dropped generated task: %s",
                         run.id,
-                        [v.code for v in validation.violations],
+                        violation_codes,
+                    )
+                    self._emit_candidate_trace(
+                        run, generated, violation_codes=tuple(violation_codes)
                     )
                     continue
                 task = validation.task
+                self._emit_candidate_trace(run, generated, task=task)
                 source = messages.get(task.gmail_message_id)
                 if source is None:
                     continue
@@ -267,10 +307,16 @@ class DigestWorker:
                         fingerprint=fingerprint,
                     )
                 )
+            self._write_dev_trace(
+                run.id,
+                "generated_output",
+                lambda: [item.output.to_dict() for item in outputs],
+            )
             # FR-12: persist validated, deduplicated Tasks only once the
             # whole run loop succeeded — idempotent on
             # tenant:user:gmail_message_id:pipeline_version, so replays
             # update rather than duplicate.
+            persistence_started = time.monotonic()
             for record in records:
                 await self._task_repository.save_task(
                     record,
@@ -279,6 +325,7 @@ class DigestWorker:
                     pipeline_version=TASK_PIPELINE_VERSION,
                     run_id=run.id,
                 )
+            persistence_ms = int((time.monotonic() - persistence_started) * 1000)
             run.emails_actionable = len(actionable)
             run.action_items_count = len(records)
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))
@@ -290,6 +337,7 @@ class DigestWorker:
         finally:
             # Run finalizer (FR-14): raw bodies never outlive the run, on any outcome.
             self._short_term.clear(run.id)
+        self._emit_run_trace(run, email_ms, classifier_ms, persistence_ms)
         run.completed_at = clock
         await self._runs.save(run)
         return run
@@ -390,6 +438,109 @@ class DigestWorker:
                     type(exc).__name__,
                 )
         return _empty_retrieval()
+
+    def _emit_candidate_trace(
+        self,
+        run: DigestRun,
+        generated: _GeneratedCandidate,
+        *,
+        task: Task | None = None,
+        violation_codes: tuple[str, ...] = (),
+    ) -> None:
+        """FR-16: one metadata-only §6.8 event per generated candidate."""
+        if self._trace_sink is None:
+            return
+        retrieval = generated.retrieval
+        decisions = tuple(decision for _, decision in generated.candidate.decisions)
+        reason_codes = tuple(
+            dict.fromkeys(
+                code.value for decision in decisions for code in decision.reason_codes
+            )
+        )
+        classifier_confidence = (
+            task.classifier_confidence
+            if task is not None
+            else next((decision.confidence for decision in decisions), None)
+        )
+        # FR-16 fallback marker: §12.3 degraded retrieval (empty result after
+        # the retry ladder) must be distinguishable from a genuine no_results.
+        degraded = (
+            generated.resolution.route is Route.RETRIEVE_RAG
+            and retrieval is not None
+            and not retrieval.chunks
+        )
+        validation_status = (
+            task.validation_status.value if task is not None else ";".join(violation_codes)
+        )
+        self._trace_sink.record(
+            TraceEvent(
+                run_id=run.id,
+                tenant_id=LOCAL_TENANT_ID,
+                user_id=run.user_id,
+                gmail_message_id=generated.output.task.gmail_message_id,
+                event_name="task_candidate",
+                status=TraceStatus.SUCCESS if task is not None else TraceStatus.FAILED,
+                route=generated.resolution.route,
+                reason_codes=reason_codes,
+                classifier_confidence=classifier_confidence,
+                rag_result_count=len(retrieval.chunks) if retrieval is not None else None,
+                retrieval_status=(
+                    retrieval.retrieval_status.value if retrieval is not None else None
+                ),
+                generation_status="RETRIEVAL_DEGRADED" if degraded else None,
+                validation_status=validation_status,
+                latency_ms=TraceLatency(
+                    rag=generated.retrieval_ms, generation=generated.generation_ms
+                ),
+            )
+        )
+
+    def _emit_run_trace(
+        self,
+        run: DigestRun,
+        email_ms: int | None,
+        classifier_ms: int | None,
+        persistence_ms: int | None,
+    ) -> None:
+        """FR-16: run-level §6.8 event with status, error marker, stage latency."""
+        if self._trace_sink is None:
+            return
+        self._trace_sink.record(
+            TraceEvent(
+                run_id=run.id,
+                tenant_id=LOCAL_TENANT_ID,
+                user_id=run.user_id,
+                gmail_message_id=None,
+                event_name="digest_run",
+                status=TraceStatus.FAILED
+                if run.status is RunStatus.FAILED
+                else TraceStatus.SUCCESS,
+                route=None,
+                reason_codes=(),
+                classifier_confidence=None,
+                rag_result_count=None,
+                retrieval_status=None,
+                # Error/fallback marker (FR-16): code only, never content.
+                generation_status=run.error_code,
+                validation_status=None,
+                latency_ms=TraceLatency(
+                    email=email_ms, classifier=classifier_ms, persistence=persistence_ms
+                ),
+            )
+        )
+
+    def _write_dev_trace(self, run_id: str, kind: str, payload: Callable[[], object]) -> None:
+        """FR-15 full-content development trace; never fails the run.
+
+        The payload is a lazy callable: full-content serialization happens
+        only when the development trace is actually enabled.
+        """
+        if self._dev_trace is None:
+            return
+        try:
+            self._dev_trace.write(run_id=run_id, kind=kind, payload=payload())
+        except Exception:
+            logger.warning("Development trace write failed for run %s (%s)", run_id, kind)
 
 
 def _empty_retrieval() -> SemanticRetrievalResponse:

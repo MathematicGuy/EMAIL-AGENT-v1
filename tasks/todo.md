@@ -41,8 +41,8 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] 4.1 Task persistence port + local adapter (idempotent key)
 - [x] 4.2 Versioned compatibility mapper (Tasks → legacy result shape) — needs 4.1
 - [ ] 4.3 Cowork GUI task presentation — needs 4.2
-- [ ] 4.4 Basic metadata-only telemetry (parallel with 4.1/4.2)
-- [ ] 4.5 Development trace (marker, encryption, TTL, prod guard)
+- [x] 4.4 Basic metadata-only telemetry (parallel with 4.1/4.2)
+- [x] 4.5 Development trace (marker, encryption, TTL, prod guard)
 - [ ] Checkpoint: V1-M4 exit criteria
 
 ## Gate: PRD-v1 §15 acceptance review (19 criteria, evidence-backed)
