@@ -426,11 +426,16 @@ owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
   atomic idempotent create; compare-and-set claim; migrate from local adapters.
 - **T5.2 Redis Streams queue + DLQ:** producer/consumer worker, bounded retry,
   claim semantics; DLQ payloads exclude email body/attachment bytes/OAuth
-  tokens; replaces `BackgroundTasks` dispatch.
+  tokens; replaces `BackgroundTasks` dispatch. Done 2026-08-08: the executor
+  (DigestWorker) owns the CAS claim; queue-level retry covers worker raises
+  only — in-run pipeline failures stay terminal inside the worker.
 - **T5.3 Lifecycle events:** replace unreadable outbox with metadata-only
   observable events wired to trace/metrics sinks.
 - **T5.4 Timeout/retry budgets:** Gmail backoff/jitter, token refresh retry,
-  partial-batch continuation.
+  partial-batch continuation. Also owns stuck-run recovery: sweep orphaned
+  runs in RUNNING (hard worker crash, or execution longer than the queue's
+  claim idle threshold) AND QUEUED-without-message (enqueue-after-create
+  crash; requeue/reset race), re-enqueueing or failing them safely.
 - **T5.5 Observability + launch gates:** alerts, numeric gates, scaled
   evaluation harness.
 

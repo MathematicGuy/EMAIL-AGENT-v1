@@ -14,7 +14,13 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Requ
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings, database_url
+from cowork_agent.config import (
+    GeminiSettings,
+    GmailSettings,
+    GroqSettings,
+    database_url,
+    redis_url,
+)
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
@@ -148,6 +154,23 @@ def create_app() -> FastAPI:
             )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
+            queue_url = redis_url()
+            if queue_url:
+                # V1-H T5.2: durable queue dispatch replaces BackgroundTasks.
+                # The durable claim lives in PostgreSQL, so the queue
+                # requires the PG repositories.
+                if app.state.pg_pool is None:
+                    raise RuntimeError("REDIS_URL requires DATABASE_URL")
+                from redis.asyncio import Redis as AsyncRedis
+
+                from cowork_agent.orchestration.redis_queue import RedisRunQueue
+
+                redis_client = AsyncRedis.from_url(queue_url, decode_responses=True)
+                app.state.redis_client = redis_client
+                app.state.run_queue = RedisRunQueue(redis_client)
+            else:
+                app.state.redis_client = None
+                app.state.run_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 classifier: RouteClassifierPort
@@ -189,6 +212,9 @@ def create_app() -> FastAPI:
         pg_pool = getattr(app.state, "pg_pool", None)
         if pg_pool is not None:
             await pg_pool.close()
+        redis_client = getattr(app.state, "redis_client", None)
+        if redis_client is not None:
+            await redis_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
 
@@ -325,7 +351,13 @@ def create_app() -> FastAPI:
             query=payload.query,
             max_emails=payload.max_emails,
         )
-        background_tasks.add_task(worker.execute, run.id)
+        run_queue = getattr(request.app.state, "run_queue", None)
+        if run_queue is not None:
+            await run_queue.enqueue_digest_run(
+                run.id, user_id=principal.user_id, tenant_id=principal.tenant_id
+            )
+        else:
+            background_tasks.add_task(worker.execute, run.id)
         return {
             "id": run.id,
             "status": run.status.value,
@@ -476,7 +508,7 @@ async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort
 
 
 def main() -> None:
-    if database_url() and sys.platform == "win32":
+    if (database_url() or redis_url()) and sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop.
         from asyncio import windows_events
 

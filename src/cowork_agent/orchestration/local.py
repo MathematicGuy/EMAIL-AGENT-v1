@@ -9,7 +9,10 @@ class InMemoryQueue:
     def __init__(self) -> None:
         self.run_ids: list[str] = []
 
-    async def enqueue_digest_run(self, run_id: str) -> None:
+    async def enqueue_digest_run(
+        self, run_id: str, *, user_id: str = "", tenant_id: str = ""
+    ) -> None:
+        del user_id, tenant_id
         if run_id not in self.run_ids:
             self.run_ids.append(run_id)
 

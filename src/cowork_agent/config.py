@@ -16,6 +16,12 @@ def database_url(environ: Mapping[str, str] | None = None) -> str:
     return source.get("DATABASE_URL", "").strip()
 
 
+def redis_url(environ: Mapping[str, str] | None = None) -> str:
+    """Redis connection URL (V1-H T5.2); empty keeps BackgroundTasks dispatch."""
+    source = os.environ if environ is None else environ
+    return source.get("REDIS_URL", "").strip()
+
+
 @dataclass(frozen=True, slots=True)
 class GmailSettings:
     client_id: str = field(repr=False)
