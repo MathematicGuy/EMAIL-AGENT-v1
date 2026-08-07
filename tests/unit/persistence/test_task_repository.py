@@ -126,16 +126,18 @@ def test_save_is_idempotent_and_keeps_every_producing_run_linked(tmp_path: Path)
         assert second_view[0].freshness is ActionFreshness.SEEN
 
         # A different pipeline version is a distinct durable row linked only
-        # to the run that produced it; the version-1 row keeps its own links.
+        # to the run that produced it; the current-version row keeps its own
+        # links. The literal is intentionally one past TASK_PIPELINE_VERSION.
         await repository.save_task(
             record_for("m1", run_id="run-3"),
             run_id="run-3",
             tenant_id="local",
             user_id="u1",
-            pipeline_version="2",
+            pipeline_version=str(int(TASK_PIPELINE_VERSION) + 1),
         )
         third_view = await repository.list_for_run("run-3")
         assert len(third_view) == 1
+        assert third_view[0].task.task_id != second_view[0].task.task_id
         assert len(await repository.list_for_run("run-1")) == 1
 
     asyncio.run(scenario())
