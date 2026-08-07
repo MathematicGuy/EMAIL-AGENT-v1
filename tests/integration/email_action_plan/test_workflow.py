@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from cowork_agent.domain import Priority, RunStatus
+from cowork_agent.domain import ActionFreshness, Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
     TASK_PIPELINE_VERSION,
     Actionability,
@@ -83,12 +83,11 @@ def task_for(
     deadline: datetime | None = None,
     *,
     priority: Priority | None = None,
-    run_id: str = "run-test",
 ) -> Task:
     """Canned §6.6 Task standing in for one Generator call's output."""
     return Task(
         task_id=f"task_{message_id}",
-        run_id=run_id,
+        run_id="run-test",
         gmail_message_id=message_id,
         gmail_url=f"https://mail.google.com/mail/u/0/#inbox/{message_id}",
         source_message_ids=(message_id,),
@@ -129,6 +128,7 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo"), email("m2", "t2", "Newsletter")]
         tasks = (task_for("m1", "Gửi báo cáo", NOW + timedelta(hours=20)),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-1", now=NOW
@@ -142,13 +142,15 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
             FakeRouteClassifier({"m2": INFORMATIONAL_DECISION}),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert completed.emails_processed == 2
         assert completed.emails_actionable == 1
         assert completed.ignored_emails_count == 1
-        saved = await results.list_items(run.id)
+        payload = await GetDigestResult(runs, results, task_repository).execute(run.id)
+        saved = payload["actionItems"]
         assert len(saved) == 1 and saved[0].priority is Priority.URGENT
         processed = await results.list_processed_emails(run.id)
         assert [item.subject for item in processed] == ["Gửi báo cáo", "Newsletter"]
@@ -169,6 +171,7 @@ def test_validation_drops_generated_task_leaking_raw_email_body() -> None:
         messages = [email("m1", "t1", "Báo cáo quý ba", body=leaked_body)]
         leaked_task = replace(task_for("m1", "Gửi báo cáo"), request_summary=leaked_body)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1",
             mailbox_connection_id="mbx1",
@@ -183,6 +186,7 @@ def test_validation_drops_generated_task_leaking_raw_email_body() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator((leaked_task,)),
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -191,7 +195,7 @@ def test_validation_drops_generated_task_leaking_raw_email_body() -> None:
         assert completed.action_items_count == 0
         assert completed.emails_actionable == 0
         assert completed.ignored_emails_count == 1
-        assert await results.list_items(run.id) == ()
+        assert await task_repository.list_for_run(run.id) == ()
 
     asyncio.run(scenario())
 
@@ -214,6 +218,7 @@ def test_validation_strips_bogus_citations_from_direct_plan_task() -> None:
             action_plan=(PlanStep(1, "Kiểm tra yêu cầu", ("cit_bogus",)),),
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1",
             mailbox_connection_id="mbx1",
@@ -228,12 +233,14 @@ def test_validation_strips_bogus_citations_from_direct_plan_task() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator((bogus_task,)),
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        saved = await results.list_items(run.id)
+        payload = await GetDigestResult(runs, results, task_repository).execute(run.id)
+        saved = payload["actionItems"]
         assert len(saved) == 1
         assert saved[0].title == "Gửi báo cáo"
         assert saved[0].evidence == ()
@@ -254,6 +261,7 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             task_for("high", "Sửa build", priority=Priority.HIGH),
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="priority-order"
         )
@@ -265,10 +273,12 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator(tasks),
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         await worker.execute(run.id, now=NOW)
-        saved = await results.list_items(run.id)
+        payload = await GetDigestResult(runs, results, task_repository).execute(run.id)
+        saved = payload["actionItems"]
 
         assert [item.priority for item in saved] == [
             Priority.URGENT,
@@ -308,6 +318,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
         message = email("m1", "t1", "Duyệt tài liệu", attachments_present=True)
         tasks = (task_for("m1", "Duyệt tài liệu"),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="partial"
@@ -320,6 +331,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator(tasks),
             ShortTermStore(),
+            task_repository=task_repository,
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
@@ -335,6 +347,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
 def test_result_has_explicit_empty_state_message() -> None:
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="empty"
@@ -347,9 +360,10 @@ def test_result_has_explicit_empty_state_message() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator(),
             ShortTermStore(),
+            task_repository=task_repository,
         )
         await worker.execute(run.id, now=NOW)
-        result = await GetDigestResult(runs, results).execute(run.id)
+        result = await GetDigestResult(runs, results, task_repository).execute(run.id)
         assert result["message"] == "Không có công việc cần xử lý"
         assert result["actionItems"] == []
 
@@ -367,6 +381,7 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="safe-failure"
         )
@@ -378,6 +393,7 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
             FailingClassifier(),
             FakePlanGenerator(),
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -397,6 +413,7 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="private-failure"
         )
@@ -408,6 +425,7 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
             FailingClassifier(),
             FakePlanGenerator(),
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -428,6 +446,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             email("m3", "shared-thread", "Third unread"),
         ]
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1",
@@ -444,6 +463,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             classifier,
             FakePlanGenerator(),
             ShortTermStore(),
+            task_repository=task_repository,
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None
@@ -461,6 +481,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
 def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="stamp"
@@ -474,6 +495,7 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             classifier,
             FakePlanGenerator(),
             ShortTermStore(),
+            task_repository=task_repository,
         )
         completed = await worker.execute(run.id, now=NOW)
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
@@ -493,6 +515,7 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]
         tasks = (task_for("m1", "Gửi báo cáo"),)
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-success"
         )
@@ -505,6 +528,7 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
             FakeRouteClassifier(),
             FakePlanGenerator(tasks),
             store,
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -532,6 +556,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-failure"
         )
@@ -545,6 +570,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
             classifier,
             FakePlanGenerator(),
             store,
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -612,6 +638,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
         memory = RecordingMemory()
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-1", now=NOW
         )
@@ -623,6 +650,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
             FakeRouteClassifier({"m1": RAG_DECISION}),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
             semantic_memory=memory,
         )
 
@@ -649,6 +677,7 @@ def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
         memory = RecordingMemory()
         generator = FakePlanGenerator((task_for("m1", "Gửi báo cáo"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-2", now=NOW
         )
@@ -660,6 +689,7 @@ def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
             FakeRouteClassifier(),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
             semantic_memory=memory,
         )
 
@@ -679,6 +709,7 @@ def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> N
         memory = RecordingMemory(fail_times=2)
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-3", now=NOW
         )
@@ -690,6 +721,7 @@ def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> N
             FakeRouteClassifier({"m1": RAG_DECISION}),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
             semantic_memory=memory,
         )
 
@@ -712,6 +744,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         memory = RecordingMemory()
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-4", now=NOW
         )
@@ -723,6 +756,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
             FakeRouteClassifier({"m1": GUARDED_RAG_DECISION}),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
             semantic_memory=memory,
         )
 
@@ -744,6 +778,7 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
             GenerationSchemaError("secret internal detail: stack trace here")
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="fail-gen", now=NOW
         )
@@ -755,6 +790,7 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
             FakeRouteClassifier(),
             generator,
             ShortTermStore(),
+            task_repository=task_repository,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -766,7 +802,7 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
         assert completed.error_message_safe is not None
         assert "secret internal detail" not in completed.error_message_safe
         assert "Nội dung email tuyệt mật." not in completed.error_message_safe
-        assert await results.list_items(run.id) == ()
+        assert await task_repository.list_for_run(run.id) == ()
 
     asyncio.run(scenario())
 
@@ -779,7 +815,7 @@ def test_validated_tasks_are_persisted_with_identity_and_pipeline_version() -> N
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="persist-1", now=NOW
         )
-        tasks = (task_for("m1", "Gửi báo cáo", run_id=run.id),)
+        tasks = (task_for("m1", "Gửi báo cáo"),)
         worker = DigestWorker(
             runs,
             results,
@@ -796,8 +832,11 @@ def test_validated_tasks_are_persisted_with_identity_and_pipeline_version() -> N
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         stored = await task_repository.list_for_run(run.id)
         assert len(stored) == 1
-        assert stored[0].task_id == "task_m1"
-        assert stored[0].run_id == run.id
+        assert stored[0].task.task_id == "task_m1"
+        assert stored[0].task.run_id == run.id
+        assert stored[0].pointer.mailbox_connection_id == "mbx1"
+        assert stored[0].pointer.provider_thread_id == "t1"
+        assert stored[0].freshness is ActionFreshness.NEW
         (tenant_id, user_id, message_id, pipeline_version), = task_repository.tasks
         assert tenant_id == LOCAL_TENANT_ID
         assert user_id == "u1"
@@ -822,7 +861,7 @@ def test_persisted_tasks_are_idempotent_across_replayed_runs() -> None:
                 FakeMailbox(messages),
                 SafeTextAttachmentExtractor(),
                 FakeRouteClassifier(),
-                FakePlanGenerator((task_for("m1", "Gửi báo cáo", run_id=run.id),)),
+                FakePlanGenerator((task_for("m1", "Gửi báo cáo"),)),
                 ShortTermStore(),
                 task_repository=task_repository,
             )
@@ -883,7 +922,7 @@ def test_sqlite_persisted_tasks_are_body_free(tmp_path: Path) -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeRouteClassifier(),
-            FakePlanGenerator((task_for("m1", "Gửi báo cáo", run_id=run.id),)),
+            FakePlanGenerator((task_for("m1", "Gửi báo cáo"),)),
             ShortTermStore(),
             task_repository=task_repository,
         )

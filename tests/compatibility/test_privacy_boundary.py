@@ -41,9 +41,12 @@ def test_email_body_never_appears_in_responses_or_stored_records(compat_session)
             run_dump = json.dumps(asdict(run_record), ensure_ascii=False, default=str)
             assert SECRET_BODY not in run_dump
 
-            stored_items = await s.app.state.result_repository.list_items(run_id)
-            for item in stored_items:
-                assert SECRET_BODY not in json.dumps(asdict(item), ensure_ascii=False, default=str)
+            stored_records = await s.app.state.task_repository.list_for_run(run_id)
+            assert stored_records
+            for record in stored_records:
+                assert SECRET_BODY not in json.dumps(
+                    asdict(record), ensure_ascii=False, default=str
+                )
 
             processed = await s.app.state.result_repository.list_processed_emails(run_id)
             for email_record in processed:

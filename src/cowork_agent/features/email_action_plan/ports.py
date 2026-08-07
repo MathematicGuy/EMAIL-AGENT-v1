@@ -1,11 +1,12 @@
 """Ports owned by the application layer."""
 
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from cowork_agent.domain import (
-    ActionItem,
+    ActionFreshness,
     AttachmentWarning,
     DigestRun,
     ExtractedAttachment,
@@ -108,34 +109,70 @@ class RunRepository(Protocol):
 
 
 class ResultRepository(Protocol):
-    async def save_items(self, run_id: str, items: Sequence[ActionItem]) -> None: ...
-    async def list_items(self, run_id: str) -> Sequence[ActionItem]: ...
     async def save_warning(self, run_id: str, warning: AttachmentWarning) -> None: ...
     async def list_warnings(self, run_id: str) -> Sequence[AttachmentWarning]: ...
-    async def fingerprint_seen(self, mailbox_id: str, fingerprint: str) -> bool: ...
     async def save_processed_emails(
         self, run_id: str, emails: Sequence[ProcessedEmail]
     ) -> None: ...
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class TaskPointer:
+    """Body-free Gmail pointer metadata accompanying one persisted Task.
+
+    These fields reconstruct the legacy Action Item surface (sender, subject,
+    thread, deep link) from durable storage; the raw email body is never
+    among them (invariant 1).
+    """
+
+    mailbox_connection_id: str
+    provider_thread_id: str
+    sender_name: str | None
+    sender_address: str
+    email_subject: str
+    email_received_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedTask:
+    """One durable Task row plus the metadata the compat mapper needs.
+
+    ``freshness`` is stamped at save time (``new`` when no row with the same
+    Mailbox Connection + fingerprint existed yet, ``seen`` otherwise) and
+    stored per run link, freezing the legacy cross-run recall semantics at
+    persistence instead of recomputing them at read time.
+    """
+
+    task: Task
+    pointer: TaskPointer
+    fingerprint: str
+    freshness: ActionFreshness = ActionFreshness.NEW
+
+
 class TaskRepository(Protocol):
-    """Durable persistence for validated §6.6 Tasks (PRD-v1 FR-12, T4.1).
+    """Durable persistence for validated §6.6 Tasks (PRD-v1 FR-12, T4.1/T4.2).
 
     ``save_task`` is idempotent on the key
     ``tenant_id:user_id:gmail_message_id:pipeline_version``: re-saving a Task
     for the same Gmail message under the same pipeline version updates the
     stored row instead of duplicating it, so idempotent run replays stay safe.
-    Rows never contain raw email bodies (invariant 1) — the Task contract
-    itself is body-free, and implementations must not add body-bearing
-    columns.
+    Every run that produces a row is linked to it, so ``list_for_run`` can
+    rebuild any run's legacy result even after later runs updated the row.
+    Rows never contain raw email bodies (invariant 1).
     """
 
     async def save_task(
-        self, *, tenant_id: str, user_id: str, pipeline_version: str, task: Task
+        self,
+        record: PersistedTask,
+        *,
+        tenant_id: str,
+        user_id: str,
+        pipeline_version: str,
+        run_id: str,
     ) -> None: ...
 
-    async def list_for_run(self, run_id: str) -> Sequence[Task]: ...
+    async def list_for_run(self, run_id: str) -> Sequence[PersistedTask]: ...
 
 
 class SemanticMemoryPort(Protocol):

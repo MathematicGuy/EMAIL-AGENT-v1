@@ -107,7 +107,9 @@ def create_app() -> FastAPI:
             await task_repository.initialize()
             app.state.run_repository = run_repository
             app.state.create_run = CreateDigestRun(run_repository)
-            app.state.get_result = GetDigestResult(run_repository, result_repository)
+            app.state.get_result = GetDigestResult(
+                run_repository, result_repository, task_repository
+            )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
             try:
@@ -134,8 +136,8 @@ def create_app() -> FastAPI:
                     classifier,
                     generator,
                     ShortTermStore(),
+                    task_repository,
                     semantic_memory=semantic_memory,
-                    task_repository=task_repository,
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:

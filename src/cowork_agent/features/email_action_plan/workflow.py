@@ -7,13 +7,7 @@ from typing import NamedTuple
 from uuid import uuid4
 
 from cowork_agent.domain import (
-    ActionFreshness,
-    ActionItem,
-    ActionPlanStep,
-    Confidence,
-    DeadlineSource,
     DigestRun,
-    EvidenceRef,
     ProcessedEmail,
     RunStatus,
     RunTrigger,
@@ -28,27 +22,28 @@ from cowork_agent.domain.target_contracts import (
     Route,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
-    Task,
 )
 from cowork_agent.features.email_action_plan.policies import (
     action_fingerprint,
-    calculate_priority,
     normalize_query,
     validate_max_emails,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
 
+from .compat_mapper import legacy_result_shape
 from .correlation import TaskCandidate, correlate_candidates
 from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
     AttachmentExtractorPort,
     MailboxPort,
+    PersistedTask,
     ResultRepository,
     RouteClassifierPort,
     RunRepository,
     SemanticMemoryPort,
+    TaskPointer,
     TaskRepository,
 )
 from .routing import RouteResolution, resolve_candidate_route
@@ -119,9 +114,9 @@ class DigestWorker:
         classifier: RouteClassifierPort,
         generator: ActionPlanGeneratorPort,
         short_term: ShortTermStore,
+        task_repository: TaskRepository,
         *,
         semantic_memory: SemanticMemoryPort | None = None,
-        task_repository: TaskRepository | None = None,
         extraction_limits: ExtractionLimits | None = None,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
@@ -216,14 +211,12 @@ class DigestWorker:
                 classification.batch_count,
                 len(outputs),
             )
-            # Routing owns selection (master-comparison §3.8): the legacy
-            # "actionable" classification filter and the empty-evidence /
-            # low-confidence skips disappear with the combined batch — every
-            # generated Task that passes the FR-10 output validators becomes
-            # an Action Item unless it duplicates a fingerprint already
-            # produced in this run.
-            items: list[ActionItem] = []
-            validated_tasks: list[Task] = []
+            # Routing owns selection (master-comparison §3.8): every generated
+            # Task that passes the FR-10 output validators is persisted unless
+            # it duplicates a fingerprint already produced in this run. The
+            # legacy Action Item surface is derived from the persisted Tasks
+            # by the compatibility mapper at read time (T4.2).
+            records: list[PersistedTask] = []
             actionable: set[str] = set()
             fingerprints: set[str] = set()
             for generated in outputs:
@@ -258,37 +251,36 @@ class DigestWorker:
                 if fingerprint in fingerprints:
                     continue
                 fingerprints.add(fingerprint)
-                validated_tasks.append(task)
-                seen = await self._results.fingerprint_seen(
-                    run.mailbox_connection_id, fingerprint
-                )
-                items.append(
-                    _action_item_from_task(
-                        task,
-                        source,
-                        connection_id=run.mailbox_connection_id,
-                        run_id=run.id,
+                records.append(
+                    PersistedTask(
+                        # The persisting run owns the durable row: normalize
+                        # the generator-stamped run identity onto the Task.
+                        task=replace(task, run_id=run.id),
+                        pointer=TaskPointer(
+                            mailbox_connection_id=run.mailbox_connection_id,
+                            provider_thread_id=source.gmail_thread_id,
+                            sender_name=source.sender_name,
+                            sender_address=source.sender_email,
+                            email_subject=source.subject,
+                            email_received_at=source.received_at,
+                        ),
                         fingerprint=fingerprint,
-                        clock=clock,
-                        seen=seen,
                     )
                 )
-            items.sort(key=lambda item: _action_item_sort_key(item, clock))
-            await self._results.save_items(run.id, items)
-            if self._task_repository is not None:
-                # FR-12: persist validated, deduplicated Tasks only once the
-                # whole run loop succeeded — idempotent on
-                # tenant:user:gmail_message_id:pipeline_version, so replays
-                # update rather than duplicate.
-                for task in validated_tasks:
-                    await self._task_repository.save_task(
-                        tenant_id=LOCAL_TENANT_ID,
-                        user_id=run.user_id,
-                        pipeline_version=TASK_PIPELINE_VERSION,
-                        task=task,
-                    )
+            # FR-12: persist validated, deduplicated Tasks only once the
+            # whole run loop succeeded — idempotent on
+            # tenant:user:gmail_message_id:pipeline_version, so replays
+            # update rather than duplicate.
+            for record in records:
+                await self._task_repository.save_task(
+                    record,
+                    tenant_id=LOCAL_TENANT_ID,
+                    user_id=run.user_id,
+                    pipeline_version=TASK_PIPELINE_VERSION,
+                    run_id=run.id,
+                )
             run.emails_actionable = len(actionable)
-            run.action_items_count = len(items)
+            run.action_items_count = len(records)
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))
             run.status = RunStatus.SUCCEEDED
         except Exception as exc:
@@ -427,98 +419,11 @@ def _safe_run_error(exc: Exception) -> tuple[str, str]:
     )
 
 
-def _action_item_from_task(
-    task: Task,
-    first_envelope: EphemeralEmailEnvelope,
-    *,
-    connection_id: str,
-    run_id: str,
-    fingerprint: str,
-    clock: datetime,
-    seen: bool,
-) -> ActionItem:
-    """Map one generated §6.6 Task onto the legacy ActionItem surface.
-
-    The Task owns content and priority; the first envelope supplies the
-    Gmail pointers. ``fingerprint``/``seen`` come from the unchanged
-    freshness + dedupe machinery surrounding this mapping.
-    """
-    if task.priority is not None:
-        priority, priority_reason = task.priority, "generated"
-    else:
-        priority, priority_reason = calculate_priority(task.deadline, clock)
-    generation_confidence = task.generation_confidence
-    if generation_confidence is None:
-        confidence = Confidence.MEDIUM
-    elif generation_confidence >= 0.8:
-        confidence = Confidence.HIGH
-    elif generation_confidence >= 0.5:
-        confidence = Confidence.MEDIUM
-    else:
-        confidence = Confidence.LOW
-    return ActionItem(
-        id=f"act_{uuid4().hex}",
-        run_id=run_id,
-        mailbox_connection_id=connection_id,
-        provider_message_id=first_envelope.gmail_message_id,
-        provider_thread_id=first_envelope.gmail_thread_id,
-        fingerprint=fingerprint,
-        freshness=ActionFreshness.SEEN if seen else ActionFreshness.NEW,
-        title=task.title.strip(),
-        summary=task.request_summary.strip(),
-        sender_name=first_envelope.sender_name or None,
-        sender_address=first_envelope.sender_email,
-        email_subject=first_envelope.subject,
-        email_received_at=first_envelope.received_at,
-        email_deep_link=first_envelope.gmail_url,
-        deadline_at=task.deadline,
-        deadline_source=DeadlineSource.EXPLICIT if task.deadline else DeadlineSource.NONE,
-        deadline_text=None,
-        priority=priority,
-        priority_reason=priority_reason,
-        action_plan=tuple(
-            ActionPlanStep(
-                step.step,
-                step.instruction,
-                "suggestion" if step.supporting_citation_ids else "inference",
-            )
-            for step in task.action_plan
-        ),
-        evidence=tuple(
-            EvidenceRef(
-                source_kind="rag",
-                filename=document.title,
-                location=document.section,
-                excerpt="",
-                source_message_id=None,
-            )
-            for document in task.supporting_documents
-        ),
-        confidence=confidence,
-        created_at=clock,
-        impact="none",
-        incident_key=task.incident_key,
-        related_message_ids=task.source_message_ids[1:],
-    )
-
-
-def _action_item_sort_key(item: ActionItem, clock: datetime) -> tuple[int, bool, datetime]:
-    priority_order = {
-        "urgent": 0,
-        "high": 1,
-        "medium": 2,
-        "low": 3,
-    }
-    return (
-        priority_order[item.priority.value],
-        item.deadline_at is None,
-        item.deadline_at or clock,
-    )
-
-
 class GetDigestResult:
-    def __init__(self, runs: RunRepository, results: ResultRepository) -> None:
-        self._runs, self._results = runs, results
+    def __init__(
+        self, runs: RunRepository, results: ResultRepository, tasks: TaskRepository
+    ) -> None:
+        self._runs, self._results, self._tasks = runs, results, tasks
 
     async def execute(self, run_id: str) -> dict[str, object]:
         run = await self._runs.get(run_id)
@@ -526,14 +431,10 @@ class GetDigestResult:
             raise RunNotFoundError(run_id)
         if run.status not in TERMINAL_STATUSES:
             raise RunNotCompleteError("RUN_NOT_COMPLETE")
-        items = list(await self._results.list_items(run_id))
-        warnings = list(await self._results.list_warnings(run_id))
-        processed_emails = list(await self._results.list_processed_emails(run_id))
-        return {
-            "run": run,
-            "actionItems": items,
-            "nextActions": items[:3],
-            "attachmentWarnings": warnings,
-            "processedEmails": processed_emails,
-            "message": "Không có công việc cần xử lý" if not items else None,
-        }
+        return legacy_result_shape(
+            run=run,
+            persisted=await self._tasks.list_for_run(run_id),
+            warnings=await self._results.list_warnings(run_id),
+            processed_emails=await self._results.list_processed_emails(run_id),
+            clock=run.completed_at or datetime.now(UTC),
+        )

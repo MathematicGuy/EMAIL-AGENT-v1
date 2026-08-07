@@ -168,6 +168,7 @@ class CompatSession:
             FakeRouteClassifier(self.decisions),
             FakePlanGenerator(self.tasks),
             ShortTermStore(),
+            self.app.state.task_repository,
         )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://compat.test"

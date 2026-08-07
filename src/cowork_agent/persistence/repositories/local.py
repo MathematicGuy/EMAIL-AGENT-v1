@@ -1,16 +1,17 @@
 """In-memory repositories for local execution and deterministic tests."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime
 
 from cowork_agent.domain import (
-    ActionItem,
+    ActionFreshness,
     AttachmentWarning,
     DigestRun,
     ProcessedEmail,
     RunStatus,
 )
-from cowork_agent.domain.target_contracts import Task
+from cowork_agent.features.email_action_plan.ports import PersistedTask
 
 
 class InMemoryRunRepository:
@@ -42,28 +43,14 @@ class InMemoryRunRepository:
 
 class InMemoryResultRepository:
     def __init__(self) -> None:
-        self.items: dict[str, list[ActionItem]] = {}
         self.warnings: dict[str, list[AttachmentWarning]] = {}
         self.processed_emails: dict[str, list[ProcessedEmail]] = {}
-
-    async def save_items(self, run_id: str, items: Sequence[ActionItem]) -> None:
-        self.items[run_id] = list(items)
-
-    async def list_items(self, run_id: str) -> Sequence[ActionItem]:
-        return tuple(self.items.get(run_id, ()))
 
     async def save_warning(self, run_id: str, warning: AttachmentWarning) -> None:
         self.warnings.setdefault(run_id, []).append(warning)
 
     async def list_warnings(self, run_id: str) -> Sequence[AttachmentWarning]:
         return tuple(self.warnings.get(run_id, ()))
-
-    async def fingerprint_seen(self, mailbox_id: str, fingerprint: str) -> bool:
-        return any(
-            item.mailbox_connection_id == mailbox_id and item.fingerprint == fingerprint
-            for values in self.items.values()
-            for item in values
-        )
 
     async def save_processed_emails(self, run_id: str, emails: Sequence[ProcessedEmail]) -> None:
         self.processed_emails[run_id] = list(emails)
@@ -74,18 +61,34 @@ class InMemoryResultRepository:
 
 class InMemoryTaskRepository:
     def __init__(self) -> None:
-        self.tasks: dict[tuple[str, str, str, str], Task] = {}
+        self.tasks: dict[tuple[str, str, str, str], PersistedTask] = {}
+        self.run_links: dict[str, dict[tuple[str, str, str, str], ActionFreshness]] = {}
 
     async def save_task(
-        self, *, tenant_id: str, user_id: str, pipeline_version: str, task: Task
+        self,
+        record: PersistedTask,
+        *,
+        tenant_id: str,
+        user_id: str,
+        pipeline_version: str,
+        run_id: str,
     ) -> None:
-        key = (tenant_id, user_id, task.gmail_message_id, pipeline_version)
-        self.tasks[key] = task
+        key = (tenant_id, user_id, record.task.gmail_message_id, pipeline_version)
+        seen = any(
+            stored.pointer.mailbox_connection_id == record.pointer.mailbox_connection_id
+            and stored.fingerprint == record.fingerprint
+            for stored in self.tasks.values()
+        )
+        freshness = ActionFreshness.SEEN if seen else ActionFreshness.NEW
+        self.tasks[key] = replace(record, freshness=freshness)
+        self.run_links.setdefault(run_id, {})[key] = freshness
 
-    async def list_for_run(self, run_id: str) -> Sequence[Task]:
+    async def list_for_run(self, run_id: str) -> Sequence[PersistedTask]:
+        links = self.run_links.get(run_id, {})
+        # Dict insertion order preserves the deterministic save order, which
+        # the mapper's stable sort relies on for equal-key ties.
         return tuple(
-            sorted(
-                (task for task in self.tasks.values() if task.run_id == run_id),
-                key=lambda task: (task.created_at, task.task_id),
-            )
+            replace(self.tasks[key], freshness=freshness)
+            for key, freshness in links.items()
+            if key in self.tasks
         )

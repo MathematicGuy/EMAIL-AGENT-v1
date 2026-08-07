@@ -1,4 +1,4 @@
-"""SQLite Task repository: idempotent key and round-trip (T4.1).
+"""SQLite Task repository: idempotent key, round-trip, run links (T4.1/T4.2).
 
 The body-free privacy proof lives in the workflow integration suite, where
 raw bodies actually exist in in-run state.
@@ -8,7 +8,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cowork_agent.domain import Priority
+from cowork_agent.domain import ActionFreshness, Priority
 from cowork_agent.domain.target_contracts import (
     TASK_PIPELINE_VERSION,
     Actionability,
@@ -18,9 +18,19 @@ from cowork_agent.domain.target_contracts import (
     Task,
     ValidationStatus,
 )
+from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPointer
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 NOW = datetime(2026, 8, 7, 9, tzinfo=UTC)
+
+POINTER = TaskPointer(
+    mailbox_connection_id="mbx1",
+    provider_thread_id="t1",
+    sender_name="Nguyễn An",
+    sender_address="an@example.com",
+    email_subject="Gửi báo cáo",
+    email_received_at=NOW,
+)
 
 
 def task_for(message_id: str, *, run_id: str = "run-1", title: str = "Gửi báo cáo") -> Task:
@@ -56,24 +66,42 @@ def task_for(message_id: str, *, run_id: str = "run-1", title: str = "Gửi báo
     )
 
 
-def test_save_and_list_round_trip_preserves_task_contract(tmp_path: Path) -> None:
+def record_for(
+    message_id: str, *, run_id: str = "run-1", title: str = "Gửi báo cáo"
+) -> PersistedTask:
+    return PersistedTask(
+        task=task_for(message_id, run_id=run_id, title=title),
+        pointer=POINTER,
+        fingerprint=f"fp_{message_id}",
+    )
+
+
+def test_save_and_list_round_trip_preserves_record(tmp_path: Path) -> None:
     async def scenario() -> None:
         repository = SQLiteTaskRepository(tmp_path / "tasks.db")
         await repository.initialize()
-        original = task_for("m1")
+        original = record_for("m1")
 
         await repository.save_task(
-            tenant_id="local", user_id="u1", pipeline_version=TASK_PIPELINE_VERSION, task=original
+            original,
+            tenant_id="local",
+            user_id="u1",
+            pipeline_version=TASK_PIPELINE_VERSION,
+            run_id="run-1",
         )
         stored = await repository.list_for_run("run-1")
 
-        assert stored == (original,)
+        assert len(stored) == 1
+        assert stored[0].task == original.task
+        assert stored[0].pointer == POINTER
+        assert stored[0].fingerprint == original.fingerprint
+        assert stored[0].freshness is ActionFreshness.NEW
         assert await repository.list_for_run("run-other") == ()
 
     asyncio.run(scenario())
 
 
-def test_save_is_idempotent_on_tenant_user_message_pipeline_key(tmp_path: Path) -> None:
+def test_save_is_idempotent_and_keeps_every_producing_run_linked(tmp_path: Path) -> None:
     async def scenario() -> None:
         repository = SQLiteTaskRepository(tmp_path / "tasks.db")
         await repository.initialize()
@@ -82,24 +110,32 @@ def test_save_is_idempotent_on_tenant_user_message_pipeline_key(tmp_path: Path) 
             "user_id": "u1",
             "pipeline_version": TASK_PIPELINE_VERSION,
         }
-        await repository.save_task(task=task_for("m1", run_id="run-1"), **kwargs)
+        await repository.save_task(record_for("m1", run_id="run-1"), run_id="run-1", **kwargs)
 
-        # Replay from a second run: same idempotent key updates, never duplicates.
+        # Replay from a second run: same idempotent key updates the row,
+        # links both runs, and stamps the second run's freshness as seen.
         await repository.save_task(
-            task=task_for("m1", run_id="run-2", title="Bản cập nhật"), **kwargs
+            record_for("m1", run_id="run-2", title="Bản cập nhật"), run_id="run-2", **kwargs
         )
 
-        assert len(await repository.list_for_run("run-2")) == 1
-        assert await repository.list_for_run("run-1") == ()
-        assert (await repository.list_for_run("run-2"))[0].title == "Bản cập nhật"
+        first_view = await repository.list_for_run("run-1")
+        second_view = await repository.list_for_run("run-2")
+        assert len(first_view) == len(second_view) == 1
+        assert first_view[0].task.title == "Bản cập nhật"
+        assert first_view[0].freshness is ActionFreshness.NEW
+        assert second_view[0].freshness is ActionFreshness.SEEN
 
-        # A different pipeline version is a distinct durable row.
+        # A different pipeline version is a distinct durable row linked only
+        # to the run that produced it; the version-1 row keeps its own links.
         await repository.save_task(
-            task=task_for("m1", run_id="run-3"),
+            record_for("m1", run_id="run-3"),
+            run_id="run-3",
             tenant_id="local",
             user_id="u1",
             pipeline_version="2",
         )
-        assert len(await repository.list_for_run("run-3")) == 1
+        third_view = await repository.list_for_run("run-3")
+        assert len(third_view) == 1
+        assert len(await repository.list_for_run("run-1")) == 1
 
     asyncio.run(scenario())

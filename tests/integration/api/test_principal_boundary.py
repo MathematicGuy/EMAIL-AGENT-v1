@@ -61,6 +61,7 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
             FakeRouteClassifier(),
             FakePlanGenerator(),
             ShortTermStore(),
+            app.state.task_repository,
         )
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://principal.test"
