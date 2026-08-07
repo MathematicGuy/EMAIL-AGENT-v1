@@ -26,7 +26,9 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
   before ranking/return.
 - **Queue/DLQ (V1-H):** Redis Streams (consumer groups, retry/claim, DLQ stream).
   MVP loop (V1-M1..M4) stays on the in-process runtime per PRD-v1 FR-02.
-- **PostgreSQL owner:** still open — decide before V1-H.
+- **PostgreSQL owner:** resolved 2026-08-07 (orchestrator owns the migration;
+  keep the `001_mail_todo.sql` lineage, evolve `action_items` → target `tasks`;
+  see Open Questions below).
 - **Attachments:** presence-only (ADR-003, supersedes ADR-002).
 - **Vocabulary:** `CONTEXT.md` terms are mandatory in all new code (Task not
   "action item"; Run not "digest" in new identifiers; `classifier_confidence` /
@@ -364,8 +366,8 @@ DEMO Increment A.
 
 ## V1-H — Durable control plane (hardening)
 
-Blocking pre-check: **PostgreSQL deployment/migration owner decision** (ask
-user at phase start).
+PostgreSQL ownership resolved 2026-08-07 (see Open Questions): orchestrator
+owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
 
 - **T5.1 PostgreSQL run/task/outbox repositories:** use existing
   `persistence/migrations/001_mail_todo.sql` lineage as migration input;
@@ -446,7 +448,15 @@ happens at phase start (gate discipline). Granularity here is work-item level.
 
 ## Open Questions
 
-- PostgreSQL deployment/migration owner (before V1-H).
+- ~~PostgreSQL deployment/migration owner (before V1-H).~~ **Resolved 2026-08-07**
+  (user delegated): orchestrator owns the PostgreSQL migration. Decision: keep
+  the `persistence/migrations/001_mail_todo.sql` lineage as the migration input —
+  `mailbox_connections` and `digest_runs` match the current models; evolve
+  `action_items` into the target `tasks` table per master-comparison §6.6
+  (idempotent key `tenant_id:user_id:gmail_message_id:pipeline_version`); drop
+  `attachment_extractions` (ADR-003), `digest_schedules`, `schedule_occurrences`
+  (scheduling out of PRD scope); replace `outbox_events` with the V1-H
+  observable lifecycle events (T5.3).
 - Numeric launch thresholds (before V1-H gates).
 - Preference field set narrowing + approval-UI shape (before V2-M2/M4).
 - Episodic relevance algorithm/thresholds (before V2-M5).

@@ -49,7 +49,7 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [ ] [O] Acceptance review passed → unlock V1-H and DEMO Increment A
 
 ## V1-H — Durable control plane
-- [ ] [O] Resolve PostgreSQL deployment/migration owner with user
+- [x] [O] Resolve PostgreSQL deployment/migration owner with user (resolved 2026-08-07: orchestrator owns; see plan.md Open Questions)
 - [ ] 5.1 PostgreSQL run/task/outbox repositories (atomic create, CAS claim)
 - [ ] 5.2 Redis Streams queue + DLQ worker (no sensitive payloads in DLQ) — needs 5.1
 - [ ] 5.3 Observable metadata-only lifecycle events (outbox replacement)
