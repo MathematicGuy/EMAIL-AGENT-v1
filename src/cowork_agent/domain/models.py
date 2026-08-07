@@ -7,7 +7,6 @@ from enum import StrEnum
 
 class RunTrigger(StrEnum):
     ON_DEMAND = "on_demand"
-    SCHEDULED = "scheduled"
 
 
 class RunStatus(StrEnum):
@@ -141,7 +140,6 @@ class DigestRun:
     query: str
     idempotency_key: str
     max_emails: int
-    schedule_id: str | None = None
     emails_matched: int = 0
     emails_processed: int = 0
     emails_actionable: int = 0

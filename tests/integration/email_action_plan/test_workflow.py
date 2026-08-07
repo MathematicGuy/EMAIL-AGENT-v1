@@ -21,6 +21,7 @@ from cowork_agent.domain.target_contracts import (
     ReasonCode,
     RetrievalStatus,
     Route,
+    SemanticChunk,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     SupportingDocument,
@@ -274,13 +275,14 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
         run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="priority-order"
         )
+        generator = FakePlanGenerator(tasks)
         worker = DigestWorker(
             runs,
             results,
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeRouteClassifier(),
-            FakePlanGenerator(tasks),
+            generator,
             ShortTermStore(),
             task_repository=task_repository,
         )
@@ -294,6 +296,8 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             Priority.HIGH,
             Priority.MEDIUM,
         ]
+        # §15 criterion 10: exactly one generation call per actionable candidate.
+        assert generator.call_count == 3
 
     asyncio.run(scenario())
 
@@ -645,6 +649,25 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Xin nghỉ phép")]
         memory = RecordingMemory()
+        memory.response = SemanticRetrievalResponse(
+            query_id="q_test",
+            tenant_id=LOCAL_TENANT_ID,
+            chunks=(
+                SemanticChunk(
+                    chunk_id="cit_hr_1",
+                    document_id="doc_hr_1",
+                    document_title="Sổ tay quy trình nội bộ",
+                    section=None,
+                    text="Nội dung tri thức công ty.",
+                    source_url="https://docs.example.com",
+                    document_version=None,
+                    relevance_score=0.9,
+                    rerank_score=None,
+                ),
+            ),
+            retrieval_status=RetrievalStatus.SUCCESS,
+            latency_ms=1,
+        )
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
@@ -676,6 +699,11 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
         assert request.knowledge_gaps == ("quy trình nghỉ phép",)
         assert request.filters.tenant_scope == LOCAL_TENANT_ID
         assert generator.received_retrievals == (memory.response,)
+        # FR-11 boundary: retrieval returned chunks, so no missing-context
+        # note may be injected.
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.missing_information == ()
 
     asyncio.run(scenario())
 
@@ -743,6 +771,56 @@ def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> N
         assert degraded is not None
         assert degraded.chunks == ()
         assert degraded.retrieval_status is RetrievalStatus.NO_RESULTS
+        # §12.3 "expose missing context": the degraded plan is persisted with
+        # a missing-information warning even when nothing was cited. The
+        # literal pins the user-facing wording intentionally.
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.missing_information == (
+            "Kế hoạch được tạo mà không có ngữ cảnh công ty.",
+        )
+
+    asyncio.run(scenario())
+
+
+def test_genuine_empty_retrieval_marks_missing_info_without_degraded_marker() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Xin nghỉ phép")]
+        memory = RecordingMemory()  # healthy port, canned NO_RESULTS response
+        sink = InMemoryTraceSink()
+        generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="rag-empty", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": RAG_DECISION}),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            semantic_memory=memory,
+            trace_sink=sink,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        # FR-11: "no useful result" must expose the missing context. The
+        # literal pins the user-facing wording intentionally.
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.missing_information == (
+            "Kế hoạch được tạo mà không có ngữ cảnh công ty.",
+        )
+        # FR-16: a genuine empty result is NOT the degraded-fallback marker.
+        candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
+        assert candidate.generation_status is None
+        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
 
     asyncio.run(scenario())
 
@@ -751,6 +829,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Xin nghỉ phép")]
         memory = RecordingMemory()
+        sink = InMemoryTraceSink()
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
@@ -767,6 +846,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
             ShortTermStore(),
             task_repository=task_repository,
             semantic_memory=memory,
+            trace_sink=sink,
         )
 
         completed = await worker.execute(run.id, now=NOW)
@@ -776,6 +856,19 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         empty = generator.received_retrievals[0]
         assert empty is not None and empty.chunks == ()
         assert empty.retrieval_status is RetrievalStatus.NO_RESULTS
+        # FR-11: the route demanded company knowledge but none was available,
+        # so the missing context must be listed. The literal pins the
+        # user-facing wording intentionally.
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.missing_information == (
+            "Kế hoạch được tạo mà không có ngữ cảnh công ty.",
+        )
+        # §14: skipped retrievals are reported as "skipped", not no_results,
+        # and carry no degraded-fallback marker.
+        candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
+        assert candidate.retrieval_status == "skipped"
+        assert candidate.generation_status is None
 
     asyncio.run(scenario())
 
@@ -811,6 +904,10 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
         assert completed.error_message_safe is not None
         assert "secret internal detail" not in completed.error_message_safe
         assert "Nội dung email tuyệt mật." not in completed.error_message_safe
+        # §15 criterion 10: generation was attempted exactly once for the
+        # single candidate — a terminal adapter error aborts the run without
+        # any worker-level re-invocation (§12.4 repair lives in the adapter).
+        assert generator.call_count == 1
         assert await task_repository.list_for_run(run.id) == ()
 
     asyncio.run(scenario())

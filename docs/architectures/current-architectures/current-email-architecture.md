@@ -189,7 +189,7 @@ Top-level fields:
 - `processedEmails` in development only
 - `message` (`"Không có công việc cần xử lý"` when no items)
 
-`run` uses snake_case fields from `DigestRun`: `id`, `user_id`, `mailbox_connection_id`, `trigger`, `status`, `query`, `idempotency_key`, `max_emails`, `schedule_id`, all email/action/attachment counters, `truncated`, `next_cursor`, safe error fields, and timestamps.
+`run` uses snake_case fields from `DigestRun`: `id`, `user_id`, `mailbox_connection_id`, `trigger`, `status`, `query`, `idempotency_key`, `max_emails`, all email/action/attachment counters, `truncated`, `next_cursor`, safe error fields, and timestamps.
 
 Each `actionItems[]`/`nextActions[]` entry uses snake_case fields from `ActionItem`: IDs, fingerprint/freshness, title/summary, sender and source-email metadata, deadline fields, priority fields, `confidence`, `impact`, `incident_key`, `related_message_ids`, and:
 
