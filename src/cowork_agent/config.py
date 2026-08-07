@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 
+def database_url(environ: Mapping[str, str] | None = None) -> str:
+    """PostgreSQL connection URL (V1-H); empty string keeps local adapters."""
+    source = os.environ if environ is None else environ
+    return source.get("DATABASE_URL", "").strip()
+
+
 @dataclass(frozen=True, slots=True)
 class GmailSettings:
     client_id: str = field(repr=False)

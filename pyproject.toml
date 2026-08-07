@@ -28,6 +28,9 @@ gui = [
   "streamlit>=1.30.0",
   "httpx>=0.27.0",
 ]
+postgres = [
+  "psycopg[binary,pool]>=3.2,<4",
+]
 
 [project.scripts]
 mail-todo-api = "cowork_agent.app:main"

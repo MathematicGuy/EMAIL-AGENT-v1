@@ -1,7 +1,9 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
+import asyncio
 import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +14,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Requ
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings
+from cowork_agent.config import GeminiSettings, GmailSettings, GroqSettings, database_url
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
@@ -21,6 +23,7 @@ from cowork_agent.features.email_action_plan.observability import (
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
+    RunRepository,
     SemanticMemoryPort,
     TaskRepository,
 )
@@ -58,6 +61,7 @@ from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -104,12 +108,39 @@ def create_app() -> FastAPI:
                 repository,
                 TokenCipher(settings.token_encryption_key),
             )
-            run_repository = InMemoryRunRepository()
+            run_repository: RunRepository
+            task_repository: TaskRepository
             result_repository = InMemoryResultRepository()
-            task_repository = SQLiteTaskRepository(
-                settings.connection_db_path.parent / "tasks.db"
-            )
-            await task_repository.initialize()
+            if database_url():
+                # V1-H T5.1 durable control plane: PostgreSQL is the source
+                # of truth for runs, tasks, and outbox events. Imports stay
+                # lazy so the app boots without the optional postgres extra.
+                from psycopg_pool import AsyncConnectionPool
+
+                from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.repositories.postgres import (
+                    PostgresOutboxRepository,
+                    PostgresRunRepository,
+                    PostgresTaskRepository,
+                )
+
+                pool = AsyncConnectionPool(
+                    database_url(), min_size=1, max_size=8, open=False
+                )
+                await pool.open(wait=True)
+                await apply_migrations(pool)
+                run_repository = PostgresRunRepository(pool)
+                task_repository = PostgresTaskRepository(pool)
+                app.state.outbox_repository = PostgresOutboxRepository(pool)
+                app.state.pg_pool = pool
+            else:
+                task_repository = SQLiteTaskRepository(
+                    settings.connection_db_path.parent / "tasks.db"
+                )
+                await task_repository.initialize()
+                run_repository = InMemoryRunRepository()
+                app.state.outbox_repository = InMemoryOutbox()
+                app.state.pg_pool = None
             app.state.run_repository = run_repository
             app.state.create_run = CreateDigestRun(run_repository)
             app.state.get_result = GetDigestResult(
@@ -155,6 +186,9 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise RuntimeError(f"Invalid Gmail configuration: {exc}") from exc
         yield
+        pg_pool = getattr(app.state, "pg_pool", None)
+        if pg_pool is not None:
+            await pg_pool.close()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
 
@@ -300,7 +334,7 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}")
     async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(InMemoryRunRepository, request.app.state.run_repository)
+        repository = cast(RunRepository, request.app.state.run_repository)
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
@@ -337,7 +371,7 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}/result")
     async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(InMemoryRunRepository, request.app.state.run_repository)
+        repository = cast(RunRepository, request.app.state.run_repository)
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
@@ -354,7 +388,7 @@ def create_app() -> FastAPI:
     async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
         """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
         information, and confidences that the legacy result shape drops."""
-        repository = cast(InMemoryRunRepository, request.app.state.run_repository)
+        repository = cast(RunRepository, request.app.state.run_repository)
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
@@ -442,6 +476,11 @@ async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort
 
 
 def main() -> None:
+    if database_url() and sys.platform == "win32":
+        # psycopg async cannot run on Windows' ProactorEventLoop.
+        from asyncio import windows_events
+
+        asyncio.set_event_loop_policy(windows_events.WindowsSelectorEventLoopPolicy())
     uvicorn.run(
         "cowork_agent.app:create_app",
         factory=True,

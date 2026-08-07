@@ -405,13 +405,14 @@ Evidence per criterion (file::test; `tw` = `tests/integration/email_action_plan/
     `tw::test_telemetry_marks_degraded_retrieval_fallback` (retrieval), error-code-only events.
     NIT: emitted `reason_codes` only covered via contract round-trip.
 19. No scheduler — no scheduler/schedule-config/recurring code in `src/` (SCHEDULED/schedule_id
-    removed at `d93ec3b`); `digest_schedules` SQL remains only in the `001_mail_todo.sql` lineage
-    (V1-H T5.1 decides keep/drop).
+    removed at `d93ec3b`; the `001_mail_todo.sql` baseline dropped the schedule tables at V1-H T5.1).
 
 Follow-ups (non-blocking): GUI live verification via DEMO-A; emitted
-`reason_codes` assertion; FR-11 note localization; `digest_schedules`
-keep/drop in T5.1. Live routing-accuracy evaluation (§14 metrics, T2.6)
-remains pending user-authorized runs but is not a §15 criterion.
+`reason_codes` assertion; FR-11 note localization. `digest_schedules`
+resolved at V1-H T5.1 (2026-08-08): dropped from the PostgreSQL baseline —
+scheduling is a PRD-v1 non-goal. Live routing-accuracy evaluation (§14
+metrics, T2.6) remains pending user-authorized runs but is not a §15
+criterion.
 
 ---
 
