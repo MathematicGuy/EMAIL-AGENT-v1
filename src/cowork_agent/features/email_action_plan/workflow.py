@@ -8,7 +8,6 @@ from uuid import uuid4
 from cowork_agent.domain import (
     ActionFreshness,
     ActionItem,
-    DigestCompletedEvent,
     DigestRun,
     ProcessedEmail,
     RunStatus,
@@ -28,9 +27,7 @@ from .ports import (
     TERMINAL_STATUSES,
     ActionExtractorPort,
     AttachmentExtractorPort,
-    CompletionOutboxPort,
     MailboxPort,
-    QueuePort,
     ResultRepository,
     RunRepository,
 )
@@ -48,9 +45,8 @@ class RunNotCompleteError(RuntimeError):
 
 
 class CreateDigestRun:
-    def __init__(self, runs: RunRepository, queue: QueuePort) -> None:
+    def __init__(self, runs: RunRepository) -> None:
         self._runs = runs
-        self._queue = queue
 
     async def execute(
         self,
@@ -78,9 +74,7 @@ class CreateDigestRun:
             max_emails=validate_max_emails(max_emails),
             created_at=now or datetime.now(UTC),
         )
-        stored, created = await self._runs.create(run)
-        if created:
-            await self._queue.enqueue_digest_run(stored.id)
+        stored, _created = await self._runs.create(run)
         return stored
 
 
@@ -92,7 +86,6 @@ class DigestWorker:
         mailbox: MailboxPort,
         attachments: AttachmentExtractorPort,
         actions: ActionExtractorPort,
-        outbox: CompletionOutboxPort,
         short_term: ShortTermStore,
         *,
         extraction_limits: ExtractionLimits | None = None,
@@ -101,7 +94,7 @@ class DigestWorker:
         # production baseline must not download or extract attachment content.
         del attachments, extraction_limits
         self._runs, self._results, self._mailbox = runs, results, mailbox
-        self._actions, self._outbox = actions, outbox
+        self._actions = actions
         self._short_term = short_term
 
     async def execute(
@@ -224,7 +217,6 @@ class DigestWorker:
             self._short_term.clear(run.id)
         run.completed_at = clock
         await self._runs.save(run)
-        await self._outbox.add(DigestCompletedEvent(run.id, run.user_id, run.status, clock))
         return run
 
     async def _fetch_threads(

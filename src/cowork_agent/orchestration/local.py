@@ -1,4 +1,4 @@
-"""In-memory queue and outbox adapters for local execution."""
+"""Deterministic test fakes retained per master-comparison §4.4; no production wiring."""
 
 from collections.abc import Sequence
 

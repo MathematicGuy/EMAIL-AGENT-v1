@@ -12,12 +12,12 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [ ] Checkpoint: full `pytest` + `ruff` + `mypy` green; commit; user review
 
 ## V1-M1 — Core contracts and Gmail entry
-- [ ] 1.1 Versioned contracts: EphemeralEmailEnvelope, EmailRouteDecision, ActionPlanOutput, TraceEvent
-- [ ] 1.2 Verified Principal boundary (remove `user_id` query params; Mailbox-Connection principal) — needs 1.1
-- [ ] 1.3 Envelope consolidation + attachment presence-only — needs 1.1
-- [ ] 1.4 Short-term cleanup + safety TTL — needs 1.3
-- [ ] 1.5 Remove fake queue/outbox wiring + MailTodoApi — needs P0-A, 1.2
-- [ ] Checkpoint: V1-M1 exit criteria (plan.md)
+- [x] 1.1 Versioned contracts: EphemeralEmailEnvelope, EmailRouteDecision, ActionPlanOutput, TraceEvent
+- [x] 1.2 Verified Principal boundary (remove `user_id` query params; Mailbox-Connection principal) — needs 1.1
+- [x] 1.3 Envelope consolidation + attachment presence-only — needs 1.1
+- [x] 1.4 Short-term cleanup + safety TTL — needs 1.3
+- [x] 1.5 Remove fake queue/outbox wiring + MailTodoApi — needs P0-A, 1.2
+- [x] Checkpoint: V1-M1 exit criteria (plan.md)
 
 ## V1-M2 — Classification and routing
 - [ ] 2.1 Split RouteClassifierPort/ActionPlanGeneratorPort; move shaping out of provider adapters

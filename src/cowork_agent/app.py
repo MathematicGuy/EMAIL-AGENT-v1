@@ -37,7 +37,6 @@ from cowork_agent.integrations.gmail.provider import (
 )
 from cowork_agent.integrations.llm.providers.gemini import GeminiActionExtractor
 from cowork_agent.integrations.llm.providers.groq import GroqActionExtractor
-from cowork_agent.orchestration.local import InMemoryOutbox, InMemoryQueue
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -81,7 +80,7 @@ def create_app() -> FastAPI:
             run_repository = InMemoryRunRepository()
             result_repository = InMemoryResultRepository()
             app.state.run_repository = run_repository
-            app.state.create_run = CreateDigestRun(run_repository, InMemoryQueue())
+            app.state.create_run = CreateDigestRun(run_repository)
             app.state.get_result = GetDigestResult(run_repository, result_repository)
             app.state.result_repository = result_repository
             try:
@@ -99,7 +98,6 @@ def create_app() -> FastAPI:
                     app.state.gmail_mailbox,
                     SafeTextAttachmentExtractor(),
                     actions,
-                    InMemoryOutbox(),
                     ShortTermStore(),
                 )
                 app.state.gemini_configuration_error = None

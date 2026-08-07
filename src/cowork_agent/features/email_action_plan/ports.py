@@ -7,7 +7,6 @@ from typing import Protocol
 from cowork_agent.domain import (
     ActionItem,
     AttachmentWarning,
-    DigestCompletedEvent,
     DigestRun,
     ExtractedAttachment,
     MailboxConnection,
@@ -62,14 +61,6 @@ class ActionExtractorPort(Protocol):
     ) -> ExtractionBatch: ...
 
 
-class QueuePort(Protocol):
-    async def enqueue_digest_run(self, run_id: str) -> None: ...
-
-
-class EventPublisherPort(Protocol):
-    async def publish(self, event: DigestCompletedEvent) -> None: ...
-
-
 class RunRepository(Protocol):
     async def create(self, run: DigestRun) -> tuple[DigestRun, bool]: ...
     async def get(self, run_id: str) -> DigestRun | None: ...
@@ -87,12 +78,6 @@ class ResultRepository(Protocol):
         self, run_id: str, emails: Sequence[ProcessedEmail]
     ) -> None: ...
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]: ...
-
-
-class CompletionOutboxPort(Protocol):
-    async def add(self, event: DigestCompletedEvent) -> None: ...
-    async def pending(self) -> Sequence[DigestCompletedEvent]: ...
-    async def mark_published(self, run_id: str) -> None: ...
 
 
 TERMINAL_STATUSES = frozenset({RunStatus.SUCCEEDED, RunStatus.PARTIAL, RunStatus.FAILED})

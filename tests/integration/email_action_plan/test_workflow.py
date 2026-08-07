@@ -30,7 +30,6 @@ from cowork_agent.features.email_action_plan.workflow import (
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.llm.fakes import FakeActionExtractor
-from cowork_agent.orchestration.local import InMemoryOutbox, InMemoryQueue
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -94,13 +93,8 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
                 EmailExtraction("m2", "newsletter", "Nội dung marketing", ()),
             )
         )
-        runs, results, queue, outbox = (
-            InMemoryRunRepository(),
-            InMemoryResultRepository(),
-            InMemoryQueue(),
-            InMemoryOutbox(),
-        )
-        creator = CreateDigestRun(runs, queue)
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-1", now=NOW
         )
@@ -110,7 +104,6 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(batch),
-            outbox,
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -122,7 +115,6 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         assert len(saved) == 1 and saved[0].priority is Priority.URGENT
         processed = await results.list_processed_emails(run.id)
         assert [item.subject for item in processed] == ["Gửi báo cáo", "Newsletter"]
-        assert len(await outbox.pending()) == 1
 
     asyncio.run(scenario())
 
@@ -154,7 +146,7 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             )
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+        run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="priority-order"
         )
         worker = DigestWorker(
@@ -163,7 +155,6 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(batch),
-            InMemoryOutbox(),
             ShortTermStore(),
         )
 
@@ -179,18 +170,18 @@ def test_pipeline_orders_items_by_priority_before_deadline() -> None:
     asyncio.run(scenario())
 
 
-def test_same_idempotency_key_creates_and_enqueues_only_one_run() -> None:
+def test_same_idempotency_key_creates_only_one_run() -> None:
     async def scenario() -> None:
-        runs, queue = InMemoryRunRepository(), InMemoryQueue()
-        creator = CreateDigestRun(runs, queue)
+        runs = InMemoryRunRepository()
+        creator = CreateDigestRun(runs)
         first = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="same"
         )
         second = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="same"
         )
-        assert first.id == second.id
-        assert queue.run_ids == [first.id]
+        assert second.id == first.id
+        assert len(runs.runs) == 1
 
     asyncio.run(scenario())
 
@@ -210,7 +201,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Duyệt tài liệu"),)),)
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        creator = CreateDigestRun(runs, InMemoryQueue())
+        creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="partial"
         )
@@ -220,7 +211,6 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
             AttachmentDownloadMustNotRunMailbox([message]),
             AttachmentExtractionMustNotRun(),
             FakeActionExtractor(batch),
-            InMemoryOutbox(),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -237,7 +227,7 @@ def test_attachment_is_recorded_without_download_or_extraction() -> None:
 def test_result_has_explicit_empty_state_message() -> None:
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        creator = CreateDigestRun(runs, InMemoryQueue())
+        creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="empty"
         )
@@ -247,7 +237,6 @@ def test_result_has_explicit_empty_state_message() -> None:
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(ExtractionBatch(())),
-            InMemoryOutbox(),
             ShortTermStore(),
         )
         await worker.execute(run.id, now=NOW)
@@ -269,7 +258,7 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+        run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="safe-failure"
         )
         worker = DigestWorker(
@@ -278,7 +267,6 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
             FakeMailbox([email("m1", "t1", "Test")]),
             SafeTextAttachmentExtractor(),
             FailingExtractor(),
-            InMemoryOutbox(),
             ShortTermStore(),
         )
 
@@ -299,7 +287,7 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+        run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="private-failure"
         )
         worker = DigestWorker(
@@ -308,7 +296,6 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
             FakeMailbox(),
             SafeTextAttachmentExtractor(),
             FailingExtractor(),
-            InMemoryOutbox(),
             ShortTermStore(),
         )
 
@@ -330,7 +317,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             email("m3", "shared-thread", "Third unread"),
         ]
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        creator = CreateDigestRun(runs, InMemoryQueue())
+        creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1",
             mailbox_connection_id="mbx1",
@@ -344,7 +331,6 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             extractor,
-            InMemoryOutbox(),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -363,7 +349,7 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
 def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        creator = CreateDigestRun(runs, InMemoryQueue())
+        creator = CreateDigestRun(runs)
         run = await creator.execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="stamp"
         )
@@ -374,7 +360,6 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
             FakeMailbox([email("m1", "t1", "Việc một"), email("m2", "t2", "Việc hai")]),
             SafeTextAttachmentExtractor(),
             extractor,
-            InMemoryOutbox(),
             ShortTermStore(),
         )
         completed = await worker.execute(run.id, now=NOW)
@@ -397,7 +382,7 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
             (EmailExtraction("m1", "actionable", "Có yêu cầu", (action("m1", "Gửi báo cáo"),)),)
         )
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+        run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-success"
         )
         store = ShortTermStore()
@@ -407,7 +392,6 @@ def test_successful_run_finalizer_clears_short_term_memory() -> None:
             FakeMailbox(messages),
             SafeTextAttachmentExtractor(),
             FakeActionExtractor(batch),
-            InMemoryOutbox(),
             store,
         )
 
@@ -435,7 +419,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
 
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
-        run = await CreateDigestRun(runs, InMemoryQueue()).execute(
+        run = await CreateDigestRun(runs).execute(
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cleanup-failure"
         )
         store = ShortTermStore()
@@ -446,7 +430,6 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
             FakeMailbox([email("m1", "t1", "Việc cần làm")]),
             SafeTextAttachmentExtractor(),
             extractor,
-            InMemoryOutbox(),
             store,
         )
 

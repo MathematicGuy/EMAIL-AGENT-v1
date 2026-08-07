@@ -51,3 +51,10 @@ The registry may grow across sessions. Keep it append-only except when removing 
 - **Evidence:** Agents reran tests that had passed one or two minutes earlier without intervening changes, adding delay but no new confidence.
 - **Failure state:** Redundant test runs slow implementation, obscure which change introduced a failure, and consume review time without increasing evidence.
 - **Deploy when:** Iterating through red-green-refactor cycles, applying review feedback, or selecting the next verification command within one session.
+
+#### "An ignore rule is only real when git confirms it"
+- **Version:** v1 (2026-08-07)
+- **Pattern:** After adding or inheriting a gitignore rule for generated artifacts, verify it with `git check-ignore <path>` and a clean `git status` before trusting it; treat artifact files appearing in commits as proof the rule never worked.
+- **Evidence:** `.pytest-tmp/` was assumed ignored (handoff and intent), but the checked-in entry was a stale typo (`.pytest-adr003.pytest-tmp/`); dozens of temp test databases and a baseline JSON had been committed until discovered via `git status` during review.
+- **Failure state:** Generated artifacts (temp DBs, caches, reports) silently enter version control, bloat history, and surface as confusing `D`/untracked noise in every later status check.
+- **Deploy when:** Adding ignore rules, onboarding to a repo's ignore assumptions, or when temp artifacts appear in `git status` unexpectedly.
