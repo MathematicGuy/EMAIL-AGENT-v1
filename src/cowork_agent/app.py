@@ -22,6 +22,7 @@ from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
     SemanticMemoryPort,
+    TaskRepository,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
@@ -348,6 +349,21 @@ def create_app() -> FastAPI:
         if not _is_development():
             payload.pop("processedEmails", None)
         return payload
+
+    @app.get("/v1/mail-todo/runs/{run_id}/tasks")
+    async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
+        """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
+        information, and confidences that the legacy result shape drops."""
+        repository = cast(InMemoryRunRepository, request.app.state.run_repository)
+        run = await repository.get(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Digest run not found")
+        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
+        if run.status.value in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
+        task_repository = cast(TaskRepository, request.app.state.task_repository)
+        records = await task_repository.list_for_run(run_id)
+        return {"tasks": [record.task.to_dict() for record in records]}
 
     return app
 

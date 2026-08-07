@@ -141,6 +141,25 @@ def test_empty_run_returns_explicit_empty_state_message(compat_session) -> None:
     asyncio.run(scenario())
 
 
+def test_tasks_endpoint_exposes_persisted_task_contracts(compat_session) -> None:
+    async def scenario() -> None:
+        async with compat_session([make_email("m1", "t1", "Việc")], _tasks_for("m1")) as s:
+            created = await s.post_run("tasks-endpoint")
+            run_id = created.json()["id"]
+            response = await s.client.get(f"/v1/mail-todo/runs/{run_id}/tasks")
+            assert response.status_code == 200
+            payload = response.json()
+            assert set(payload) == {"tasks"}
+            assert len(payload["tasks"]) == 1
+            task = payload["tasks"][0]
+            assert task["gmail_message_id"] == "m1"
+            assert task["title"] == "Việc m1"
+            assert task["validation_status"] == "system_generated"
+            assert "action_plan" in task and "missing_information" in task
+
+    asyncio.run(scenario())
+
+
 def test_processed_emails_are_development_only(compat_session, monkeypatch) -> None:
     async def scenario() -> None:
         async with compat_session([make_email("m1", "t1", "Việc")], _tasks_for("m1")) as s:

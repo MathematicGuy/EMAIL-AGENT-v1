@@ -6,6 +6,7 @@ Streamlined 3-step UI:
 3. View extracted tasks immediately
 """
 
+import html
 import math
 import os
 import time
@@ -90,6 +91,19 @@ st.markdown(
     .bg-high { background-color: #FFEDD5; color: #9A3412; }
     .bg-medium { background-color: #FEF3C7; color: #92400E; }
     .bg-low { background-color: #F3F4F6; color: #374151; }
+    .citation-chip {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #1D4ED8;
+        background-color: #DBEAFE;
+        border: 1px solid #BFDBFE;
+        border-radius: 9999px;
+        padding: 2px 10px;
+        margin: 2px 4px 2px 0;
+        text-decoration: none;
+    }
+    .citation-chip:hover { background-color: #BFDBFE; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -313,6 +327,17 @@ if display_run_id:
     res_code, res_data = api_request("GET", f"/v1/mail-todo/runs/{display_run_id}/result")
 
     if res_code == 200 and isinstance(res_data, dict):
+        # §6.6 Task contracts (T4.3): citations and missing information that
+        # the legacy result shape does not carry.
+        task_meta: dict[str, dict[str, Any]] = {}
+        tasks_code, tasks_data = api_request(
+            "GET", f"/v1/mail-todo/runs/{display_run_id}/tasks"
+        )
+        if tasks_code == 200 and isinstance(tasks_data, dict):
+            task_meta = {
+                str(task.get("gmail_message_id")): task
+                for task in tasks_data.get("tasks", [])
+            }
         items = res_data.get("actionItems", [])
         warnings = res_data.get("attachmentWarnings", [])
 
@@ -330,6 +355,30 @@ if display_run_id:
                 title = item.get("title") or "(Không có tiêu đề)"
                 summary = item.get("summary") or ""
 
+                meta = task_meta.get(str(item.get("provider_message_id")), {})
+                documents = meta.get("supporting_documents") or []
+                missing_information = meta.get("missing_information") or []
+                citations_by_id = {
+                    str(doc.get("citation_id")): doc for doc in documents
+                }
+                # LLM-sourced fields: escape text and restrict href schemes
+                # before interpolating into HTML.
+                chip_fragments = []
+                for doc in documents:
+                    label = html.escape(str(doc.get("title") or ""), quote=True)
+                    url = str(doc.get("url") or "")
+                    if url.startswith(("http://", "https://")):
+                        href = html.escape(url, quote=True)
+                        chip_fragments.append(
+                            f'<a class="citation-chip" href="{href}"'
+                            f' target="_blank" rel="noopener">📎 {label}</a>'
+                        )
+                    else:
+                        chip_fragments.append(
+                            f'<span class="citation-chip">📎 {label}</span>'
+                        )
+                chips_html = "".join(chip_fragments)
+
                 with st.container():
                     st.markdown(
                         f"""
@@ -343,6 +392,7 @@ if display_run_id:
                             </div>
                             <p style="color: #475569; font-size: 0.95rem;
                                       margin-bottom: 8px;">{summary}</p>
+                            <div style="margin-bottom: 8px;">{chips_html}</div>
                             <div style="font-size: 0.85rem; color: #64748B;">
                                 <strong>Hạn chót:</strong> <code>{deadline}</code> | 
                                 <strong>Độ tin cậy:</strong> <code>{confidence}</code>
@@ -352,10 +402,17 @@ if display_run_id:
                         unsafe_allow_html=True,
                     )
 
+                    if missing_information:
+                        st.warning(
+                            "⚠️ Thiếu thông tin để hoàn tất kế hoạch: "
+                            + "; ".join(str(gap) for gap in missing_information)
+                        )
+
                     steps = item.get("action_plan", [])
                     if steps:
+                        meta_steps = meta.get("action_plan") or []
                         with st.expander("📌 Các bước thực hiện chi tiết"):
-                            for step in steps:
+                            for step_index, step in enumerate(steps):
                                 instruction = step.get("instruction", "")
                                 basis = step.get("basis")
                                 basis_labels = {
@@ -366,7 +423,18 @@ if display_run_id:
                                 }
                                 basis_label = basis_labels.get(basis, basis)
                                 suffix = f" _(nguồn: {basis_label})_" if basis_label else ""
-                                st.markdown(f"- {instruction}{suffix}")
+                                citation_ids = (
+                                    meta_steps[step_index].get("supporting_citation_ids")
+                                    if step_index < len(meta_steps)
+                                    else None
+                                ) or []
+                                cited = [
+                                    f"📎 {citations_by_id[str(cid)].get('title')}"
+                                    for cid in citation_ids
+                                    if str(cid) in citations_by_id
+                                ]
+                                citation_suffix = f" ({'; '.join(cited)})" if cited else ""
+                                st.markdown(f"- {instruction}{suffix}{citation_suffix}")
 
                     col_link, col_meta = st.columns([1, 2])
                     with col_link:
