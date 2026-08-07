@@ -9,6 +9,7 @@ from typing import NamedTuple
 from uuid import uuid4
 
 from cowork_agent.domain import (
+    DigestCompletedEvent,
     DigestRun,
     ProcessedEmail,
     RunStatus,
@@ -44,6 +45,7 @@ from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
     AttachmentExtractorPort,
+    CompletionOutboxPort,
     MailboxPort,
     PersistedTask,
     ResultRepository,
@@ -142,6 +144,7 @@ class DigestWorker:
         trace_sink: TraceSink | None = None,
         dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
+        completion_outbox: CompletionOutboxPort | None = None,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
         # production baseline must not download or extract attachment content.
@@ -153,6 +156,7 @@ class DigestWorker:
         self._short_term = short_term
         self._trace_sink = trace_sink
         self._dev_trace = dev_trace
+        self._completion_outbox = completion_outbox
 
     async def execute(
         self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
@@ -364,7 +368,28 @@ class DigestWorker:
         self._emit_run_trace(run, email_ms, classifier_ms, persistence_ms)
         run.completed_at = clock
         await self._runs.save(run)
+        await self._append_completion_event(run, clock)
         return run
+
+    async def _append_completion_event(self, run: DigestRun, clock: datetime) -> None:
+        """T5.3: durable, metadata-only lifecycle event for every terminal run."""
+        if self._completion_outbox is None:
+            return
+        try:
+            await self._completion_outbox.add(
+                DigestCompletedEvent(
+                    run_id=run.id,
+                    user_id=run.user_id,
+                    status=run.status,
+                    occurred_at=clock,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Completion event for run %s could not be appended to the outbox (%s)",
+                run.id,
+                type(exc).__name__,
+            )
 
     async def _fetch_threads(
         self, run: DigestRun

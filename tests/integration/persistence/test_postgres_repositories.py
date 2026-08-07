@@ -425,6 +425,7 @@ def test_digest_pipeline_runs_end_to_end_against_postgres() -> None:
             await apply_migrations(pool)
             runs = PostgresRunRepository(pool)
             tasks = PostgresTaskRepository(pool)
+            outbox = PostgresOutboxRepository(pool)
             run, _ = await runs.create(_run())
             envelope = EphemeralEmailEnvelope(
                 run_id="",
@@ -453,6 +454,7 @@ def test_digest_pipeline_runs_end_to_end_against_postgres() -> None:
                 FakePlanGenerator((_task("m1"),)),
                 ShortTermStore(),
                 task_repository=tasks,
+                completion_outbox=outbox,
             )
 
             completed = await worker.execute(run.id, now=NOW)
@@ -466,6 +468,10 @@ def test_digest_pipeline_runs_end_to_end_against_postgres() -> None:
             assert reloaded is not None
             assert reloaded.status is RunStatus.SUCCEEDED
             assert reloaded.emails_processed == 1
+            events = await outbox.pending()
+            assert len(events) == 1
+            assert events[0].run_id == run.id
+            assert events[0].status is RunStatus.SUCCEEDED
         finally:
             await pool.close()
 

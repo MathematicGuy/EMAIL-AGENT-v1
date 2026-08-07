@@ -201,6 +201,7 @@ def create_app() -> FastAPI:
                     dev_trace=dev_trace_sink_from_env(
                         settings.connection_db_path.parent, settings.token_encryption_key
                     ),
+                    completion_outbox=app.state.outbox_repository,
                 )
                 app.state.gemini_configuration_error = None
             except ValueError as exc:

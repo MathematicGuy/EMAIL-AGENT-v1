@@ -82,6 +82,7 @@ async def run_worker() -> None:
     from cowork_agent.orchestration.redis_queue import RedisRunConsumer
     from cowork_agent.persistence.migrate import apply_migrations
     from cowork_agent.persistence.repositories.postgres import (
+        PostgresOutboxRepository,
         PostgresRunRepository,
         PostgresTaskRepository,
     )
@@ -93,6 +94,7 @@ async def run_worker() -> None:
         await apply_migrations(pool)
         runs = PostgresRunRepository(pool)
         tasks = PostgresTaskRepository(pool)
+        outbox = PostgresOutboxRepository(pool)
         settings = GmailSettings.from_env()
         connection_repository = SQLiteMailboxConnectionRepository(
             settings.connection_db_path
@@ -129,6 +131,7 @@ async def run_worker() -> None:
             dev_trace=dev_trace_sink_from_env(
                 settings.connection_db_path.parent, settings.token_encryption_key
             ),
+            completion_outbox=outbox,
         )
         consumer = RedisRunConsumer(redis_client, runs, digest_worker)
         logger.info("Worker ready; consuming the durable run queue")

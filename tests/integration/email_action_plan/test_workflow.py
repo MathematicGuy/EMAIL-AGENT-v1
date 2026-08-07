@@ -49,6 +49,7 @@ from cowork_agent.integrations.llm.fakes import (
     FakeRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
+from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
     InMemoryRunRepository,
@@ -909,6 +910,84 @@ def test_generation_failure_fails_run_with_safe_error() -> None:
         # any worker-level re-invocation (§12.4 repair lives in the adapter).
         assert generator.call_count == 1
         assert await task_repository.list_for_run(run.id) == ()
+
+    asyncio.run(scenario())
+
+
+def test_terminal_runs_append_completion_events_to_outbox() -> None:
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        outbox = InMemoryOutbox()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        creator = CreateDigestRun(runs)
+        ok_run = await creator.execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="ok", now=NOW
+        )
+        failed_run = await creator.execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="bad", now=NOW
+        )
+
+        def worker(generator: FakePlanGenerator | FailingPlanGenerator) -> DigestWorker:
+            return DigestWorker(
+                runs,
+                results,
+                FakeMailbox(messages),
+                SafeTextAttachmentExtractor(),
+                FakeRouteClassifier(),
+                generator,
+                ShortTermStore(),
+                task_repository=task_repository,
+                completion_outbox=outbox,
+            )
+
+        await worker(FakePlanGenerator((task_for("m1", "Gửi báo cáo"),))).execute(
+            ok_run.id, now=NOW
+        )
+        await worker(
+            FailingPlanGenerator(GenerationSchemaError("boom"))
+        ).execute(failed_run.id, now=NOW)
+
+        # T5.3: every terminal run yields exactly one metadata-only
+        # lifecycle event, on success and on failure alike.
+        pending = await outbox.pending()
+        assert [(event.run_id, event.status) for event in pending] == [
+            (ok_run.id, RunStatus.SUCCEEDED),
+            (failed_run.id, RunStatus.FAILED),
+        ]
+        assert all(event.user_id == "u1" for event in pending)
+        assert all(event.occurred_at == NOW for event in pending)
+
+    asyncio.run(scenario())
+
+
+def test_outbox_outage_never_masks_the_run_result() -> None:
+    class BrokenOutbox:
+        async def add(self, event: object) -> None:
+            raise RuntimeError("event store down")
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "Gửi báo cáo")]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="outage", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator((task_for("m1", "Gửi báo cáo"),)),
+            ShortTermStore(),
+            task_repository=InMemoryTaskRepository(),
+            completion_outbox=BrokenOutbox(),  # type: ignore[arg-type]
+        )
+
+        # T5.3 availability property: lifecycle-event persistence is
+        # best-effort and must never mask the terminal run result.
+        completed = await worker.execute(run.id, now=NOW)
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
 
     asyncio.run(scenario())
 

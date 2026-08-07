@@ -52,7 +52,7 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [x] [O] Resolve PostgreSQL deployment/migration owner with user (resolved 2026-08-07: orchestrator owns; see plan.md Open Questions)
 - [x] 5.1 PostgreSQL run/task/outbox repositories (atomic create, CAS claim)
 - [x] 5.2 Redis Streams queue + DLQ worker (no sensitive payloads in DLQ) — needs 5.1
-- [ ] 5.3 Observable metadata-only lifecycle events (outbox replacement)
+- [x] 5.3 Observable metadata-only lifecycle events (outbox replacement)
 - [ ] 5.4 Timeout/retry budgets (Gmail backoff/jitter, token refresh, partial batch)
 - [ ] 5.5 Advanced observability, alerts, numeric launch gates, scaled evaluation
 - [ ] Checkpoint: V1-H exit criteria (separate-process claim, restart durability)

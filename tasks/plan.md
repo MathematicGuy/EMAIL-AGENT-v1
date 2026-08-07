@@ -437,7 +437,10 @@ owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
   claim idle threshold) AND QUEUED-without-message (enqueue-after-create
   crash; requeue/reset race), re-enqueueing or failing them safely.
 - **T5.5 Observability + launch gates:** alerts, numeric gates, scaled
-  evaluation harness.
+  evaluation harness. Also owns lifecycle-event publication: a publisher
+  consuming `CompletionOutboxPort.pending()`/`mark_published` into
+  trace/metrics sinks, and completion events for runs forced terminal by
+  DLQ retry exhaustion (T5.3 review: those currently get no event).
 
 **Exit criteria (old Milestone 1):** API-created run visible to a separate
 worker process; single-claim enforced; retry exhaustion reaches DLQ without

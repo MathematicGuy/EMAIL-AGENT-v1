@@ -8,6 +8,7 @@ from typing import Protocol
 from cowork_agent.domain import (
     ActionFreshness,
     AttachmentWarning,
+    DigestCompletedEvent,
     DigestRun,
     ExtractedAttachment,
     MailboxConnection,
@@ -115,6 +116,18 @@ class ResultRepository(Protocol):
         self, run_id: str, emails: Sequence[ProcessedEmail]
     ) -> None: ...
     async def list_processed_emails(self, run_id: str) -> Sequence[ProcessedEmail]: ...
+
+
+class CompletionOutboxPort(Protocol):
+    """Durable lifecycle events for terminal runs (V1-H T5.3).
+
+    Payloads are metadata-only (run/user IDs, status, timestamp) — never
+    email content (invariant 1). ``add`` is idempotent per run; ``pending``
+    and ``mark_published`` drive publication to observers."""
+
+    async def add(self, event: DigestCompletedEvent) -> None: ...
+    async def pending(self) -> Sequence[DigestCompletedEvent]: ...
+    async def mark_published(self, run_id: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
