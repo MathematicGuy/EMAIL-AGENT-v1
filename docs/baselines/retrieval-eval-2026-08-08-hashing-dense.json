@@ -1,0 +1,161 @@
+{
+  "generated_at": "2026-08-08T20:36:40.989213Z",
+  "embedder": "hashing",
+  "retriever": "dense",
+  "reranker": null,
+  "corpus": {
+    "document_count": 6,
+    "chunk_count": 36,
+    "corpus_dir": "data/extracted"
+  },
+  "limits": {
+    "top_k": 5,
+    "min_score": 0.2
+  },
+  "case_count": 32,
+  "document_level": {
+    "hit_at_1": 0.5357,
+    "hit_at_3": 0.8929,
+    "mrr": 0.6845,
+    "recall_at_5": 0.8929
+  },
+  "section_level": {
+    "hit_at_1": 0.3571,
+    "hit_at_3": 0.6429,
+    "mrr": 0.5101,
+    "recall_at_5": 0.7143,
+    "excluded_case_count": 0
+  },
+  "by_probe": {
+    "lexical": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.6667,
+        "hit_at_3": 1.0,
+        "mrr": 0.8056,
+        "recall_at_5": 1.0
+      },
+      "section_level": {
+        "hit_at_1": 0.5,
+        "hit_at_3": 0.6667,
+        "mrr": 0.5833,
+        "recall_at_5": 0.6667,
+        "excluded_case_count": 0
+      }
+    },
+    "mixed": {
+      "case_count": 16,
+      "document_level": {
+        "hit_at_1": 0.625,
+        "hit_at_3": 1.0,
+        "mrr": 0.7812,
+        "recall_at_5": 1.0
+      },
+      "section_level": {
+        "hit_at_1": 0.4375,
+        "hit_at_3": 0.8125,
+        "mrr": 0.6302,
+        "recall_at_5": 0.875,
+        "excluded_case_count": 0
+      }
+    },
+    "semantic": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.1667,
+        "hit_at_3": 0.5,
+        "mrr": 0.3056,
+        "recall_at_5": 0.5
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.1667,
+        "mrr": 0.1167,
+        "recall_at_5": 0.3333,
+        "excluded_case_count": 0
+      }
+    }
+  },
+  "by_document": {
+    "cap_lai_cccd": {
+      "case_count": 5,
+      "mrr": 0.7667,
+      "section_mrr": 0.5
+    },
+    "dang_ky_ket_hon": {
+      "case_count": 5,
+      "mrr": 0.8667,
+      "section_mrr": 0.84
+    },
+    "dang_ky_xe": {
+      "case_count": 5,
+      "mrr": 0.5667,
+      "section_mrr": 0.5
+    },
+    "huong_dan_nop_ho_so_dai_hoc_vinuni": {
+      "case_count": 4,
+      "mrr": 0.75,
+      "section_mrr": 0.3125
+    },
+    "thu_tuc_dang_ky_bhxh_luatvietnam": {
+      "case_count": 5,
+      "mrr": 0.6667,
+      "section_mrr": 0.5
+    },
+    "thue_dien_tu": {
+      "case_count": 4,
+      "mrr": 0.4583,
+      "section_mrr": 0.3333
+    }
+  },
+  "abstention": {
+    "case_count": 4,
+    "abstention_rate": 0.0,
+    "false_answer_case_ids": [
+      "q-029",
+      "q-030",
+      "q-031",
+      "q-032"
+    ]
+  },
+  "latency_ms": {
+    "p50": 0,
+    "p95": 0
+  },
+  "misses": [
+    {
+      "case_id": "q-008",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": [
+        "cap_lai_cccd",
+        "dang_ky_xe",
+        "dang_ky_ket_hon",
+        "cap_lai_cccd",
+        "dang_ky_ket_hon"
+      ]
+    },
+    {
+      "case_id": "q-017",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": [
+        "dang_ky_ket_hon",
+        "dang_ky_ket_hon",
+        "dang_ky_xe"
+      ]
+    },
+    {
+      "case_id": "q-022",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    }
+  ]
+}

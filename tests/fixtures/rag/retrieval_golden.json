@@ -1,0 +1,402 @@
+[
+  {
+    "id": "q-001",
+    "query": "Tôi cần cấp lại CCCD qua VNeID thì làm các bước nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "cap_lai_cccd"
+    ],
+    "expected_sections": [
+      "Quy trình đăng ký cấp lại CCCD online bằng VNeID"
+    ],
+    "email_body": "Chào anh,\n\nThẻ căn cước của em sắp hết hạn. Nhờ anh hướng dẫn giúp em các bước cấp lại CCCD online qua VNeID với ạ.",
+    "notes": "C5 end-to-end fixture. Distractor: dang_ky_xe also mentions the dichvucong portal and VNeID login."
+  },
+  {
+    "id": "q-002",
+    "query": "Nghị quyết 190/2025/QH15 quy định thế nào về giấy tờ đã cấp trước khi sắp xếp bộ máy?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "cap_lai_cccd"
+    ],
+    "expected_sections": [
+      "Có cần làm lại Căn cước, hộ chiếu khi sáp nhập tỉnh?"
+    ],
+    "email_body": null,
+    "notes": "Exact legal code in body text. Hard negative: thue_dien_tu cites Nghị quyết 202/2025/QH15 and 1655-1687/NQ-UBTVQH15, so the shared QH15 token is not enough — only the 190/2025 numeral separates them. BM25 should rank #1."
+  },
+  {
+    "id": "q-003",
+    "query": "Khi nào thì tôi buộc phải xin đổi giấy tùy thân mới?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "cap_lai_cccd"
+    ],
+    "expected_sections": [
+      "Các trường hợp cấp đổi, cấp lại thẻ Căn cước"
+    ],
+    "email_body": null,
+    "notes": "Avoids every high-signal token in the target: no 'Căn cước', 'CCCD', 'cấp lại', 'trường hợp'. 'giấy tùy thân' appears nowhere in the corpus. BM25 expected to miss."
+  },
+  {
+    "id": "q-004",
+    "query": "Thông tin in trên thẻ Căn cước bị sai sót thì có được cấp đổi không?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "cap_lai_cccd"
+    ],
+    "expected_sections": [
+      "Các trường hợp cấp đổi, cấp lại thẻ Căn cước"
+    ],
+    "email_body": null,
+    "notes": "Natural phrasing over the Điều 24 enumeration."
+  },
+  {
+    "id": "q-005",
+    "query": "Từ ngày 01/07/2026 làm thẻ Căn cước ở công an xã được không?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "cap_lai_cccd"
+    ],
+    "expected_sections": [
+      "Làm thẻ Căn cước từ ngày 01/07/2026 ở đâu?"
+    ],
+    "email_body": null,
+    "notes": "Section-level discriminator: three of the four cap_lai_cccd sections mention thẻ Căn cước, only this one answers 'where'."
+  },
+  {
+    "id": "q-006",
+    "query": "Nộp tờ khai thuế online trên Cổng Dịch vụ công TTHC thì thao tác thế nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "thue_dien_tu"
+    ],
+    "expected_sections": [
+      "Hướng dẫn nộp tờ khai thuế online trên Dịch vụ Công TTHC"
+    ],
+    "email_body": "Chào anh,\n\nCông ty em cần nộp tờ khai thuế qua Cổng Dịch vụ công TTHC. Nhờ anh hướng dẫn giúp em các thao tác nộp online với ạ.\n\nEm cảm ơn.",
+    "notes": "This section only became addressable after the T-0 H1 split; before it, the whole document was one unlabeled blob."
+  },
+  {
+    "id": "q-007",
+    "query": "Nghị định 69/2024/NĐ-CP về định danh và xác thực điện tử áp dụng thế nào cho hệ thống thuế?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "thue_dien_tu"
+    ],
+    "expected_sections": [
+      "Thông tin chung"
+    ],
+    "email_body": null,
+    "notes": "Exact legal-code token. Dense embeddings blur digits; BM25 should rank #1."
+  },
+  {
+    "id": "q-008",
+    "query": "Trang cũ để nộp báo cáo còn dùng được đến bao giờ?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "thue_dien_tu"
+    ],
+    "expected_sections": [
+      "Thay đổi hệ thống"
+    ],
+    "email_body": null,
+    "notes": "Avoids 'Thuế điện tử', 'hệ thống', 'ngừng hoạt động', and 'song song'. Dense should bridge 'trang cũ' to 'Hệ thống Thuế điện tử sẽ ngừng hoạt động'."
+  },
+  {
+    "id": "q-009",
+    "query": "Cục Thuế đã triển khai hệ thống giải quyết thủ tục hành chính phiên bản nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "thue_dien_tu"
+    ],
+    "expected_sections": [
+      "Thông tin chung"
+    ],
+    "email_body": null,
+    "notes": "Shares 'thủ tục hành chính' with thu_tuc_dang_ky_bhxh_luatvietnam; 'Cục Thuế' is the separator."
+  },
+  {
+    "id": "q-010",
+    "query": "Mẫu hộ tịch điện tử tương tác là gì và ai phải cung cấp thông tin?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "dang_ky_ket_hon"
+    ],
+    "expected_sections": [
+      "Quy trình đăng ký kết hôn online"
+    ],
+    "email_body": null,
+    "notes": "Exact form name. 'hộ tịch' occurs in no other document, and the query deliberately omits 'kết hôn' so the form name is the only signal."
+  },
+  {
+    "id": "q-011",
+    "query": "Đăng ký kết hôn trước hay sau đám cưới đều được phải không?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_ket_hon"
+    ],
+    "expected_sections": [
+      "Điều kiện đăng ký kết hôn"
+    ],
+    "email_body": null,
+    "notes": "Section-level discriminator: all four sections of this document share 'đăng ký kết hôn'."
+  },
+  {
+    "id": "q-012",
+    "query": "Hai người Việt Nam cư trú trong nước đăng ký kết hôn có mất lệ phí không?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_ket_hon"
+    ],
+    "expected_sections": [
+      "Lệ phí đăng ký kết hôn"
+    ],
+    "email_body": "Chào anh/chị,\n\nHai vợ chồng em đều là người Việt Nam và đang cư trú trong nước. Cho em hỏi khi đăng ký kết hôn thì có phải đóng lệ phí không ạ?",
+    "notes": "Near-duplicate distractor inside the same section: the Việt Nam–người nước ngoài case immediately follows."
+  },
+  {
+    "id": "q-013",
+    "query": "Hai vợ chồng sắp cưới muốn hoàn tất giấy tờ chính thức, phải chuẩn bị những gì?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "dang_ky_ket_hon"
+    ],
+    "expected_sections": [
+      "Quy trình đăng ký kết hôn online"
+    ],
+    "email_body": null,
+    "notes": "Zero overlap with the 'đăng ký kết hôn' phrasing in the chunk. BM25 expected to miss."
+  },
+  {
+    "id": "q-014",
+    "query": "Nộp trực tuyến xong thì tra cứu tình trạng hồ sơ ở đâu?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_ket_hon"
+    ],
+    "expected_sections": [
+      "Cách tra cứu tình trạng hồ sơ đăng ký kết hôn"
+    ],
+    "email_body": "Chào anh/chị,\n\nEm đã nộp hồ sơ đăng ký kết hôn trực tuyến hôm qua. Nhờ anh/chị chỉ giúp em tra cứu tình trạng hồ sơ ở đâu ạ.\n\nEm cảm ơn.",
+    "notes": "Cross-document distractor: dang_ky_xe and thu_tuc_dang_ky_bhxh_luatvietnam both describe online submission and result tracking."
+  },
+  {
+    "id": "q-015",
+    "query": "Cổng thisinh.thitotnghiepthpt.edu.vn dùng để làm gì?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+    ],
+    "expected_sections": [
+      "3. Hướng dẫn nộp hồ sơ đại học và quy trình nộp chi tiết"
+    ],
+    "email_body": null,
+    "notes": "Exact portal hostname. Appears in this document only, in section 3 and again in the conclusion — section-level Hit@1 is the tighter check."
+  },
+  {
+    "id": "q-016",
+    "query": "Thí sinh tự do đã tốt nghiệp THPT cần chuẩn bị những giấy tờ gì?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+    ],
+    "expected_sections": [
+      "2. Chuẩn bị giấy tờ cần thiết trong bộ hồ sơ"
+    ],
+    "email_body": "Chào thầy/cô,\n\nEm đã tốt nghiệp THPT từ năm ngoái và năm nay muốn nộp hồ sơ xét tuyển đại học. Nhờ thầy/cô cho em biết bộ hồ sơ cần những giấy tờ gì ạ.\n\nEm cảm ơn.",
+    "notes": "End-to-end fixture. Three sibling sub-tables in the same section (lớp 12 / tự do chưa tốt nghiệp / tự do đã tốt nghiệp) are near-duplicates."
+  },
+  {
+    "id": "q-017",
+    "query": "Em sợ trượt hết, có nên rải hồ sơ ở nhiều tầm điểm khác nhau không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+    ],
+    "expected_sections": [
+      "4. Chiến lược chọn nguyện vọng và ngành học thông minh"
+    ],
+    "email_body": null,
+    "notes": "Avoids 'nguyện vọng', 'sắp xếp', 'thứ tự', 'rủi ro' and also 'xét tuyển' — 'tuyển' has df=1, so keeping it would hand BM25 the document for free and void the probe. Dense must bridge 'rải hồ sơ ở nhiều tầm điểm' to the three-tier mơ ước/phù hợp/an toàn strategy."
+  },
+  {
+    "id": "q-018",
+    "query": "Hiện có những phương thức xét tuyển đại học nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+    ],
+    "expected_sections": [
+      "1. Tổng quan về các phương thức nộp hồ sơ đại học hiện nay"
+    ],
+    "email_body": null,
+    "notes": "Straightforward natural phrasing; baseline case for the mixed slice."
+  },
+  {
+    "id": "q-019",
+    "query": "Phiếu kiểm tra chất lượng xuất xưởng phải có những gì?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "dang_ky_xe"
+    ],
+    "expected_sections": [
+      "Hồ sơ bổ sung đối với xe sản xuất, lắp ráp trong nước"
+    ],
+    "email_body": null,
+    "notes": "Exact form name in body text. NOTE: 'Quyết định 1383/QĐ-BCA' cannot be used here — it appears only in the H1 heading, and _split_sections excludes heading lines from chunk text, so no retriever over chunk text can match it."
+  },
+  {
+    "id": "q-020",
+    "query": "Cấp lại biển số xe mất bao lâu?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_xe"
+    ],
+    "expected_sections": [
+      "Thời hạn giải quyết"
+    ],
+    "email_body": "Chào anh,\n\nEm bị mất biển số xe máy và đã làm thủ tục xin cấp lại. Cho em hỏi thời hạn giải quyết là bao lâu ạ?",
+    "notes": "Distractor: 'cấp lại' is the dominant token of cap_lai_cccd. Document-level Hit@1 is the check here."
+  },
+  {
+    "id": "q-021",
+    "query": "Xe nhập khẩu thì cần bổ sung những giấy tờ gì khi đăng ký?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_xe"
+    ],
+    "expected_sections": [
+      "Hồ sơ bổ sung đối với xe nhập khẩu"
+    ],
+    "email_body": null,
+    "notes": "Near-duplicate distractor: 'Hồ sơ bổ sung đối với xe sản xuất, lắp ráp trong nước'. Section-level metric is the discriminator here."
+  },
+  {
+    "id": "q-022",
+    "query": "Chủ phương tiện phải có tài khoản mức mấy mới tự thao tác trên mạng được?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "dang_ky_xe"
+    ],
+    "expected_sections": [
+      "Điều kiện thực hiện"
+    ],
+    "email_body": null,
+    "notes": "Avoids 'đăng ký xe', 'định danh điện tử', 'VNeID'. 'Chủ phương tiện' for 'Chủ xe'. Hard negative: dang_ky_ket_hon also requires a level-2 account."
+  },
+  {
+    "id": "q-023",
+    "query": "Các bước đăng ký xe online lần đầu trên VNeID gồm những gì?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "dang_ky_xe"
+    ],
+    "expected_sections": [
+      "Quy trình thực hiện"
+    ],
+    "email_body": null,
+    "notes": "Distractor: cap_lai_cccd is the other VNeID step-by-step procedure in the corpus."
+  },
+  {
+    "id": "q-024",
+    "query": "Tờ khai Mẫu TK1-TS dùng cho đối tượng nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "thu_tuc_dang_ky_bhxh_luatvietnam"
+    ],
+    "expected_sections": [
+      "2. Thành phần hồ sơ"
+    ],
+    "email_body": null,
+    "notes": "Exact form number, unique in the corpus. Query omits 'bảo hiểm xã hội' so the form number is the only signal."
+  },
+  {
+    "id": "q-025",
+    "query": "Nộp hồ sơ BHXH bao lâu thì cơ quan trả kết quả?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "thu_tuc_dang_ky_bhxh_luatvietnam"
+    ],
+    "expected_sections": [
+      "3. Cách thức và Thời hạn giải quyết"
+    ],
+    "email_body": null,
+    "notes": "Distractor: dang_ky_xe has its own 'Thời hạn giải quyết' section, an exact section-title collision across documents."
+  },
+  {
+    "id": "q-026",
+    "query": "Hợp đồng lao động từ 1 tháng trở lên có phải đóng BHXH bắt buộc không?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "thu_tuc_dang_ky_bhxh_luatvietnam"
+    ],
+    "expected_sections": [
+      "1. Đối tượng áp dụng"
+    ],
+    "email_body": "Chào chị,\n\nBên em sắp ký hợp đồng thời hạn 2 tháng với một bạn cộng tác viên. Trường hợp này công ty có phải đăng ký BHXH bắt buộc cho bạn ấy không ạ?\n\nEm cảm ơn chị.",
+    "notes": "End-to-end fixture."
+  },
+  {
+    "id": "q-027",
+    "query": "Doanh nghiệp có bao nhiêu ngày để hoàn tất đăng ký cho nhân viên mới vào làm?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "thu_tuc_dang_ky_bhxh_luatvietnam"
+    ],
+    "expected_sections": [
+      "4. Yêu cầu, điều kiện thực hiện thủ tục"
+    ],
+    "email_body": null,
+    "notes": "Avoids 'BHXH', 'bảo hiểm', 'người sử dụng lao động', 'người lao động'. Hard negative: section 3 also states a day count (05 ngày làm việc) — the answer here is 30 ngày."
+  },
+  {
+    "id": "q-028",
+    "query": "Trình tự nộp hồ sơ và nhận sổ bảo hiểm xã hội gồm mấy bước?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "thu_tuc_dang_ky_bhxh_luatvietnam"
+    ],
+    "expected_sections": [
+      "5. Trình tự thực hiện thủ tục"
+    ],
+    "email_body": null,
+    "notes": "Distractor: the H1 preamble section carries almost the same wording as this query."
+  },
+  {
+    "id": "q-029",
+    "query": "Quy trình xin nghỉ phép năm của công ty như thế nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": "Chào HR,\n\nEm muốn xin nghỉ phép năm 5 ngày vào tháng sau, nhờ chị hướng dẫn quy trình ạ.",
+    "notes": "Corpus has no HR policy. Must return NO_RESULTS, not a confident wrong chunk."
+  },
+  {
+    "id": "q-030",
+    "query": "Đăng ký thường trú, tạm trú online thì nộp hồ sơ ở đâu?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Regression guard: data/extracted/dang_ky_tam_tru.md was removed from the corpus. This case fails loudly if it is ever restored without updating the golden set. Shares 'đăng ký' and 'nộp hồ sơ' with five documents, so it is also the hardest abstention case."
+  },
+  {
+    "id": "q-031",
+    "query": "Mức đóng thuế thu nhập cá nhân năm 2026 là bao nhiêu phần trăm?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "thue_dien_tu covers the submission portal, never tax rates. Tests that lexical overlap on 'thuế' does not produce a confident answer."
+  },
+  {
+    "id": "q-032",
+    "query": "Công ty muốn đăng ký nhãn hiệu độc quyền thì nộp hồ sơ ở cơ quan nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Plausible admin question, entirely outside the corpus domain."
+  }
+]

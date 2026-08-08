@@ -57,3 +57,7 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.13"
 strict = true
 files = ["src"]
+# Resolve `cowork_agent` from the source tree, so checking a file outside
+# src/ (e.g. `mypy scripts/evaluate_retrieval.py`) sees real types instead
+# of the un-marked installed distribution.
+mypy_path = "src"

@@ -1,0 +1,211 @@
+"""Typed loader for the labeled retrieval golden set (SPEC-rag §5).
+
+Loaded by the retrieval evaluation harness (`scripts/evaluate_retrieval.py`)
+and the end-to-end email->corpus fixtures. Schema is documented in README.md
+next to this file.
+
+Rules 1-3 are pure schema checks. Rules 4-6 compare the labels against the
+real corpus and therefore need ``corpus_dir``; they are the anti-rot guard
+that makes a re-chunk fail loudly instead of silently scoring 0.0.
+"""
+
+import json
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import Enum, StrEnum
+from pathlib import Path
+from typing import Any, TypeVar
+
+TEnum = TypeVar("TEnum", bound=Enum)
+
+#: Tenant stamp used only while validating labels against the corpus.
+VALIDATION_TENANT_ID = "local"
+
+_CASE_ID_PATTERN = re.compile(r"^q-\d{3}$")
+
+
+class Probe(StrEnum):
+    LEXICAL = "lexical"
+    SEMANTIC = "semantic"
+    MIXED = "mixed"
+    UNANSWERABLE = "unanswerable"
+
+
+#: Probe types every corpus document must carry at least once (SPEC §5.1).
+ANSWERABLE_PROBES: tuple[Probe, ...] = (Probe.LEXICAL, Probe.SEMANTIC, Probe.MIXED)
+
+
+class RetrievalFixtureError(ValueError):
+    """Raised when the fixture JSON violates the documented schema."""
+
+
+@dataclass(frozen=True)
+class RetrievalCase:
+    id: str
+    query: str
+    probe: Probe
+    expected_document_ids: tuple[str, ...]
+    expected_sections: tuple[str, ...]
+    email_body: str | None
+    notes: str | None
+
+
+DEFAULT_FIXTURE_PATH = Path(__file__).with_name("retrieval_golden.json")
+
+
+def load_retrieval_golden(
+    path: Path | None = None, *, corpus_dir: Path | None = None
+) -> tuple[RetrievalCase, ...]:
+    """Parse and validate the golden set.
+
+    Args:
+        path: Fixture JSON to read; defaults to ``retrieval_golden.json``.
+        corpus_dir: Knowledge corpus directory. When given, rules 4-6 also
+            run: every expected document id must be a real corpus document,
+            every expected section must be one ``load_corpus`` actually
+            emits for that document, and every document must carry each
+            answerable probe type. Omit it for pure-schema checks that must
+            not touch the corpus.
+
+    Raises:
+        RetrievalFixtureError: on any schema or corpus-consistency violation.
+    """
+    fixture_path = path or DEFAULT_FIXTURE_PATH
+    try:
+        raw = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RetrievalFixtureError(f"{fixture_path}: invalid JSON: {exc}") from exc
+    if not isinstance(raw, list):
+        raise RetrievalFixtureError(f"{fixture_path}: top level must be a JSON array")
+    cases = [_parse_case(entry, index, fixture_path) for index, entry in enumerate(raw)]
+    ids = [case.id for case in cases]
+    duplicates = {case_id for case_id in ids if ids.count(case_id) > 1}
+    if duplicates:
+        raise RetrievalFixtureError(f"{fixture_path}: duplicate case ids: {sorted(duplicates)}")
+    if corpus_dir is not None:
+        _validate_against_corpus(cases, corpus_dir, fixture_path)
+    return tuple(cases)
+
+
+def _parse_case(entry: Any, index: int, source: Path) -> RetrievalCase:
+    where = f"{source}[{index}]"
+    if not isinstance(entry, dict):
+        raise RetrievalFixtureError(f"{where}: case must be an object")
+    case_id = _require_str(entry, "id", where)
+    if _CASE_ID_PATTERN.match(case_id) is None:
+        raise RetrievalFixtureError(f"{where}: 'id' must match q-NNN; got {case_id!r}")
+    probe = _enum_value(entry.get("probe"), Probe, f"{where}.probe")
+    document_ids = _require_str_tuple(entry, "expected_document_ids", where)
+    if bool(document_ids) is (probe is Probe.UNANSWERABLE):
+        raise RetrievalFixtureError(
+            f"{where}: 'expected_document_ids' must be empty if and only if "
+            f"probe is {Probe.UNANSWERABLE.value}"
+        )
+    return RetrievalCase(
+        id=case_id,
+        query=_require_str(entry, "query", where),
+        probe=probe,
+        expected_document_ids=document_ids,
+        expected_sections=_require_str_tuple(entry, "expected_sections", where),
+        email_body=_optional_str(entry, "email_body", where),
+        notes=_optional_str(entry, "notes", where, required=False),
+    )
+
+
+def _validate_against_corpus(
+    cases: Sequence[RetrievalCase], corpus_dir: Path, source: Path
+) -> None:
+    """Rules 4-5: expected documents and sections must exist in the corpus."""
+    from cowork_agent.integrations.rag.knowledge_base import load_corpus
+
+    sections_by_document = {
+        document.document_id: {
+            chunk.section for chunk in document.chunks if chunk.section is not None
+        }
+        for document in load_corpus(corpus_dir, tenant_id=VALIDATION_TENANT_ID)
+    }
+    for index, case in enumerate(cases):
+        where = f"{source}[{index}]"
+        for document_id in case.expected_document_ids:
+            if document_id not in sections_by_document:
+                raise RetrievalFixtureError(
+                    f"{where}: unknown document id {document_id!r}; "
+                    f"corpus has {sorted(sections_by_document)}"
+                )
+        known = {
+            section
+            for document_id in case.expected_document_ids
+            for section in sections_by_document[document_id]
+        }
+        for section in case.expected_sections:
+            if section not in known:
+                raise RetrievalFixtureError(
+                    f"{where}: section {section!r} is not emitted by load_corpus for "
+                    f"{list(case.expected_document_ids)}; the golden set is stale"
+                )
+    _validate_probe_coverage(cases, tuple(sections_by_document), source)
+
+
+def _validate_probe_coverage(
+    cases: Sequence[RetrievalCase], document_ids: Sequence[str], source: Path
+) -> None:
+    """Rule 6: every document carries each answerable probe, plus abstention."""
+    covered: dict[str, set[Probe]] = {document_id: set() for document_id in document_ids}
+    for case in cases:
+        for document_id in case.expected_document_ids:
+            covered[document_id].add(case.probe)
+    missing = [
+        f"{document_id}:{probe.value}"
+        for document_id in document_ids
+        for probe in ANSWERABLE_PROBES
+        if probe not in covered[document_id]
+    ]
+    if missing:
+        raise RetrievalFixtureError(f"{source}: missing probe coverage: {missing}")
+    if not any(case.probe is Probe.UNANSWERABLE for case in cases):
+        raise RetrievalFixtureError(
+            f"{source}: no {Probe.UNANSWERABLE.value} case; the abstention metric would be empty"
+        )
+
+
+def _require_str(entry: dict[str, Any], field: str, where: str) -> str:
+    value = entry.get(field)
+    if not isinstance(value, str) or not value:
+        raise RetrievalFixtureError(f"{where}: missing non-empty string field '{field}'")
+    return value
+
+
+def _require_str_tuple(entry: dict[str, Any], field: str, where: str) -> tuple[str, ...]:
+    value = entry.get(field)
+    if not isinstance(value, list):
+        raise RetrievalFixtureError(f"{where}: missing array field '{field}'")
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise RetrievalFixtureError(f"{where}: '{field}' entries must be non-empty strings")
+    return tuple(str(item) for item in value)
+
+
+def _optional_str(
+    entry: dict[str, Any], field: str, where: str, *, required: bool = True
+) -> str | None:
+    if field not in entry:
+        if required:
+            raise RetrievalFixtureError(f"{where}: missing field '{field}'")
+        return None
+    value = entry[field]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RetrievalFixtureError(f"{where}: field '{field}' must be a string or null")
+    return value
+
+
+def _enum_value(value: Any, enum_type: type[TEnum], where: str) -> TEnum:
+    try:
+        return enum_type(value)
+    except (ValueError, TypeError):
+        allowed = ", ".join(item.value for item in enum_type)
+        raise RetrievalFixtureError(
+            f"{where}: unknown value {value!r}; allowed: {allowed}"
+        ) from None

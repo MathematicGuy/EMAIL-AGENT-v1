@@ -1,0 +1,126 @@
+{
+  "generated_at": "2026-08-08T20:20:51.305531Z",
+  "embedder": "gemini",
+  "retriever": "hybrid",
+  "reranker": "jina",
+  "corpus": {
+    "document_count": 6,
+    "chunk_count": 36,
+    "corpus_dir": "data/extracted"
+  },
+  "limits": {
+    "top_k": 5,
+    "min_score": 0.2
+  },
+  "case_count": 32,
+  "document_level": {
+    "hit_at_1": 0.9286,
+    "hit_at_3": 1.0,
+    "mrr": 0.9643,
+    "recall_at_5": 1.0
+  },
+  "section_level": {
+    "hit_at_1": 0.9286,
+    "hit_at_3": 0.9643,
+    "mrr": 0.9554,
+    "recall_at_5": 1.0,
+    "excluded_case_count": 0
+  },
+  "by_probe": {
+    "lexical": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0,
+        "recall_at_5": 1.0
+      },
+      "section_level": {
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0,
+        "recall_at_5": 1.0,
+        "excluded_case_count": 0
+      }
+    },
+    "mixed": {
+      "case_count": 16,
+      "document_level": {
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0,
+        "recall_at_5": 1.0
+      },
+      "section_level": {
+        "hit_at_1": 1.0,
+        "hit_at_3": 1.0,
+        "mrr": 1.0,
+        "recall_at_5": 1.0,
+        "excluded_case_count": 0
+      }
+    },
+    "semantic": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.6667,
+        "hit_at_3": 1.0,
+        "mrr": 0.8333,
+        "recall_at_5": 1.0
+      },
+      "section_level": {
+        "hit_at_1": 0.6667,
+        "hit_at_3": 0.8333,
+        "mrr": 0.7917,
+        "recall_at_5": 1.0,
+        "excluded_case_count": 0
+      }
+    }
+  },
+  "by_document": {
+    "cap_lai_cccd": {
+      "case_count": 5,
+      "mrr": 0.9,
+      "section_mrr": 0.85
+    },
+    "dang_ky_ket_hon": {
+      "case_count": 5,
+      "mrr": 1.0,
+      "section_mrr": 1.0
+    },
+    "dang_ky_xe": {
+      "case_count": 5,
+      "mrr": 1.0,
+      "section_mrr": 1.0
+    },
+    "huong_dan_nop_ho_so_dai_hoc_vinuni": {
+      "case_count": 4,
+      "mrr": 1.0,
+      "section_mrr": 1.0
+    },
+    "thu_tuc_dang_ky_bhxh_luatvietnam": {
+      "case_count": 5,
+      "mrr": 1.0,
+      "section_mrr": 1.0
+    },
+    "thue_dien_tu": {
+      "case_count": 4,
+      "mrr": 0.875,
+      "section_mrr": 0.875
+    }
+  },
+  "abstention": {
+    "case_count": 4,
+    "abstention_rate": 0.0,
+    "false_answer_case_ids": [
+      "q-029",
+      "q-030",
+      "q-031",
+      "q-032"
+    ]
+  },
+  "latency_ms": {
+    "p50": 1027,
+    "p95": 2432
+  },
+  "misses": []
+}
