@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Document status | Spec — implementation gated on PRD-v1 and PRD-v2 completion |
-| Version | 1.0 |
-| Date | 2026-08-07 |
+| Version | 1.1 |
+| Date | 2026-08-09 |
 | Milestone position | Final phase after `V2-M6` (master-comparison §7: `DEMO`) |
 | Depends on | PRD-v1 §15 acceptance passed; PRD-v2 §16 acceptance passed |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
@@ -53,6 +53,7 @@ must never scaffold or mock unimplemented milestone work
 | Run | `@Email` invocation: connection picker, max-emails slider, idempotent create, live progress polling, safe error display | FR-01, FR-02 |
 | Tasks | Task list per Run: title, request summary, Action Plan steps, priority (incl. `urgent`), deadline, actionability + route badges, classifier confidence | FR-12, FR-13 |
 | Task detail | Ordered plan steps with per-step Citation chips, supporting documents with links, Gmail deep-link pointer, missing-information warning panel for Partial Plans, "correlated from N emails" indicator (`source_message_ids`) | FR-10, FR-11, FR-12, FR-13 |
+| Knowledge | Corpus readiness indicator, loaded document list with chunk counts, ad-hoc grounded query input with retrieval results (chunks, scores, reranker status), citation chips on grounded answers, empty-state and error handling | V1-M3 (`HybridSemanticMemory`), Email RAG Status Stage 1–2 |
 | Run audit | Route/reason-code summary, retrieval status and result count, validation status, stage latencies (metadata only) | FR-16 |
 
 ### 3.2 Increment B — PRD-v2 showcase (after PRD-v2 §16 passes)
@@ -88,12 +89,15 @@ Cowork Demo
 ├── 1. Connect        (Mailbox Connections)
 ├── 2. Run            (@Email invocation + live progress)
 ├── 3. Tasks          (list → detail)
-├── 4. Memory         (Increment B: Preferences | Episodes | Deletion)
-└── 5. Run audit      (route/telemetry summary, dev-gated extras)
+├── 4. Knowledge      (corpus status, document list, ad-hoc grounded query)
+├── 5. Memory         (Increment B: Preferences | Episodes | Deletion)
+└── 6. Run audit      (route/telemetry summary, dev-gated extras)
 ```
 
-Keep the proven 3-step spine of the current GUI for Increments A screens;
-add Memory as a separate page/section so Increment A stays untouched.
+Keep the proven 3-step spine of the current GUI for Increment A screens;
+add Knowledge as a standalone screen after Tasks so the RAG pipeline is
+directly testable. Add Memory as a separate page/section so Increment A
+stays untouched.
 
 ## 6. UX and quality bar
 
@@ -120,6 +124,11 @@ Apply `frontend-ui-engineering` principles within Streamlit's constraints:
 8. **Bilingual copy**: current GUI is Vietnamese; keep one language per
    screen section and externalize strings so the demo can be switched to
    English for stakeholder showcases.
+9. **RAG result consistency**: retrieval results on the Knowledge screen
+   use the same `.citation-chip` styling as task-level citations; corpus
+   status uses semantic color + text pairs (green + "Ready", amber +
+   "Degraded", red + "Unavailable"). Grounded answers display inline
+   citation chips that match the chunk provenance returned by retrieval.
 
 ## 7. Backend API contract assumptions
 
@@ -131,6 +140,9 @@ The demo consumes endpoints; it defines none. Expected inventory:
 | Create/Run-status/Run-result | ✔ `/v1/mail-todo/runs*` | Compatibility mapper preserves these through V1-M4 |
 | Task list/detail from persisted Tasks | ✗ | V1-M4 (or compatibility result shape suffices for Increment A) |
 | Route/telemetry summary | partial (dev `processedEmails`) | V1-M4 basic telemetry exposure |
+| Knowledge readiness (`GET /v1/mail-todo/knowledge/ready`) | ✗ (wired internally, not exposed as REST) | V1-M3 prerequisite — expose corpus readiness + chunk/doc counts |
+| Document list (`GET /v1/mail-todo/knowledge/documents`) | ✗ | V1-M3 prerequisite — list loaded documents with title, section count, source URL |
+| Grounded query (`POST /v1/mail-todo/knowledge/chat`) | ✗ | V1-M3 prerequisite — ad-hoc query returning grounded answer + citation chips + retrieval chunks with scores |
 | Profile read/write/delete | ✗ | V2-M2 |
 | Approve/complete/reject transitions | ✗ | V2-M4 |
 | Episode view + deletion | ✗ | V2-M3 / V2-M6 |
@@ -154,13 +166,22 @@ The demo spec is accepted when:
 6. Backend-down, Run-failed, and empty-result states each render a clear,
    actionable message.
 7. No raw email body appears anywhere in the UI or browser storage.
+8. The Knowledge screen shows corpus readiness (ready / degraded / unavailable)
+   and a document list with title, section count, and source URL for each
+   loaded document.
+9. An ad-hoc grounded query returns an answer with inline citation chips
+   linking to source chunks; the retrieval panel shows chunk title, section,
+   relevance score, and reranker status for each result.
+10. An empty corpus, retrieval failure, or no-match query renders a clear
+    actionable message (not a stack trace) with the appropriate semantic
+    color treatment.
 
 **Increment B**
-8. Preferences can be created, edited, and deleted; a subsequent Run visibly
-   reflects them (or the backend indicates application).
-9. Approve/complete/reject transitions update the badge immediately and the
-   eligibility indicator matches the PRD-v2 rule table.
-10. Episodes show provenance fields; deleted memory no longer appears after
+11. Preferences can be created, edited, and deleted; a subsequent Run visibly
+    reflects them (or the backend indicates application).
+12. Approve/complete/reject transitions update the badge immediately and the
+    eligibility indicator matches the PRD-v2 rule table.
+13. Episodes show provenance fields; deleted memory no longer appears after
     refresh.
 
 ## 9. Live verification plan
@@ -175,10 +196,18 @@ Performed with `frontend-ui-engineering` + browser verification
    asserting Citations appear only on the second.
 4. Force a failure path (backend stopped / invalid connection) and verify
    the error state.
-5. Check console/network for errors and for absence of raw email payloads.
-6. Increment B: approve an episode, re-run, verify retrieval-eligible
+5. Navigate to the Knowledge screen; confirm corpus readiness shows "Ready";
+   verify the document list renders with title, section count, and source URL.
+   Run an ad-hoc grounded query matching a known corpus document (e.g. a
+   question about administrative procedures) and verify: (a) the answer
+   includes inline citation chips, (b) the retrieval panel shows chunks
+   with scores and reranker status. Run a query with no matching content
+   and verify the empty-state message. Force a corpus-unavailable state
+   (e.g. empty `data/extracted/` directory) and verify the degraded indicator.
+6. Check console/network for errors and for absence of raw email payloads.
+7. Increment B: approve an episode, re-run, verify retrieval-eligible
    history influences/labels the new plan per backend output.
-7. Record screenshots + a short checklist result in the PR/commit message.
+8. Record screenshots + a short checklist result in the PR/commit message.
 
 ## 10. Skills workflow for implementation
 
@@ -195,6 +224,8 @@ Performed with `frontend-ui-engineering` + browser verification
 
 - Production Cowork surface, auth/login UI, multi-user management.
 - Attachment viewing, email composition/reply, scheduling UI.
-- Corpus administration, RAG ingestion tooling.
+- Corpus administration, RAG ingestion tooling, chunk editing, or document
+  upload (the Knowledge screen is read-only inspection + ad-hoc query;
+  corpus management stays out of scope).
 - Mobile app or native packaging; responsive-browser support is sufficient
   (verify 768px and 1440px widths).

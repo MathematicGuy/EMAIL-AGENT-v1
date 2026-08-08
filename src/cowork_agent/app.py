@@ -23,6 +23,11 @@ from cowork_agent.config import (
     redis_url,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
+from cowork_agent.domain.target_contracts import (
+    RetrievalFilters,
+    RetrievalLimits,
+    SemanticRetrievalRequest,
+)
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -71,7 +76,7 @@ from cowork_agent.integrations.llm.providers.groq import (
 from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
-from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
@@ -95,6 +100,11 @@ class CreateRunRequest(BaseModel):
     mailbox_connection_id: str = Field(alias="mailboxConnectionId")
     query: str = "is:unread in:inbox"
     max_emails: int = Field(default=200, alias="maxEmails", ge=1, le=500)
+
+
+class KnowledgeChatRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    top_k: int = Field(default=5, ge=1, le=20)
 
 
 def create_app() -> FastAPI:
@@ -203,6 +213,13 @@ def create_app() -> FastAPI:
                     semantic_memory = NullSemanticMemory()
                 else:
                     raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
+                app.state.semantic_memory = semantic_memory
+                try:
+                    app.state.knowledge_documents = load_corpus(
+                        _RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID
+                    )
+                except Exception:
+                    app.state.knowledge_documents = ()
                 app.state.digest_worker = DigestWorker(
                     run_repository,
                     result_repository,
@@ -223,6 +240,8 @@ def create_app() -> FastAPI:
                 app.state.llm_provider_label = provider_label
             except ValueError as exc:
                 app.state.digest_worker = None
+                app.state.semantic_memory = NullSemanticMemory()
+                app.state.knowledge_documents = ()
                 app.state.llm_configuration_error = str(exc)
                 app.state.llm_provider_label = provider_label
         except ValueError as exc:
@@ -452,6 +471,73 @@ def create_app() -> FastAPI:
         task_repository = cast(TaskRepository, request.app.state.task_repository)
         records = await task_repository.list_for_run(run_id)
         return {"tasks": [record.task.to_dict() for record in records]}
+
+    # ── Knowledge endpoints (V1-M3): corpus inspection + ad-hoc retrieval ──
+
+    @app.get("/v1/mail-todo/knowledge/ready")
+    async def knowledge_ready(request: Request) -> dict[str, Any]:
+        documents: tuple[KnowledgeDocument, ...] = cast(
+            tuple[KnowledgeDocument, ...],
+            getattr(request.app.state, "knowledge_documents", ()),
+        )
+        memory = cast(
+            SemanticMemoryPort,
+            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
+        )
+        chunk_count = sum(len(doc.chunks) for doc in documents)
+        is_null = type(memory).__name__ == "NullSemanticMemory"
+        if not documents:
+            status = "unavailable"
+        elif is_null:
+            status = "degraded"
+        else:
+            status = "ready"
+        return {
+            "status": status,
+            "document_count": len(documents),
+            "chunk_count": chunk_count,
+        }
+
+    @app.get("/v1/mail-todo/knowledge/documents")
+    async def knowledge_documents(request: Request) -> dict[str, Any]:
+        documents: tuple[KnowledgeDocument, ...] = cast(
+            tuple[KnowledgeDocument, ...],
+            getattr(request.app.state, "knowledge_documents", ()),
+        )
+        items = [
+            {
+                "document_id": doc.document_id,
+                "title": doc.title,
+                "section_count": len(doc.chunks),
+                "source_url": doc.source_url,
+            }
+            for doc in documents
+        ]
+        return {"documents": items}
+
+    @app.post("/v1/mail-todo/knowledge/chat")
+    async def knowledge_chat(
+        body: KnowledgeChatRequest, request: Request
+    ) -> dict[str, Any]:
+        memory = cast(
+            SemanticMemoryPort,
+            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
+        )
+        retrieval_request = SemanticRetrievalRequest(
+            run_id="knowledge-adhoc",
+            tenant_id=LOCAL_TENANT_ID,
+            user_id="demo-gui",
+            query=body.query,
+            knowledge_gaps=(),
+            filters=RetrievalFilters(
+                tenant_scope=LOCAL_TENANT_ID, document_status=()
+            ),
+            limits=RetrievalLimits(
+                top_k=body.top_k, min_score=-1.0, timeout_ms=8_000
+            ),
+        )
+        response = await memory.retrieve(retrieval_request)
+        return response.to_dict()
 
     return app
 

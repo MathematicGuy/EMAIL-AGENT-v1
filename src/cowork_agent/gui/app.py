@@ -1,7 +1,7 @@
 """Cowork Demo — Streamlit showcase frontend (SPEC-Demo-Frontend Increment A).
 
 Five-screen information architecture on the proven 3-step spine:
-Connect → Run (@Email) → Tasks (+ Task detail) → Run audit.
+Connect → Run (@Email) → Tasks (+ Task detail) → Knowledge (RAG) → Run audit.
 
 The module is import-safe: all Streamlit side effects live in ``main()``,
 which only runs under ``streamlit run`` (``__name__ == "__main__"``).
@@ -120,6 +120,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "sort_default": "Thứ tự hệ thống",
         "filter_priority_label": "Lọc theo mức ưu tiên:",
         "filter_all": "Tất cả",
+        "knowledge_title": "Kho Tri Thức (RAG)",
+        "knowledge_ready": "Sẵn sàng",
+        "knowledge_degraded": "Suy giảm (chỉ BM25, không có embedding)",
+        "knowledge_unavailable": "Không khả dụng",
+        "knowledge_docs_heading": "Tài liệu đã nạp",
+        "knowledge_doc_title": "Tên",
+        "knowledge_doc_sections": "Số phần",
+        "knowledge_doc_source": "Nguồn",
+        "knowledge_empty_corpus": "Chưa có tài liệu nào được nạp vào kho tri thức.",
+        "knowledge_query_placeholder": "Nhập câu hỏi để tra cứu trong kho tri thức…",
+        "knowledge_query_button": "🔍 Tra cứu",
+        "knowledge_results_heading": "Kết quả tra cứu",
+        "knowledge_no_results": "Không tìm thấy kết quả phù hợp.",
+        "knowledge_fetch_error": "Không thể tra cứu tri thức (mã {code}).",
+        "knowledge_score_label": "Điểm",
+        "knowledge_reranker_label": "Reranker",
+        "knowledge_reranker_on": "Có",
+        "knowledge_reranker_off": "Không",
+        "knowledge_latency": "Độ trễ: {ms} ms",
+        "knowledge_status_label": "Trạng thái kho tri thức",
+        "knowledge_doc_count": "{count} tài liệu",
+        "knowledge_chunk_count": "{count} chunks",
     },
     "en": {
         "app_title": "📧 Module Mail",
@@ -212,6 +234,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "sort_default": "Default order",
         "filter_priority_label": "Filter by priority:",
         "filter_all": "All",
+        "knowledge_title": "Knowledge Base (RAG)",
+        "knowledge_ready": "Ready",
+        "knowledge_degraded": "Degraded (BM25 only, no embeddings)",
+        "knowledge_unavailable": "Unavailable",
+        "knowledge_docs_heading": "Loaded documents",
+        "knowledge_doc_title": "Title",
+        "knowledge_doc_sections": "Sections",
+        "knowledge_doc_source": "Source",
+        "knowledge_empty_corpus": "No documents loaded into the knowledge base.",
+        "knowledge_query_placeholder": "Enter a query to search the knowledge base…",
+        "knowledge_query_button": "🔍 Search",
+        "knowledge_results_heading": "Retrieval results",
+        "knowledge_no_results": "No matching results found.",
+        "knowledge_fetch_error": "Could not query the knowledge base (code {code}).",
+        "knowledge_score_label": "Score",
+        "knowledge_reranker_label": "Reranker",
+        "knowledge_reranker_on": "On",
+        "knowledge_reranker_off": "Off",
+        "knowledge_latency": "Latency: {ms} ms",
+        "knowledge_status_label": "Corpus status",
+        "knowledge_doc_count": "{count} documents",
+        "knowledge_chunk_count": "{count} chunks",
     },
 }
 
@@ -653,6 +697,8 @@ def main() -> None:
     st.markdown("---")
     _screen_tasks(base_url, lang)
     st.markdown("---")
+    _screen_knowledge(base_url, lang)
+    st.markdown("---")
     _screen_audit(base_url, lang)
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
@@ -939,6 +985,43 @@ def _fetch_run_audit(base_url: str, run_id: str) -> tuple[int, Any]:
         return api_request(base_url, "GET", f"/v1/mail-todo/runs/{run_id}")
 
 
+def _fetch_knowledge_status(base_url: str) -> tuple[int, Any]:
+    try:
+        import streamlit as st
+
+        @st.cache_data(ttl=10.0, show_spinner=False)
+        def _cached(url: str) -> tuple[int, Any]:
+            return api_request(url, "GET", "/v1/mail-todo/knowledge/ready")
+
+        return _cached(base_url)
+    except Exception:
+        return api_request(base_url, "GET", "/v1/mail-todo/knowledge/ready")
+
+
+def _fetch_knowledge_documents(base_url: str) -> tuple[int, Any]:
+    try:
+        import streamlit as st
+
+        @st.cache_data(ttl=300.0, show_spinner=False)
+        def _cached(url: str) -> tuple[int, Any]:
+            return api_request(url, "GET", "/v1/mail-todo/knowledge/documents")
+
+        return _cached(base_url)
+    except Exception:
+        return api_request(base_url, "GET", "/v1/mail-todo/knowledge/documents")
+
+
+def _post_knowledge_chat(
+    base_url: str, query: str, top_k: int = 5
+) -> tuple[int, Any]:
+    return api_request(
+        base_url,
+        "POST",
+        "/v1/mail-todo/knowledge/chat",
+        json={"query": query, "top_k": top_k},
+    )
+
+
 def _task_steps(task: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(step) for step in _as_list(task.get("action_plan"))]
 
@@ -1094,6 +1177,138 @@ def _screen_task_detail(base_url: str, lang: str, tasks: list[dict[str, Any]]) -
     gmail_url = safe_url(task.get("gmail_url"))
     if gmail_url:
         st.link_button(tr(lang, "open_gmail"), gmail_url)
+
+
+def _screen_knowledge(base_url: str, lang: str) -> None:
+    """Screen 4: Knowledge Base (RAG) inspection and ad-hoc retrieval."""
+    import streamlit as st
+
+    def _render_knowledge_body() -> None:
+        st.markdown(
+            f"### 📚 {tr(lang, 'knowledge_title')}", unsafe_allow_html=True
+        )
+
+        # ── Corpus status ──
+        status_code, status_res = _fetch_knowledge_status(base_url)
+        if status_code != 200 or not isinstance(status_res, dict):
+            st.error(tr(lang, "knowledge_fetch_error", code=status_code))
+            return
+
+        corpus_status = str(status_res.get("status", "unavailable"))
+        doc_count = int(status_res.get("document_count", 0))
+        chunk_count = int(status_res.get("chunk_count", 0))
+
+        status_labels = {
+            "ready": tr(lang, "knowledge_ready"),
+            "degraded": tr(lang, "knowledge_degraded"),
+            "unavailable": tr(lang, "knowledge_unavailable"),
+        }
+        status_label = status_labels.get(corpus_status, corpus_status)
+
+        col_status, col_docs, col_chunks = st.columns(3)
+        with col_status:
+            st.metric(tr(lang, "knowledge_status_label"), status_label)
+        with col_docs:
+            st.metric(tr(lang, "knowledge_doc_count", count=doc_count), doc_count)
+        with col_chunks:
+            st.metric(tr(lang, "knowledge_chunk_count", count=chunk_count), chunk_count)
+
+        if corpus_status == "unavailable":
+            st.warning(tr(lang, "knowledge_empty_corpus"))
+            return
+
+        # ── Document list ──
+        st.markdown(f"**{tr(lang, 'knowledge_docs_heading')}**")
+        docs_code, docs_res = _fetch_knowledge_documents(base_url)
+        if docs_code == 200 and isinstance(docs_res, dict):
+            documents = _as_list(docs_res.get("documents"))
+            if documents:
+                rows = [
+                    {
+                        tr(lang, "knowledge_doc_title"): doc.get("title", "—"),
+                        tr(lang, "knowledge_doc_sections"): doc.get("section_count", 0),
+                        tr(lang, "knowledge_doc_source"): doc.get("source_url", "—"),
+                    }
+                    for doc in documents
+                ]
+                st.table(rows)
+            else:
+                st.info(tr(lang, "knowledge_empty_corpus"))
+        elif docs_code != 200:
+            st.error(tr(lang, "knowledge_fetch_error", code=docs_code))
+
+        # ── Ad-hoc query ──
+        st.markdown("---")
+        query = st.text_input(
+            tr(lang, "knowledge_query_button"),
+            placeholder=tr(lang, "knowledge_query_placeholder"),
+            key="knowledge_query_input",
+        )
+        top_k = st.slider("Top K", min_value=1, max_value=20, value=5, key="knowledge_top_k")
+
+        if not query or not query.strip():
+            return
+
+        search_clicked = st.button(
+            tr(lang, "knowledge_query_button"), key="knowledge_search_btn"
+        )
+        if not search_clicked:
+            return
+
+        with st.spinner(tr(lang, "loading")):
+            chat_code, chat_res = _post_knowledge_chat(
+                base_url, query.strip(), top_k
+            )
+
+        if chat_code != 200 or not isinstance(chat_res, dict):
+            st.error(tr(lang, "knowledge_fetch_error", code=chat_code))
+            return
+
+        chunks = _as_list(chat_res.get("chunks"))
+        retrieval_status = str(chat_res.get("retrieval_status", ""))
+        latency_ms = chat_res.get("latency_ms", 0)
+
+        st.markdown(f"**{tr(lang, 'knowledge_results_heading')}**")
+        st.caption(tr(lang, "knowledge_latency", ms=latency_ms))
+
+        if not chunks or retrieval_status == "no_results":
+            st.info(tr(lang, "knowledge_no_results"))
+            return
+
+        for i, chunk in enumerate(chunks, 1):
+            title = html.escape(str(chunk.get("document_title", "—")))
+            section = html.escape(str(chunk.get("section") or "—"))
+            text = html.escape(str(chunk.get("text", "")))
+            score = chunk.get("relevance_score", 0.0)
+            rerank_score = chunk.get("rerank_score")
+            source_url = chunk.get("source_url", "")
+
+            has_reranker = rerank_score is not None
+            reranker_text = (
+                f"{tr(lang, 'knowledge_reranker_label')}: "
+                f"{tr(lang, 'knowledge_reranker_on')} ({rerank_score:.3f})"
+                if has_reranker
+                else f"{tr(lang, 'knowledge_reranker_label')}: {tr(lang, 'knowledge_reranker_off')}"
+            )
+
+            with st.expander(f"{i}. {title} — §{section}"):
+                chip_html = citation_chip_html(title, source_url)
+                st.markdown(chip_html, unsafe_allow_html=True)
+                st.markdown(
+                    f"**{tr(lang, 'knowledge_score_label')}:** `{score:.4f}` · "
+                    f"{reranker_text}"
+                )
+                st.markdown(text)
+
+    if hasattr(st, "fragment"):
+
+        @st.fragment
+        def _knowledge_fragment() -> None:
+            _render_knowledge_body()
+
+        _knowledge_fragment()
+    else:
+        _render_knowledge_body()
 
 
 def _screen_audit(base_url: str, lang: str) -> None:
