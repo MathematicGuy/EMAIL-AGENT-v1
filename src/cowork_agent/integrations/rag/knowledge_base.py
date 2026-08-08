@@ -14,7 +14,7 @@ from pathlib import Path
 _MAX_CHUNK_CHARS = 1200
 
 _H1_PATTERN = re.compile(r"^#\s+(.+)$", re.MULTILINE)
-_H2_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+_SECTION_PATTERN = re.compile(r"^#{1,2}\s+(.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +46,7 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument,
     Documents are read sorted by filename for determinism; ``document_id``
     is the file stem, ``title`` the first H1 heading (fallback: stem), and
     ``source_url`` the POSIX path relative to the repository root. Chunks
-    follow H2 sections (fallback: the whole document), split further on
+    follow H1/H2 sections (fallback: the whole document), split further on
     paragraph boundaries near ``_MAX_CHUNK_CHARS``.
 
     Raises:
@@ -97,8 +97,8 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument,
 
 
 def _split_sections(raw_text: str) -> list[tuple[str | None, str]]:
-    """Split a document into (section title, body) pairs by H2 headings."""
-    matches = list(_H2_PATTERN.finditer(raw_text))
+    """Split a document into (section title, body) pairs by H1/H2 headings."""
+    matches = list(_SECTION_PATTERN.finditer(raw_text))
     if not matches:
         body = raw_text.strip()
         return [(None, body)] if body else []
