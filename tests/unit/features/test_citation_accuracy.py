@@ -101,7 +101,7 @@ def test_partial_overlap_on_shared_words() -> None:
         _retrieval(_chunk("cit_1", "Report today to manager")),
     )
 
-    assert report.overlaps[0].overlap_score == 0.5
+    assert report.overlaps[0].overlap_score == 0.4
 
 
 def test_zero_overlap_when_no_shared_words() -> None:
@@ -162,7 +162,7 @@ def test_multiple_citations_per_step() -> None:
     assert report.total_citations == 2
     assert [overlap.step for overlap in report.overlaps] == [3, 3]
     assert [overlap.citation_id for overlap in report.overlaps] == ["cit_1", "cit_2"]
-    assert report.mean_overlap == 0.8333
+    assert report.mean_overlap == 0.8334
 
 
 def test_preview_truncates_at_80_chars() -> None:

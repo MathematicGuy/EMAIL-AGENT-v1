@@ -82,7 +82,7 @@ flowchart TD
 - ✅ **Pipeline Integration Wiring (`test_workflow.py`)**: Tests that retrieved guidebook chunks are correctly passed to the AI plan writer (ensures plumbing works).
 - ✅ **Graceful Error Degradation (`test_workflow.py`)**: Tests that if search fails, the system warns the user instead of breaking or crashing (ensures high reliability).
 - ✅ **Fake Citation Stripping (`test_workflow.py`)**: Tests that citations to non-existent document chunks are automatically removed before saving (prevents broken links).
-- ❌ **Citation Accuracy Verification**: Missing tests verifying that plan steps with citations actually discuss the real content in the cited chunk.
+- ✅ **Citation Accuracy Verification (`test_citation_accuracy.py`)**: Inspects plan-step word overlap with each cited retrieved chunk and reports missing chunk IDs.
 - ❌ **Plan Faithfulness / Hallucination Check**: Missing automated checks (e.g. RAGAS) to ensure generated action plans don't fabricate steps absent from the guidebooks.
 - ❌ **Context Relevance Scoring**: Missing evaluation measuring if retrieved chunks are actually relevant to the email's request before generating the plan.
 
