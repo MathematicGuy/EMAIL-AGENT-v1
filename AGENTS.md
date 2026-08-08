@@ -21,6 +21,7 @@ src/cowork_agent/
 ├── gui/app.py                   # Streamlit test GUI
 ├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
 ├── integrations/llm/            # Gemini/Groq providers, fakes
+├── integrations/rag/            # local hybrid semantic retrieval (V1-M3)
 ├── orchestration/local.py       # in-process local orchestration
 └── persistence/                 # SQLite mailbox-connection repo; migrations/
 ```
@@ -66,6 +67,7 @@ to the OS temp directory so continuity is preserved.
    they exist only as transient in-run state.
 2. Gmail access stays read-only: only the `gmail.readonly` scope.
 3. Attachment processing is out of scope (ADR-003): record presence only.
-4. Target-state components (PostgreSQL, durable queue/DLQ, RAG, four-type
-   memory system) are not implemented yet; do not scaffold them unless the
-   request explicitly cites a `master-comparison.md` milestone.
+4. V1-M3 local retrieval is implemented by `HybridSemanticMemory` (in-repo
+   dense + BM25 + RRF + optional Jina reranking). Production Qdrant and the
+   PRD-v2 four-type memory system remain milestone-gated; do not scaffold
+   them unless the request explicitly cites `docs/master-comparison.md`.

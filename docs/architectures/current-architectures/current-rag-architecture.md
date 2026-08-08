@@ -1,5 +1,12 @@
 # Current RAG Architecture
 
+> **Historical snapshot notice (2026-08-09):** This document intentionally preserves findings for
+> commit `cf2fd49801d5932b26de82af9d104d730cf58271`; its statements that RAG/BM25/reranking are absent
+> are not the current worktree status. See
+> [`../../references/EMAIL-RAG-ARCHITECHTURE.md`](../../references/EMAIL-RAG-ARCHITECHTURE.md) for the
+> current local V1-M3 hybrid-retrieval architecture and [`../../master-comparison.md`](../../master-comparison.md)
+> for implementation status versus target architecture.
+
 ## Extraction status
 
 This document describes commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07.

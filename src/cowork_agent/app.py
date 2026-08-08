@@ -69,8 +69,9 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqRouteClassifier,
 )
 from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
+from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
-from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
@@ -517,7 +518,11 @@ async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort
     """
     try:
         documents = load_corpus(_RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
-        memory = InRepoSemanticMemory(documents, GeminiEmbeddingAdapter(settings))
+        memory = HybridSemanticMemory(
+            documents,
+            GeminiEmbeddingAdapter(settings),
+            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
+        )
         await memory.build_index()
         return memory
     except Exception as exc:

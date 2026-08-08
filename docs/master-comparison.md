@@ -1113,6 +1113,15 @@ Maps to PRD-v1 §16 Milestone 3; satisfies FR-08..FR-11, §12.3, and §12.4.
 - `DIRECT_PLAN` performs no retrieval;
 - raw email is absent from generated output.
 
+#### V1-M3 implementation addendum — T3.7 (2026-08-09)
+
+The local retrieval adapter is now `HybridSemanticMemory`: tenant ACL is checked before query
+embedding or lexical statistics/scoring; the allowed corpus is searched by the existing in-repo
+dense numpy adapter and BM25, fused with deterministic RRF (`k=60`), optionally reranked by Jina,
+then reduced to final top-k. `JINA_API_KEY` is optional; a missing key or any Jina transport/schema
+failure preserves the RRF candidate order. This closes the local hybrid-retrieval slice only.
+Production Qdrant, ingestion APIs, and the PRD-v2 four-type memory system remain target work.
+
 ### V1-M4 — Persistence and product presentation
 
 Maps to PRD-v1 §16 Milestone 4; satisfies FR-12, FR-13, FR-15, FR-16, and §12.5.

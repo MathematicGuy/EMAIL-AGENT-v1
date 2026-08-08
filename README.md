@@ -1,8 +1,8 @@
 # Cowork Agent (Email-to-Action-Plan)
 
-Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc, tuân thủ kiến trúc **Cowork Agent Specification** với Agent Core, Hệ thống Bộ nhớ 4 thành phần (Four-Type Memory System) và Module RAG.
+Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc. Runtime hiện tại có classifier/router riêng và Company Knowledge RAG truy hồi-only cục bộ; hệ thống bộ nhớ bốn loại vẫn thuộc kiến trúc mục tiêu.
 
-> **Trạng thái tài liệu — đọc trước khi dùng:** README này mô tả cả **hiện trạng** (mục 4, 5) và **kiến trúc mục tiêu** (mục 1, 2). Bản MVP hiện tại chỉ triển khai pipeline trích xuất một lượt với SQLite + bộ nhớ in-process; các module `memory/`, `rag/`, `runtime/`, `ops/`, queue/DLQ và PostgreSQL **chưa tồn tại trong mã nguồn**. Phân tích đầy đủ hiện trạng ↔ mục tiêu và các milestone di cư: [`docs/master-comparison.md`](docs/master-comparison.md).
+> **Trạng thái tài liệu — đọc trước khi dùng:** README này phân biệt **runtime hiện tại** và **kiến trúc mục tiêu**. Local V1-M3 đã có classifier/router, `SemanticMemoryPort` và `HybridSemanticMemory`; dense search in-memory, BM25 và RRF chạy trên corpus `data/extracted/*.md`, còn Jina reranking là tùy chọn. Qdrant và hệ thống bộ nhớ bốn loại chưa phải runtime production hiện tại. Phân tích đầy đủ hiện trạng ↔ mục tiêu và các milestone di cư: [`docs/master-comparison.md`](docs/master-comparison.md).
 
 ---
 
@@ -23,7 +23,7 @@ Trigger (Scheduled / Manual)
                             └── Cleanup Temporary Email State & Short-Term Memory
 ```
 
-**Đã triển khai trong MVP:** Gmail Fetch & Normalization → một lượt gọi LLM (phân loại + trích xuất kế hoạch gộp trong `features/email_action_plan/workflow.py`) → lọc/ưu tiên/sắp xếp deterministic → lưu kết quả in-memory. Chưa có classifier/router riêng, RAG, memory system hay queue. Chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md).
+**Đã triển khai trong local V1-M3:** Gmail Fetch & Normalization → classifier theo batch → correlation và router deterministic (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`) → truy hồi hybrid chỉ cho nhánh `RETRIEVE_RAG` → một lần gọi final generator cho mỗi task candidate không phải `NO_ACTION` → validation và lưu task. RAG chỉ cung cấp ngữ cảnh/citation; Agent Core vẫn sở hữu Action Plan. Qdrant và long-term/episodic memory chưa được triển khai. Chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md).
 
 ---
 
@@ -47,7 +47,7 @@ email-agent-v1/
 │       ├── domain/                     # Pure business models
 │       │   └── models.py
 │       ├── features/                   # Core business features
-│       │   └── email_action_plan/      # Email-to-Action-Plan workflow (combined extraction)
+│       │   └── email_action_plan/      # Classifier, routing, retrieval & plan workflow
 │       │       ├── workflow.py         # Workflow orchestrator
 │       │       ├── policies.py         # Route & planning policies
 │       │       ├── ports.py            # Provider/repository protocols
@@ -56,10 +56,10 @@ email-agent-v1/
 │       │   └── app.py
 │       ├── integrations/               # External service boundaries
 │       │   ├── gmail/                  # OAuth, Gmail adapter, deterministic fakes
-│       │   └── llm/                    # Gemini & Groq providers, fakes
-│       ├── orchestration/              # In-process local orchestration
-│       │   └── local.py
-│       └── persistence/                # SQLite mailbox-connection repo
+│       │   ├── llm/                    # Gemini/Groq/Faucet providers, fakes
+│       │   └── rag/                    # Dense + BM25 + RRF + optional Jina reranker
+│       ├── orchestration/              # Local dispatch and optional durable worker
+│       └── persistence/                # SQLite local repos; optional PostgreSQL adapters
 │           ├── repositories/
 │           └── migrations/             # SQL migrations (no runner wired yet)
 │
@@ -76,7 +76,7 @@ email-agent-v1/
     └── references/                     # Specs & experience registry
 ```
 
-**Chưa tồn tại (thuộc kiến trúc mục tiêu):** `memory/`, `rag/`, `runtime/`, `ops/`, `orchestration/queue.py|worker.py|scheduler.py`, `tests/contracts/`, `configs/`, `Makefile`, `CLAUDE.md`, `scripts/run_email.py`. Chỉ scaffold các module này khi yêu cầu trích dẫn rõ một milestone trong [`docs/master-comparison.md`](docs/master-comparison.md).
+**Chưa triển khai trong runtime production:** Qdrant, ingestion/upload API, scheduler và hệ thống memory bốn loại (long-term, episodic, semantic, short-term qua một Memory Gateway). Local semantic retrieval nằm trong `integrations/rag/`; không suy diễn nó thành production RAG service. Chỉ scaffold capability mục tiêu khi yêu cầu trích dẫn rõ milestone trong [`docs/master-comparison.md`](docs/master-comparison.md).
 
 ---
 
@@ -112,13 +112,16 @@ python -m pip install -e ".[dev,gui]"
 
 ### 4.2 Cấu hình môi trường (`.env`)
 
-Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng (`.env.example` hiện chỉ chứa các biến mà bản MVP **thực sự đọc** — cấu hình PostgreSQL/queue thuộc kiến trúc mục tiêu chưa triển khai):
+Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự.
 
 ```env
 # Key xoay vòng Gemini (hoặc Groq)
 GEMINI_API_KEY_1="your_key_1"
 GEMINI_API_KEY_2="your_key_2"
 GEMINI_API_KEY_3="your_key_3"
+
+# Optional hybrid-RAG reranking; blank means pass-through after RRF
+JINA_API_KEY=""
 
 # Gmail OAuth Credentials
 GMAIL_CLIENT_ID="your_gmail_client_id"

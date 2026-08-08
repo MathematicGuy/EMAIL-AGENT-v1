@@ -1,6 +1,6 @@
 # Kiến trúc hệ thống Module Mail
 
-> Trạng thái tài liệu: mô tả kiến trúc **đang được hiện thực trong mã nguồn** tại ngày 2026-08-06.  
+> Trạng thái tài liệu: mô tả kiến trúc **đang được hiện thực trong mã nguồn** tại ngày 2026-08-09.
 > Các nội dung thuộc kiến trúc đích nhưng chưa được nối vào runtime hiện tại được ghi rõ là “định hướng production”.
 
 ## 1. Mục tiêu và phạm vi
@@ -14,7 +14,7 @@ Hệ thống hiện thực các khả năng chính:
 - Đọc email chưa đọc, lấy ngữ cảnh thread và file đính kèm.
 - Dùng Gemini hoặc Groq để phân loại email và trích xuất action item có cấu trúc.
 - Chuẩn hóa ưu tiên, deadline, bằng chứng và chống trùng lặp trong phạm vi dữ liệu kết quả hiện có.
-- Tùy chọn truy hồi quy trình nội bộ từ Qdrant và sinh action plan có citation.
+- Truy hồi quy trình nội bộ bằng hybrid search cục bộ (dense in-memory + BM25 + RRF), với Jina reranking tùy chọn, rồi cung cấp context/citation cho final generator.
 - Cung cấp REST API và giao diện kiểm thử Streamlit.
 
 Ngoài phạm vi hiện tại:
@@ -38,13 +38,13 @@ flowchart LR
     API --> ExtractLLM[Gemini hoặc Groq]
     API --> SQLite[(SQLite mailbox connections)]
 
-    API --> RAG[Company Knowledge RAG]
-    RAG --> Qdrant[(Qdrant)]
-    RAG --> GenLLM[Gemini / OpenRouter / OpenAI]
-    RAG --> Embed[Gemini hoặc Jina embeddings]
-    RAG -. tùy chọn .-> Rerank[Jina reranker]
-    RAG --> Files[(Upload files + registry JSON)]
-    RAG -. tùy chọn .-> Langfuse[Langfuse]
+    API --> RAG[HybridSemanticMemory cục bộ]
+    RAG --> Dense[(Dense numpy in-memory)]
+    RAG --> BM25[BM25 in-memory]
+    RAG --> Fusion[RRF]
+    Fusion -. JINA_API_KEY tùy chọn .-> Rerank[Jina reranker]
+    RAG --> Files[(data/extracted Markdown)]
+    RAG -. mục tiêu production .-> Qdrant[(Qdrant)]
 ```
 
 Điểm vào duy nhất là `cowork_agent.app:create_app` (CLI entry point `mail-todo-api` gọi `cowork_agent.app:main`). FastAPI app này hợp nhất mailbox digest và knowledge chat dưới cùng namespace `/v1/mail-todo`.
@@ -72,12 +72,14 @@ flowchart TB
         UseCases --> MailAdapters
         UseCases --> Attachment
         UseCases --> ActionLLM
-        UseCases -. RAG_ENABLED .-> EmbeddedRAG
+        UseCases -. RETRIEVE_RAG .-> EmbeddedRAG
     end
 
     MailAdapters --> OAuthDB[(SQLite)]
-    EmbeddedRAG --> Qdrant[(Qdrant)]
-    EmbeddedRAG --> Registry[(Registry JSON + source files)]
+    EmbeddedRAG --> Dense[(Dense numpy in-memory)]
+    EmbeddedRAG --> Lexical[(BM25 + RRF in-memory)]
+    EmbeddedRAG --> Corpus[(data/extracted Markdown)]
+    EmbeddedRAG -. tùy chọn .-> Jina[Jina reranker]
 ```
 
 Hệ quả vận hành quan trọng:
@@ -86,7 +88,8 @@ Hệ quả vận hành quan trọng:
 - Run, child run, kết quả, queue và outbox mất khi process restart.
 - Không có worker process độc lập; không có retry bền vững sau crash.
 - Chỉ mailbox connection được lưu bền vững trong SQLite.
-- Khi bật RAG, metadata tài liệu và file gốc được lưu trên filesystem; vector/chunk được lưu trong Qdrant.
+- Với Gemini, corpus đi kèm repository được load và dense index được dựng in-memory lúc startup. Qdrant chỉ là target production, không được nối vào runtime hiện tại.
+- Thiếu `JINA_API_KEY`, timeout, lỗi mạng hoặc response Jina không hợp lệ đều giữ nguyên thứ tự RRF; retrieval không bị chặn bởi reranker.
 
 ## 4. Phân lớp và trách nhiệm
 
@@ -143,16 +146,15 @@ Chứa FastAPI composition root và HTTP adapter:
 
 Là bounded context cho Company Knowledge RAG:
 
-- `ingestion/`: parse, cấu trúc, chunk và tùy chọn enrich tài liệu (định hướng production: pdf, docx, OCR).
-- `retrieval/`: dense search, BM25, Reciprocal Rank Fusion và tùy chọn rerank (hiện thực: `InRepoSemanticMemory` + numpy cosine similarity).
-- `providers/`: generation, embedding, key rotation và provider fallback (hiện thực: `GeminiEmbeddingAdapter`).
-- `generation/`: trả lời grounded có citation gate.
-- `storage/`: registry tài liệu — hiện dùng `data/extracted/*.md` thay vì filesystem registry đích.
-- `observability/`: tracing với chính sách che dữ liệu (định hướng production: Langfuse).
-- `evaluation/`: golden set, metric, artifact và RAGAS tùy chọn.
-- `runtime.py`: tạo một `KnowledgeRuntime` dùng chung provider, store, registry, tracer, ingestion và chat.
-- `api/`: router knowledge được gắn vào FastAPI app hợp nhất (định hướng production).
-- `cli.py`: ingest/evaluation gọi trực tiếp knowledge runtime, không dựng FastAPI phụ.
+- `knowledge_base.py`: load và chunk corpus Markdown tĩnh trong `data/extracted/*.md`.
+- `memory.py`: `InRepoSemanticMemory`, dense cosine search bằng numpy trên embedding Gemini.
+- `bm25.py`: lexical search in-memory; tenant ACL được áp dụng trước khi tính document statistics và score.
+- `rrf.py`: Reciprocal Rank Fusion với thứ tự xác định khi đồng điểm.
+- `hybrid.py`: `HybridSemanticMemory` điều phối ACL gate → dense/BM25 candidate retrieval → RRF → optional rerank → final top-k.
+- `jina_reranker.py`: boundary Jina tùy chọn; không có key hoặc bất kỳ lỗi/response không hợp lệ nào đều pass-through, không log query hay credential.
+- `null_memory.py`: structured no-results fallback khi semantic memory không thể khởi tạo.
+
+Qdrant, document upload/ingestion API, registry ghi động, OCR và knowledge chat là **định hướng production**, không phải module đang được nối vào runtime hiện tại.
 
 ### 4.6 `gui/`
 
@@ -227,12 +229,15 @@ Một request nhận tối đa hai connection ID và chỉ cho phép một conne
 6. Bỏ email không actionable; bỏ action không có evidence hoặc có confidence thấp.
 7. Tính fingerprint, loại trùng trong run và xác định `new`/`seen` từ result repository.
 8. Tính priority bằng policy xác định dựa trên deadline, required/blocker và impact.
-9. Nếu RAG được bật, truy hồi tài liệu quy trình và sinh lại action plan grounded.
-10. Lưu item/warning/counters; ghi completion event vào outbox; chuyển run thành terminal state.
+9. Correlate task candidate và resolve route; chỉ `RETRIEVE_RAG` gọi `SemanticMemoryPort`, còn `DIRECT_PLAN` thực hiện zero retrieval.
+10. Gọi final generator đúng một lần cho mỗi candidate không phải `NO_ACTION`, với retrieval context nếu có; sau đó validate và lưu task/warning/counters.
+11. Ghi completion event vào outbox và chuyển run thành terminal state.
 
 Attachment hoặc RAG lỗi cục bộ làm run thành `partial` nhưng vẫn giữ action item có thể sử dụng. Lỗi toàn pipeline làm run `failed`; exception nội bộ không được trả nguyên văn qua API.
 
 ### 5.4 Ingest tài liệu knowledge
+
+> **Target-only:** sơ đồ dưới đây mô tả pipeline ingestion production chưa được nối. Runtime hiện tại chỉ load corpus Markdown đã commit từ `data/extracted/*.md` lúc startup; không có upload/reindex endpoint hoặc Qdrant write path.
 
 ```mermaid
 flowchart LR
@@ -255,15 +260,14 @@ flowchart LR
 
 ### 5.5 Hybrid retrieval và grounded action plan
 
-1. Tạo truy vấn giới hạn độ dài từ title, summary, incident key và evidence của action.
-2. Tạo query embedding và dense search trong Qdrant, chỉ lấy chunk `ready` qua ngưỡng điểm.
-3. Scroll tập ứng viên và xếp hạng lexical bằng BM25.
-4. Hợp nhất dense và lexical bằng Reciprocal Rank Fusion.
-5. Tùy chọn rerank bằng Jina, sau đó lấy top-k.
-6. Ghép email, attachment và procedure chunk vào prompt tạo action plan.
-7. Chỉ giữ procedure step tham chiếu một source ID hợp lệ; citation chỉ được trả cho chunk thực sự được dùng.
+1. `HybridSemanticMemory` kiểm tra tenant-visible chunks trước mọi query embedding hoặc lexical scoring.
+2. Trên tập dữ liệu được ACL cho phép, `InRepoSemanticMemory` thực hiện dense cosine search in-memory và `BM25SearchAdapter` thực hiện lexical ranking.
+3. `ReciprocalRankFusion` hợp nhất hai ranked list bằng RRF (`k=60`) với tie-break xác định.
+4. Candidate pool được giới hạn; `JinaRerankerAdapter` chỉ gọi Jina khi có `JINA_API_KEY`.
+5. Thiếu key hoặc Jina timeout/network/schema/validation failure giữ nguyên toàn bộ thứ tự RRF.
+6. Chỉ sau fusion/rerank mới áp dụng final top-k và trả `SemanticRetrievalResponse` cho generator.
 
-Nếu không có tài liệu phù hợp, action plan không được phép tự tạo procedure step thiếu căn cứ. Nếu retrieval/generation lỗi, action item vẫn được giữ nhưng run chuyển `partial` và `retrieval_status` phản ánh lỗi.
+Đây là retrieval-only RAG. `HybridSemanticMemory` không sinh answer/action plan và không lưu raw email; Agent Core dùng các chunk được trả về trong lần gọi final generator duy nhất của candidate.
 
 ## 6. Dữ liệu và lưu trữ
 
@@ -276,7 +280,7 @@ Nếu không có tài liệu phù hợp, action plan không được phép tự 
 | Completion event | `InMemoryOutbox` hoặc `PostgresOutboxRepository` | Có khi dùng Postgres | — |
 | Knowledge source files | `data/extracted/*.md` (corpus đi kèm repository; định hướng: `.data/rag/uploads`) | Có | Load lúc startup qua `load_corpus()` |
 | Knowledge registry | định hướng production: `.data/rag/registry.json` | định hướng | Atomic replace trong một process |
-| Knowledge chunks/vectors | `InRepoSemanticMemory` (in-memory numpy; định hướng production: Qdrant) | Không / Có | Dùng `GeminiEmbeddingAdapter` |
+| Knowledge chunks/vectors | `HybridSemanticMemory`: dense numpy + BM25 + RRF in-memory; Qdrant là target production | Không | Dùng `GeminiEmbeddingAdapter`; optional Jina chỉ rerank candidate đã ACL-filter |
 | Evaluation artifacts | Filesystem | Có | Phục vụ benchmark, không thuộc request path |
 
 Migration `src/cowork_agent/persistence/migrations/001_mail_todo.sql` định nghĩa schema PostgreSQL cho `mailbox_connections`, `digest_runs`, `tasks`, `task_run_links` và `outbox_events`. `cowork_agent.app` khởi tạo PostgreSQL adapter khi `DATABASE_URL` được thiết lập.
@@ -315,7 +319,9 @@ erDiagram
 | `GET` | `/v1/mail-todo/runs/{run_id}/result` | Lấy kết quả terminal |
 | `GET` | `/v1/mail-todo/runs/{run_id}/tasks` | Lấy danh sách task của run |
 
-### Knowledge được nhúng trong Module Mail API
+### Knowledge API (định hướng production, chưa được nối)
+
+Runtime hiện tại không expose knowledge upload/chat/readiness endpoint. Bảng dưới đây là target API surface, không phải route hiện có trong `create_app()`.
 
 | Method | Endpoint | Vai trò |
 |---|---|---|
@@ -335,8 +341,9 @@ Cấu hình được nạp từ môi trường qua các lớp dataclass riêng b
 - Mailbox: `GMAIL_*` (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, `GMAIL_SCOPES`, `GMAIL_CONNECTION_DB_PATH`); `MICROSOFT_*` cho Outlook (định hướng production).
 - Security: `TOKEN_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `OAUTH_STATE_TTL_SECONDS`.
 - Action extraction: `LLM_PROVIDER=gemini|groq|faucet`, `GEMINI_*`, `GROQ_*` hoặc `FAUCET_*`.
-- Knowledge: `RAG_ENABLED`, Qdrant URL/collection/vector size, retrieval limit và context limit (định hướng production; hiện dùng in-memory corpus).
-- Knowledge providers: Gemini cho generation và embedding (hiện thực); OpenRouter hoặc OpenAI cho generation và Jina cho embedding/reranker (định hướng production).
+- Knowledge hiện tại: corpus cố định `data/extracted/*.md`, Gemini embedding, dense numpy, BM25 và RRF in-memory; không cần `RAG_ENABLED` hay Qdrant config.
+- Reranking: `JINA_API_KEY` là optional. Blank/missing hoặc lỗi Jina làm adapter pass-through và bảo toàn thứ tự RRF.
+- Knowledge target-only: Qdrant URL/collection/vector size, ingestion limits, OpenRouter/OpenAI generation, Jina embedding và Langfuse.
 - Observability: `DEV_TRACE_ENABLED`, `DEV_TRACE_SINK`; Langfuse credentials (định hướng production).
 - Runtime/Storage: `APP_ENV`, `APP_HOST`, `APP_PORT`, `DATABASE_URL` (PostgreSQL), `REDIS_URL` (Redis queue).
 

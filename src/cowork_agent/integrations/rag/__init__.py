@@ -5,7 +5,8 @@ embeddings, and the in-process vector store. The Memory Gateway of PRD-v2
 is not scaffolded here.
 """
 
+from .hybrid import HybridSemanticMemory
 from .memory import InRepoSemanticMemory
 from .null_memory import NullSemanticMemory
 
-__all__ = ["InRepoSemanticMemory", "NullSemanticMemory"]
+__all__ = ["HybridSemanticMemory", "InRepoSemanticMemory", "NullSemanticMemory"]
