@@ -14,6 +14,7 @@ from cowork_agent.domain.target_contracts import SemanticChunk
 
 JINA_RERANK_ENDPOINT = "https://api.jina.ai/v1/rerank"
 JINA_RERANK_MODEL = "jina-reranker-v2-base-multilingual"
+_USER_AGENT = "cowork-agent/1.0"
 
 
 class RerankerPort(Protocol):
@@ -222,10 +223,13 @@ def _post_json(
     payload: Mapping[str, object],
     timeout_seconds: float,
 ) -> Mapping[str, object]:
+    # Cloudflare fronts api.jina.ai and rejects urllib's default User-Agent with
+    # HTTP 403 "error code: 1010". Without this the adapter's fallback silently
+    # degrades every call to a no-op reranker.
     request = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers=dict(headers),
+        headers={"User-Agent": _USER_AGENT, **dict(headers)},
         method="POST",
     )
     with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - fixed Jina endpoint
