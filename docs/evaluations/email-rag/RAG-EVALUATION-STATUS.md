@@ -118,21 +118,17 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 ### ✅ Available
 
-#### `tests/unit/integrations/rag/test_rag.py`
+#### `tests/unit/integrations/rag/` — RAG Unit Test Suite
 
-| Test | What it checks |
+| Test File | What it checks |
 |---|---|
-| `test_load_corpus_reads_the_committed_documents` | All six `.md` files load; `document_id`, `title`, `chunks`, `source_url`, `tenant_id` all correctly set |
-| `test_load_corpus_chunks_by_h2_sections` | H1/H2 headings become `section`; chunk `text` matches body text |
-| `test_load_corpus_rejects_missing_or_empty_dir` | Guard on bad corpus paths |
-| `test_acl_filters_tenant_before_results` | Tenant-scoped retrieval returns only local chunks; foreign chunks excluded |
-| `test_acl_filtering_happens_before_embedding` | ACL gate fires before any embedding call; zero query embeddings for wrong tenant |
-| `test_ranking_min_score_and_top_k` | Scores returned in descending order; `top_k` truncation; `min_score=0.99` produces `NO_RESULTS` |
-| `test_null_semantic_memory_returns_structured_no_results` | `NullSemanticMemory` returns correct empty response shape |
-| `test_timeout_status_when_embedder_times_out` | `SlowEmbedder` triggers `TIMEOUT` status with empty chunks |
-| `test_hashing_embedder_is_deterministic` | `HashingEmbedder` produces stable vectors across calls |
+| `test_rag.py` | Corpus loading (6 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
+| `test_bm25.py` | Tenant-scoped BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization, ACL filtering before scoring |
+| `test_rrf.py` | Reciprocal Rank Fusion, 1-based position rank scoring (`RRF_K=60`), duplicate handling, score fusion |
+| `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, tenant ACL gate, Jina reranker integration |
+| `test_jina_reranker.py` | `JinaRerankerAdapter` cross-encoder reranker boundary, HTTP transport, custom User-Agent, exception fallback to original candidate order, `FakeJinaReranker` |
 
-> **Important caveat:** every test in this file uses `HashingEmbedder` — a deterministic fake that converts text to a numeric hash vector. This validates *mechanics* (index building, scoring pipeline, ACL logic, chunk filtering), but **not semantic similarity**. Ranking order under it is arbitrary, which is why no test here asserts *which* document wins; an earlier `cap_lai_cccd` assertion was removed once H1 chunking exposed it as a chunk-boundary coincidence. Semantic quality is measured by the golden set below, under a real embedder.
+> **Important caveat:** every test using `HashingEmbedder` — a deterministic fake that converts text to a numeric hash vector — validates *mechanics* (index building, scoring pipeline, ACL logic, chunk filtering), but **not semantic similarity**. Ranking order under it is arbitrary, which is why no test there asserts *which* document wins; an earlier `cap_lai_cccd` assertion was removed once H1 chunking exposed it as a chunk-boundary coincidence. Semantic quality is measured by the golden set below, under a real embedder.
 
 ### ✅ C4 — Real-embedding Hit@K / MRR (closed 2026-08-09)
 
@@ -239,8 +235,9 @@ No measurement of whether the retrieved chunks are relevant to the email's state
 | Routing | Route resolver unit tests | ✅ Available | `tests/unit/features/test_routing.py` |
 | Routing | Fixtures grounded in corpus content | ❌ Missing | — |
 | Retrieval | Corpus loading & chunking | ✅ Available | `tests/unit/integrations/rag/test_rag.py` |
-| Retrieval | ACL / tenant filtering | ✅ Available | `tests/unit/integrations/rag/test_rag.py` |
+| Retrieval | ACL / tenant filtering | ✅ Available | `tests/unit/integrations/rag/test_rag.py`, `test_bm25.py`, `test_hybrid.py` |
 | Retrieval | Score ordering, top_k, timeout | ✅ Available | `tests/unit/integrations/rag/test_rag.py` |
+| Retrieval | BM25, RRF & Hybrid unit tests | ✅ Available | `tests/unit/integrations/rag/` (`test_bm25.py`, `test_rrf.py`, `test_hybrid.py`, `test_jina_reranker.py`) |
 | Retrieval | Real-embedding Hit@K / MRR | ✅ Available | `scripts/evaluate_retrieval.py`, `tests/fixtures/rag/` |
 | Retrieval | Email → corpus retrieval fixture | ✅ Available | `tests/integration/email_action_plan/test_rag_retrieval_golden.py` |
 | Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Available | `docs/baselines/retrieval-eval-2026-08-08-gemini-*.json` |
@@ -252,7 +249,7 @@ No measurement of whether the retrieved chunks are relevant to the email's state
 | Generation | Plan faithfulness / grounding (RAGAS or judge) | ❌ Missing | — |
 | Generation | Context relevance before generation | ❌ Missing | — |
 
-**8 of 15 evaluation items are covered. Layer 2 (retrieval quality) went from 3/6 to 6/7 with the golden set, the harness, and the four-way comparison; its one remaining gap is abstention.  
+**12 of 19 evaluation items are covered. Layer 2 (retrieval quality) unit & benchmark testing is complete across dense, BM25, RRF, and Jina reranker; its one remaining gap is abstention (C7).  
 The gap is now concentrated in Layer 3 (generation fidelity) — citation accuracy, faithfulness, and context relevance are all still unmeasured, and they are what decides whether a retrieved chunk actually becomes a correct action plan.**
 
 ---

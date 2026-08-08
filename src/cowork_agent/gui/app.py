@@ -880,6 +880,7 @@ def _poll_run(
             status.update(label=tr(lang, "run_success"), state="complete", expanded=False)
             st.session_state["last_run_id"] = run_id
             st.session_state.pop("active_run", None)
+            st.rerun()
             return
         if current_status == "failed":
             raw_error = s_res.get("error")

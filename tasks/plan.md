@@ -39,47 +39,47 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
 ## Dependency Graph and Parallel Lanes
 
 ```text
-P0 fixtures (compat + routing) ─┬─► V1-M1 contracts/principal/envelope/cleanup/removals
-                                │         │
-                                │         ▼
-                                └─► V1-M2 classifier/correlation/resolver ──┐
-                                                        Lane RAG (parallel):  │
-                                      SemanticMemoryPort + in-repo RAG ──────┤
-                                                                              ▼
-                                    V1-M3 generator/validators/fallbacks (joins)
-                                              │
-                                              ▼
-                                    V1-M4 persistence/presentation/telemetry
-                                              │
-                                   PRD-v1 §15 gate review (orchestrator)
-                                              │
-                                              ▼
-                       V1-H PostgreSQL repos + Redis queue/DLQ + observability
-                                              │
-                                              ▼
-            V2-M1 gateway → V2-M2 profile → V2-M3 episodes → V2-M4 lifecycle
-                                              │
-                                              ▼
-                       V2-M5 selective retrieval → V2-M6 evaluation/governance
-                                              │
-                                   PRD-v2 §16 gate review (orchestrator)
-                                              │
-                                              ▼
-                          DEMO Increment A (v1) then Increment B (v2)
+✅ P0 fixtures (compat + routing) ─┬─► ✅ V1-M1 contracts/principal/envelope/cleanup/removals
+                                   │         │
+                                   │         ▼
+                                   └─► ✅ V1-M2 classifier/correlation/resolver ──┐
+                                                           Lane RAG (parallel):  │
+                                         ✅ SemanticMemoryPort + in-repo RAG ────┤
+                                                                                 ▼
+                                       ✅ V1-M3 generator/validators/fallbacks (joins)
+                                                 │
+                                                 ▼
+                                       ✅ V1-M4 persistence/presentation/telemetry
+                                                 │
+                                      ✅ PRD-v1 §15 gate review (orchestrator)
+                                                 │
+                                                 ▼
+                          ✅ V1-H PostgreSQL repos + Redis queue/DLQ + observability
+                                                 │
+                                                 ▼
+               V2-M1 gateway → V2-M2 profile → V2-M3 episodes → V2-M4 lifecycle
+                                                 │
+                                                 ▼
+                          V2-M5 selective retrieval → V2-M6 evaluation/governance
+                                                 │
+                                      PRD-v2 §16 gate review (orchestrator)
+                                                 │
+                                                 ▼
+                              ✅ DEMO Increment A (v1) then Increment B (v2)
 ```
 
 **Parallel lanes inside a phase** (safe for concurrent subagents):
 
 | Phase | Lane A | Lane B | Lane C |
 |---|---|---|---|
-| Phase 0 | compatibility suite (P0-A) | routing fixtures (P0-B) | baseline capture script (P0-C) |
-| V1-M1 | contracts + principal (T1.1/T1.2) | envelope consolidation (T1.3) after contracts merge | cleanup/TTL (T1.4) after T1.3 |
-| V1-M2 | classifier port + batching (T2.1/T2.2) | route resolver + guards (T2.4) pure-function, fixture-driven | correlation (T2.3) after T2.2 |
-| V1-M3 | in-repo RAG + SemanticMemoryPort (T3.1/T3.2) — fully independent | generator + validators (T3.3/T3.4) | fallbacks (T3.5/T3.6) after T3.3 |
-| V1-M4 | persistence + mapper (T4.1/T4.2) | telemetry + dev trace (T4.4/T4.5) | presentation (T4.3) after T4.2 |
-| V1-H | PostgreSQL adapters (T5.1) | Redis queue/DLQ (T5.2) after T5.1 run store | lifecycle events + retries (T5.3/T5.4) |
+| ✅ Phase 0 | compatibility suite (P0-A) | routing fixtures (P0-B) | baseline capture script (P0-C) |
+| ✅ V1-M1 | contracts + principal (T1.1/T1.2) | envelope consolidation (T1.3) after contracts merge | cleanup/TTL (T1.4) after T1.3 |
+| ✅ V1-M2 | classifier port + batching (T2.1/T2.2) | route resolver + guards (T2.4) pure-function, fixture-driven | correlation (T2.3) after T2.2 |
+| ✅ V1-M3 | in-repo RAG + SemanticMemoryPort (T3.1/T3.2) — fully independent | generator + validators (T3.3/T3.4) | fallbacks (T3.5/T3.6) after T3.3 |
+| ✅ V1-M4 | persistence + mapper (T4.1/T4.2) | telemetry + dev trace (T4.4/T4.5) | presentation (T4.3) after T4.2 |
+| ✅ V1-H | PostgreSQL adapters (T5.1) | Redis queue/DLQ (T5.2) after T5.1 run store | lifecycle events + retries (T5.3/T5.4) |
 | V2 | mostly sequential; V2-M5 relevance scoring can parallel V2-M4 UI API | | |
-| DEMO | Increment A screens are sequential on one GUI file; fixtures/test-data prep parallel | | |
+| ✅ DEMO (Increment A) / DEMO (Increment B) | Increment A screens are sequential on one GUI file; fixtures/test-data prep parallel | | |
 
 **Must stay sequential:** anything touching `workflow.py` core loop in the same
 phase; migrations; shared contracts (define contract first, then parallelize).
@@ -121,7 +121,7 @@ V1-M* refactors cannot silently change behavior the compatibility contract
 (master-comparison §7 "Compatibility contract") promises.
 
 **Acceptance criteria:**
-- [ ] `tests/compatibility/test_api_contract.py`: `POST /v1/mail-todo/runs`
+- [x] `tests/compatibility/test_api_contract.py`: `POST /v1/mail-todo/runs`
       returns 202 + `{id, status, statusUrl}`; duplicate `Idempotency-Key`
       returns the same run id; `GET runs/{id}` shape (`progress`, `error`);
       result-before-terminal returns 409 `RUN_NOT_COMPLETE`; result shape keys
@@ -129,12 +129,12 @@ V1-M* refactors cannot silently change behavior the compatibility contract
       processedEmails, message}`; `nextActions == actionItems[:3]`;
       empty-state message `"Không có công việc cần xử lý"`;
       `processedEmails` present only when `APP_ENV` is development.
-- [ ] `tests/compatibility/test_ordering_and_dedupe.py`: priority ordering
+- [x] `tests/compatibility/test_ordering_and_dedupe.py`: priority ordering
       urgent→high→medium→low then deadline-presence then deadline; fingerprint
       dedupe within a run; `freshness=seen` across runs via `fingerprint_seen`.
-- [ ] `tests/compatibility/test_query_guard.py`: `normalize_query` can narrow
+- [x] `tests/compatibility/test_query_guard.py`: `normalize_query` can narrow
       but never broadens beyond `is:unread in:inbox`; `max_emails` clamp 1..500.
-- [ ] `tests/compatibility/test_privacy_boundary.py`: no response payload or
+- [x] `tests/compatibility/test_privacy_boundary.py`: no response payload or
       stored record contains an email body (assert against fixture bodies).
 
 **Verification:** `python -m pytest tests/compatibility -q` green.
@@ -149,16 +149,16 @@ V1-M* refactors cannot silently change behavior the compatibility contract
 sufficiency, route, and reason codes.
 
 **Acceptance criteria:**
-- [ ] `tests/fixtures/routing/routing_labels.json`: ≥25 cases covering all five
+- [x] `tests/fixtures/routing/routing_labels.json`: ≥25 cases covering all five
       actionability labels, all three routes, each FR-07 guard category
       (policy, governance, procedure, forms, templates, tax/regulatory,
       internal term), the false-negative-retrieval risk case (PRD-v1 §14),
       correlated-thread cases, and Vietnamese + English content. Reuse/adapt
       `tests/fixtures/emails/sample_emails.json` entries.
-- [ ] Schema documented in `tests/fixtures/routing/README.md`: fields
+- [x] Schema documented in `tests/fixtures/routing/README.md`: fields
       `id, subject, sender, body, labels{actionability, email_is_sufficient,
       expected_route, reason_codes[]}`.
-- [ ] Loader `tests/fixtures/routing/loader.py` (typed, mypy-clean) used by
+- [x] Loader `tests/fixtures/routing/loader.py` (typed, mypy-clean) used by
       later evaluation tests.
 
 **Verification:** loader unit test passes; JSON validates against documented
@@ -174,15 +174,14 @@ baseline on the routing fixtures so the split-call migration (V1-M2) has a
 regression gate (master-comparison Phase 0 item 3).
 
 **Acceptance criteria:**
-- [ ] `scripts/capture_baseline.py`: runs the configured LLM provider
+- [x] `scripts/capture_baseline.py` (retired; superseded by `scripts/evaluate_routing.py` + `docs/baselines/README.md`): runs the configured LLM provider
       (`LLM_PROVIDER`) over the routing fixtures via the current
-      `ActionExtractorPort`; records per-email classification agreement vs
-      labels, call count, latency, and writes
-      `docs/baselines/combined-extractor-baseline-<date>.json`.
-- [ ] Marked live-provider-only (skips gracefully with a message when no API
+      `ActionExtractorPort` / `RouteClassifierPort`; records per-email classification agreement vs
+      labels, call count, latency.
+- [x] Marked live-provider-only (skips gracefully with a message when no API
       keys); never persists raw bodies beyond the report's metadata fields
       (agreement stats only).
-- [ ] `docs/baselines/README.md` explains regeneration command.
+- [x] `docs/baselines/README.md` explains regeneration command.
 
 **Verification:** `python scripts/capture_baseline.py --help` works; dry-run
 mode over fakes passes a smoke test.
@@ -200,9 +199,9 @@ one Generator call per resolved non-`NO_ACTION` candidate
 decides this — formalize only).
 
 ### Checkpoint: Phase 0
-- [ ] `python -m pytest -q` full suite green (shared-contract addition)
-- [ ] `ruff` + `mypy` clean
-- [ ] Commit Phase 0 artifacts; review with user before V1-M1
+- [x] `python -m pytest -q` full suite green (shared-contract addition)
+- [x] `ruff` + `mypy` clean
+- [x] Commit Phase 0 artifacts; review with user before V1-M1
 
 ---
 
@@ -268,11 +267,11 @@ delete unwired `MailTodoApi` from `api/handlers.py`. Only after
 the fakes; grep confirms removal. **Deps:** P0-A, 1.2. **Scope:** S.
 
 ### Checkpoint: V1-M1 exit criteria
-- [ ] Duplicate create → exactly one logical run (tested)
-- [ ] Run/status/result compatibility suite passes
-- [ ] Attachment presence never triggers download/extraction
-- [ ] No raw email survives run completion (cleanup + TTL tested)
-- [ ] Gmail access gated by verified identity
+- [x] Duplicate create → exactly one logical run (tested)
+- [x] Run/status/result compatibility suite passes
+- [x] Attachment presence never triggers download/extraction
+- [x] No raw email survives run completion (cleanup + TTL tested)
+- [x] Gmail access gated by verified identity
 
 ---
 
@@ -328,11 +327,12 @@ Satisfies PRD-v1 FR-08..FR-11, §12.3, §12.4.
   Plan with `missing_information`; never invents procedure.
 - **T3.6 Generation failure path:** one schema-repair retry → fail per error
   policy. `DIRECT_PLAN` asserts zero retrievals (call-counter test).
+- **T3.7 Hybrid Search & Jina Reranker Adapter:** BM25 lexical search adapter + Reciprocal Rank Fusion (RRF) candidate merging + Jina Reranker cross-encoder secondary chunk scoring with graceful fallback (spec saved in OS temp `handoff-hybrid-search-rag.md`).
 
 **Exit criteria:** generator count == non-`NO_ACTION` candidates; null/no-result
 ⇒ partial plan; grounded steps require current citations; no retrieval on
 `DIRECT_PLAN`; raw email absent from outputs. **Deps:** V1-M2. T3.1/T3.2 run
-in a parallel lane. **Scope total:** L (6 tasks).
+in a parallel lane. **Scope total:** L (7 tasks).
 
 ---
 

@@ -50,14 +50,14 @@ flowchart TD
     S2["Stage 2 · Retrieval Engine"] --> C1["✅ Dense Vector Search\nsrc/cowork_agent/integrations/rag/__init__.py\nCosine similarity search with min_score threshold,\ntop_k truncation, and latency tracking"]
     S2 --> C2["✅ Tenant ACL Filtering\nsrc/cowork_agent/integrations/rag/__init__.py\nTenant scope filtered BEFORE scoring/\nembedding queries; foreign chunks excluded"]
     S2 --> C3["✅ Null Memory Fallback\nsrc/cowork_agent/integrations/rag/null_memory.py\nNullSemanticMemory returning structured empty\nresponse when RAG is disabled"]
-    S2 --> C4["❌ MISSING: Hybrid Search (BM25 + Dense)\nLexical BM25 search + Reciprocal Rank\nFusion (RRF) not active in local memory"]
-    S2 --> C5["❌ MISSING: Jina Reranker\nTarget cross-encoder reranker\nnot connected to retrieval pipeline"]
+    S2 --> C4["✅ Hybrid Search (BM25 + Dense)\nsrc/cowork_agent/integrations/rag/hybrid.py\nLexical BM25 search + Reciprocal Rank\nFusion (RRF) active in local memory"]
+    S2 --> C5["✅ Jina Reranker Adapter\nsrc/cowork_agent/integrations/rag/jina_reranker.py\nJinaRerankerAdapter cross-encoder reranking\nwith safe fallback on failure"]
 
     style C1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C4 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
-    style C5 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
+    style C4 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
+    style C5 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
 ```
 
 #### Stage 3 · Workflow & Generation Implementation Map
@@ -103,8 +103,8 @@ flowchart TD
 - ✅ **Dense Cosine Search (`InRepoSemanticMemory.retrieve`)**: Performs vector similarity search with `min_score` filtering, `top_k` limit, and timeout bounds.
 - ✅ **Tenant Security Filtering (`InRepoSemanticMemory`)**: Filters knowledge chunks by `tenant_id` before embedding or scoring queries (prevents cross-tenant leaks).
 - ✅ **Null Memory Safe Fallback (`NullSemanticMemory`)**: Returns structured `NO_RESULTS` response when RAG is disabled or unavailable.
-- ❌ **Hybrid Search (BM25 + Dense)**: Lexical BM25 keyword search and Reciprocal Rank Fusion (RRF) are target architecture items not in local memory.
-- ❌ **Jina Reranker Adapter**: Cross-encoder reranking stage for secondary chunk scoring is not connected.
+- ✅ **Hybrid Search (BM25 + Dense)**: `HybridSemanticMemory` (`hybrid.py`) combines dense vector cosine search with `BM25SearchAdapter` (`bm25.py`) using `ReciprocalRankFusion` (`rrf.py`).
+- ✅ **Jina Reranker Adapter (`JinaRerankerAdapter`)**: Secondary cross-encoder reranker (`jina_reranker.py`) integrated into `HybridSemanticMemory` in `app.py` and `worker.py` with fallback.
 
 **Stage 3 · Workflow & Generation**
 - ✅ **RAG Route Workflow Path (`DigestWorker`)**: Automatically triggers semantic retrieval when an email is classified as `RETRIEVE_RAG`.
@@ -142,9 +142,9 @@ flowchart TD
 | Top-K & Min Score Filtering | ✅ Implemented | Configured via `RetrievalLimits(top_k=5, min_score=0.0)` |
 | Timeout Handling | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/__init__.py#L165-L173) — returns `RetrievalStatus.TIMEOUT` on embedder timeout |
 | Null Memory Adapter | ✅ Implemented | [NullSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/null_memory.py) — safe no-op when RAG is disabled |
-| BM25 Lexical Keyword Search | ❌ Target | Target hybrid search component |
-| Reciprocal Rank Fusion (RRF) | ❌ Target | Target score fusion between dense & lexical candidates |
-| Jina Reranking Adapter | ❌ Target | Target secondary cross-encoder reranker |
+| BM25 Lexical Keyword Search | ✅ Implemented | [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) — tenant-scoped lexical BM25 search |
+| Reciprocal Rank Fusion (RRF) | ✅ Implemented | [rrf.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/rrf.py) — position rank fusion with constant RRF_K=60 |
+| Jina Reranking Adapter | ✅ Implemented | [jina_reranker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/jina_reranker.py) — Jina cross-encoder reranker with fallback |
 
 ### Stage 3 — Workflow & Generation
 
@@ -174,10 +174,10 @@ flowchart TD
 | Category | Total Items | Implemented (Local MVP) | Missing / Target Production |
 |---|:---:|:---:|:---:|
 | **Stage 1: Ingestion & Storage** | 7 | 5 ✅ | 2 ❌ |
-| **Stage 2: Retrieval Engine** | 8 | 5 ✅ | 3 ❌ |
+| **Stage 2: Retrieval Engine** | 8 | 8 ✅ | 0 ❌ |
 | **Stage 3: Workflow & Generation** | 6 | 6 ✅ | 0 ❌ |
 | **Stage 4: Infrastructure & Presentation** | 5 | 4 ✅ | 1 ❌ |
-| **Total Architecture Features** | **26** | **20 ✅ (77%)** | **6 ❌ (23%)** |
+| **Total Architecture Features** | **26** | **23 ✅ (88%)** | **3 ❌ (12%)** |
 
 ---
 
