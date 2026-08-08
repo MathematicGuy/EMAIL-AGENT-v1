@@ -117,3 +117,36 @@ def test_safe_url_allows_only_http_schemes() -> None:
     assert gui.safe_url("http://example.com") == "http://example.com"
     assert gui.safe_url("javascript:alert(1)") is None
     assert gui.safe_url(None) is None
+
+
+def test_filter_tasks_by_priority() -> None:
+    t_urgent = dict(SAMPLE_TASK, task_id="t1", priority="urgent")
+    t_low = dict(SAMPLE_TASK, task_id="t2", priority="low")
+    tasks = [t_urgent, t_low]
+
+    assert len(gui.filter_tasks(tasks, "all")) == 2
+    assert len(gui.filter_tasks(tasks, "urgent")) == 1
+    assert gui.filter_tasks(tasks, "urgent")[0]["task_id"] == "t1"
+    assert len(gui.filter_tasks(tasks, "low")) == 1
+    assert gui.filter_tasks(tasks, "low")[0]["task_id"] == "t2"
+    assert len(gui.filter_tasks(tasks, "high")) == 0
+
+
+def test_sort_tasks_by_priority_and_deadline() -> None:
+    t_low = dict(SAMPLE_TASK, task_id="t1", priority="low", deadline="2026-08-20")
+    t_urgent = dict(SAMPLE_TASK, task_id="t2", priority="urgent", deadline="2026-08-10")
+    t_high = dict(SAMPLE_TASK, task_id="t3", priority="high", deadline="2026-08-15")
+    tasks = [t_low, t_urgent, t_high]
+
+    sorted_desc = gui.sort_tasks(tasks, "priority_desc")
+    assert [t["task_id"] for t in sorted_desc] == ["t2", "t3", "t1"]
+
+    sorted_asc = gui.sort_tasks(tasks, "priority_asc")
+    assert [t["task_id"] for t in sorted_asc] == ["t1", "t3", "t2"]
+
+    sorted_deadline = gui.sort_tasks(tasks, "deadline")
+    assert [t["task_id"] for t in sorted_deadline] == ["t2", "t3", "t1"]
+
+    sorted_default = gui.sort_tasks(tasks, "default")
+    assert [t["task_id"] for t in sorted_default] == ["t1", "t2", "t3"]
+

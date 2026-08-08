@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings
+from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
 from cowork_agent.domain import Priority
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -23,6 +23,7 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.email_action_plan.correlation import TaskCandidate
 from cowork_agent.features.email_action_plan.routing import RouteResolution
 from cowork_agent.features.email_action_plan.schemas import GenerationContext
+from cowork_agent.integrations.llm.providers.faucet import FaucetActionPlanGenerator, FaucetAPIError
 from cowork_agent.integrations.llm.providers.gemini import (
     GENERATION_SCHEMA,
     GENERATOR_REPAIR_INSTRUCTION,
@@ -371,3 +372,62 @@ def test_groq_generator_repair_retry_recovers_then_fails_safely(
         assert len(captured) == 4
 
     asyncio.run(scenario())
+
+
+def test_faucet_generator_parses_output_repairs_once_and_fails_safely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads: list[dict[str, object]] = [
+        {"task": task_payload()},
+        {"task": {}},
+        {"task": task_payload()},
+        {"task": {}},
+        {"task": {}},
+    ]
+    captured: list[dict[str, object]] = []
+
+    def fake_post_json(
+        url: str, api_key: str, body: dict[str, object], timeout_seconds: int
+    ) -> dict[str, object]:
+        del url, api_key, timeout_seconds
+        captured.append(body)
+        return {"choices": [{"message": {"content": json.dumps(payloads.pop(0))}}]}
+
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet._post_json", fake_post_json)
+    settings = FaucetSettings.from_env(
+        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+        load_env_file=False,
+    )
+    generator = FaucetActionPlanGenerator(settings)
+
+    async def generate_once() -> None:
+        await generator.generate(
+            user_timezone="Asia/Ho_Chi_Minh",
+            current_time=CURRENT_TIME,
+            run_context=RUN_CONTEXT,
+            candidate=candidate("msg-1"),
+            envelopes=(envelope("msg-1"),),
+            resolution=RESOLUTION,
+            retrieval=None,
+        )
+
+    async def scenario() -> None:
+        output = await generator.generate(
+            user_timezone="Asia/Ho_Chi_Minh",
+            current_time=CURRENT_TIME,
+            run_context=RUN_CONTEXT,
+            candidate=candidate("msg-1"),
+            envelopes=(envelope("msg-1"),),
+            resolution=RESOLUTION,
+            retrieval=None,
+        )
+        assert output.task.priority is Priority.URGENT
+        await generate_once()
+        with pytest.raises(FaucetAPIError) as excinfo:
+            await generate_once()
+        assert "body-msg-1" not in excinfo.value.safe_message
+
+    asyncio.run(scenario())
+
+    assert len(captured) == 5
+    assert "steps numbered from 1" in json.dumps(captured[2], ensure_ascii=False)

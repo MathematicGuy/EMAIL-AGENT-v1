@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from cowork_agent.config import (
+    FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
@@ -36,6 +37,10 @@ from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailMailboxAdapter
+from cowork_agent.integrations.llm.providers.faucet import (
+    FaucetActionPlanGenerator,
+    FaucetRouteClassifier,
+)
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRouteClassifier,
@@ -114,8 +119,13 @@ async def run_worker() -> None:
             classifier = GroqRouteClassifier(groq_settings)
             generator = GroqActionPlanGenerator(groq_settings)
             semantic_memory = NullSemanticMemory()
+        elif provider == "faucet":
+            faucet_settings = FaucetSettings.from_env()
+            classifier = FaucetRouteClassifier(faucet_settings)
+            generator = FaucetActionPlanGenerator(faucet_settings)
+            semantic_memory = NullSemanticMemory()
         else:
-            raise ValueError("LLM_PROVIDER must be either 'gemini' or 'groq'")
+            raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
         digest_worker = DigestWorker(
             runs,
             InMemoryResultRepository(),

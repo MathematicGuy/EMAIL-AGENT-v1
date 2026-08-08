@@ -44,6 +44,7 @@ from cowork_agent.features.email_action_plan.workflow import (
 )
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
+from cowork_agent.integrations.gmail.provider import MailboxReauthRequiredError
 from cowork_agent.integrations.llm.fakes import (
     FailingPlanGenerator,
     FakePlanGenerator,
@@ -417,6 +418,40 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
         assert completed.error_code == "GROQ_API_ERROR"
         assert completed.error_message_safe == "Groq từ chối yêu cầu (HTTP 400)."
         assert "private diagnostic" not in completed.error_message_safe
+
+    asyncio.run(scenario())
+
+
+def test_worker_surfaces_actionable_gmail_reauth_error_without_private_details() -> None:
+    class ReauthRequiredMailbox:
+        async def search_unread(self, *args: object) -> None:
+            raise MailboxReauthRequiredError("encrypted token is stale: private-token")
+
+    async def scenario() -> None:
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="gmail-reauth"
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            ReauthRequiredMailbox(),  # type: ignore[arg-type]
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            FakePlanGenerator(),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.FAILED
+        assert completed.error_code == "GMAIL_REAUTH_REQUIRED"
+        assert completed.error_message_safe == (
+            "Gmail access needs to be reconnected. Reconnect Gmail and retry."
+        )
+        assert "private-token" not in completed.error_message_safe
 
     asyncio.run(scenario())
 

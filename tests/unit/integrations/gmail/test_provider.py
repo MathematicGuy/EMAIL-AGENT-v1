@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import random
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,9 @@ from google.auth.exceptions import TransportError
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from cowork_agent.config import GMAIL_READONLY_SCOPE, GmailSettings
+from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.target_contracts import BodyFormat, FetchStatus
+from cowork_agent.integrations.gmail import provider as gmail_provider
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
@@ -269,6 +272,69 @@ def _http_error(status: int) -> "HttpError":
 def _adapter() -> GmailMailboxAdapter:
     # _call touches none of the dependencies, so placeholders suffice.
     return GmailMailboxAdapter(object(), object(), object())  # type: ignore[arg-type]
+
+
+def _active_connection() -> MailboxConnection:
+    now = datetime.now(UTC)
+    return MailboxConnection(
+        id="mbx-1",
+        user_id="owner@example.com",
+        provider="gmail",
+        external_account_id="owner@example.com",
+        email_address="owner@example.com",
+        encrypted_refresh_token="encrypted-token",
+        scopes=(GMAIL_READONLY_SCOPE,),
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_service_translates_only_stored_token_decryption_errors(tmp_path: Path) -> None:
+    class Repository:
+        async def get(self, connection_id: str) -> MailboxConnection:
+            assert connection_id == "mbx-1"
+            return _active_connection()
+
+    class FailingCipher:
+        def decrypt(self, encrypted_token: str) -> str:
+            assert encrypted_token == "encrypted-token"
+            raise ValueError("Stored Gmail token cannot be decrypted")
+
+    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    adapter = GmailMailboxAdapter(settings, Repository(), FailingCipher())  # type: ignore[arg-type]
+
+    with pytest.raises(MailboxReauthRequiredError) as raised:
+        asyncio.run(adapter._service("mbx-1"))
+
+    assert raised.value.error_code == "GMAIL_REAUTH_REQUIRED"
+    assert raised.value.safe_message == (
+        "Gmail access needs to be reconnected. Reconnect Gmail and retry."
+    )
+
+
+def test_service_does_not_translate_unrelated_build_value_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Repository:
+        async def get(self, connection_id: str) -> MailboxConnection:
+            assert connection_id == "mbx-1"
+            return _active_connection()
+
+    class DecryptingCipher:
+        def decrypt(self, encrypted_token: str) -> str:
+            assert encrypted_token == "encrypted-token"
+            return "refresh-token"
+
+    def invalid_build(*args: object, **kwargs: object) -> None:
+        raise ValueError("Gmail discovery document is invalid")
+
+    monkeypatch.setattr(gmail_provider, "build", invalid_build)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="discovery document"):
+        asyncio.run(adapter._service("mbx-1"))
 
 
 def test_call_retries_transient_errors_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:

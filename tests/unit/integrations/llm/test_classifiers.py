@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings
+from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
@@ -18,6 +18,7 @@ from cowork_agent.domain.target_contracts import (
     ReasonCode,
     Route,
 )
+from cowork_agent.integrations.llm.providers.faucet import FaucetRouteClassifier
 from cowork_agent.integrations.llm.providers.gemini import (
     CLASSIFICATION_SCHEMA,
     CLASSIFIER_REPAIR_INSTRUCTION,
@@ -408,3 +409,73 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
     assert isinstance(user_content, str)
     assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in user_content
     assert "<untrusted_data>" in user_content
+
+
+def test_faucet_malformed_transport_json_falls_back_without_logging_email_body(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"not-json"
+
+    def fake_urlopen(*args: object, **kwargs: object) -> FakeResponse:
+        del args, kwargs
+        return FakeResponse()
+
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet.urlopen", fake_urlopen)
+    settings = FaucetSettings.from_env(
+        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+        load_env_file=False,
+    )
+
+    async def scenario() -> None:
+        result = await FaucetRouteClassifier(settings).classify(
+            "UTC", datetime.now(UTC), (envelope("msg-1"),)
+        )
+        assert result.decisions[0].decision == FALLBACK_ROUTE_DECISION
+
+    asyncio.run(scenario())
+    assert "body-msg-1" not in caplog.text
+
+
+def test_faucet_classifier_parses_decision_and_requests_classification_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[dict[str, object]] = []
+
+    def fake_post_json(
+        url: str, api_key: str, body: dict[str, object], timeout_seconds: int
+    ) -> dict[str, object]:
+        del url, api_key, timeout_seconds
+        captured.append(body)
+        return {
+            "choices": [
+                {"message": {"content": json.dumps({"emails": [decision_payload("msg-1")]})}}
+            ]
+        }
+
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet._post_json", fake_post_json)
+    settings = FaucetSettings.from_env(
+        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+        load_env_file=False,
+    )
+
+    async def scenario() -> None:
+        result = await FaucetRouteClassifier(settings).classify(
+            "UTC", datetime.now(UTC), (envelope("msg-1"),)
+        )
+        assert result.decisions[0].decision.candidate_action_item == "Handle msg-1"
+
+    asyncio.run(scenario())
+
+    assert len(captured) == 1
+    assert captured[0]["response_format"] == {"type": "json_object"}
+    messages = captured[0]["messages"]
+    assert isinstance(messages, list)
+    assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in messages[1]["content"]

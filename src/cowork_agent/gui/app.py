@@ -104,6 +104,22 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "audit_fetch_error": "Không thể tải dữ liệu kiểm toán (mã {code}).",
         "sender_label": "Từ",
+        "scan_mode_label": "Chế độ quét email:",
+        "scan_mode_unread": "📨 Email chưa đọc (is:unread in:inbox)",
+        "scan_mode_all": (
+            "🔄 Quét lại Top K email mới nhất trong Inbox (Test mode - bao gồm email đã đọc)"
+        ),
+        "scan_ordering_hint": (
+            "💡 Gmail trả về email mới nhất trước (ngày giảm dần). "
+            "Hệ thống sẽ xử lý tối đa Top {max_emails} email mới nhất."
+        ),
+        "sort_label": "Sắp xếp theo:",
+        "sort_priority_desc": "Mức ưu tiên: Cao ➔ Thấp",
+        "sort_priority_asc": "Mức ưu tiên: Thấp ➔ Cao",
+        "sort_deadline": "Hạn chót (Gần nhất)",
+        "sort_default": "Thứ tự hệ thống",
+        "filter_priority_label": "Lọc theo mức ưu tiên:",
+        "filter_all": "Tất cả",
     },
     "en": {
         "app_title": "📧 Module Mail",
@@ -180,6 +196,22 @@ STRINGS: dict[str, dict[str, str]] = {
         ),
         "audit_fetch_error": "Could not load audit data (code {code}).",
         "sender_label": "From",
+        "scan_mode_label": "Scan mode:",
+        "scan_mode_unread": "📨 Unread emails (is:unread in:inbox)",
+        "scan_mode_all": (
+            "🔄 Re-process Top K recent emails in Inbox (Test mode - includes read emails)"
+        ),
+        "scan_ordering_hint": (
+            "💡 Gmail returns newest emails first (descending by date). "
+            "The system processes top {max_emails} newest emails."
+        ),
+        "sort_label": "Sort by:",
+        "sort_priority_desc": "Priority: High ➔ Low",
+        "sort_priority_asc": "Priority: Low ➔ High",
+        "sort_deadline": "Deadline (Soonest)",
+        "sort_default": "Default order",
+        "filter_priority_label": "Filter by priority:",
+        "filter_all": "All",
     },
 }
 
@@ -319,6 +351,59 @@ def priority_label(priority: str | None, lang: str) -> str:
     return PRIORITY_LABELS[key].get(lang, key.upper())
 
 
+PRIORITY_RANK: dict[str, int] = {
+    "urgent": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "unknown": 0,
+}
+
+
+def filter_tasks(
+    tasks: Sequence[Mapping[str, Any]], priority_filter: str = "all"
+) -> list[dict[str, Any]]:
+    """Filter tasks by priority key ('all', 'urgent', 'high', 'medium', 'low', 'unknown')."""
+    p_filter = priority_filter.lower()
+    if p_filter == "all":
+        return [dict(t) for t in tasks]
+    return [
+        dict(t)
+        for t in tasks
+        if priority_key(str(t.get("priority")) if t.get("priority") else None) == p_filter
+    ]
+
+
+def sort_tasks(
+    tasks: Sequence[Mapping[str, Any]], sort_key: str = "priority_desc"
+) -> list[dict[str, Any]]:
+    """Sort tasks deterministically by priority rank, deadline, or original order."""
+    task_list = [dict(t) for t in tasks]
+    if sort_key == "priority_desc":
+        return sorted(
+            task_list,
+            key=lambda t: PRIORITY_RANK.get(
+                priority_key(str(t.get("priority")) if t.get("priority") else None), 0
+            ),
+            reverse=True,
+        )
+    if sort_key == "priority_asc":
+        return sorted(
+            task_list,
+            key=lambda t: PRIORITY_RANK.get(
+                priority_key(str(t.get("priority")) if t.get("priority") else None), 0
+            ),
+        )
+    if sort_key == "deadline":
+
+        def _deadline_key(t: Mapping[str, Any]) -> str:
+            d = t.get("deadline")
+            return str(d) if d else "9999-99-99"
+
+        return sorted(task_list, key=_deadline_key)
+    return task_list
+
+
 def format_deadline(deadline: object, lang: str) -> str:
     """Render an ISO deadline as a compact human string (metadata only)."""
     if not deadline:
@@ -444,17 +529,44 @@ def route_summary(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _get_http_client() -> httpx.Client:
+    """Return a shared httpx.Client instance cached via Streamlit if available."""
+    try:
+        import streamlit as st
+
+        @st.cache_resource
+        def _cached_client() -> httpx.Client:
+            return httpx.Client(timeout=15.0)
+
+        return _cached_client()
+    except Exception:
+        return httpx.Client(timeout=15.0)
+
+
 def api_request(base_url: str, method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
     url = f"{base_url.rstrip('/')}{path}"
     try:
-        with httpx.Client(timeout=15.0) as client:
-            res = client.request(method, url, **kwargs)
-            try:
-                return res.status_code, res.json()
-            except Exception:
-                return res.status_code, res.text
+        client = _get_http_client()
+        res = client.request(method, url, **kwargs)
+        try:
+            return res.status_code, res.json()
+        except Exception:
+            return res.status_code, res.text
     except Exception as e:
         return 0, str(e)
+
+
+def _check_health(base_url: str) -> tuple[int, Any]:
+    try:
+        import streamlit as st
+
+        @st.cache_data(ttl=5.0, show_spinner=False)
+        def _cached_health(url: str) -> tuple[int, Any]:
+            return api_request(url, "GET", "/health")
+
+        return _cached_health(base_url)
+    except Exception:
+        return api_request(base_url, "GET", "/health")
 
 
 def read_settings() -> dict[str, Any]:
@@ -488,6 +600,7 @@ def read_settings() -> dict[str, Any]:
 def main() -> None:
     import streamlit as st
 
+    start_time = time.perf_counter()
     load_dotenv()
     settings = read_settings()
     base_url: str = settings["api_base_url"]
@@ -526,7 +639,7 @@ def main() -> None:
         else:
             st.success(message)
 
-    health_code, _ = api_request(base_url, "GET", "/health")
+    health_code, _ = _check_health(base_url)
     if health_code != 200:
         st.error(f"⚠️ {tr(lang, 'backend_down')}")
         st.info(tr(lang, "backend_down_help"))
@@ -542,12 +655,22 @@ def main() -> None:
     st.markdown("---")
     _screen_audit(base_url, lang)
 
+    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+    st.caption(f"⚡ *Streamlit Rerun Latency: {elapsed_ms:.1f} ms*")
+
 
 def _load_connections(base_url: str, lang: str) -> list[dict[str, Any]]:
     import streamlit as st
 
-    with st.spinner(tr(lang, "loading")):
+    try:
+        @st.cache_data(ttl=10.0, show_spinner=False)
+        def _cached_connections(url: str) -> tuple[int, Any]:
+            return api_request(url, "GET", "/v1/mail-todo/connections")
+
+        code, res = _cached_connections(base_url)
+    except Exception:
         code, res = api_request(base_url, "GET", "/v1/mail-todo/connections")
+
     if code == 200 and isinstance(res, dict):
         return [dict(item) for item in _as_list(res.get("connections"))]
     st.error(tr(lang, "connections_error", code=code))
@@ -589,6 +712,10 @@ def _screen_connect(base_url: str, lang: str, connections: list[dict[str, Any]])
                     base_url, "DELETE", f"/v1/mail-todo/connections/{connection.get('id')}"
                 )
                 if code == 200:
+                    try:
+                        st.cache_data.clear()
+                    except Exception:
+                        pass
                     st.session_state["flash"] = {
                         "message": tr(lang, "disconnected_flash", email=email),
                         "level": "success",
@@ -606,41 +733,68 @@ def _screen_run(
 ) -> None:
     import streamlit as st
 
-    st.markdown(
-        f'### <span class="step-number">2</span> {tr(lang, "step2_title")}',
-        unsafe_allow_html=True,
-    )
-    selected_connection_id: str | None = None
-    if connections:
-        options = {
-            str(c.get("id")): f"📫 {c.get('emailAddress')} ({c.get('status')})"
-            for c in connections
-        }
-        selected_connection_id = st.selectbox(
-            tr(lang, "connection_picker"),
-            options=list(options.keys()),
-            format_func=lambda x: options[x],
+    def _render_run_body() -> None:
+        st.markdown(
+            f'### <span class="step-number">2</span> {tr(lang, "step2_title")}',
+            unsafe_allow_html=True,
         )
+        selected_connection_id: str | None = None
+        if connections:
+            options = {
+                str(c.get("id")): f"📫 {c.get('emailAddress')} ({c.get('status')})"
+                for c in connections
+            }
+            selected_connection_id = st.selectbox(
+                tr(lang, "connection_picker"),
+                options=list(options.keys()),
+                format_func=lambda x: options[x],
+            )
+        else:
+            st.warning(tr(lang, "connections_empty"))
+
+        scan_mode = st.radio(
+            tr(lang, "scan_mode_label"),
+            options=["unread", "all"],
+            format_func=lambda x: tr(lang, f"scan_mode_{x}"),
+            horizontal=True,
+        )
+        selected_query = "is:unread in:inbox" if scan_mode == "unread" else "in:inbox"
+
+        max_emails = st.slider(
+            tr(lang, "max_emails_slider"), min_value=5, max_value=100, value=20, step=5
+        )
+        st.caption(tr(lang, "scan_ordering_hint", max_emails=max_emails))
+
+        start_clicked = st.button(
+            tr(lang, "start_run"), type="primary", use_container_width=True,
+            disabled=not selected_connection_id,
+        )
+        if not selected_connection_id:
+            st.info(tr(lang, "need_connection_hint"))
+            return
+
+        if start_clicked:
+            _create_and_watch_run(
+                base_url, lang, settings, selected_connection_id, selected_query, int(max_emails)
+            )
+
+    if hasattr(st, "fragment"):
+        @st.fragment
+        def _run_fragment() -> None:
+            _render_run_body()
+
+        _run_fragment()
     else:
-        st.warning(tr(lang, "connections_empty"))
-
-    max_emails = st.slider(
-        tr(lang, "max_emails_slider"), min_value=5, max_value=100, value=20, step=5
-    )
-    start_clicked = st.button(
-        tr(lang, "start_run"), type="primary", use_container_width=True,
-        disabled=not selected_connection_id,
-    )
-    if not selected_connection_id:
-        st.info(tr(lang, "need_connection_hint"))
-        return
-
-    if start_clicked:
-        _create_and_watch_run(base_url, lang, settings, selected_connection_id, int(max_emails))
+        _render_run_body()
 
 
 def _create_and_watch_run(
-    base_url: str, lang: str, settings: dict[str, Any], connection_id: str, max_emails: int
+    base_url: str,
+    lang: str,
+    settings: dict[str, Any],
+    connection_id: str,
+    query: str,
+    max_emails: int,
 ) -> None:
     """Idempotent Run creation (SPEC §6.7/§8.5) + bounded status polling."""
     import streamlit as st
@@ -651,6 +805,7 @@ def _create_and_watch_run(
     active_run = dict(active) if isinstance(active, dict) else None
     if active_run is not None and not (
         active_run.get("connection_id") == connection_id
+        and active_run.get("query") == query
         and active_run.get("max_emails") == max_emails
     ):
         active_run = None
@@ -667,7 +822,7 @@ def _create_and_watch_run(
                 headers={"Idempotency-Key": idempotency_key, "Content-Type": "application/json"},
                 json={
                     "mailboxConnectionId": connection_id,
-                    "query": "is:unread in:inbox",
+                    "query": query,
                     "maxEmails": max_emails,
                 },
             )
@@ -681,6 +836,7 @@ def _create_and_watch_run(
             "run_id": run_id,
             "key": idempotency_key,
             "connection_id": connection_id,
+            "query": query,
             "max_emails": max_emails,
         }
         st.write(tr(lang, "run_created", run_id=run_id, provider=settings["provider_name"]))
@@ -751,10 +907,35 @@ def _render_error(lang: str, res: Any) -> None:
 
 
 def _fetch_tasks(base_url: str, run_id: str) -> tuple[int, list[dict[str, Any]]]:
-    code, res = api_request(base_url, "GET", f"/v1/mail-todo/runs/{run_id}/tasks")
-    if code == 200 and isinstance(res, dict):
-        return code, [dict(item) for item in _as_list(res.get("tasks"))]
-    return code, []
+    try:
+        import streamlit as st
+
+        @st.cache_data(ttl=300.0, show_spinner=False)
+        def _cached_fetch(url: str, r_id: str) -> tuple[int, list[dict[str, Any]]]:
+            code, res = api_request(url, "GET", f"/v1/mail-todo/runs/{r_id}/tasks")
+            if code == 200 and isinstance(res, dict):
+                return code, [dict(item) for item in _as_list(res.get("tasks"))]
+            return code, []
+
+        return _cached_fetch(base_url, run_id)
+    except Exception:
+        code, res = api_request(base_url, "GET", f"/v1/mail-todo/runs/{run_id}/tasks")
+        if code == 200 and isinstance(res, dict):
+            return code, [dict(item) for item in _as_list(res.get("tasks"))]
+        return code, []
+
+
+def _fetch_run_audit(base_url: str, run_id: str) -> tuple[int, Any]:
+    try:
+        import streamlit as st
+
+        @st.cache_data(ttl=5.0, show_spinner=False)
+        def _cached_audit(url: str, r_id: str) -> tuple[int, Any]:
+            return api_request(url, "GET", f"/v1/mail-todo/runs/{r_id}")
+
+        return _cached_audit(base_url, run_id)
+    except Exception:
+        return api_request(base_url, "GET", f"/v1/mail-todo/runs/{run_id}")
 
 
 def _task_steps(task: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -794,38 +975,69 @@ def _gmail_pointer_html(task: Mapping[str, Any], lang: str) -> str:
 def _screen_tasks(base_url: str, lang: str) -> None:
     import streamlit as st
 
-    st.markdown(
-        f'### <span class="step-number">3</span> {tr(lang, "step3_title")}',
-        unsafe_allow_html=True,
-    )
-    run_id = st.session_state.get("last_run_id")
-    if not run_id:
-        st.info(tr(lang, "tasks_none_yet", button=tr(lang, "start_run").removeprefix("🚀 ")))
-        return
+    def _render_content() -> None:
+        st.markdown(
+            f'### <span class="step-number">3</span> {tr(lang, "step3_title")}',
+            unsafe_allow_html=True,
+        )
+        run_id = st.session_state.get("last_run_id")
+        if not run_id:
+            st.info(tr(lang, "tasks_none_yet", button=tr(lang, "start_run").removeprefix("🚀 ")))
+            return
 
-    with st.spinner(tr(lang, "loading")):
         code, tasks = _fetch_tasks(base_url, str(run_id))
-    if code != 200:
-        st.error(tr(lang, "tasks_fetch_error", code=code))
-        return
-    if not tasks:
-        st.info(tr(lang, "tasks_empty"))
-        return
+        if code != 200:
+            st.error(tr(lang, "tasks_fetch_error", code=code))
+            return
+        if not tasks:
+            st.info(tr(lang, "tasks_empty"))
+            return
 
-    st.success(tr(lang, "tasks_found", count=len(tasks)))
-    for index, task in enumerate(tasks, 1):
-        st.markdown(build_task_card_html(task, index, lang), unsafe_allow_html=True)
-        missing = task_missing_information(task)
-        if missing:
-            st.warning(f"{tr(lang, 'missing_info_title')} {'; '.join(missing)}")
-        pointer = _gmail_pointer_html(task, lang)
-        if pointer:
-            st.markdown(pointer, unsafe_allow_html=True)
-        if _task_steps(task):
-            with st.expander(tr(lang, "steps_expander"), key=f"steps-{task.get('task_id')}"):
-                _render_plan_steps(lang, task)
+        st.success(tr(lang, "tasks_found", count=len(tasks)))
 
-    _screen_task_detail(base_url, lang, tasks)
+        col_sort, col_filter = st.columns(2)
+        with col_sort:
+            sort_key = st.selectbox(
+                tr(lang, "sort_label"),
+                options=["priority_desc", "priority_asc", "deadline", "default"],
+                format_func=lambda x: tr(lang, f"sort_{x}"),
+                key="task_sort_select",
+            )
+        with col_filter:
+            filter_key = st.selectbox(
+                tr(lang, "filter_priority_label"),
+                options=["all", "urgent", "high", "medium", "low"],
+                format_func=lambda x: (
+                    tr(lang, "filter_all") if x == "all" else priority_label(x, lang)
+                ),
+                key="task_filter_select",
+            )
+
+        filtered = filter_tasks(tasks, str(filter_key))
+        display_tasks = sort_tasks(filtered, str(sort_key))
+
+        for index, task in enumerate(display_tasks, 1):
+            st.markdown(build_task_card_html(task, index, lang), unsafe_allow_html=True)
+            missing = task_missing_information(task)
+            if missing:
+                st.warning(f"{tr(lang, 'missing_info_title')} {'; '.join(missing)}")
+            pointer = _gmail_pointer_html(task, lang)
+            if pointer:
+                st.markdown(pointer, unsafe_allow_html=True)
+            if _task_steps(task):
+                with st.expander(tr(lang, "steps_expander"), key=f"steps-{task.get('task_id')}"):
+                    _render_plan_steps(lang, task)
+
+        _screen_task_detail(base_url, lang, display_tasks)
+
+    if hasattr(st, "fragment"):
+        @st.fragment
+        def _tasks_fragment() -> None:
+            _render_content()
+
+        _tasks_fragment()
+    else:
+        _render_content()
 
 
 def _screen_task_detail(base_url: str, lang: str, tasks: list[dict[str, Any]]) -> None:
@@ -886,78 +1098,85 @@ def _screen_task_detail(base_url: str, lang: str, tasks: list[dict[str, Any]]) -
 def _screen_audit(base_url: str, lang: str) -> None:
     import streamlit as st
 
-    st.markdown(f"### 🔎 {tr(lang, 'audit_title')}", unsafe_allow_html=True)
-    run_id = st.session_state.get("last_run_id")
-    if not run_id:
-        st.info(tr(lang, "audit_none"))
-        return
+    def _render_audit_body() -> None:
+        st.markdown(f"### 🔎 {tr(lang, 'audit_title')}", unsafe_allow_html=True)
+        run_id = st.session_state.get("last_run_id")
+        if not run_id:
+            st.info(tr(lang, "audit_none"))
+            return
 
-    with st.spinner(tr(lang, "loading")):
-        run_code, run_res = api_request(base_url, "GET", f"/v1/mail-todo/runs/{run_id}")
+        run_code, run_res = _fetch_run_audit(base_url, str(run_id))
         tasks_code, tasks = _fetch_tasks(base_url, str(run_id))
-    if run_code != 200 or not isinstance(run_res, dict):
-        st.error(tr(lang, "audit_fetch_error", code=run_code))
-        return
+        if run_code != 200 or not isinstance(run_res, dict):
+            st.error(tr(lang, "audit_fetch_error", code=run_code))
+            return
 
-    col_status, col_progress = st.columns(2)
-    status_value = str(run_res.get("status") or tr(lang, "unknown"))
-    col_status.metric(tr(lang, "audit_status_label"), status_value)
-    raw_progress = run_res.get("progress")
-    progress = dict(raw_progress) if isinstance(raw_progress, dict) else {}
-    col_progress.metric(
-        tr(lang, "audit_progress_label"),
-        f"{progress.get('emailsProcessed', 0)}/{progress.get('emailsToProcess', 0)}",
-    )
-
-    error = run_res.get("error")
-    if isinstance(error, dict) and error.get("code"):
-        st.error(
-            f"**{tr(lang, 'error_code_label')}:** `{error.get('code')}`  \n"
-            f"**{tr(lang, 'error_detail_label')}:** "
-            f"{error.get('message') or tr(lang, 'error_unknown')}"
+        col_status, col_progress = st.columns(2)
+        status_value = str(run_res.get("status") or tr(lang, "unknown"))
+        col_status.metric(tr(lang, "audit_status_label"), status_value)
+        raw_progress = run_res.get("progress")
+        progress = dict(raw_progress) if isinstance(raw_progress, dict) else {}
+        col_progress.metric(
+            tr(lang, "audit_progress_label"),
+            f"{progress.get('emailsProcessed', 0)}/{progress.get('emailsToProcess', 0)}",
         )
 
-    # Development-only processedEmails metadata (SPEC §2.3): the backend only
-    # includes this key behind the APP_ENV development gate.
-    processed = _as_list(run_res.get("processedEmails"))
-    if processed:
-        with st.expander(tr(lang, "audit_processed_expander", count=len(processed))):
-            for index, item in enumerate(processed, 1):
-                subject = html.escape(str(item.get("subject") or tr(lang, "unknown")))
-                sender = html.escape(str(item.get("sender") or tr(lang, "unknown")))
-                st.markdown(
-                    f"**{index}. {subject}**  \n{tr(lang, 'sender_label')}: `{sender}`"
-                )
-
-    if tasks_code == 200 and tasks:
-        summary = route_summary(tasks)
-        st.markdown(f"**{tr(lang, 'audit_route_summary')}**")
-        st.caption(
-            tr(lang, "audit_totals", total=summary["total"], partial=summary["partial_plans"])
-        )
-        route_rows = [
-            {
-                tr(lang, "audit_header_route"): enum_label("route", route, lang),
-                tr(lang, "audit_header_count"): count,
-            }
-            for route, count in sorted(summary["routes"].items())
-        ]
-        st.table(route_rows)
-        st.caption(
-            tr(
-                lang, "audit_retrieval",
-                tasks=summary["retrieval_tasks"], docs=summary["document_count"],
+        error = run_res.get("error")
+        if isinstance(error, dict) and error.get("code"):
+            st.error(
+                f"**{tr(lang, 'error_code_label')}:** `{error.get('code')}`  \n"
+                f"**{tr(lang, 'error_detail_label')}:** "
+                f"{error.get('message') or tr(lang, 'error_unknown')}"
             )
-        )
-        validation_summary = ", ".join(
-            f"{enum_label('validation_status', key, lang)}: {count}"
-            for key, count in sorted(summary["validations"].items())
-        )
-        st.caption(tr(lang, "audit_validation", summary=validation_summary))
-    elif tasks_code != 200:
-        st.error(tr(lang, "tasks_fetch_error", code=tasks_code))
 
-    st.caption(tr(lang, "audit_telemetry_note"))
+        processed = _as_list(run_res.get("processedEmails"))
+        if processed:
+            with st.expander(tr(lang, "audit_processed_expander", count=len(processed))):
+                for index, item in enumerate(processed, 1):
+                    subject = html.escape(str(item.get("subject") or tr(lang, "unknown")))
+                    sender = html.escape(str(item.get("sender") or tr(lang, "unknown")))
+                    st.markdown(
+                        f"**{index}. {subject}**  \n{tr(lang, 'sender_label')}: `{sender}`"
+                    )
+
+        if tasks_code == 200 and tasks:
+            summary = route_summary(tasks)
+            st.markdown(f"**{tr(lang, 'audit_route_summary')}**")
+            st.caption(
+                tr(lang, "audit_totals", total=summary["total"], partial=summary["partial_plans"])
+            )
+            route_rows = [
+                {
+                    tr(lang, "audit_header_route"): enum_label("route", route, lang),
+                    tr(lang, "audit_header_count"): count,
+                }
+                for route, count in sorted(summary["routes"].items())
+            ]
+            st.table(route_rows)
+            st.caption(
+                tr(
+                    lang, "audit_retrieval",
+                    tasks=summary["retrieval_tasks"], docs=summary["document_count"],
+                )
+            )
+            validation_summary = ", ".join(
+                f"{enum_label('validation_status', key, lang)}: {count}"
+                for key, count in sorted(summary["validations"].items())
+            )
+            st.caption(tr(lang, "audit_validation", summary=validation_summary))
+        elif tasks_code != 200:
+            st.error(tr(lang, "tasks_fetch_error", code=tasks_code))
+
+        st.caption(tr(lang, "audit_telemetry_note"))
+
+    if hasattr(st, "fragment"):
+        @st.fragment
+        def _audit_fragment() -> None:
+            _render_audit_body()
+
+        _audit_fragment()
+    else:
+        _render_audit_body()
 
 
 if __name__ == "__main__":

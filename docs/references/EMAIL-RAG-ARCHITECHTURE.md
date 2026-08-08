@@ -47,7 +47,7 @@ flowchart LR
     RAG -. tùy chọn .-> Langfuse[Langfuse]
 ```
 
-Điểm vào duy nhất là `mail_todo.api.server:create_app`. FastAPI app này hợp nhất mailbox digest, quản lý tài liệu knowledge và knowledge chat dưới cùng namespace `/v1/mail-todo`. `mail_todo.knowledge.api.router` chỉ tạo `APIRouter`, không khởi tạo một FastAPI app hoặc runtime riêng.
+Điểm vào duy nhất là `cowork_agent.app:create_app` (CLI entry point `mail-todo-api` gọi `cowork_agent.app:main`). FastAPI app này hợp nhất mailbox digest và knowledge chat dưới cùng namespace `/v1/mail-todo`.
 
 ## 3. Kiến trúc runtime hiện tại
 
@@ -102,7 +102,7 @@ Chứa mô hình và policy thuần, không phụ thuộc FastAPI, database ho�
 - Trạng thái run: `queued`, `running`, `succeeded`, `partial`, `failed`.
 - Policy chuẩn hóa query, giới hạn email, tính priority và tạo fingerprint.
 
-### 4.2 `application/`
+### 4.2 `application/` (hiện thực trong `features/email_action_plan/`)
 
 Điều phối use case và định nghĩa port:
 
@@ -115,43 +115,43 @@ Chứa mô hình và policy thuần, không phụ thuộc FastAPI, database ho�
 
 Application layer chỉ biết các protocol; adapter cụ thể được nối tại startup của API.
 
-### 4.3 `infrastructure/`
+### 4.3 `infrastructure/` (hiện thực trong `integrations/` & `persistence/`)
 
 Hiện thực các port và tích hợp bên ngoài:
 
-- Gmail OAuth và Gmail API.
-- Microsoft OAuth và Microsoft Graph.
+- Gmail OAuth và Gmail API (`integrations/gmail/`).
+- Microsoft OAuth và Microsoft Graph (định hướng production).
 - Router chọn mailbox adapter theo provider đã lưu trong connection.
-- Gemini/Groq action extractor.
+- Gemini/Groq/Faucet action extractor (`integrations/llm/`).
 - Parser attachment trong process.
-- SQLite repository cho mailbox connection.
+- SQLite repository cho mailbox connection và task (`persistence/`).
 - Repository, queue và outbox in-memory cho local runtime/test.
-- Adapter nối mail pipeline với knowledge retrieval và grounded plan generation.
+- Adapter nối mail pipeline với knowledge retrieval và grounded plan generation (`integrations/rag/`).
 - Mã hóa refresh token và ký OAuth state.
 
-### 4.4 `api/`
+### 4.4 `api/` và `app.py`
 
 Chứa FastAPI composition root và HTTP adapter:
 
-- Nạp một `RuntimeSettings` từ environment trong lifespan.
+- Nạp cấu hình từ environment trong lifespan (`app.py` là entry point duy nhất).
 - Khởi tạo repository, provider adapter, worker và knowledge runtime.
 - Validate ownership theo `user_id`, payload, provider và trạng thái run.
 - Chuyển domain object thành JSON response.
 - Chỉ trả thông báo lỗi đã được đánh dấu an toàn.
 
-### 4.5 `knowledge/`
+### 4.5 `knowledge/` (hiện thực trong `integrations/rag/`)
 
 Là bounded context cho Company Knowledge RAG:
 
-- `ingestion/`: parse, cấu trúc, chunk và tùy chọn enrich tài liệu.
-- `retrieval/`: dense search, BM25, Reciprocal Rank Fusion và tùy chọn rerank.
-- `providers/`: generation, embedding, key rotation và provider fallback.
+- `ingestion/`: parse, cấu trúc, chunk và tùy chọn enrich tài liệu (định hướng production: pdf, docx, OCR).
+- `retrieval/`: dense search, BM25, Reciprocal Rank Fusion và tùy chọn rerank (hiện thực: `InRepoSemanticMemory` + numpy cosine similarity).
+- `providers/`: generation, embedding, key rotation và provider fallback (hiện thực: `GeminiEmbeddingAdapter`).
 - `generation/`: trả lời grounded có citation gate.
-- `storage/`: registry tài liệu trên filesystem.
-- `observability/`: tracing với chính sách che dữ liệu.
+- `storage/`: registry tài liệu — hiện dùng `data/extracted/*.md` thay vì filesystem registry đích.
+- `observability/`: tracing với chính sách che dữ liệu (định hướng production: Langfuse).
 - `evaluation/`: golden set, metric, artifact và RAGAS tùy chọn.
 - `runtime.py`: tạo một `KnowledgeRuntime` dùng chung provider, store, registry, tracer, ingestion và chat.
-- `api/`: router knowledge được gắn vào FastAPI app hợp nhất.
+- `api/`: router knowledge được gắn vào FastAPI app hợp nhất (định hướng production).
 - `cli.py`: ingest/evaluation gọi trực tiếp knowledge runtime, không dựng FastAPI phụ.
 
 ### 4.6 `gui/`
@@ -269,17 +269,17 @@ Nếu không có tài liệu phù hợp, action plan không được phép tự 
 
 | Dữ liệu | Runtime hiện tại | Độ bền | Ghi chú |
 |---|---|---:|---|
-| Mailbox connection | SQLite, mặc định dưới `.data/` | Có | Refresh token đã mã hóa |
-| Combined/child run | In-memory repository | Không | Mất khi restart |
-| Queue/background job | In-memory + FastAPI BackgroundTasks | Không | Không có worker độc lập |
-| Action item, warning, processed metadata | In-memory result repository | Không | Không lưu raw body mặc định |
-| Completion event | In-memory outbox | Không | Chưa có consumer production |
-| Knowledge source files | `.data/rag/uploads` | Có theo filesystem | Lưu theo document ID/version |
-| Knowledge registry | `.data/rag/registry.json` | Có theo filesystem | Atomic replace trong một process |
-| Knowledge chunks/vectors | Qdrant | Có theo cấu hình Qdrant | Collection mặc định `company_processes` |
+| Mailbox connection | SQLite tại `.data/mail_todo.db` (`SQLiteMailboxConnectionRepository`) | Có | Refresh token đã mã hóa |
+| Combined/child run | `InMemoryRunRepository` (hoặc `PostgresRunRepository` khi có `DATABASE_URL`) | Không / Có | Mất khi restart nếu dùng In-Memory |
+| Queue/background job | FastAPI `BackgroundTasks` hoặc `RedisRunQueue` khi có `REDIS_URL` | Không / Có | Xử lý bất đồng bộ |
+| Action item, warning, processed metadata | `InMemoryResultRepository` và `SQLiteTaskRepository` (`.data/tasks.db`) hoặc `PostgresTaskRepository` | Có (task trong SQLite/Postgres) | Không lưu raw email body |
+| Completion event | `InMemoryOutbox` hoặc `PostgresOutboxRepository` | Có khi dùng Postgres | — |
+| Knowledge source files | `data/extracted/*.md` (corpus đi kèm repository; định hướng: `.data/rag/uploads`) | Có | Load lúc startup qua `load_corpus()` |
+| Knowledge registry | định hướng production: `.data/rag/registry.json` | định hướng | Atomic replace trong một process |
+| Knowledge chunks/vectors | `InRepoSemanticMemory` (in-memory numpy; định hướng production: Qdrant) | Không / Có | Dùng `GeminiEmbeddingAdapter` |
 | Evaluation artifacts | Filesystem | Có | Phục vụ benchmark, không thuộc request path |
 
-Migration `migrations/001_mail_todo.sql` định nghĩa schema PostgreSQL cho mailbox connection, schedule, run, action item, attachment extraction và outbox. Đây là kiến trúc đích; `mail_todo.api.server` hiện chưa khởi tạo PostgreSQL adapter từ migration này.
+Migration `src/cowork_agent/persistence/migrations/001_mail_todo.sql` định nghĩa schema PostgreSQL cho `mailbox_connections`, `digest_runs`, `tasks`, `task_run_links` và `outbox_events`. `cowork_agent.app` khởi tạo PostgreSQL adapter khi `DATABASE_URL` được thiết lập.
 
 Các quan hệ domain chính:
 
@@ -305,14 +305,15 @@ erDiagram
 | `GET` | `/health` | Liveness của API |
 | `GET` | `/v1/mail-todo/oauth/gmail/connect` | Bắt đầu Gmail OAuth |
 | `GET` | `/v1/mail-todo/oauth/gmail/callback` | Hoàn tất Gmail OAuth |
-| `GET` | `/v1/mail-todo/oauth/outlook/connect` | Bắt đầu Microsoft OAuth |
-| `GET` | `/v1/mail-todo/oauth/outlook/callback` | Hoàn tất Microsoft OAuth |
+| `GET` | `/v1/mail-todo/oauth/outlook/connect` | Bắt đầu Microsoft OAuth (định hướng production) |
+| `GET` | `/v1/mail-todo/oauth/outlook/callback` | Hoàn tất Microsoft OAuth (định hướng production) |
 | `GET` | `/v1/mail-todo/connections` | Liệt kê connection của user |
-| `DELETE` | `/v1/mail-todo/connections/{id}` | Xóa connection của user |
-| `GET` | `/v1/mail-todo/connections/{id}/unread-preview` | Kiểm tra email chưa đọc |
+| `DELETE` | `/v1/mail-todo/connections/{connection_id}` | Xóa connection của user |
+| `GET` | `/v1/mail-todo/connections/{connection_id}/unread-preview` | Kiểm tra email chưa đọc |
 | `POST` | `/v1/mail-todo/runs` | Tạo combined run |
-| `GET` | `/v1/mail-todo/runs/{id}` | Poll trạng thái/progress |
-| `GET` | `/v1/mail-todo/runs/{id}/result` | Lấy kết quả terminal |
+| `GET` | `/v1/mail-todo/runs/{run_id}` | Poll trạng thái/progress |
+| `GET` | `/v1/mail-todo/runs/{run_id}/result` | Lấy kết quả terminal |
+| `GET` | `/v1/mail-todo/runs/{run_id}/tasks` | Lấy danh sách task của run |
 
 ### Knowledge được nhúng trong Module Mail API
 
@@ -329,15 +330,15 @@ Tất cả endpoint knowledge và mailbox cùng xuất hiện trong OpenAPI/Swag
 
 ## 8. Tích hợp và cấu hình
 
-`RuntimeSettings` là điểm nạp cấu hình duy nhất của API. Bên trong nó vẫn giữ các nhóm settings có kiểu riêng để mỗi adapter chỉ nhận đúng phần cấu hình cần thiết:
+Cấu hình được nạp từ môi trường qua các lớp dataclass riêng biệt trong `config.py` (`GmailSettings`, `GeminiSettings`, `GroqSettings`, `FaucetSettings`) và các hàm helper (`database_url`, `redis_url`). Bên trong vẫn giữ các nhóm settings có kiểu riêng để mỗi adapter chỉ nhận đúng phần cấu hình cần thiết:
 
-- Mailbox: `GMAIL_*`, `MICROSOFT_*`, redirect URI, read-only scopes và đường dẫn SQLite.
-- Security: `TOKEN_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, TTL của OAuth state.
-- Action extraction: `LLM_PROVIDER=gemini|groq`, `GEMINI_*` hoặc `GROQ_*`.
-- Knowledge: `RAG_ENABLED`, Qdrant URL/collection/vector size, retrieval limit và context limit.
-- Knowledge providers: Gemini, OpenRouter hoặc OpenAI cho generation; Gemini/Jina cho embedding; Jina reranker tùy chọn.
-- Observability: trace mode và Langfuse credentials.
-- Runtime/UI: environment, host/port và polling timeout.
+- Mailbox: `GMAIL_*` (`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, `GMAIL_SCOPES`, `GMAIL_CONNECTION_DB_PATH`); `MICROSOFT_*` cho Outlook (định hướng production).
+- Security: `TOKEN_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `OAUTH_STATE_TTL_SECONDS`.
+- Action extraction: `LLM_PROVIDER=gemini|groq|faucet`, `GEMINI_*`, `GROQ_*` hoặc `FAUCET_*`.
+- Knowledge: `RAG_ENABLED`, Qdrant URL/collection/vector size, retrieval limit và context limit (định hướng production; hiện dùng in-memory corpus).
+- Knowledge providers: Gemini cho generation và embedding (hiện thực); OpenRouter hoặc OpenAI cho generation và Jina cho embedding/reranker (định hướng production).
+- Observability: `DEV_TRACE_ENABLED`, `DEV_TRACE_SINK`; Langfuse credentials (định hướng production).
+- Runtime/Storage: `APP_ENV`, `APP_HOST`, `APP_PORT`, `DATABASE_URL` (PostgreSQL), `REDIS_URL` (Redis queue).
 
 Gemini action extractor hỗ trợ nhiều API key, round-robin và đổi key khi gặp rate limit. Knowledge provider dùng primary/fallback router cho lỗi tạm thời; key pool có cooldown. Giá trị secret phải nằm trong environment hoặc secret manager, không commit vào repository.
 
@@ -387,18 +388,20 @@ Giới hạn: các bảo đảm idempotency, claim, dedupe và outbox hiện kh�
 ## 13. Bản đồ mã nguồn
 
 ```text
-src/mail_todo/
-├── api/                 # FastAPI composition root duy nhất, HTTP serialization
-├── application/         # Use case, pipeline, ports và contracts
+src/cowork_agent/
+├── api/                 # HTTP handlers và serializers
 ├── domain/              # Entity/value object/policy thuần
-├── infrastructure/      # Gmail, Outlook, LLM, SQLite, parser, RAG adapters
-├── knowledge/           # Runtime chung, router, ingestion, retrieval, generation, eval
+├── features/            # Feature workflows và ports (email_action_plan)
 ├── gui/                 # Streamlit testing interface
+├── integrations/        # External integration adapters (gmail, llm, rag)
+├── orchestration/       # Task execution, queue management, worker
+├── persistence/         # Repositories, migrations (SQLite, Postgres)
+├── app.py               # FastAPI composition root và main runner
+├── config.py            # Environment configuration settings
+├── identity.py          # Tenant and principal utilities
 └── __init__.py          # Public package surface
 
-migrations/              # PostgreSQL schema đích và rollback
 docs/adr/                # Quyết định kiến trúc
-evaluation/              # Golden sets và evaluation metadata
 tests/                   # Unit, component, integration
 scripts/                 # Launcher/utility scripts
 ```

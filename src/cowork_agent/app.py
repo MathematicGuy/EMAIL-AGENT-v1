@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from cowork_agent.config import (
+    FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
@@ -54,6 +55,10 @@ from cowork_agent.integrations.gmail.provider import (
     GmailMailboxAdapter,
     MailboxNotConnectedError,
     MailboxReauthRequiredError,
+)
+from cowork_agent.integrations.llm.providers.faucet import (
+    FaucetActionPlanGenerator,
+    FaucetRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
@@ -173,6 +178,11 @@ def create_app() -> FastAPI:
                 app.state.run_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+                provider_label = {
+                    "gemini": "Gemini",
+                    "groq": "Groq",
+                    "faucet": "Faucet",
+                }.get(provider, "LLM provider")
                 classifier: RouteClassifierPort
                 generator: ActionPlanGeneratorPort
                 if provider == "gemini":
@@ -185,8 +195,13 @@ def create_app() -> FastAPI:
                     classifier = GroqRouteClassifier(groq_settings)
                     generator = GroqActionPlanGenerator(groq_settings)
                     semantic_memory = NullSemanticMemory()
+                elif provider == "faucet":
+                    faucet_settings = FaucetSettings.from_env()
+                    classifier = FaucetRouteClassifier(faucet_settings)
+                    generator = FaucetActionPlanGenerator(faucet_settings)
+                    semantic_memory = NullSemanticMemory()
                 else:
-                    raise ValueError("LLM_PROVIDER must be either 'gemini' or 'groq'")
+                    raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
                 app.state.digest_worker = DigestWorker(
                     run_repository,
                     result_repository,
@@ -203,10 +218,12 @@ def create_app() -> FastAPI:
                     ),
                     completion_outbox=app.state.outbox_repository,
                 )
-                app.state.gemini_configuration_error = None
+                app.state.llm_configuration_error = None
+                app.state.llm_provider_label = provider_label
             except ValueError as exc:
                 app.state.digest_worker = None
-                app.state.gemini_configuration_error = str(exc)
+                app.state.llm_configuration_error = str(exc)
+                app.state.llm_provider_label = provider_label
         except ValueError as exc:
             raise RuntimeError(f"Invalid Gmail configuration: {exc}") from exc
         yield
@@ -342,7 +359,10 @@ def create_app() -> FastAPI:
         if worker is None:
             raise HTTPException(
                 status_code=503,
-                detail=f"Gemini is not configured: {request.app.state.gemini_configuration_error}",
+                detail=(
+                    f"{request.app.state.llm_provider_label} is not configured: "
+                    f"{request.app.state.llm_configuration_error}"
+                ),
             )
         creator = cast(CreateDigestRun, request.app.state.create_run)
         run = await creator.execute(

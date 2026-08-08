@@ -153,10 +153,56 @@ class GroqSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FaucetSettings:
+    """Fixed-endpoint configuration for the Faucet chat-completions provider."""
+
+    api_key: str = field(repr=False)
+    model: str
+    max_emails_per_batch: int
+    max_output_tokens: int
+    timeout_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "FaucetSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        model = environ.get("FAUCET_MODEL", "").strip()
+        if not model or model.startswith("replace-with-"):
+            raise ValueError("FAUCET_MODEL must be a real Faucet model name")
+        return cls(
+            api_key=_required_secret(environ, "FAUCET_API_KEY"),
+            model=model,
+            max_emails_per_batch=_positive_int(environ, "FAUCET_MAX_EMAILS_PER_BATCH", 5),
+            max_output_tokens=_bounded_positive_int(
+                environ, "FAUCET_MAX_OUTPUT_TOKENS", 2048, maximum=4096
+            ),
+            timeout_seconds=_bounded_positive_int(
+                environ, "FAUCET_TIMEOUT_SECONDS", 60, maximum=120
+            ),
+        )
+
+
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
     value = int(environ.get(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _bounded_positive_int(
+    environ: Mapping[str, str], name: str, default: int, *, maximum: int
+) -> int:
+    value = _positive_int(environ, name, default)
+    if value > maximum:
+        raise ValueError(f"{name} must not exceed {maximum}")
     return value
 
 

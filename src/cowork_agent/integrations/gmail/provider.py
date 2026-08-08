@@ -40,7 +40,8 @@ class MailboxNotConnectedError(LookupError):
 
 
 class MailboxReauthRequiredError(RuntimeError):
-    pass
+    error_code = "GMAIL_REAUTH_REQUIRED"
+    safe_message = "Gmail access needs to be reconnected. Reconnect Gmail and retry."
 
 
 #: V1-H T5.4 bounded retry budget for transient Gmail failures. Delays use
@@ -262,9 +263,15 @@ class GmailMailboxAdapter:
         connection = await self._repository.get(connection_id)
         if connection is None or connection.status != "active":
             raise MailboxNotConnectedError(connection_id)
+        try:
+            refresh_token = self._cipher.decrypt(connection.encrypted_refresh_token)
+        except ValueError as exc:
+            raise MailboxReauthRequiredError(
+                "Stored Gmail token cannot be decrypted; reconnect Gmail"
+            ) from exc
         credentials = Credentials(  # type: ignore[no-untyped-call]
             token=None,
-            refresh_token=self._cipher.decrypt(connection.encrypted_refresh_token),
+            refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=self._settings.client_id,
             client_secret=self._settings.client_secret,

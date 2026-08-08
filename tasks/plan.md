@@ -99,12 +99,12 @@ phase; migrations; shared contracts (define contract first, then parallelize).
 
 ## Definition of Done (project-wide)
 
-- [ ] Focused pytest scope passes (`python -m pytest <scope> -q`)
-- [ ] `python -m ruff check .` clean
-- [ ] `python -m mypy src` clean (strict) when `src/` changed
-- [ ] Vocabulary per `CONTEXT.md`; no new "digest"/"action item"/"extractor" names
-- [ ] Raw email bodies absent from any persisted/logged/response payload
-- [ ] Compatibility suite (`tests/compatibility/`) still green after V1-M1 starts
+- [x] Focused pytest scope passes (`python -m pytest <scope> -q`)
+- [x] `python -m ruff check .` clean
+- [x] `python -m mypy src` clean (strict) when `src/` changed
+- [x] Vocabulary per `CONTEXT.md`; no new "digest"/"action item"/"extractor" names
+- [x] Raw email bodies absent from any persisted/logged/response payload
+- [x] Compatibility suite (`tests/compatibility/`) still green after V1-M1 starts
 
 ---
 
