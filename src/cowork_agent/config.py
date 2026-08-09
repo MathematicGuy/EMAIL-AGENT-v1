@@ -23,6 +23,30 @@ def redis_url(environ: Mapping[str, str] | None = None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class ChatMemorySettings:
+    """Bounded local working-memory policy for V2 chat sessions."""
+
+    max_turns: int
+    ttl_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "ChatMemorySettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        return cls(
+            max_turns=_positive_int(environ, "CHAT_MEMORY_MAX_TURNS", 20),
+            ttl_seconds=_positive_int(environ, "CHAT_MEMORY_TTL_SECONDS", 1800),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GmailSettings:
     client_id: str = field(repr=False)
     client_secret: str = field(repr=False)
