@@ -445,9 +445,11 @@ owns the migration; T5.1 evolves the `001_mail_todo.sql` lineage per §6.6.
   trace/metrics sinks, and completion events for runs forced terminal by
   DLQ retry exhaustion (T5.3 review: those currently get no event).
   Delivered 2026-08-08: `LifecycleEventPublisher` (outbox → trace sink,
-  at-least-once), DLQ completion events, worker wiring. **Blocked:**
-  numeric launch gates/alerts + scaled evaluation need the user's
-  threshold decisions (Open Questions) and user-authorized live runs.
+  at-least-once), DLQ completion events, worker wiring. Done 2026-08-09:
+  CLI gate flags (`--fail-under-doc-mrr`, `--fail-under-recall`,
+  `--fail-over-latency-p95`) in `evaluate_retrieval.py`; thresholds
+  resolved (see Open Questions). **Remaining:** live-run evidence
+  (user-authorized 2026-08-09; pending execution).
 
 **Exit criteria (old Milestone 1):** API-created run visible to a separate
 worker process; single-claim enforced; retry exhaustion reaches DLQ without
@@ -528,7 +530,15 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   `attachment_extractions` (ADR-003), `digest_schedules`, `schedule_occurrences`
   (scheduling out of PRD scope); replace `outbox_events` with the V1-H
   observable lifecycle events (T5.3).
-- Numeric launch thresholds (before V1-H gates).
+- ~~Numeric launch thresholds (before V1-H gates).~~ **Resolved 2026-08-09**
+  (user approved): section-level MRR ≥ 0.85 (`--fail-under-mrr 0.85`);
+  document-level MRR ≥ 0.90 (`--fail-under-doc-mrr 0.90`); document-level
+  Recall@5 ≥ 0.95 (`--fail-under-recall 0.95`); p95 retrieval latency
+  ≤ 3000 ms (`--fail-over-latency-p95 3000`); DLQ exhaustion rate ≤ 2%
+  of runs (measured from LifecycleEventPublisher events over soak);
+  raw email leak rate = 0% (dump-scan enforced, non-negotiable).
+  Routing classifier confidence floor stays at 0.50 in code; production
+  tightening to ≥ 0.60 is a V2-M2 follow-up (preference gating).
 - Preference field set narrowing + approval-UI shape (before V2-M2/M4).
 - Episodic relevance algorithm/thresholds (before V2-M5).
 - Retention periods + memory quality-improvement threshold (before V2-M6).

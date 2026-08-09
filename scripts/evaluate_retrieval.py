@@ -35,7 +35,7 @@ import os
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -73,6 +73,21 @@ RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID)
 #: RetrievalStatus.NO_RESULTS, duplicated so the metric layer imports nothing.
 NO_RESULTS_STATUS = "no_results"
 
+DENSE_COSINE_SCORE = "dense_cosine"
+BM25_SCORE = "bm25"
+RRF_SCORE = "rrf"
+JINA_SCORE = "jina"
+SCORE_KINDS: tuple[str, ...] = (
+    DENSE_COSINE_SCORE,
+    BM25_SCORE,
+    RRF_SCORE,
+    JINA_SCORE,
+)
+
+ABSOLUTE_SCORE_GATE = "absolute_score"
+MARGIN_GATE = "margin"
+GATE_KINDS: tuple[str, ...] = (ABSOLUTE_SCORE_GATE, MARGIN_GATE)
+
 
 # --------------------------------------------------------------------------
 # Pure: no corpus, no embedder, no filesystem. Unit-tested directly.
@@ -89,8 +104,292 @@ class CaseResult:
     expected_sections: tuple[str, ...]
     returned_document_ids: tuple[str, ...]
     returned_sections: tuple[str | None, ...]
+    returned_scores: tuple[float, ...]
+    configured_score_kind: str
+    observed_score_kind: str | None
+    reranker_requested: bool
+    reranker_applied: bool
     retrieval_status: str
     latency_ms: int
+
+    def __post_init__(self) -> None:
+        lengths = {
+            len(self.returned_document_ids),
+            len(self.returned_sections),
+            len(self.returned_scores),
+        }
+        if len(lengths) != 1:
+            raise ValueError("returned ids, sections, and scores must be parallel")
+        if self.configured_score_kind not in SCORE_KINDS:
+            raise ValueError(
+                f"unknown configured_score_kind {self.configured_score_kind!r}"
+            )
+        if self.observed_score_kind is not None and self.observed_score_kind not in SCORE_KINDS:
+            raise ValueError(f"unknown observed_score_kind {self.observed_score_kind!r}")
+        if any(
+            isinstance(score, bool) or not isinstance(score, (int, float))
+            for score in self.returned_scores
+        ):
+            raise ValueError("returned scores must be numeric and non-boolean")
+        normalized_scores = tuple(float(score) for score in self.returned_scores)
+        if any(not math.isfinite(score) for score in normalized_scores):
+            raise ValueError("returned scores must be finite non-boolean numbers")
+        if len(normalized_scores) > 1 and not math.isfinite(
+            normalized_scores[0] - normalized_scores[1]
+        ):
+            raise ValueError("derived score delta must be finite")
+        object.__setattr__(self, "returned_scores", normalized_scores)
+        if self.returned_scores and self.observed_score_kind is None:
+            raise ValueError("observed_score_kind is required when scores are returned")
+        if not self.returned_scores and self.observed_score_kind is not None:
+            raise ValueError("observed_score_kind must be null when no scores are returned")
+        if self.reranker_requested != (self.configured_score_kind == JINA_SCORE):
+            raise ValueError("reranker_requested must match configured jina provenance")
+        if self.reranker_applied and not self.reranker_requested:
+            raise ValueError("reranker_applied requires reranker_requested")
+        if self.reranker_applied != (self.observed_score_kind == JINA_SCORE):
+            raise ValueError("reranker_applied must match observed jina provenance")
+        compatible_observed_kinds = (
+            {JINA_SCORE, RRF_SCORE}
+            if self.configured_score_kind == JINA_SCORE
+            else {self.configured_score_kind}
+        )
+        if (
+            self.observed_score_kind is not None
+            and self.observed_score_kind not in compatible_observed_kinds
+        ):
+            raise ValueError(
+                "configured_score_kind and observed_score_kind must be compatible"
+            )
+
+
+def score_summary(result: CaseResult) -> dict[str, float | None]:
+    """Top/runner-up score evidence without any retrieved text."""
+    top_score = result.returned_scores[0] if result.returned_scores else None
+    runner_up_score = result.returned_scores[1] if len(result.returned_scores) > 1 else None
+    delta = (
+        top_score - runner_up_score
+        if top_score is not None and runner_up_score is not None
+        else None
+    )
+    return {
+        "top_score": top_score,
+        "runner_up_score": runner_up_score,
+        "delta": delta,
+    }
+
+
+def score_evidence(results: Sequence[CaseResult]) -> dict[str, list[dict[str, Any]]]:
+    """Closed, metadata-only score evidence for each evaluated case."""
+    cases: list[dict[str, Any]] = []
+    for result in results:
+        cases.append(
+            {
+                "case_id": result.case_id,
+                "probe": result.probe,
+                "configured_score_kind": result.configured_score_kind,
+                "observed_score_kind": result.observed_score_kind,
+                "reranker_requested": result.reranker_requested,
+                "reranker_applied": result.reranker_applied,
+                "returned_scores": list(result.returned_scores),
+                **score_summary(result),
+            }
+        )
+    return {"cases": cases}
+
+
+def candidate_thresholds(values: Sequence[float]) -> tuple[float, ...]:
+    """Minimum, unique midpoints, and one value just above the maximum."""
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in values
+    ):
+        raise ValueError("candidate values must be numeric and non-boolean")
+    normalized = tuple(float(value) for value in values)
+    if any(not math.isfinite(value) for value in normalized):
+        raise ValueError("candidate values must be finite non-boolean numbers")
+    unique = sorted(set(normalized))
+    if not unique:
+        return ()
+    boundaries = [unique[0]]
+    for left, right in zip(unique, unique[1:], strict=False):
+        midpoint = left / 2 + right / 2
+        boundary = midpoint if left < midpoint < right else right
+        if boundary != boundaries[-1]:
+            boundaries.append(boundary)
+    upper_boundary = math.nextafter(unique[-1], math.inf)
+    if upper_boundary != boundaries[-1]:
+        boundaries.append(upper_boundary)
+    candidates = tuple(boundaries)
+    if any(not math.isfinite(candidate) for candidate in candidates):
+        raise ValueError("derived candidate thresholds must be finite")
+    return candidates
+
+
+def simulate_gate(
+    results: Sequence[CaseResult],
+    *,
+    score_kind: str,
+    gate_kind: str,
+    threshold: float,
+) -> tuple[CaseResult, ...]:
+    """Return an immutable effective view after one evaluation-only gate."""
+    _check_score_kind(score_kind)
+    _check_gate(gate_kind, threshold)
+    simulated: list[CaseResult] = []
+    for result in results:
+        if _abstained(result) or result.observed_score_kind != score_kind:
+            simulated.append(result)
+            continue
+        summary = score_summary(result)
+        value = summary["top_score"] if gate_kind == ABSOLUTE_SCORE_GATE else summary["delta"]
+        if value is None or value >= threshold:
+            simulated.append(result)
+            continue
+        simulated.append(
+            replace(
+                result,
+                returned_document_ids=(),
+                returned_sections=(),
+                returned_scores=(),
+                observed_score_kind=None,
+                reranker_applied=False,
+                retrieval_status=NO_RESULTS_STATUS,
+            )
+        )
+    return tuple(simulated)
+
+
+def calibration_sweep(
+    results: Sequence[CaseResult],
+    *,
+    score_kind: str,
+    gate_kind: str,
+    candidates: Sequence[float] | None = None,
+) -> list[dict[str, Any]]:
+    """Measure one compatible score space without selecting a threshold."""
+    _check_score_kind(score_kind)
+    if gate_kind not in GATE_KINDS:
+        raise ValueError(f"unknown gate kind {gate_kind!r}")
+    matching = [result for result in results if result.observed_score_kind == score_kind]
+    summaries = [(result, score_summary(result)) for result in matching]
+    value_key = "top_score" if gate_kind == ABSOLUTE_SCORE_GATE else "delta"
+    observed_values = [
+        value
+        for _result, summary in summaries
+        if (value := summary[value_key]) is not None
+    ]
+    thresholds = (
+        tuple(candidates)
+        if candidates is not None
+        else candidate_thresholds(observed_values)
+    )
+    inherited = sorted(result.case_id for result in results if _abstained(result))
+    undefined_margins = sorted(
+        result.case_id
+        for result, summary in summaries
+        if summary["delta"] is None
+    )
+    output: list[dict[str, Any]] = []
+    for threshold in thresholds:
+        _check_gate(gate_kind, threshold)
+        simulated = simulate_gate(
+            results,
+            score_kind=score_kind,
+            gate_kind=gate_kind,
+            threshold=threshold,
+        )
+        unanswerable = [result for result in simulated if not result.expected_document_ids]
+        abstained_unanswerable = [result for result in unanswerable if _abstained(result)]
+        answerable = [result for result in simulated if result.expected_document_ids]
+        false_abstentions = [result for result in answerable if _abstained(result)]
+        newly_affected = sorted(
+            after.case_id
+            for before, after in zip(results, simulated, strict=True)
+            if before.expected_document_ids and not _abstained(before) and _abstained(after)
+        )
+        aggregated = aggregate(simulated)
+        output.append(
+            {
+                "observed_score_kind": score_kind,
+                "gate_kind": gate_kind,
+                "threshold": threshold,
+                "affected_population_count": len(matching),
+                "inherited_abstention_case_ids": inherited,
+                "undefined_margin_case_ids": (
+                    undefined_margins if gate_kind == MARGIN_GATE else []
+                ),
+                "unanswerable": {
+                    "case_count": len(unanswerable),
+                    "abstention_count": len(abstained_unanswerable),
+                    "abstention_rate": (
+                        round(len(abstained_unanswerable) / len(unanswerable), 4)
+                        if unanswerable
+                        else None
+                    ),
+                    "false_answer_case_ids": sorted(
+                        result.case_id for result in unanswerable if not _abstained(result)
+                    ),
+                },
+                "answerable": {
+                    "case_count": len(answerable),
+                    "false_abstention_count": len(false_abstentions),
+                    "false_abstention_rate": (
+                        round(len(false_abstentions) / len(answerable), 4)
+                        if answerable
+                        else None
+                    ),
+                    "affected_case_ids": newly_affected,
+                },
+                "metrics": {
+                    "overall": {
+                        "document_level": aggregated["document_level"],
+                        "section_level": aggregated["section_level"],
+                    },
+                    "by_probe": aggregated["by_probe"],
+                },
+            }
+        )
+    return output
+
+
+def calibration_sweeps(results: Sequence[CaseResult]) -> dict[str, list[dict[str, Any]]]:
+    """All deterministic candidates, partitioned by observed score kind."""
+    absolute: list[dict[str, Any]] = []
+    margin: list[dict[str, Any]] = []
+    margin_summary: list[dict[str, Any]] = []
+    observed_kinds = sorted(
+        {result.observed_score_kind for result in results if result.observed_score_kind}
+    )
+    for score_kind in observed_kinds:
+        absolute.extend(
+            calibration_sweep(
+                results, score_kind=score_kind, gate_kind=ABSOLUTE_SCORE_GATE
+            )
+        )
+        kind_margin = calibration_sweep(
+            results, score_kind=score_kind, gate_kind=MARGIN_GATE
+        )
+        margin.extend(kind_margin)
+        matching = [
+            result for result in results if result.observed_score_kind == score_kind
+        ]
+        undefined = sorted(
+            result.case_id for result in matching if score_summary(result)["delta"] is None
+        )
+        margin_summary.append(
+            {
+                "observed_score_kind": score_kind,
+                "defined_margin_case_count": len(matching) - len(undefined),
+                "undefined_margin_case_ids": undefined,
+                "candidate_count": len(kind_margin),
+            }
+        )
+    return {
+        "absolute_score": absolute,
+        "margin": margin,
+        "margin_summary": margin_summary,
+    }
 
 
 def rank_of_first_relevant(result: CaseResult, *, level: str) -> int | None:
@@ -297,6 +596,20 @@ def _check_level(level: str) -> None:
         raise ValueError(f"unknown relevance level {level!r}; allowed: {', '.join(LEVELS)}")
 
 
+def _check_score_kind(score_kind: str) -> None:
+    if score_kind not in SCORE_KINDS:
+        raise ValueError(f"unknown score kind {score_kind!r}")
+
+
+def _check_gate(gate_kind: str, threshold: float) -> None:
+    if gate_kind not in GATE_KINDS:
+        raise ValueError(f"unknown gate kind {gate_kind!r}")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise ValueError("gate threshold must be numeric and non-boolean")
+    if not math.isfinite(threshold):
+        raise ValueError("gate threshold must be a finite non-boolean number")
+
+
 # --------------------------------------------------------------------------
 # Impure: corpus, embedder, report.
 # --------------------------------------------------------------------------
@@ -473,6 +786,8 @@ async def run_evaluation(
     *,
     top_k: int,
     min_score: float,
+    configured_score_kind: str,
+    reranker_requested: bool,
     timeout_ms: int = 8_000,
 ) -> list[CaseResult]:
     """Index the corpus once, then retrieve for every case.
@@ -500,6 +815,29 @@ async def run_evaluation(
             limits=RetrievalLimits(top_k=top_k, min_score=min_score, timeout_ms=timeout_ms),
         )
         response = await retriever.retrieve(request)
+        rerank_scores = tuple(chunk.rerank_score for chunk in response.chunks)
+        has_rerank = tuple(score is not None for score in rerank_scores)
+        if any(has_rerank) and not all(has_rerank):
+            raise ValueError("one response has mixed null and non-null rerank scores")
+        if any(has_rerank) and not reranker_requested:
+            raise ValueError("rerank scores were returned when reranking was not requested")
+        reranker_applied = bool(response.chunks) and all(has_rerank)
+        if reranker_applied:
+            if any(
+                isinstance(score, bool)
+                or not isinstance(score, (int, float))
+                or not math.isfinite(score)
+                for score in rerank_scores
+            ):
+                raise ValueError("rerank scores must be finite numeric non-boolean values")
+            observed_score_kind: str | None = JINA_SCORE
+            returned_scores = tuple(float(score) for score in rerank_scores if score is not None)
+        elif response.chunks:
+            observed_score_kind = RRF_SCORE if reranker_requested else configured_score_kind
+            returned_scores = tuple(chunk.relevance_score for chunk in response.chunks)
+        else:
+            observed_score_kind = None
+            returned_scores = ()
         results.append(
             CaseResult(
                 case_id=case.id,
@@ -508,6 +846,11 @@ async def run_evaluation(
                 expected_sections=tuple(case.expected_sections),
                 returned_document_ids=tuple(chunk.document_id for chunk in response.chunks),
                 returned_sections=tuple(chunk.section for chunk in response.chunks),
+                returned_scores=returned_scores,
+                configured_score_kind=configured_score_kind,
+                observed_score_kind=observed_score_kind,
+                reranker_requested=reranker_requested,
+                reranker_applied=reranker_applied,
                 retrieval_status=response.retrieval_status.value,
                 latency_ms=response.latency_ms,
             )
@@ -548,6 +891,8 @@ def build_report(
         "abstention": abstention_stats(results),
         "latency_ms": latency_percentiles(results),
         "misses": miss_report(results),
+        "score_evidence": score_evidence(results),
+        "evaluation_only_calibration_sweeps": calibration_sweeps(results),
     }
 
 
@@ -599,6 +944,20 @@ def _relative_to_repo(path: Path) -> str:
         return path.resolve().relative_to(REPO_ROOT).as_posix()
     except ValueError:
         return path.name
+
+
+def _unit_interval(raw_value: str) -> float:
+    value = float(raw_value)
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError("must be a finite number between 0 and 1")
+    return value
+
+
+def _nonnegative_finite(raw_value: str) -> float:
+    value = float(raw_value)
+    if not math.isfinite(value) or value < 0.0:
+        raise argparse.ArgumentTypeError("must be a finite non-negative number")
+    return value
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -654,11 +1013,65 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--fail-under-mrr",
-        type=float,
+        type=_unit_interval,
         default=None,
         help="Exit non-zero when section-level MRR falls below this value. For CI gating.",
     )
+    parser.add_argument(
+        "--fail-under-doc-mrr",
+        type=_unit_interval,
+        default=None,
+        help="Exit non-zero when document-level MRR falls below this value.",
+    )
+    parser.add_argument(
+        "--fail-under-recall",
+        type=_unit_interval,
+        default=None,
+        help="Exit non-zero when document-level Recall@5 falls below this value.",
+    )
+    parser.add_argument(
+        "--fail-over-latency-p95",
+        type=_nonnegative_finite,
+        default=None,
+        help="Exit non-zero when p95 latency (ms) exceeds this value.",
+    )
     return parser.parse_args(argv)
+
+
+def launch_gate_failures(
+    report: dict[str, Any],
+    *,
+    min_section_mrr: float | None,
+    min_document_mrr: float | None,
+    min_document_recall: float | None,
+    max_latency_p95: float | None,
+) -> list[str]:
+    """Return every strict launch-gate violation; equality always passes."""
+    failures: list[str] = []
+    section_mrr = report["section_level"]["mrr"]
+    if min_section_mrr is not None and section_mrr < min_section_mrr:
+        failures.append(
+            f"section-level MRR {section_mrr} < --fail-under-mrr {min_section_mrr}"
+        )
+    document_mrr = report["document_level"]["mrr"]
+    if min_document_mrr is not None and document_mrr < min_document_mrr:
+        failures.append(
+            "document-level MRR "
+            f"{document_mrr} < --fail-under-doc-mrr {min_document_mrr}"
+        )
+    document_recall = report["document_level"]["recall_at_5"]
+    if min_document_recall is not None and document_recall < min_document_recall:
+        failures.append(
+            "document-level Recall@5 "
+            f"{document_recall} < --fail-under-recall {min_document_recall}"
+        )
+    latency_p95 = report["latency_ms"]["p95"]
+    if max_latency_p95 is not None and latency_p95 > max_latency_p95:
+        failures.append(
+            f"p95 latency {latency_p95}ms > "
+            f"--fail-over-latency-p95 {max_latency_p95}ms"
+        )
+    return failures
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -688,7 +1101,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         reranker=build_reranker(enabled=args.rerank),
     )
     results = asyncio.run(
-        run_evaluation(cases, retriever, top_k=args.top_k, min_score=args.min_score)
+        run_evaluation(
+            cases,
+            retriever,
+            top_k=args.top_k,
+            min_score=args.min_score,
+            configured_score_kind=(
+                JINA_SCORE
+                if args.rerank
+                else {
+                    DENSE: DENSE_COSINE_SCORE,
+                    BM25: BM25_SCORE,
+                    HYBRID: RRF_SCORE,
+                }[args.retriever]
+            ),
+            reranker_requested=args.rerank,
+        )
     )
     report = build_report(
         results,
@@ -708,15 +1136,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print_summary(report, target)
 
-    if args.fail_under_mrr is not None:
-        section_mrr = report["section_level"]["mrr"]
-        if section_mrr < args.fail_under_mrr:
-            print(
-                f"FAIL: section-level MRR {section_mrr} is below "
-                f"--fail-under-mrr {args.fail_under_mrr}.",
-                file=sys.stderr,
-            )
-            return 1
+    failures = launch_gate_failures(
+        report,
+        min_section_mrr=args.fail_under_mrr,
+        min_document_mrr=args.fail_under_doc_mrr,
+        min_document_recall=args.fail_under_recall,
+        max_latency_p95=args.fail_over_latency_p95,
+    )
+    if failures:
+        for message in failures:
+            print(f"FAIL: {message}.", file=sys.stderr)
+        return 1
     return 0
 
 
