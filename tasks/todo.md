@@ -4,6 +4,10 @@ Checklist companion to `tasks/plan.md`. One line per task; tick when the task's
 acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 (main agent) task; others are subagent-dispatchable.
 
+V2 scope authority: `docs/references/doc-update-scope-memory-chat.md` and
+`docs/references/memory-system-and-chat-demo-analysis.md` realign memory to AI
+Chat and define `@Email` as an executable in-chat skill.
+
 ## Phase 0 — Fixtures, baseline, contract freeze
 - [x] P0-A Compatibility test suite (`tests/compatibility/`) — lanes: API contract · ordering/dedupe · query guard · privacy
 - [x] P0-B Labeled routing fixture set (`tests/fixtures/routing/`, ≥25 cases)
@@ -57,38 +61,40 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [ ] 5.5 Advanced observability, alerts, numeric launch gates, scaled evaluation (lifecycle publication + DLQ events delivered at `479bf2d`; numeric gates/scaled eval BLOCKED on user threshold decisions + authorized live runs)
 - [ ] Checkpoint: V1-H exit criteria (separate-process claim, restart durability) — mechanics evidenced by T5.1/T5.2/T5.4 tests; formal sign-off waits on 5.5 blocked items
 
-## V2-M1 — Memory Gateway
-- [ ] Memory contracts: TaskEpisode, MemoryContextRequest, profile/transition/provenance
+## V2-M1 — Chat Memory Gateway and session working memory
+- [ ] ChatMessageRequest/SSE, TaskEpisode, MemoryContextRequest, profile/transition/provenance contracts
 - [ ] In-process Memory Gateway: namespace, eligibility, fail-closed
-- [ ] Route all Agent Core memory access through gateway
-- [ ] Checkpoint: cross-tenant/cross-user fail-closed tests
+- [ ] Chat Session Working Memory keyed by mandatory `session_id` + `feature: ai_chat`, with TTL/compaction
+- [ ] Route all Chat Controller memory access through gateway
+- [ ] Checkpoint: cross-tenant/cross-user/session fail-closed + TTL tests
 
-## V2-M2 — Long-term declarative memory
-- [ ] PostgreSQL profile store; explicit-only writes
-- [ ] Compact profile loading + degraded fallback
+## V2-M2 — AI Chat declarative profile
+- [ ] PostgreSQL persona/profile store; explicit-only writes
+- [ ] Compact per-turn profile loading + degraded fallback
 - [ ] Preference/profile deletion + retention
-- [ ] Checkpoint: preferences affect later plans; read failure never blocks v1
+- [ ] Checkpoint: preferences affect later chat; failure does not block chat or `@Email`
 
-## V2-M3 — Episodic persistence
-- [ ] Idempotent system-generated episode writes (`retrieval_eligible=false`)
+## V2-M3 — Chat and `@Email` episodic persistence
+- [ ] Bounded chat summaries + idempotent `@Email` Action Plan episodes (`retrieval_eligible=false`)
 - [ ] Eligibility enforcement at write + read boundaries (code, not prompts)
-- [ ] Provenance mandatory; no-raw-body validation
+- [ ] Chat session/turn/tool provenance mandatory; no-raw-body validation
 - [ ] Checkpoint: system-generated episodes unretrievable
 
-## V2-M4 — Validation lifecycle
-- [ ] Approve/complete/reject transitions (API + minimal GUI control)
+## V2-M4 — AI Chat Controller, SSE, and `@Email` tool
+- [ ] Chat session/message APIs + Chat Controller event loop + typed SSE handler
+- [ ] `@Email` Skill Tool wrapper returning structured Action Plan cards
+- [ ] Inline approve/complete/reject transitions on cards
 - [ ] Eligibility rule table on every transition; invalid transitions refused
-- [ ] Provenance + timestamps per transition
-- [ ] Checkpoint: approval/completion flips eligibility; rejection does not
+- [ ] Checkpoint: stream/tool lifecycle works; approval/completion flips eligibility
 
-## V2-M5 — Selective episodic retrieval
+## V2-M5 — Selective episodic and RAG retrieval for chat
 - [ ] Episodic retrieval request with eligibility filters + bounded relevance scoring
-- [ ] Selective trigger policy (never every run)
-- [ ] Labeled generator context sources + conflict precedence (FR-13)
+- [ ] Selective chat-intent trigger policy (never every turn)
+- [ ] Labeled persona/session/episode/semantic context + conflict precedence (FR-13)
 - [ ] Checkpoint: approved/completed-only retrieval, even against model request
 
-## V2-M6 — Evaluation and governance
-- [ ] Memory-enabled vs v1-baseline evaluation on labeled set
+## V2-M6 — AI Chat memory evaluation and governance
+- [ ] Memory-enabled vs memory-disabled chat evaluation on labeled set
 - [ ] Retention, purge, deletion audits, index propagation
 - [ ] Zero-tolerance safety metrics/alerts
 - [ ] Launch thresholds established
@@ -98,8 +104,9 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 - [ ] [O] Acceptance review passed → unlock DEMO Increment B
 
 ## DEMO — Showcase frontend
-- [ ] DEMO-A Increment A screens (Connect/Run/Tasks/Detail/Audit) per SPEC §3.1
-- [ ] DEMO-A live browser verification per SPEC §9 (screenshots)
-- [ ] DEMO-B Increment B screens (Preferences/Lifecycle/Insight/Effect/Deletion)
-- [ ] DEMO-B live browser verification
-- [ ] Checkpoint: SPEC §8 criteria 1–10 with evidence
+- [ ] DEMO-A AI Chat Assistant primary screen + embedded `@Email` Action Plan cards
+- [ ] DEMO-A supporting Connect, Knowledge, and Run audit screens per SPEC §3.1
+- [ ] DEMO-A Playwright FE review per SPEC §9 (snapshots, screenshots, console/network/storage)
+- [ ] DEMO-B inline task controls + persona/preferences + memory transparency/provenance/deletion
+- [ ] DEMO-B Playwright live browser verification
+- [ ] Checkpoint: SPEC §8 criteria 1–16 with evidence

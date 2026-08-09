@@ -35,6 +35,10 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
   `generation_confidence` always qualified).
 - **Invariants (AGENTS.md):** raw email never persisted/logged; Gmail read-only;
   no target-state scaffolding without an explicit milestone citation.
+- **V2 Memory Scope (2026-08-09):** the four-type memory system is realigned
+  from the standalone Email pipeline to the Multi-Turn AI Chat Assistant;
+  `@Email` is an executable in-chat skill tool. See
+  `docs/references/memory-system-and-chat-demo-analysis.md` §5.
 
 ## Dependency Graph and Parallel Lanes
 
@@ -57,10 +61,10 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
                           ✅ V1-H PostgreSQL repos + Redis queue/DLQ + observability
                                                  │
                                                  ▼
-               V2-M1 gateway → V2-M2 profile → V2-M3 episodes → V2-M4 lifecycle
+       V2-M1 Chat gateway/session buffer → V2-M2 chat profile → V2-M3 chat/tool episodes
                                                  │
                                                  ▼
-                          V2-M5 selective retrieval → V2-M6 evaluation/governance
+       V2-M4 Chat Controller/SSE/@Email → V2-M5 chat retrieval → V2-M6 governance
                                                  │
                                       PRD-v2 §16 gate review (orchestrator)
                                                  │
@@ -78,7 +82,7 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
 | ✅ V1-M3 | in-repo RAG + SemanticMemoryPort (T3.1/T3.2) — fully independent | generator + validators (T3.3/T3.4) | fallbacks (T3.5/T3.6) after T3.3 |
 | ✅ V1-M4 | persistence + mapper (T4.1/T4.2) | telemetry + dev trace (T4.4/T4.5) | presentation (T4.3) after T4.2 |
 | ✅ V1-H | PostgreSQL adapters (T5.1) | Redis queue/DLQ (T5.2) after T5.1 run store | lifecycle events + retries (T5.3/T5.4) |
-| V2 | mostly sequential; V2-M5 relevance scoring can parallel V2-M4 UI API | | |
+| V2 | mostly sequential; V2-M5 relevance scoring can parallel V2-M4 in-chat lifecycle API | | |
 | ✅ DEMO (Increment A) / DEMO (Increment B) | Increment A screens are sequential on one GUI file; fixtures/test-data prep parallel | | |
 
 **Must stay sequential:** anything touching `workflow.py` core loop in the same
@@ -457,32 +461,33 @@ sensitive payloads; restart loses nothing. **Deps:** §15 gate. **Scope:** L.
 
 ---
 
-## V2 group — Memory Extension (PRD-v2)
+## V2 group — AI Chat Memory and `@Email` Tool Extension (PRD-v2)
 
 Each milestone mirrors master-comparison §7 V2-M*; detailed task refinement
 happens at phase start (gate discipline). Granularity here is work-item level.
 
-- **V2-M1 (gateway):** `TaskEpisode`/`MemoryContextRequest` + profile/episode/
-  transition/provenance contracts; in-process Memory Gateway with namespace
-  resolution, read/write eligibility, fail-closed on missing namespace; all
-  Agent Core memory access routed through it. Exit: cross-tenant/cross-user
-  tests fail closed.
-- **V2-M2 (long-term):** PostgreSQL profile store (explicit-only writes),
-  compact loading with degraded fallback (default profile + warning), deletion.
-  Exit: stored preferences change later output; read failure never blocks v1.
-- **V2-M3 (episodic writes):** one idempotent episode per persisted task,
+- **V2-M1 (chat gateway/session):** `ChatMessageRequest`, SSE event,
+  `TaskEpisode`, `MemoryContextRequest`, profile/transition/provenance
+  contracts; in-process Memory Gateway; bounded Chat Session Working Memory;
+  mandatory `session_id` and `feature: ai_chat`; all Chat Controller access
+  routed through it. Exit: namespace tests fail closed and session TTL works.
+- **V2-M2 (chat profile):** PostgreSQL persona/profile store (explicit-only
+  writes), compact per-turn loading with degraded fallback, and deletion.
+  Exit: stored persona/preferences change later chat responses; failure does
+  not block chat or the stateless `@Email` tool.
+- **V2-M3 (chat/tool episodes):** bounded chat summaries and one idempotent
+  episode per persisted `@Email` Action Plan,
   `system_generated`, `retrieval_eligible=false`; eligibility enforced at
   write AND read boundaries in code; mandatory provenance; no raw body.
-- **V2-M4 (lifecycle):** approve/complete/reject API + minimal GUI control;
-  transactional/idempotent transitions; eligibility rule table enforced;
-  provenance timestamps.
-- **V2-M5 (selective retrieval):** eligibility-filtered episodic retrieval,
-  bounded + relevance-scored; selective trigger policy (never every run);
-  labeled generator context (email/preference/episode/company evidence);
-  conflict precedence rules (FR-13).
-- **V2-M6 (evaluation/governance):** memory-enabled vs v1-baseline evaluation
-  on labeled set; retention + purge + deletion audits; zero-tolerance safety
-  counters; launch thresholds.
+- **V2-M4 (chat/SSE/tool lifecycle):** Chat API Controller, Chat Controller
+  event loop, SSE handler, `@Email` wrapper, Action Plan card DTO, and inline
+  transactional approve/complete/reject controls.
+- **V2-M5 (selective chat retrieval):** eligibility-filtered episodes and
+  enterprise RAG, bounded and relevance-scored from chat intent; labeled
+  system/profile/session/episode/semantic context; conflict rules (FR-13).
+- **V2-M6 (chat memory governance):** memory-enabled vs memory-disabled chat
+  evaluation; retention, purge, deletion audits, zero-tolerance safety
+  counters, and launch thresholds.
 
 **Gate:** PRD-v2 §16 acceptance criteria 1–20 with evidence → DEMO Increment B.
 
@@ -490,20 +495,22 @@ happens at phase start (gate discipline). Granularity here is work-item level.
 
 ## DEMO — Showcase frontend (SPEC-Demo-Frontend)
 
-- **DEMO-A (Increment A, after §15):** Connect / Run / Tasks / Task detail /
-  Run audit screens in `gui/app.py` (Streamlit); idempotent Run creation;
-  Partial-Plan treatment; citation chips; all states (loading/empty/error/
-  success); bilingual-ready copy. Live-verify per SPEC §9 with browser-use MCP
-  + RunPreview; screenshot evidence in the merge record.
+- **DEMO-A (Core Chat and Email Tool):** AI Chat Assistant primary screen,
+  embedded `@Email` execution and Action Plan cards, Connect, Knowledge, and
+  Run audit; typed SSE states, idempotent tool execution, citations, all UI
+  states, and bilingual-ready copy. Live-verify per SPEC §9 with the
+  `playwright-cli` skill; preserve screenshots and console/network evidence.
   - Status 2026-08-08: five-screen implementation + `tests/unit/gui/` helper
     suite landed (import-safe module, VI/EN catalogs, Idempotency-Key reuse on
     retry); ruff/mypy/full suite green; reviewer SHOULD-FIX items applied.
-    Outstanding: SPEC §9 live-browser verification with the user's Gmail OAuth.
-- **DEMO-B (Increment B, after §16):** Preferences / Task lifecycle / Memory
-  insight / Memory effect / Deletion screens, feature-flagged off until
-  endpoints exist.
+    This status describes the legacy email-first UI; chat-first work remains
+    milestone-gated. Outstanding: Playwright review of the existing FE and,
+    later, full SPEC §9 verification with Gmail OAuth.
+- **DEMO-B (Chat Memory and Transparency, after §16):** persona/preferences,
+  inline task controls, memory-recall badges, episode provenance, and deletion,
+  feature-flagged off until endpoints exist.
 
-**Exit:** SPEC §8 criteria 1–10 with browser-verified evidence.
+**Exit:** SPEC §8 criteria 1–16 with Playwright-verified evidence.
 
 ---
 
