@@ -471,6 +471,9 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   contracts; in-process Memory Gateway; bounded Chat Session Working Memory;
   mandatory `session_id` and `feature: ai_chat`; all Chat Controller access
   routed through it. Exit: namespace tests fail closed and session TTL works.
+  **Delivered:** `7e42784..2a29e29`; 73 focused tests, Ruff, strict mypy,
+  and the deterministic full suite pass. AC-02/AC-03 complete; AC-01 has
+  gateway-boundary evidence and awaits the V2-M4 controller.
 - **V2-M2 (chat profile):** PostgreSQL persona/profile store (explicit-only
   writes), compact per-turn loading with degraded fallback, deletion, and
   retention behavior.

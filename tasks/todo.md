@@ -62,11 +62,11 @@ Chat and define `@Email` as an executable in-chat skill.
 - [ ] Checkpoint: V1-H exit criteria (separate-process claim, restart durability) — mechanics evidenced by T5.1/T5.2/T5.4 tests; formal sign-off waits on 5.5 blocked items
 
 ## V2-M1 — Chat Memory Gateway and session working memory
-- [ ] ChatMessageRequest/SSE, TaskEpisode, MemoryContextRequest, profile/transition/provenance contracts
-- [ ] In-process Memory Gateway: namespace, eligibility, fail-closed
-- [ ] Chat Session Working Memory keyed by mandatory `session_id` + `feature: ai_chat`, with TTL/compaction
-- [ ] Route all Chat Controller memory access through gateway
-- [ ] Checkpoint: cross-tenant/cross-user/session fail-closed + TTL tests
+- [x] ChatMessageRequest/SSE, TaskEpisode, MemoryContextRequest, profile/transition/provenance contracts (`310d2fd`)
+- [x] In-process Memory Gateway: namespace, eligibility, fail-closed (`2a29e29`)
+- [x] Chat Session Working Memory keyed by mandatory `session_id` + `feature: ai_chat`, with TTL/compaction (`7e42784`, `2a29e29`)
+- [x] Freeze the Gateway as the sole feature-level memory access boundary (`2a29e29`; controller wiring is V2-M4)
+- [x] Checkpoint: cross-tenant/cross-user/session fail-closed + TTL tests (73 focused tests; deterministic suite exit 0)
 
 ## V2-M2 — AI Chat declarative profile
 - [ ] PostgreSQL persona/profile store; explicit-only writes

@@ -8,13 +8,13 @@
 | Field | Current value |
 |---|---|
 | Updated | 2026-08-10 (Asia/Bangkok) |
-| Branch / implementation baseline | `main` / `e339f6f` (run `git rev-parse --short HEAD` for current handoff commit) |
+| Branch / implementation baseline | `main` / `2a29e29` (implementation; run `git rev-parse --short HEAD` for the current handoff commit) |
 | Product frontier | PRD-v2 Multi-Turn AI Chat Memory + executable `@Email` tool |
-| Active milestone | **V2-M1 — Chat Memory Gateway & Session Working Memory** |
-| PRD-v2 progress | **0/6 milestones; 0/20 acceptance criteria evidenced** |
+| Active milestone | **V2-M2 — AI Chat Declarative Profile** |
+| PRD-v2 progress | **1/6 milestones; 2/20 acceptance criteria complete** |
 | V1 foundation | PRD-v1 §15 passed; Email RAG pipeline implemented and memory-free |
 | Formal readiness caveat | V1-H task 5.5 and final hardening checkpoint remain open |
-| Repository docs | Clean after `e339f6f`; no uncommitted doc/task changes |
+| Repository docs | Dashboard and trackers reconciled through V2-M1 |
 
 ## 1. New-session launch sequence
 
@@ -24,9 +24,10 @@ Do these in order; do not reread the entire documentation set first.
 2. Read this handoff completely.
 3. Run `git status --short --branch` and preserve the user-owned dirty files
    listed in §3 unless their scope is explicitly changed.
-4. For V2-M1, read only:
-   - `docs/PRD-v2-Memory-Extension.md` §10, FR-01, FR-02, FR-18, §16, §17;
-   - `docs/master-comparison.md` contracts 6.3–6.5, 6.9, and V2-M1;
+4. For V2-M2, read only:
+   - `docs/PRD-v2-Memory-Extension.md` §10, FR-03..FR-05, FR-15,
+     FR-16, FR-18, §16, §17;
+   - `docs/master-comparison.md` V2-M2 and the profile/provenance contracts;
    - the source/test slice in §8 below.
 5. Produce a thin-slice plan from §7, then implement with tests first.
 6. Update the dashboard using §12 before ending the session.
@@ -131,8 +132,8 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met,
 
 | Milestone | Status | % | Deliverable / exit gate | Depends on | Evidence |
 |---|---:|---:|---|---|---|
-| V2-M1 Gateway + session working memory | **NEXT** | 0 | Chat/memory contracts; fail-closed namespace; bounded session TTL; no gateway bypass | PRD-v1 baseline | — |
-| V2-M2 Declarative chat profile | BLOCKED | 0 | Explicit-only profile CRUD; per-turn compact load; fallback; deletion/retention | V2-M1 | — |
+| V2-M1 Gateway + session working memory | **DONE** | 100 | Chat/memory contracts; fail-closed namespace; bounded session TTL; no gateway bypass | PRD-v1 baseline | `7e42784..2a29e29`; 73 focused tests; deterministic suite exit 0 |
+| V2-M2 Declarative chat profile | **NEXT** | 0 | Explicit-only profile CRUD; per-turn compact load; fallback; deletion/retention | V2-M1 | — |
 | V2-M3 Chat + `@Email` episodes | BLOCKED | 0 | Idempotent summaries/tool episodes; mandatory provenance; raw-body rejection; ineligible default | V2-M1, V2-M2 contracts | — |
 | V2-M4 Chat Controller + SSE + tool | BLOCKED | 0 | Session/message APIs; typed SSE; `@Email` wrapper; inline lifecycle commands | V2-M1–M3 | — |
 | V2-M5 Selective episodic + RAG retrieval | BLOCKED | 0 | Intent-triggered bounded retrieval; eligibility filters; labeled context; conflict precedence | V2-M4 | — |
@@ -148,17 +149,16 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met,
 | PRD-v2 §16 gate | BLOCKED | Requires AC-01..AC-20 below |
 | DEMO-B unlock | BLOCKED | Requires PRD-v2 §16 pass |
 
-Operational rule: V2-M1 contract-first code and deterministic local tests may
-start now. Do not claim production readiness or unlock later milestones until
-their dependency and acceptance evidence is recorded here.
+Operational rule: V2-M2 contract/policy and profile persistence may start now.
+Do not scaffold episodes, controller/SSE, or production vector infrastructure.
 
 ## 6. PRD-v2 acceptance dashboard
 
 | ID | Acceptance statement | Status | Evidence |
 |---|---|---:|---|
-| AC-01 | Chat Controller accesses all four memories only through Gateway | TODO | — |
-| AC-02 | Every operation carries tenant/user/session/`feature: ai_chat`/type | TODO | — |
-| AC-03 | Bounded working buffer preserves turns and expires by policy | TODO | — |
+| AC-01 | Chat Controller accesses all four memories only through Gateway | TODO | Gateway-only feature boundary: `2a29e29`; actual Chat Controller proof remains V2-M4 |
+| AC-02 | Every operation carries tenant/user/session/`feature: ai_chat`/type | DONE | `310d2fd`, `2a29e29`; domain namespace + foreign-scope gateway tests |
+| AC-03 | Bounded working buffer preserves turns and expires by policy | DONE | `7e42784`, `2a29e29`; `tests/unit/features/ai_chat/test_session_buffer.py` |
 | AC-04 | Explicit persona/preferences persist and load in later sessions | TODO | — |
 | AC-05 | User can invoke `@Email` inside a chat thread | TODO | — |
 | AC-06 | `@Email` stays stateless and owns no durable memory | TODO | — |
@@ -178,82 +178,70 @@ their dependency and acceptance evidence is recorded here.
 | AC-20 | No scheduler, recurring scan, or autonomous email action added | TODO | — |
 
 Evidence format: link a test path, commit SHA, migration, browser artifact, or
-gate record. `DONE` without evidence is invalid. Update the top-level `0/20`
+gate record. `DONE` without evidence is invalid. Update the top-level `2/20`
 counter whenever this table changes.
 
-## 7. Immediate implementation plan — V2-M1
+## 7. Immediate implementation plan — V2-M2
 
-Goal: land the smallest contract-first, fail-closed memory slice without
-touching the Email Action Plan workflow.
+Goal: persist and load a compact, explicit-only declarative chat profile
+without coupling memory into the Email Action Plan workflow.
 
-### Slice M1.0 — contract placement decision
+### Slice M2.0 — explicit-write policy and repository contract
 
-1. Inspect `src/cowork_agent/domain/target_contracts.py` and its round-trip
-   tests; it already holds V1 target DTO conventions and explicitly deferred
-   `TaskEpisode` / `MemoryContextRequest`.
-2. Decide whether chat/memory DTOs remain in that module or move to a focused
-   `domain/chat_contracts.py`. Prefer the focused module if the existing file
-   would become harder to navigate; record the choice here under Decisions.
-3. Freeze contract tests before implementing services.
+1. Extend the existing `DeclarativeProfile` contract only for fields required
+   by FR-03's first UI slice; keep the payload compact and bounded.
+2. Define a framework-free profile repository port and pure write policy that
+   accepts explicit user configuration, explicit remember requests, or trusted
+   admin configuration only.
+3. Freeze rejection tests for passive chat/email inference and foreign scope.
 
-### Slice M1.1 — typed contracts and namespace policy
+### Slice M2.1 — PostgreSQL profile persistence
 
-Implement and test at minimum:
+1. Add an additive migration for the namespaced profile row, expiration, and
+   timestamps; never add raw email or ordinary chat payload columns.
+2. Implement idempotent profile upsert/read/delete behind the repository port.
+3. Prove tenant/user isolation, explicit-only provenance, expiry, and deletion
+   with deterministic repository tests and PostgreSQL integration evidence.
 
-- `ChatMessageRequest(session_id, user_message, tool_choices, idempotency_key)`;
-- `ChatMessageStreamEvent` typed event variants;
-- `MemoryNamespace` with mandatory tenant/user/session, fixed
-  `feature="ai_chat"`, memory type, and record/source identifiers;
-- `MemoryContextRequest` and degraded-source response shape;
-- minimal `TaskEpisode` fields needed by later milestones;
-- pure fail-closed namespace validation and logical-key construction.
+### Slice M2.2 — gateway integration and degraded fallback
 
-Do not add API routes, databases, LLM chat loops, or profile/episode storage in
-this slice.
+1. Add the explicit profile write/delete operations to the Memory Gateway;
+   semantic and episodic writes remain impossible.
+2. Load a compact profile per requested chat turn; absence is a normal empty
+   result, while adapter outage returns the typed long-term degradation.
+3. Prove profile failure leaves working memory and the stateless `@Email`
+   pipeline untouched. Do not add Chat API routes or UI in this milestone.
 
-### Slice M1.2 — Gateway and bounded session buffer
+### V2-M2 exit checklist
 
-1. Add framework-free feature ports/policies under a focused
-   `features/ai_chat/` package.
-2. Implement an in-memory Chat Session Buffer adapter with bounded turn count,
-   TTL, explicit cleanup, and an injectable clock for deterministic tests.
-3. Implement the Memory Gateway facade so all reads/writes validate namespace
-   and policy first; unavailable optional memory returns typed degradation.
-4. Prove cross-tenant, cross-user, cross-session, wrong-feature, expiry,
-   compaction, and no-bypass behavior.
-
-### V2-M1 exit checklist
-
-- [ ] Contract round trips and invalid-schema tests pass.
-- [ ] Missing/inconsistent namespace fails closed.
-- [ ] Session turns are bounded and expire deterministically.
-- [ ] Gateway is the only feature-level memory access boundary.
-- [ ] No raw-email-shaped field exists in a durable memory DTO.
-- [ ] Smallest relevant pytest scope, Ruff, and mypy pass.
-- [ ] AC-01, AC-02, and AC-03 have evidence links.
+- [ ] Explicit-only profile write policy rejects passive inference.
+- [ ] Profile CRUD is tenant/user isolated, idempotent, and expiry-aware.
+- [ ] Gateway returns compact profile data or typed long-term degradation.
+- [ ] Deletion prevents later profile retrieval.
+- [ ] No email body or ordinary chat transcript enters the profile schema.
+- [ ] Focused tests, PostgreSQL integration proof, Ruff, and mypy pass.
+- [ ] AC-04 plus applicable AC-17/AC-19 evidence is recorded.
 - [ ] Dashboard, `tasks/plan.md`, and `tasks/todo.md` agree.
 
-## 8. Source and test map for V2-M1
+## 8. Source and test map for V2-M2
 
 Read these before editing; do not load unrelated provider/UI files.
 
 | File | Why it matters |
 |---|---|
-| `src/cowork_agent/domain/target_contracts.py` | Existing immutable DTO and serialization conventions |
-| `tests/unit/domain/test_target_contracts.py` | Contract round-trip/error pattern |
-| `src/cowork_agent/features/email_action_plan/ports.py` | Protocol style and dependency-boundary example only |
-| `src/cowork_agent/features/email_action_plan/short_term.py` | Existing TTL/cleanup concept; do not reuse email-run semantics as chat semantics |
-| `tests/unit/features/test_short_term.py` | Deterministic short-term testing precedent |
-| `src/cowork_agent/integrations/rag/null_memory.py` | Typed degraded/no-results adapter precedent |
-| `src/cowork_agent/app.py` | Composition root; do not modify until a slice needs wiring |
+| `src/cowork_agent/domain/chat_contracts.py` | Public chat/profile contract facade |
+| `src/cowork_agent/features/ai_chat/ports.py` | Add the profile repository boundary here |
+| `src/cowork_agent/features/ai_chat/memory_gateway.py` | Enforce explicit writes and degraded reads |
+| `src/cowork_agent/persistence/repositories/postgres.py` | Existing PostgreSQL adapter conventions |
+| `src/cowork_agent/persistence/migrations/001_mail_todo.sql` | Baseline only; add a new migration, never rewrite it |
+| `tests/integration/persistence/test_postgres_repositories.py` | PostgreSQL integration/skip pattern |
 
 Expected new test homes:
 
 ```text
-tests/unit/domain/test_chat_contracts.py
-tests/unit/features/ai_chat/test_namespace.py
+tests/unit/features/ai_chat/test_profile_policy.py
 tests/unit/features/ai_chat/test_memory_gateway.py
-tests/unit/features/ai_chat/test_session_buffer.py
+tests/integration/persistence/test_chat_profile_repository.py
 ```
 
 Naming may follow existing repository conventions discovered during M1.0;
@@ -315,14 +303,14 @@ performance slice.
 | New episodes default ineligible | Eligibility enforced in code/storage filters, never prompts |
 | Semantic memory is retrieval-only | Chat and tool can read; neither writes enterprise corpus |
 | SSE is the chat delivery contract | Typed delta/tool/citation/completed/error events |
+| Chat contracts live behind a focused facade | `domain/chat_contracts.py` re-exports focused private chat/common/memory modules |
+| Working-memory TTL is inactivity-based | Appends refresh a 1,800-second default; reads do not; newest 20 logical turns retained |
 
 ### Open decisions (resolve only when their milestone needs them)
 
 | Decision | Needed by | Current handling |
 |---|---|---|
-| Chat contract module placement | V2-M1 M1.0 | Inspect convention, record decision |
-| PostgreSQL profile/episode schema migration shape | V2-M2/M3 | Do not migrate during M1 |
-| Session max turns and TTL numeric defaults | V2-M1 | Define config-backed safe defaults with tests; surface if PRD conflict |
+| PostgreSQL profile/episode schema migration shape | V2-M2/M3 | Resolve profile shape in M2.0; add a new migration in M2.1 |
 | Episode relevance algorithm/threshold | V2-M5 | Deferred |
 | Memory quality launch threshold | V2-M6 | User/product decision |
 
@@ -365,21 +353,23 @@ Update it at every verified slice or changed blocker:
 |---|---|---|
 | 2026-08-10 | `e25a674..e339f6f` | PRD-v2, target architecture, contracts, frontend spec, and trackers realigned to AI Chat |
 | 2026-08-10 | Playwright live review summarized in §10 | Current authenticated V1 frontend/runtime baseline |
+| 2026-08-10 | `7e42784..2a29e29` | V2-M1 contracts, deep immutability, fail-closed gateway, bounded session buffer |
+| 2026-08-10 | 73 focused tests + deterministic full suite exit 0 | V2-M1 code gate; unfiltered live E2E separately failed on Gmail reauth/HTTP timeout |
 
 ## 13. End-of-session handoff template
 
 Before stopping, replace this block's placeholders with current facts:
 
 ```text
-ACTIVE MILESTONE / SLICE:
-STATUS AND PERCENT:
-COMMITS:
-TESTS / LINT / TYPES:
-AC EVIDENCE ADDED:
-FILES CHANGED:
-USER-OWNED DIRTY FILES PRESERVED:
-OPEN BLOCKER + OWNER + NEXT PROOF:
-EXACT NEXT ACTION:
+ACTIVE MILESTONE / SLICE: V2-M2 / M2.0 explicit profile policy and repository contract
+STATUS AND PERCENT: V2-M1 DONE 100%; V2-M2 NEXT 0%
+COMMITS: 7e42784, 310d2fd, 1d92fa1, 2a29e29
+TESTS / LINT / TYPES: 73 focused pass; Ruff pass; mypy 67 files pass; deterministic suite exit 0
+AC EVIDENCE ADDED: AC-02 and AC-03 complete; AC-01 gateway boundary only (controller proof V2-M4)
+FILES CHANGED: chat/memory contracts; ai_chat gateway/ports/session buffer; config/tests; dashboard/trackers
+USER-OWNED DIRTY FILES PRESERVED: caveman deletions, scripts/run_gui.py, skills-lock.json, uv.lock
+OPEN BLOCKER + OWNER + NEXT PROOF: live Gmail needs reauthorization; user/runtime owner; rerun live E2E after reconnect
+EXACT NEXT ACTION: implement M2.0 explicit profile write policy and repository port test-first
 ```
 
 The next agent should be able to act from those fields plus §§1, 7, and 8
