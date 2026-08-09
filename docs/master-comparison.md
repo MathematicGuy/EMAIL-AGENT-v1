@@ -500,7 +500,7 @@ flowchart TB
     MEM --> EPI
     CHAT --> LLM --> SSE --> CLIENT
     LLM -->|explicit tool call| TOOL --> EMAIL --> TASK --> CARD --> SSE
-    CARD -->|system_generated episode| EPI
+    CARD -->|tool result / lifecycle command| CHAT
     EMAIL --> CLEAR
 ```
 

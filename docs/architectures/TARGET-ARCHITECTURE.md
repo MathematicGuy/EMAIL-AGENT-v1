@@ -179,9 +179,11 @@ flowchart TB
 
     BUILD --> TASKDB --> CARD --> SSE
 
-    BUILD -->|write tool episode<br/>status=system_generated| MEMAPI
+    BUILD -->|tool result DTO| CHAT
+    CHAT -->|write turn + tool episode<br/>status=system_generated| MEMAPI
     CARD --> APPROVAL
-    APPROVAL -->|set lifecycle + eligibility| MEMAPI
+    APPROVAL -->|lifecycle command| CHAT
+    CHAT -->|set lifecycle + eligibility| MEMAPI
 
     %% =========================================================
     %% OBSERVABILITY
