@@ -129,7 +129,22 @@ def _to_dict(instance: object) -> dict[str, object]:
 
 
 def _frozen_mapping(value: object, name: str) -> Mapping[str, object]:
-    return MappingProxyType(dict(_as_mapping(value, name)))
+    mapping = _as_mapping(value, name)
+    return MappingProxyType({key: _freeze_value(item) for key, item in mapping.items()})
+
+
+def _freeze_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("nested context mappings must have JSON-compatible string keys")
+        return MappingProxyType(
+            {key: _freeze_value(item) for key, item in value.items()}
+        )
+    if isinstance(value, tuple | list):
+        return tuple(_freeze_value(item) for item in value)
+    if value is None or isinstance(value, str | int | float | bool | Enum | datetime):
+        return value
+    raise TypeError("context values must be JSON-compatible")
 
 
 _RAW_EMAIL_SHAPED_KEYS = frozenset(
@@ -154,5 +169,3 @@ def _reject_raw_email_shaped_keys(value: object) -> None:
     elif isinstance(value, Sequence) and not isinstance(value, str):
         for nested in value:
             _reject_raw_email_shaped_keys(nested)
-
-

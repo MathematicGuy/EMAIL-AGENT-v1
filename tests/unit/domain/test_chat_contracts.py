@@ -350,6 +350,36 @@ def test_context_response_returns_typed_working_turns_and_profile() -> None:
     assert response.profile == _profile()
 
 
+def test_context_response_defensively_freezes_nested_semantic_context() -> None:
+    source = {"citation_ids": ["doc-1#section-2"]}
+    response = MemoryContextResponse(
+        turns=(),
+        profile=None,
+        episodes=(),
+        semantic_context=source,
+        degraded=False,
+        degraded_sources=(),
+    )
+
+    source["citation_ids"].append("doc-2#section-1")
+
+    assert response.to_dict()["semantic_context"] == {
+        "citation_ids": ["doc-1#section-2"]
+    }
+
+
+def test_context_response_rejects_non_json_semantic_context_values() -> None:
+    with pytest.raises(TypeError, match="JSON-compatible"):
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context={"citation_ids": {"doc-1#section-2"}},
+            degraded=False,
+            degraded_sources=(),
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "eligible"),
     [
