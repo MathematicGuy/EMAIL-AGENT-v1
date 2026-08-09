@@ -130,17 +130,18 @@ flowchart TB
     end
 
     CHAT -->|read/write active turns| MEMAPI
-    CHAT -->|active tool state| SHORT
-    SHORT -->|bounded session context| CHAT
     MEMAPI --> POLICY
+    POLICY -->|active session + tool state| SHORT
+    SHORT --> MEMAPI
+    MEMAPI -->|bounded session context| CHAT
     POLICY -->|compact profile per turn| LONG
-    LONG --> CHAT
+    LONG --> MEMAPI
 
     CHAT -->|optional prior-context query| MEMAPI
     POLICY -->|validated episodes only| EPISODE
-    EPISODE --> CHAT
+    EPISODE --> MEMAPI
 
-    CHAT -->|enterprise question| SEMPORT
+    POLICY -->|enterprise chat question| SEMPORT
     NEEDRAG --> SEMPORT
 
     %% =========================================================
@@ -161,7 +162,7 @@ flowchart TB
     SEARCH <--> INDEX
     SEARCH <--> DOCSTORE
     SEARCH --> RERANK --> PACK
-    PACK --> CHAT
+    PACK --> MEMAPI
     PACK --> GENERATE
 
     DIRECT --> GENERATE
@@ -178,9 +179,9 @@ flowchart TB
 
     BUILD --> TASKDB --> CARD --> SSE
 
-    BUILD -->|write episode<br/>status=system_generated| EPISODE
+    BUILD -->|write tool episode<br/>status=system_generated| MEMAPI
     CARD --> APPROVAL
-    APPROVAL -->|set lifecycle + eligibility| EPISODE
+    APPROVAL -->|set lifecycle + eligibility| MEMAPI
 
     %% =========================================================
     %% OBSERVABILITY
@@ -640,7 +641,7 @@ User approval or completion signal
 
 ## Memory namespace
 
-Every memory operation should carry:
+Every memory operation must carry:
 
 ```yaml
 tenant_id: string
@@ -984,6 +985,7 @@ added to task rows, chat history, traces, indexes, or any durable memory type.
 
 ```text
 POST /v1/cowork/chat/sessions
+GET  /v1/cowork/chat/sessions
 POST /v1/cowork/chat/sessions/{session_id}/messages  # SSE response
 GET  /v1/cowork/chat/sessions/{session_id}/messages
 
@@ -994,6 +996,7 @@ GET  /v1/cowork/email-action-plan/runs/{run_id}
 POST /v1/email/messages/read
 POST /v1/memory/context/read
 POST /v1/memory/episodes/write
+POST /v1/memory/episodes/{episode_id}/transition
 POST /v1/rag/retrieve
 POST /v1/tasks
 ```
@@ -1362,7 +1365,8 @@ task:
    No Reflexion or autonomous reasoning loop is included.
 
 9. **Namespacing and provenance are mandatory.**<br>
-   Every durable memory record is tenant- and user-scoped.
+   Every memory operation is scoped by tenant, user, mandatory `session_id`,
+   `feature: ai_chat`, memory type, and provenance.
 
 10. **Optional context must degrade gracefully.**<br>
     Long-term, episodic, and RAG failures have explicit fallback paths.

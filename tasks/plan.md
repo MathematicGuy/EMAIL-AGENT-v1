@@ -472,7 +472,8 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   mandatory `session_id` and `feature: ai_chat`; all Chat Controller access
   routed through it. Exit: namespace tests fail closed and session TTL works.
 - **V2-M2 (chat profile):** PostgreSQL persona/profile store (explicit-only
-  writes), compact per-turn loading with degraded fallback, and deletion.
+  writes), compact per-turn loading with degraded fallback, deletion, and
+  retention behavior.
   Exit: stored persona/preferences change later chat responses; failure does
   not block chat or the stateless `@Email` tool.
 - **V2-M3 (chat/tool episodes):** bounded chat summaries and one idempotent
@@ -544,8 +545,9 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   ≤ 3000 ms (`--fail-over-latency-p95 3000`); DLQ exhaustion rate ≤ 2%
   of runs (measured from LifecycleEventPublisher events over soak);
   raw email leak rate = 0% (dump-scan enforced, non-negotiable).
-  Routing classifier confidence floor stays at 0.50 in code; production
-  tightening to ≥ 0.60 is a V2-M2 follow-up (preference gating).
+  Routing classifier confidence floor stays at 0.50 in code; any production
+  tightening to ≥ 0.60 is a separate V1 routing-evaluation follow-up, not
+  part of the V2 Chat Profile milestone.
 - Preference field set narrowing + approval-UI shape (before V2-M2/M4).
 - Episodic relevance algorithm/thresholds (before V2-M5).
 - Retention periods + memory quality-improvement threshold (before V2-M6).

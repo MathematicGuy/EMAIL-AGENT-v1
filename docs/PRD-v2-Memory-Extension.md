@@ -112,8 +112,8 @@ Open or resume an AI Chat session
 → stream the assistant response
 → when requested, invoke @Email as a stateless tool
 → render its grounded Action Plan card in the active chat thread
-→ approve, complete, or reject the plan in chat
-→ record the chat turn and derived episode
+→ record the chat turn and system-generated, retrieval-ineligible episode
+→ approve, complete, or reject the plan in chat to update episode eligibility
 → delete raw email and transient tool context
 ```
 

@@ -257,4 +257,4 @@ Performed with `frontend-ui-engineering` plus the `playwright-cli` skill:
   upload (the Knowledge screen is read-only inspection + ad-hoc query;
   corpus management stays out of scope).
 - Mobile app or native packaging; responsive-browser support is sufficient
-  (verify 768px and 1440px widths).
+  (verify 320px, 768px, 1024px, and 1440px widths).

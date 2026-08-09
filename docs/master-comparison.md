@@ -504,13 +504,12 @@ flowchart TB
     EMAIL --> CLEAR
 ```
 
-## Diagram 2 — Agent Core State Machine
+## Diagram 2 — Stateless `@Email` Pipeline State Machine
 
 ```mermaid
 flowchart TB
-    START["Start run"] --> STATE["Create short-term state"]
-    STATE --> PROFILE["Load compact profile"]
-    PROFILE --> RULES["Apply deterministic policy guards"]
+    START["Start tool run"] --> STATE["Create transient tool state"]
+    STATE --> RULES["Apply deterministic policy guards"]
     RULES --> CLASS["Classifier call — structured"]
     CLASS --> VALIDCLASS{"Classifier valid?"}
     VALIDCLASS -->|no| RETRY["Retry classifier once"]
@@ -532,8 +531,8 @@ flowchart TB
     GROUND --> BUILD["Build minimal durable task"]
     BUILD0 --> PERSIST["Persist output"]
     BUILD --> PERSIST
-    PERSIST --> EPISODE["Write episode: system_generated, ineligible"]
-    EPISODE --> CLEAR["Clear raw email and temporary context"]
+    PERSIST --> RETURN["Return Action Plan DTO to Chat Controller"]
+    RETURN --> CLEAR["Clear raw email and transient tool context"]
 ```
 
 ## Diagram 3 — Four-Type Memory System
@@ -1311,7 +1310,7 @@ episodes and continues.
 
 ### V2-M6 — AI Chat memory evaluation and governance
 
-Satisfies PRD-v2 §15, §16 Milestone 6, FR-16, FR-17.
+Satisfies PRD-v2 §15, §17 Milestone 6, FR-16, FR-17.
 
 1. Evaluate memory-enabled chat against a memory-disabled chat baseline.
 2. Define retention periods; implement background purge, deletion audits, and index propagation.
