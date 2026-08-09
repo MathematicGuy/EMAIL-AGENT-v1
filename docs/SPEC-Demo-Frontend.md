@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document status | Spec — implementation gated on PRD-v1 and PRD-v2 completion |
-| Version | 1.1 |
+| Version | 1.2 |
 | Date | 2026-08-09 |
 | Milestone position | Final phase after `V2-M6` (master-comparison §7: `DEMO`) |
 | Depends on | PRD-v1 §15 acceptance passed; PRD-v2 §16 acceptance passed |
@@ -14,12 +14,13 @@
 
 ## 1. Purpose
 
-A demonstration frontend that lets a human exercise the complete Cowork
-Agent value loop end-to-end in a browser:
+A demonstration frontend that lets a human exercise the complete Cowork AI
+Chat and executable-tool value loop end-to-end in a browser:
 
 ```text
-Connect Gmail → @Email → watch the Run → see grounded Tasks with Citations
-→ approve/complete/reject → see memory improve the next Run
+Connect Gmail → open AI Chat Assistant → converse or invoke @Email
+→ see a grounded Action Plan card in the chat thread
+→ approve/complete/reject in chat → see memory inform the next turn
 ```
 
 It exists to **prove the product story**, not to be the production Cowork
@@ -42,29 +43,33 @@ must never scaffold or mock unimplemented milestone work
 5. No scheduler, no recurring-run UI, no notification settings.
 6. The demo must not introduce durable storage of its own; all state comes
    from backend endpoints.
+7. Chat responses use the backend SSE contract. Tool calls, tool output, and
+   memory citations render as typed embedded components, not parsed prose.
+8. The UI must distinguish assistant text, tool execution status, Action Plan
+   cards, and memory-recall indicators without exposing full prompts or raw
+   memory payloads.
 
 ## 3. Delivery structure (two increments)
 
-### 3.1 Increment A — PRD-v1 showcase (after PRD-v1 §15 passes)
+### 3.1 Increment A — Core Chat and `@Email` tool
 
 | Screen | Capability shown | PRD-v1 basis |
 |---|---|---|
-| Connect | Mailbox Connection list, Gmail OAuth connect/disconnect | FR-03 |
-| Run | `@Email` invocation: connection picker, max-emails slider, idempotent create, live progress polling, safe error display | FR-01, FR-02 |
-| Tasks | Task list per Run: title, request summary, Action Plan steps, priority (incl. `urgent`), deadline, actionability + route badges, classifier confidence | FR-12, FR-13 |
-| Task detail | Ordered plan steps with per-step Citation chips, supporting documents with links, Gmail deep-link pointer, missing-information warning panel for Partial Plans, "correlated from N emails" indicator (`source_message_ids`) | FR-10, FR-11, FR-12, FR-13 |
-| Knowledge | Corpus readiness indicator, loaded document list with chunk counts, ad-hoc grounded query input with retrieval results (chunks, scores, reranker status), citation chips on grounded answers, empty-state and error handling | V1-M3 (`HybridSemanticMemory`), Email RAG Status Stage 1–2 |
-| Run audit | Route/reason-code summary, retrieval status and result count, validation status, stage latencies (metadata only) | FR-16 |
+| AI Chat Assistant | Primary `st.chat_message` / `st.chat_input` thread, session sidebar, history, streaming assistant response | PRD-v2 V2-M1, V2-M4 |
+| In-chat `@Email` | Explicit tool trigger, visible execution status, and structured Action Plan cards with citation chips in the active thread | PRD-v1 FR-01..FR-13; PRD-v2 V2-M4 |
+| Connect | Mailbox Connection list, Gmail OAuth connect/disconnect | PRD-v1 FR-03 |
+| Knowledge | Corpus readiness, documents, and grounded query inspection for enterprise RAG | V1-M3 (`HybridSemanticMemory`) |
+| Run audit | Chat, SSE, tool-route, validation, and stage-latency metadata only | PRD-v1 FR-16; PRD-v2 FR-17 |
 
-### 3.2 Increment B — PRD-v2 showcase (after PRD-v2 §16 passes)
+### 3.2 Increment B — Chat memory and transparency
 
 | Screen | Capability shown | PRD-v2 basis |
 |---|---|---|
-| Preferences | Explicit Profile editor: language, timezone, output style, priority rules, important people; save/delete | FR-03, FR-04, FR-15 |
-| Task lifecycle | Approve / Complete / Reject controls per Task with Validation Status badge and eligibility indicator | FR-07, §12 |
-| Memory insight | Episode provenance view per Task: status, `retrieval_eligible`, created/updated, pipeline/model version | FR-06, FR-14 |
-| Memory effect | Side-by-side or toggle comparison of the latest Run with/without episodic context where the backend exposes it; preference-application indicator | FR-12, §15 evaluation |
-| Deletion | Delete preference, delete episode(s), with confirmation and post-deletion refresh | FR-15 |
+| Preferences | Explicit AI Chat persona/profile editor: language, tone, brevity, priority rules, and default tool permission | FR-03, FR-04, FR-15 |
+| In-chat task controls | Inline Approve / Complete / Reject controls on `@Email` cards with validation and eligibility state | FR-07, §12 |
+| Memory transparency | In-thread badges for active profile rules, eligible episodic hits, and semantic citations—never raw context | FR-12, FR-14, FR-17 |
+| Episode insight | Provenance view for chat summaries and tool plans: status, eligibility, source session/turn, and versions | FR-06, FR-14 |
+| Deletion | Delete a preference or episode with confirmation and post-deletion refresh | FR-15 |
 
 Increment B screens are feature-flagged off until their backend endpoints
 exist; the demo must run cleanly on an Increment-A-only backend.
@@ -86,18 +91,16 @@ not authorize that promotion.
 
 ```text
 Cowork Demo
-├── 1. Connect        (Mailbox Connections)
-├── 2. Run            (@Email invocation + live progress)
-├── 3. Tasks          (list → detail)
-├── 4. Knowledge      (corpus status, document list, ad-hoc grounded query)
-├── 5. Memory         (Increment B: Preferences | Episodes | Deletion)
-└── 6. Run audit      (route/telemetry summary, dev-gated extras)
+├── 1. AI Chat Assistant  (multi-turn chat, @Email, inline Action Plan cards)
+├── 2. Connect            (Gmail OAuth and Mailbox Connections)
+├── 3. Knowledge          (RAG readiness, documents, grounded query)
+├── 4. Memory             (Preferences | Episodes | Deletion)
+└── 5. Run audit          (chat, SSE, tool, route, and latency metadata)
 ```
 
-Keep the proven 3-step spine of the current GUI for Increment A screens;
-add Knowledge as a standalone screen after Tasks so the RAG pipeline is
-directly testable. Add Memory as a separate page/section so Increment A
-stays untouched.
+Make AI Chat Assistant the default landing screen. Connect and Knowledge
+remain supporting screens. The former standalone Run and Tasks experiences
+move into the chat thread as tool status and Action Plan card components.
 
 ## 6. UX and quality bar
 
@@ -129,6 +132,16 @@ Apply `frontend-ui-engineering` principles within Streamlit's constraints:
    status uses semantic color + text pairs (green + "Ready", amber +
    "Degraded", red + "Unavailable"). Grounded answers display inline
    citation chips that match the chunk provenance returned by retrieval.
+10. **Native chat semantics**: use `st.chat_message` for user/assistant roles
+    and `st.chat_input` for the composer. Preserve focus and message order
+    while incremental SSE deltas arrive.
+11. **Tool progress**: show a concise `st.status` state for queued/running/
+    completed/failed `@Email` execution. Never render raw email payloads.
+12. **Action Plan card**: group title, priority, deadline, ordered steps,
+    missing-information warning, Gmail pointer, citations, and lifecycle
+    controls in one keyboard-operable in-thread component.
+13. **Memory transparency**: label declarative, episodic, and semantic sources
+    with text plus icon; disclose source type and provenance, not full context.
 
 ## 7. Backend API contract assumptions
 
@@ -136,6 +149,10 @@ The demo consumes endpoints; it defines none. Expected inventory:
 
 | Capability | Exists today | Expected from milestones |
 |---|---|---|
+| Create/list chat sessions | ✗ | V2-M1 / V2-M4 — `POST/GET /v1/cowork/chat/sessions` |
+| Send message and stream response | ✗ | V2-M4 — `POST /v1/cowork/chat/sessions/{session_id}/messages` (SSE) |
+| Chat history | ✗ | V2-M1 / V2-M4 — `GET /v1/cowork/chat/sessions/{session_id}/messages` |
+| Execute `@Email` tool | existing standalone run API only | V2-M4 — internal `POST /v1/cowork/tools/email` wrapper |
 | Health, OAuth connect/callback, connections list/delete, unread preview | ✔ `app.py` | — |
 | Create/Run-status/Run-result | ✔ `/v1/mail-todo/runs*` | Compatibility mapper preserves these through V1-M4 |
 | Task list/detail from persisted Tasks | ✗ | V1-M4 (or compatibility result shape suffices for Increment A) |
@@ -144,7 +161,7 @@ The demo consumes endpoints; it defines none. Expected inventory:
 | Document list (`GET /v1/mail-todo/knowledge/documents`) | ✗ | V1-M3 prerequisite — list loaded documents with title, section count, source URL |
 | Grounded query (`POST /v1/mail-todo/knowledge/chat`) | ✗ | V1-M3 prerequisite — ad-hoc query returning grounded answer + citation chips + retrieval chunks with scores |
 | Profile read/write/delete | ✗ | V2-M2 |
-| Approve/complete/reject transitions | ✗ | V2-M4 |
+| Approve/complete/reject transitions | ✗ | V2-M4 in-chat episode transition endpoint |
 | Episode view + deletion | ✗ | V2-M3 / V2-M6 |
 
 If a needed read endpoint is missing at implementation time, file it against
@@ -155,48 +172,58 @@ the owning milestone — do not work around it with client-side logic.
 The demo spec is accepted when:
 
 **Increment A**
-1. A first-time user can connect Gmail, run `@Email`, and see Tasks without
-   touching any config file beyond `.env`.
-2. Every Task card shows title, summary, plan, priority, Gmail pointer;
+1. A first-time user can connect Gmail, create a chat session, and exchange
+   multiple ordered messages without touching configuration beyond `.env`.
+2. Invoking `@Email` in chat visibly triggers the tool and renders its result
+   in the same thread; duplicate triggers share one idempotency key.
+3. Every Action Plan card shows title, summary, plan, priority, Gmail pointer;
    grounded steps show Citation chips linking to source documents.
-3. A Partial Plan is visually distinct and lists `missing_information`.
-4. Correlated Tasks show the source-email count; the Gmail deep link opens
+4. A Partial Plan is visually distinct and lists `missing_information`.
+5. Correlated Tasks show the source-email count; the Gmail deep link opens
    the source message.
-5. Duplicate Run clicks produce one Run (idempotency key).
-6. Backend-down, Run-failed, and empty-result states each render a clear,
+6. Assistant text, tool status, tool output, citations, and terminal stream
+   state are rendered from typed SSE events.
+7. Backend-down, stream-failed, tool-failed, and empty-result states render a clear,
    actionable message.
-7. No raw email body appears anywhere in the UI or browser storage.
-8. The Knowledge screen shows corpus readiness (ready / degraded / unavailable)
+8. No raw email body or full assembled prompt appears in the DOM, console,
+   network response history, or browser storage.
+9. The Knowledge screen shows corpus readiness (ready / degraded / unavailable)
    and a document list with title, section count, and source URL for each
    loaded document.
-9. An ad-hoc grounded query returns an answer with inline citation chips
+10. An ad-hoc grounded query returns an answer with inline citation chips
    linking to source chunks; the retrieval panel shows chunk title, section,
    relevance score, and reranker status for each result.
-10. An empty corpus, retrieval failure, or no-match query renders a clear
+11. An empty corpus, retrieval failure, or no-match query renders a clear
     actionable message (not a stack trace) with the appropriate semantic
     color treatment.
 
 **Increment B**
-11. Preferences can be created, edited, and deleted; a subsequent Run visibly
-    reflects them (or the backend indicates application).
-12. Approve/complete/reject transitions update the badge immediately and the
+12. Persona/preferences can be created, edited, and deleted; a subsequent
+    chat turn visibly reflects them.
+13. Approve/complete/reject transitions on an in-chat card update immediately and the
     eligibility indicator matches the PRD-v2 rule table.
-13. Episodes show provenance fields; deleted memory no longer appears after
+14. An approved tool episode can be recalled on a relevant later turn, while
+    unapproved and rejected episodes remain unavailable.
+15. Memory badges identify the active profile, episode, or semantic source
+    without revealing full stored payloads.
+16. Episodes show provenance fields; deleted memory no longer appears after
     refresh.
 
 ## 9. Live verification plan
 
-Performed with `frontend-ui-engineering` + browser verification
-(browser-use MCP / `RunPreview`):
+Performed with `frontend-ui-engineering` plus the `playwright-cli` skill:
 
 1. Start backend (`mail-todo-api`) and GUI (`python scripts/run_gui.py`).
-2. Open the preview browser; capture screenshots at each step of §8.
-3. Walk the full §1 loop twice: once for a self-contained email
-   (`DIRECT_PLAN`), once for a company-knowledge email (`RETRIEVE_RAG`),
-   asserting Citations appear only on the second.
-4. Force a failure path (backend stopped / invalid connection) and verify
-   the error state.
-5. Navigate to the Knowledge screen; confirm corpus readiness shows "Ready";
+2. Open the UI with `playwright-cli`, snapshot the accessible tree, and check
+   console plus network requests before interaction.
+3. Create a chat session, send two turns, reload, and verify ordered history.
+4. Invoke `@Email` twice with the same idempotency key and verify one tool run
+   and one in-thread Action Plan card.
+5. Exercise `DIRECT_PLAN` and `RETRIEVE_RAG`; verify citations appear only
+   where evidence exists and raw email never appears in snapshots, console,
+   network payload inspection, localStorage, or sessionStorage.
+6. Force backend, SSE, and tool failure paths and verify actionable states.
+7. Navigate to the Knowledge screen; confirm corpus readiness shows "Ready";
    verify the document list renders with title, section count, and source URL.
    Run an ad-hoc grounded query matching a known corpus document (e.g. a
    question about administrative procedures) and verify: (a) the answer
@@ -204,10 +231,12 @@ Performed with `frontend-ui-engineering` + browser verification
    with scores and reranker status. Run a query with no matching content
    and verify the empty-state message. Force a corpus-unavailable state
    (e.g. empty `data/extracted/` directory) and verify the degraded indicator.
-6. Check console/network for errors and for absence of raw email payloads.
-7. Increment B: approve an episode, re-run, verify retrieval-eligible
-   history influences/labels the new plan per backend output.
-8. Record screenshots + a short checklist result in the PR/commit message.
+8. Increment B: approve an episode in chat, send a relevant next turn, and
+   verify the eligible episode is recalled and labeled; reject another and
+   verify it is excluded.
+9. Test keyboard navigation and resize to 320, 768, 1024, and 1440 pixels.
+10. Record Playwright screenshots, console/network findings, and a short
+    checklist result in the PR or commit evidence.
 
 ## 10. Skills workflow for implementation
 
@@ -216,7 +245,7 @@ Performed with `frontend-ui-engineering` + browser verification
 | Task breakdown of this spec | `planning-and-task-breakdown` |
 | Build screens slice by slice | `incremental-implementation`, `frontend-ui-engineering` |
 | Verify against Streamlit/FastAPI docs | `source-driven-development` |
-| Runtime verification | browser-use MCP + `RunPreview` (per §9) |
+| Runtime verification | `playwright-cli` snapshots, interactions, console/network checks, and screenshots (per §9) |
 | Review before merge | `code-review-and-quality` |
 | Commit | `git-workflow-and-versioning` |
 
