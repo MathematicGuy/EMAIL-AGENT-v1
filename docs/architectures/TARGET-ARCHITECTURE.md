@@ -1,46 +1,47 @@
 # TARGET ARCHITECTURE
 
-## Cowork Agent — Email to Action Plan
+## Cowork Agent — AI Chat Assistant with Executable `@Email` Tool
 
 **Architecture level:** Level 2 — Production Engineer<br>
 **Status:** Baseline target architecture<br>
-**Agent pattern:** Deterministic single-agent workflow with conditional retrieval<br>
+**Agent pattern:** Multi-turn Chat Controller with deterministic tool pipelines<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Primary use case:** Read selected Gmail messages, extract Action Items, optionally retrieve company knowledge, and generate cited Action Plans.
+**Primary use case:** Sustain grounded multi-turn chat and execute the stateless Email RAG pipeline as an in-chat `@Email` skill.
 
 ---
 
 ## 1. Product and Architecture Hypothesis
 
-> Can a Cowork Agent use a one-time email read plus persistent company knowledge to create a useful Action Plan without requiring the email to become semantic company knowledge?
+> Can a multi-turn Cowork Chat Assistant combine typed memory, enterprise
+> knowledge, and executable tools while keeping raw email strictly ephemeral?
 
 The primary transformation is:
 
 ```text
-Ephemeral email context
+User chat message + active session buffer
         +
-Persistent user and company context
+Explicit profile + eligible episodes + enterprise RAG
         ↓
-Actionability and knowledge-sufficiency routing
+Chat response or @Email tool invocation
         ↓
-Direct Action Plan or RAG-supported Action Plan
+Streamed response / rendered Action Plan card
         ↓
-Persisted task output and system-generated episode
+Persisted chat turn and system-generated episode
 ```
 
 ### Current workflow characteristics
 
 - Gmail is accessed through a read-only Google integration.
-- The Cowork feature is invoked manually with `@Email`.
-- The workflow is deterministic and one-shot.
-- The LLM does not freely loop over arbitrary tools.
-- The Agent Core owns orchestration and routing.
+- The primary product entry is a multi-turn AI Chat session.
+- The Chat Controller owns session orchestration, context assembly, and SSE streaming.
+- `@Email` is an explicit in-chat skill; its internal workflow remains deterministic and one-shot.
+- The LLM may request only allow-listed tools under deterministic policy.
 - The RAG module is an external, pluggable semantic-memory provider.
 - Reflexion and multi-agent orchestration are out of scope.
 - Email attachments are out of scope under ADR-003; record presence only and do not process
   content.
-- Current outputs are system-generated; users cannot yet edit or approve them.
+- `@Email` Action Plans render with inline approve, complete, and reject controls.
 - System-generated episodes are persisted but are not eligible for retrieval until validated later.
 
 ---
@@ -53,21 +54,20 @@ flowchart TB
     %% =========================================================
     %% ENTRY AND CONTROL PLANE
     %% =========================================================
-    subgraph ENTRY["1. ENTRY & CONTROL PLANE"]
-        CMD["@Email Command<br/>Manual feature invocation"]
-        API["Cowork Feature API<br/>Create Email Action Plan Run"]
-        QUEUE[("Job Queue<br/>run_id · tenant_id · user_id")]
-        DLQ[("Dead-Letter Queue<br/>failed jobs")]
+    subgraph ENTRY["1. CHAT ENTRY & CONTROL PLANE"]
+        CLIENT["AI Chat Client / UI"]
+        API["Chat API Controller<br/>sessions · messages"]
+        SSE["Streaming SSE Handler<br/>deltas · tool events · citations"]
+        CHAT["Chat Controller & Orchestrator<br/>session state · memory · tool routing"]
     end
 
-    CMD --> API
-    API --> QUEUE
-    QUEUE -. exhausted retries .-> DLQ
+    CLIENT --> API --> SSE --> CHAT
 
     %% =========================================================
     %% EMAIL MODULE
     %% =========================================================
-    subgraph EMAIL["2. EMAIL MODULE"]
+    subgraph EMAIL["2. @EMAIL TOOL PLANE"]
+        TOOL["@Email Skill / Tool Adapter<br/>stateless execution boundary"]
         TOKEN[("OAuth Token Store<br/>encrypted credentials")]
         GMAIL["Google Gmail API<br/>read-only access"]
         FETCH["Email Reader Service<br/>fetch selected messages"]
@@ -75,6 +75,8 @@ flowchart TB
         ENVELOPE["EphemeralEmailEnvelope<br/>message_id · Gmail link<br/>normalized body · metadata"]
     end
 
+    CHAT -->|explicit tool invocation| TOOL
+    TOOL --> FETCH
     TOKEN --> FETCH
     FETCH <--> GMAIL
     FETCH --> NORMALIZE --> ENVELOPE
@@ -82,9 +84,9 @@ flowchart TB
     %% =========================================================
     %% AGENT CORE
     %% =========================================================
-    subgraph AGENT["3. AGENT CORE SYSTEM"]
-        WORKER["Agent Worker / Run Coordinator<br/>owns workflow lifecycle"]
-        CONTEXT["Context Assembler"]
+    subgraph AGENT["3. DETERMINISTIC @EMAIL PIPELINE"]
+        WORKER["Tool Run Coordinator<br/>owns transient execution lifecycle"]
+        CONTEXT["Tool Context Assembler"]
         RULES["Deterministic Policy Guard<br/>tax · governance · policy · forms"]
         CLASSIFIER["Actionability + Knowledge-Sufficiency Classifier<br/>structured LLM output"]
         RESOLVER["Route Resolver<br/>rules + classifier + confidence"]
@@ -99,7 +101,7 @@ flowchart TB
         BUILD["Output Builder<br/>minimal durable task artifact"]
     end
 
-    QUEUE --> WORKER
+    TOOL --> WORKER
     ENVELOPE --> WORKER
     WORKER --> CONTEXT
     CONTEXT --> RULES
@@ -116,29 +118,29 @@ flowchart TB
     subgraph MEMORY["4. MEMORY SYSTEM — 4 TYPES"]
         MEMAPI["Memory Gateway / Facade<br/>namespace and policy enforcement"]
 
-        SHORT[("Short-Term Memory<br/>Redis / in-memory TTL<br/>ephemeral email + run state")]
+        SHORT[("Chat Session Buffer<br/>Redis / in-memory TTL<br/>session_id · bounded turns · active tool state")]
 
-        LONG[("Long-Term Memory<br/>PostgreSQL profile store<br/>preferences + configuration")]
+        LONG[("Long-Term Memory<br/>PostgreSQL profile store<br/>persona · preferences · assistant rules")]
 
-        EPISODE[("Episodic Memory<br/>PostgreSQL task episodes<br/>system_generated / approved / completed")]
+        EPISODE[("Episodic Memory<br/>chat summaries + @Email plans<br/>system_generated / approved / completed")]
 
         SEMPORT["Semantic Memory Port<br/>company knowledge interface"]
 
         POLICY["Memory Policy Engine<br/>read/write eligibility<br/>provenance · TTL · deletion"]
     end
 
-    WORKER -->|create run state| SHORT
-    SHORT -->|current run context| CONTEXT
-
-    WORKER --> MEMAPI
+    CHAT -->|read/write active turns| MEMAPI
+    CHAT -->|active tool state| SHORT
+    SHORT -->|bounded session context| CHAT
     MEMAPI --> POLICY
-    POLICY -->|read every run| LONG
-    LONG --> CONTEXT
+    POLICY -->|compact profile per turn| LONG
+    LONG --> CHAT
 
-    CLASSIFIER -->|optional similar-task query| MEMAPI
+    CHAT -->|optional prior-context query| MEMAPI
     POLICY -->|validated episodes only| EPISODE
-    EPISODE --> GENERATE
+    EPISODE --> CHAT
 
+    CHAT -->|enterprise question| SEMPORT
     NEEDRAG --> SEMPORT
 
     %% =========================================================
@@ -159,6 +161,7 @@ flowchart TB
     SEARCH <--> INDEX
     SEARCH <--> DOCSTORE
     SEARCH --> RERANK --> PACK
+    PACK --> CHAT
     PACK --> GENERATE
 
     DIRECT --> GENERATE
@@ -169,27 +172,28 @@ flowchart TB
     %% =========================================================
     subgraph OUTPUT["6. OUTPUT & PRODUCT DATA"]
         TASKDB[("Task Output Database<br/>title · minimal paraphrase<br/>plan · citations · Gmail pointer")]
-        BRIEF["Cowork Daily Brief UI"]
-        APPROVAL{"Future Human Approval Gate"}
+        CARD["In-Chat Action Plan Card"]
+        APPROVAL{"Approve · Complete · Reject"}
     end
 
-    BUILD --> TASKDB --> BRIEF
+    BUILD --> TASKDB --> CARD --> SSE
 
     BUILD -->|write episode<br/>status=system_generated| EPISODE
-    BRIEF -. future approval .-> APPROVAL
-    APPROVAL -. set approved/completed .-> EPISODE
+    CARD --> APPROVAL
+    APPROVAL -->|set lifecycle + eligibility| EPISODE
 
     %% =========================================================
     %% OBSERVABILITY
     %% =========================================================
     subgraph OPS["7. OBSERVABILITY & OPERATIONS"]
         EVENTS["Event Stream<br/>run lifecycle events"]
-        TRACEDEV[("Development Trace Store<br/>may contain full email<br/>encrypted + TTL")]
+        TRACEDEV[("Development Trace Store<br/>metadata only; no raw email")]
         TRACEPROD[("Production Trace Store<br/>metadata only")]
         METRICS["Metrics + Alerts<br/>latency · route · retrieval quality"]
         PURGE["Retention / Purge Jobs"]
     end
 
+    CHAT --> EVENTS
     WORKER --> EVENTS
     EMAIL --> EVENTS
     AGENT --> EVENTS
@@ -206,21 +210,19 @@ flowchart TB
     %% =========================================================
     %% CLEANUP
     %% =========================================================
-    BUILD -->|run complete| WORKER
-    WORKER -->|delete raw email state| SHORT
+    BUILD -->|tool complete| WORKER
+    WORKER -->|purge raw email state| SHORT
 ```
 
 ## Primary execution shape
 
 ```text
-One or more bounded classifier batch calls
-→ one route decision per selected email
-→ deterministic thread/incident correlation into task candidates
+User message → assemble bounded chat memory → stream assistant deltas
+→ optionally invoke @Email → one route decision per selected email
 → zero or one RAG retrieval per task candidate
-→ one Action Plan generation call per task candidate
-→ validate and persist output
-→ write system-generated episode
-→ delete ephemeral run state
+→ one validated Action Plan per task candidate
+→ render card and write system-generated episode
+→ purge ephemeral email/tool state
 ```
 
 There is no Reflexion loop. Retries are infrastructure retries, schema-repair retries, or module fallbacks—not autonomous reasoning retries.
@@ -233,7 +235,8 @@ There is no Reflexion loop. Retries are infrastructure retries, schema-repair re
 flowchart LR
 
     subgraph CALLER["CALLER"]
-        JOB["Agent Job Worker"]
+        TOOL["@Email Skill / Tool Adapter"]
+        CHAT["Chat Controller<br/>active session_id"]
     end
 
     subgraph EMAIL["EMAIL MODULE"]
@@ -264,7 +267,7 @@ flowchart LR
         PRODTRACE[("Prod Trace Store<br/>message_id · latency · status only")]
     end
 
-    JOB --> API
+    CHAT --> TOOL --> API
     API --> AUTH
     AUTH <--> TOKENS
     AUTH --> CONNECTOR
@@ -273,7 +276,7 @@ flowchart LR
     FETCH --> NORMALIZER
     NORMALIZER --> POLICY
     POLICY --> RESULT
-    RESULT --> JOB
+    RESULT --> TOOL -->|formatted Action Plan DTO| CHAT
 
     CONNECTOR -. 429 / 5xx .-> LIMIT
     CONNECTOR -. timeout .-> TIMEOUT
@@ -300,6 +303,7 @@ The Email Module owns:
 
 The Email Module does not own:
 
+- chat sessions or SSE connections;
 - task persistence;
 - long-term memory;
 - episodic retrieval policy;
@@ -342,6 +346,35 @@ fetch_status: complete | partial
 
 # 4. Agent Core and Intent Classifier Architecture
 
+The target has two deliberately separate operational modes. The Chat
+Controller runs the multi-turn event loop and may invoke allow-listed tools;
+the `@Email` tool retains the bounded deterministic V1-M4 pipeline.
+
+```mermaid
+flowchart LR
+    USER["User chat message"] --> CHAT["Chat Controller"]
+    CHAT --> MEMORY["Assemble profile + episodes<br/>RAG + session buffer"]
+    MEMORY --> LLM["Chat LLM"]
+    LLM -->|assistant delta| SSE["SSE stream"]
+    LLM -->|explicit @Email call| TOOL["@Email Tool Adapter"]
+    TOOL --> PIPE["Deterministic Email Pipeline"]
+    PIPE --> CARD["Structured Action Plan DTO"]
+    CARD --> SSE
+    CHAT -->|record bounded turn| MEMORY
+```
+
+## Chat Controller event loop
+
+1. Validate the user, tenant, and `session_id`.
+2. Read bounded working memory, compact profile, eligible episodes, and any
+   selectively requested enterprise RAG context through the Memory Gateway.
+3. Stream assistant deltas and typed tool events over SSE.
+4. Route an explicit `@Email` call through the tool adapter.
+5. Render the returned Action Plan DTO in the originating chat thread.
+6. Record the turn and derived episode, then purge transient tool data.
+
+## Deterministic `@Email` tool pipeline
+
 ```mermaid
 flowchart TB
 
@@ -351,8 +384,8 @@ flowchart TB
         EPISODES["Validated Episodic Hits<br/>optional"]
     end
 
-    subgraph CORE["AGENT CORE — DETERMINISTIC STATE MACHINE"]
-        START["Start Run"]
+    subgraph CORE["@EMAIL TOOL — DETERMINISTIC STATE MACHINE"]
+        START["Start Tool Run"]
         STATE[("Short-Term Run State")]
 
         EXTRACT["Pre-Extraction<br/>candidate outcome · deadline<br/>sender · explicit instructions"]
@@ -416,14 +449,14 @@ flowchart TB
     GENFAIL -. retry exhausted .-> HARDFAIL
 ```
 
-## Router purpose
+### Router purpose
 
 The router answers two separate questions:
 
 1. **Actionability:** Does the email require or suggest user action?
 2. **Knowledge sufficiency:** Can the Action Plan be grounded in the email alone?
 
-## Route decision formula
+### Route decision formula
 
 ```text
 RETRIEVE_RAG =
@@ -432,7 +465,7 @@ RETRIEVE_RAG =
     AND missing knowledge is likely available in company documents
 ```
 
-## Route labels
+### Route labels
 
 ```text
 NO_ACTION
@@ -440,7 +473,7 @@ DIRECT_PLAN
 RETRIEVE_RAG
 ```
 
-## Classifier contract
+### Classifier contract
 
 ```yaml
 actionability:
@@ -487,7 +520,7 @@ reason_codes:
 confidence: number
 ```
 
-## Conservative failure behavior
+### Conservative failure behavior
 
 ```text
 Classifier timeout or invalid schema
@@ -505,7 +538,7 @@ Classifier timeout or invalid schema
 ```mermaid
 flowchart TB
 
-    subgraph CLIENT["AGENT CORE"]
+    subgraph CLIENT["AI CHAT CONTROLLER"]
         REQ["Memory Context Request"]
         WRITE["Memory Write Request"]
     end
@@ -520,19 +553,19 @@ flowchart TB
 
         subgraph SHORTBOX["1. SHORT-TERM MEMORY"]
             SHORT[("Redis / In-Memory Store")]
-            SHORTDATA["Data:<br/>raw email body<br/>classifier result<br/>RAG context<br/>generated candidate"]
-            SHORTTTL["TTL:<br/>until job completion<br/>plus safety expiration"]
+            SHORTDATA["Data:<br/>bounded chat turns<br/>session summary<br/>active tool execution state"]
+            SHORTTTL["TTL:<br/>session policy<br/>plus safety expiration"]
         end
 
         subgraph LONGBOX["2. LONG-TERM DECLARATIVE MEMORY"]
             LONG[("PostgreSQL user_profile")]
-            LONGDATA["Data:<br/>language preference<br/>timezone<br/>priority rules<br/>manager identities<br/>output preferences"]
+            LONGDATA["Data:<br/>assistant persona<br/>language · tone · brevity<br/>priority rules<br/>explicit preferences"]
             LONGWRITE["Writes:<br/>manual configuration<br/>explicit user preference"]
         end
 
         subgraph EPIBOX["3. EPISODIC MEMORY"]
             EPISODE[("PostgreSQL task_episode")]
-            EPIDATA["Data:<br/>task category<br/>minimal action item<br/>generated plan<br/>citations<br/>Gmail pointer<br/>outcome/status"]
+            EPIDATA["Data:<br/>chat summaries<br/>@Email Action Plans<br/>citations · Gmail pointer<br/>outcome/status"]
             STATUS["Status:<br/>system_generated<br/>user_approved<br/>completed<br/>rejected"]
             ELIGIBLE["Retrieval eligible only when:<br/>approved or completed"]
         end
@@ -546,10 +579,10 @@ flowchart TB
 
     REQ --> API --> NS --> READPOL
 
-    READPOL -->|always| SHORT
-    READPOL -->|small profile each run| LONG
+    READPOL -->|active session| SHORT
+    READPOL -->|small profile each turn| LONG
     READPOL -->|validated only| EPISODE
-    READPOL -->|classifier says retrieve| SEM
+    READPOL -->|chat intent says retrieve| SEM
 
     SHORT --> SHORTDATA
     SHORT --> SHORTTTL
@@ -564,7 +597,7 @@ flowchart TB
     SEM --> RAG --> SEMDATA
 
     WRITE --> API --> NS --> WRITEPOL
-    WRITEPOL -->|run state only| SHORT
+    WRITEPOL -->|session turns + active tool state| SHORT
     WRITEPOL -->|explicit/manual only| LONG
     WRITEPOL -->|store system_generated| EPISODE
     WRITEPOL -. no direct agent write .-> SEM
@@ -581,10 +614,10 @@ flowchart TB
 
 | Memory type | Read policy | Write policy | Initial storage |
 |---|---|---|---|
-| Short-term | Always active during current run | Runtime-only writes | Redis or in-process state |
-| Long-term declarative | Load compact profile every run | Manual config or explicit user preference | PostgreSQL |
-| Episodic | Retrieve only validated episodes | Store every generated task as `system_generated` | PostgreSQL |
-| Semantic | Retrieve only when classifier routes to RAG | No direct agent write | Existing RAG module |
+| Short-term | Active for the current `session_id`; bounded by turn and TTL policy | Chat turns and transient tool-state writes | Redis or in-process state |
+| Long-term declarative | Load a compact persona/profile per relevant turn | Manual config or explicit user preference | PostgreSQL |
+| Episodic | Retrieve only eligible chat/tool episodes | Store summaries and `@Email` plans as `system_generated` | PostgreSQL |
+| Semantic | Retrieve when chat or tool intent requires enterprise knowledge | No direct controller write | Existing RAG module |
 
 ## Episodic decision B
 
@@ -612,16 +645,16 @@ Every memory operation should carry:
 ```yaml
 tenant_id: string
 user_id: string
-feature: email_action_plan
+session_id: string
+feature: ai_chat
 memory_type: short_term | long_term | episodic | semantic
-run_id: string | null
 source_id: string | null
 ```
 
 Recommended logical key:
 
 ```text
-tenant_id / user_id / feature / memory_type / record_id
+tenant_id / user_id / session_id / feature: ai_chat / memory_type / record_id
 ```
 
 ## Provenance fields
@@ -748,7 +781,9 @@ It should not call:
 retrieve_and_answer(email)
 ```
 
-The Agent Core remains responsible for the final Action Item and Action Plan.
+The `@Email` deterministic pipeline remains responsible for the final Action
+Item and Action Plan; the Chat Controller owns only session orchestration and
+tool invocation.
 
 ## Retrieval response contract
 
@@ -785,20 +820,20 @@ latency_ms: integer
 ```mermaid
 flowchart LR
 
-    subgraph AGENT["AGENT CORE"]
-        A1["1. Start Email Run"]
-        A2["2. Load Profile"]
-        A3["3. Classify Email"]
-        A4["4. Retrieve Optional Context"]
-        A5["5. Generate Action Plan"]
-        A6["6. Persist Output"]
-        A7["7. End Run"]
+    subgraph CHAT["CHAT CONTROLLER"]
+        A1["1. Receive User Message"]
+        A2["2. Read Memory Context"]
+        A3["3. Call Chat LLM"]
+        A4{"4. @Email requested?"}
+        A5["5. Execute @Email Tool"]
+        A6["6. Stream Response / Card"]
+        A7["7. Record Turn & Episode"]
     end
 
     subgraph MEMORY["MEMORY SYSTEM"]
-        S[("Short-Term<br/>run state")]
+        S[("Chat Session Buffer<br/>session_id turns")]
         L[("Long-Term<br/>profile")]
-        E[("Episodic<br/>task history")]
+        E[("Episodic<br/>chat + tool history")]
         M["Semantic Port"]
     end
 
@@ -806,36 +841,31 @@ flowchart LR
         R["Company Knowledge Retrieval"]
     end
 
-    subgraph PRODUCT["PRODUCT DATA"]
-        T[("Task Output DB")]
+    subgraph TOOL["@EMAIL TOOL"]
+        P["Reader → Classifier → RAG<br/>→ Action Plan Generator"]
+        RAW[("Transient raw email state")]
     end
 
-    A1 -->|create run_id<br/>store raw email temporarily| S
+    subgraph PRODUCT["PRODUCT & STREAM"]
+        T[("Task Output DB")]
+        SSE["SSE Action Plan Card"]
+    end
 
-    A2 -->|read preferences| L
-    L -->|language · timezone<br/>priority rules| A2
-
-    A2 --> A3
-
-    A3 -->|save route decision| S
-
-    A3 -->|optional similar-task query| E
-    E -->|approved/completed only| A4
-
-    A3 -->|when route=retrieve_rag| M
-    M --> R
-    R -->|chunks + citations + scores| A4
-
-    A4 -->|merged context| A5
-    A5 -->|generated output| S
-
-    A5 --> A6
-    A6 -->|minimal task artifact| T
-
-    A6 -->|write episode<br/>status=system_generated<br/>retrieval_eligible=false| E
-
+    A1 -->|append bounded turn| S --> A2
+    A2 -->|persona + preferences| L
+    A2 -->|approved/completed only| E
+    A2 -->|selective enterprise query| M --> R --> A3
+    L --> A3
+    E --> A3
+    A3 --> A4
+    A4 -->|no| A6
+    A4 -->|yes| A5 --> P
+    P --> RAW
+    P -->|validated Action Plan DTO| T --> A6 --> SSE
     A6 --> A7
-    A7 -->|delete raw email<br/>delete temporary context| S
+    A7 -->|chat turn + system_generated plan| E
+    A7 -->|updated bounded context| S
+    A7 -->|purge| RAW
 ```
 
 ---
@@ -844,10 +874,13 @@ flowchart LR
 
 | Component | Owns | Must not own |
 |---|---|---|
+| Chat Controller | Chat turns, context assembly, tool routing, SSE connection | Raw email persistence or memory storage internals |
+| Chat Session Buffer | Bounded short-term turn history for one `session_id` | Durable profile or episodes |
+| `@Email` Tool | Transient Gmail fetch and deterministic pipeline state | Chat session history or durable raw email |
 | Job Queue | Run delivery | Email content |
 | Email Module | OAuth, Gmail fetching, normalization | Tasks or durable memories |
-| Agent Core | Workflow decisions and generation | Company document storage |
-| Short-Term Memory | Current run state and temporary email context | Durable user facts |
+| Deterministic Email Pipeline | Email routing and Action Plan generation | Chat orchestration or company document storage |
+| Short-Term Memory | Active chat turns and temporary tool state | Durable user facts or raw-email retention |
 | Long-Term Memory | Stable user and system configuration | Raw emails |
 | Episodic Memory | Derived task history and outcome status | Raw email body |
 | RAG Module | Company documents, chunks, embeddings, citations | User task history |
@@ -858,7 +891,9 @@ flowchart LR
 
 # 9. Email Content Database Trace
 
-Email content can enter persistent infrastructure through two different paths.
+Raw email content never enters persistent infrastructure. The only permitted
+path is transient in-process or TTL-bound tool state that is purged when the
+`@Email` invocation completes or fails.
 
 ## 9.1 Development observation path
 
@@ -866,7 +901,8 @@ Email content can enter persistent infrastructure through two different paths.
 Gmail API
 → Email Module
 → Agent runtime
-→ Development Trace Store
+→ Transient tool state
+→ purge on completion/failure
 ```
 
 Possible fields:
@@ -877,25 +913,21 @@ tenant_id: string
 user_id: string
 gmail_message_id: string
 
-input_payload: full email content
-normalized_email: object
-classifier_input: object
-classifier_output: object
+input_payload: prohibited
+normalized_email: prohibited
+classifier_input: metadata_only
+classifier_output: metadata_only
 retrieval_query: string | null
-retrieved_context: object | null
-generation_input: object
-generation_output: object
+retrieved_context: citation_ids_only
+generation_input: metadata_only
+generation_output: derived_action_plan_only
 
 created_at: datetime
 expires_at: datetime
 environment: development
 ```
 
-Required note:
-
-> **ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE**
-
-This trace must not feed:
+This metadata trace must not feed:
 
 - long-term memory extraction;
 - episodic-memory learning;
@@ -943,13 +975,19 @@ classifier_confidence: number
 generation_confidence: number | null
 ```
 
-Raw email content may be added later at the database layer if product policy explicitly allows it. If that happens, it should be represented as a separate source record with its own provenance, retention, access policy, and deletion path—not silently embedded inside task or memory rows.
+Raw email content is transient `@Email` tool-execution data. It must never be
+added to task rows, chat history, traces, indexes, or any durable memory type.
 
 ---
 
 # 10. Suggested Internal Service APIs
 
 ```text
+POST /v1/cowork/chat/sessions
+POST /v1/cowork/chat/sessions/{session_id}/messages  # SSE response
+GET  /v1/cowork/chat/sessions/{session_id}/messages
+
+POST /v1/cowork/tools/email
 POST /v1/cowork/email-action-plan/runs
 GET  /v1/cowork/email-action-plan/runs/{run_id}
 
@@ -963,6 +1001,10 @@ POST /v1/tasks
 ## Suggested internal events
 
 ```text
+chat.message.received
+chat.tool.invoked
+chat.message.completed
+
 cowork.run.created
 cowork.run.started
 
@@ -1163,18 +1205,19 @@ High-impact external actions—sending email, changing company systems, purchasi
 
 ## Development tracing
 
-May include full email and generated output during the current development stage.
+Development tracing is metadata-only. It may include identifiers, route
+labels, latency, citations, and derived output status, but never raw email,
+normalized bodies, or full prompts.
 
 Required controls:
 
 - development environment only;
-- encrypted storage;
 - restricted access;
 - automatic TTL;
 - environment-level guard preventing accidental production enablement;
 - no memory consolidation;
 - no semantic indexing;
-- no training export by default.
+- no training export.
 
 ## Production tracing
 
@@ -1292,20 +1335,22 @@ task:
 
 # 16. Architecture Principles
 
-1. **Agent Core owns orchestration.**<br>
-   Email and RAG remain external tools or modules.
+1. **The Chat Controller owns session orchestration.**<br>
+   `@Email` is an executable skill backed by a deterministic tool pipeline;
+   Email and RAG remain external modules.
 
 2. **RAG is semantic memory, not the Agent itself.**<br>
    It retrieves company knowledge; it does not own the final task-generation policy.
 
 3. **Memory reads are selective.**<br>
-   Short-term and long-term are loaded by default; episodic and semantic context are conditional.
+   The bounded session buffer and compact profile are loaded by default;
+   episodic and semantic context are conditional on chat intent.
 
 4. **Memory writes are typed and controlled.**<br>
    Long-term writes are explicit. Episodic writes are allowed as `system_generated`, but retrieval remains disabled until validation.
 
-5. **Raw email and derived task output are different data classes.**<br>
-   If raw email persistence is enabled later, it must have a separate schema and lifecycle.
+5. **Raw email is transient tool-execution data.**<br>
+   It is never durable memory; only minimal derived task output and references may persist.
 
 6. **No unsupported company-specific steps.**<br>
    RAG failure produces a partial plan, not a hallucinated procedure.
@@ -1326,21 +1371,18 @@ task:
 
 # 17. Initial Implementation Order
 
-1. Define shared data contracts.
-2. Implement `EphemeralEmailEnvelope`.
-3. Implement run coordinator and queue worker.
-4. Implement short-term run-state storage and cleanup.
-5. Implement compact long-term profile loading.
-6. Implement structured Actionability and Knowledge-Sufficiency Classifier.
-7. Implement route resolver with hard policy guards.
-8. Wrap the existing RAG module behind `SemanticMemoryPort`.
-9. Implement Action Plan Generator and validators.
-10. Implement task persistence with idempotency.
-11. Implement episodic writes as `system_generated`.
-12. Enforce `retrieval_eligible = false` for unvalidated episodes.
-13. Add event stream, development tracing, and production telemetry.
-14. Build a labeled routing evaluation dataset.
-15. Add future human-approval transitions only after the deterministic baseline is stable.
+1. Retain the completed V1-M1..M4 stateless Email RAG pipeline.
+2. Define chat session, SSE event, memory-context, and tool-result contracts.
+3. Implement the Memory Gateway namespace and Chat Session Buffer.
+4. Implement compact declarative profile loading for chat turns.
+5. Implement chat-summary and `@Email` Action Plan episodic writes.
+6. Enforce `retrieval_eligible = false` for unvalidated episodes.
+7. Implement Chat API session endpoints and the SSE Streaming Handler.
+8. Implement the Chat Controller event loop and allow-listed tool routing.
+9. Wrap the Email RAG pipeline behind the `@Email` Skill / Tool Adapter.
+10. Render Action Plan cards and idempotent inline lifecycle controls.
+11. Add selective episodic and semantic retrieval for chat intent.
+12. Add metadata-only events, evaluation, deletion, and governance gates.
 
 ---
 
@@ -1363,21 +1405,18 @@ task:
 # 19. Baseline Summary
 
 ```text
-@Email
-→ queue
-→ Gmail read
-→ normalize email
-→ create ephemeral run state
-→ load compact long-term profile
-→ classify actionability and knowledge sufficiency
-→ no action, direct generation, or one RAG retrieval
-→ generate structured Action Plan
-→ validate grounding and citations
-→ persist task output
-→ persist system-generated episode
-→ disable episode retrieval
-→ clear ephemeral state
-→ emit traces and metrics
+AI Chat client creates or resumes a session
+→ user sends a message through the Chat API
+→ Chat Controller assembles session, profile, eligible episode, and RAG context
+→ SSE handler streams assistant deltas
+→ explicit @Email request invokes the stateless Email RAG tool
+→ Gmail is read into transient tool state
+→ deterministic routing produces a grounded Action Plan
+→ Action Plan card streams into the active chat thread
+→ minimal task output and a retrieval-ineligible episode persist
+→ chat turn is recorded and raw email state is purged
+→ inline approval or completion may enable later episodic retrieval
 ```
 
-This document is the baseline target architecture for the first production-oriented implementation of the Cowork Email Action Plan Agent.
+This document is the baseline target architecture for the Cowork AI Chat
+Assistant, its four-type memory engine, and the executable `@Email` tool.
