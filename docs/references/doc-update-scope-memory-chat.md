@@ -9,9 +9,10 @@
 
 ## 1. Core Architecture Realignment Vision
 
-The project documentation across `PRD-v2-Memory-Extension.md`, `TARGET-ARCHITECTURE.md`, `SPEC-Demo-Frontend.md`, and `master-comparison.md` currently binds the 4-Type Memory System directly to a standalone, asynchronous Email-to-Action-Plan batch pipeline. 
+The project documentation across `PRD-v2-Memory-Extension.md`, `TARGET-ARCHITECTURE.md`, `SPEC-Demo-Frontend.md`, and `master-comparison.md` currently binds the 4-Type Memory System directly to a standalone, asynchronous Email-to-Action-Plan batch pipeline.
 
 Following team alignment and analysis:
+
 1. **Email RAG is Standalone & Memory-Free**: The Email RAG pipeline (V1-M1..V1-M4) is mostly completed, frontend-functional, and operates as a single-turn, stateless execution. It does NOT require or consume the 4-Type Memory System.
 2. **Memory System Powers AI Chat**: The 4-Type Memory System (Working Memory, Declarative Profile, Episodic Memory, Semantic RAG) is decoupled from standalone email runs and reassigned to power a primary **multi-turn AI Chat Assistant**.
 3. **`@Email` as an Executable Skill/Tool**: Inside the AI Chat Assistant interface, `@Email` is defined as an executable skill/tool. When a user invokes `@Email` (or requests email action plans), the Chat Controller executes the Email RAG pipeline and renders the generated Action Plan directly into the active chat thread as a rich component.
@@ -24,7 +25,7 @@ Following team alignment and analysis:
 ### File 1: `PRD-v2-Memory-Extension.md`
 
 | Section Citation | Current State | Modification Instructions |
-|---|---|---|
+| --- | --- | --- |
 | **Title & Metadata** (`L1-16`) | "Cowork Agent — Long-Term and Episodic Memory Extension" (Version 2.0, centered on Email Action Plan). | **Modify**: Rename title to *"Cowork Agent — Memory Extension for AI Chat Assistant & Executable `@Email` Tool"*. Update metadata table to reflect AI Chat Assistant as the primary memory target. |
 | **§1. Executive Summary** (`L19-60`) | Describes extending the deterministic Email-to-Action-Plan workflow with memory. | **Modify**: Reframe Executive Summary. State explicitly that PRD-v2 decouples Memory from standalone Email RAG and reassigns it to the multi-turn AI Chat Assistant. Define `@Email` as an in-chat executable skill. Update lifecycle diagram to: `User Chat Turn → Memory Engine Context Assembly → Response & Tool Execution (@Email) → Action Plan Rendered in Chat → Record Turn & Episode in Memory → Purge Ephemeral Raw Email`. |
 | **§2. Product Hypothesis** (`L62-79`) | Focuses on memory improving email prioritization and plan consistency across email runs. | **Modify**: Shift hypothesis to multi-turn conversational AI Chat. Memory improves chat continuity, preference adherence, persona alignment, and cross-session task context. Retain raw email ephemerality rule. |
@@ -47,7 +48,7 @@ Following team alignment and analysis:
 ### File 2: `TARGET-ARCHITECTURE.md`
 
 | Section Citation | Current State | Modification Instructions |
-|---|---|---|
+| --- | --- | --- |
 | **Header & §1. Product Hypothesis** (`L1-46`) | Describes deterministic single-agent workflow for Email Action Plan with embedded Memory & RAG. | **Modify**: Reframe Level 2 target architecture to be **AI Chat Assistant with Executable `@Email` Tool & 4-Type Memory System**. Update primary use case to multi-turn conversational chat with memory and skill invocation. |
 | **§2. Overall Production Architecture** (`L48-230`) | Mermaid diagram and description with `@Email Command` entering `Cowork Feature API` -> `Agent Core`. | **Modify**: Update Architecture Diagram (§2):<br>1. **Entry Plane**: Replace `@Email Command` entry with **`AI Chat Client / UI`** connecting to **`Chat API Controller`** via **`Streaming SSE Handler`**.<br>2. **Control Plane**: Introduce **`Chat Controller & Orchestrator`** that owns chat session state, calls Memory Gateway, and invokes LLMs/Tools.<br>3. **Tool Plane**: Add **"`@Email` Skill / Tool Adapter"**. When invoked, it executes the standalone Email RAG pipeline (Email Reader -> Classifier -> Email RAG -> Action Plan Generator) statelessly.<br>4. **Memory Plane**: Connect Memory Gateway to `Chat Controller`. Short-Term Memory stores `Chat Session Buffer` (`session_id`). Episodic Memory stores validated chat turns & approved Action Plans. |
 | **§3. Email Module Architecture** (`L231-341`) | Email Module as standalone primary workflow driver. | **Modify**: Re-position Email Module as a backend component wrapped by the `@Email` Skill Tool. Emphasize that execution is triggered via Chat Controller and returns formatted Action Plan DTO to the active chat session. |
@@ -64,7 +65,7 @@ Following team alignment and analysis:
 ### File 3: `SPEC-Demo-Frontend.md`
 
 | Section Citation | Current State | Modification Instructions |
-|---|---|---|
+| --- | --- | --- |
 | **Header & §1. Purpose** (`L1-29`) | Demo value loop: `Connect Gmail → @Email → watch the Run → see Tasks → approve/complete → see memory improve next Run`. | **Modify**: Re-align purpose and value loop to:<br>`Connect Gmail → Open AI Chat Assistant → Multi-turn Chat / Invoke @Email Tool → See rendered Action Plan in Chat Thread → Approve/Complete in Chat → Observe Memory Context active in Chat`. |
 | **§2. Positioning and Hard Rules** (`L30-46`) | Rule 1: Client of FastAPI backend. Rule 3: Raw email bodies never rendered. | **Modify**: Retain all hard privacy rules. Add: AI Chat UI uses standard streaming SSE / polling client logic and renders tool execution outputs as structured embedded components. |
 | **§3. Delivery Structure (Increments A & B)** (`L47-71`) | Table of screens: Connect, Run, Tasks, Task detail, Knowledge, Run audit, Preferences, Task lifecycle, Memory insight, Deletion. | **Modify**: Restructure Increments:<br>• **Increment A (Core Chat & Email Tool)**:<br>  - `AI Chat Assistant`: Chat thread UI (`st.chat_input`), session sidebar, message history.<br>  - `@Email` Skill Execution: In-chat tool trigger that runs Email RAG and renders Action Plan cards with citation chips directly inside the chat thread.<br>  - `Connect` & `Knowledge` screens (retained for connection status & corpus inspection).<br>• **Increment B (Chat Memory & Transparency)**:<br>  - `Preferences`: Explicit user profile editor.<br>  - `In-Chat Task Controls`: Inline `Approve` / `Complete` / `Reject` buttons on `@Email` Action Plan components.<br>  - `Memory Transparency`: In-chat memory recall badges showing active profile rules and retrieved episodic hits used by the assistant. |
@@ -79,7 +80,7 @@ Following team alignment and analysis:
 ### File 4: `master-comparison.md`
 
 | Section Citation | Current State | Modification Instructions |
-|---|---|---|
+| --- | --- | --- |
 | **§0. Alignment Decision** (`L20-77`) | Describes corrected execution shape for Email Action Plan workflow. | **Modify**: Add Alignment Decision section updating the architectural target: Standalone Email RAG is completed as a stateless service (V1-M1..M4); PRD-v2 Memory System is assigned to power the **AI Chat Assistant**, with `@Email` integrated as an executable chat skill. |
 | **Step 2. Current vs Authoritative Target Gap Table** (`L201-236`) | 25 comparison rows mapping email workflow gaps. | **Modify/Add Rows**: <br>• Add row: `AI Chat Controller` (Missing -> Add Chat Controller & SSE streaming handler).<br>• Add row: `Chat Session Working Memory` (Missing -> Add Redis/In-memory Chat Session Buffer).<br>• Add row: `@Email Chat Skill Tool` (Missing -> Wrap Email RAG pipeline as executable chat tool).<br>• Modify row: `Memory Gateway` (Re-route namespace and policy engine to serve Chat Controller). |
 | **Step 4. Recommended Changes (Keep/Modify/Add/Remove)** (`L374-437`) | Lists components to Keep, Modify, Add, Remove. | **Modify**: <br>• **Keep**: Standalone Email RAG pipeline, Gmail OAuth adapter, Hybrid Semantic RAG.<br>• **Modify**: Memory Gateway (serve Chat API), Episodic Store (store chat turns & tool outputs).<br>• **Add**: Chat API Controller, SSE Streaming Handler, Chat Session Working Memory (`session_id`), `@Email` Skill Tool Wrapper, In-Chat Task Validation UI. |
@@ -94,7 +95,7 @@ Following team alignment and analysis:
 ### Component Ownership Realignment
 
 | Component | Legacy Assignment | Reassigned Target Architecture |
-|---|---|---|
+| --- | --- | --- |
 | **Short-Term Working Memory** | Ephemeral Email Run state (`run_id`) | Active Chat Session Buffer (`session_id` + turn history) |
 | **Long-Term Declarative Memory** | Email output preferences | AI Chat persona, output style, user role, and explicitly saved facts |
 | **Long-Term Episodic Memory** | Email task run history | Chat conversation summaries & validated `@Email` Action Plan outputs |
