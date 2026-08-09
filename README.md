@@ -165,13 +165,17 @@ email-agent-v1/
 
 ```bash
 # Tạo môi trường ảo Python
-python -m venv .venv
+python3 -m venv .venv
+# Hoặc với uv: uv venv --python 3.12 .venv
+
+# Kích hoạt môi trường ảo (Linux / Ubuntu / macOS)
+source .venv/bin/activate
 
 # Kích hoạt môi trường ảo (Windows PowerShell)
-.\.venv\Scripts\activate
+# .\.venv\Scripts\activate
 
 # Cài đặt package ở chế độ editable cùng dev & gui dependencies
-python -m pip install -e ".[dev,gui]"
+pip install -e ".[dev,gui]"
 ```
 
 ### 4.2 Cấu hình môi trường (`.env`)
@@ -199,14 +203,24 @@ OAUTH_STATE_SECRET="your_oauth_state_secret"
 ### 4.3 Khởi chạy dịch vụ
 
 - **Chạy API Server (FastAPI):**
-  ```powershell
-  .\.venv\Scripts\mail-todo-api.exe
-  ```
+  - *Linux / Ubuntu:*
+    ```bash
+    .venv/bin/mail-todo-api
+    ```
+  - *Windows PowerShell:*
+    ```powershell
+    .\.venv\Scripts\mail-todo-api.exe
+    ```
 
 - **Chạy Giao diện Kiểm thử Streamlit GUI:**
-  ```powershell
-  python scripts/run_gui.py
-  ```
+  - *Linux / Ubuntu:*
+    ```bash
+    .venv/bin/python scripts/run_gui.py
+    ```
+  - *Windows PowerShell:*
+    ```powershell
+    python scripts/run_gui.py
+    ```
   Giao diện sẽ khởi chạy tại `http://localhost:8501`.
 
 ---
@@ -217,13 +231,16 @@ Chạy bộ công cụ kiểm tra chất lượng mã nguồn:
 
 ```bash
 # Kiểm tra linter & code style
-python -m ruff check .
+ruff check .
 
 # Kiểm tra kiểu tĩnh (Static Type Check)
-python -m mypy src
+mypy src
 
 # Chạy toàn bộ Unit, Integration và Contract tests
-python -m pytest -q
+pytest -q
+
+# Chạy E2E Frontend-API Integration tests (Linux / Ubuntu & Windows)
+pytest tests/integration/api/test_e2e_frontend_api.py -v
 ```
 
 ---
