@@ -1368,3 +1368,45 @@ def test_telemetry_marks_degraded_retrieval_fallback() -> None:
         assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
 
     asyncio.run(scenario())
+
+
+def test_completion_timestamp_is_taken_after_the_work_not_at_claim_time() -> None:
+    """Regression: run.completed_at reused the claim clock, so every durable
+    record showed a zero-second run and hid the latency the SLO measures."""
+
+    class SlowMailbox(FakeMailbox):
+        """Spends real time, so a claim-time stamp is measurably too early."""
+
+        async def get_thread(
+            self, connection_id: str, thread_id: str
+        ) -> Sequence[EphemeralEmailEnvelope]:
+            await asyncio.sleep(0.05)
+            return await super().get_thread(connection_id, thread_id)
+
+    async def scenario() -> None:
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-1"
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            SlowMailbox([email("m1", "t1", "Newsletter")]),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": INFORMATIONAL_DECISION}),
+            FakePlanGenerator(()),
+            ShortTermStore(),
+            task_repository=InMemoryTaskRepository(),
+        )
+        completed = await worker.execute(run.id)
+        assert completed is not None and completed.completed_at is not None
+        assert completed.started_at is not None
+        elapsed = (completed.completed_at - completed.started_at).total_seconds()
+        assert elapsed >= 0.05, f"completed_at stamped at claim time (elapsed {elapsed}s)"
+        # The injected-clock path stays deterministic for every other test.
+        pinned = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-2", now=NOW
+        )
+        assert (await worker.execute(pinned.id, now=NOW)).completed_at == NOW
+
+    asyncio.run(scenario())

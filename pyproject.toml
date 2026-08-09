@@ -43,7 +43,9 @@ mail-todo-worker = "cowork_agent.orchestration.worker:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "." because test modules import shared helpers as `tests.fixtures.*`; without
+# it collection only works under `python -m pytest`, which happens to add the CWD.
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.ruff]

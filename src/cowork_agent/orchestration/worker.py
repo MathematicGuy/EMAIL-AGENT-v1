@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 import sys
-from pathlib import Path
 
 from cowork_agent.config import (
     FaucetSettings,
@@ -29,11 +28,9 @@ from cowork_agent.features.email_action_plan.observability import (
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
-    SemanticMemoryPort,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
-from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailMailboxAdapter
@@ -49,10 +46,7 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
 )
-from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
-from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
-from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
-from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
@@ -60,29 +54,6 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: Committed in-repo knowledge corpus; resolved from the package root.
-_RAG_CORPUS_PATH = Path(__file__).resolve().parents[3] / "data" / "extracted"
-
-
-async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort:
-    """Best-effort corpus index; null memory keeps runs moving (§12.3)."""
-    try:
-        documents = load_corpus(_RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
-        memory = HybridSemanticMemory(
-            documents,
-            GeminiEmbeddingAdapter(settings),
-            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
-        )
-        await memory.build_index()
-        return memory
-    except Exception as exc:
-        logger.warning(
-            "Semantic memory unavailable (%s); retrieval returns structured empty results",
-            type(exc).__name__,
-        )
-        return NullSemanticMemory()
-
 
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
@@ -118,7 +89,7 @@ async def run_worker() -> None:
             gemini_settings = GeminiSettings.from_env()
             classifier = GeminiRouteClassifier(gemini_settings)
             generator = GeminiActionPlanGenerator(gemini_settings)
-            semantic_memory = await _build_semantic_memory(gemini_settings)
+            semantic_memory = await build_semantic_memory(gemini_settings)
         elif provider == "groq":
             groq_settings = GroqSettings.from_env()
             classifier = GroqRouteClassifier(groq_settings)
@@ -164,6 +135,9 @@ async def run_worker() -> None:
 
 
 def main() -> None:
+    # See app.main(): INFO records are dropped without a root handler, and the
+    # trace sink plus lifecycle publication are INFO-only.
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     if sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop.
         from asyncio import windows_events

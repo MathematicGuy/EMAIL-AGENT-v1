@@ -1,12 +1,10 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
-import asyncio
 import logging
 import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, cast
 
 import uvicorn
@@ -73,9 +71,10 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
 )
-from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
-from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
-from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
+from cowork_agent.integrations.rag.bootstrap import (
+    RAG_CORPUS_PATH,
+    build_semantic_memory,
+)
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
@@ -91,9 +90,6 @@ from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 from .api.handlers import _jsonable
 
 logger = logging.getLogger(__name__)
-
-#: Committed in-repo knowledge corpus (V1-M3), resolved from the package root.
-_RAG_CORPUS_PATH = Path(__file__).resolve().parents[2] / "data" / "extracted"
 
 
 class CreateRunRequest(BaseModel):
@@ -200,7 +196,7 @@ def create_app() -> FastAPI:
                     gemini_settings = GeminiSettings.from_env()
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
-                    semantic_memory = await _build_semantic_memory(gemini_settings)
+                    semantic_memory = await build_semantic_memory(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)
@@ -216,7 +212,7 @@ def create_app() -> FastAPI:
                 app.state.semantic_memory = semantic_memory
                 try:
                     app.state.knowledge_documents = load_corpus(
-                        _RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID
+                        RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID
                     )
                 except Exception:
                     app.state.knowledge_documents = ()
@@ -595,41 +591,25 @@ def _public_connection(connection: Any) -> dict[str, Any]:
     }
 
 
-async def _build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort:
-    """Best-effort in-repo RAG store; null memory on any setup failure.
-
-    RETRIEVE_RAG candidates degrade to structured empty retrieval (§12.3)
-    when the corpus or the embedding API is unavailable, so a missing index
-    never blocks digest runs.
-    """
-    try:
-        documents = load_corpus(_RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
-        memory = HybridSemanticMemory(
-            documents,
-            GeminiEmbeddingAdapter(settings),
-            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
-        )
-        await memory.build_index()
-        return memory
-    except Exception as exc:
-        logger.warning(
-            "Semantic memory unavailable (%s); retrieval returns structured empty results",
-            type(exc).__name__,
-        )
-        return NullSemanticMemory()
-
-
 def main() -> None:
+    # Without a root handler the stdlib drops every INFO record, which silently
+    # discards the whole trace-sink stream (§13) — the observability surface is
+    # log lines, so an unconfigured logger means no observability at all.
+    # .upper() because basicConfig rejects "debug" with a ValueError, which would
+    # kill the process at startup over a lowercase env var.
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+    loop = "auto"
     if (database_url() or redis_url()) and sys.platform == "win32":
-        # psycopg async cannot run on Windows' ProactorEventLoop.
-        from asyncio import windows_events
-
-        asyncio.set_event_loop_policy(windows_events.WindowsSelectorEventLoopPolicy())
+        # psycopg async cannot run on Windows' ProactorEventLoop. uvicorn builds
+        # the loop from its own loop_factory, so setting the event loop *policy*
+        # here has no effect — the loop has to be named in the config instead.
+        loop = "asyncio:SelectorEventLoop"
     uvicorn.run(
         "cowork_agent.app:create_app",
         factory=True,
         host=os.getenv("APP_HOST", "127.0.0.1"),
         port=int(os.getenv("APP_PORT", "8000")),
+        loop=loop,
     )
 
 

@@ -371,9 +371,12 @@ class DigestWorker:
             # Run finalizer (FR-14): raw bodies never outlive the run, on any outcome.
             self._short_term.clear(run.id)
         self._emit_run_trace(run, email_ms, classifier_ms, persistence_ms)
-        run.completed_at = clock
+        # The claim clock is not the completion clock. Reusing it stamped every
+        # run as zero-duration, which hides the latency the SLO is measured on.
+        completed = now or datetime.now(UTC)
+        run.completed_at = completed
         await self._runs.save(run)
-        await self._append_completion_event(run, clock)
+        await self._append_completion_event(run, completed)
         return run
 
     async def _append_completion_event(self, run: DigestRun, clock: datetime) -> None:

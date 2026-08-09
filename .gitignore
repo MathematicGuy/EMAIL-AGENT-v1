@@ -30,3 +30,4 @@ htmlcov/
 .qoder
 .pytest-tmp/
 .c7-pytest-tmp*/
+.runlogs/
