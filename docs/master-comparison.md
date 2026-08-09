@@ -3,7 +3,7 @@
 **Alignment status:** Corrected against `TARGET-ARCHITECTURE.md`; Step 7 decomposed against `PRD-v1-Core-Email-and-RAG.md` and `PRD-v2-Memory-Extension.md`<br>
 **Authoritative target:** `TARGET-ARCHITECTURE.md` — Baseline target architecture<br>
 **Current-code baseline:** commit `cf2fd49801d5932b26de82af9d104d730cf58271`, branch `main`<br>
-**Date:** 2026-08-07
+**Date:** 2026-08-09
 
 ## Label legend
 
@@ -19,19 +19,26 @@
 
 # 0. Alignment Decision
 
+## AI Chat memory scope realignment
+
+V1-M1..M4 establish the completed standalone Email RAG baseline. That
+pipeline remains stateless and memory-free. PRD-v2 assigns the four-type
+memory system to the multi-turn AI Chat Assistant, and exposes the completed
+pipeline as an executable in-chat `@Email` skill. The Chat Controller owns
+session orchestration and all Memory Gateway access; raw email remains
+strictly ephemeral tool data. **[T]**
+
 The original `master-comparison.md` was **conceptually aligned but not contract-aligned** with the target. It correctly identified the current system, preserved the one-shot deterministic pattern, kept RAG retrieval-only for the Cowork workflow, and protected raw email from durable memory. However, it diverged from the target on several load-bearing decisions.
 
 ## Corrected target execution shape
 
 ```text
-One or more bounded classifier batch calls
-→ one route decision per selected email
-→ deterministic thread/incident correlation into task candidates
-→ zero or one RAG retrieval per task candidate
-→ one Action Plan generation call per task candidate
-→ validate and persist output
-→ write system-generated episode
-→ delete ephemeral run state
+User message → Chat Controller → Memory Gateway context assembly
+→ stream assistant response or explicit @Email tool call
+→ run the standalone Email RAG pipeline statelessly
+→ render a grounded Action Plan card in the active chat thread
+→ record chat turn and system-generated episode
+→ purge raw email and transient tool state
 ```
 
 This means:
@@ -62,10 +69,12 @@ This means:
 The current code generates Action Plans inside the Email workflow: the provider produces candidate steps, provider-specific code shapes them, and `DigestWorker` stores the result. **[S]** The target changes ownership as follows:
 
 ```text
+Chat Controller → session orchestration, Memory Gateway access, SSE, tool routing
+@Email Tool Adapter → invoke the standalone Email RAG pipeline
 Email Module → fetch and normalize only
 Classifier → actionability and knowledge sufficiency only
 RAG Module → retrieve company chunks and citations only
-Agent Core → orchestrate and own final Action Plan generation
+@Email deterministic pipeline → own final Action Plan generation
 Validators → enforce schema, grounding, and citation rules
 ```
 
@@ -220,15 +229,18 @@ This is the most useful part of the extraction, because three of the four target
 | RAG failure | No path | Retry once; structured empty result; partial plan; expose missing context | | | | yes | Never restore an unsupported draft or invent company procedure |
 | Final generator | Existing extraction call creates plans | One Action Plan generation call after route and optional retrieval | | yes | | | Add separate generator contract and prompt |
 | Output validation | Provider parser and deterministic shaping | Schema validator + grounding validator + citation validator | | yes | | yes | Centralize validators after generation |
-| Short-term memory | In-process local variables | Redis or in-process run state with cleanup and safety TTL | yes | yes | | | Name the boundary and add explicit cleanup/finalizer |
-| Long-term declarative | Hardcoded timezone default | PostgreSQL profile store, loaded compactly every run | | yes | | yes | Implement profile repository behind Memory Gateway |
-| Episodic memory | In-memory `ActionItem` history | PostgreSQL episodes; write every generated task as `system_generated` | yes | yes | | | Persist derived task output, never raw body |
+| Short-term memory | In-process local variables | Redis or in-process Chat Session Buffer with bounded turns and TTL | yes | yes | | | Key by `session_id`; keep raw email only in separate transient tool state |
+| Long-term declarative | Hardcoded timezone default | PostgreSQL AI Chat persona/profile loaded compactly per turn | | yes | | yes | Implement profile repository behind Memory Gateway |
+| Episodic memory | In-memory `ActionItem` history | PostgreSQL chat summaries and `@Email` plan episodes | yes | yes | | | Persist derived output, never raw body |
 | Episodic eligibility | No durable status policy | Approved/completed only are retrieval-eligible | | yes | | yes | Default `retrieval_eligible=false` |
-| Semantic memory | Absent | Existing/pluggable RAG module through `SemanticMemoryPort` | | | | yes | No direct Agent write into semantic memory |
-| Memory facade | No logical facade | Memory Gateway/Facade with namespace and policy enforcement | | | | yes | Implement in-process facade first; it need not be a separate service |
+| Semantic memory | `HybridSemanticMemory` local retrieval exists | Existing/pluggable RAG module through `SemanticMemoryPort` available to chat and `@Email` | yes | yes | | | No direct Chat Controller write into semantic memory |
+| Memory facade | No logical facade | Memory Gateway/Facade serving Chat Controller with namespace and policy enforcement | | | | yes | Implement in-process facade first; it need not be a separate service |
+| AI Chat Controller | Missing | Session orchestration, context assembly, tool routing, and SSE streaming | | | | yes | Add Chat API Controller, SSE handler, and Chat Controller event loop |
+| Chat Session Working Memory | Missing | Bounded `session_id` turn history in Redis or in-process TTL state | | | | yes | Add Chat Session Buffer behind the Memory Gateway |
+| `@Email` Chat Skill Tool | Missing | Executable wrapper around the completed stateless Email RAG pipeline | | | | yes | Return a structured Action Plan DTO to the active chat thread |
 | Durable task output | In-memory | Task DB with title, minimal paraphrase, plan, citations, Gmail pointer | | yes | | | Use idempotent PostgreSQL persistence |
-| Raw email durability | Raw body is not persisted | Raw body remains short-term only; dev traces are the explicit exception | yes | | | | Preserve this boundary |
-| Development trace | Minimal development-only processed metadata | Full-content trace allowed only in development, encrypted and TTL-limited | yes | yes | | | Add mandated marker and hard environment guard |
+| Raw email durability | Raw body is not persisted | Raw body remains transient tool state with no durable exception | yes | | | | Preserve and test this boundary |
+| Development trace | Minimal development-only processed metadata | Metadata-only; raw bodies and full prompts are prohibited | yes | yes | | | Keep hard environment guard and TTL |
 | Production trace | One exception log and polling status | Metadata-only trace, event stream, metrics, and alerts | | yes | | yes | Structured logs may bootstrap, but are not the final target |
 | Human approval | Absent | Future gate; current output remains `system_generated` and ineligible | yes | yes | | | Do not block baseline on approval UI |
 | Reflexion/multi-agent | Absent | Explicitly out of scope | yes | | | | Keep absent |
@@ -380,12 +392,13 @@ Attachment extraction, OCR, sandboxing, and attachment-derived evidence belong t
 |---|---|
 | Gmail OAuth, PKCE, read-only scope, encrypted refresh token | Keep within the Email Module |
 | Gmail adapter and body normalization | Keep behind the Email Module API/port |
-| `DigestWorker` orchestration seed | Evolve into Agent Worker / Run Coordinator |
+| Standalone Email RAG pipeline | Keep as the deterministic implementation behind `@Email` |
 | Idempotency key and queued-to-running claim semantics | Preserve and make durable |
 | Current raw-email ephemerality | Preserve as a non-negotiable privacy boundary |
 | `ActionItem`, evidence, Gmail pointer, fingerprint concepts | Reuse as seeds for task output and episodic records |
 | Deterministic policies | Move to Agent Core/application policy |
-| Existing development environment gate | Reuse for full-content development traces |
+| Existing `HybridSemanticMemory` | Keep as the local hybrid semantic RAG baseline |
+| Existing development environment gate | Reuse for safe metadata-only diagnostics |
 
 ## 4.2 Modify
 
@@ -400,6 +413,8 @@ Attachment extraction, OCR, sandboxing, and attachment-derived evidence belong t
 | Timeout/retry behavior | Apply target budgets per external operation |
 | Completion outbox | Emit target lifecycle events and telemetry |
 | Current attachment flow | Disable processing for this baseline |
+| Memory Gateway / Facade | Route namespaced memory access through the Chat Controller |
+| Episodic Store | Persist chat summaries and tool outputs with lifecycle policy |
 
 ## 4.3 Add
 
@@ -419,6 +434,11 @@ Attachment extraction, OCR, sandboxing, and attachment-derived evidence belong t
 | Task Output Repository | Minimal durable task artifact |
 | Event Stream, traces, metrics, alerts | Target observability plane |
 | Routing evaluation dataset | Measure actionable and RAG routing precision/recall |
+| Chat API Controller | Create sessions and accept multi-turn messages |
+| SSE Streaming Handler | Stream assistant deltas, tool calls, tool output, and citations |
+| Chat Session Working Memory | Store bounded turn history keyed by `session_id` |
+| `@Email` Skill Tool Wrapper | Execute the stateless Email RAG pipeline from chat |
+| In-Chat Task Validation UI | Approve, complete, or reject Action Plan episodes inline |
 
 ## 4.4 Remove or defer
 
@@ -453,41 +473,35 @@ flowchart TB
         Q0[("Write-only fake queue")]
     end
 
-    subgraph TARGET["TARGET BASELINE"]
-        CMD["@Email"]
-        API["Cowork Feature API"]
-        Q[("Job Queue")]
-        DLQ[("Dead-Letter Queue")]
-        W["Agent Worker / Run Coordinator"]
-        EMAIL["Email Module"]
-        STM[("Short-Term Run State")]
-        PROFILE[("Long-Term Profile — PostgreSQL")]
-        CLASS["Actionability + Knowledge-Sufficiency Classifier"]
-        ROUTE{"Deterministic Route"}
-        RAG["SemanticMemoryPort / RAG retrieval"]
-        GEN["Action Plan Generator — one call"]
-        VAL["Schema + Grounding + Citation Validators"]
+    subgraph TARGET["TARGET AI CHAT BASELINE"]
+        CLIENT["AI Chat Client"]
+        API["Chat API Controller"]
+        SSE["SSE Streaming Handler"]
+        CHAT["Chat Controller"]
+        MEM["Memory Gateway"]
+        STM[("Chat Session Buffer")]
+        PROFILE[("Declarative Profile")]
+        EPI[("Eligible Chat + Tool Episodes")]
+        LLM["Chat LLM"]
+        TOOL["@Email Skill Tool"]
+        EMAIL["Standalone Email RAG Pipeline"]
         TASK[("Task Output DB")]
-        EPI[("Episodic Store — PostgreSQL")]
-        CLEAR["Delete ephemeral state"]
+        CARD["In-Chat Action Plan Card"]
+        CLEAR["Purge raw email state"]
     end
 
     API0 --> BG0 --> W0 --> G0 --> L0 --> M0
     API0 -.-> Q0
 
-    CMD --> API
-    API --> Q --> W
-    Q -. exhausted retries .-> DLQ
-    W --> EMAIL --> STM
-    PROFILE --> CLASS
-    STM --> CLASS --> ROUTE
-    ROUTE -->|NO_ACTION| VAL
-    ROUTE -->|DIRECT_PLAN| GEN
-    ROUTE -->|RETRIEVE_RAG| RAG --> GEN
-    GEN --> VAL --> TASK
-    VAL --> EPI
-    EPI --> CLEAR
-    TASK --> CLEAR
+    CLIENT --> API --> CHAT
+    CHAT --> MEM
+    MEM --> STM
+    MEM --> PROFILE
+    MEM --> EPI
+    CHAT --> LLM --> SSE --> CLIENT
+    LLM -->|explicit tool call| TOOL --> EMAIL --> TASK --> CARD --> SSE
+    CARD -->|system_generated episode| EPI
+    EMAIL --> CLEAR
 ```
 
 ## Diagram 2 — Agent Core State Machine
@@ -526,25 +540,25 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    AGENT["Agent Core"] --> GATE["Memory Gateway / Facade"]
+    CHAT["Chat Controller"] --> GATE["Memory Gateway / Facade"]
     GATE --> NS["Namespace Resolver"]
     NS --> RP["Read Policy"]
     NS --> WP["Write Policy"]
 
-    RP -->|always current run| ST[("Short-Term — Redis/in-process")]
-    RP -->|compact profile every run| LT[("Long-Term — PostgreSQL")]
-    RP -->|approved/completed only| EP[("Episodic — PostgreSQL")]
-    RP -->|route=RETRIEVE_RAG only| SEM["SemanticMemoryPort"]
+    RP -->|active session_id| ST[("Chat Session Buffer — Redis/in-process")]
+    RP -->|compact persona per turn| LT[("Long-Term Profile — PostgreSQL")]
+    RP -->|eligible chat/tool history| EP[("Episodic — PostgreSQL")]
+    RP -->|chat intent requires knowledge| SEM["SemanticMemoryPort"]
     SEM --> RAG[("External RAG Module")]
 
-    WP -->|run state only| ST
+    WP -->|bounded turns + active tool state| ST
     WP -->|explicit/manual only| LT
     WP -->|system_generated write| EP
-    WP -. no direct Agent write .-> SEM
+    WP -. no direct controller write .-> SEM
 
     POLICY["Provenance · TTL · deletion · eligibility"] --> RP
     POLICY --> WP
-    CLEAR["Run finalizer / purge"] --> ST
+    TTL["Session TTL / compaction"] --> ST
 ```
 
 ## Diagram 4 — Email Content Boundaries
@@ -557,7 +571,7 @@ raw email allowed temporarily"]
     STM --> CLASS["Classifier"]
     STM --> GEN["Generator"]
     STM --> DEV["Development trace
-full content allowed + TTL"]
+metadata only + TTL"]
     STM -. forbidden .-> LONG["Long-term profile"]
     STM -. forbidden .-> EPI["Episodic store"]
     STM -. forbidden .-> INDEX["RAG index"]
@@ -582,18 +596,19 @@ flowchart TB
         V1M1 --> V1M2 --> V1M3 --> V1M4 --> V1H
     end
 
-    subgraph V2["PRD-v2 — Memory Extension"]
-        V2M1["V2-M1 Memory Gateway + namespace"]
-        V2M2["V2-M2 long-term declarative profile"]
-        V2M3["V2-M3 episodic writes, ineligible by default"]
-        V2M4["V2-M4 approve / complete / reject"]
-        V2M5["V2-M5 selective episodic retrieval + context"]
-        V2M6["V2-M6 evaluation, retention, launch gates"]
+    subgraph V2["PRD-v2 — AI Chat Memory + Tool Integration"]
+        V2M1["V2-M1 Gateway + Chat Session Buffer"]
+        V2M2["V2-M2 chat persona + explicit profile"]
+        V2M3["V2-M3 chat + @Email episodes"]
+        V2M4["V2-M4 Chat Controller + SSE + @Email tool"]
+        V2M5["V2-M5 selective chat episodic + RAG retrieval"]
+        V2M6["V2-M6 chat memory evaluation + governance"]
         V2M1 --> V2M2 --> V2M3 --> V2M4 --> V2M5 --> V2M6
     end
 
     P0 --> V1M1
     V1H --> V2M1
+    V2M6 --> DEMO["DEMO — Streamlit AI Chat Frontend"]
 ```
 
 ---
@@ -604,6 +619,8 @@ flowchart TB
 
 ```yaml
 run_id: string
+session_id: string | null
+chat_turn_id: string | null
 tenant_id: string
 user_id: string
 
@@ -687,14 +704,50 @@ confidence: number
 
 The LLM proposes this structured decision. The deterministic resolver verifies consistency and applies hard rules before selecting the execution route.
 
-## 6.3 `MemoryContextRequest`
+## 6.3 `ChatMessageRequest`
 
 ```yaml
-run_id: string
+session_id: string
+user_message: string
+tool_choices:
+  - "@Email"
+idempotency_key: string
+```
+
+## 6.4 `ChatMessageStreamEvent`
+
+```yaml
+event_id: string
+session_id: string
+turn_id: string
+event_type: delta | tool_call | tool_output | memory_citation | completed | error
+
+delta:
+  text: string | null
+tool_call:
+  name: "@Email" | null
+  call_id: string | null
+tool_output:
+  action_plan: object | null
+memory_citation:
+  memory_type: declarative | episodic | semantic | null
+  source_id: string | null
+error:
+  code: string | null
+  safe_message: string | null
+```
+
+The stream never contains raw email bodies or full assembled prompts.
+
+## 6.5 `MemoryContextRequest`
+
+```yaml
+session_id: string
 namespace:
   tenant_id: string
   user_id: string
-  feature: email_action_plan
+  session_id: string
+  feature: ai_chat
 
 reads:
   short_term: true
@@ -705,7 +758,7 @@ reads:
     max_items: integer
   semantic:
     enabled: boolean
-    condition: route == retrieve_rag
+    condition: chat_intent_requires_enterprise_context
 
 response:
   profile: object | null
@@ -718,7 +771,7 @@ response:
     - semantic
 ```
 
-## 6.4 `SemanticRetrievalRequest`
+## 6.6 `SemanticRetrievalRequest`
 
 ```yaml
 run_id: string
@@ -746,7 +799,7 @@ constraint: >
   Do not generate an Action Plan.
 ```
 
-## 6.5 `SemanticRetrievalResponse`
+## 6.7 `SemanticRetrievalResponse`
 
 ```yaml
 query_id: string
@@ -774,7 +827,7 @@ retrieval_status:
 latency_ms: integer
 ```
 
-## 6.6 `ActionPlanOutput`
+## 6.8 `ActionPlanOutput`
 
 ```yaml
 task:
@@ -828,7 +881,7 @@ Validation rules:
 - The generator must not invent company procedures.
 - The output must not contain the full email body.
 
-## 6.7 `TaskEpisode`
+## 6.9 `TaskEpisode`
 
 ```yaml
 episode_id: string
@@ -836,6 +889,9 @@ record_id: string
 tenant_id: string
 user_id: string
 run_id: string
+chat_session_id: string
+chat_turn_id: string
+source_tool: "@Email"
 
 gmail_message_id: string
 gmail_url: string
@@ -878,7 +934,7 @@ privacy: >
   Do not store the raw email body.
 ```
 
-## 6.8 `TraceEvent`
+## 6.10 `TraceEvent`
 
 ```yaml
 run_id: string
@@ -908,8 +964,9 @@ latency_ms:
 
 content_policy:
   production: metadata_only
-  development: full_content_allowed
-  development_marker: ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE
+  development: metadata_only
+  raw_email_allowed: false
+  full_prompt_allowed: false
   development_ttl_required: true
 ```
 
@@ -920,7 +977,9 @@ content_policy:
 This step decomposes the migration into two PRD-scoped milestone groups so each implementation scope matches exactly one PRD:
 
 - **PRD-v1** — `docs/PRD-v1-Core-Email-and-RAG.md`: manual `@Email` workflow, classification, routing, retrieval-only RAG, single generation, validation, minimal task persistence, telemetry. Long-term and episodic memory are explicitly deferred.
-- **PRD-v2** — `docs/PRD-v2-Memory-Extension.md`: Memory Gateway, long-term declarative memory, episodic memory, validation lifecycle, selective episodic retrieval.
+- **PRD-v2** — `docs/PRD-v2-Memory-Extension.md`: multi-turn AI
+  Chat Controller, four-type memory, SSE, executable `@Email`, in-chat
+  validation lifecycle, and selective episodic/RAG retrieval.
 
 Decomposition rules:
 
@@ -940,15 +999,15 @@ The Step 2 gap rows and Step 6 contracts are assigned here:
 | `EmailRouteDecision` (6.2), classifier split, resolver, guards | V1-M2 | PRD-v1 FR-05..FR-07, §12.2 |
 | `SemanticRetrievalRequest`/`Response` (6.4/6.5), live RAG, partial-plan fallback | V1-M3 | PRD-v1 FR-08, FR-11, §12.3 |
 | Generator call, schema/grounding/citation validators | V1-M3 | PRD-v1 FR-09, FR-10, §12.4 |
-| `ActionPlanOutput` (6.6), idempotent task persistence, presentation, basic telemetry, development trace | V1-M4 | PRD-v1 FR-12..FR-16, §12.5 |
+| `ActionPlanOutput` (6.8), idempotent task persistence, presentation, basic telemetry, development trace | V1-M4 | PRD-v1 FR-12..FR-16, §12.5 |
 | Labeled routing evaluation dataset | V1-M2, grown through V1-H | PRD-v1 §14, §16 |
 | PostgreSQL run/result/outbox repositories, real queue + DLQ, lifecycle events, production observability, launch gates | V1-H | PRD-v1 FR-02, §16 hardening |
-| `MemoryContextRequest` (6.3), Memory Gateway, namespaces | V2-M1 | PRD-v2 FR-01, FR-02 |
+| Chat message/SSE contracts (6.3–6.4), `MemoryContextRequest` (6.5), Memory Gateway, namespaces | V2-M1 | PRD-v2 FR-01, FR-02 |
 | Long-term profile store, compact loading, degraded fallback | V2-M2 | PRD-v2 FR-03..FR-05, FR-18 |
-| `TaskEpisode` (6.7), episodic writes, `retrieval_eligible=false` | V2-M3 | PRD-v2 FR-06, FR-08 |
+| `TaskEpisode` (6.9), episodic writes, `retrieval_eligible=false` | V2-M3 | PRD-v2 FR-06, FR-08 |
 | Approve/complete/reject transitions | V2-M4 | PRD-v2 FR-07, §12 |
 | Selective episodic retrieval, labeled generation context, conflict rules | V2-M5 | PRD-v2 FR-09..FR-13 |
-| `TraceEvent` memory fields (6.8), retention, deletion, memory evaluation | V2-M6 | PRD-v2 FR-15..FR-17, §15 |
+| `TraceEvent` memory fields (6.10), retention, deletion, memory evaluation | V2-M6 | PRD-v2 FR-15..FR-17, §15 |
 
 ## 7.2 Scope conflicts resolved by this alignment
 
@@ -1135,8 +1194,8 @@ Maps to PRD-v1 §16 Milestone 4; satisfies FR-12, FR-13, FR-15, FR-16, and §12.
    in the Cowork surface.
 4. Emit metadata-only basic telemetry: run status, message id, route/reason codes, confidence,
    retrieval status/count, validation status, stage latency, errors, fallback use.
-5. Implement the development trace with the mandated marker, encryption at rest, TTL, restricted
-   access, and a hard production guard.
+5. Keep development traces metadata-only with TTL, restricted access, and a
+   hard production guard; raw email and full prompts are prohibited.
 
 **Exit criteria:**
 
@@ -1171,43 +1230,45 @@ These items close the durability gaps from old Milestone 1 without gating the MV
 **PRD-v1 is complete when** PRD-v1 §15 acceptance criteria 1–19 pass and the V1-H exit criteria
 hold.
 
-## PRD-v2 milestone group — Long-Term and Episodic Memory Extension
+## PRD-v2 milestone group — AI Chat Memory and `@Email` Tool Extension
 
 Depends on a stable PRD-v1. `V2-M1..M6` mirror PRD-v2 §17 Milestones 1–6.
 
-### V2-M1 — Memory contracts and namespace
+### V2-M1 — Chat Memory Gateway and session working memory
 
 Satisfies PRD-v2 FR-01, FR-02.
 
-1. Define `TaskEpisode`, long-term profile, episodic retrieval, transition, and provenance
-   contracts, plus `MemoryContextRequest`.
+1. Define `ChatMessageRequest`, `ChatMessageStreamEvent`, `TaskEpisode`, profile,
+   retrieval, transition, provenance, and `MemoryContextRequest` contracts.
 2. Implement the logical Memory Gateway (in-process allowed): namespace resolution, read/write
    eligibility, provenance, degraded responses, memory-type isolation; fail closed on missing or
    inconsistent namespace.
-3. Route all Agent Core memory access through the gateway, including short-term and semantic
-   access.
+3. Route all Chat Controller memory access through the gateway.
+4. Implement a bounded Chat Session Buffer keyed by mandatory `session_id` and
+   `feature: ai_chat`, with TTL and compaction policy.
 
 **Exit criteria:** cross-tenant and cross-user access tests fail closed; no memory access
 bypasses the gateway.
 
-### V2-M2 — Long-term declarative memory
+### V2-M2 — AI Chat declarative profile
 
 Satisfies PRD-v2 FR-03..FR-05, FR-15, FR-16, FR-18.
 
 1. Implement the PostgreSQL profile store and the explicit-only write path (user configuration,
    explicit remember request, trusted admin config); no inference from email bodies.
-2. Implement compact profile loading into Email Action Plan runs with a degraded fallback:
-   default profile, continue, warning event.
+2. Implement compact persona and preference loading for each relevant chat
+   turn with a default-profile degraded fallback.
 3. Implement preference/profile deletion and retention behavior.
 
-**Exit criteria:** stored preferences change later plan output; profile read failure never blocks
-the v1 workflow; long-term writes are explicit-only.
+**Exit criteria:** stored preferences change later chat responses; profile read
+failure never blocks the chat turn or the stateless v1 tool; writes are explicit-only.
 
-### V2-M3 — Episodic persistence
+### V2-M3 — Chat and `@Email` episodic persistence
 
 Satisfies PRD-v2 FR-06, FR-08, FR-14, FR-18.
 
-1. Write one episode per successfully persisted task: `system_generated`,
+1. Write bounded chat summaries and one episode per successfully persisted
+   `@Email` task: `system_generated`,
    `retrieval_eligible=false`, idempotent and retry-safe; an episode write failure preserves the
    task and never duplicates it.
 2. Enforce retrieval eligibility at both write and read boundaries in code, not prompts.
@@ -1217,28 +1278,30 @@ Satisfies PRD-v2 FR-06, FR-08, FR-14, FR-18.
 **Exit criteria:** system-generated episodes cannot be retrieved; writes are idempotent; episodes
 contain derived task output and Gmail pointer only.
 
-### V2-M4 — Validation lifecycle
+### V2-M4 — AI Chat Controller, SSE, and `@Email` tool execution
 
 Satisfies PRD-v2 FR-07 and §12.
 
-1. Implement approve/complete/reject transitions through an API or minimal Cowork task control;
-   transitions are transactional and idempotent.
-2. Enforce the `retrieval_eligible` rule table on every transition.
-3. Record provenance and timestamps for each transition.
+1. Implement Chat API session/message endpoints, the Chat Controller event
+   loop, and typed SSE streaming.
+2. Wrap the completed Email RAG pipeline as the allow-listed `@Email` skill.
+3. Render its Action Plan DTO in chat with transactional, idempotent
+   approve/complete/reject controls.
+4. Enforce eligibility, provenance, and timestamps on every transition.
 
 **Exit criteria:** approval/completion makes an episode retrieval-eligible; rejection keeps it
 ineligible; invalid transitions are refused.
 
-### V2-M5 — Selective episodic retrieval and context integration
+### V2-M5 — Selective episodic and RAG retrieval for chat
 
 Satisfies PRD-v2 FR-09..FR-13.
 
 1. Implement the episodic retrieval request with eligibility filters (`user_approved`,
    `completed`, `retrieval_eligible=true`), bounded results, and relevance scoring.
-2. Implement the selective trigger policy: episodes are retrieved only when deterministic policy
-   or classifier metadata indicates value, never on every run.
-3. Extend the generator context assembler with labeled source types: current email, explicit
-   preference, validated episode, company evidence.
+2. Implement the selective trigger policy from chat intent; never retrieve all
+   episodic or semantic context on every turn.
+3. Assemble labeled chat context: system persona, active session buffer,
+   explicit preference, validated episode, and company evidence.
 4. Implement conflict precedence: current instruction > current company evidence > stored
    preference > advisory episode; never invent to resolve conflicts.
 
@@ -1246,11 +1309,11 @@ Satisfies PRD-v2 FR-09..FR-13.
 requested by the model; generation context sources are labeled; episodic retrieval failure skips
 episodes and continues.
 
-### V2-M6 — Evaluation and governance
+### V2-M6 — AI Chat memory evaluation and governance
 
 Satisfies PRD-v2 §15, §16 Milestone 6, FR-16, FR-17.
 
-1. Evaluate memory-enabled output against the v1 baseline on a labeled set.
+1. Evaluate memory-enabled chat against a memory-disabled chat baseline.
 2. Define retention periods; implement background purge, deletion audits, and index propagation.
 3. Add memory safety metrics and alerts: unvalidated retrieval, cross-tenant incidents,
    raw-email violations, rejected-episode retrieval, expired-record retrieval — all must hold at
@@ -1260,13 +1323,14 @@ Satisfies PRD-v2 §15, §16 Milestone 6, FR-16, FR-17.
 **Exit criteria:** PRD-v2 §16 acceptance criteria 1–20 pass; safety counters remain at zero under
 test.
 
-## DEMO — Showcase frontend (after both PRD groups)
+## DEMO — Streamlit AI Chat showcase (after both PRD groups)
 
 A demonstration frontend that exercises the complete value loop end-to-end in
 a browser. Full specification: `docs/SPEC-Demo-Frontend.md`.
 
-1. Increment A (PRD-v1 showcase) starts only after PRD-v1 §15 acceptance
-   passes; Increment B (PRD-v2 showcase) only after PRD-v2 §16 passes.
+1. Increment A centers the AI Chat Assistant and embedded `@Email` tool after
+   the required backend gates pass; Increment B adds memory transparency and
+   in-chat lifecycle controls after PRD-v2 §16 passes.
 2. The demo is a pure API client: no workflow, routing, generation, or
    memory-policy logic in the client; no scaffolding of unimplemented
    milestone capabilities.
@@ -1297,13 +1361,13 @@ browser-verified evidence.
 | 12 | V1-H | Implement durable PostgreSQL run/result/outbox adapters | Restart and atomic-claim tests |
 | 13 | V1-H | Implement queue producer/consumer, retry, and DLQ | Separate-process integration test |
 | 14 | V1-H | Add telemetry sinks, retention, purge, and launch gates | Operational verification |
-| 15 | V2-M1 | Implement Memory Gateway, namespaces, memory contracts | Namespace and fail-closed tests |
-| 16 | V2-M2 | Implement long-term profile store, loading, fallback, deletion | Preference application tests |
-| 17 | V2-M3 | Implement idempotent system-generated episode writes | Eligibility and privacy tests |
-| 18 | V2-M4 | Implement approve/complete/reject transitions | Transition and eligibility tests |
-| 19 | V2-M5 | Implement selective episodic retrieval and labeled generation context | Retrieval and conflict tests |
-| 20 | V2-M6 | Evaluation vs v1 baseline, retention, deletion audits, launch gates | Operational verification |
-| 21 | DEMO | Build showcase frontend per `docs/SPEC-Demo-Frontend.md` (Increment A after PRD-v1 §15, Increment B after PRD-v2 §16) | SPEC §8 acceptance + browser-verified evidence |
+| 15 | V2-M1 | Implement Memory Gateway, `feature: ai_chat` namespace, and Chat Session Buffer | Namespace, TTL, and fail-closed tests |
+| 16 | V2-M2 | Implement AI Chat persona/profile loading, fallback, and deletion | Preference application tests |
+| 17 | V2-M3 | Persist chat summaries and idempotent `@Email` episodes | Eligibility and privacy tests |
+| 18 | V2-M4 | Implement Chat Controller, SSE handler, `@Email` tool, and inline transitions | Stream, tool, transition, and eligibility tests |
+| 19 | V2-M5 | Implement selective episodic/RAG retrieval and labeled chat context | Retrieval and conflict tests |
+| 20 | V2-M6 | Evaluate AI Chat memory, retention, deletion audits, and launch gates | Operational verification |
+| 21 | DEMO | Build Streamlit AI Chat showcase with embedded `@Email` and memory panels | SPEC §8 acceptance + Playwright evidence |
 
 ## Blocking decisions
 
