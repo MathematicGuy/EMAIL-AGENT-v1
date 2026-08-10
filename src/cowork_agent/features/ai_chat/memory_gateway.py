@@ -3,10 +3,12 @@
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatTurn,
+    DeclarativeProfile,
     DegradedMemorySource,
     MemoryContextRequest,
     MemoryContextResponse,
     MemoryNamespace,
+    MemoryProvenance,
     MemoryType,
     TaskEpisode,
 )
@@ -18,6 +20,7 @@ from .ports import (
     EpisodicMemoryPort,
     SemanticChatMemoryPort,
 )
+from .profile_policy import authorize_profile_write
 
 
 class NamespaceAccessDenied(ValueError):
@@ -120,6 +123,34 @@ class MemoryGateway:
             degraded=bool(degraded),
             degraded_sources=tuple(degraded),
         )
+
+    async def write_profile(
+        self, profile: DeclarativeProfile, *, provenance: MemoryProvenance
+    ) -> DeclarativeProfile:
+        """Persist an explicit profile; refuses anything but an authorized write.
+
+        Unlike the per-turn read, a write failure is not degraded away: the user
+        asked for it, so ``MemorySourceUnavailableError`` propagates.
+        """
+
+        adapter = self._require_declarative_memory()
+        namespace = self._namespace(MemoryType.LONG_TERM)
+        if profile.tenant_id != self._scope.tenant_id or profile.user_id != self._scope.user_id:
+            raise NamespaceAccessDenied("profile scope does not match the verified chat scope")
+        authorize_profile_write(namespace, profile, provenance)
+        return await adapter.write_profile(namespace, profile)
+
+    async def delete_profile(self) -> bool:
+        """Delete the in-scope profile (FR-15); later reads must miss."""
+
+        return await self._require_declarative_memory().delete_profile(
+            self._namespace(MemoryType.LONG_TERM)
+        )
+
+    def _require_declarative_memory(self) -> DeclarativeMemoryPort:
+        if self._declarative_memory is None:
+            raise MemorySourceUnavailableError("no declarative memory adapter is configured")
+        return self._declarative_memory
 
     def clear_session(self) -> None:
         self._session_buffer.clear(self._namespace(MemoryType.SHORT_TERM))
