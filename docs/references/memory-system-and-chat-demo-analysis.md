@@ -3,15 +3,19 @@
 > [!CAUTION]
 > **CRITICAL REVISION CONTEXT & SPECIFICATION ALIGNMENT NOTE**:
 > **Primary Purpose of Memory System**: The user has explicitly clarified that **the 4-Type Memory System is intended to support AI Chat features**, **NOT Email features**.
-> **Status of Email RAG**: The Email RAG feature is mostly completed, functioning in the frontend, and **does NOT require the memory system**.
+> **Status of Email RAG**: The Email RAG feature is mostly completed, functioning in the frontend, and **does NOT require the memory system**. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
 > **Document Status**: The current PRD-v2, Target Architecture, and Frontend Spec contained a major requirement misalignment by binding Memory to Email Action Planning instead of AI Chat. This document serves as the audit baseline for realigning project documentation (PRDs, Target Architecture, Specs).
 
 > [!IMPORTANT]
-> **Executive Summary & Core Question Answer**:
+> **Executive Summary & Implementation Status Overview**:
 > **Does the Memory System in the PRD support regular AI chat (like ChatGPT) out-of-the-box?**
 > **NO.** In its current specification ([PRD-v2-Memory-Extension.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md), [TARGET-ARCHITECTURE.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md), and [SPEC-Demo-Frontend.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md)), the system misattributes memory to a **deterministic, asynchronous Email-to-Action-Plan batch pipeline** (triggered by `@Email`). 
 > 
 > As clarified, **the 4-Type Memory System architecture (Working, Declarative Profile, Episodic, Semantic RAG) MUST be decoupled from Email and realigned as the foundation for the AI Chat Assistant**, requiring document audits and specification updates.
+> 
+> **Codebase Implementation Status Audit Summary**:
+> - <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED</span>: Stateless Email RAG Pipeline (`/v1/mail-todo/runs`, `/v1/tasks`), Local Hybrid RAG Corpus Inspection (`/v1/mail-todo/knowledge/*`), 5-Screen Streamlit Frontend (Connect, Run, Tasks, Knowledge, Audit), and In-Memory AI Chat Memory Gateway & Session Buffer primitives (`features/ai_chat/memory_gateway.py`, `session_buffer.py`).
+> - <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span>: Multi-turn SSE AI Chat API Controller (`/v1/cowork/chat/sessions`), In-Chat `@Email` Executable Tool Dispatcher, Durable PostgreSQL Profile/Episodic stores, Streamlit `5. Memory` & `7. AI Chat Assistant` screens.
 
 ---
 
@@ -21,89 +25,94 @@ The system categorizes memory into **four distinct, typed memory domains** ([PRD
 
 ```mermaid
 flowchart TD
-    GW["Logical Memory Gateway<br/>(Namespace Resolution & Policy Engine)"]
+    classDef green fill:#2ea44f,stroke:#1e6b33,stroke-width:2px,color:#ffffff;
+    classDef red fill:#cb2431,stroke:#8e1621,stroke-width:2px,color:#ffffff;
+    classDef yellow fill:#d97706,stroke:#92400e,stroke-width:2px,color:#ffffff;
 
-    GW --> WM["1. Short-Term Working Memory<br/>(Run Ephemeral - In-Memory/Redis)"]
-    GW --> DM["2. Long-Term Declarative Memory<br/>(User Profile - PostgreSQL/SQLite)"]
-    GW --> EM["3. Long-Term Episodic Memory<br/>(Derived Task History - PostgreSQL/SQLite)"]
-    GW --> SM["4. Semantic Memory<br/>(Company RAG Corpus - Vector DB / Qdrant)"]
+    GW["Logical Memory Gateway<br/>(Namespace Resolution & Policy Engine)"]:::green
+
+    GW --> WM["1. Short-Term Working Memory<br/>(Run Ephemeral / Chat Session Buffer)"]:::yellow
+    GW --> DM["2. Long-Term Declarative Memory<br/>(User Profile - PostgreSQL/SQLite)"]:::red
+    GW --> EM["3. Long-Term Episodic Memory<br/>(Derived Task History - PostgreSQL/SQLite)"]:::red
+    GW --> SM["4. Semantic Memory<br/>(Company RAG Corpus - Vector DB / Qdrant)"]:::yellow
 
     subgraph Boundaries["Strict Privacy Boundaries"]
-        WM ---|"Raw emails purged post-run"| WM_PURGE["No raw email persistence"]
-        DM ---|"Explicit-only writes"| DM_POLICY["No AI-inferred preference loops"]
-        EM ---|"Human validation required"| EM_GATE["retrieval_eligible = true on approval"]
+        WM ---|"Raw emails purged post-run"| WM_PURGE["No raw email persistence"]:::green
+        DM ---|"Explicit-only writes"| DM_POLICY["No AI-inferred preference loops"]:::red
+        EM ---|"Human validation required"| EM_GATE["retrieval_eligible = true on approval"]:::red
     end
 ```
 
 ### The 4 Memory Pillars
 
-| Memory Type | Definition & Purpose | Primary Storage | Write & Privacy Policy |
-|---|---|---|---|
-| **1. Short-Term Working Memory** | Ephemeral runtime state created per execution run (`run_id`). Holds normalized envelopes, classifier output, RAG chunks, candidate action plans. | Redis / In-Memory (TTL) | **Strict Ephemerality**: Raw email bodies and full prompt contexts are purged immediately upon run completion ([AGENTS.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/AGENTS.md) Invariant 1). |
-| **2. Long-Term Declarative Memory** | Explicit, durable user preferences (language, timezone, formatting style, priority rules, manager/colleague roles). | PostgreSQL (`user_profile`) / SQLite | **Explicit-Only Writes**: Populated *only* via manual UI configuration or explicit user commands ("remember this preference"). Auto-inference from raw emails is forbidden ([PRD-v2 §FR-04](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md)). |
-| **3. Long-Term Episodic Memory** | Derived task history and experience tracking (task titles, paraphrases, action plans, Gmail deep links). | PostgreSQL (`task_episode`) / SQLite | **Human-Gated Eligibility**: System-generated episodes default to `retrieval_eligible = false`. They become eligible *only* when a human clicks `Approve` or `Complete` in the UI ([PRD-v2 §FR-08](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md)). |
-| **4. Semantic Memory (Company RAG)** | Enterprise-wide declarative domain knowledge (SOPs, governance, technical guides, templates). | Qdrant Vector DB + BM25 Hybrid Index | **Read-Only Agent Core**: Accessed via `SemanticMemoryPort` only when classifier sets `route = RETRIEVE_RAG`. Raw emails are never ingested into company RAG ([TARGET-ARCHITECTURE.md §6](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L6)). |
+| Memory Type | Definition & Purpose | Primary Storage | Write & Privacy Policy | Codebase Implementation Status |
+|---|---|---|---|---|
+| **1. Short-Term Working Memory** | Ephemeral runtime state created per execution run (`run_id`) or active chat session (`session_id`). Holds normalized envelopes, classifier output, RAG chunks, candidate action plans, and chat turns. | Redis / In-Memory (TTL) | **Strict Ephemerality**: Raw email bodies and full prompt contexts are purged immediately upon run completion ([AGENTS.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/AGENTS.md) Invariant 1). | <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED (In-Memory)</span><br>• `ShortTermStore` ([short_term.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/short_term.py))<br>• `InMemoryChatSessionBuffer` ([session_buffer.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/session_buffer.py))<br><span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED (Redis Queue/Store)</span> |
+| **2. Long-Term Declarative Memory** | Explicit, durable user preferences (language, timezone, formatting style, priority rules, manager/colleague roles). | PostgreSQL (`user_profile`) / SQLite | **Explicit-Only Writes**: Populated *only* via manual UI configuration or explicit user commands ("remember this preference"). Auto-inference from raw emails is forbidden ([PRD-v2 §FR-04](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md)). | <span style="color: #d97706; font-weight: bold;">🟠 PARTIAL (Domain/Port Contract)</span><br>• `DeclarativeProfile` & `DeclarativeMemoryPort` ([chat_contracts.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/domain/chat_contracts.py))<br><span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED (DB Store & UI Editor)</span> |
+| **3. Long-Term Episodic Memory** | Derived task history and experience tracking (task titles, paraphrases, action plans, Gmail deep links). | PostgreSQL (`task_episode`) / SQLite | **Human-Gated Eligibility**: System-generated episodes default to `retrieval_eligible = false`. They become eligible *only* when a human clicks `Approve` or `Complete` in the UI ([PRD-v2 §FR-08](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md)). | <span style="color: #d97706; font-weight: bold;">🟠 PARTIAL (Email Task DB / Domain)</span><br>• `SQLiteTaskRepository` ([tasks.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/tasks.py))<br>• `TaskEpisode` & `EpisodicMemoryPort`<br><span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED (Chat Episode Store & Gate UI)</span> |
+| **4. Semantic Memory (Company RAG)** | Enterprise-wide declarative domain knowledge (SOPs, governance, technical guides, templates). | Qdrant Vector DB + BM25 Hybrid Index | **Read-Only Agent Core**: Accessed via `SemanticMemoryPort` only when classifier sets `route = RETRIEVE_RAG`. Raw emails are never ingested into company RAG ([TARGET-ARCHITECTURE.md §6](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L6)). | <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED (Local Hybrid RAG)</span><br>• `HybridSemanticMemory` (BM25 + Dense + RRF + Jina) ([hybrid.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py))<br><span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED (Production Qdrant DB)</span> |
 
 > [!NOTE]
-> **Note on Procedural Memory**: Standard cognitive architecture includes "Procedural Memory" (how-to rules & skills). In PRD-v2, procedural rules are enforced deterministically via hard policy guards and backend schemas rather than a dynamic, user-writeable memory store.
+> **Note on Procedural Memory**: Standard cognitive architecture includes "Procedural Memory" (how-to rules & skills). In PRD-v2, procedural rules are enforced deterministically via hard policy guards and backend schemas rather than a dynamic, user-writeable memory store. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED via Code Policies]</span>
 
 ### Hybrid Retrieval & Fusion Pipeline
 
 Semantic Memory retrieval utilizes a hybrid dense-sparse vector pipeline ([master-comparison.md §1.12](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/master-comparison.md)):
-1. **Tenant ACL Pre-Filter**: Filters chunks by `tenant_id` and document permissions before scoring.
-2. **Dense Vector Search + Lexical BM25 Keyword Search**: Evaluated concurrently over document chunks.
-3. **Reciprocal Rank Fusion (RRF, $k=60$)**: Merges dense and sparse result lists into a single ranked list.
-4. **Jina Reranking**: Optional reranker layer refines top-k relevance scores.
+1. **Tenant ACL Pre-Filter**: Filters chunks by `tenant_id` and document permissions before scoring. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - LOCAL_TENANT_ID]</span>
+2. **Dense Vector Search + Lexical BM25 Keyword Search**: Evaluated concurrently over document chunks. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - bm25.py / embeddings.py]</span>
+3. **Reciprocal Rank Fusion (RRF, $k=60$)**: Merges dense and sparse result lists into a single ranked list. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - rrf.py]</span>
+4. **Jina Reranking**: Optional reranker layer refines top-k relevance scores. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - jina_reranker.py]</span>
 5. **Context Precedence Enforcement**:
    $$\text{Current User Instruction} > \text{Company RAG Policy} > \text{Stored Preference} > \text{Approved Prior Episode}$$
+   <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED - Chat Prompt Assembler pending]</span>
 
 ---
 
 ## 2. How Memory Features are Demoed in the Frontend ([SPEC-Demo-Frontend.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md))
 
-The frontend demo is built with **Streamlit** ([gui/app.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui/app.py)) and organized into 6 core screens. Memory features are delivered across two milestones:
+The frontend demo is built with **Streamlit** ([gui/app.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui/app.py)) and organized into screens. Memory features are delivered across two milestones:
 
 ```text
-Streamlit Navigation Structure (SPEC-Demo-Frontend.md §5):
-├── 1. Connect        (Gmail OAuth & Mailbox Status)
-├── 2. Run            (@Email invocation & live pipeline execution)
-├── 3. Tasks          (Task List → Detail Cards with Citations & Action Buttons)
-├── 4. Knowledge      [Increment A]: RAG Corpus Status, Chunk Search & Ad-hoc Grounded Query
-├── 5. Memory         [Increment B]: User Preferences Editor | Episode Provenance | Deletion UI
-└── 6. Run audit      (Route & Telemetry Summary, Latencies, Dev-Gated Traces)
+Streamlit Navigation Structure (gui/app.py vs SPEC-Demo-Frontend.md §5):
+├── 1. Connect        (Gmail OAuth & Mailbox Status) <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+├── 2. Run            (@Email invocation & live pipeline execution) <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+├── 3. Tasks          (Task List → Detail Cards with Citations) <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+├── 4. Knowledge      [Increment A]: RAG Corpus Status, Chunk Search & Ad-hoc Grounded Query <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+├── 5. Memory         [Increment B]: User Preferences Editor | Episode Provenance | Deletion UI <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+└── 6. Run audit      (Route & Telemetry Summary, Dev-Gated Traces) <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
 ```
 
 ### Key Memory Inspector & UI Components
 
-1. **Knowledge Screen (`4. Knowledge`) — Semantic RAG Inspection**:
-   * **Corpus Readiness Indicator**: Real-time health badge (**Green "Ready"**, **Amber "Degraded"**, **Red "Unavailable"**).
-   * **Loaded Document List**: Shows ingested files, titles, chunk counts, and source links.
-   * **Ad-hoc Grounded RAG Query Input (`POST /v1/mail-todo/knowledge/chat`)**: A single-turn query panel to test document retrieval. It renders answers with **relevance scores**, **reranker status**, and clickable **Citation Chips**.
+1. **Knowledge Screen (`4. Knowledge`) — Semantic RAG Inspection**: <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+   * **Corpus Readiness Indicator**: Real-time health badge (**Green "Ready"**, **Amber "Degraded"**, **Red "Unavailable"**). <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - /v1/mail-todo/knowledge/ready]</span>
+   * **Loaded Document List**: Shows ingested files, titles, chunk counts, and source links. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED - /v1/mail-todo/knowledge/documents]</span>
+   * **Ad-hoc Grounded RAG Query Input (`POST /v1/mail-todo/knowledge/chat`)**: A single-turn query panel to test document retrieval. It renders answers with **relevance scores**, **reranker status**, and clickable **Citation Chips**. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
    > [!CAUTION]
    > `POST /v1/mail-todo/knowledge/chat` is an **ad-hoc RAG corpus testing panel**, NOT a multi-turn conversational AI chatbot!
 
-2. **Memory Screen (`5. Memory`) — Declarative & Episodic Inspection**:
-   * **Preferences Profile Editor**: Editable form for explicit user preferences (language, output style, priority rules, key contacts).
-   * **Task Validation Badges & Lifecycle Controls**: Per-task buttons (`Approve`, `Complete`, `Reject`) and status badges (`system_generated`, `user_approved`, `completed`, `rejected`). Shows `retrieval_eligible` toggle.
-   * **Episode Provenance Inspector**: Detailed metadata panel showing model ID, prompt version, pipeline version, and Gmail deep link.
-   * **Memory Effect Inspector**: Toggle/side-by-side view comparing generated plan outputs **with vs. without** memory context, along with a **preference-application indicator** showing how stored rules altered the output.
-   * **Deletion Controls**: Interface to delete individual preferences, specific task episodes, or purge all memory with confirmation dialogs.
+2. **Memory Screen (`5. Memory`) — Declarative & Episodic Inspection**: <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * **Preferences Profile Editor**: Editable form for explicit user preferences (language, output style, priority rules, key contacts). <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * **Task Validation Badges & Lifecycle Controls**: Per-task buttons (`Approve`, `Complete`, `Reject`) and status badges (`system_generated`, `user_approved`, `completed`, `rejected`). Shows `retrieval_eligible` toggle. <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED in UI]</span>
+   * **Episode Provenance Inspector**: Detailed metadata panel showing model ID, prompt version, pipeline version, and Gmail deep link. <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * **Memory Effect Inspector**: Toggle/side-by-side view comparing generated plan outputs **with vs. without** memory context, along with a **preference-application indicator** showing how stored rules altered the output. <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * **Deletion Controls**: Interface to delete individual preferences, specific task episodes, or purge all memory with confirmation dialogs. <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
 
 3. **Strict Constraints**:
-   * **No Client Mocks**: Pure API client talking to FastAPI backend ([SPEC-Demo-Frontend.md §2 Rule 1](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md#L2)).
-   * **No Raw Prompt/Context Visualizer**: Raw email bodies and full prompts are strictly hidden from the UI to protect user privacy ([SPEC-Demo-Frontend.md §2 Rule 3](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md#L2)).
+   * **No Client Mocks**: Pure API client talking to FastAPI backend ([SPEC-Demo-Frontend.md §2 Rule 1](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md#L2)). <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+   * **No Raw Prompt/Context Visualizer**: Raw email bodies and full prompts are strictly hidden from the UI to protect user privacy ([SPEC-Demo-Frontend.md §2 Rule 3](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md#L2)). <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
 
 ---
 
 ## 3. Email Agent vs. Regular AI Chat (ChatGPT-style) Comparison
 
-| Architectural Dimension | Email Task Agent (Current Scope) | Regular AI Chat (ChatGPT-style) |
-|---|---|---|
-| **Trigger & Interaction** | Event/Batch driven via `@Email` invocation | Interactive multi-turn dialogue with real-time token streaming |
-| **Short-Term Context** | Single run (`run_id`), deleted immediately post-execution | Multi-turn chat session buffer (`session_id`) retained across dialogue turns |
-| **Episodic Memory Entry** | Derived from task outputs; strictly human-gated (`retrieval_eligible=true` only on approval) | Ingests conversational turn summaries & user decisions across chat history |
-| **Preference Learning** | Explicit UI/Command configuration only | Automatic extraction of facts & user preferences from chat messages |
-| **API Endpoints** | `/v1/mail-todo/runs`, `/v1/tasks` | `/v1/cowork/chat/sessions`, `/v1/cowork/chat/sessions/{id}/messages` (SSE) |
+| Architectural Dimension | Email Task Agent (Current Scope) | Regular AI Chat (ChatGPT-style) | Codebase Implementation Status |
+|---|---|---|---|
+| **Trigger & Interaction** | Event/Batch driven via `@Email` invocation | Interactive multi-turn dialogue with real-time token streaming | Email Agent: <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED</span><br>AI Chat Streaming: <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span> |
+| **Short-Term Context** | Single run (`run_id`), deleted immediately post-execution | Multi-turn chat session buffer (`session_id`) retained across dialogue turns | Email Run: <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED</span><br>Chat Session Buffer: <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED (`session_buffer.py`)</span> |
+| **Episodic Memory Entry** | Derived from task outputs; strictly human-gated (`retrieval_eligible=true` only on approval) | Ingests conversational turn summaries & user decisions across chat history | Email Task DB: <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED (`SQLiteTaskRepository`)</span><br>Chat Episode Engine: <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span> |
+| **Preference Learning** | Explicit UI/Command configuration only | Automatic extraction of facts & user preferences from chat messages | Email Preferences: <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span><br>Chat Facts Extractor: <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span> |
+| **API Endpoints** | `/v1/mail-todo/runs`, `/v1/tasks` | `/v1/cowork/chat/sessions`, `/v1/cowork/chat/sessions/{id}/messages` (SSE) | `/v1/mail-todo/*`: <span style="color: #2ea44f; font-weight: bold;">🟢 IMPLEMENTED</span><br>`/v1/cowork/chat/*`: <span style="color: #cb2431; font-weight: bold;">🔴 UN-IMPLEMENTED</span> |
 
 ---
 
@@ -113,13 +122,17 @@ To support standard AI chat alongside the Email agent, the 4-type memory primiti
 
 ```mermaid
 flowchart LR
+    classDef green fill:#2ea44f,stroke:#1e6b33,stroke-width:2px,color:#ffffff;
+    classDef red fill:#cb2431,stroke:#8e1621,stroke-width:2px,color:#ffffff;
+    classDef yellow fill:#d97706,stroke:#92400e,stroke-width:2px,color:#ffffff;
+
     subgraph Chat_Memory_Mapping["4-Type Memory System Mapped to AI Chat"]
         direction TB
-        WM2["1. Short-Term Working Memory<br/>➔ Redis Chat Session Buffer (TTL)<br/>Stores active N-turn message history & turn state"]
-        DM2["2. Long-Term Declarative Memory<br/>➔ User Profile, Persona & Config<br/>Tone, formatting preference, user persona"]
-        EM2["3. Long-Term Episodic Memory<br/>➔ Chat Thread Summaries & Decisions<br/>Searchable past chat threads & user outcomes"]
-        SM2["4. Semantic Memory<br/>➔ Enterprise RAG & Fact Store<br/>Company docs + extracted factual knowledge"]
-        PM2["+ Procedural Memory<br/>➔ Custom System Prompts & Persona Rules<br/>Step-by-step assistant instructions & workflows"]
+        WM2["1. Short-Term Working Memory<br/>➔ Redis Chat Session Buffer (TTL)<br/>Stores active N-turn message history & turn state"]:::yellow
+        DM2["2. Long-Term Declarative Memory<br/>➔ User Profile, Persona & Config<br/>Tone, formatting preference, user persona"]:::red
+        EM2["3. Long-Term Episodic Memory<br/>➔ Chat Thread Summaries & Decisions<br/>Searchable past chat threads & user outcomes"]:::red
+        SM2["4. Semantic Memory<br/>➔ Enterprise RAG & Fact Store<br/>Company docs + extracted factual knowledge"]:::yellow
+        PM2["+ Procedural Memory<br/>➔ Custom System Prompts & Persona Rules<br/>Step-by-step assistant instructions & workflows"]:::red
     end
 ```
 
@@ -127,14 +140,14 @@ flowchart LR
 
 To enable regular AI Chat in the codebase, the following additions would be made across the architecture:
 
-1. **New Backend Chat Controllers & Streaming**: Add an SSE-capable conversational event loop alongside the batch email runner ([TARGET-ARCHITECTURE.md §2](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L2)).
-2. **REST API Extensions**:
-   * `POST /v1/cowork/chat/sessions` — Create a new chat session
-   * `POST /v1/cowork/chat/sessions/{session_id}/messages` — Multi-turn SSE streaming message endpoint
-   * `GET /v1/cowork/chat/sessions/{session_id}/messages` — Fetch conversation turn history
-   * `GET/PUT /v1/memory/procedural/rules` — Manage assistant instructions & persona rules
-3. **Namespace Expansion**: Expand `Logical Memory Gateway` namespace filter from `feature: email_action_plan` to support `feature: general_chat` ([PRD-v2 §FR-02](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/PRD-v2-Memory-Extension.md)).
-4. **Frontend Chat Screen**: Add a 7th screen (`7. AI Chat Assistant`) to [SPEC-Demo-Frontend.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md) featuring `st.chat_input`, session sidebars, inline memory recall badges, and grounded RAG citations.
+1. **New Backend Chat Controllers & Streaming**: Add an SSE-capable conversational event loop alongside the batch email runner ([TARGET-ARCHITECTURE.md §2](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L2)). <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+2. **REST API Extensions**: <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * `POST /v1/cowork/chat/sessions` — Create a new chat session <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * `POST /v1/cowork/chat/sessions/{session_id}/messages` — Multi-turn SSE streaming message endpoint <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * `GET /v1/cowork/chat/sessions/{session_id}/messages` — Fetch conversation turn history <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+   * `GET/PUT /v1/memory/procedural/rules` — Manage assistant instructions & persona rules <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
+3. **Namespace Expansion**: Memory Gateway in `features/ai_chat/memory_gateway.py` supports `MemoryNamespace` and `ChatMemoryScope`. <span style="color: #2ea44f; font-weight: bold;">[🟢 IMPLEMENTED]</span>
+4. **Frontend Chat Screen**: Add a screen (`AI Chat Assistant`) to [SPEC-Demo-Frontend.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md) featuring `st.chat_input`, session sidebars, inline memory recall badges, and grounded RAG citations. <span style="color: #cb2431; font-weight: bold;">[🔴 UN-IMPLEMENTED]</span>
 
 ---
 
