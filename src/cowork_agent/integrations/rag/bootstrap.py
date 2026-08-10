@@ -56,6 +56,8 @@ async def build_semantic_memory(
             reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
             query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
             enable_mmr=True,
+            min_rerank_score=0.30,
+            relative_cutoff_ratio=0.85,
         )
         await memory.build_index()
         return memory
