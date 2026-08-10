@@ -54,6 +54,28 @@ class _FakeClient:
         )()
 
 
+class _RecordingClient:
+    def __init__(self) -> None:
+        self.batches: list[list[str]] = []
+
+    @property
+    def aio(self) -> _RecordingClient:
+        return self
+
+    @property
+    def models(self) -> _RecordingClient:
+        return self
+
+    async def embed_content(self, *, model: str, contents: list[str]) -> Any:
+        del model
+        self.batches.append(contents)
+        return type(
+            "Resp",
+            (),
+            {"embeddings": [type("E", (), {"values": [float(index)]})() for index in contents]},
+        )()
+
+
 def _patch(monkeypatch: pytest.MonkeyPatch, working_key: str) -> list[str]:
     attempted: list[str] = []
     monkeypatch.setattr(
@@ -89,3 +111,13 @@ def test_embed_does_not_rotate_when_rotation_is_disabled(
     with pytest.raises(Exception, match="quota exhausted"):
         asyncio.run(adapter.embed(["xin chào"]))
     assert attempted == ["key-1"]
+
+
+def test_embed_splits_more_than_one_hundred_contents_and_preserves_order() -> None:
+    client = _RecordingClient()
+    adapter = GeminiEmbeddingAdapter(_settings(), client=client)  # type: ignore[arg-type]
+
+    vectors = asyncio.run(adapter.embed([str(index) for index in range(101)]))
+
+    assert [len(batch) for batch in client.batches] == [100, 1]
+    assert vectors == tuple((float(index),) for index in range(101))
