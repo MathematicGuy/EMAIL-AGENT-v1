@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import AsyncIterator, Sequence
+from datetime import datetime
 
 from cowork_agent.domain import ExtractedAttachment, ExtractedUnit
 from cowork_agent.domain.target_contracts import EphemeralEmailEnvelope
@@ -38,6 +39,14 @@ class FakeMailbox:
     ) -> Sequence[EphemeralEmailEnvelope]:
         del connection_id
         return tuple(item for item in self.messages if item.gmail_thread_id == thread_id)
+
+    async def get_message_received_at(
+        self, connection_id: str, message_id: str
+    ) -> datetime:
+        del connection_id
+        return next(
+            item.received_at for item in self.messages if item.gmail_message_id == message_id
+        )
 
     async def download_attachment(
         self, connection_id: str, message_id: str, attachment_id: str, max_bytes: int
