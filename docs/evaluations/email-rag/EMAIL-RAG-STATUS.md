@@ -31,7 +31,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     S1["Stage 1 · Ingestion & Storage"] --> B1["✅ Local Corpus Loader\nsrc/cowork_agent/integrations/rag/knowledge_base.py\nReads data/extracted/*.md, chunks by H2 headings,\nextracts titles and source_url metadata"]
-    S1 --> B2["✅ In-Repo Vector Memory\nsrc/cowork_agent/integrations/rag/__init__.py\nInRepoSemanticMemory using numpy cosine\nsimilarity over dense embeddings"]
+    S1 --> B2["✅ In-Repo Vector Memory\nsrc/cowork_agent/integrations/rag/memory.py\nInRepoSemanticMemory using numpy cosine\nsimilarity over dense embeddings"]
     S1 --> B3["✅ Gemini Embedding Adapter\nsrc/cowork_agent/integrations/rag/embeddings.py\nGeminiEmbeddingAdapter for live embeddings;\nHashingEmbedder for deterministic tests"]
     S1 --> B4["❌ MISSING: Qdrant Vector Store\nTarget external vector DB (Qdrant)\nnot connected in current local runtime"]
     S1 --> B5["❌ MISSING: PDF/DOCX & OCR Ingestion\nNo PDF/DOCX parser or Tesseract OCR\nsandbox for non-text documents"]
@@ -47,8 +47,8 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    S2["Stage 2 · Retrieval Engine"] --> C1["✅ Dense Vector Search\nsrc/cowork_agent/integrations/rag/__init__.py\nCosine similarity search with min_score threshold,\ntop_k truncation, and latency tracking"]
-    S2 --> C2["✅ Tenant ACL Filtering\nsrc/cowork_agent/integrations/rag/__init__.py\nTenant scope filtered BEFORE scoring/\nembedding queries; foreign chunks excluded"]
+    S2["Stage 2 · Retrieval Engine"] --> C1["✅ Dense Vector Search\nsrc/cowork_agent/integrations/rag/memory.py\nCosine similarity search with min_score threshold,\ntop_k truncation, and latency tracking"]
+    S2 --> C2["✅ Tenant ACL Filtering\nsrc/cowork_agent/integrations/rag/memory.py\nTenant scope filtered BEFORE scoring/\nembedding queries; foreign chunks excluded"]
     S2 --> C3["✅ Null Memory Fallback\nsrc/cowork_agent/integrations/rag/null_memory.py\nNullSemanticMemory returning structured empty\nresponse when RAG is disabled"]
     S2 --> C4["✅ Hybrid Search (BM25 + Dense)\nsrc/cowork_agent/integrations/rag/hybrid.py\nLexical BM25 search + Reciprocal Rank\nFusion (RRF) active in local memory"]
     S2 --> C5["✅ Jina Reranker Adapter\nsrc/cowork_agent/integrations/rag/jina_reranker.py\nJinaRerankerAdapter cross-encoder reranking\nwith safe fallback on failure"]
@@ -94,14 +94,14 @@ flowchart TD
 
 **Stage 1 · Ingestion & Storage**
 - ✅ **Local Corpus Loader (`knowledge_base.py`)**: Loads Markdown files from `data/extracted/`, chunks by H2 section headers, and extracts title metadata.
-- ✅ **In-Repo Vector Memory (`InRepoSemanticMemory`)**: In-memory vector store using numpy cosine similarity over dense embeddings.
-- ✅ **Gemini Embedding Adapter (`GeminiEmbeddingAdapter`)**: Generates vector embeddings via Gemini API (with `HashingEmbedder` for fast unit tests).
+- ✅ **In-Repo Vector Memory (`InRepoSemanticMemory`)**: In-memory vector store (`memory.py`) using numpy cosine similarity over dense embeddings.
+- ✅ **Gemini Embedding Adapter (`GeminiEmbeddingAdapter`)**: Generates vector embeddings via Gemini API (with `HashingEmbedder` in `fakes.py` for fast unit tests).
 - ❌ **Qdrant Vector Database Integration**: Target external Qdrant vector database is not connected in the current local runtime.
 - ❌ **PDF/DOCX & OCR Ingestion Sandbox**: Target document ingestion pipeline for binary files (PDF/DOCX) and image OCR is not implemented.
 
 **Stage 2 · Retrieval Engine**
 - ✅ **Dense Cosine Search (`InRepoSemanticMemory.retrieve`)**: Performs vector similarity search with `min_score` filtering, `top_k` limit, and timeout bounds.
-- ✅ **Tenant Security Filtering (`InRepoSemanticMemory`)**: Filters knowledge chunks by `tenant_id` before embedding or scoring queries (prevents cross-tenant leaks).
+- ✅ **Tenant Security Filtering (`InRepoSemanticMemory`)**: Filters knowledge chunks by `tenant_id` in `memory.py` before embedding or scoring queries (prevents cross-tenant leaks).
 - ✅ **Null Memory Safe Fallback (`NullSemanticMemory`)**: Returns structured `NO_RESULTS` response when RAG is disabled or unavailable.
 - ✅ **Hybrid Search (BM25 + Dense)**: `HybridSemanticMemory` (`hybrid.py`) combines dense vector cosine search with `BM25SearchAdapter` (`bm25.py`) using `ReciprocalRankFusion` (`rrf.py`).
 - ✅ **Jina Reranker Adapter (`JinaRerankerAdapter`)**: Secondary cross-encoder reranker (`jina_reranker.py`) integrated into `HybridSemanticMemory` in `app.py` and `worker.py` with fallback.
@@ -126,10 +126,10 @@ flowchart TD
 | Component | Status | Implementation File / Note |
 |---|---|---|
 | Markdown Corpus Loader | ✅ Implemented | [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) — loads `cap_lai_cccd.md`, `dang_ky_ket_hon.md`, `dang_ky_tam_tru.md` |
-| H2 Section Chunking | ✅ Implemented | [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py#L64-L75) — splits docs by `#` / `##` headings |
-| Dense Vector Storage | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/__init__.py) — in-memory numpy array vectors |
+| H2 Section Chunking | ✅ Implemented | [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py#L99-L115) — splits docs by `#` / `##` headings |
+| Dense Vector Storage | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/memory.py) — in-memory numpy array vectors |
 | Gemini Embedder Adapter | ✅ Implemented | [GeminiEmbeddingAdapter](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) — calls Gemini embedding API |
-| Deterministic Test Embedder | ✅ Implemented | [HashingEmbedder](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/fakes.py) — MD5 hash vectorizer for fast offline tests |
+| Deterministic Test Embedder | ✅ Implemented | [HashingEmbedder](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/fakes.py#L14-L36) — MD5 hash vectorizer for fast offline tests |
 | Qdrant External DB | ❌ Target | Target production vector database (specified in [EMAIL-RAG-ARCHITECHTURE.md](./EMAIL-RAG-ARCHITECHTURE.md) §4.5) |
 | PDF/DOCX Parser & OCR | ❌ Target | Target ingestion pipeline for binary documents and OCR scanning |
 
@@ -137,10 +137,10 @@ flowchart TD
 
 | Component | Status | Implementation File / Note |
 |---|---|---|
-| Dense Vector Cosine Search | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/__init__.py#L144-L156) — dot product / cosine similarity |
-| Pre-scoring ACL Filter | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/__init__.py#L86-L120) — filters by `tenant_scope` before query embedding |
+| Dense Vector Cosine Search | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/memory.py#L83-L98) — dot product / cosine similarity |
+| Pre-scoring ACL Filter | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/memory.py#L64-L68) — filters by `tenant_scope` before query embedding |
 | Top-K & Min Score Filtering | ✅ Implemented | Configured via `RetrievalLimits(top_k=5, min_score=0.0)` |
-| Timeout Handling | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/__init__.py#L165-L173) — returns `RetrievalStatus.TIMEOUT` on embedder timeout |
+| Timeout Handling | ✅ Implemented | [InRepoSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/memory.py#L74-L75) — returns `RetrievalStatus.TIMEOUT` on embedder timeout |
 | Null Memory Adapter | ✅ Implemented | [NullSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/null_memory.py) — safe no-op when RAG is disabled |
 | BM25 Lexical Keyword Search | ✅ Implemented | [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) — tenant-scoped lexical BM25 search |
 | Reciprocal Rank Fusion (RRF) | ✅ Implemented | [rrf.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/rrf.py) — position rank fusion with constant RRF_K=60 |
@@ -150,11 +150,11 @@ flowchart TD
 
 | Component | Status | Implementation File / Note |
 |---|---|---|
-| `RETRIEVE_RAG` Dispatch | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L731-L792) — invokes semantic memory when route requires knowledge |
-| `DIRECT_PLAN` Zero-Call Guard | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L794-L823) — bypasses retrieval completely for direct emails |
-| Citation Integrity Validator | ✅ Implemented | [validation.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/validation.py#L216-L262) — strips invalid citations before task persistence |
-| Retrieval Bounded Retry | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L826-L867) — retries retrieval once on transient failure |
-| Degradation to Partial Plan | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L869-L900) — attaches `missing_information` warning on empty retrieval |
+| `RETRIEVE_RAG` Dispatch | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L230-L233) — invokes semantic memory when route requires knowledge |
+| `DIRECT_PLAN` Zero-Call Guard | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L237-L246) — bypasses retrieval completely for direct emails |
+| Citation Integrity Validator | ✅ Implemented | [validation.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/validation.py#L129-L205) — strips invalid citations before task persistence |
+| Retrieval Bounded Retry | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L502-L514) — retries retrieval once on transient failure |
+| Degradation to Partial Plan | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L296-L305) — attaches `missing_information` warning on empty retrieval |
 | Grounded Action Plan Generation | ✅ Implemented | [fakes.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/fakes.py) / Gemini Generator — injects retrieved chunks into LLM prompt |
 
 ### Stage 4 — Infrastructure & Presentation
