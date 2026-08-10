@@ -309,3 +309,16 @@ Items 1 and 2 of the previous revision (golden set, end-to-end fixture) are **do
 - `tests/integration/email_action_plan/test_rag_retrieval_golden.py` — end-to-end email → corpus fixtures
 - `tests/integration/email_action_plan/test_workflow.py` — workflow-level RAG wiring tests
 - `scripts/evaluate_routing.py` — offline routing benchmark
+
+## Local knowledge ingestion
+
+An administrator CLI now ingests local DOCX and native-text PDF documents as
+Markdown for the corpus. It is covered by focused unit/integration tests for
+manifest skips, atomic output, deterministic discovery, safe rejection paths,
+CLI exit codes, and compatibility with `load_corpus()`.
+
+Scan, image-based, and mixed PDFs currently return
+`mistral_not_configured`; no Mistral request is made until OCR is enabled and
+an API key is provided. There is no Gmail-attachment ingestion or upload API,
+and this ingestion capability is not yet included in the retrieval-quality
+golden set or live-Qdrant benchmark.

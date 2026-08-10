@@ -1,220 +1,122 @@
 # Email RAG — Architecture Implementation Status
+> **Document status:** current snapshot as of 2026-08-10. This report describes
+> the code in this checkout, not a target architecture.
 
-> **Document status:** current snapshot as of 2026-08-10.
-> Purpose: map what Email RAG architectural components are implemented in the current codebase vs. what remains target/production-only scope.  
-> The system architecture spans four main areas:  
-> **1. Ingestion & Storage** (document parsing, chunking, vector memory) →  
-> **2. Retrieval Engine** (dense search, BM25, ACL filtering, reranking) →  
-> **3. Workflow & Generation** (RAG routing, grounded prompt assembly, citation validation, degradation) →  
-> **4. Infrastructure & Presentation** (FastAPI endpoints, Streamlit GUI, multi-tenant security).
+## Executive summary
 
----
+Email RAG is implemented as a retrieval-only capability behind
+`SemanticMemoryPort`. With the Gemini provider, the application loads the
+committed Markdown corpus and prefers a Qdrant-backed semantic memory when
+`QDRANT_ENABLED=true`. If Qdrant is disabled or fails while the app starts, it
+falls back to the deprecated in-repo hybrid retriever. If neither store can be
+built, it uses `NullSemanticMemory`, which returns a structured empty response
+rather than blocking an email run.
 
-## Architecture Implementation Map
-
-### System-Wide Architecture Overview
+The production default is therefore configurable Qdrant, not an unconditional
+requirement. Dense/BM25/RRF/Jina code remains executable as the local fallback
+and evaluation harness; it is not the preferred configured store.
 
 ```mermaid
 flowchart LR
-    A["📧 Email Action Plan System"] --> S1["Stage 1 · Ingestion & Storage\n(Corpus, Chunks, Vectors)"]
-    S1 --> S2["Stage 2 · Retrieval Engine\n(Dense Search, ACL, Fallbacks)"]
-    S2 --> S3["Stage 3 · Workflow & Generation\n(Routing, Citations, Degradation)"]
-    S3 --> S4["Stage 4 · Infra & Presentation\n(FastAPI, Streamlit, Multi-tenancy)"]
+    A[Gemini provider] --> B[Load data/extracted Markdown corpus]
+    B --> C{QDRANT_ENABLED?}
+    C -->|true| D[QdrantSemanticMemory]
+    D -->|setup fails| E[HybridSemanticMemory fallback]
+    C -->|false| E
+    E -->|build fails| F[NullSemanticMemory]
+    D --> G[SemanticMemoryPort]
+    E --> G
+    F --> G
+    G --> H[Email workflow and /knowledge/chat]
 ```
 
----
+## Implemented architecture
 
-### Decomposed Stage Maps
-
-#### Stage 1 · Ingestion & Storage Implementation Map
-
-```mermaid
-flowchart TD
-    S1["Stage 1 · Ingestion & Storage"] --> B1["✅ Local Corpus Loader\nsrc/cowork_agent/integrations/rag/knowledge_base.py\nReads data/extracted/*.md, chunks by H2 headings,\nextracts titles and source_url metadata"]
-    S1 --> B2["⚠️ Deprecated In-Repo Memory\nsrc/cowork_agent/integrations/rag/hybrid.py\nHybridSemanticMemory & InRepoSemanticMemory\ndeprecated in favor of Qdrant adapter"]
-    S1 --> B3["✅ Gemini Embedding Adapter\nsrc/cowork_agent/integrations/rag/embeddings.py\nGeminiEmbeddingAdapter for live embeddings;\nHashingEmbedder for deterministic tests"]
-    S1 --> B4["✅ Qdrant Vector Store\nsrc/cowork_agent/integrations/rag/qdrant.py\nQdrantSemanticMemory with Qdrant Cloud config\nand :memory: mode for offline tests"]
-    S1 --> B5["❌ MISSING: PDF/DOCX & OCR Ingestion\nNo PDF/DOCX parser or Tesseract OCR\nsandbox for non-text documents"]
-
-    style B1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style B2 fill:#b8860b,color:#fff,stroke:#b8860b
-    style B3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style B4 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style B5 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
-```
-
-#### Stage 2 · Retrieval Engine Implementation Map
-
-```mermaid
-flowchart TD
-    S2["Stage 2 · Retrieval Engine"] --> C1["✅ Qdrant Vector Search\nsrc/cowork_agent/integrations/rag/qdrant.py\nCosine search via client.query_points with min_score\nfiltering and top_k bounds"]
-    S2 --> C2["✅ Pre-Scoring Tenant ACL Filter\nsrc/cowork_agent/integrations/rag/qdrant.py\nPayload filter tenant_id == tenant_scope\nenforced BEFORE query scoring in Qdrant engine"]
-    S2 --> C3["✅ Null Memory Fallback\nsrc/cowork_agent/integrations/rag/null_memory.py\nNullSemanticMemory returning structured empty\nresponse when Qdrant/RAG fails or is disabled"]
-    S2 --> C4["⚠️ Legacy Hybrid Search (BM25 + Dense)\nsrc/cowork_agent/integrations/rag/hybrid.py\nHybridSemanticMemory (deprecated as default;\nretained for legacy unit test suites)"]
-    S2 --> C5["✅ Jina Reranker Adapter\nsrc/cowork_agent/integrations/rag/jina_reranker.py\nJinaRerankerAdapter cross-encoder reranking\nwith safe fallback on failure"]
-
-    style C1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C4 fill:#b8860b,color:#fff,stroke:#b8860b
-    style C5 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-```
-
-#### Stage 3 · Workflow & Generation Implementation Map
-
-```mermaid
-flowchart TD
-    S3["Stage 3 · Workflow & Generation"] --> D1["✅ RAG Route Integration\nsrc/cowork_agent/features/email_action_plan/workflow.py\nRETRIEVE_RAG path invokes retrieval with\nknowledge_gaps & query before generation"]
-    S3 --> D2["✅ DIRECT_PLAN Zero-Retrieval Guard\nsrc/cowork_agent/features/email_action_plan/workflow.py\nDIRECT_PLAN candidates bypass retrieval\ncompletely to save latency and tokens"]
-    S3 --> D3["✅ Citation Validation & Stripping\nsrc/cowork_agent/features/email_action_plan/validation.py\nStrips citations referencing chunk IDs not\nreturned by current retrieval request"]
-    S3 --> D4["✅ Degradation & Partial Plan Fallback\nsrc/cowork_agent/features/email_action_plan/workflow.py\nRetrieval failure retries once, then outputs\nPartial Plan with missing_information warning"]
-
-    style D1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style D2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style D3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style D4 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-```
-
-#### Stage 4 · Infrastructure & Presentation Implementation Map
-
-```mermaid
-flowchart TD
-    S4["Stage 4 · Infra & Presentation"] --> E1["✅ FastAPI Knowledge Endpoints\nsrc/cowork_agent/app.py\nEndpoints under /v1/mail-todo/knowledge/*\nfor readiness, doc list, and grounded chat"]
-    S4 --> E2["✅ Streamlit Test GUI\nsrc/cowork_agent/gui/app.py\nDisplays action plans with source email\npointers, citations, and warnings"]
-    S4 --> E3["❌ MISSING: User-Level Document ACL\nCorpus is company-wide; user_id filtering\nnot yet applied to document registry"]
-
-    style E1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style E2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style E3 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
-```
-
----
-
-### Plain English Summary (1 Line Per Component)
-
-**Stage 1 · Ingestion & Storage**
-- ✅ **Local Corpus Loader (`knowledge_base.py`)**: Loads Markdown files from `data/extracted/`, chunks by H2 section headers, and extracts title metadata.
-- ⚠️ **Deprecated In-Repo Vector Memory (`HybridSemanticMemory` / `InRepoSemanticMemory`)**: Replaced by Qdrant adapter as production default; issues `DeprecationWarning` at construction.
-- ✅ **Gemini Embedding Adapter (`GeminiEmbeddingAdapter`)**: Generates vector embeddings via Gemini API (with `HashingEmbedder` in `fakes.py` for fast unit tests).
-- ✅ **Qdrant Vector Database Integration (`QdrantSemanticMemory`)**: Qdrant Cloud adapter (`qdrant.py`) with payload metadata, automatic corpus ingestion, and `:memory:` mode for offline tests.
-- ❌ **PDF/DOCX & OCR Ingestion Sandbox**: Target document ingestion pipeline for binary files (PDF/DOCX) and image OCR is not implemented.
-
-**Stage 2 · Retrieval Engine**
-- ✅ **Qdrant Vector Search (`QdrantSemanticMemory.retrieve`)**: Performs vector similarity search via `query_points` with `min_score` filtering, `top_k` limit, and cosine distance.
-- ✅ **Pre-Scoring Tenant ACL Filtering (`QdrantSemanticMemory`)**: Enforces payload filter `tenant_id == tenant_scope` in Qdrant engine before vector scoring.
-- ✅ **Null Memory Safe Fallback (`NullSemanticMemory`)**: Returns structured `NO_RESULTS` response when RAG is disabled, unreachable, or fails.
-- ⚠️ **Legacy Hybrid Search (BM25 + Dense)**: `HybridSemanticMemory` (`hybrid.py`) deprecated as default; retained for legacy test suites.
-- ✅ **Jina Reranker Adapter (`JinaRerankerAdapter`)**: Secondary cross-encoder reranker (`jina_reranker.py`) integrated into retrieval workflow with fallback.
-
-**Stage 3 · Workflow & Generation**
-- ✅ **RAG Route Workflow Path (`DigestWorker`)**: Automatically triggers semantic retrieval when an email is classified as `RETRIEVE_RAG`.
-- ✅ **DIRECT_PLAN Zero-Retrieval Guard (`DigestWorker`)**: Prevents retrieval calls for `DIRECT_PLAN` emails to save latency and API tokens.
-- ✅ **Citation Validation & Stripping (`validation.py`)**: Strips any LLM-generated citations referencing chunk IDs not returned in the current retrieval.
-- ✅ **Degradation & Missing Information Warning (`DigestWorker`)**: Retries failed retrieval once, then produces a Partial Plan with an explicit `missing_information` warning without hallucinating.
-
-**Stage 4 · Infrastructure & Presentation**
-- ✅ **FastAPI Knowledge Endpoints (`app.py`)**: Exposes REST endpoints (`/v1/mail-todo/knowledge/*`) for health readiness, document list, and grounded chat.
-- ✅ **Streamlit Test Interface (`gui/app.py`)**: Renders generated action plans with Gmail thread pointers, citations, and missing-context warnings.
-- ❌ **User-Level Document Authorization**: Knowledge corpus is company-wide; user-level access control on documents is not yet active.
-
----
-
-## Current Corrections and Open Gaps
-
-This section reconciles the original MVP map with the current code and retained
-evaluation evidence. The implemented components above remain valid local-MVP
-capabilities; the items below are not implemented production capabilities.
-
-| Area | Status | Evidence and remaining gap |
+| Area | Status | Current behavior and evidence |
 |---|---|---|
-| Markdown chunking | Implemented | `load_corpus()` splits on both H1 and H2 headings, then splits long sections at paragraph boundaries; any H2-only wording elsewhere in this document is stale. |
-| Deterministic test embedding | Implemented | `HashingEmbedder` uses SHA-256 buckets, not MD5. It validates mechanics only and is not semantic-quality evidence. |
-| Persistent vector storage | Missing / target | Dense vectors and BM25 structures are in memory and are rebuilt at startup; Qdrant or another persistent vector store is not connected. |
-| Binary-document ingestion | Missing / target | No PDF/DOCX/XLSX/PPTX parser, OCR pipeline, or automatic conversion to Markdown/text is present. |
-| Corpus lifecycle | Missing | No document upload flow, versioning, incremental re-index, document-status enforcement, or persistent embedding cache exists. |
-| Calibrated abstention | Missing | All four retained unanswerable benchmark cases return chunks at the current threshold. Score/margin sweeps are evaluation-only; no runtime policy is selected. |
-| Retrieval deadline | Partial | `InRepoSemanticMemory` maps a raised `TimeoutError` to `TIMEOUT`, but request `timeout_ms` is not enforced as an active deadline around embedding/retrieval. |
-| Reranker observability | Missing | Jina fallback preserves availability, but runtime telemetry does not record whether reranking ran or fell back. |
-| Semantic plan grounding | Missing | Citation IDs are restricted to chunks returned by the current retrieval, but no semantic evaluation proves plan claims are entailed by those chunks. |
-| Document authorization | Missing / target | Tenant filtering is applied before scoring; per-user, group, and document-level ACLs are not active. |
+| Corpus source | Implemented | `knowledge_base.py` loads committed `data/extracted/*.md`, creates document/section metadata, and does not ingest raw email bodies. |
+| Qdrant configuration | Implemented | `QdrantSettings` reads URL, API key, collection, vector size, reindex flag, and `QDRANT_ENABLED`. A URL alone does not enable Qdrant. |
+| Qdrant store | Implemented | `QdrantSemanticMemory` queries Qdrant with cosine vectors, top-k and score threshold. `ingest_corpus()` creates/recreates and upserts the approved corpus. |
+| Qdrant tenant isolation | Implemented | The Qdrant payload filter for `tenant_id == tenant_scope` is constructed before query embedding/scoring. An empty tenant scope returns `authorization_denied`. |
+| Qdrant lifecycle | Partial | A missing/empty collection is ingested on boot; `QDRANT_REINDEX=true` forces re-ingestion. Each ingestion recreates the collection before upsert, so it is a corpus replacement rather than an incremental update. There is no upload API, registry, versioning, or incremental document update workflow. |
+| In-repo hybrid fallback | Implemented, deprecated | `HybridSemanticMemory` combines dense Gemini embeddings, BM25, RRF, optional query expansion/HyDE, optional Jina reranking, and optional MMR. It is used as a fallback/evaluation implementation and emits `DeprecationWarning`. |
+| Empty-result fallback | Implemented | When no memory can be built, `NullSemanticMemory` returns `retrieval_status=no_results` with no chunks. Known Qdrant query failures also degrade to this structured empty result. |
+| Email workflow wiring | Implemented | `DigestWorker` invokes retrieval for `RETRIEVE_RAG`, skips it for `DIRECT_PLAN`, forwards chunks to the generator, and records missing information when retrieval is empty or unavailable. |
+| Citation boundary | Implemented | Validation removes generated citation IDs that are not present in the retrieval response for the current request. |
+| Knowledge HTTP API | Implemented | `app.py` exposes readiness, document-list, and `/v1/mail-todo/knowledge/chat` endpoints. The chat endpoint returns the port's chunks, status, and latency; it does not generate an answer. |
+| Streamlit presentation | Implemented | The GUI renders `retrieval_status=no_results` as “Không tìm thấy kết quả phù hợp.” A client transport timeout/error is separately rendered as a fetch error (`mã 0`). |
 
-## Detailed Architectural Coverage
+## Runtime behavior and degradation
 
-### Stage 1 — Ingestion & Storage
+1. `LLM_PROVIDER=gemini` calls `build_semantic_memory()` at application startup.
+2. If Qdrant is enabled, the bootstrap connects to the configured collection;
+   it ingests the committed corpus only when the collection is missing/empty or
+   reindexing is requested.
+3. A Qdrant bootstrap failure is logged and the bootstrap attempts
+   `HybridSemanticMemory`. The same hybrid path is used when Qdrant is not
+   enabled.
+4. A hybrid bootstrap failure produces `NullSemanticMemory`. Retrieval then
+   succeeds as an API operation with `no_results`, rather than failing the
+   digest workflow.
+5. A healthy retriever returning no matching chunks also returns `no_results`.
+   This is distinct from a Streamlit-to-backend network/timeout failure.
 
-| Component | Status | Implementation File / Note |
+`QDRANT_ENABLED=false` is therefore a deliberate local fallback mode, not an
+absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
+
+## Security and data boundaries
+
+- Gmail access remains read-only.
+- Raw email bodies and attachment content are transient; the RAG corpus comes
+  only from repository Markdown files.
+- Tenant scope is enforced in the Qdrant query filter before scoring. The
+  in-repo retrievers also filter tenant-visible chunks before retrieval.
+- Per-user, group, document-status, and document-level ACL policies are not
+  implemented. The current corpus is effectively company-wide within its
+  tenant scope.
+
+## Known gaps and limits
+
+| Gap | Status | Why it matters |
 |---|---|---|
-| Markdown Corpus Loader | ✅ Implemented | [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) — loads `cap_lai_cccd.md`, `dang_ky_ket_hon.md`, `dang_ky_tam_tru.md` |
-| H2 Section Chunking | ✅ Implemented | [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py#L99-L115) — splits docs by `#` / `##` headings |
-| Dense Vector Storage | ✅ Implemented | [QdrantSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) — Qdrant Cloud / `:memory:` client |
-| Gemini Embedder Adapter | ✅ Implemented | [GeminiEmbeddingAdapter](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) — calls Gemini embedding API |
-| Deterministic Test Embedder | ✅ Implemented | [HashingEmbedder](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/fakes.py#L14-L36) — MD5 hash vectorizer for fast offline tests |
-| Qdrant External DB | ✅ Implemented | [qdrant.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) — production Qdrant Cloud adapter wired in `bootstrap.py` |
-| PDF/DOCX Parser & OCR | ❌ Target | Target ingestion pipeline for binary documents and OCR scanning |
+| Live Qdrant quality benchmark | Missing | Qdrant adapter mechanics are tested, but the retained real-embedding benchmark measures the in-repo variants, not Qdrant Cloud retrieval quality. |
+| Calibrated abstention | Missing | `no_results` is structurally supported, but no validated runtime score or margin policy separates unrelated Vietnamese queries from relevant corpus content. |
+| Active end-to-end deadline | Partial | Embedding/reranker transports have their own timeouts, but `RetrievalLimits.timeout_ms` is not enforced as one deadline across every remote step. |
+| Reranker observability | Missing | Jina safely falls back, but the runtime response does not report whether reranking was applied or bypassed. |
+| Semantic grounding | Missing | Citation IDs are constrained to retrieved chunks; no evaluation proves generated plan claims are entailed by those chunks. |
+| Binary ingestion | Partial | The administrator CLI converts local DOCX and native-text PDF files into Markdown. Scan, image-based, and mixed PDFs fail safely with `mistral_not_configured` until Mistral OCR is configured; XLSX/PPTX, upload, and Gmail-attachment ingestion do not exist. |
+| Corpus administration | Missing | No persistent document registry, version history, incremental update, or asynchronous ingestion pipeline exists. |
 
-### Stage 2 — Retrieval Engine
+## Operational checks
 
-| Component | Status | Implementation File / Note |
-|---|---|---|
-| Dense Vector Cosine Search | ✅ Implemented | [QdrantSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) — `query_points` cosine similarity |
-| Pre-scoring ACL Filter | ✅ Implemented | [QdrantSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) — filters by `tenant_scope` before vector scoring |
-| Top-K & Min Score Filtering | ✅ Implemented | Configured via `RetrievalLimits(top_k=5, min_score=0.0)` |
-| Timeout Handling | ✅ Implemented | Graceful degradation to `NullSemanticMemory` on connection/timeout error |
-| Null Memory Adapter | ✅ Implemented | [NullSemanticMemory](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/null_memory.py) — safe no-op when RAG is disabled |
-| BM25 Lexical Keyword Search | ⚠️ Legacy | [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) — part of deprecated `HybridSemanticMemory` |
-| Reciprocal Rank Fusion (RRF) | ⚠️ Legacy | [rrf.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/rrf.py) — part of deprecated `HybridSemanticMemory` |
-| Jina Reranking Adapter | ✅ Implemented | [jina_reranker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/jina_reranker.py) — Jina cross-encoder reranker with fallback |
+| Check | Expected result |
+|---|---|
+| `GET /v1/mail-todo/knowledge/ready` | `ready` when a non-null store and corpus are available; `degraded` for `NullSemanticMemory`; `unavailable` when the corpus cannot load. |
+| `POST /v1/mail-todo/knowledge/chat` with no matching chunk | HTTP 200 with `retrieval_status: "no_results"` and an empty `chunks` list. |
+| Streamlit search for the same response | “Không tìm thấy kết quả phù hợp.” |
+| Qdrant unavailable at boot | Warning in backend log, then hybrid fallback; only a subsequent hybrid failure yields null memory. |
 
-### Stage 3 — Workflow & Generation
+## Source of truth
 
-| Component | Status | Implementation File / Note |
-|---|---|---|
-| `RETRIEVE_RAG` Dispatch | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L230-L233) — invokes semantic memory when route requires knowledge |
-| `DIRECT_PLAN` Zero-Call Guard | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L237-L246) — bypasses retrieval completely for direct emails |
-| Citation Integrity Validator | ✅ Implemented | [validation.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/validation.py#L129-L205) — strips invalid citations before task persistence |
-| Retrieval Bounded Retry | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L502-L514) — retries retrieval once on transient failure |
-| Degradation to Partial Plan | ✅ Implemented | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py#L296-L305) — attaches `missing_information` warning on empty retrieval |
-| Grounded Action Plan Generation | ✅ Implemented | [fakes.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/fakes.py) / Gemini Generator — injects retrieved chunks into LLM prompt |
+- `src/cowork_agent/integrations/rag/bootstrap.py`
+- `src/cowork_agent/integrations/rag/qdrant.py`
+- `src/cowork_agent/integrations/rag/hybrid.py`
+- `src/cowork_agent/app.py`
+- `src/cowork_agent/features/email_action_plan/workflow.py`
+- `src/cowork_agent/gui/app.py`
 
-### Stage 4 — Infrastructure & Presentation
+## Local knowledge ingestion
 
-| Component | Status | Implementation File / Note |
-|---|---|---|
-| FastAPI Composition Root | ✅ Implemented | [app.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/app.py) — merges mailbox digest & knowledge endpoints under `/v1/mail-todo` |
-| Knowledge REST API | ✅ Implemented | `/v1/mail-todo/knowledge/ready`, `/v1/mail-todo/knowledge/documents`, `/v1/mail-todo/knowledge/chat` |
-| Streamlit Test GUI | ✅ Implemented | [gui/app.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui/app.py) — displays tasks, citations, and missing info warnings |
-| Dev Trace Telemetry | ✅ Implemented | [observability.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/observability.py) — encrypted trace sink with metadata-only rules |
-| User-Level Document ACL | ❌ Target | Knowledge corpus is company-wide; user-level access filtering is pending |
+The `mail-todo-ingest-knowledge` administrator CLI accepts `--source`,
+`--output`, `--force`, and `--dry-run`. It deterministically discovers local
+DOCX/PDF files, writes non-empty Markdown atomically, and records hashes in an
+ingestion manifest. Run it with `KNOWLEDGE_INGEST_OCR_ENABLED=false` until
+`MISTRAL_API_KEY` is configured.
 
----
-
-## Summary Matrix
-
-| Category | Total Items | Implemented (Local MVP / Cloud) | Missing / Target Production |
-|---|:---:|:---:|:---:|
-| **Stage 1: Ingestion & Storage** | 7 | 6 ✅ | 1 ❌ |
-| **Stage 2: Retrieval Engine** | 8 | 8 ✅ | 0 ❌ |
-| **Stage 3: Workflow & Generation** | 6 | 6 ✅ | 0 ❌ |
-| **Stage 4: Infrastructure & Presentation** | 5 | 4 ✅ | 1 ❌ |
-| **Total Architecture Features** | **26** | **24 ✅ (92%)** | **2 ❌ (8%)** |
-
-### Reconciled Summary Matrix
-
-| Category | Implemented (Local MVP) | Missing / target / open gap |
-|---|:---:|:---:|
-| Stage 1: Ingestion & Storage | 5 | 3 |
-| Stage 2: Retrieval Engine | 8 | 2 |
-| Stage 3: Workflow & Generation | 6 | 1 |
-| Stage 4: Infrastructure & Presentation | 4 | 1 |
-| **Total reconciled scope** | **23 (77%)** | **7 (23%)** |
-
-The reconciled scope counts corpus lifecycle, calibrated abstention, retrieval
-deadline/reranker observability, and semantic plan grounding in addition to the
-three original target-production items.
-
----
-
-*Related Documents:*
-- [EMAIL-RAG-ARCHITECHTURE.md](../../references/EMAIL-RAG-ARCHITECHTURE.md) — full target system architecture specification
+Native-text PDFs and DOCX files are supported. PDFs that need OCR fail with
+`mistral_not_configured` and do not create partial output. The CLI never
+downloads Gmail attachments, has no upload API, and does not write to Qdrant;
+after a successful ingestion, operators choose when to restart the local
+retriever or set `QDRANT_REINDEX=true` for a corpus replacement.
 - [RAG-EVALUATION-STATUS.md](./RAG-EVALUATION-STATUS.md) — evaluation & test coverage map
 - [master-comparison.md](../../master-comparison.md) — current vs target gap analysis and milestones
