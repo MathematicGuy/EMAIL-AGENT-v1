@@ -8,10 +8,12 @@ from .models import (
     PdfInspection,
     PdfKind,
 )
+from .service import KnowledgeIngestionService
 
 __all__ = [
     "ExtractionResult",
     "IngestionOutcome",
+    "KnowledgeIngestionService",
     "ManifestEntry",
     "OcrPage",
     "PdfInspection",
