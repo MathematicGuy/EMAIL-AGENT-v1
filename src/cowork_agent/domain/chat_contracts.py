@@ -16,6 +16,7 @@ from ._chat_contracts_common import (
     MemoryType,
 )
 from ._chat_contracts_memory import (
+    PROFILE_PREFERENCE_FIELDS,
     ChatMemoryScope,
     ChatTurn,
     DeclarativeProfile,
@@ -36,6 +37,7 @@ from .target_contracts import ValidationStatus
 __all__ = [
     "AI_CHAT_FEATURE",
     "CHAT_CONTRACTS_VERSION",
+    "PROFILE_PREFERENCE_FIELDS",
     "ChatEventType",
     "ChatMemoryScope",
     "ChatMessageRequest",

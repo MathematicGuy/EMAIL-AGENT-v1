@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Final
@@ -43,6 +44,11 @@ class HybridSemanticMemory:
         top_k_default: int = 5,
         min_score_default: float = 0.2,
     ) -> None:
+        warnings.warn(
+            "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._chunks = tuple(chunk for document in documents for chunk in document.chunks)
         if not self._chunks:
             raise ValueError("HybridSemanticMemory requires a non-empty corpus")

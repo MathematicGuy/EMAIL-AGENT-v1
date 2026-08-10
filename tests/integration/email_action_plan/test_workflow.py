@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.domain import ActionFreshness, Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
@@ -51,6 +52,9 @@ from cowork_agent.integrations.llm.fakes import (
     FakeRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
+from cowork_agent.integrations.rag.fakes import HashingEmbedder
+from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
@@ -1449,5 +1453,66 @@ def test_completion_timestamp_is_taken_after_the_work_not_at_claim_time() -> Non
             user_id="u1", mailbox_connection_id="mbx1", idempotency_key="request-2", now=NOW
         )
         assert (await worker.execute(pinned.id, now=NOW)).completed_at == NOW
+
+    asyncio.run(scenario())
+
+
+#: Demo-validation for the Qdrant migration: the committed corpus, indexed in
+#: an in-memory Qdrant, reached through the real DigestWorker RETRIEVE_RAG path.
+QDRANT_DEMO_COLLECTION = "workflow_company_knowledge"
+CORPUS_DIR = Path(__file__).resolve().parents[3] / "data" / "extracted"
+
+
+def test_retrieve_rag_workflow_runs_end_to_end_over_qdrant() -> None:
+    """The whole RETRIEVE_RAG route against a real Qdrant query engine.
+
+    No fake memory sits between routing and generation here: whatever the
+    generator receives came out of Qdrant, so the citations are checked
+    against the chunk ids actually ingested from ``data/extracted/``.
+    """
+
+    async def scenario() -> None:
+        client = AsyncQdrantClient(":memory:")
+        documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
+        await ingest_corpus(client, QDRANT_DEMO_COLLECTION, documents, HashingEmbedder())
+        memory = QdrantSemanticMemory(
+            client, QDRANT_DEMO_COLLECTION, HashingEmbedder(), min_score_default=0.0
+        )
+        corpus_chunk_ids = {
+            chunk.chunk_id for document in documents for chunk in document.chunks
+        }
+
+        generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="qdrant-1", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox([email("m1", "t1", "Xin nghỉ phép")]),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier({"m1": RAG_DECISION}),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            semantic_memory=memory,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert completed.action_items_count == 1
+        (retrieval,) = generator.received_retrievals
+        assert retrieval.retrieval_status is RetrievalStatus.SUCCESS
+        assert retrieval.tenant_id == LOCAL_TENANT_ID
+        assert retrieval.chunks
+        for chunk in retrieval.chunks:
+            assert chunk.chunk_id in corpus_chunk_ids
+            assert chunk.source_url.startswith("data/extracted/")
+        stored = await task_repository.list_for_run(run.id)
+        assert len(stored) == 1
+        assert stored[0].task.missing_information == ()
 
     asyncio.run(scenario())

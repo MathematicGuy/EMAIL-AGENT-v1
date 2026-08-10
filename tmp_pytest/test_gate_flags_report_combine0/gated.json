@@ -1,0 +1,4189 @@
+{
+  "generated_at": "2026-08-10T03:29:04.288114Z",
+  "embedder": "hashing",
+  "retriever": "dense",
+  "reranker": null,
+  "corpus": {
+    "document_count": 6,
+    "chunk_count": 36,
+    "corpus_dir": "data/extracted"
+  },
+  "limits": {
+    "top_k": 5,
+    "min_score": 0.2
+  },
+  "case_count": 19,
+  "document_level": {
+    "hit_at_1": 0.1667,
+    "hit_at_3": 0.3889,
+    "mrr": 0.2731,
+    "recall_at_5": 0.4444
+  },
+  "section_level": {
+    "hit_at_1": 0.0556,
+    "hit_at_3": 0.1667,
+    "mrr": 0.1111,
+    "recall_at_5": 0.1667,
+    "excluded_case_count": 0
+  },
+  "by_probe": {
+    "lexical": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.1667,
+        "hit_at_3": 0.5,
+        "mrr": 0.3056,
+        "recall_at_5": 0.5
+      },
+      "section_level": {
+        "hit_at_1": 0.1667,
+        "hit_at_3": 0.1667,
+        "mrr": 0.1667,
+        "recall_at_5": 0.1667,
+        "excluded_case_count": 0
+      }
+    },
+    "mixed": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.1667,
+        "hit_at_3": 0.3333,
+        "mrr": 0.2639,
+        "recall_at_5": 0.5
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.1667,
+        "mrr": 0.0833,
+        "recall_at_5": 0.1667,
+        "excluded_case_count": 0
+      }
+    },
+    "semantic": {
+      "case_count": 6,
+      "document_level": {
+        "hit_at_1": 0.1667,
+        "hit_at_3": 0.3333,
+        "mrr": 0.25,
+        "recall_at_5": 0.3333
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.1667,
+        "mrr": 0.0833,
+        "recall_at_5": 0.1667,
+        "excluded_case_count": 0
+      }
+    }
+  },
+  "by_document": {
+    "cap_lai_cccd": {
+      "case_count": 3,
+      "mrr": 0.6667,
+      "section_mrr": 0.5
+    },
+    "dang_ky_ket_hon": {
+      "case_count": 3,
+      "mrr": 0.6111,
+      "section_mrr": 0.0
+    },
+    "dang_ky_xe": {
+      "case_count": 3,
+      "mrr": 0.25,
+      "section_mrr": 0.1667
+    },
+    "huong_dan_nop_ho_so_dai_hoc_vinuni": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "thu_tuc_dang_ky_bhxh_luatvietnam": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "thue_dien_tu": {
+      "case_count": 3,
+      "mrr": 0.1111,
+      "section_mrr": 0.0
+    }
+  },
+  "abstention": {
+    "case_count": 1,
+    "abstention_rate": 0.0,
+    "false_answer_case_ids": [
+      "q-019"
+    ]
+  },
+  "latency_ms": {
+    "p50": 0,
+    "p95": 0
+  },
+  "misses": [
+    {
+      "case_id": "q-002",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": [
+        "dang_ky_ket_hon",
+        "dang_ky_xe"
+      ]
+    },
+    {
+      "case_id": "q-007",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": [
+        "dang_ky_ket_hon",
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "dang_ky_ket_hon",
+        "thue_dien_tu"
+      ]
+    },
+    {
+      "case_id": "q-010",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": [
+        "thue_dien_tu",
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ]
+    },
+    {
+      "case_id": "q-011",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "dang_ky_ket_hon",
+        "cap_lai_cccd"
+      ]
+    },
+    {
+      "case_id": "q-012",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "cap_lai_cccd",
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "cap_lai_cccd",
+        "dang_ky_xe"
+      ]
+    },
+    {
+      "case_id": "q-013",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": [
+        "cap_lai_cccd",
+        "cap_lai_cccd",
+        "dang_ky_ket_hon",
+        "cap_lai_cccd",
+        "cap_lai_cccd"
+      ]
+    },
+    {
+      "case_id": "q-014",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": [
+        "cap_lai_cccd",
+        "dang_ky_ket_hon",
+        "cap_lai_cccd",
+        "dang_ky_xe"
+      ]
+    },
+    {
+      "case_id": "q-015",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": [
+        "cap_lai_cccd",
+        "cap_lai_cccd",
+        "dang_ky_ket_hon",
+        "cap_lai_cccd",
+        "cap_lai_cccd"
+      ]
+    },
+    {
+      "case_id": "q-017",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": [
+        "dang_ky_ket_hon",
+        "dang_ky_xe",
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "cap_lai_cccd"
+      ]
+    },
+    {
+      "case_id": "q-018",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "cap_lai_cccd",
+        "cap_lai_cccd",
+        "cap_lai_cccd"
+      ]
+    }
+  ],
+  "score_evidence": {
+    "cases": [
+      {
+        "case_id": "q-001",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.2643863558769226,
+          0.25,
+          0.22305670380592346,
+          0.20044592022895813
+        ],
+        "top_score": 0.2643863558769226,
+        "runner_up_score": 0.25,
+        "delta": 0.014386355876922607
+      },
+      {
+        "case_id": "q-002",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.23076923191547394,
+          0.22116294503211975
+        ],
+        "top_score": 0.23076923191547394,
+        "runner_up_score": 0.22116294503211975,
+        "delta": 0.009606286883354187
+      },
+      {
+        "case_id": "q-003",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.2862991690635681,
+          0.22661688923835754,
+          0.200738787651062,
+          0.20044592022895813
+        ],
+        "top_score": 0.2862991690635681,
+        "runner_up_score": 0.22661688923835754,
+        "delta": 0.05968227982521057
+      },
+      {
+        "case_id": "q-004",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.29740893840789795,
+          0.25,
+          0.22941574454307556,
+          0.22661687433719635,
+          0.21575850248336792
+        ],
+        "top_score": 0.29740893840789795,
+        "runner_up_score": 0.25,
+        "delta": 0.04740893840789795
+      },
+      {
+        "case_id": "q-005",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.3076923191547394,
+          0.24550160765647888,
+          0.24077171087265015,
+          0.23735633492469788,
+          0.22116294503211975
+        ],
+        "top_score": 0.3076923191547394,
+        "runner_up_score": 0.24550160765647888,
+        "delta": 0.0621907114982605
+      },
+      {
+        "case_id": "q-006",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.3149290680885315,
+          0.31165117025375366,
+          0.3076923191547394,
+          0.30215585231781006,
+          0.26726123690605164
+        ],
+        "top_score": 0.3149290680885315,
+        "runner_up_score": 0.31165117025375366,
+        "delta": 0.003277897834777832
+      },
+      {
+        "case_id": "q-007",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.2810496985912323,
+          0.2809757590293884,
+          0.2355278730392456,
+          0.20236116647720337
+        ],
+        "top_score": 0.2810496985912323,
+        "runner_up_score": 0.2809757590293884,
+        "delta": 7.393956184387207e-05
+      },
+      {
+        "case_id": "q-008",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.38461539149284363,
+          0.29488393664360046,
+          0.2740755081176758,
+          0.24550162255764008,
+          0.24094992876052856
+        ],
+        "top_score": 0.38461539149284363,
+        "runner_up_score": 0.29488393664360046,
+        "delta": 0.08973145484924316
+      },
+      {
+        "case_id": "q-009",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.4008188247680664,
+          0.38357067108154297,
+          0.28676968812942505,
+          0.25717225670814514,
+          0.24077171087265015
+        ],
+        "top_score": 0.4008188247680664,
+        "runner_up_score": 0.38357067108154297,
+        "delta": 0.017248153686523438
+      },
+      {
+        "case_id": "q-010",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.3221930265426636,
+          0.28676968812942505
+        ],
+        "top_score": 0.3221930265426636,
+        "runner_up_score": 0.28676968812942505,
+        "delta": 0.035423338413238525
+      },
+      {
+        "case_id": "q-011",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.28676968812942505,
+          0.23076924681663513,
+          0.20773214101791382
+        ],
+        "top_score": 0.28676968812942505,
+        "runner_up_score": 0.23076924681663513,
+        "delta": 0.05600044131278992
+      },
+      {
+        "case_id": "q-012",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.4301545321941376,
+          0.34355899691581726,
+          0.23693954944610596,
+          0.22360679507255554,
+          0.22116294503211975
+        ],
+        "top_score": 0.4301545321941376,
+        "runner_up_score": 0.34355899691581726,
+        "delta": 0.08659553527832031
+      },
+      {
+        "case_id": "q-013",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.34355899691581726,
+          0.3210405707359314,
+          0.3076923191547394,
+          0.2876780033111572,
+          0.26726123690605164
+        ],
+        "top_score": 0.34355899691581726,
+        "runner_up_score": 0.3210405707359314,
+        "delta": 0.022518426179885864
+      },
+      {
+        "case_id": "q-014",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.28327107429504395,
+          0.26923078298568726,
+          0.26726123690605164,
+          0.22116294503211975
+        ],
+        "top_score": 0.28327107429504395,
+        "runner_up_score": 0.26923078298568726,
+        "delta": 0.01404029130935669
+      },
+      {
+        "case_id": "q-015",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.34355899691581726,
+          0.3210405707359314,
+          0.2884615361690521,
+          0.2876780033111572,
+          0.27329719066619873
+        ],
+        "top_score": 0.34355899691581726,
+        "runner_up_score": 0.3210405707359314,
+        "delta": 0.022518426179885864
+      },
+      {
+        "case_id": "q-016",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.3076923191547394,
+          0.28676968812942505,
+          0.2726248800754547,
+          0.20652851462364197,
+          0.20044592022895813
+        ],
+        "top_score": 0.3076923191547394,
+        "runner_up_score": 0.28676968812942505,
+        "delta": 0.02092263102531433
+      },
+      {
+        "case_id": "q-017",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.23076921701431274,
+          0.22116294503211975,
+          0.20073877274990082,
+          0.20044592022895813
+        ],
+        "top_score": 0.23076921701431274,
+        "runner_up_score": 0.22116294503211975,
+        "delta": 0.009606271982192993
+      },
+      {
+        "case_id": "q-018",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.34412363171577454,
+          0.2862991690635681,
+          0.207732155919075,
+          0.20044592022895813
+        ],
+        "top_score": 0.34412363171577454,
+        "runner_up_score": 0.2862991690635681,
+        "delta": 0.05782446265220642
+      },
+      {
+        "case_id": "q-019",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": "dense_cosine",
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [
+          0.28044912219047546,
+          0.26616019010543823,
+          0.25803637504577637
+        ],
+        "top_score": 0.28044912219047546,
+        "runner_up_score": 0.26616019010543823,
+        "delta": 0.014288932085037231
+      }
+    ]
+  },
+  "evaluation_only_calibration_sweeps": {
+    "absolute_score": [
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.23076921701431274,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 0,
+          "false_abstention_rate": 0.0,
+          "affected_case_ids": []
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3889,
+              "mrr": 0.2731,
+              "recall_at_5": 0.4444
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.23076922446489334,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 1,
+          "false_abstention_rate": 0.0556,
+          "affected_case_ids": [
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3889,
+              "mrr": 0.2731,
+              "recall_at_5": 0.4444
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.24757779389619827,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 2,
+          "false_abstention_rate": 0.1111,
+          "affected_case_ids": [
+            "q-002",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3889,
+              "mrr": 0.2731,
+              "recall_at_5": 0.4444
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.27241773903369904,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 3,
+          "false_abstention_rate": 0.1667,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2176,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.2807494103908539,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 3,
+          "false_abstention_rate": 0.1667,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2176,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.2821603864431381,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 4,
+          "false_abstention_rate": 0.2222,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-007",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2176,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.28478512167930603,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 5,
+          "false_abstention_rate": 0.2778,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-007",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2176,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.2865344285964966,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 6,
+          "false_abstention_rate": 0.3333,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-007",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.2778,
+              "mrr": 0.162,
+              "recall_at_5": 0.3333
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0972,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.2920893132686615,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 7,
+          "false_abstention_rate": 0.3889,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-007",
+            "q-011",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.2778,
+              "mrr": 0.162,
+              "recall_at_5": 0.3333
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0972,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.30255062878131866,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 8,
+          "false_abstention_rate": 0.4444,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-007",
+            "q-011",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.2222,
+              "mrr": 0.1343,
+              "recall_at_5": 0.2778
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0556,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0972,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.31131069362163544,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 10,
+          "false_abstention_rate": 0.5556,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-007",
+            "q-011",
+            "q-014",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0602,
+              "recall_at_5": 0.1667
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0972,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.31856104731559753,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 11,
+          "false_abstention_rate": 0.6111,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-011",
+            "q-014",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0417,
+              "recall_at_5": 0.1111
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0417,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.3328760117292404,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 12,
+          "false_abstention_rate": 0.6667,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-010",
+            "q-011",
+            "q-014",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0417,
+              "recall_at_5": 0.1111
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0417,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.3438413143157959,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 14,
+          "false_abstention_rate": 0.7778,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0417,
+              "recall_at_5": 0.1111
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0417,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.3643695116043091,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 15,
+          "false_abstention_rate": 0.8333,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0417,
+              "recall_at_5": 0.1111
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0417,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.392717108130455,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 16,
+          "false_abstention_rate": 0.8889,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-008",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0139,
+              "recall_at_5": 0.0556
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0417,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.415486678481102,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 17,
+          "false_abstention_rate": 0.9444,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-008",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "absolute_score",
+        "threshold": 0.43015453219413763,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 18,
+          "false_abstention_rate": 1.0,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-008",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-012",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      }
+    ],
+    "margin": [
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 7.393956184387207e-05,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 0,
+          "false_abstention_rate": 0.0,
+          "affected_case_ids": []
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3889,
+              "mrr": 0.2731,
+              "recall_at_5": 0.4444
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.001675918698310852,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 1,
+          "false_abstention_rate": 0.0556,
+          "affected_case_ids": [
+            "q-007"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3889,
+              "mrr": 0.2731,
+              "recall_at_5": 0.4444
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.2639,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.006442084908485413,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 2,
+          "false_abstention_rate": 0.1111,
+          "affected_case_ids": [
+            "q-006",
+            "q-007"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2546,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.00960627943277359,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 3,
+          "false_abstention_rate": 0.1667,
+          "affected_case_ids": [
+            "q-006",
+            "q-007",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2546,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.011823289096355438,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 4,
+          "false_abstention_rate": 0.2222,
+          "affected_case_ids": [
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2546,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.01416461169719696,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 0,
+          "abstention_rate": 0.0,
+          "false_answer_case_ids": [
+            "q-019"
+          ]
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 5,
+          "false_abstention_rate": 0.2778,
+          "affected_case_ids": [
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2546,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.01433764398097992,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 5,
+          "false_abstention_rate": 0.2778,
+          "affected_case_ids": [
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1667,
+              "hit_at_3": 0.3333,
+              "mrr": 0.2546,
+              "recall_at_5": 0.3889
+            },
+            "section_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1111,
+              "recall_at_5": 0.1667,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.5,
+                "mrr": 0.3056,
+                "recall_at_5": 0.5
+              },
+              "section_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.015817254781723022,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 6,
+          "false_abstention_rate": 0.3333,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.2778,
+              "mrr": 0.1991,
+              "recall_at_5": 0.3333
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.2083,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.019085392355918884,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 7,
+          "false_abstention_rate": 0.3889,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-014",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.2778,
+              "mrr": 0.1852,
+              "recall_at_5": 0.2778
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.3333,
+                "mrr": 0.1389,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.021720528602600098,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 8,
+          "false_abstention_rate": 0.4444,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-014",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.2222,
+              "mrr": 0.1667,
+              "recall_at_5": 0.2222
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.028970882296562195,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 10,
+          "false_abstention_rate": 0.5556,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.2222,
+              "mrr": 0.1667,
+              "recall_at_5": 0.2222
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.04141613841056824,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 11,
+          "false_abstention_rate": 0.6111,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.2222,
+              "mrr": 0.1667,
+              "recall_at_5": 0.2222
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.05170468986034393,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 12,
+          "false_abstention_rate": 0.6667,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-004",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1389,
+              "recall_at_5": 0.1667
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.05691245198249817,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 13,
+          "false_abstention_rate": 0.7222,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-004",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1389,
+              "recall_at_5": 0.1667
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.058753371238708496,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 14,
+          "false_abstention_rate": 0.7778,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-004",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.1111,
+              "hit_at_3": 0.1667,
+              "mrr": 0.1389,
+              "recall_at_5": 0.1667
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0556,
+              "recall_at_5": 0.1111,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.1667,
+                "mrr": 0.1667,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.060936495661735535,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 15,
+          "false_abstention_rate": 0.8333,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0556,
+              "hit_at_3": 0.1111,
+              "mrr": 0.0833,
+              "recall_at_5": 0.1111
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.1667,
+                "hit_at_3": 0.3333,
+                "mrr": 0.25,
+                "recall_at_5": 0.3333
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.0743931233882904,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 16,
+          "false_abstention_rate": 0.8889,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.08816349506378174,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 17,
+          "false_abstention_rate": 0.9444,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-012",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0556,
+              "mrr": 0.0278,
+              "recall_at_5": 0.0556,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.1667,
+                "mrr": 0.0833,
+                "recall_at_5": 0.1667,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      },
+      {
+        "observed_score_kind": "dense_cosine",
+        "gate_kind": "margin",
+        "threshold": 0.08973145484924318,
+        "affected_population_count": 19,
+        "inherited_abstention_case_ids": [],
+        "undefined_margin_case_ids": [],
+        "unanswerable": {
+          "case_count": 1,
+          "abstention_count": 1,
+          "abstention_rate": 1.0,
+          "false_answer_case_ids": []
+        },
+        "answerable": {
+          "case_count": 18,
+          "false_abstention_count": 18,
+          "false_abstention_rate": 1.0,
+          "affected_case_ids": [
+            "q-001",
+            "q-002",
+            "q-003",
+            "q-004",
+            "q-005",
+            "q-006",
+            "q-007",
+            "q-008",
+            "q-009",
+            "q-010",
+            "q-011",
+            "q-012",
+            "q-013",
+            "q-014",
+            "q-015",
+            "q-016",
+            "q-017",
+            "q-018"
+          ]
+        },
+        "metrics": {
+          "overall": {
+            "document_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0
+            },
+            "section_level": {
+              "hit_at_1": 0.0,
+              "hit_at_3": 0.0,
+              "mrr": 0.0,
+              "recall_at_5": 0.0,
+              "excluded_case_count": 0
+            }
+          },
+          "by_probe": {
+            "lexical": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "mixed": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            },
+            "semantic": {
+              "case_count": 6,
+              "document_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0
+              },
+              "section_level": {
+                "hit_at_1": 0.0,
+                "hit_at_3": 0.0,
+                "mrr": 0.0,
+                "recall_at_5": 0.0,
+                "excluded_case_count": 0
+              }
+            }
+          }
+        }
+      }
+    ],
+    "margin_summary": [
+      {
+        "observed_score_kind": "dense_cosine",
+        "defined_margin_case_count": 19,
+        "undefined_margin_case_ids": [],
+        "candidate_count": 19
+      }
+    ]
+  }
+}

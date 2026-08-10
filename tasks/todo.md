@@ -69,10 +69,10 @@ Chat and define `@Email` as an executable in-chat skill.
 - [x] Checkpoint: cross-tenant/cross-user/session fail-closed + TTL tests (73 focused tests; deterministic suite exit 0)
 
 ## V2-M2 — AI Chat declarative profile
-- [ ] PostgreSQL persona/profile store; explicit-only writes
-- [ ] Compact per-turn profile loading + degraded fallback
-- [ ] Preference/profile deletion + retention
-- [ ] Checkpoint: preferences affect later chat; failure does not block chat or `@Email`
+- [x] PostgreSQL persona/profile store (`002_chat_profiles.sql`, `PostgresChatProfileRepository`); explicit-only writes enforced by `profile_policy.authorize_profile_write` + a `source_type` CHECK
+- [x] Compact per-turn profile loading + degraded fallback (gateway `read_context` long-term path; `expires_at` filtered in SQL)
+- [x] Preference/profile deletion + retention (`delete_profile`, `purge_expired`)
+- [x] Checkpoint: preferences affect later chat; failure does not block chat or `@Email` — unit/gateway proof plus `tests/integration/persistence` 15 passed against `cowork-pg` (2026-08-10)
 
 ## V2-M3 — Chat and `@Email` episodic persistence
 - [ ] Bounded chat summaries + idempotent `@Email` Action Plan episodes (`retrieval_eligible=false`)

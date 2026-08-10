@@ -11,9 +11,10 @@ from cowork_agent.domain.target_contracts import (
     RetrievalStatus,
     SemanticRetrievalRequest,
 )
-from cowork_agent.integrations.rag import InRepoSemanticMemory, NullSemanticMemory
+from cowork_agent.integrations.rag import NullSemanticMemory
 from cowork_agent.integrations.rag.fakes import HashingEmbedder, SlowEmbedder
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"

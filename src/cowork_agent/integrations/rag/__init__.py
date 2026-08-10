@@ -1,21 +1,19 @@
-"""In-repo Semantic Memory (RAG) adapters for the local MVP.
-
-Retrieval-only company-knowledge access per PRD-v1 FR-08: corpus loading,
-embeddings, and the in-process vector store. The Memory Gateway of PRD-v2
-is not scaffolded here.
-"""
+"""Semantic Memory (RAG) adapters."""
 
 from .hybrid import HybridSemanticMemory
 from .memory import InRepoSemanticMemory
 from .mmr import mmr_diversify
 from .null_memory import NullSemanticMemory
+from .qdrant import QdrantSemanticMemory, ingest_corpus
 from .query_transform import QueryTransformerPort, RuleBasedQueryTransformer
 
 __all__ = [
     "HybridSemanticMemory",
     "InRepoSemanticMemory",
     "NullSemanticMemory",
+    "QdrantSemanticMemory",
     "QueryTransformerPort",
     "RuleBasedQueryTransformer",
+    "ingest_corpus",
     "mmr_diversify",
 ]

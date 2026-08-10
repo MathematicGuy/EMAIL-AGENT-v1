@@ -13,6 +13,8 @@ so the workflow and API layers are unchanged:
   run's view with save-time freshness.
 - ``PostgresOutboxRepository`` — durable lifecycle-event outbox on the
   ``outbox_events`` table (metadata-only payloads; T5.3 wires publication).
+- ``PostgresChatProfileRepository`` — V2-M2 declarative chat profile keyed by
+  the AI Chat memory namespace; explicit-only, expiry-aware, deletable.
 """
 
 import json
@@ -29,6 +31,12 @@ from cowork_agent.domain import (
     DigestRun,
     RunStatus,
     RunTrigger,
+)
+from cowork_agent.domain.chat_contracts import (
+    DeclarativeProfile,
+    MemoryNamespace,
+    MemoryProvenanceSource,
+    MemoryType,
 )
 from cowork_agent.domain.target_contracts import Task
 from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPointer
@@ -294,6 +302,120 @@ class PostgresOutboxRepository:
                 " WHERE aggregate_id = %s AND published_at IS NULL",
                 (run_id,),
             )
+
+
+class PostgresChatProfileRepository:
+    """Explicit-only declarative chat profile store (V2-M2, PRD-v2 FR-03..FR-05).
+
+    Isolation and retention are enforced in SQL rather than in the caller: the
+    namespace supplies the primary key, and an expired row can never be read
+    back (FR-16) even if a caller forgets to check.
+    """
+
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        self._pool = pool
+
+    async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"SELECT {_PROFILE_COLUMNS} FROM chat_profiles"
+                " WHERE profile_key = %s AND (expires_at IS NULL OR expires_at > now())",
+                (_profile_key(namespace),),
+            )
+            row = await cursor.fetchone()
+        return None if row is None else _profile_from_row(row)
+
+    async def write_profile(
+        self, namespace: MemoryNamespace, profile: DeclarativeProfile
+    ) -> DeclarativeProfile:
+        """Idempotent upsert; ``created_at`` survives every later write."""
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"""
+                INSERT INTO chat_profiles (profile_key, {_PROFILE_COLUMNS})
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (profile_key) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    language = excluded.language,
+                    timezone = excluded.timezone,
+                    assistant_persona = excluded.assistant_persona,
+                    response_tone = excluded.response_tone,
+                    source_type = excluded.source_type,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                RETURNING {_PROFILE_COLUMNS}
+                """,
+                (
+                    _profile_key(namespace),
+                    profile.profile_id,
+                    profile.tenant_id,
+                    profile.user_id,
+                    namespace.feature,
+                    profile.language,
+                    profile.timezone,
+                    profile.assistant_persona,
+                    profile.response_tone,
+                    profile.source_type.value,
+                    profile.expires_at,
+                    profile.created_at,
+                    profile.updated_at,
+                ),
+            )
+            row = await cursor.fetchone()
+        assert row is not None
+        return _profile_from_row(row)
+
+    async def delete_profile(self, namespace: MemoryNamespace) -> bool:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM chat_profiles WHERE profile_key = %s",
+                (_profile_key(namespace),),
+            )
+            return cursor.rowcount == 1
+
+    async def purge_expired(self, now: datetime) -> int:
+        """Retention purge (FR-16); reads already exclude expired rows."""
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM chat_profiles WHERE expires_at IS NOT NULL AND expires_at <= %s",
+                (now,),
+            )
+            return cursor.rowcount
+
+
+_PROFILE_COLUMNS = (
+    "profile_id, tenant_id, user_id, feature, language, timezone,"
+    " assistant_persona, response_tone, source_type, expires_at,"
+    " created_at, updated_at"
+)
+
+
+def _profile_key(namespace: MemoryNamespace) -> str:
+    # Session-independent: a profile outlives the session that wrote it, so
+    # MemoryNamespace.logical_key() (which pins session_id) is deliberately
+    # not used here.
+    if namespace.memory_type is not MemoryType.LONG_TERM:
+        raise ValueError("chat profiles require a long-term namespace")
+    return "/".join((namespace.tenant_id, namespace.user_id, namespace.feature, "long_term"))
+
+
+def _profile_from_row(row: Sequence[object]) -> DeclarativeProfile:
+    def optional(index: int) -> str | None:
+        return None if row[index] is None else str(row[index])
+
+    return DeclarativeProfile(
+        profile_id=str(row[0]),
+        tenant_id=str(row[1]),
+        user_id=str(row[2]),
+        language=optional(4),
+        timezone=optional(5),
+        assistant_persona=optional(6),
+        response_tone=optional(7),
+        source_type=MemoryProvenanceSource(str(row[8])),
+        expires_at=_as_datetime(row[9]),
+        created_at=cast(datetime, row[10]),
+        updated_at=cast(datetime, row[11]),
+    )
 
 
 def _run_params(run: DigestRun) -> tuple[object, ...]:

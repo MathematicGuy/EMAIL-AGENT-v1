@@ -30,5 +30,9 @@ htmlcov/
 .qoder
 .pytest-tmp/
 .c7-pytest-tmp*/
+tmp_pytest/
+*tmp_pytest*
+**/tmp_pytest/**
+
 .runlogs/
 .playwright-cli/
