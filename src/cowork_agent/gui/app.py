@@ -580,11 +580,11 @@ def _get_http_client() -> httpx.Client:
 
         @st.cache_resource
         def _cached_client() -> httpx.Client:
-            return httpx.Client(timeout=15.0)
+            return httpx.Client(timeout=20.0)
 
         return _cached_client()
     except Exception:
-        return httpx.Client(timeout=15.0)
+        return httpx.Client(timeout=20.0)
 
 
 def api_request(base_url: str, method: str, path: str, **kwargs: Any) -> tuple[int, Any]:
