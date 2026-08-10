@@ -8,5 +8,12 @@ is not scaffolded here.
 from .hybrid import HybridSemanticMemory
 from .memory import InRepoSemanticMemory
 from .null_memory import NullSemanticMemory
+from .qdrant import QdrantSemanticMemory, ingest_corpus
 
-__all__ = ["HybridSemanticMemory", "InRepoSemanticMemory", "NullSemanticMemory"]
+__all__ = [
+    "HybridSemanticMemory",
+    "InRepoSemanticMemory",
+    "NullSemanticMemory",
+    "QdrantSemanticMemory",
+    "ingest_corpus",
+]
