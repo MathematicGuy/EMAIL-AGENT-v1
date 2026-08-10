@@ -47,6 +47,47 @@ class ChatMemorySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class QdrantSettings:
+    """Qdrant vector store configuration for Semantic Memory retrieval.
+
+    Absent configuration is not an error: ``enabled`` is false when
+    ``QDRANT_URL`` is empty, and the RAG bootstrap degrades to
+    ``NullSemanticMemory`` rather than blocking a digest run (invariant 4).
+    """
+
+    url: str
+    api_key: str = field(repr=False)
+    collection_name: str
+    enabled: bool
+    vector_size: int
+    reindex: bool
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "QdrantSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        url = environ.get("QDRANT_URL", "").strip()
+        if url.startswith("replace-with-"):
+            url = ""
+        return cls(
+            url=url,
+            api_key=environ.get("QDRANT_API_KEY", "").strip(),
+            collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
+            or "company_knowledge",
+            enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
+            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 768),
+            reindex=_boolean(environ, "QDRANT_REINDEX", False),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GmailSettings:
     client_id: str = field(repr=False)
     client_secret: str = field(repr=False)
