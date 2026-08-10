@@ -6,6 +6,7 @@ import pytest
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
+    ChatToolChoice,
     ChatTurn,
     DeclarativeProfile,
     DegradedMemorySource,
@@ -14,7 +15,10 @@ from cowork_agent.domain.chat_contracts import (
     EpisodicMemoryRead,
     MemoryContextRequest,
     MemoryNamespace,
+    MemoryProvenance,
+    MemoryProvenanceSource,
     MemoryReadOptions,
+    MemoryType,
     SemanticMemoryRead,
     TaskEpisode,
 )
@@ -24,6 +28,7 @@ from cowork_agent.features.ai_chat.memory_gateway import (
     MemorySourceUnavailableError,
     NamespaceAccessDenied,
 )
+from cowork_agent.features.ai_chat.profile_policy import ProfileWriteRejected
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 
 NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
@@ -121,10 +126,26 @@ class ProfileReader:
     def __init__(self, profile: DeclarativeProfile | None = None) -> None:
         self.profile = profile
         self.calls: list[MemoryNamespace] = []
+        self.writes: list[DeclarativeProfile] = []
+        self.deletes: list[MemoryNamespace] = []
 
     async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
         self.calls.append(namespace)
         return self.profile
+
+    async def write_profile(
+        self, namespace: MemoryNamespace, profile: DeclarativeProfile
+    ) -> DeclarativeProfile:
+        del namespace
+        self.writes.append(profile)
+        self.profile = profile
+        return profile
+
+    async def delete_profile(self, namespace: MemoryNamespace) -> bool:
+        self.deletes.append(namespace)
+        existed = self.profile is not None
+        self.profile = None
+        return existed
 
 
 class EpisodeReader:
@@ -153,6 +174,16 @@ class SemanticReader:
 
 class UnavailableProfileReader:
     async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
+        del namespace
+        raise MemorySourceUnavailableError("sensitive provider detail")
+
+    async def write_profile(
+        self, namespace: MemoryNamespace, profile: DeclarativeProfile
+    ) -> DeclarativeProfile:
+        del namespace, profile
+        raise MemorySourceUnavailableError("sensitive provider detail")
+
+    async def delete_profile(self, namespace: MemoryNamespace) -> bool:
         del namespace
         raise MemorySourceUnavailableError("sensitive provider detail")
 
@@ -274,6 +305,99 @@ def test_typed_optional_source_failure_degrades_without_leaking_error_text() -> 
     assert "sensitive provider detail" not in str(response.to_dict())
 
 
+def _explicit_provenance(source_tool: ChatToolChoice | None = None) -> MemoryProvenance:
+    return MemoryProvenance(
+        source_type=MemoryProvenanceSource.EXPLICIT_USER_CONFIG,
+        source_id="chat-settings-form",
+        source_tool=source_tool,
+        run_id=None,
+        chat_turn_id="turn-1",
+        pipeline_version=None,
+        model_id=None,
+        prompt_version=None,
+    )
+
+
+def test_explicit_profile_write_persists_and_later_reads_return_it() -> None:
+    profiles = ProfileReader(None)
+    gateway = _gateway(profile_reader=profiles)
+
+    written = asyncio.run(gateway.write_profile(_profile(), provenance=_explicit_provenance()))
+
+    assert written == _profile()
+    assert profiles.writes == [_profile()]
+    assert asyncio.run(gateway.read_context(_request(_scope()))).profile == _profile()
+
+
+def test_gateway_refuses_a_non_explicit_profile_write_before_the_adapter() -> None:
+    profiles = ProfileReader(None)
+    gateway = _gateway(profile_reader=profiles)
+
+    with pytest.raises(ProfileWriteRejected):
+        asyncio.run(
+            gateway.write_profile(
+                _profile(), provenance=_explicit_provenance(ChatToolChoice.EMAIL)
+            )
+        )
+
+    assert profiles.writes == []
+
+
+def test_gateway_refuses_a_foreign_scope_profile_write() -> None:
+    profiles = ProfileReader(None)
+    foreign = DeclarativeProfile(
+        profile_id="profile-2",
+        tenant_id="tenant-2",
+        user_id="user@example.com",
+        language="en",
+        timezone=None,
+        assistant_persona=None,
+        response_tone=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    with pytest.raises(NamespaceAccessDenied):
+        asyncio.run(
+            _gateway(profile_reader=profiles).write_profile(
+                foreign, provenance=_explicit_provenance()
+            )
+        )
+
+    assert profiles.writes == []
+
+
+def test_profile_deletion_prevents_later_retrieval() -> None:
+    profiles = ProfileReader(_profile())
+    gateway = _gateway(profile_reader=profiles)
+
+    assert asyncio.run(gateway.delete_profile()) is True
+    assert asyncio.run(gateway.read_context(_request(_scope()))).profile is None
+    assert profiles.deletes[0].memory_type is MemoryType.LONG_TERM
+
+
+def test_profile_write_failure_surfaces_instead_of_degrading_silently() -> None:
+    gateway = _gateway(profile_reader=UnavailableProfileReader())
+
+    with pytest.raises(MemorySourceUnavailableError):
+        asyncio.run(gateway.write_profile(_profile(), provenance=_explicit_provenance()))
+
+
+def test_profile_outage_leaves_working_memory_and_tool_availability_intact() -> None:
+    gateway = _gateway(
+        profile_reader=UnavailableProfileReader(),
+        episode_reader=EpisodeReader(()),
+        semantic_reader=SemanticReader(None),
+    )
+    gateway.append_turn(_turn())
+
+    response = asyncio.run(gateway.read_context(_request(_scope())))
+
+    assert response.turns == (_turn(),)
+    assert response.profile is None
+    assert response.degraded_sources == (DegradedMemorySource.LONG_TERM,)
+
+
 def test_disabled_optional_sources_are_not_called_or_reported_degraded() -> None:
     profiles = ProfileReader(_profile())
     episodes = EpisodeReader(())
@@ -327,4 +451,12 @@ def test_gateway_exposes_no_durable_or_semantic_write_operation() -> None:
         if callable(value) and not name.startswith("_")
     }
 
-    assert public_methods == {"append_turn", "read_context", "clear_session"}
+    # V2-M2 adds explicit declarative writes only; episodic and semantic
+    # writes must stay impossible through the gateway.
+    assert public_methods == {
+        "append_turn",
+        "read_context",
+        "clear_session",
+        "write_profile",
+        "delete_profile",
+    }

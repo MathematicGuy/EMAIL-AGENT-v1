@@ -22,6 +22,12 @@ class DeclarativeMemoryPort(Protocol):
         self, namespace: MemoryNamespace
     ) -> DeclarativeProfile | None: ...
 
+    async def write_profile(
+        self, namespace: MemoryNamespace, profile: DeclarativeProfile
+    ) -> DeclarativeProfile: ...
+
+    async def delete_profile(self, namespace: MemoryNamespace) -> bool: ...
+
 
 class EpisodicMemoryPort(Protocol):
     async def read_episodes(

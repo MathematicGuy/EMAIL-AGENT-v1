@@ -446,9 +446,20 @@ class ChatTurn:
         )
 
 
+class MemoryProvenanceSource(StrEnum):
+    """Trusted origin categories carried by memory writes and citations."""
+
+    EXPLICIT_USER_CONFIG = "explicit_user_config"
+    SYSTEM_GENERATED_CHAT_TOOL_OUTPUT = "system_generated_chat_tool_output"
+    ENTERPRISE_CORPUS = "enterprise_corpus"
+
+
+PROFILE_PREFERENCE_FIELDS = ("language", "timezone", "assistant_persona", "response_tone")
+
+
 @dataclass(frozen=True, slots=True)
 class DeclarativeProfile:
-    """Explicit-only profile DTO; storage and write authorization land in V2-M2."""
+    """Explicit-only profile DTO (PRD-v2 FR-03), narrowed to the first UI slice."""
 
     profile_id: str
     tenant_id: str
@@ -459,15 +470,19 @@ class DeclarativeProfile:
     response_tone: str | None
     created_at: datetime
     updated_at: datetime
+    source_type: MemoryProvenanceSource = MemoryProvenanceSource.EXPLICIT_USER_CONFIG
+    expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.profile_id, "profile_id")
         _require_string(self.tenant_id, "tenant_id")
         _require_string(self.user_id, "user_id")
-        for name in ("language", "timezone", "assistant_persona", "response_tone"):
+        for name in PROFILE_PREFERENCE_FIELDS:
             value = getattr(self, name)
             if value is not None:
                 _require_string(value, name)
+        if self.source_type is not MemoryProvenanceSource.EXPLICIT_USER_CONFIG:
+            raise ValueError("declarative profiles are explicit-only (FR-04)")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -475,10 +490,8 @@ class DeclarativeProfile:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         _reject_raw_email_shaped_keys(data)
-        nullable_strings = {
-            name: data[name]
-            for name in ("language", "timezone", "assistant_persona", "response_tone")
-        }
+        nullable_strings = {name: data[name] for name in PROFILE_PREFERENCE_FIELDS}
+        expires_at = data.get("expires_at")
         return cls(
             profile_id=_require_string(data["profile_id"], "profile_id"),
             tenant_id=_require_string(data["tenant_id"], "tenant_id"),
@@ -505,6 +518,14 @@ class DeclarativeProfile:
             ),
             created_at=_as_datetime(data["created_at"], "created_at"),
             updated_at=_as_datetime(data["updated_at"], "updated_at"),
+            source_type=_as_enum(
+                data.get("source_type", MemoryProvenanceSource.EXPLICIT_USER_CONFIG),
+                MemoryProvenanceSource,
+                "source_type",
+            ),
+            expires_at=(
+                _as_datetime(expires_at, "expires_at") if expires_at is not None else None
+            ),
         )
 
 
@@ -563,14 +584,6 @@ class EpisodeTransition:
             retrieval_eligible=eligible,
             transitioned_at=_as_datetime(data["transitioned_at"], "transitioned_at"),
         )
-
-
-class MemoryProvenanceSource(StrEnum):
-    """Trusted origin categories carried by memory writes and citations."""
-
-    EXPLICIT_USER_CONFIG = "explicit_user_config"
-    SYSTEM_GENERATED_CHAT_TOOL_OUTPUT = "system_generated_chat_tool_output"
-    ENTERPRISE_CORPUS = "enterprise_corpus"
 
 
 @dataclass(frozen=True, slots=True)
