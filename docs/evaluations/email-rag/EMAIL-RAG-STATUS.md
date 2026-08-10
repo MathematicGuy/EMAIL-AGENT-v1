@@ -1,6 +1,6 @@
 # Email RAG — Architecture Implementation Status
 
-> **Document status:** current snapshot as of 2026-08-09.  
+> **Document status:** current snapshot as of 2026-08-10.
 > Purpose: map what Email RAG architectural components are implemented in the current codebase vs. what remains target/production-only scope.  
 > The system architecture spans four main areas:  
 > **1. Ingestion & Storage** (document parsing, chunking, vector memory) →  
@@ -119,6 +119,25 @@ flowchart TD
 
 ---
 
+## Current Corrections and Open Gaps
+
+This section reconciles the original MVP map with the current code and retained
+evaluation evidence. The implemented components above remain valid local-MVP
+capabilities; the items below are not implemented production capabilities.
+
+| Area | Status | Evidence and remaining gap |
+|---|---|---|
+| Markdown chunking | Implemented | `load_corpus()` splits on both H1 and H2 headings, then splits long sections at paragraph boundaries; any H2-only wording elsewhere in this document is stale. |
+| Deterministic test embedding | Implemented | `HashingEmbedder` uses SHA-256 buckets, not MD5. It validates mechanics only and is not semantic-quality evidence. |
+| Persistent vector storage | Missing / target | Dense vectors and BM25 structures are in memory and are rebuilt at startup; Qdrant or another persistent vector store is not connected. |
+| Binary-document ingestion | Missing / target | No PDF/DOCX/XLSX/PPTX parser, OCR pipeline, or automatic conversion to Markdown/text is present. |
+| Corpus lifecycle | Missing | No document upload flow, versioning, incremental re-index, document-status enforcement, or persistent embedding cache exists. |
+| Calibrated abstention | Missing | All four retained unanswerable benchmark cases return chunks at the current threshold. Score/margin sweeps are evaluation-only; no runtime policy is selected. |
+| Retrieval deadline | Partial | `InRepoSemanticMemory` maps a raised `TimeoutError` to `TIMEOUT`, but request `timeout_ms` is not enforced as an active deadline around embedding/retrieval. |
+| Reranker observability | Missing | Jina fallback preserves availability, but runtime telemetry does not record whether reranking ran or fell back. |
+| Semantic plan grounding | Missing | Citation IDs are restricted to chunks returned by the current retrieval, but no semantic evaluation proves plan claims are entailed by those chunks. |
+| Document authorization | Missing / target | Tenant filtering is applied before scoring; per-user, group, and document-level ACLs are not active. |
+
 ## Detailed Architectural Coverage
 
 ### Stage 1 — Ingestion & Storage
@@ -178,6 +197,20 @@ flowchart TD
 | **Stage 3: Workflow & Generation** | 6 | 6 ✅ | 0 ❌ |
 | **Stage 4: Infrastructure & Presentation** | 5 | 4 ✅ | 1 ❌ |
 | **Total Architecture Features** | **26** | **23 ✅ (88%)** | **3 ❌ (12%)** |
+
+### Reconciled Summary Matrix
+
+| Category | Implemented (Local MVP) | Missing / target / open gap |
+|---|:---:|:---:|
+| Stage 1: Ingestion & Storage | 5 | 3 |
+| Stage 2: Retrieval Engine | 8 | 2 |
+| Stage 3: Workflow & Generation | 6 | 1 |
+| Stage 4: Infrastructure & Presentation | 4 | 1 |
+| **Total reconciled scope** | **23 (77%)** | **7 (23%)** |
+
+The reconciled scope counts corpus lifecycle, calibrated abstention, retrieval
+deadline/reranker observability, and semantic plan grounding in addition to the
+three original target-production items.
 
 ---
 

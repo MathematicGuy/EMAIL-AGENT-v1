@@ -1,6 +1,6 @@
 # RAG Evaluation — Status Report
 
-> **Document status:** current snapshot as of 2026-08-09, revised after the golden-set
+> **Document status:** current snapshot as of 2026-08-10, revised after the golden-set
 > and evaluation-harness work landed (C4, C5, C6 all closed — see
 > [SPEC](./SPEC-rag-golden-set-and-eval.md) / [PLAN](./PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
@@ -183,6 +183,12 @@ Four findings, in order of importance:
 
 This is a real product gap, not a measurement artifact, and it is the one SPEC §4 added the `unanswerable` probe specifically to catch. It also makes the SPEC §7 Phase-2 gate "abstention must not decrease" vacuous — it is already at the floor. `q-029` is marked `xfail` in the C5 integration test with that reason recorded.
 
+The evaluator now records score provenance and provides **evaluation-only**
+absolute-score and margin calibration sweeps. These make the answerable versus
+unanswerable trade-off inspectable, but do not select or apply a runtime
+threshold. A production abstention policy remains open until it is chosen and
+validated against fresh live evidence.
+
 Note the related consequence: `latency_ms` reads `0` for local-only retrievers because `SemanticRetrievalResponse.latency_ms` is an `int` and in-repo retrieval is sub-millisecond. That is a contract-level truncation, not a harness bug.
 
 ---
@@ -224,6 +230,25 @@ No measurement of whether the retrieved chunks are relevant to the email's state
 **Metric to add:** Context Precision / Context Recall (RAGAS) or manual golden-set relevance labels for the six corpus documents. The C4 golden set already supplies the (query → expected section) labels these metrics need.
 
 ---
+
+## Current Evidence Reconciliation
+
+The following corrections supplement the original coverage map and distinguish
+implemented evaluation mechanics from runtime guarantees.
+
+| Evaluation area | Current status | Evidence boundary |
+|---|---|---|
+| C7 abstention | Runtime missing; evaluation-only support available | All four retained unanswerable cases return chunks in every retained baseline (`abstention_rate = 0.000`). `evaluate_retrieval.py` now emits score evidence and absolute-score/margin sweeps, but it does not select or apply a runtime gate. |
+| Citation accuracy | Partial | `test_citation_accuracy.py` validates citation IDs and lexical-overlap signals. It does not prove a generated claim is semantically supported by the cited chunk. |
+| Plan faithfulness | Missing | No automated claim-to-evidence or generated-plan faithfulness evaluation exists. |
+| Context relevance | Partial labels | The 32-case golden set supports document/section Hit@K, MRR, and Recall@5. It does not provide exhaustive semantic relevance judgments for every returned chunk against the email need. |
+| Reranker evidence | Partial | Retained Jina baseline results are useful only when reranking actually ran. Runtime fallback preserves candidate order but does not publish an applied/fallback signal. |
+
+### Interpretation rule
+
+Do not describe score sweeps as a calibrated runtime abstention policy, citation
+ID validation as semantic grounding, or target-section labels as exhaustive
+context-relevance judgments.
 
 ## Summary Table
 
