@@ -14,6 +14,8 @@ dependencies = [
   "google-api-python-client>=2.160,<3",
   "google-auth-oauthlib>=1.2,<2",
   "google-genai>=1.0,<2",
+  "mistralai>=1,<2",
+  "python-docx>=1,<2",
   "python-dotenv>=1.0,<2",
   "qdrant-client>=1.9,<2",
   "uvicorn[standard]>=0.34,<1",
@@ -39,6 +41,7 @@ redis = [
 [project.scripts]
 mail-todo-api = "cowork_agent.app:main"
 mail-todo-worker = "cowork_agent.orchestration.worker:main"
+mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
