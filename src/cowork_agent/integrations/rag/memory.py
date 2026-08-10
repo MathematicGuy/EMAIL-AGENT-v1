@@ -9,6 +9,7 @@ cosine similarity over precomputed chunk embeddings (master-comparison §6.4/
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Sequence
 from uuid import uuid4
 
@@ -26,7 +27,12 @@ from .knowledge_base import KnowledgeChunk, KnowledgeDocument
 
 
 class InRepoSemanticMemory:
-    """SemanticMemoryPort over an in-memory, ACL-filtered vector index."""
+    """SemanticMemoryPort over an in-memory, ACL-filtered vector index.
+
+    Deprecated: ``QdrantSemanticMemory`` is the production store. This one
+    re-embeds the whole corpus in every process at startup and keeps the
+    index in local heap, so it stays only for offline evaluation harnesses.
+    """
 
     def __init__(
         self,
@@ -36,6 +42,11 @@ class InRepoSemanticMemory:
         top_k_default: int = 5,
         min_score_default: float = 0.2,
     ) -> None:
+        warnings.warn(
+            "InRepoSemanticMemory is deprecated; use QdrantSemanticMemory",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._chunks: tuple[KnowledgeChunk, ...] = tuple(
             chunk for document in documents for chunk in document.chunks
         )

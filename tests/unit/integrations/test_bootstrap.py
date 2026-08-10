@@ -50,21 +50,29 @@ def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     return client
 
 
-def test_disabled_qdrant_falls_back_to_the_in_repo_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
-    )
-
+def test_disabled_qdrant_yields_null_memory_rather_than_a_legacy_store() -> None:
     memory = asyncio.run(
         bootstrap.build_semantic_memory(
             _gemini_settings(), _qdrant_settings(QDRANT_ENABLED="false")
         )
     )
 
-    assert not isinstance(memory, QdrantSemanticMemory)
-    assert not isinstance(memory, NullSemanticMemory)
+    assert isinstance(memory, NullSemanticMemory)
+
+
+def test_the_bootstrap_no_longer_constructs_the_deprecated_stores(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    asyncio.run(
+        bootstrap.build_semantic_memory(
+            _gemini_settings(), _qdrant_settings(QDRANT_ENABLED="false")
+        )
+    )
+
+    deprecations = [
+        warning for warning in recwarn if issubclass(warning.category, DeprecationWarning)
+    ]
+    assert deprecations == []
 
 
 def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(

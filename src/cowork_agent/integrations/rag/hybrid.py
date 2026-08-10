@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Final
@@ -27,7 +28,12 @@ _MAX_CANDIDATE_POOL: Final = 100
 
 
 class HybridSemanticMemory:
-    """Compose the existing dense index with lexical fusion and reranking."""
+    """Compose the existing dense index with lexical fusion and reranking.
+
+    Deprecated: ``QdrantSemanticMemory`` is the production store. This one
+    remains for the offline retrieval-evaluation harness, which compares
+    dense, BM25, fused, and reranked variants over the committed corpus.
+    """
 
     def __init__(
         self,
@@ -38,6 +44,11 @@ class HybridSemanticMemory:
         top_k_default: int = 5,
         min_score_default: float = 0.2,
     ) -> None:
+        warnings.warn(
+            "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._chunks = tuple(chunk for document in documents for chunk in document.chunks)
         if not self._chunks:
             raise ValueError("HybridSemanticMemory requires a non-empty corpus")
