@@ -20,6 +20,7 @@ from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ async def build_semantic_memory(settings: GeminiSettings) -> SemanticMemoryPort:
             documents,
             GeminiEmbeddingAdapter(settings),
             reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
+            query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
+            enable_mmr=True,
         )
         await memory.build_index()
         return memory

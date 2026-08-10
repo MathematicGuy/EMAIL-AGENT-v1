@@ -15,9 +15,9 @@ def main():
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{src_dir};{existing_pythonpath}" if existing_pythonpath else src_dir
 
-    print("🚀 Starting Module Mail Streamlit Test Suite...")
-    print(f"📂 Root Directory: {root_dir}")
-    print("🌐 Launching Streamlit on http://localhost:8501")
+    print("Starting Module Mail Streamlit Test Suite...")
+    print(f"Root Directory: {root_dir}")
+    print("Launching Streamlit on http://localhost:8501")
 
     # Command to run Streamlit
     streamlit_cmd = [
