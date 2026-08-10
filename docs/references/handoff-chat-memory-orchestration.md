@@ -406,7 +406,7 @@ Before stopping, replace this block's placeholders with current facts:
 ```text
 ACTIVE MILESTONE / SLICE: V2-M2 complete and evidenced; V2-M3 is NEXT, nothing started
 STATUS AND PERCENT: V2-M1 DONE 100%; V2-M2 DONE 100%; PRD-v2 2/6 milestones, 3/20 AC
-COMMITS: 7e42784, 310d2fd, 1d92fa1, 2a29e29, e5be750, plus the V2-M2 commit on `dev`
+COMMITS: 7e42784, 310d2fd, 1d92fa1, 2a29e29, e5be750, 7384e3a (V2-M2, on `dev`, not pushed)
 TESTS / LINT / TYPES: 496 passed / 1 skipped / 4 xfailed; PostgreSQL gate 15 passed;
   Ruff pass; mypy src pass. The 24 `test_e2e_frontend_api.py` errors are the SSL_CERT_FILE
   environment defect described in §3 — not caused by, and not fixable inside, this repo
