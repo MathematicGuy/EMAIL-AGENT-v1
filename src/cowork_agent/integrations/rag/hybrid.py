@@ -22,6 +22,7 @@ from .jina_reranker import RerankerPort
 from .knowledge_base import KnowledgeChunk, KnowledgeDocument
 from .memory import InRepoSemanticMemory
 from .mmr import mmr_diversify
+from .query_guard import is_retrieval_query
 from .query_transform import QueryTransformerPort
 from .rrf import ReciprocalRankFusion
 
@@ -41,6 +42,8 @@ class HybridSemanticMemory:
         query_transformer: QueryTransformerPort | None = None,
         enable_mmr: bool = False,
         lambda_mult: float = 0.7,
+        min_rerank_score: float = 0.0,
+        relative_cutoff_ratio: float = 0.0,
         top_k_default: int = 5,
         min_score_default: float = 0.2,
     ) -> None:
@@ -65,6 +68,8 @@ class HybridSemanticMemory:
         self._query_transformer = query_transformer
         self._enable_mmr = enable_mmr
         self._lambda_mult = lambda_mult
+        self._min_rerank_score = min_rerank_score
+        self._relative_cutoff_ratio = relative_cutoff_ratio
         self._top_k_default = top_k_default
         self._rrf = ReciprocalRankFusion()
 
@@ -76,6 +81,10 @@ class HybridSemanticMemory:
         self, request: SemanticRetrievalRequest
     ) -> SemanticRetrievalResponse:
         started = time.monotonic()
+        query_str = _query_text(request)
+        if not is_retrieval_query(query_str):
+            return _response(request, (), RetrievalStatus.NO_RESULTS, started)
+
         if not any(chunk.tenant_id == request.filters.tenant_scope for chunk in self._chunks):
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
@@ -84,7 +93,7 @@ class HybridSemanticMemory:
 
         try:
             # Multi-Query Expansion & HyDE if transformer present
-            queries_to_search = [_query_text(request)]
+            queries_to_search = [query_str]
             if self._query_transformer is not None:
                 transformed = await self._query_transformer.transform(
                     request.query, request.knowledge_gaps
@@ -124,17 +133,45 @@ class HybridSemanticMemory:
             )
 
             reranked = (
-                await self._reranker.rerank(query=_query_text(request), candidates=candidates)
+                await self._reranker.rerank(query=query_str, candidates=candidates)
                 if self._reranker is not None
                 else candidates
             )
 
+            # Filter candidates by dynamic relative score cutoff & threshold
+            filtered: list[SemanticChunk] = []
+            if reranked:
+                has_rerank = reranked[0].rerank_score is not None
+                if has_rerank:
+                    top_score = reranked[0].rerank_score or 0.0
+                    min_threshold = max(
+                        self._min_rerank_score, top_score * self._relative_cutoff_ratio
+                    )
+                    for chunk in reranked:
+                        if (
+                            chunk.rerank_score is not None
+                            and chunk.rerank_score >= min_threshold
+                        ):
+                            filtered.append(chunk)
+                else:
+                    top_rrf = reranked[0].relevance_score
+                    min_rrf_threshold = (
+                        top_rrf * self._relative_cutoff_ratio
+                        if self._relative_cutoff_ratio > 0.0
+                        else 0.0
+                    )
+                    for chunk in reranked:
+                        if chunk.relevance_score >= min_rrf_threshold:
+                            filtered.append(chunk)
+
+            filtered_reranked = tuple(filtered)
+
             # Apply MMR Diversification if enabled
-            if self._enable_mmr and reranked:
-                cand_chunks = reranked[: candidate_limit]
+            if self._enable_mmr and filtered_reranked:
+                cand_chunks = filtered_reranked[: candidate_limit]
                 cand_texts = tuple(c.text for c in cand_chunks)
                 cand_vecs = await self._embedder.embed(cand_texts)
-                (query_vec,) = await self._embedder.embed((_query_text(request),))
+                (query_vec,) = await self._embedder.embed((query_str,))
                 chunks = mmr_diversify(
                     chunks=cand_chunks,
                     chunk_vectors=cand_vecs,
@@ -143,7 +180,7 @@ class HybridSemanticMemory:
                     lambda_mult=self._lambda_mult,
                 )
             else:
-                chunks = reranked[:final_top_k]
+                chunks = filtered_reranked[:final_top_k]
 
             status = RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
             return _response(request, chunks, status, started)
