@@ -60,6 +60,7 @@ class QdrantSettings:
     collection_name: str
     enabled: bool
     vector_size: int
+    reindex: bool
 
     @classmethod
     def from_env(
@@ -82,6 +83,7 @@ class QdrantSettings:
             or "company_knowledge",
             enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
             vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 768),
+            reindex=_boolean(environ, "QDRANT_REINDEX", False),
         )
 
 
