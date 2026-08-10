@@ -30,12 +30,7 @@ _MAX_CANDIDATE_POOL: Final = 100
 
 
 class HybridSemanticMemory:
-    """Compose dense retrieval, lexical fusion, multi-query expansion, reranking, and MMR.
-
-    Deprecated: ``QdrantSemanticMemory`` is the production store. This one
-    remains for the offline retrieval-evaluation harness over the committed
-    corpus.
-    """
+    """Compose the dense index with lexical fusion, multi-query expansion, reranking, and MMR."""
 
     def __init__(
         self,
@@ -87,70 +82,73 @@ class HybridSemanticMemory:
         final_top_k = _final_top_k(request, self._top_k_default)
         candidate_limit = _candidate_limit(final_top_k)
 
-        # Multi-Query Expansion & HyDE if transformer present
-        queries_to_search = [_query_text(request)]
-        if self._query_transformer is not None:
-            transformed = await self._query_transformer.transform(
-                request.query, request.knowledge_gaps
+        try:
+            # Multi-Query Expansion & HyDE if transformer present
+            queries_to_search = [_query_text(request)]
+            if self._query_transformer is not None:
+                transformed = await self._query_transformer.transform(
+                    request.query, request.knowledge_gaps
+                )
+                queries_to_search.extend(transformed.expanded_queries)
+                if transformed.hypothetical_doc:
+                    queries_to_search.append(transformed.hypothetical_doc)
+
+            all_dense_results: list[tuple[str, float]] = []
+            all_lexical_results: list[tuple[str, float]] = []
+
+            for q_text in queries_to_search:
+                q_request = replace(
+                    request,
+                    query=q_text,
+                    knowledge_gaps=(),
+                    limits=replace(request.limits, top_k=candidate_limit),
+                )
+                dense_response = await self._dense.retrieve(q_request)
+                lexical = self._bm25.search(
+                    q_text,
+                    tenant_id=request.filters.tenant_scope,
+                    top_k=candidate_limit,
+                )
+                all_dense_results.extend(
+                    (chunk.chunk_id, chunk.relevance_score) for chunk in dense_response.chunks
+                )
+                all_lexical_results.extend(lexical)
+
+            fused = self._rrf.fuse(
+                dense_results=tuple(all_dense_results),
+                bm25_results=tuple(all_lexical_results),
             )
-            queries_to_search.extend(transformed.expanded_queries)
-            if transformed.hypothetical_doc:
-                queries_to_search.append(transformed.hypothetical_doc)
-
-        all_dense_results: list[tuple[str, float]] = []
-        all_lexical_results: list[tuple[str, float]] = []
-
-        for q_text in queries_to_search:
-            q_request = replace(
-                request,
-                query=q_text,
-                knowledge_gaps=(),
-                limits=replace(request.limits, top_k=candidate_limit),
+            candidates = tuple(
+                _semantic_chunk(self._chunks_by_id[candidate.chunk_id], candidate.score)
+                for candidate in fused
             )
-            dense_response = await self._dense.retrieve(q_request)
-            lexical = self._bm25.search(
-                q_text,
-                tenant_id=request.filters.tenant_scope,
-                top_k=candidate_limit,
+
+            reranked = (
+                await self._reranker.rerank(query=_query_text(request), candidates=candidates)
+                if self._reranker is not None
+                else candidates
             )
-            all_dense_results.extend(
-                (chunk.chunk_id, chunk.relevance_score) for chunk in dense_response.chunks
-            )
-            all_lexical_results.extend(lexical)
 
-        fused = self._rrf.fuse(
-            dense_results=tuple(all_dense_results),
-            bm25_results=tuple(all_lexical_results),
-        )
-        candidates = tuple(
-            _semantic_chunk(self._chunks_by_id[candidate.chunk_id], candidate.score)
-            for candidate in fused
-        )
+            # Apply MMR Diversification if enabled
+            if self._enable_mmr and reranked:
+                cand_chunks = reranked[: candidate_limit]
+                cand_texts = tuple(c.text for c in cand_chunks)
+                cand_vecs = await self._embedder.embed(cand_texts)
+                (query_vec,) = await self._embedder.embed((_query_text(request),))
+                chunks = mmr_diversify(
+                    chunks=cand_chunks,
+                    chunk_vectors=cand_vecs,
+                    query_vector=query_vec,
+                    top_k=final_top_k,
+                    lambda_mult=self._lambda_mult,
+                )
+            else:
+                chunks = reranked[:final_top_k]
 
-        reranked = (
-            await self._reranker.rerank(query=_query_text(request), candidates=candidates)
-            if self._reranker is not None
-            else candidates
-        )
-
-        # Apply MMR Diversification if enabled
-        if self._enable_mmr and reranked:
-            cand_chunks = reranked[: candidate_limit]
-            cand_texts = tuple(c.text for c in cand_chunks)
-            cand_vecs = await self._embedder.embed(cand_texts)
-            (query_vec,) = await self._embedder.embed((_query_text(request),))
-            chunks = mmr_diversify(
-                chunks=cand_chunks,
-                chunk_vectors=cand_vecs,
-                query_vector=query_vec,
-                top_k=final_top_k,
-                lambda_mult=self._lambda_mult,
-            )
-        else:
-            chunks = reranked[:final_top_k]
-
-        status = RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
-        return _response(request, chunks, status, started)
+            status = RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
+            return _response(request, chunks, status, started)
+        except Exception:
+            return _response(request, (), RetrievalStatus.TIMEOUT, started)
 
 
 def _candidate_limit(final_top_k: int) -> int:
