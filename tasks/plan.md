@@ -479,6 +479,17 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   retention behavior.
   Exit: stored persona/preferences change later chat responses; failure does
   not block chat or the stateless `@Email` tool.
+  **Delivered (code):** `DeclarativeProfile` narrowed to the first UI slice
+  plus `source_type`/`expires_at`; `features/ai_chat/profile_policy.py`
+  explicit-only write policy; `DeclarativeMemoryPort` write/delete;
+  `MemoryGateway.write_profile`/`delete_profile`; migration
+  `002_chat_profiles.sql`; `PostgresChatProfileRepository` (idempotent upsert,
+  SQL-level expiry filter, delete, purge). Focused tests, Ruff, and strict
+  mypy pass; the full deterministic suite passes.
+  **Evidenced 2026-08-10:** `python -m pytest tests/integration/persistence -q`
+  → 15 passed against the `cowork-pg` container, including all five scenarios
+  in `tests/integration/persistence/test_chat_profile_repository.py`. AC-04 is
+  DONE; AC-17 now has its profile-storage half. Milestone closed.
 - **V2-M3 (chat/tool episodes):** bounded chat summaries and one idempotent
   episode per persisted `@Email` Action Plan,
   `system_generated`, `retrieval_eligible=false`; eligibility enforced at

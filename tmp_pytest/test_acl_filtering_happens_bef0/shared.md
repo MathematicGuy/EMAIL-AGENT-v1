@@ -1,0 +1,5 @@
+# Shared
+
+## Rule
+
+Common text.
