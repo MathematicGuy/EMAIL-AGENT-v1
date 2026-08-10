@@ -397,7 +397,7 @@ Attachment extraction, OCR, sandboxing, and attachment-derived evidence belong t
 | Current raw-email ephemerality | Preserve as a non-negotiable privacy boundary |
 | `ActionItem`, evidence, Gmail pointer, fingerprint concepts | Reuse as seeds for task output and episodic records |
 | Deterministic policies | Move to Agent Core/application policy |
-| Existing `HybridSemanticMemory` | Keep as the local hybrid semantic RAG baseline |
+| Existing `HybridSemanticMemory` | Deprecated as default in favor of `QdrantSemanticMemory` (Qdrant Cloud adapter); retained only for backward compatibility |
 | Existing development environment gate | Reuse for safe metadata-only diagnostics |
 
 ## 4.2 Modify

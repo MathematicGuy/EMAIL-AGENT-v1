@@ -17,7 +17,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - Add `qdrant-client[async]>=1.9,<2` to `[project.dependencies]` in `pyproject.toml`.
   - Add `QdrantSettings` dataclass/pydantic model to `config.py` reading from env: `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION` (default `company_knowledge`), `QDRANT_ENABLED` (bool, default `false`), `QDRANT_VECTOR_SIZE` (int, default `768`).
   - Add a unit test in `tests/unit/test_config.py` proving the settings load from env vars.
-- **Status:** pending
+- **Status:** done
 
 ### Task B: Implement QdrantSemanticMemory Adapter + Corpus Ingestion
 - **Files:** `src/cowork_agent/integrations/rag/qdrant.py`, `src/cowork_agent/integrations/rag/__init__.py`
@@ -29,7 +29,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - Convert `ScoredPoint` results to `SemanticChunk` domain objects with `relevance_score`.
   - Create `ingest_corpus(client, collection, documents, embedder)` helper: recreates collection if needed using `VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)`, then upserts `PointStruct` batches (chunk_id as UUID5, payload includes `tenant_id`, `document_id`, `section`, `text`, `source_url`, `document_title`).
   - All tests use `QdrantClient(":memory:")` — no network required.
-- **Status:** pending
+- **Status:** done
 
 ### Task C: Wire Qdrant Adapter into Bootstrap Layer
 - **Files:** `src/cowork_agent/integrations/rag/bootstrap.py`
@@ -39,7 +39,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - If `QdrantSettings.enabled` is true, construct `QdrantClient(url=settings.url, api_key=settings.api_key)`, call `ingest_corpus(...)`, return `QdrantSemanticMemory(...)`.
   - Any `Exception` during Qdrant init (connection refused, bad key, etc.) logs a warning and returns `NullSemanticMemory()` — graceful degradation invariant.
   - Add unit tests for the enabled/disabled/error paths.
-- **Status:** pending
+- **Status:** done
 
 ### Task D: Integration Tests & Fallback Verification
 - **Files:** `tests/integration/test_qdrant_integration.py`
@@ -50,7 +50,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - Test 3: `min_score` threshold → assert only chunks above threshold returned.
   - Test 4: `top_k` limit → assert returned count ≤ top_k.
   - Test 5: Simulate unreachable Qdrant in `build_semantic_memory` → assert returns `NullSemanticMemory`.
-- **Status:** pending
+- **Status:** done
 
 ### Task E: Demo-Validation Task (Full Workflow Verification)
 - **Files:** `tests/integration/email_action_plan/test_workflow.py`
@@ -58,7 +58,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
 - **Criteria:**
   - Using `:memory:` Qdrant + `HashingEmbedder` (deterministic, no Gemini API), run a full `DigestWorker` email action plan workflow with `route = RETRIEVE_RAG`.
   - Assert final `ActionPlanOutput` is non-empty and citations reference valid chunk IDs from the ingested corpus.
-- **Status:** pending
+- **Status:** done
 
 ### Task F: Deprecate HybridSemanticMemory as Default
 - **Files:** `src/cowork_agent/integrations/rag/hybrid.py`, `src/cowork_agent/integrations/rag/memory.py`, `src/cowork_agent/integrations/rag/__init__.py`
@@ -67,7 +67,7 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - Add `warnings.warn("HybridSemanticMemory is deprecated...", DeprecationWarning, stacklevel=2)` at construction time to both `InRepoSemanticMemory` and `HybridSemanticMemory`.
   - Remove both from `__all__` in `__init__.py` (they remain importable directly for legacy tests but are no longer exported).
   - `bootstrap.py` must not reference `HybridSemanticMemory` anymore; it uses only `QdrantSemanticMemory` or `NullSemanticMemory`.
-- **Status:** pending
+- **Status:** done
 
 ### Task G: Update .env.example with Qdrant Cloud Config
 - **Files:** `.env.example`
@@ -76,4 +76,4 @@ Migrate the production `SemanticMemoryPort` retrieval adapter from the in-memory
   - Add a `# Vector Store (Qdrant Cloud)` section to `.env.example` with commented-out keys: `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION=company_knowledge`, `QDRANT_ENABLED=true`, `QDRANT_VECTOR_SIZE=768`.
   - **Do NOT commit real API keys** to `.env.example` — use placeholder values only (e.g. `QDRANT_API_KEY=<your-qdrant-cloud-api-key>`).
   - Unit tests still pass (no code changes, only env documentation).
-- **Status:** pending
+- **Status:** done
