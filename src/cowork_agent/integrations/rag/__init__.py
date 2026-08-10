@@ -7,6 +7,15 @@ is not scaffolded here.
 
 from .hybrid import HybridSemanticMemory
 from .memory import InRepoSemanticMemory
+from .mmr import mmr_diversify
 from .null_memory import NullSemanticMemory
+from .query_transform import QueryTransformerPort, RuleBasedQueryTransformer
 
-__all__ = ["HybridSemanticMemory", "InRepoSemanticMemory", "NullSemanticMemory"]
+__all__ = [
+    "HybridSemanticMemory",
+    "InRepoSemanticMemory",
+    "NullSemanticMemory",
+    "QueryTransformerPort",
+    "RuleBasedQueryTransformer",
+    "mmr_diversify",
+]

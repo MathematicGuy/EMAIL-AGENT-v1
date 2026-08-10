@@ -20,6 +20,8 @@ from .embeddings import EmbeddingPort
 from .jina_reranker import RerankerPort
 from .knowledge_base import KnowledgeChunk, KnowledgeDocument
 from .memory import InRepoSemanticMemory
+from .mmr import mmr_diversify
+from .query_transform import QueryTransformerPort
 from .rrf import ReciprocalRankFusion
 
 _MIN_CANDIDATE_POOL: Final = 20
@@ -27,7 +29,7 @@ _MAX_CANDIDATE_POOL: Final = 100
 
 
 class HybridSemanticMemory:
-    """Compose the existing dense index with lexical fusion and reranking."""
+    """Compose the dense index with lexical fusion, multi-query expansion, reranking, and MMR."""
 
     def __init__(
         self,
@@ -35,6 +37,9 @@ class HybridSemanticMemory:
         embedder: EmbeddingPort,
         *,
         reranker: RerankerPort | None = None,
+        query_transformer: QueryTransformerPort | None = None,
+        enable_mmr: bool = False,
+        lambda_mult: float = 0.7,
         top_k_default: int = 5,
         min_score_default: float = 0.2,
     ) -> None:
@@ -42,6 +47,7 @@ class HybridSemanticMemory:
         if not self._chunks:
             raise ValueError("HybridSemanticMemory requires a non-empty corpus")
         self._chunks_by_id = {chunk.chunk_id: chunk for chunk in self._chunks}
+        self._embedder = embedder
         self._dense = InRepoSemanticMemory(
             documents,
             embedder,
@@ -50,6 +56,9 @@ class HybridSemanticMemory:
         )
         self._bm25 = BM25SearchAdapter(self._chunks)
         self._reranker = reranker
+        self._query_transformer = query_transformer
+        self._enable_mmr = enable_mmr
+        self._lambda_mult = lambda_mult
         self._top_k_default = top_k_default
         self._rrf = ReciprocalRankFusion()
 
@@ -61,49 +70,75 @@ class HybridSemanticMemory:
         self, request: SemanticRetrievalRequest
     ) -> SemanticRetrievalResponse:
         started = time.monotonic()
-        # This outer ACL gate guarantees no query embedding or lexical scoring
-        # occurs for a tenant that has no visible chunks.
         if not any(chunk.tenant_id == request.filters.tenant_scope for chunk in self._chunks):
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
         final_top_k = _final_top_k(request, self._top_k_default)
         candidate_limit = _candidate_limit(final_top_k)
-        candidate_request = replace(
-            request,
-            limits=replace(request.limits, top_k=candidate_limit),
-        )
-        dense_response = await self._dense.retrieve(candidate_request)
-        lexical_results = self._bm25.search(
-            _query_text(request),
-            tenant_id=request.filters.tenant_scope,
-            top_k=candidate_limit,
-        )
-        dense_results = tuple(
-            (chunk.chunk_id, chunk.relevance_score) for chunk in dense_response.chunks
-        )
+
+        # Multi-Query Expansion & HyDE if transformer present
+        queries_to_search = [_query_text(request)]
+        if self._query_transformer is not None:
+            transformed = await self._query_transformer.transform(
+                request.query, request.knowledge_gaps
+            )
+            queries_to_search.extend(transformed.expanded_queries)
+            if transformed.hypothetical_doc:
+                queries_to_search.append(transformed.hypothetical_doc)
+
+        all_dense_results: list[tuple[str, float]] = []
+        all_lexical_results: list[tuple[str, float]] = []
+
+        for q_text in queries_to_search:
+            q_request = replace(
+                request,
+                query=q_text,
+                knowledge_gaps=(),
+                limits=replace(request.limits, top_k=candidate_limit),
+            )
+            dense_response = await self._dense.retrieve(q_request)
+            lexical = self._bm25.search(
+                q_text,
+                tenant_id=request.filters.tenant_scope,
+                top_k=candidate_limit,
+            )
+            all_dense_results.extend(
+                (chunk.chunk_id, chunk.relevance_score) for chunk in dense_response.chunks
+            )
+            all_lexical_results.extend(lexical)
+
         fused = self._rrf.fuse(
-            dense_results=dense_results,
-            bm25_results=lexical_results,
+            dense_results=tuple(all_dense_results),
+            bm25_results=tuple(all_lexical_results),
         )
         candidates = tuple(
             _semantic_chunk(self._chunks_by_id[candidate.chunk_id], candidate.score)
             for candidate in fused
         )
+
         reranked = (
             await self._reranker.rerank(query=_query_text(request), candidates=candidates)
             if self._reranker is not None
             else candidates
         )
-        chunks = reranked[:final_top_k]
-        status = (
-            RetrievalStatus.SUCCESS
-            if chunks
-            else (
-                RetrievalStatus.TIMEOUT
-                if dense_response.retrieval_status is RetrievalStatus.TIMEOUT
-                else RetrievalStatus.NO_RESULTS
+
+        # Apply MMR Diversification if enabled
+        if self._enable_mmr and reranked:
+            cand_chunks = reranked[: candidate_limit]
+            cand_texts = tuple(c.text for c in cand_chunks)
+            cand_vecs = await self._embedder.embed(cand_texts)
+            (query_vec,) = await self._embedder.embed((_query_text(request),))
+            chunks = mmr_diversify(
+                chunks=cand_chunks,
+                chunk_vectors=cand_vecs,
+                query_vector=query_vec,
+                top_k=final_top_k,
+                lambda_mult=self._lambda_mult,
             )
-        )
+        else:
+            chunks = reranked[:final_top_k]
+
+        status = RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
         return _response(request, chunks, status, started)
 
 
