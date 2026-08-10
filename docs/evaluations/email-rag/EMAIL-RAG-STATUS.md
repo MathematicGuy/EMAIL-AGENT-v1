@@ -1,5 +1,4 @@
 # Email RAG — Architecture Implementation Status
-
 > **Document status:** current snapshot as of 2026-08-10. This report describes
 > the code in this checkout, not a target architecture.
 
@@ -39,7 +38,7 @@ flowchart LR
 | Qdrant configuration | Implemented | `QdrantSettings` reads URL, API key, collection, vector size, reindex flag, and `QDRANT_ENABLED`. A URL alone does not enable Qdrant. |
 | Qdrant store | Implemented | `QdrantSemanticMemory` queries Qdrant with cosine vectors, top-k and score threshold. `ingest_corpus()` creates/recreates and upserts the approved corpus. |
 | Qdrant tenant isolation | Implemented | The Qdrant payload filter for `tenant_id == tenant_scope` is constructed before query embedding/scoring. An empty tenant scope returns `authorization_denied`. |
-| Qdrant lifecycle | Partial | A missing/empty collection is ingested on boot; `QDRANT_REINDEX=true` forces re-ingestion. There is no upload API, registry, versioning, or incremental document update workflow. |
+| Qdrant lifecycle | Partial | A missing/empty collection is ingested on boot; `QDRANT_REINDEX=true` forces re-ingestion. Each ingestion recreates the collection before upsert, so it is a corpus replacement rather than an incremental update. There is no upload API, registry, versioning, or incremental document update workflow. |
 | In-repo hybrid fallback | Implemented, deprecated | `HybridSemanticMemory` combines dense Gemini embeddings, BM25, RRF, optional query expansion/HyDE, optional Jina reranking, and optional MMR. It is used as a fallback/evaluation implementation and emits `DeprecationWarning`. |
 | Empty-result fallback | Implemented | When no memory can be built, `NullSemanticMemory` returns `retrieval_status=no_results` with no chunks. Known Qdrant query failures also degrade to this structured empty result. |
 | Email workflow wiring | Implemented | `DigestWorker` invokes retrieval for `RETRIEVE_RAG`, skips it for `DIRECT_PLAN`, forwards chunks to the generator, and records missing information when retrieval is empty or unavailable. |
@@ -85,7 +84,7 @@ absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
 | Active end-to-end deadline | Partial | Embedding/reranker transports have their own timeouts, but `RetrievalLimits.timeout_ms` is not enforced as one deadline across every remote step. |
 | Reranker observability | Missing | Jina safely falls back, but the runtime response does not report whether reranking was applied or bypassed. |
 | Semantic grounding | Missing | Citation IDs are constrained to retrieved chunks; no evaluation proves generated plan claims are entailed by those chunks. |
-| Binary ingestion | Missing | No PDF/DOCX/XLSX/PPTX parser, OCR, upload, or conversion pipeline exists. |
+| Binary ingestion | Partial | The administrator CLI converts local DOCX and native-text PDF files into Markdown. Scan, image-based, and mixed PDFs fail safely with `mistral_not_configured` until Mistral OCR is configured; XLSX/PPTX, upload, and Gmail-attachment ingestion do not exist. |
 | Corpus administration | Missing | No persistent document registry, version history, incremental update, or asynchronous ingestion pipeline exists. |
 
 ## Operational checks
@@ -105,3 +104,19 @@ absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
 - `src/cowork_agent/app.py`
 - `src/cowork_agent/features/email_action_plan/workflow.py`
 - `src/cowork_agent/gui/app.py`
+
+## Local knowledge ingestion
+
+The `mail-todo-ingest-knowledge` administrator CLI accepts `--source`,
+`--output`, `--force`, and `--dry-run`. It deterministically discovers local
+DOCX/PDF files, writes non-empty Markdown atomically, and records hashes in an
+ingestion manifest. Run it with `KNOWLEDGE_INGEST_OCR_ENABLED=false` until
+`MISTRAL_API_KEY` is configured.
+
+Native-text PDFs and DOCX files are supported. PDFs that need OCR fail with
+`mistral_not_configured` and do not create partial output. The CLI never
+downloads Gmail attachments, has no upload API, and does not write to Qdrant;
+after a successful ingestion, operators choose when to restart the local
+retriever or set `QDRANT_REINDEX=true` for a corpus replacement.
+- [RAG-EVALUATION-STATUS.md](./RAG-EVALUATION-STATUS.md) — evaluation & test coverage map
+- [master-comparison.md](../../master-comparison.md) — current vs target gap analysis and milestones
