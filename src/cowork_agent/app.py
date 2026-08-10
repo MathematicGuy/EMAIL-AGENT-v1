@@ -30,6 +30,7 @@ from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
 )
+from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     MailboxTemporaryError,
@@ -94,7 +95,7 @@ logger = logging.getLogger(__name__)
 
 class CreateRunRequest(BaseModel):
     mailbox_connection_id: str = Field(alias="mailboxConnectionId")
-    query: str = "is:unread in:inbox"
+    query: str = DEFAULT_QUERY
     max_emails: int = Field(default=200, alias="maxEmails", ge=1, le=500)
 
 
@@ -318,7 +319,7 @@ def create_app() -> FastAPI:
         _require_owned_connection(principal, connection, detail="Gmail connection not found")
         try:
             page = await _gmail_mailbox(request).search_unread(
-                connection_id, "is:unread in:inbox", limit
+                connection_id, DEFAULT_QUERY, limit
             )
             messages = []
             seen_threads: set[str] = set()

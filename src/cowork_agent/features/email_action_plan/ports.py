@@ -41,6 +41,12 @@ class MailboxPort(Protocol):
         self, connection_id: str, thread_id: str
     ) -> Sequence[EphemeralEmailEnvelope]: ...
 
+    async def get_message_received_at(
+        self, connection_id: str, message_id: str
+    ) -> datetime:
+        """Return Gmail's internal receipt time without fetching an email body."""
+        ...
+
     def download_attachment(
         self, connection_id: str, message_id: str, attachment_id: str, max_bytes: int
     ) -> AsyncIterator[bytes]:

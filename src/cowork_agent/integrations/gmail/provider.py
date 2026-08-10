@@ -232,6 +232,28 @@ class GmailMailboxAdapter:
         response = await self._call(execute)
         return tuple(_parse_message(item) for item in response.get("messages", ()))
 
+    async def get_message_received_at(
+        self, connection_id: str, message_id: str
+    ) -> datetime:
+        """Read only the internal Gmail timestamp needed for deterministic ordering."""
+        service = await self._service(connection_id)
+
+        def execute() -> Mapping[str, Any]:
+            request = (
+                service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=message_id,
+                    format="metadata",
+                    fields="id,internalDate",
+                )
+            )
+            return cast(Mapping[str, Any], request.execute())
+
+        response = await self._call(execute)
+        return datetime.fromtimestamp(int(response["internalDate"]) / 1000, tz=UTC)
+
     async def download_attachment(
         self,
         connection_id: str,

@@ -105,13 +105,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "audit_fetch_error": "Không thể tải dữ liệu kiểm toán (mã {code}).",
         "sender_label": "Từ",
         "scan_mode_label": "Chế độ quét email:",
-        "scan_mode_unread": "📨 Email chưa đọc (is:unread in:inbox)",
+        "scan_mode_unread": "📨 Email chưa đọc trong tab Chính (Primary)",
         "scan_mode_all": (
             "🔄 Quét lại Top K email mới nhất trong Inbox (Test mode - bao gồm email đã đọc)"
         ),
         "scan_ordering_hint": (
-            "💡 Gmail trả về email mới nhất trước (ngày giảm dần). "
-            "Hệ thống sẽ xử lý tối đa Top {max_emails} email mới nhất."
+            "💡 Hệ thống xếp email theo thời điểm nhận của Gmail (mới nhất trước). "
+            "Hệ thống sẽ xử lý tối đa Top {max_emails} email mới nhất trong phạm vi đã chọn."
         ),
         "sort_label": "Sắp xếp theo:",
         "sort_priority_desc": "Mức ưu tiên: Cao ➔ Thấp",
@@ -219,13 +219,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "audit_fetch_error": "Could not load audit data (code {code}).",
         "sender_label": "From",
         "scan_mode_label": "Scan mode:",
-        "scan_mode_unread": "📨 Unread emails (is:unread in:inbox)",
+        "scan_mode_unread": "📨 Unread emails in the Primary tab",
         "scan_mode_all": (
             "🔄 Re-process Top K recent emails in Inbox (Test mode - includes read emails)"
         ),
         "scan_ordering_hint": (
-            "💡 Gmail returns newest emails first (descending by date). "
-            "The system processes top {max_emails} newest emails."
+            "💡 The system ranks emails by Gmail received time (newest first). "
+            "It processes up to the top {max_emails} emails in the selected scope."
         ),
         "sort_label": "Sort by:",
         "sort_priority_desc": "Priority: High ➔ Low",
@@ -804,7 +804,11 @@ def _screen_run(
             format_func=lambda x: tr(lang, f"scan_mode_{x}"),
             horizontal=True,
         )
-        selected_query = "is:unread in:inbox" if scan_mode == "unread" else "in:inbox"
+        selected_query = (
+            "is:unread in:inbox category:primary"
+            if scan_mode == "unread"
+            else "in:inbox"
+        )
 
         max_emails = st.slider(
             tr(lang, "max_emails_slider"), min_value=5, max_value=100, value=20, step=5

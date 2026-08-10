@@ -57,7 +57,7 @@ from .ports import (
     TaskRepository,
 )
 from .routing import RouteResolution, resolve_candidate_route
-from .schemas import ExtractionLimits, GenerationContext
+from .schemas import ExtractionLimits, GenerationContext, MessageRef
 from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
@@ -183,8 +183,11 @@ class DigestWorker:
                         sender_address=message.sender_email,
                         received_at=message.received_at,
                     )
-                    for thread in threads
-                    for message in thread
+                    for message in sorted(
+                        (message for thread in threads for message in thread),
+                        key=lambda item: item.received_at,
+                        reverse=True,
+                    )
                 ),
             )
             envelopes: list[EphemeralEmailEnvelope] = []
@@ -404,25 +407,48 @@ class DigestWorker:
     ) -> tuple[list[tuple[EphemeralEmailEnvelope, ...]], int]:
         threads: list[tuple[EphemeralEmailEnvelope, ...]] = []
         skipped_threads = 0
-        message_ids: set[str] = set()
-        messages_by_thread: dict[str, list[str]] = {}
+        refs: list[MessageRef] = []
+        seen_message_ids: set[str] = set()
         cursor: str | None = None
-        while len(message_ids) < run.max_emails:
+        while True:
             page = await self._mailbox.search_unread(
                 run.mailbox_connection_id,
                 run.query,
-                min(100, run.max_emails - len(message_ids)),
+                100,
                 cursor,
             )
             run.emails_matched = max(run.emails_matched, page.estimated_total or 0)
             for ref in page.messages:
-                if ref.message_id in message_ids or len(message_ids) >= run.max_emails:
+                if ref.message_id in seen_message_ids:
                     continue
-                message_ids.add(ref.message_id)
-                messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
+                seen_message_ids.add(ref.message_id)
+                refs.append(ref)
             cursor = page.next_cursor
-            if cursor is None or len(message_ids) >= run.max_emails:
+            if cursor is None:
                 break
+
+        received_at_by_id: dict[str, datetime] = {}
+        for ref in refs:
+            try:
+                received_at_by_id[ref.message_id] = await self._mailbox.get_message_received_at(
+                    run.mailbox_connection_id, ref.message_id
+                )
+            except MailboxTemporaryError:
+                skipped_threads += 1
+                logger.warning(
+                    "Run %s skipping message %s after transient timestamp fetch failure",
+                    run.id,
+                    ref.message_id,
+                )
+
+        selected_refs = sorted(
+            (ref for ref in refs if ref.message_id in received_at_by_id),
+            key=lambda ref: received_at_by_id[ref.message_id],
+            reverse=True,
+        )[: run.max_emails]
+        messages_by_thread: dict[str, list[str]] = {}
+        for ref in selected_refs:
+            messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
 
         for thread_id, selected_ids in messages_by_thread.items():
             try:

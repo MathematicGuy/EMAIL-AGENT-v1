@@ -11,8 +11,8 @@ from cowork_agent.features.email_action_plan.policies import (
 )
 
 
-def test_default_query_is_unread_inbox() -> None:
-    assert normalize_query(None) == DEFAULT_QUERY == "is:unread in:inbox"
+def test_default_query_is_unread_primary_inbox() -> None:
+    assert normalize_query(None) == DEFAULT_QUERY == "is:unread in:inbox category:primary"
 
 
 @pytest.mark.parametrize(

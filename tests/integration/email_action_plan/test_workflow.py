@@ -528,6 +528,47 @@ def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> 
     asyncio.run(scenario())
 
 
+def test_max_emails_selects_and_audits_newest_unread_messages() -> None:
+    async def scenario() -> None:
+        messages = [
+            replace(email("oldest", "t1", "Oldest"), received_at=NOW - timedelta(days=8)),
+            replace(email("newest", "t2", "Newest"), received_at=NOW),
+            replace(email("third", "t3", "Third"), received_at=NOW - timedelta(days=2)),
+            replace(email("second", "t4", "Second"), received_at=NOW - timedelta(days=1)),
+            replace(email("fourth", "t5", "Fourth"), received_at=NOW - timedelta(days=3)),
+            replace(email("fifth", "t6", "Fifth"), received_at=NOW - timedelta(days=4)),
+        ]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1",
+            mailbox_connection_id="mbx1",
+            idempotency_key="newest-unread",
+            max_emails=5,
+        )
+        classifier = FakeRouteClassifier()
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            classifier,
+            FakePlanGenerator(),
+            ShortTermStore(),
+            task_repository=task_repository,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.emails_processed == 5
+        expected_ids = ["newest", "second", "third", "fourth", "fifth"]
+        assert [item.gmail_message_id for item in classifier.received_envelopes] == expected_ids
+        processed = await results.list_processed_emails(run.id)
+        assert [item.provider_message_id for item in processed] == expected_ids
+
+    asyncio.run(scenario())
+
+
 def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
     async def scenario() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
