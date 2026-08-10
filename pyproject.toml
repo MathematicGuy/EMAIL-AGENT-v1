@@ -64,3 +64,7 @@ files = ["src"]
 # src/ (e.g. `mypy scripts/evaluate_retrieval.py`) sees real types instead
 # of the un-marked installed distribution.
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["qdrant_client.*"]
+ignore_missing_imports = true

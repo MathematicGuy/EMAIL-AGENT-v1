@@ -82,7 +82,7 @@ class InRepoSemanticMemory:
         query_text = _query_text(request)
         try:
             (query_vector,) = await self._embedder.embed((query_text,))
-        except TimeoutError:
+        except Exception:
             return _response(request, (), RetrievalStatus.TIMEOUT, started)
 
         query = np.asarray(query_vector, dtype=np.float32)
