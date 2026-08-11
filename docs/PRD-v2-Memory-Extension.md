@@ -1,16 +1,16 @@
 # Product Requirements Document
 
-## Cowork Agent — Memory Extension for AI Chat Assistant & Executable `@Email` Tool
+## Cowork Agent — Memory Extension for AI Chat Assistant
 
 | Field | Value |
 |---|---|
 | Product | Cowork Agent — Multi-Turn AI Chat Assistant |
 | Document status | Post-MVP Chat Memory Extension |
-| Version | 2.1 |
-| Date | 2026-08-09 |
+| Version | 2.2 |
+| Date | 2026-08-11 |
 | Depends on | Completed PRD-v1 stateless Email RAG pipeline |
 | Primary memory owner | AI Chat Controller (`feature: ai_chat`) |
-| Tool integration | Executable in-chat `@Email` skill |
+| Tool integration | None in the current AI Chat baseline |
 | Memory types | Chat working, declarative profile, episodic, semantic RAG |
 | Reflexion | Out of scope |
 | Scheduling | Out of scope |
@@ -21,8 +21,8 @@
 
 PRD-v2 assigns safe, typed memory to the multi-turn AI Chat Assistant. It
 explicitly decouples the four-type memory system from the completed,
-standalone Email RAG pipeline. That pipeline remains stateless and is exposed
-to the Chat Controller as the executable `@Email` skill.
+standalone Email RAG pipeline. The standalone PRD-v1 Email Agent remains
+stateless and is not exposed as an AI Chat tool.
 
 PRD-v1 already provides:
 
@@ -37,25 +37,23 @@ PRD-v1 already provides:
 
 PRD-v2 combines four memory capabilities for chat:
 
-1. **Working memory** for bounded turns and transient tool state in one `session_id`.
+1. **Working memory** for bounded turns in one `session_id`.
 2. **Long-term declarative memory** for explicit persona, preferences, and configuration.
-3. **Episodic memory** for conversation summaries and validated `@Email` Action Plans.
+3. **Episodic memory** for conversation summaries and validated chat-native tasks.
 4. **Semantic memory** for selectively retrieved enterprise knowledge.
 
 The extension must improve conversational continuity without allowing the
-model to treat its own unverified chat or tool output as trusted memory. Raw
-email bodies fetched during `@Email` execution remain transient in-run data.
+model to treat its own unverified chat output as trusted memory. Raw email
+bodies remain confined to the standalone PRD-v1 Email Agent.
 
 The memory lifecycle is:
 
 ```text
 User chat message
 → assemble profile + eligible episodes + semantic RAG + session working memory
-→ stream an assistant response or request a tool
-→ execute @Email statelessly when invoked
-→ render the Action Plan as a rich card in the chat thread
-→ record the turn and a system-generated episode
-→ purge raw email and transient tool payloads
+→ stream an assistant response
+→ when explicitly requested, render a chat-native task proposal
+→ record the turn and a system-generated, retrieval-ineligible TaskEpisode
 → approval/completion may make the episode eligible for later chat retrieval
 ```
 
@@ -75,7 +73,7 @@ PRD-v2 tests whether memory improves:
 - persona, language, tone, and formatting adherence;
 - recall of prior user decisions and validated task outcomes;
 - grounded answers from enterprise knowledge;
-- relevant reuse of approved `@Email` Action Plans.
+- relevant reuse of approved chat-native tasks.
 
 The extension must preserve the v1 privacy rule:
 
@@ -85,9 +83,9 @@ The extension must preserve the v1 privacy rule:
 
 ## 3. Problem Statement
 
-The completed PRD-v1 pipeline can create a trustworthy Action Plan from
-current email and optional company context. The remaining product problem is
-that a stateless chat assistant forgets context between turns and sessions.
+The completed PRD-v1 Email Agent remains a separate product flow. The remaining
+PRD-v2 problem is that a stateless chat assistant forgets context between turns
+and sessions.
 
 This causes limitations:
 
@@ -95,7 +93,7 @@ This causes limitations:
 - it loses earlier decisions and active conversational context;
 - it cannot safely recall approved or completed task patterns;
 - it cannot connect enterprise knowledge with the current conversation;
-- past `@Email` tool plans are not available as validated chat context.
+- past explicitly requested chat tasks are not available as validated context.
 
 Naively storing and retrieving all generated output would create a self-reinforcing error loop. The system therefore needs typed memory, explicit provenance, and strict retrieval eligibility.
 
@@ -110,11 +108,9 @@ Open or resume an AI Chat session
 → send a user message
 → assemble bounded working memory, profile, eligible episodes, and RAG context
 → stream the assistant response
-→ when requested, invoke @Email as a stateless tool
-→ render its grounded Action Plan card in the active chat thread
-→ record the chat turn and system-generated, retrieval-ineligible episode
-→ approve, complete, or reject the plan in chat to update episode eligibility
-→ delete raw email and transient tool context
+→ on an explicit user request, render a bounded task proposal
+→ record the chat turn and system-generated, retrieval-ineligible TaskEpisode
+→ approve, complete, or reject the task in chat to update episode eligibility
 ```
 
 ---
@@ -125,16 +121,16 @@ Open or resume an AI Chat session
 2. Enforce tenant, user, `session_id`, `feature: ai_chat`, and memory-type namespaces.
 3. Maintain bounded multi-turn working memory for each active chat session.
 4. Store explicit chat persona and user preferences as long-term declarative memory.
-5. Store chat summaries and every `@Email` Action Plan as episodic records.
+5. Store chat summaries and explicitly requested chat-native tasks as distinct episodic records.
 6. Mark new episodes as:
    - `validation_status = system_generated`
    - `retrieval_eligible = false`
-7. Support approval, completion, and rejection directly on in-chat Action Plan cards.
+7. Support approval, completion, and rejection directly on in-chat task proposals.
 8. Make only approved or completed episodes retrievable.
 9. Retrieve episodic and semantic context selectively for chat turns.
 10. Preserve provenance, confidence, version, retention, and deletion metadata.
-11. Prevent raw email content from entering durable memory.
-12. Stream assistant and tool events through an SSE-capable Chat API.
+11. Prevent raw email, attachment content, and full chat transcripts from entering TaskEpisodes.
+12. Stream assistant events through an SSE-capable Chat API.
 13. Evaluate whether memory materially improves chat continuity and grounded task assistance.
 
 ---
@@ -154,6 +150,7 @@ The following remain outside PRD-v2:
 - raw email ingestion into semantic company knowledge;
 - multi-agent orchestration;
 - automatic email replies;
+- executable in-chat `@Email` or any other AI Chat tool;
 - standalone Email pipeline memory integration;
 - background ingestion of Gmail messages into any memory type;
 - high-impact external actions;
@@ -168,9 +165,9 @@ The following remain outside PRD-v2:
 
 | Memory type | Purpose | V2 status |
 |---|---|---|
-| Short-term / working | Bounded active-chat turn history keyed by `session_id`, plus transient `@Email` execution state | Added for AI Chat |
+| Short-term / working | Bounded active-chat turn history keyed by `session_id` | Added for AI Chat |
 | Long-term declarative | Explicit persona, language, tone, output preferences, and user configuration | Added in v2 |
-| Episodic | Chat thread summaries and derived `@Email` Action Plans with validation state | Added in v2 |
+| Episodic | Chat summaries plus explicitly requested chat-native tasks with validation state | Added in v2 |
 | Semantic | Enterprise policies, procedures, templates, governance, and documentation available to chat through RAG | Retained from v1 RAG |
 
 ---
@@ -185,11 +182,12 @@ As a user, I want Cowork to remember persona and response preferences I explicit
 
 As a user, I want later chat sessions to follow my stored preferences and recall eligible prior decisions.
 
-### US-03 — Execute `@Email` inside chat
+### US-03 — Create a task inside chat
 
-As a user, I want to invoke `@Email` in a conversation and see its Action Plan rendered in that thread.
+As a user, I want to explicitly ask for a task or action plan and see a bounded
+task proposal rendered in that thread.
 
-### US-04 — Validate a tool-generated plan in chat
+### US-04 — Validate a chat-generated task
 
 As a user, I want inline approval or completion to make a useful Action Plan eligible for future retrieval.
 
@@ -197,9 +195,10 @@ As a user, I want inline approval or completion to make a useful Action Plan eli
 
 As a user, I want rejected and unapproved plans excluded from later chat retrieval.
 
-### US-06 — Recall relevant prior tool outcomes
+### US-06 — Recall relevant prior task outcomes
 
-As a user, I want Cowork to use relevant approved chat decisions and `@Email` plans when they improve a later answer.
+As a user, I want Cowork to use relevant approved chat decisions and tasks when
+they improve a later answer.
 
 ### US-07 — Manage memory
 
@@ -207,7 +206,8 @@ As a user, I want explicit deletion paths for stored preferences and task episod
 
 ### US-08 — Preserve privacy
 
-As a user, I want raw email bodies used by `@Email` to remain ephemeral and excluded from every durable memory type.
+As a user, I want TaskEpisodes to exclude raw email, attachment content, full
+chat transcripts, and copied company-document text.
 
 ---
 
@@ -216,7 +216,6 @@ As a user, I want raw email bodies used by `@Email` to remain ephemeral and excl
 ```mermaid
 flowchart TB
     C["AI Chat Controller"] --> G["Memory Gateway"]
-    C --> T["@Email Executable Skill / Tool"]
     G --> N["Namespace Resolver"]
     N --> R["Read Policy"]
     N --> W["Write Policy"]
@@ -246,11 +245,11 @@ flowchart TB
 3. Explicit user input is different from inferred model output.
 4. System-generated episodes are untrusted by default.
 5. Retrieval eligibility is policy-enforced, not prompt-enforced.
-6. Raw email content accessed by `@Email` is strictly transient tool data.
+6. TaskEpisodes contain compact derived fields, never raw source content.
 7. Semantic company knowledge remains separate from user task history.
 8. Every memory operation is scoped by tenant, user, `session_id`, and `feature: ai_chat`.
 9. Provenance and lifecycle fields are mandatory.
-10. Memory failure degrades chat context but does not corrupt the stateless v1 tool workflow.
+10. Memory failure degrades chat context without changing the standalone PRD-v1 Email Agent.
 
 ---
 
@@ -309,8 +308,6 @@ assistant_persona: string | null
 response_tone: string | null
 response_brevity: concise | standard | detailed | null
 output_style: concise | standard | detailed | null
-default_tool_permissions:
-  email: ask | allow | deny
 priority_rules:
   - string
 important_people:
@@ -345,7 +342,7 @@ Before each chat turn, the Chat Controller may request a compact profile.
 
 The profile response shall:
 
-- contain only fields relevant to the AI Chat response or requested tool;
+- contain only fields relevant to the AI Chat response or explicit task request;
 - remain bounded in size;
 - exclude unrelated personal data;
 - include a degraded indicator when the store is unavailable.
@@ -356,28 +353,28 @@ Failure behavior:
 profile read fails
 → use default chat persona
 → continue the chat turn with a degraded-memory indicator
-→ preserve stateless @Email availability
+→ preserve standalone PRD-v1 Email Agent availability
 → emit a metadata-only warning event
 ```
 
 ### FR-06 — Episodic task write
 
-Every completed chat turn may create a bounded conversation summary. Every
-successfully rendered `@Email` Action Plan shall create or update one episodic
-record after the task result is persisted.
+Every completed chat turn may create a bounded conversation summary. A
+TaskEpisode may be created only after the user explicitly requests a task or
+action plan. An assistant suggestion, ordinary conversation, classifier output,
+or background process must not create one.
+
+The Chat Controller writes the TaskEpisode after rendering the bounded task
+proposal. Retries for the same tenant, user, originating session, and
+originating turn update the same logical record.
 
 ```yaml
 episode_id: string
 record_id: string
 tenant_id: string
 user_id: string
-run_id: string
 chat_session_id: string
 chat_turn_id: string
-source_tool: "@Email"
-
-gmail_message_id: string
-gmail_url: string
 
 task_title: string
 minimal_request_paraphrase: string
@@ -397,7 +394,8 @@ missing_information:
 validation_status: system_generated
 retrieval_eligible: false
 
-source_type: system_generated_chat_tool_output
+source_type: system_generated_chat_task
+creation_reason: explicit_user_task_request
 
 created_at: datetime
 updated_at: datetime
@@ -408,7 +406,14 @@ prompt_version: string | null
 confidence: number | null
 ```
 
-The episode must not contain the raw email body.
+`record_id` is an opaque deterministic idempotency key derived from tenant,
+user, originating chat session, and originating chat turn. It must not contain
+or encode user text. TaskEpisodes have no foreign key to PRD-v1 Email Agent
+tasks.
+
+The episode must not contain raw email, attachment content, a full chat
+transcript, copied RAG chunks, tool payloads, or mailbox identifiers. Optional
+citations identify company-RAG documents without copying their content.
 
 ### FR-07 — Episode lifecycle
 
@@ -431,8 +436,9 @@ user_approved → completed
 user_approved → rejected
 ```
 
-These transitions shall be available as inline controls on the `@Email`
-Action Plan card in the originating chat thread.
+These transitions shall be available as inline controls on the task proposal
+in the originating chat thread. Transition and single-record deletion requests
+must match that originating session.
 
 ### FR-08 — Retrieval eligibility
 
@@ -446,6 +452,8 @@ rejected → retrieval_eligible = false
 ```
 
 The LLM must not be able to override this rule.
+Storage must derive `retrieval_eligible` atomically from the resulting
+`validation_status`; callers cannot supply an independent eligibility value.
 
 ### FR-09 — Selective episodic retrieval
 
@@ -459,6 +467,9 @@ The Chat Controller may request episodes when:
 - deterministic policy or classifier metadata indicates likely value.
 
 The system shall not retrieve episodic history for every chat turn by default.
+Eligible TaskEpisodes may cross chat sessions only within the same tenant,
+user, and `feature: ai_chat` scope. Retrieval excludes expired records and
+applies server-side result and timeout bounds before returning data.
 
 ### FR-10 — Episodic retrieval request
 
@@ -515,7 +526,7 @@ retrieval_status:
 degraded: boolean
 ```
 
-The response shall exclude raw email content.
+The response shall exclude raw source content and unvalidated or expired tasks.
 
 ### FR-12 — Generation context integration
 
@@ -527,17 +538,13 @@ The Chat LLM context assembler may receive:
 - current RAG context when chat intent requires enterprise knowledge;
 - bounded working memory from the active `session_id`.
 
-When `@Email` is invoked, its standalone generator may additionally receive
-the current ephemeral email and only the tool-specific context permitted by
-the Chat Controller.
-
 The context assembler shall clearly label each source type so the generator can distinguish:
 
 - current user message and active session turns;
 - explicit preference;
 - validated prior episode;
 - current company document evidence;
-- transient `@Email` tool input and output.
+- current explicit task-creation request and any generated task proposal.
 
 ### FR-13 — Conflict handling
 
@@ -642,13 +649,13 @@ skip episodes
 Episodic write failure:
 
 ```text
-preserve successfully persisted task
+preserve successfully streamed chat response
 → retry episode write safely
 → do not duplicate the task
 ```
 
-Semantic RAG failure produces a grounded chat degradation indicator. During
-`@Email` execution it continues to use the v1 partial-plan fallback.
+Semantic RAG failure produces a grounded chat degradation indicator. It does
+not alter the standalone PRD-v1 Email Agent.
 
 ---
 
@@ -662,8 +669,8 @@ The minimum supported product operations are:
 - mark a task completed;
 - reject a generated task.
 
-These operations are rendered directly on the structured `@Email` Action
-Plan card inside the chat thread and backed by idempotent transition APIs.
+These operations are rendered directly on the chat-native task proposal inside
+the originating chat thread and backed by idempotent transition APIs.
 
 ### Approval effects
 
@@ -784,22 +791,20 @@ PRD-v2 is accepted when:
 2. Every operation carries tenant, user, `session_id`, `feature: ai_chat`, and memory type.
 3. A bounded working-memory buffer preserves active-session turns and expires by policy.
 4. Explicit persona and response preferences can be written and loaded in later sessions.
-5. A user can invoke `@Email` inside the chat thread.
-6. `@Email` executes the completed Email RAG pipeline without giving it durable memory ownership.
-7. Assistant deltas, tool events, and the Action Plan card stream to the active session.
-8. Every rendered tool plan writes an idempotent `system_generated` episode.
-9. New tool episodes have `retrieval_eligible = false`.
-10. Inline approval or completion makes an episode retrieval-eligible.
-11. Inline rejection keeps an episode retrieval-ineligible.
-12. Episodic retrieval returns only approved or completed episodes.
-13. Unvalidated episodes cannot be returned even when requested by the model.
-14. Episodic and semantic retrieval are selective and bounded per chat turn.
-15. Current company policy evidence takes precedence over prior episode guidance.
-16. Raw email bodies are absent from chat history, durable memory, telemetry, and browser storage.
-17. Memory deletion paths prevent later retrieval.
-18. Production telemetry is metadata-only.
-19. Memory outages degrade chat gracefully and do not corrupt `@Email` execution.
-20. No scheduler, recurring Email processing, or autonomous email action is introduced.
+5. Assistant deltas and completion events stream to the active session.
+6. Only an explicit user task/action-plan request creates an idempotent chat-native TaskEpisode.
+7. New TaskEpisodes are `system_generated` and retrieval-ineligible.
+8. Inline approval or completion makes an episode retrieval-eligible.
+9. Inline rejection keeps an episode retrieval-ineligible.
+10. Episodic retrieval returns only approved or completed episodes.
+11. Unvalidated episodes cannot be returned even when requested by the model.
+12. Episodic and semantic retrieval are selective and bounded per chat turn.
+13. Current company policy evidence takes precedence over prior episode guidance.
+14. TaskEpisodes exclude raw email, attachment content, full chat transcripts, copied RAG chunks, and tool payloads.
+15. Exact-scope deletion prevents later retrieval and does not delete semantic company RAG.
+16. Production telemetry is metadata-only.
+17. Memory outages degrade chat gracefully and preserve the standalone PRD-v1 Email Agent.
+18. No in-chat tool, scheduler, recurring Email processing, or autonomous email action is introduced.
 
 ---
 
@@ -820,19 +825,19 @@ PRD-v2 is accepted when:
 - add default-profile fallback;
 - add deletion and retention behavior.
 
-### V2-M3 — Chat and `@Email` episodic persistence
+### V2-M3 — Chat-native episodic persistence
 
-- write bounded chat summaries and task-derived tool episodes;
+- write bounded chat summaries and explicitly requested chat-native TaskEpisodes;
 - enforce `system_generated`;
 - enforce `retrieval_eligible = false`;
 - implement idempotency and retry-safe writes;
-- ensure raw email exclusion.
+- ensure raw-source exclusion.
 
-### V2-M4 — SSE Chat Controller and `@Email` tool lifecycle
+### V2-M4 — SSE Chat Controller and task lifecycle
 
 - implement Chat API sessions, turn orchestration, and SSE streaming;
-- wrap the standalone Email RAG pipeline as the `@Email` skill tool;
-- render structured Action Plan cards with approve, complete, and reject controls;
+- render chat-native task proposals only after explicit user requests;
+- provide approve, complete, and reject controls in the originating chat session;
 - enforce retrieval eligibility changes;
 - record provenance and timestamps;
 
@@ -891,12 +896,15 @@ PRD-v2 is accepted when:
 - PRD-v2 adds long-term declarative and episodic memory.
 - Short-term and semantic memory remain as defined in v1.
 - Long-term writes are explicit.
-- Every generated task is recorded as an episode.
+- Chat-native tasks are created only after explicit user requests.
+- Chat-native TaskEpisodes have no PRD-v1 task-row, Gmail, run, or tool ownership.
+- TaskEpisode identity is scoped to tenant, user, originating session, and originating turn.
 - System-generated episodes are not retrievable.
 - Approved or completed episodes may be retrieved.
 - Rejected episodes are never retrieval-eligible.
 - Raw email bodies are excluded from durable memory.
-- Memory failure does not block the core Email workflow.
+- In-chat `@Email` is retired; the standalone PRD-v1 Email Agent remains separate.
+- Memory failure does not block the standalone Email Agent.
 - Scheduling remains out of scope.
 - Reflexion remains out of scope.
 
@@ -919,10 +927,7 @@ User chat message
 → Chat Controller reads the active session buffer
 → assemble persona + compact profile + eligible episodes + semantic RAG
 → stream the assistant response
-→ invoke @Email when requested
-→ execute Email RAG in transient tool state
-→ render one grounded Action Plan card in the chat thread
-→ record the turn and a system-generated, retrieval-ineligible episode
-→ purge raw email and tool payloads
+→ when explicitly requested, render one bounded chat-native task proposal
+→ record the turn and a system-generated, retrieval-ineligible TaskEpisode
 → inline approval or completion enables safe later chat retrieval
 ```

@@ -15,7 +15,6 @@ from ._chat_contracts_common import (
     MAX_RETRIEVAL_QUERY_LENGTH,
     MAX_RETRIEVAL_TIMEOUT_MS,
     MAX_SEMANTIC_RETRIEVAL_ITEMS,
-    ChatToolChoice,
     DegradedMemorySource,
     EpisodeSourceType,
     MemoryType,
@@ -31,6 +30,18 @@ from ._chat_contracts_common import (
     _to_dict,
 )
 from .target_contracts import ValidationStatus
+
+MAX_TASK_TITLE_LENGTH = 200
+MAX_TASK_REQUEST_PARAPHRASE_LENGTH = 1_000
+MAX_TASK_ACTION_PLAN_ITEMS = 20
+MAX_TASK_ACTION_PLAN_ITEM_LENGTH = 500
+MAX_TASK_MISSING_INFORMATION_ITEMS = 20
+MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH = 500
+MAX_TASK_RAG_CITATIONS = 20
+MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH = 256
+MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH = 300
+MAX_EPISODE_CITATION_SECTION_LENGTH = 300
+MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,40 +401,62 @@ class EpisodeCitation:
     source_url: str
 
     def __post_init__(self) -> None:
-        _require_string(self.document_id, "document_id")
-        _require_string(self.document_title, "document_title")
-        _require_string(self.source_url, "source_url")
+        _require_bounded_string(
+            self.document_id, "document_id", MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH
+        )
+        _require_bounded_string(
+            self.document_title, "document_title", MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH
+        )
+        _require_bounded_string(
+            self.source_url, "source_url", MAX_EPISODE_CITATION_SOURCE_URL_LENGTH
+        )
         if self.section is not None:
-            _require_string(self.section, "section")
+            _require_bounded_string(self.section, "section", MAX_EPISODE_CITATION_SECTION_LENGTH)
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
+        _reject_raw_email_shaped_keys(data)
+        expected_fields = {"document_id", "document_title", "section", "source_url"}
+        unexpected_fields = set(data).difference(expected_fields)
+        if unexpected_fields:
+            raise ValueError(
+                f"unexpected field(s) for EpisodeCitation: {sorted(unexpected_fields)}"
+            )
         section = data["section"]
         return cls(
-            document_id=_require_string(data["document_id"], "document_id"),
-            document_title=_require_string(data["document_title"], "document_title"),
-            section=_require_string(section, "section") if section is not None else None,
-            source_url=_require_string(data["source_url"], "source_url"),
+            document_id=_require_bounded_string(
+                data["document_id"], "document_id", MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH
+            ),
+            document_title=_require_bounded_string(
+                data["document_title"],
+                "document_title",
+                MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
+            ),
+            section=(
+                _require_bounded_string(section, "section", MAX_EPISODE_CITATION_SECTION_LENGTH)
+                if section is not None
+                else None
+            ),
+            source_url=_require_bounded_string(
+                data["source_url"], "source_url", MAX_EPISODE_CITATION_SOURCE_URL_LENGTH
+            ),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class TaskEpisode:
-    """Derived, body-free `@Email` output prepared for later episodic storage."""
+    """Body-free task proposal created from an explicit AI Chat request."""
 
     episode_id: str
     record_id: str
     tenant_id: str
     user_id: str
-    run_id: str
     chat_session_id: str
     chat_turn_id: str
-    source_tool: Literal["@Email"]
-    gmail_message_id: str
-    gmail_url: str
+    creation_reason: Literal["explicit_user_task_request"]
     task_title: str
     minimal_request_paraphrase: str
     action_plan: tuple[str, ...]
@@ -445,18 +478,71 @@ class TaskEpisode:
             "record_id",
             "tenant_id",
             "user_id",
-            "run_id",
             "chat_session_id",
             "chat_turn_id",
-            "gmail_message_id",
-            "gmail_url",
-            "task_title",
-            "minimal_request_paraphrase",
             "pipeline_version",
         ):
             _require_string(getattr(self, name), name)
-        if self.source_tool != ChatToolChoice.EMAIL.value:
-            raise ValueError("source_tool must be '@Email'")
+        _require_bounded_string(self.task_title, "task_title", MAX_TASK_TITLE_LENGTH)
+        _require_bounded_string(
+            self.minimal_request_paraphrase,
+            "minimal_request_paraphrase",
+            MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
+        )
+        if self.creation_reason != "explicit_user_task_request":
+            raise ValueError("creation_reason must be explicit_user_task_request")
+        _reject_raw_email_shaped_keys(self.action_plan)
+        _reject_raw_email_shaped_keys(self.rag_citations)
+        _reject_raw_email_shaped_keys(self.missing_information)
+        action_plan = _as_sequence(self.action_plan, "action_plan")
+        if len(action_plan) > MAX_TASK_ACTION_PLAN_ITEMS:
+            raise ValueError(
+                f"action_plan must not contain more than {MAX_TASK_ACTION_PLAN_ITEMS} items"
+            )
+        object.__setattr__(
+            self,
+            "action_plan",
+            tuple(
+                _require_bounded_string(
+                    item, "action_plan item", MAX_TASK_ACTION_PLAN_ITEM_LENGTH
+                )
+                for item in action_plan
+            ),
+        )
+        rag_citations = _as_sequence(self.rag_citations, "rag_citations")
+        if len(rag_citations) > MAX_TASK_RAG_CITATIONS:
+            raise ValueError(
+                f"rag_citations must not contain more than {MAX_TASK_RAG_CITATIONS} items"
+            )
+        if not all(isinstance(citation, EpisodeCitation) for citation in rag_citations):
+            raise TypeError("rag_citations items must be EpisodeCitation instances")
+        object.__setattr__(self, "rag_citations", tuple(rag_citations))
+        missing_information = _as_sequence(self.missing_information, "missing_information")
+        if len(missing_information) > MAX_TASK_MISSING_INFORMATION_ITEMS:
+            raise ValueError(
+                "missing_information must not contain more than "
+                f"{MAX_TASK_MISSING_INFORMATION_ITEMS} items"
+            )
+        object.__setattr__(
+            self,
+            "missing_information",
+            tuple(
+                _require_bounded_string(
+                    item,
+                    "missing_information item",
+                    MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
+                )
+                for item in missing_information
+            ),
+        )
+        if not isinstance(self.validation_status, ValidationStatus):
+            raise TypeError("validation_status must be a ValidationStatus")
+        if not isinstance(self.source_type, EpisodeSourceType):
+            raise TypeError("source_type must be an EpisodeSourceType")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be a datetime")
+        if not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be a datetime")
         if not isinstance(self.retrieval_eligible, bool):
             raise TypeError("retrieval_eligible must be a boolean")
         expected_eligibility = {
@@ -467,6 +553,8 @@ class TaskEpisode:
         }[self.validation_status]
         if self.retrieval_eligible != expected_eligibility:
             raise ValueError("retrieval_eligible must match validation_status")
+        if self.source_type is not EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK:
+            raise ValueError("source_type must be system_generated_chat_task")
         if self.model_id is not None:
             _require_string(self.model_id, "model_id")
         if self.prompt_version is not None:
@@ -482,6 +570,32 @@ class TaskEpisode:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         _reject_raw_email_shaped_keys(data)
+        expected_fields = {
+            "episode_id",
+            "record_id",
+            "tenant_id",
+            "user_id",
+            "chat_session_id",
+            "chat_turn_id",
+            "creation_reason",
+            "task_title",
+            "minimal_request_paraphrase",
+            "action_plan",
+            "rag_citations",
+            "missing_information",
+            "validation_status",
+            "retrieval_eligible",
+            "source_type",
+            "created_at",
+            "updated_at",
+            "pipeline_version",
+            "model_id",
+            "prompt_version",
+            "confidence",
+        }
+        unexpected_fields = set(data).difference(expected_fields)
+        if unexpected_fields:
+            raise ValueError(f"unexpected field(s) for TaskEpisode: {sorted(unexpected_fields)}")
         citations = tuple(
             EpisodeCitation.from_dict(_as_mapping(item, "rag_citations item"))
             for item in _as_sequence(data["rag_citations"], "rag_citations")
@@ -509,17 +623,19 @@ class TaskEpisode:
             record_id=_require_string(data["record_id"], "record_id"),
             tenant_id=_require_string(data["tenant_id"], "tenant_id"),
             user_id=_require_string(data["user_id"], "user_id"),
-            run_id=_require_string(data["run_id"], "run_id"),
             chat_session_id=_require_string(data["chat_session_id"], "chat_session_id"),
             chat_turn_id=_require_string(data["chat_turn_id"], "chat_turn_id"),
-            source_tool=cast(
-                Literal["@Email"], _require_string(data["source_tool"], "source_tool")
+            creation_reason=cast(
+                Literal["explicit_user_task_request"],
+                _require_string(data["creation_reason"], "creation_reason"),
             ),
-            gmail_message_id=_require_string(data["gmail_message_id"], "gmail_message_id"),
-            gmail_url=_require_string(data["gmail_url"], "gmail_url"),
-            task_title=_require_string(data["task_title"], "task_title"),
-            minimal_request_paraphrase=_require_string(
-                data["minimal_request_paraphrase"], "minimal_request_paraphrase"
+            task_title=_require_bounded_string(
+                data["task_title"], "task_title", MAX_TASK_TITLE_LENGTH
+            ),
+            minimal_request_paraphrase=_require_bounded_string(
+                data["minimal_request_paraphrase"],
+                "minimal_request_paraphrase",
+                MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
             ),
             action_plan=action_plan,
             rag_citations=citations,
@@ -686,7 +802,7 @@ class MemoryProvenanceSource(StrEnum):
     """Trusted origin categories carried by memory writes and citations."""
 
     EXPLICIT_USER_CONFIG = "explicit_user_config"
-    SYSTEM_GENERATED_CHAT_TOOL_OUTPUT = "system_generated_chat_tool_output"
+    SYSTEM_GENERATED_CHAT_TASK = "system_generated_chat_task"
     ENTERPRISE_CORPUS = "enterprise_corpus"
 
 
@@ -828,8 +944,6 @@ class MemoryProvenance:
 
     source_type: MemoryProvenanceSource
     source_id: str
-    source_tool: ChatToolChoice | None
-    run_id: str | None
     chat_turn_id: str | None
     pipeline_version: str | None
     model_id: str | None
@@ -837,15 +951,10 @@ class MemoryProvenance:
 
     def __post_init__(self) -> None:
         _require_string(self.source_id, "source_id")
-        for name in ("run_id", "chat_turn_id", "pipeline_version", "model_id", "prompt_version"):
+        for name in ("chat_turn_id", "pipeline_version", "model_id", "prompt_version"):
             value = getattr(self, name)
             if value is not None:
                 _require_string(value, name)
-        if (
-            self.source_type is MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT
-            and self.source_tool is not ChatToolChoice.EMAIL
-        ):
-            raise ValueError("system-generated tool provenance requires source_tool='@Email'")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -853,24 +962,26 @@ class MemoryProvenance:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         _reject_raw_email_shaped_keys(data)
+        expected_fields = {
+            "source_type",
+            "source_id",
+            "chat_turn_id",
+            "pipeline_version",
+            "model_id",
+            "prompt_version",
+        }
+        unexpected_fields = set(data).difference(expected_fields)
+        if unexpected_fields:
+            raise ValueError(
+                f"unexpected field(s) for MemoryProvenance: {sorted(unexpected_fields)}"
+            )
         values = {
             name: data[name]
-            for name in ("run_id", "chat_turn_id", "pipeline_version", "model_id", "prompt_version")
+            for name in ("chat_turn_id", "pipeline_version", "model_id", "prompt_version")
         }
-        source_tool = data["source_tool"]
         return cls(
             source_type=_as_enum(data["source_type"], MemoryProvenanceSource, "source_type"),
             source_id=_require_string(data["source_id"], "source_id"),
-            source_tool=(
-                _as_enum(source_tool, ChatToolChoice, "source_tool")
-                if source_tool is not None
-                else None
-            ),
-            run_id=(
-                _require_string(values["run_id"], "run_id")
-                if values["run_id"] is not None
-                else None
-            ),
             chat_turn_id=(
                 _require_string(values["chat_turn_id"], "chat_turn_id")
                 if values["chat_turn_id"] is not None

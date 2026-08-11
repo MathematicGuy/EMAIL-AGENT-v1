@@ -6,7 +6,7 @@ acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 
 V2 scope authority: `docs/references/doc-update-scope-memory-chat.md` and
 `docs/references/memory-system-and-chat-demo-analysis.md` realign memory to AI
-Chat and define `@Email` as an executable in-chat skill.
+Chat.
 
 ## Phase 0 — Fixtures, baseline, contract freeze
 - [x] P0-A Compatibility test suite (`tests/compatibility/`) — lanes: API contract · ordering/dedupe · query guard · privacy
@@ -72,20 +72,22 @@ Chat and define `@Email` as an executable in-chat skill.
 - [x] PostgreSQL persona/profile store (`002_chat_profiles.sql`, `PostgresChatProfileRepository`); explicit-only writes enforced by `profile_policy.authorize_profile_write` + a `source_type` CHECK
 - [x] Compact per-turn profile loading + degraded fallback (gateway `read_context` long-term path; `expires_at` filtered in SQL)
 - [x] Preference/profile deletion + retention (`delete_profile`, `purge_expired`)
-- [x] Checkpoint: preferences affect later chat; failure does not block chat or `@Email` — unit/gateway proof plus `tests/integration/persistence` 15 passed against `cowork-pg` (2026-08-10)
+- [x] Checkpoint: preferences affect later chat; failure does not block chat — unit/gateway proof plus `tests/integration/persistence` 15 passed against `cowork-pg` (2026-08-10)
 
-## V2-M3 — Chat and `@Email` episodic persistence
-- [ ] Bounded chat summaries + idempotent `@Email` Action Plan episodes (`retrieval_eligible=false`)
-- [ ] Eligibility enforcement at write + read boundaries (code, not prompts)
-- [ ] Chat session/turn/tool provenance mandatory; no-raw-body validation
-- [ ] Checkpoint: system-generated episodes unretrievable
+## V2-M3 — Chat episodic persistence
+- [x] [O] M3.1 ADR-004 + PRD-v2 v2.2 generic TaskEpisode contract approved
+- [x] [O] M3.1 Sync Target Architecture, master comparison, and orchestration evidence
+- [x] M3.2 Tests-first generic TaskEpisode domain contract
+- [x] M3.3 Consumer fixtures + port alignment; full AI Chat unit scope green
+- [ ] M3.4a PostgreSQL migration/down + repository lifecycle tests
+- [ ] M3.4b Gateway write/transition/delete wiring
+- [ ] Checkpoint: system-generated episodes unretrievable; approved/completed only retrievable
 
-## V2-M4 — AI Chat Controller, SSE, and `@Email` tool
+## V2-M4 — AI Chat Controller and SSE
 - [ ] Chat session/message APIs + Chat Controller event loop + typed SSE handler
-- [ ] `@Email` Skill Tool wrapper returning structured Action Plan cards
-- [ ] Inline approve/complete/reject transitions on cards
+- [ ] Inline approve/complete/reject transitions on episodes
 - [ ] Eligibility rule table on every transition; invalid transitions refused
-- [ ] Checkpoint: stream/tool lifecycle works; approval/completion flips eligibility
+- [ ] Checkpoint: stream/task lifecycle works; approval/completion flips eligibility
 
 ## V2-M5 — Selective episodic and RAG retrieval for chat
 - [ ] Episodic retrieval request with eligibility filters + bounded relevance scoring
@@ -98,15 +100,18 @@ Chat and define `@Email` as an executable in-chat skill.
 - [ ] Retention, purge, deletion audits, index propagation
 - [ ] Zero-tolerance safety metrics/alerts
 - [ ] Launch thresholds established
-- [ ] Checkpoint: PRD-v2 §16 criteria 1–20 pass
+- [ ] Checkpoint: PRD-v2 §16 criteria 1–18 pass
 
 ## Gate: PRD-v2 §16 acceptance review
 - [ ] [O] Acceptance review passed → unlock DEMO Increment B
 
 ## DEMO — Showcase frontend
-- [ ] DEMO-A AI Chat Assistant primary screen + embedded `@Email` Action Plan cards
+- [ ] DEMO-A AI Chat Assistant primary screen
 - [ ] DEMO-A supporting Connect, Knowledge, and Run audit screens per SPEC §3.1
 - [ ] DEMO-A Playwright FE review per SPEC §9 (snapshots, screenshots, console/network/storage)
 - [ ] DEMO-B inline task controls + persona/preferences + memory transparency/provenance/deletion
 - [ ] DEMO-B Playwright live browser verification
 - [ ] Checkpoint: SPEC §8 criteria 1–16 with evidence
+
+## Do Later
+- [ ] Retired `@Email` in-chat feature and its Action Plan card lifecycle. Do not implement unless explicitly reactivated.

@@ -1,9 +1,9 @@
 # Master Comparison — Current Architecture vs Target Cowork Agent
 
-**Alignment status:** Corrected against `TARGET-ARCHITECTURE.md`; Step 7 decomposed against `PRD-v1-Core-Email-and-RAG.md` and `PRD-v2-Memory-Extension.md`<br>
-**Authoritative target:** `TARGET-ARCHITECTURE.md` — Baseline target architecture<br>
+**Alignment status:** Realigned to accepted ADR-004 and PRD-v2 v2.2; historical pre-ADR-004 target material is retained only where labeled superseded<br>
+**Authoritative target:** `TARGET-ARCHITECTURE.md`, [ADR-004 — Chat-native TaskEpisodes](adr/ADR-004-chat-native-task-episodes.md), and `PRD-v2-Memory-Extension.md` v2.2<br>
 **Current-code baseline:** commit `cf2fd49801d5932b26de82af9d104d730cf58271`, branch `main`<br>
-**Date:** 2026-08-09
+**Date:** 2026-08-11
 
 ## Label legend
 
@@ -15,6 +15,15 @@
 | **[A]** | Assumption that must be validated |
 | **[U]** | Unresolved implementation question that does not override the target |
 
+## ADR-004 supersession notice
+
+ADR-004 is the decision authority for AI Chat TaskEpisodes. Any pre-ADR-004
+reference below to an executable in-chat `@Email` tool, an Email Action Plan
+card lifecycle, Email-derived episode ownership, Gmail/run/tool fields, or
+`system_generated_chat_tool_output` is explicitly superseded historical
+material, not the target contract. The standalone PRD-v1 Email Agent remains
+unchanged and memory-free.
+
 ---
 
 # 0. Alignment Decision
@@ -23,10 +32,10 @@
 
 V1-M1..M4 establish the completed standalone Email RAG baseline. That
 pipeline remains stateless and memory-free. PRD-v2 assigns the four-type
-memory system to the multi-turn AI Chat Assistant, and exposes the completed
-pipeline as an executable in-chat `@Email` skill. The Chat Controller owns
-session orchestration and all Memory Gateway access; raw email remains
-strictly ephemeral tool data. **[T]**
+memory system to the multi-turn AI Chat Assistant. The Chat Controller owns
+session orchestration, all Memory Gateway access, and the bounded task-proposal
+producer. AI Chat has no executable Email tool; raw email remains solely
+transient standalone PRD-v1 data. **[T]**
 
 The original `master-comparison.md` was **conceptually aligned but not contract-aligned** with the target. It correctly identified the current system, preserved the one-shot deterministic pattern, kept RAG retrieval-only for the Cowork workflow, and protected raw email from durable memory. However, it diverged from the target on several load-bearing decisions.
 
@@ -34,11 +43,10 @@ The original `master-comparison.md` was **conceptually aligned but not contract-
 
 ```text
 User message → Chat Controller → Memory Gateway context assembly
-→ stream assistant response or explicit @Email tool call
-→ run the standalone Email RAG pipeline statelessly
-→ render a grounded Action Plan card in the active chat thread
-→ record chat turn and system-generated episode
-→ purge raw email and transient tool state
+→ stream assistant response
+→ on an explicit user task/action-plan request, render one bounded proposal
+→ record chat turn and system-generated, retrieval-ineligible TaskEpisode
+→ originating-session approval/completion/rejection updates eligibility
 ```
 
 This means:
@@ -48,7 +56,7 @@ This means:
 - Every resolved task candidate reaches exactly one final Action Plan generation call. Classifier
   invocations may be bounded batches, but each selected email still receives one route decision.
   **[T+D]**
-- RAG failure produces a partial plan with explicit missing context; the system must not restore an unsupported pass-one draft or invent company procedure. **[T]**
+- RAG failure produces a bounded degraded chat response with explicit missing context; the system must not invent company procedure. **[T]**
 
 ## Critical corrections applied
 
@@ -708,10 +716,12 @@ The LLM proposes this structured decision. The deterministic resolver verifies c
 ```yaml
 session_id: string
 user_message: string
-tool_choices:
-  - "@Email"
 idempotency_key: string
 ```
+
+The active request contract has no tool field. Strict deserialization rejects a
+retired `tool_choices` input as an unexpected field; it cannot initiate a
+standalone PRD-v1 Email run.
 
 ## 6.4 `ChatMessageStreamEvent`
 
@@ -719,15 +729,10 @@ idempotency_key: string
 event_id: string
 session_id: string
 turn_id: string
-event_type: delta | tool_call | tool_output | memory_citation | completed | error
+event_type: delta | memory_citation | completed | error
 
 delta:
   text: string | null
-tool_call:
-  name: "@Email" | null
-  call_id: string | null
-tool_output:
-  action_plan: object | null
 memory_citation:
   memory_type: declarative | episodic | semantic | null
   source_id: string | null
@@ -887,13 +892,8 @@ episode_id: string
 record_id: string
 tenant_id: string
 user_id: string
-run_id: string
 chat_session_id: string
 chat_turn_id: string
-source_tool: "@Email"
-
-gmail_message_id: string
-gmail_url: string
 
 task_title: string
 minimal_request_paraphrase: string
@@ -921,7 +921,8 @@ retrieval_rule: >
   false when system_generated;
   true only after user_approved or completed.
 
-source_type: system_generated_task | user_approved_task
+source_type: system_generated_chat_task
+creation_reason: explicit_user_task_request
 created_at: datetime
 updated_at: datetime
 pipeline_version: string
@@ -929,9 +930,17 @@ model_id: string | null
 prompt_version: string | null
 
 privacy: >
-  Store derived task output and Gmail pointer only.
-  Do not store the raw email body.
+  Store body-free compact task data and optional company-RAG citation
+  coordinates only. Do not store raw email, attachment content, full chat
+  transcripts, copied RAG chunks, Gmail, run, tool, mailbox, or PRD-v1 task
+  identity.
 ```
+
+`record_id` is an opaque stable idempotency key derived from tenant, user,
+originating chat session, and originating chat turn. TaskEpisodes are created
+only after an explicit user task/action-plan request. Mutation and single-record
+deletion require the originating session; eligible retrieval may cross sessions
+only for the same tenant, user, and `feature: ai_chat` scope.
 
 ## 6.10 `TraceEvent`
 
@@ -1229,7 +1238,7 @@ These items close the durability gaps from old Milestone 1 without gating the MV
 **PRD-v1 is complete when** PRD-v1 §15 acceptance criteria 1–19 pass and the V1-H exit criteria
 hold.
 
-## PRD-v2 milestone group — AI Chat Memory and `@Email` Tool Extension
+## Superseded pre-ADR-004 PRD-v2 milestone group — historical only
 
 Depends on a stable PRD-v1. `V2-M1..M6` mirror PRD-v2 §17 Milestones 1–6.
 
@@ -1319,17 +1328,97 @@ Satisfies PRD-v2 §15, §17 Milestone 6, FR-16, FR-17.
    zero.
 4. Establish launch thresholds.
 
-**Exit criteria:** PRD-v2 §16 acceptance criteria 1–20 pass; safety counters remain at zero under
+**Exit criteria:** PRD-v2 §16 acceptance criteria 1–18 pass; safety counters remain at zero under
 test.
+
+## Accepted PRD-v2 milestone group — AI Chat memory and chat-native TaskEpisodes
+
+This is the active V2 plan. ADR-004 and PRD-v2 v2.2 supersede the preceding
+Email-tool milestones; the standalone PRD-v1 Email Agent remains outside this
+group and memory-free.
+
+### V2-M1 — Chat Memory Gateway and session working memory
+
+1. Define Chat Controller, session, SSE, profile, TaskEpisode, retrieval,
+   transition, provenance, and `MemoryContextRequest` contracts.
+2. Implement the logical Memory Gateway: namespace resolution, read/write
+   eligibility, provenance, degraded responses, and memory-type isolation.
+3. Route all Chat Controller memory access through the gateway.
+4. Implement a bounded Chat Session Buffer keyed by mandatory `session_id` and
+   `feature: ai_chat`, with TTL and compaction policy.
+
+**Exit criteria:** Cross-tenant and cross-user access tests fail closed; no
+memory access bypasses the gateway.
+
+### V2-M2 — AI Chat declarative profile
+
+1. Implement the explicit-only profile store and write path.
+2. Implement compact persona and preference loading with default-profile
+   degraded fallback.
+3. Implement preference/profile deletion and retention behavior.
+
+**Exit criteria:** Stored preferences affect later chat responses; profile-read
+failure never blocks the chat turn or the standalone PRD-v1 Email Agent.
+
+### V2-M3 — Chat-native episodic persistence
+
+1. Write bounded chat summaries and TaskEpisodes only after an explicit user
+   task/action-plan request.
+2. Persist the initial status as `system_generated` and derive
+   `retrieval_eligible=false` atomically.
+3. Use a stable opaque `record_id` derived from tenant, user, originating
+   session, and originating turn for retry-safe idempotency.
+4. Validate body-free compact payloads and optional company-RAG citation
+   coordinates; prohibit PRD-v1 task, Gmail, run, and tool ownership.
+
+**Exit criteria:** System-generated episodes cannot be retrieved; writes are
+idempotent; persisted episodes exclude raw source content and standalone Email
+identity.
+
+### V2-M4 — SSE Chat Controller and task lifecycle
+
+1. Implement Chat API session/message endpoints, turn orchestration, and typed
+   SSE streaming.
+2. Render a bounded task proposal only after an explicit user request.
+3. Provide approve, complete, reject, and single-record deletion only in the
+   originating chat session.
+4. Enforce atomic lifecycle-derived eligibility, timestamps, and provenance.
+
+**Exit criteria:** Approval/completion enables eligibility, rejection preserves
+ineligibility, and invalid or cross-session single-record mutations are refused.
+
+### V2-M5 — Selective episodic and RAG retrieval for chat
+
+1. Implement bounded eligible-episode retrieval filtered to the same tenant,
+   user, and `feature: ai_chat`; eligible records may cross sessions.
+2. Implement selective episodic and semantic trigger policy from chat intent.
+3. Assemble labeled chat context and enforce conflict precedence: current
+   instruction, then current company evidence, then stored preferences, then
+   advisory episodes.
+
+**Exit criteria:** Retrieval returns approved/completed episodes only; failed
+episodic retrieval skips episodes and continues the chat turn.
+
+### V2-M6 — AI Chat memory evaluation and governance
+
+1. Compare memory-enabled chat against a memory-disabled baseline.
+2. Define retention, purge, user-wide deletion audit, and index propagation.
+3. Add safety metrics for unvalidated retrieval, cross-tenant incidents,
+   raw-email violations, rejected-episode retrieval, and expired-record
+   retrieval; all must remain zero.
+4. Establish launch thresholds.
+
+**Exit criteria:** PRD-v2 §16 acceptance criteria 1–18 pass; safety counters
+remain at zero under test.
 
 ## DEMO — Streamlit AI Chat showcase (after both PRD groups)
 
 A demonstration frontend that exercises the complete value loop end-to-end in
 a browser. Full specification: `docs/SPEC-Demo-Frontend.md`.
 
-1. Increment A centers the AI Chat Assistant and embedded `@Email` tool after
-   the required backend gates pass; Increment B adds memory transparency and
-   in-chat lifecycle controls after PRD-v2 §16 passes.
+1. Increment A centers the AI Chat Assistant after the required backend gates
+   pass; Increment B adds memory transparency and chat-native task lifecycle
+   controls after PRD-v2 §16 passes. It does not embed a PRD-v1 Email tool.
 2. The demo is a pure API client: no workflow, routing, generation, or
    memory-policy logic in the client; no scaffolding of unimplemented
    milestone capabilities.
@@ -1342,6 +1431,10 @@ a browser. Full specification: `docs/SPEC-Demo-Frontend.md`.
 browser-verified evidence.
 
 ## Recommended implementation order
+
+The V2 entries in the legacy ordering table below are superseded by the active
+ADR-004 V2-M1..M6 plan above. V1 entries remain the unchanged standalone,
+memory-free Email Agent delivery plan.
 
 | Order | Phase | Work | Dependency or proof |
 |---:|---|---|---|
@@ -1362,11 +1455,11 @@ browser-verified evidence.
 | 14 | V1-H | Add telemetry sinks, retention, purge, and launch gates | Operational verification |
 | 15 | V2-M1 | Implement Memory Gateway, `feature: ai_chat` namespace, and Chat Session Buffer | Namespace, TTL, and fail-closed tests |
 | 16 | V2-M2 | Implement AI Chat persona/profile loading, fallback, and deletion | Preference application tests |
-| 17 | V2-M3 | Persist chat summaries and idempotent `@Email` episodes | Eligibility and privacy tests |
-| 18 | V2-M4 | Implement Chat Controller, SSE handler, `@Email` tool, and inline transitions | Stream, tool, transition, and eligibility tests |
+| 17 | V2-M3 | Persist chat summaries and idempotent chat-native TaskEpisodes | Eligibility and privacy tests |
+| 18 | V2-M4 | Implement Chat Controller, SSE handler, explicit task proposals, and originating-session transitions | Stream, transition, and eligibility tests |
 | 19 | V2-M5 | Implement selective episodic/RAG retrieval and labeled chat context | Retrieval and conflict tests |
 | 20 | V2-M6 | Evaluate AI Chat memory, retention, deletion audits, and launch gates | Operational verification |
-| 21 | DEMO | Build Streamlit AI Chat showcase with embedded `@Email` and memory panels | SPEC §8 acceptance + Playwright evidence |
+| 21 | DEMO | Build Streamlit AI Chat showcase with task-memory panels | SPEC §8 acceptance + Playwright evidence |
 
 ## Blocking decisions
 

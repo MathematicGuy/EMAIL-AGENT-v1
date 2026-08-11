@@ -21,20 +21,20 @@ NOW = datetime(2026, 8, 10, tzinfo=UTC)
 
 
 def _request() -> ChatMessageRequest:
-    return ChatMessageRequest("session-1", "Current instruction", (), "idem-1")
+    return ChatMessageRequest("session-1", "Current instruction", "idem-1")
 
 
 def _episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="episode-1", record_id="record-1", tenant_id="tenant-1",
-        user_id="user@example.com", run_id="run-1", chat_session_id="session-1",
-        chat_turn_id="turn-1", source_tool="@Email", gmail_message_id="message-1",
-        gmail_url="https://mail.google.com/message-1", task_title="Submit report",
+        user_id="user@example.com", chat_session_id="session-1",
+        chat_turn_id="turn-1", creation_reason="explicit_user_task_request",
+        task_title="Submit report",
         minimal_request_paraphrase="Submit report", action_plan=("Submit it",),
         rag_citations=(EpisodeCitation("doc-1", "Procedure", None, "https://docs.example.com"),),
         missing_information=(), validation_status=ValidationStatus.USER_APPROVED,
         retrieval_eligible=True,
-        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
         created_at=NOW, updated_at=NOW, pipeline_version="2", model_id=None,
         prompt_version=None, confidence=None,
     )

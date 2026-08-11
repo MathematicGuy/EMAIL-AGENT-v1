@@ -8,7 +8,6 @@ from cowork_agent.domain.chat_contracts import (
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
-    ChatToolChoice,
     DeclarativeProfile,
     MemoryNamespace,
     MemoryType,
@@ -98,13 +97,11 @@ def _request(
     *,
     session_id: str = "session-1",
     idempotency_key: str = "idem-1",
-    tool_choices: tuple[ChatToolChoice, ...] = (),
     user_message: str = "Help me plan today.",
 ) -> ChatMessageRequest:
     return ChatMessageRequest(
         session_id=session_id,
         user_message=user_message,
-        tool_choices=tool_choices,
         idempotency_key=idempotency_key,
     )
 
@@ -259,21 +256,6 @@ def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() ->
             source_id=None,
         )
     ) == ()
-
-
-def test_email_tool_choice_is_explicitly_unavailable_in_v2_m4a() -> None:
-    reply = FakeReply()
-    profile = ProfileReader(_profile())
-    controller, _ = _controller(reply=reply, profile=profile)
-
-    events = asyncio.run(
-        _collect(controller, _request(tool_choices=(ChatToolChoice.EMAIL,)))
-    )
-
-    assert [event.event_type for event in events] == [ChatEventType.ERROR]
-    assert events[0].code == "tool_not_available"
-    assert profile.reads == []
-    assert reply.calls == []
 
 
 def test_completed_idempotent_request_replays_events_without_a_second_turn() -> None:

@@ -8,6 +8,7 @@ from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -23,6 +24,16 @@ from cowork_agent.identity import VerifiedPrincipal
 
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
+
+
+class _ChatMessagePayload(BaseModel):
+    """Untrusted HTTP body kept separate from the pure chat contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    user_message: str
+    idempotency_key: str
 
 
 def create_chat_router() -> APIRouter:
@@ -45,7 +56,7 @@ def create_chat_router() -> APIRouter:
     @router.post("/sessions/{session_id}/messages")
     async def create_message(
         session_id: str,
-        payload: ChatMessageRequest,
+        payload: _ChatMessagePayload,
         request: Request,
     ) -> StreamingResponse:
         if payload.session_id != session_id:
@@ -53,6 +64,10 @@ def create_chat_router() -> APIRouter:
                 status_code=422,
                 detail="Payload session_id must match the path session_id",
             )
+        try:
+            message = ChatMessageRequest.from_dict(payload.model_dump())
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid chat message") from exc
         principal = await _verified_principal(request)
         try:
             _sessions(request).require(
@@ -66,7 +81,7 @@ def create_chat_router() -> APIRouter:
         if controller is None:
             raise HTTPException(status_code=404, detail="Chat session not found")
         return StreamingResponse(
-            _sse_events(controller, payload, request),
+            _sse_events(controller, message, request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

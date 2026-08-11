@@ -35,10 +35,10 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
   `generation_confidence` always qualified).
 - **Invariants (AGENTS.md):** raw email never persisted/logged; Gmail read-only;
   no target-state scaffolding without an explicit milestone citation.
-- **V2 Memory Scope (2026-08-09):** the four-type memory system is realigned
-  from the standalone Email pipeline to the Multi-Turn AI Chat Assistant;
-  `@Email` is an executable in-chat skill tool. See
-  `docs/references/memory-system-and-chat-demo-analysis.md` §5.
+- **V2 Memory Scope (2026-08-11):** the four-type memory system belongs to the
+  Multi-Turn AI Chat Assistant. ADR-004 retires executable in-chat `@Email`;
+  explicitly requested chat-native tasks replace Email-derived episodes. The
+  standalone PRD-v1 Email Agent remains separate and memory-free.
 
 ## Dependency Graph and Parallel Lanes
 
@@ -61,10 +61,10 @@ Doc reorganization + Phase 0 blocking decisions committed in `6fea71a`.
                           ✅ V1-H PostgreSQL repos + Redis queue/DLQ + observability
                                                  │
                                                  ▼
-       V2-M1 Chat gateway/session buffer → V2-M2 chat profile → V2-M3 chat/tool episodes
+       V2-M1 Chat gateway/session buffer → V2-M2 chat profile → V2-M3 chat-native episodes
                                                  │
                                                  ▼
-       V2-M4 Chat Controller/SSE/@Email → V2-M5 chat retrieval → V2-M6 governance
+       V2-M4 Chat Controller/SSE/task lifecycle → V2-M5 chat retrieval → V2-M6 governance
                                                  │
                                       PRD-v2 §16 gate review (orchestrator)
                                                  │
@@ -461,7 +461,7 @@ sensitive payloads; restart loses nothing. **Deps:** §15 gate. **Scope:** L.
 
 ---
 
-## V2 group — AI Chat Memory and `@Email` Tool Extension (PRD-v2)
+## V2 group — AI Chat Memory Extension (PRD-v2)
 
 Each milestone mirrors master-comparison §7 V2-M*; detailed task refinement
 happens at phase start (gate discipline). Granularity here is work-item level.
@@ -478,7 +478,7 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   writes), compact per-turn loading with degraded fallback, deletion, and
   retention behavior.
   Exit: stored persona/preferences change later chat responses; failure does
-  not block chat or the stateless `@Email` tool.
+  not block chat or the standalone PRD-v1 Email Agent.
   **Delivered (code):** `DeclarativeProfile` narrowed to the first UI slice
   plus `source_type`/`expires_at`; `features/ai_chat/profile_policy.py`
   explicit-only write policy; `DeclarativeMemoryPort` write/delete;
@@ -490,13 +490,38 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   → 15 passed against the `cowork-pg` container, including all five scenarios
   in `tests/integration/persistence/test_chat_profile_repository.py`. AC-04 is
   DONE; AC-17 now has its profile-storage half. Milestone closed.
-- **V2-M3 (chat/tool episodes):** bounded chat summaries and one idempotent
-  episode per persisted `@Email` Action Plan,
-  `system_generated`, `retrieval_eligible=false`; eligibility enforced at
-  write AND read boundaries in code; mandatory provenance; no raw body.
-- **V2-M4 (chat/SSE/tool lifecycle):** Chat API Controller, Chat Controller
-  event loop, SSE handler, `@Email` wrapper, Action Plan card DTO, and inline
-  transactional approve/complete/reject controls.
+- **V2-M3 (chat-native episodes):** bounded chat summaries and one idempotent
+  TaskEpisode per explicit user task/action-plan request; Chat Controller is
+  producer; `system_generated`, `retrieval_eligible=false`; eligibility
+  enforced at write AND read boundaries; no Email task FK or raw source data.
+
+  **V2-M3 refinement (ADR-004, dependency ordered):**
+
+  1. **M3.1 Contract authority (S, docs):** accept ADR-004 and PRD-v2 v2.2,
+     then sync target architecture and master comparison. Acceptance: producer,
+     identity, payload, lifecycle, and exclusions agree; `git diff --check`
+     passes. No code or migration.
+  2. **M3.2 Domain contract migration (M, 3 files):** tests first; replace the
+     Email-shaped `TaskEpisode`, episode source, and provenance source with the
+     chat-native contract. Acceptance: focused domain tests prove round-trip,
+     removed fields, explicit creation reason, fixed source, eligibility table,
+     and raw-source rejection. Verify focused pytest, Ruff, and strict mypy.
+     Depends on M3.1.
+  3. **M3.3 Consumer fixture and port alignment (M, <=5 files):** migrate
+     MemoryGateway, generation-context, profile-policy fixtures and any exact
+     public port annotations without adding persistence behavior. Acceptance:
+     all AI Chat unit tests pass; no legacy tool-output enum/source field remains
+     in AI Chat contracts. Verify focused pytest, Ruff, and strict mypy. Depends
+     on M3.2.
+  4. **M3.4 Durable lifecycle slice (split before dispatch):** after contract
+     acceptance, add PostgreSQL migration/down path, repository, exact-scope
+     read/write/transition/delete tests, then wire Gateway writes/transitions in
+     a separate increment. No PRD-v1 task FK, Qdrant episode store, tool path,
+     scheduler, or auto-extraction. Depends on M3.3.
+
+- **V2-M4 (chat/SSE/task lifecycle):** Chat API Controller, Chat Controller
+  event loop, SSE handler, bounded task proposal DTO, and inline transactional
+  approve/complete/reject controls in the originating chat session.
 - **V2-M5 (selective chat retrieval):** eligibility-filtered episodes and
   enterprise RAG, bounded and relevance-scored from chat intent; labeled
   system/profile/session/episode/semantic context; conflict rules (FR-13).
@@ -504,15 +529,14 @@ happens at phase start (gate discipline). Granularity here is work-item level.
   evaluation; retention, purge, deletion audits, zero-tolerance safety
   counters, and launch thresholds.
 
-**Gate:** PRD-v2 §16 acceptance criteria 1–20 with evidence → DEMO Increment B.
+**Gate:** PRD-v2 §16 acceptance criteria 1–18 with evidence → DEMO Increment B.
 
 ---
 
 ## DEMO — Showcase frontend (SPEC-Demo-Frontend)
 
-- **DEMO-A (Core Chat and Email Tool):** AI Chat Assistant primary screen,
-  embedded `@Email` execution and Action Plan cards, Connect, Knowledge, and
-  Run audit; typed SSE states, idempotent tool execution, citations, all UI
+- **DEMO-A (Core Chat):** AI Chat Assistant primary screen, Connect,
+  Knowledge, and Run audit; typed SSE states, citations, all UI
   states, and bilingual-ready copy. Live-verify per SPEC §9 with the
   `playwright-cli` skill; preserve screenshots and console/network evidence.
   - Status 2026-08-08: five-screen implementation + `tests/unit/gui/` helper

@@ -149,13 +149,6 @@ class ChatController:
                 return
 
             turn_id = self._new_id()
-            if request.tool_choices:
-                yield self._error(
-                    turn_id=turn_id,
-                    code="tool_not_available",
-                    safe_message="Tools are not available in this chat version.",
-                )
-                return
             if await is_cancelled():
                 return
 

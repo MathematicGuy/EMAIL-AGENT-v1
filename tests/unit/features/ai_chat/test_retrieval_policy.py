@@ -27,7 +27,6 @@ def _request(user_message: str) -> ChatMessageRequest:
     return ChatMessageRequest(
         session_id="session-1",
         user_message=user_message,
-        tool_choices=(),
         idempotency_key="idempotency-1",
     )
 

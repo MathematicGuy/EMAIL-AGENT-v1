@@ -8,7 +8,6 @@ import pytest
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatSummaryEpisode,
-    ChatToolChoice,
     ChatTurn,
     DeclarativeProfile,
     DegradedMemorySource,
@@ -114,12 +113,9 @@ def _episode(
         record_id=episode_id,
         tenant_id="tenant-1",
         user_id="user@example.com",
-        run_id="run-1",
         chat_session_id=session_id,
         chat_turn_id="turn-1",
-        source_tool="@Email",
-        gmail_message_id="message-1",
-        gmail_url="https://mail.google.com/mail/u/0/#all/message-1",
+        creation_reason="explicit_user_task_request",
         task_title="Submit the report",
         minimal_request_paraphrase="Submit the requested report.",
         action_plan=("Open the approved template.",),
@@ -134,7 +130,7 @@ def _episode(
         missing_information=(),
         validation_status=status,
         retrieval_eligible=status in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED},
-        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
         created_at=NOW,
         updated_at=NOW,
         pipeline_version="2",
@@ -444,12 +440,12 @@ def test_postgres_profile_read_preserves_programming_errors() -> None:
         asyncio.run(repository.read_profile(namespace))
 
 
-def _explicit_provenance(source_tool: ChatToolChoice | None = None) -> MemoryProvenance:
+def _explicit_provenance(
+    *, source_type: MemoryProvenanceSource = MemoryProvenanceSource.EXPLICIT_USER_CONFIG
+) -> MemoryProvenance:
     return MemoryProvenance(
-        source_type=MemoryProvenanceSource.EXPLICIT_USER_CONFIG,
+        source_type=source_type,
         source_id="chat-settings-form",
-        source_tool=source_tool,
-        run_id=None,
         chat_turn_id="turn-1",
         pipeline_version=None,
         model_id=None,
@@ -475,7 +471,10 @@ def test_gateway_refuses_a_non_explicit_profile_write_before_the_adapter() -> No
     with pytest.raises(ProfileWriteRejected):
         asyncio.run(
             gateway.write_profile(
-                _profile(), provenance=_explicit_provenance(ChatToolChoice.EMAIL)
+                _profile(),
+                provenance=_explicit_provenance(
+                    source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TASK
+                ),
             )
         )
 
@@ -809,7 +808,7 @@ def test_gateway_rejects_foreign_chat_summary_before_adapter_write(
     [
         ("validation_status", ValidationStatus.USER_APPROVED),
         ("retrieval_eligible", True),
-        ("source_type", EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT),
+        ("source_type", EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK),
     ],
     ids=["validation_status", "retrieval_eligible", "source_type"],
 )

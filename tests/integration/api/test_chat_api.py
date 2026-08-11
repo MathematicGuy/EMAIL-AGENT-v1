@@ -17,10 +17,14 @@ from cowork_agent.identity import VerifiedPrincipal
 
 
 class FakeReply:
+    def __init__(self) -> None:
+        self.calls = 0
+
     async def stream_reply(
         self, request: ChatMessageRequest, context: object
     ) -> AsyncIterator[str]:
         del request, context
+        self.calls += 1
         yield "Hello"
         yield " from chat"
 
@@ -31,12 +35,14 @@ def _app(principal: VerifiedPrincipal | None = None) -> FastAPI:
     app.state.chat_sessions = InMemoryChatSessionRegistry(new_id=lambda: "session-1")
     app.state.chat_controllers = {}
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
+    reply = FakeReply()
+    app.state.chat_test_reply = reply
 
     def controller_factory(scope: ChatMemoryScope) -> ChatController:
         return ChatController(
             scope=scope,
             memory=MemoryGateway(scope=scope, session_buffer=buffer),
-            reply=FakeReply(),
+            reply=reply,
         )
 
     app.state.chat_controller_factory = controller_factory
@@ -73,7 +79,6 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
                 json={
                     "session_id": "session-1",
                     "user_message": "Hello",
-                    "tool_choices": [],
                     "idempotency_key": "idem-1",
                 },
             )
@@ -105,7 +110,6 @@ def test_message_endpoint_rejects_a_path_and_payload_session_mismatch() -> None:
                 json={
                     "session_id": "session-2",
                     "user_message": "Wrong session",
-                    "tool_choices": [],
                     "idempotency_key": "idem-2",
                 },
             )
@@ -134,12 +138,34 @@ def test_message_endpoint_hides_a_session_owned_by_another_principal() -> None:
                 json={
                     "session_id": "session-1",
                     "user_message": "Not mine",
-                    "tool_choices": [],
                     "idempotency_key": "idem-3",
                 },
             )
 
         assert response.status_code == 404
+
+    asyncio.run(scenario())
+
+
+def test_message_endpoint_rejects_retired_tool_choices_before_controller_dispatch() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            response = await client.post(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                json={
+                    "session_id": "session-1",
+                    "user_message": "Hello",
+                    "tool_choices": ["@Email"],
+                    "idempotency_key": "idem-retired-tool",
+                },
+            )
+
+        assert response.status_code == 422
+        assert app.state.chat_test_reply.calls == 0
 
     asyncio.run(scenario())
 
