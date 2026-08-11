@@ -466,6 +466,17 @@ sensitive payloads; restart loses nothing. **Deps:** §15 gate. **Scope:** L.
 Each milestone mirrors master-comparison §7 V2-M*; detailed task refinement
 happens at phase start (gate discipline). Granularity here is work-item level.
 
+**Current checkpoint (2026-08-11):** `feature/v2-m3-chat-summary` is at
+`cedd563`; M3.1-M3.3 are committed. M3.4a PostgreSQL durability is implemented
+and parent-verified but uncommitted and not finally accepted because the latest
+citation-key correction invalidated the preceding Sol verdict. Live evidence
+from the earlier `cowork-pg` run is 30 persistence tests passed with zero skips,
+198 domain + AI Chat tests passed, and full suite 696 passed/25 skipped/4
+xfailed; Ruff, strict mypy across 79 files, and diff check were clean. Docker
+Desktop is currently unavailable and must be restarted before another live
+PostgreSQL verification run. M3.4b Gateway wiring must remain sequential after
+M3.4a acceptance.
+
 - **V2-M1 (chat gateway/session):** `ChatMessageRequest`, SSE event,
   `TaskEpisode`, `MemoryContextRequest`, profile/transition/provenance
   contracts; in-process Memory Gateway; bounded Chat Session Working Memory;
@@ -497,37 +508,56 @@ happens at phase start (gate discipline). Granularity here is work-item level.
 
   **V2-M3 refinement (ADR-004, dependency ordered):**
 
-  1. **M3.1 Contract authority (S, docs):** accept ADR-004 and PRD-v2 v2.2,
+  1. **M3.1 Contract authority — DONE (S, docs):** accept ADR-004 and PRD-v2 v2.2,
      then sync target architecture and master comparison. Acceptance: producer,
      identity, payload, lifecycle, and exclusions agree; `git diff --check`
      passes. No code or migration.
-  2. **M3.2 Domain contract migration (M, 3 files):** tests first; replace the
+  2. **M3.2 Domain contract migration — DONE (M, 3 files):** tests first; replace the
      Email-shaped `TaskEpisode`, episode source, and provenance source with the
      chat-native contract. Acceptance: focused domain tests prove round-trip,
      removed fields, explicit creation reason, fixed source, eligibility table,
      and raw-source rejection. Verify focused pytest, Ruff, and strict mypy.
      Depends on M3.1.
-  3. **M3.3 Consumer fixture and port alignment (M, <=5 files):** migrate
+  3. **M3.3 Consumer fixture and port alignment — DONE (M, <=5 files):** migrate
      MemoryGateway, generation-context, profile-policy fixtures and any exact
      public port annotations without adding persistence behavior. Acceptance:
      all AI Chat unit tests pass; no legacy tool-output enum/source field remains
      in AI Chat contracts. Verify focused pytest, Ruff, and strict mypy. Depends
      on M3.2.
-  4. **M3.4 Durable lifecycle slice (split before dispatch):** after contract
-     acceptance, add PostgreSQL migration/down path, repository, exact-scope
-     read/write/transition/delete tests, then wire Gateway writes/transitions in
-     a separate increment. No PRD-v1 task FK, Qdrant episode store, tool path,
-     scheduler, or auto-extraction. Depends on M3.3.
+  4. **M3.4a PostgreSQL durability — VERIFY (M):** reversible migration `004`,
+     repository, exact-scope idempotent write/transition/delete, immutable
+     identity guards, storage-derived eligibility, expiry/purge, and bounded
+     cross-session PostgreSQL FTS retrieval are implemented. Parent gates are
+     green. Two final reviews returned `fix-first`; query/min-score semantics
+     and exact citation keys were corrected. Acceptance now requires a fresh
+     behaviorally read-only Sol verdict plus unchanged post-review status/hashes.
+  5. **M3.4b Gateway lifecycle wiring — NEXT (M):** after M3.4a acceptance,
+     connect explicit-request writes, originating-session transitions/deletion,
+     and eligible episodic reads exclusively through `MemoryGateway`. Acceptance:
+     focused tests prove unvalidated episodes cannot reach model context and
+     approve/complete/reject behavior remains fail-closed. No PRD-v1 task FK,
+     Qdrant episode store, tool path, scheduler, or auto-extraction.
 
 - **V2-M4 (chat/SSE/task lifecycle):** Chat API Controller, Chat Controller
   event loop, SSE handler, bounded task proposal DTO, and inline transactional
   approve/complete/reject controls in the originating chat session.
+  **Current:** session/message API, controller loop, and typed SSE are landed
+  with 12 focused tests. Inline TaskEpisode lifecycle controls remain and depend
+  on M3.4b.
 - **V2-M5 (selective chat retrieval):** eligibility-filtered episodes and
   enterprise RAG, bounded and relevance-scored from chat intent; labeled
   system/profile/session/episode/semantic context; conflict rules (FR-13).
+  **Current:** query contracts, deterministic intent policy, Gateway filtering
+  and degradation, ready-only semantic runtime, labeled precedence assembly,
+  and M3.4a PostgreSQL FTS bounds are landed. Durable Gateway/reply-provider
+  consumption remains after M3.4b.
 - **V2-M6 (chat memory governance):** memory-enabled vs memory-disabled chat
   evaluation; retention, purge, deletion audits, zero-tolerance safety
   counters, and launch thresholds.
+  **Current:** metadata-only Gateway events, paired launch gate, exact-scope
+  bulk deletion, retention settings, purge coordination, and live M3.4a SQL
+  deletion/purge are landed. Production sink/alerts, backup/restore, index
+  propagation, end-to-end runtime deletion proof, and threshold evidence remain.
 
 **Gate:** PRD-v2 §16 acceptance criteria 1–18 with evidence → DEMO Increment B.
 

@@ -22,7 +22,7 @@ so the workflow and API layers are unchanged:
 import json
 from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -36,12 +36,18 @@ from cowork_agent.domain import (
     RunTrigger,
 )
 from cowork_agent.domain.chat_contracts import (
+    MAX_EPISODIC_RETRIEVAL_ITEMS,
+    MAX_RETRIEVAL_TIMEOUT_MS,
     ChatSummaryEpisode,
     DeclarativeProfile,
+    EpisodeCitation,
     EpisodeSourceType,
+    EpisodeTransition,
+    EpisodicMemoryQuery,
     MemoryNamespace,
     MemoryProvenanceSource,
     MemoryType,
+    TaskEpisode,
 )
 from cowork_agent.domain.target_contracts import Task, ValidationStatus
 from cowork_agent.features.ai_chat.episode_policy import authorize_chat_summary_write
@@ -510,6 +516,202 @@ class PostgresChatSummaryEpisodeRepository:
             return cursor.rowcount
 
 
+class PostgresTaskEpisodeRepository:
+    """Durable, body-free chat task episodes with SQL-enforced lifecycle isolation."""
+
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        self._pool = pool
+
+    async def write_task_episode(
+        self,
+        namespace: MemoryNamespace,
+        episode: TaskEpisode,
+        *,
+        expires_at: datetime | None,
+    ) -> TaskEpisode:
+        _validate_task_episode_write(namespace, episode, expires_at)
+        # Reparse the object-owned payload so a caller cannot bypass the frozen
+        # domain constructor and smuggle raw-email/tool-shaped mappings to SQL.
+        trusted_episode = TaskEpisode.from_dict(episode.to_dict())
+        try:
+            async with self._pool.connection() as connection:
+                cursor = await connection.execute(
+                f"""
+                INSERT INTO task_episodes ({_TASK_EPISODE_WRITE_COLUMNS})
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (tenant_id, user_id, feature, chat_session_id, record_id)
+                DO UPDATE SET
+                    task_title = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.task_title ELSE task_episodes.task_title END,
+                    minimal_request_paraphrase = CASE
+                    WHEN task_episodes.validation_status = 'system_generated'
+                    AND excluded.updated_at >= task_episodes.updated_at
+                    THEN excluded.minimal_request_paraphrase
+                    ELSE task_episodes.minimal_request_paraphrase END,
+                    action_plan = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.action_plan ELSE task_episodes.action_plan END,
+                    rag_citations = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.rag_citations ELSE task_episodes.rag_citations END,
+                    missing_information = CASE
+                    WHEN task_episodes.validation_status = 'system_generated'
+                    AND excluded.updated_at >= task_episodes.updated_at
+                    THEN excluded.missing_information
+                    ELSE task_episodes.missing_information END,
+                    expires_at = CASE
+                    WHEN task_episodes.validation_status = 'system_generated'
+                    AND excluded.updated_at >= task_episodes.updated_at
+                    THEN excluded.expires_at ELSE task_episodes.expires_at END,
+                    pipeline_version = CASE
+                    WHEN task_episodes.validation_status = 'system_generated'
+                    AND excluded.updated_at >= task_episodes.updated_at
+                    THEN excluded.pipeline_version ELSE task_episodes.pipeline_version END,
+                    model_id = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.model_id ELSE task_episodes.model_id END,
+                    prompt_version = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.prompt_version ELSE task_episodes.prompt_version END,
+                    confidence = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.confidence ELSE task_episodes.confidence END,
+                    updated_at = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.updated_at ELSE task_episodes.updated_at END
+                WHERE task_episodes.episode_id = excluded.episode_id
+                    AND task_episodes.chat_turn_id = excluded.chat_turn_id
+                RETURNING {_TASK_EPISODE_COLUMNS}
+                """,
+                    _task_episode_params(namespace, trusted_episode, expires_at),
+                )
+                row = await cursor.fetchone()
+        except psycopg.errors.UniqueViolation as error:
+            raise ValueError("task episode immutable identity conflict") from error
+        if row is None:
+            raise ValueError("task episode immutable identity conflict")
+        return _task_episode_from_row(row)
+
+    async def transition_task_episode(self, transition: EpisodeTransition) -> TaskEpisode | None:
+        namespace = transition.namespace
+        _task_episode_mutation_key(namespace, transition.episode_id)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"""
+                UPDATE task_episodes
+                SET validation_status = %s, updated_at = %s
+                WHERE tenant_id = %s AND user_id = %s AND feature = %s
+                    AND chat_session_id = %s AND record_id = %s AND chat_turn_id = %s
+                    AND episode_id = %s AND validation_status = %s
+                    AND updated_at <= %s
+                RETURNING {_TASK_EPISODE_COLUMNS}
+                """,
+                (
+                    transition.to_status.value,
+                    transition.transitioned_at,
+                    namespace.tenant_id,
+                    namespace.user_id,
+                    namespace.feature,
+                    namespace.session_id,
+                    namespace.record_id,
+                    namespace.source_id,
+                    transition.episode_id,
+                    transition.from_status.value,
+                    transition.transitioned_at,
+                ),
+            )
+            row = await cursor.fetchone()
+        return None if row is None else _task_episode_from_row(row)
+
+    async def delete_task_episode(self, namespace: MemoryNamespace, *, episode_id: str) -> bool:
+        _task_episode_mutation_key(namespace, episode_id)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM task_episodes
+                WHERE tenant_id = %s AND user_id = %s AND feature = %s
+                    AND chat_session_id = %s AND record_id = %s AND chat_turn_id = %s
+                    AND episode_id = %s
+                """,
+                (
+                    namespace.tenant_id,
+                    namespace.user_id,
+                    namespace.feature,
+                    namespace.session_id,
+                    namespace.record_id,
+                    namespace.source_id,
+                    episode_id,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    async def read_episodes(
+        self, namespace: MemoryNamespace, query: EpisodicMemoryQuery
+    ) -> tuple[TaskEpisode, ...]:
+        _task_episode_read_namespace(namespace)
+        limit = min(query.max_items, MAX_EPISODIC_RETRIEVAL_ITEMS)
+        timeout_ms = min(query.timeout_ms, MAX_RETRIEVAL_TIMEOUT_MS)
+        try:
+            async with self._pool.connection() as connection:
+                await connection.execute(
+                    "SELECT set_config('statement_timeout', %s, true)", (f"{timeout_ms}ms",)
+                )
+                cursor = await connection.execute(
+                    f"""
+                    WITH ranked AS (
+                        SELECT {_TASK_EPISODE_COLUMNS},
+                            ts_rank_cd(search_vector, terms.tsquery, 32) AS relevance_score
+                        FROM task_episodes
+                        CROSS JOIN LATERAL (
+                            SELECT plainto_tsquery('simple', %s) AS tsquery
+                        ) AS terms
+                        WHERE tenant_id = %s AND user_id = %s AND feature = %s
+                            AND validation_status IN ('user_approved', 'completed')
+                            AND retrieval_eligible = true
+                            AND search_vector @@ terms.tsquery
+                            AND (expires_at IS NULL OR expires_at > now())
+                    )
+                    SELECT {_TASK_EPISODE_COLUMNS} FROM ranked
+                    WHERE relevance_score > 0 AND relevance_score >= %s
+                    ORDER BY relevance_score DESC, updated_at DESC, record_id DESC
+                    LIMIT %s
+                    """,
+                    (
+                        query.query,
+                        namespace.tenant_id,
+                        namespace.user_id,
+                        namespace.feature,
+                        query.min_score,
+                        limit,
+                    ),
+                )
+                rows = await cursor.fetchall()
+        except (psycopg.OperationalError, psycopg.errors.QueryCanceled) as error:
+            raise MemorySourceUnavailableError("task episode read unavailable") from error
+        return tuple(_task_episode_from_row(row) for row in rows)
+
+    async def delete_all_for_user(self, namespace: MemoryNamespace) -> int:
+        _task_episode_read_namespace(namespace)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM task_episodes WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.tenant_id, namespace.user_id, namespace.feature),
+            )
+            return cursor.rowcount
+
+    async def purge_expired(self, now: datetime) -> int:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM task_episodes WHERE expires_at IS NOT NULL AND expires_at <= %s",
+                (now,),
+            )
+            return cursor.rowcount
+
+
 _PROFILE_COLUMNS = (
     "profile_id, tenant_id, user_id, feature, language, timezone,"
     " assistant_persona, response_tone, source_type, expires_at,"
@@ -521,6 +723,18 @@ _CHAT_SUMMARY_COLUMNS = (
     " chat_turn_id, summary, validation_status, retrieval_eligible, source_type,"
     " created_at, updated_at, expires_at, pipeline_version, model_id,"
     " prompt_version, confidence"
+)
+_TASK_EPISODE_COLUMNS = (
+    "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
+    " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
+    " missing_information, validation_status, retrieval_eligible, source_type, created_at,"
+    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence"
+)
+_TASK_EPISODE_WRITE_COLUMNS = (
+    "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
+    " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
+    " missing_information, validation_status, source_type, created_at, updated_at, expires_at,"
+    " pipeline_version, model_id, prompt_version, confidence"
 )
 
 
@@ -543,6 +757,104 @@ def _chat_summary_deletion_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is not None:
         raise ValueError("chat summary deletion requires an episodic record namespace")
     return namespace.logical_key()
+
+
+def _validate_task_episode_write(
+    namespace: MemoryNamespace, episode: TaskEpisode, expires_at: datetime | None
+) -> None:
+    _task_episode_mutation_key(namespace, episode.episode_id)
+    if (
+        namespace.tenant_id != episode.tenant_id
+        or namespace.user_id != episode.user_id
+        or namespace.session_id != episode.chat_session_id
+        or namespace.record_id != episode.record_id
+        or namespace.source_id != episode.chat_turn_id
+    ):
+        raise ValueError("task episode namespace must match the episode identity")
+    if (
+        episode.validation_status is not ValidationStatus.SYSTEM_GENERATED
+        or episode.retrieval_eligible
+    ):
+        raise ValueError("task episode writes require initial system-generated ineligible episodes")
+    if episode.source_type is not EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK:
+        raise ValueError("task episode writes require chat-task provenance")
+    if expires_at is not None:
+        if not isinstance(expires_at, datetime):
+            raise TypeError("expires_at must be a datetime or None")
+        if expires_at <= episode.created_at:
+            raise ValueError("expires_at must be later than episode.created_at")
+
+
+def _task_episode_mutation_key(namespace: MemoryNamespace, episode_id: str) -> None:
+    if namespace.memory_type is not MemoryType.EPISODIC:
+        raise ValueError("task episodes require an episodic namespace")
+    if namespace.record_id is None or namespace.source_id is None:
+        raise ValueError("task episode mutations require record and source identifiers")
+    if not isinstance(episode_id, str) or not episode_id:
+        raise ValueError("episode_id must be a non-empty string")
+
+
+def _task_episode_read_namespace(namespace: MemoryNamespace) -> None:
+    if namespace.memory_type is not MemoryType.EPISODIC:
+        raise ValueError("task episodes require an episodic namespace")
+
+
+def _task_episode_params(
+    namespace: MemoryNamespace, episode: TaskEpisode, expires_at: datetime | None
+) -> tuple[object, ...]:
+    return (
+        namespace.tenant_id,
+        namespace.user_id,
+        namespace.feature,
+        namespace.session_id,
+        namespace.record_id,
+        episode.episode_id,
+        namespace.source_id,
+        episode.creation_reason,
+        episode.task_title,
+        episode.minimal_request_paraphrase,
+        Jsonb(list(episode.action_plan)),
+        Jsonb([citation.to_dict() for citation in episode.rag_citations]),
+        Jsonb(list(episode.missing_information)),
+        episode.validation_status.value,
+        episode.source_type.value,
+        episode.created_at,
+        episode.updated_at,
+        expires_at,
+        episode.pipeline_version,
+        episode.model_id,
+        episode.prompt_version,
+        episode.confidence,
+    )
+
+
+def _task_episode_from_row(row: Sequence[object]) -> TaskEpisode:
+    rag_citations = cast(list[object], row[11])
+    return TaskEpisode(
+        episode_id=str(row[5]),
+        record_id=str(row[4]),
+        tenant_id=str(row[0]),
+        user_id=str(row[1]),
+        chat_session_id=str(row[3]),
+        chat_turn_id=str(row[6]),
+        creation_reason=cast("Literal['explicit_user_task_request']", str(row[7])),
+        task_title=str(row[8]),
+        minimal_request_paraphrase=str(row[9]),
+        action_plan=tuple(cast(list[str], row[10])),
+        rag_citations=tuple(
+            EpisodeCitation.from_dict(cast(dict[str, object], item)) for item in rag_citations
+        ),
+        missing_information=tuple(cast(list[str], row[12])),
+        validation_status=ValidationStatus(str(row[13])),
+        retrieval_eligible=bool(row[14]),
+        source_type=EpisodeSourceType(str(row[15])),
+        created_at=cast(datetime, row[16]),
+        updated_at=cast(datetime, row[17]),
+        pipeline_version=str(row[19]),
+        model_id=None if row[20] is None else str(row[20]),
+        prompt_version=None if row[21] is None else str(row[21]),
+        confidence=None if row[22] is None else float(cast(float, row[22])),
+    )
 
 
 def _profile_from_row(row: Sequence[object]) -> DeclarativeProfile:

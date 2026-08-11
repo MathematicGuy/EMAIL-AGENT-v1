@@ -8,7 +8,7 @@
 | Field | Current value |
 |---|---|
 | Updated | 2026-08-11 (Asia/Bangkok) |
-| Branch / implementation baseline | Orchestration checkpoint `dc2fb08` on `feature/v2-m3-chat-summary`; live `dev` is `15ea2b9`, merge-base remains `148a779`; M3.1-M3.3 are uncommitted; no merge, rebase, reset, or push performed |
+| Branch / implementation baseline | `cedd563` on `feature/v2-m3-chat-summary`; live `dev` is `91dff59`, merge-base remains `148a779`; M3.1-M3.3 are committed and M3.4a is uncommitted; no merge, rebase, reset, or push performed by this orchestration session |
 | Product frontier | PRD-v2 Multi-Turn AI Chat Memory |
 | Active milestone | **V2-M3 — Generic TaskEpisode contract migration (ACTIVE)**; V2-M5 semantic runtime remains verified but generic episodic runtime is dependency-blocked |
 | PRD-v2 progress | **2.75 / 6 milestones; 3 / 18 acceptance criteria complete; 4 criteria partial** |
@@ -70,9 +70,10 @@ Non-negotiable:
 - Domain and feature code remain framework-free (`domain ← features ← integrations/orchestration/persistence ← app`).
 
 Current active worktree state:
-- Branch `feature/v2-m3-chat-summary` at `dc2fb08` has uncommitted M3.1-M3.3 authority, generic TaskEpisode contract, consumer, and strict HTTP-boundary changes. The unrelated concurrent `README.md` edit is excluded from this acceptance scope.
-- `dev` is `15ea2b9`; merge-base is `148a779` with 3 feature commits and 2 dev commits unique. Reconciliation is a later explicit task.
-- Verification status: 206 focused tests passed; full suite 663 passed, 28 skipped, 4 xfailed outside the managed sandbox; Ruff clean; `mypy src` clean across 79 files.
+- Branch `feature/v2-m3-chat-summary` is at `cedd563`. M3.1-M3.3 are committed; M3.4a PostgreSQL TaskEpisode durability is present as an uncommitted migration/repository/test slice. Unrelated user-owned documentation changes remain outside this acceptance scope.
+- `dev` is `91dff59`; merge-base is `148a779` with 6 feature commits and 5 dev commits unique. Reconciliation is a later explicit task.
+- Latest parent verification after the M3.4a citation-allowlist correction: 30 live PostgreSQL persistence tests passed with zero skips; 198 domain + AI Chat tests passed; full suite 696 passed, 25 skipped, 4 xfailed using an explicit writable external pytest temp directory; Ruff, `mypy src` across 79 files, and `git diff --check` were clean.
+- Docker Desktop is currently unavailable. The PostgreSQL results above are retained evidence from the earlier live `cowork-pg` run, not a new rerun.
 
 ## 4. Authority and selective document routing
 
@@ -95,10 +96,10 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 |---|---:|---:|---|---|---|
 | V2-M1 Gateway + session working memory | **DONE** | 100 | Chat/memory contracts; fail-closed namespace; bounded session TTL; no gateway bypass | PRD-v1 baseline | `7e42784..2a29e29`; 73 focused tests; deterministic suite exit 0 |
 | V2-M2 Declarative chat profile | **DONE** | 100 | Explicit-only profile CRUD; per-turn compact load; fallback; deletion/retention | V2-M1 | Policy/port/gateway/migration/repo landed; 496 passed; PostgreSQL gate 15 passed against `cowork-pg` |
-| V2-M3 Chat-native episodes | **ACTIVE** | 75 | Chat summaries verified; ADR-004 authority plus bounded generic TaskEpisode contract and consumers accepted; PostgreSQL durability is next | V2-M1, V2-M2 | M3.1-M3.3: focused 206 passed; full 663 passed, 28 skipped, 4 xfailed; Ruff and mypy clean; generic migration/repository not yet landed |
+| V2-M3 Chat-native episodes | **ACTIVE** | 90 | M3.1-M3.3 accepted and committed; M3.4a PostgreSQL durability implemented and parent-verified; fresh final review and later Gateway lifecycle wiring remain | V2-M1, V2-M2 | M3.4a: 30 live PostgreSQL persistence tests, 198 domain + AI Chat tests, full 696 passed/25 skipped/4 xfailed; Ruff, mypy, and diff check clean; fresh Sol verdict pending |
 | V2-M4 Chat Controller + SSE | **VERIFY** | 35 | Session/message APIs, Chat Controller loop, and typed assistant SSE landed | V2-M1–M3 | 12 focused controller/API tests; principal binding, cancellation, replay, typed provider failure proven |
-| V2-M5 Selective episodic + RAG retrieval | **ACTIVE** | 70 | Query-scoped contracts, deterministic intent policy, Gateway filtering/degradation, ready-only Qdrant/semantic runtime, and labeled precedence assembler landed; eligible episodic runtime depends on generic TaskEpisode persistence | V2-M4A | Central post-fix focus 96 passed; generation-context 2 passed; Ruff and narrowed mypy clean |
-| V2-M6 Evaluation + governance | **ACTIVE** | 55 | Metadata-only Gateway events, paired launch gate, exact-scope retryable bulk deletion, optional durable retention settings, and explicit purge coordinator landed; production sink/alerts, backup/restore, and runtime DB deletion proof remain | V2-M5 core contracts | Central governance focuses green; PostgreSQL deletion test present but server-gated skip |
+| V2-M5 Selective episodic + RAG retrieval | **ACTIVE** | 70 | Query-scoped contracts, deterministic intent policy, Gateway filtering/degradation, ready-only Qdrant/semantic runtime, and labeled precedence assembler landed; eligible episodic runtime depends on M3.4b Gateway wiring | V2-M4A | Central post-fix focus 96 passed; generation-context 2 passed; Ruff and narrowed mypy clean |
+| V2-M6 Evaluation + governance | **ACTIVE** | 55 | Metadata-only Gateway events, paired launch gate, exact-scope retryable bulk deletion, optional durable retention settings, and explicit purge coordinator landed; production sink/alerts, backup/restore, and end-to-end runtime deletion proof remain | V2-M5 core contracts | Central governance focuses green; M3.4a live PostgreSQL deletion/purge paths pass, while Gateway runtime wiring remains |
 
 ## 6. PRD-v2 acceptance dashboard
 
@@ -109,16 +110,16 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 | AC-03 | Bounded working buffer preserves turns and expires by policy | DONE | `7e42784`, `2a29e29`; `tests/unit/features/ai_chat/test_session_buffer.py` |
 | AC-04 | Explicit persona/preferences persist and load in later sessions | DONE | Profile policy/gateway/PostgreSQL repo green (`test_chat_profile_repository.py` 15 passed) |
 | AC-05 | Assistant events stream to the active session | PARTIAL | Typed assistant delta/error/completed SSE proven by controller/API tests |
-| AC-06 | Only explicit user task requests create idempotent TaskEpisodes | TODO | ADR-004/PRD-v2 contract approved; producer implementation pending |
-| AC-07 | New TaskEpisodes are system-generated and retrieval-ineligible | PARTIAL | Generic contract enforces lifecycle/eligibility consistency; durable storage derivation remains M3.4 |
-| AC-08 | Inline approval/completion makes episode eligible | TODO | — |
-| AC-09 | Inline rejection keeps episode ineligible | TODO | — |
-| AC-10 | Retrieval returns approved/completed episodes only | TODO | — |
-| AC-11 | Model cannot retrieve unvalidated episodes directly | TODO | Gateway filtering exists; generic durable runtime pending |
-| AC-12 | Episodic and semantic retrieval are selective and bounded | PARTIAL | Deterministic intent triggers, server-owned bounds, Gateway filtering, and ready-only Qdrant enforcement proven; generic episodic runtime pending |
+| AC-06 | Only explicit user task requests create idempotent TaskEpisodes | PARTIAL | ADR-004 explicit-request contract plus scoped idempotent PostgreSQL writes are proven; Chat Controller producer wiring remains |
+| AC-07 | New TaskEpisodes are system-generated and retrieval-ineligible | PARTIAL | Domain contract and PostgreSQL storage-generated eligibility are proven; producer wiring remains |
+| AC-08 | Inline approval/completion makes episode eligible | PARTIAL | Session-scoped PostgreSQL transitions derive eligibility from approved/completed status; inline controller wiring remains |
+| AC-09 | Inline rejection keeps episode ineligible | PARTIAL | PostgreSQL lifecycle transitions keep non-approved/non-completed states ineligible; inline controller wiring remains |
+| AC-10 | Retrieval returns approved/completed episodes only | PARTIAL | PostgreSQL retrieval filters to eligible validated lifecycle states with expiry and scope enforcement; Gateway runtime wiring remains |
+| AC-11 | Model cannot retrieve unvalidated episodes directly | PARTIAL | Gateway filtering and PostgreSQL eligibility/status predicates are proven; live reply-provider consumption remains |
+| AC-12 | Episodic and semantic retrieval are selective and bounded | PARTIAL | Intent policy, Gateway bounds, ready-only semantic runtime, and bounded PostgreSQL FTS retrieval with timeout/max-items/min-score are proven; live combined consumption remains |
 | AC-13 | Current company evidence outranks prior episode guidance | PARTIAL | Typed assembler precedence and labeled advisory episodes proven; live reply-provider consumption pending |
-| AC-14 | TaskEpisodes exclude raw source content and tool payloads | PARTIAL | Direct and deserialized domain inputs enforce bounded typed payloads plus recursive raw/tool-shaped-key rejection; PostgreSQL proof remains M3.4 |
-| AC-15 | Exact-scope deletion prevents later retrieval without deleting semantic RAG | PARTIAL | Gateway bulk deletion and semantic exclusion unit-proven; generic TaskEpisode SQL path pending |
+| AC-14 | TaskEpisodes exclude raw source content and tool payloads | PARTIAL | Domain guards plus PostgreSQL constraints enforce bounded body-free fields and the exact citation-key allowlist; fresh final review remains |
+| AC-15 | Exact-scope deletion prevents later retrieval without deleting semantic RAG | PARTIAL | Gateway semantic exclusion plus scoped PostgreSQL single/bulk deletion and expiry purge are proven; lifecycle wiring remains |
 | AC-16 | Production telemetry is metadata-only | PARTIAL | Typed Gateway events exclude content, identity, query, URLs, citations, and exception text; production sink/alerts remain |
 | AC-17 | Memory outage degrades chat and preserves standalone Email Agent | PARTIAL | Gateway degradation proven; standalone Email Agent remains separate by contract |
 | AC-18 | No in-chat tool, scheduler, recurring processing, or autonomous email action | PARTIAL | Public contract/SSE expose no tool surface; FastAPI rejects retired `tool_choices` with 422 before reply dispatch; final product-wide audit remains |
@@ -139,8 +140,15 @@ diff review, then dashboard evidence before the next dependency starts.
 3. **M3.3 consumers — DONE:** AI Chat fixtures and public annotations migrated;
    request tool choices and tool-only SSE variants are retired. AI Chat is chat +
    memory only; retired `tool_choices` wire input fails strict deserialization.
-4. **M3.4 durability — NEXT:** split PostgreSQL migration/repository from Gateway
-   write/transition/delete wiring. No PRD-v1 task FK or Qdrant TaskEpisode store.
+4. **M3.4a PostgreSQL durability — VERIFY:** migration/down migration, repository,
+   lifecycle, bounded cross-session retrieval, deletion/purge, privacy constraints,
+   and live PostgreSQL tests are implemented and parent-verified. Two fresh Sol
+   reviews returned `fix-first`; query/min-score semantics and exact citation keys
+   were corrected. Because the last correction invalidated the prior verdict, one
+   new final review is still required.
+5. **M3.4b Gateway lifecycle wiring — NEXT:** connect write/transition/delete and
+   eligible retrieval through `MemoryGateway`. No PRD-v1 task FK or Qdrant
+   TaskEpisode store.
 
 ### Task 2: V2-M4A Chat Controller & SSE Engine
 1. **Controller Core:** Build `src/cowork_agent/features/ai_chat/controller.py` to validate scope, load working memory and compact declarative profile via `MemoryGateway`, and process chat turns.
@@ -182,10 +190,6 @@ Read these before editing:
 # Focused AI Chat & persistence test suite
 python -m pytest tests/unit/features/ai_chat tests/integration/persistence -q
 
-# Code quality & static typing
-python -m ruff check .
-python -m mypy src
-
 # Full suite (at merge / acceptance boundary)
 python -m pytest -q
 ```
@@ -201,44 +205,14 @@ python -m pytest -q
   request; no Email task FK, Gmail/run/tool fields, or automatic extraction.
 
 ### Active blockers
-1. **Branch reconciliation:** feature HEAD is `dc2fb08`, live `dev` is `15ea2b9`, and their merge-base remains `148a779` (`3` feature commits and `2` dev commits are unique). The new `dev` commit changes GUI/performance files and removes tracked pytest artifacts; this session did not merge, rebase, reset, or push. Reconcile explicitly in a later session.
-2. **Acceptance Verification:** the current pre-reconciliation tree is centrally green (206 focused; full suite 663 passed, 28 skipped, 4 xfailed; Ruff and mypy clean), but final post-reconciliation verification remains required.
-3. **Durability boundary:** M3.1-M3.3 are accepted but uncommitted. M3.4 PostgreSQL
-   migration/repository and later Gateway lifecycle wiring remain separate,
-   undispatched increments. No persistence evidence is claimed by contract tests.
-
-### Delegation incident: Luna `xhigh` and `max` did not return
-
-This incident is classified as a **delivery-completion failure, not an
-implementation-quality failure**. Both Luna attempts ended without a final,
-verifiable handoff inside the supervisor's observation window. The worktree
-nevertheless contained a coherent partial Qdrant security implementation. The first
-Terra/high recovery pass changed only Ruff import ordering and made the narrow focused
-checks pass. A later fresh full-stack review correctly returned `fix-first`: adjacent
-callers still supplied an empty lifecycle allowlist, arbitrary non-ready statuses were
-accepted, operational failures were collapsed into `no_results`, and the timeout was
-not end-to-end. Those are integration-quality gaps, but they do not explain why both
-Luna attempts failed to return any final handoff.
-
-Ranked likely causes:
-
-| Rank | Likely cause | Confidence | Evidence / interpretation |
-|---:|---|---|---|
-| 1 | The agent did not finish the verification-and-reporting tail before the supervision window ended | High | Neither `xhigh` nor `max` returned a final report, while their substantive patch was present and later passed 25 focused Qdrant tests. The observable task failure is therefore failure to complete and report the turn, independent of later review findings. |
-| 2 | The one-shot packet bundled security implementation, adjacent-caller migration, test expansion, formatting, type checking, and final evidence into too broad a completion boundary | High | The narrow adapter tests passed, but fresh review found omitted full-stack caller, outage, allowlist, and deadline cases. The task needed smaller acceptance slices and an explicit cross-caller regression sweep. |
-| 3 | Execution/tool latency or an interrupted child-task lifecycle prevented a clean terminal response | Medium | The supervisor observed non-return, but no trustworthy child-runtime diagnostic identifies whether a command stalled, the task was interrupted, or the response deadline expired. These mechanisms remain indistinguishable. |
-| 4 | Insufficient task context | Low-medium | The inherited patch correctly implemented exact tenant equality before embedding, document-status filtering, payload indexes, timeout propagation, and focused tests, so the core constraints were understood. However, the one-shot context did not lead to complete adjacent-caller and end-to-end deadline verification; that is better explained by scope/acceptance breadth than by wholesale context loss. |
-
-What this does **not** prove: it does not establish an intrinsic Luna model defect,
-nor distinguish a platform timeout from a stalled verification command or failure to
-synthesize the final handoff. Internal runtime telemetry was not available, so the
-ranking is based on observable repository artifacts and supervisor lifecycle events.
-
-Operational response for this PRD-v2 session: use the explicit escalation ladder
-`Luna/xhigh -> Luna/max -> Terra/high`. On escalation, preserve the existing patch,
-give the next worker the failed attempt's exact owned files and verification state,
-and split future Luna packets so implementation and expensive acceptance evidence do
-not share an unnecessarily large one-shot boundary.
+1. **Branch reconciliation:** feature HEAD is `cedd563`, live `dev` is `91dff59`, and their merge-base remains `148a779` (`6` feature commits and `5` dev commits are unique). This session did not merge, rebase, reset, or push. Reconcile explicitly in a later session.
+2. **Acceptance verification:** M3.4a is centrally green (30 live PostgreSQL persistence tests; 198 domain + AI Chat tests; full suite 696 passed, 25 skipped, 4 xfailed; Ruff, mypy, and diff check clean), but a fresh final Sol verdict is required after the citation-allowlist correction. Final post-reconciliation verification also remains required.
+3. **Durability boundary:** M3.1-M3.3 are accepted and committed. M3.4a PostgreSQL
+   migration/repository is implemented but uncommitted and not finally accepted;
+   M3.4b Gateway lifecycle wiring remains a separate next increment.
+4. **Local PostgreSQL availability:** Docker Desktop is currently unavailable. Do
+   not convert this into skipped acceptance evidence; restart Docker and confirm
+   `cowork-pg` before the next PostgreSQL verification run.
 
 ## 11. Evidence ledger
 
@@ -260,17 +234,18 @@ not share an unnecessarily large one-shot boundary.
 | 2026-08-10 | V2-M6 retention and purge coordination | Optional profile/episode retention seconds have no invented default; explicit UTC purge coordinator reuses repository purge operations and exposes no scheduler API. Central config/retention focus 10 passed; Ruff clean. |
 | 2026-08-10 | Deferred TaskEpisode persistence/lifecycle dispatch | Terra/high implementation did not start: child returned an account usage-limit error with retry time `2026-08-16 04:26`. No files from that requested slice were accepted or claimed complete. |
 | 2026-08-11 | PRD-v2 foundation checkpoint `fc3c0b7` | 44 code/test/config paths committed. Focused scope: 206 passed, 1 skipped. Full suite outside the managed sandbox: 624 passed, 28 skipped, 4 xfailed. Ruff clean; mypy clean across 79 source files. The first sandboxed full-suite attempts failed only because Windows ACLs made pytest/tempfile child directories unwritable. |
-| 2026-08-11 | TaskEpisode commitment review and execution stop | **Superseded by ADR-004 after product retired in-chat `@Email`.** The earlier Email-task FK verdict no longer applies; migration `004` and TaskEpisode repository remain absent. |
+| 2026-08-11 | TaskEpisode commitment review and execution stop | **Superseded by ADR-004 after product retired in-chat `@Email`.** The earlier Email-task FK verdict no longer applies. At that checkpoint, migration `004` and the TaskEpisode repository were still absent; the later M3.4a row records their implementation. |
 | 2026-08-11 | ADR-004 generic TaskEpisode decision | User-confirmed chat-native task contract: explicit request only, Chat Controller producer, initial system-generated/ineligible state, user lifecycle controls, chat-scoped opaque idempotency, no Email task FK or Gmail/run/tool fields. M3.2 domain migration dispatched tests first. |
-| 2026-08-11 | M3.1-M3.3 generic TaskEpisode contract acceptance | Public chat contract `2.0.0`; no request/tool SSE surface; explicit-request-only provenance; fixed compact payload/citation bounds; direct and deserialized inputs are deeply immutable, typed, and raw/tool-payload guarded. FastAPI uses a strict tool-free transport model; retired `tool_choices` returns HTTP 422 before reply dispatch. TDD tool retirement RED: 25 failed/141 passed, then GREEN 166 passed; bounds RED failed on missing public limits; HTTP RED returned 200 before the boundary fix. Final focused parent gate: 206 passed. Full suite outside the managed sandbox: 663 passed, 28 skipped, 4 xfailed; Ruff clean; mypy clean across 79 source files. M3.4 persistence remains unimplemented. |
+| 2026-08-11 | M3.1-M3.3 generic TaskEpisode contract acceptance | Public chat contract `2.0.0`; no request/tool SSE surface; explicit-request-only provenance; fixed compact payload/citation bounds; direct and deserialized inputs are deeply immutable, typed, and raw/tool-payload guarded. FastAPI uses a strict tool-free transport model; retired `tool_choices` returns HTTP 422 before reply dispatch. TDD tool retirement RED: 25 failed/141 passed, then GREEN 166 passed; bounds RED failed on missing public limits; HTTP RED returned 200 before the boundary fix. Final focused parent gate: 206 passed. Full suite outside the managed sandbox: 663 passed, 28 skipped, 4 xfailed; Ruff clean; mypy clean across 79 source files. Accepted in `cedd563`. |
+| 2026-08-11 | M3.4a PostgreSQL TaskEpisode durability — final review pending | Added reversible migration `004`, scoped idempotent repository writes, immutable identity guards, storage-derived lifecycle eligibility, cross-session tenant/user retrieval, expiry and server bounds, PostgreSQL FTS relevance/min-score, exact citation keys, deletion, and purge. Live PostgreSQL persistence: 30 passed, zero skips; domain + AI Chat: 198 passed; full suite with writable external temp: 696 passed, 25 skipped, 4 xfailed; Ruff, mypy across 79 files, and diff check clean. First final review found missing query/min-score behavior; second found permissive citation keys. Both were corrected and reverified, invalidating the previous verdict; a new fresh final review is required before acceptance. |
 
 ## 12. End-of-session handoff template
 
 ```text
-ACTIVE MILESTONE / SLICE: V2-M3 TaskEpisode PostgreSQL durability (M3.4a next)
-STATUS AND PERCENT: use dashboard sections 5-6; no percentage changed during the 2026-08-11 checkpoint
-COMMITS: dc2fb08 on feature/v2-m3-chat-summary; dev 15ea2b9; merge-base 148a779; no merge/rebase/push
-TESTS / LINT / TYPES: focused 206 passed; full 663 passed, 28 skipped, 4 xfailed; Ruff pass; mypy 79 files pass
-AC EVIDENCE ADDED: M3.1-M3.3 contract accepted; AI Chat has no public tool surface; bounded generic TaskEpisode contract is green
-EXACT NEXT ACTION: fresh final review, then dispatch M3.4a migration/down + PostgreSQL repository tests as a separate slice
+ACTIVE MILESTONE / SLICE: V2-M3 TaskEpisode PostgreSQL durability (M3.4a final review)
+STATUS AND PERCENT: ACTIVE, 90%; implementation and parent gates green, fresh final Sol verdict pending
+COMMITS: cedd563 on feature/v2-m3-chat-summary; dev 91dff59; merge-base 148a779; no merge/rebase/push in this orchestration session
+TESTS / LINT / TYPES: live PostgreSQL 30 passed, zero skips; domain + AI Chat 198 passed; full 696 passed, 25 skipped, 4 xfailed; Ruff pass; mypy 79 files pass; diff check clean
+AC EVIDENCE ADDED: durable scoped idempotency, immutable identity, storage-derived eligibility, bounded FTS retrieval, exact citation keys, deletion, and purge
+EXACT NEXT ACTION: start Docker/cowork-pg if needed, capture M3.4a status and hashes, obtain a fresh behaviorally read-only Sol final review, compare post-review hashes, then either correct findings or accept M3.4a and dispatch M3.4b Gateway lifecycle wiring
 ```

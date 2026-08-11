@@ -79,27 +79,30 @@ Chat.
 - [x] [O] M3.1 Sync Target Architecture, master comparison, and orchestration evidence
 - [x] M3.2 Tests-first generic TaskEpisode domain contract
 - [x] M3.3 Consumer fixtures + port alignment; full AI Chat unit scope green
-- [ ] M3.4a PostgreSQL migration/down + repository lifecycle tests
-- [ ] M3.4b Gateway write/transition/delete wiring
+- [x] M3.4a PostgreSQL migration/down + repository lifecycle/retrieval/deletion tests; parent gates green
+- [ ] [O] M3.4a fresh final Sol review after citation-key correction + before/after status/hash comparison
+- [ ] M3.4b Gateway write/transition/delete/retrieval wiring — needs accepted M3.4a
 - [ ] Checkpoint: system-generated episodes unretrievable; approved/completed only retrievable
 
 ## V2-M4 — AI Chat Controller and SSE
-- [ ] Chat session/message APIs + Chat Controller event loop + typed SSE handler
+- [x] Chat session/message APIs + Chat Controller event loop + typed SSE handler (12 focused controller/API tests)
 - [ ] Inline approve/complete/reject transitions on episodes
 - [ ] Eligibility rule table on every transition; invalid transitions refused
 - [ ] Checkpoint: stream/task lifecycle works; approval/completion flips eligibility
 
 ## V2-M5 — Selective episodic and RAG retrieval for chat
-- [ ] Episodic retrieval request with eligibility filters + bounded relevance scoring
-- [ ] Selective chat-intent trigger policy (never every turn)
-- [ ] Labeled persona/session/episode/semantic context + conflict precedence (FR-13)
+- [x] Episodic query contract + eligible-state filters + bounded PostgreSQL FTS relevance/min-score
+- [x] Selective chat-intent trigger policy (never every turn)
+- [x] Labeled persona/session/episode/semantic context + conflict precedence (FR-13)
+- [ ] Wire durable episodic retrieval through MemoryGateway and live reply-provider consumption — needs M3.4b
 - [ ] Checkpoint: approved/completed-only retrieval, even against model request
 
 ## V2-M6 — AI Chat memory evaluation and governance
-- [ ] Memory-enabled vs memory-disabled chat evaluation on labeled set
-- [ ] Retention, purge, deletion audits, index propagation
-- [ ] Zero-tolerance safety metrics/alerts
-- [ ] Launch thresholds established
+- [x] Memory-enabled vs memory-disabled paired evaluation contract and launch gate
+- [x] Retention, purge, and exact-scope deletion coordination; M3.4a SQL deletion/purge live-tested
+- [x] Zero-tolerance safety metrics encoded in the paired launch gate
+- [ ] Production telemetry sink/alerts, backup/restore, index propagation, and end-to-end runtime deletion proof
+- [ ] PRD-v2 launch thresholds established and evidenced on the labeled set
 - [ ] Checkpoint: PRD-v2 §16 criteria 1–18 pass
 
 ## Gate: PRD-v2 §16 acceptance review
