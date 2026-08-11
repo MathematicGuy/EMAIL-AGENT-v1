@@ -33,7 +33,7 @@ from .memory_observability import (
     RecordingMemoryOperationSink,
 )
 from .retention import ExpiredMemoryPurgePort, MemoryPurgeCoordinator, MemoryPurgeReport
-from .retrieval_policy import select_memory_reads
+from .retrieval_policy import is_explicit_task_request, select_memory_reads
 
 __all__ = [
     "ChatController",
@@ -65,5 +65,6 @@ __all__ = [
     "UnavailableChatReply",
     "assemble_generation_context",
     "evaluate_launch_gate",
+    "is_explicit_task_request",
     "select_memory_reads",
 ]

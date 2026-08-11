@@ -14,6 +14,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    TaskEpisode,
 )
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
@@ -89,6 +90,34 @@ def create_chat_router() -> APIRouter:
             },
         )
 
+    @router.post("/sessions/{session_id}/task-episodes/{episode_id}/approve")
+    async def approve_task_episode(
+        session_id: str, episode_id: str, request: Request
+    ) -> dict[str, object]:
+        return await _task_episode_action(request, session_id, episode_id, "approve")
+
+    @router.post("/sessions/{session_id}/task-episodes/{episode_id}/complete")
+    async def complete_task_episode(
+        session_id: str, episode_id: str, request: Request
+    ) -> dict[str, object]:
+        return await _task_episode_action(request, session_id, episode_id, "complete")
+
+    @router.post("/sessions/{session_id}/task-episodes/{episode_id}/reject")
+    async def reject_task_episode(
+        session_id: str, episode_id: str, request: Request
+    ) -> dict[str, object]:
+        return await _task_episode_action(request, session_id, episode_id, "reject")
+
+    @router.delete(
+        "/sessions/{session_id}/task-episodes/{episode_id}",
+        status_code=204,
+        response_model=None,
+    )
+    async def delete_task_episode(session_id: str, episode_id: str, request: Request) -> None:
+        controller = await _owned_controller(request, session_id)
+        if not await controller.delete_task_episode(episode_id):
+            raise HTTPException(status_code=404, detail="Chat task episode not found")
+
     return router
 
 
@@ -124,6 +153,43 @@ async def _verified_principal(request: Request) -> VerifiedPrincipal:
     if not isinstance(principal, VerifiedPrincipal):
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
     return principal
+
+
+async def _owned_controller(request: Request, session_id: str) -> ChatController:
+    principal = await _verified_principal(request)
+    try:
+        _sessions(request).require(
+            session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+        )
+    except ChatSessionAccessDenied as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
+    controller = _controllers(request).get(session_id)
+    if controller is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return controller
+
+
+async def _task_episode_action(
+    request: Request, session_id: str, episode_id: str, action: str
+) -> dict[str, object]:
+    controller = await _owned_controller(request, session_id)
+    operation = {
+        "approve": controller.approve_task_episode,
+        "complete": controller.complete_task_episode,
+        "reject": controller.reject_task_episode,
+    }[action]
+    episode = await operation(episode_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Chat task episode not found")
+    return _task_episode_response(episode)
+
+
+def _task_episode_response(episode: TaskEpisode) -> dict[str, object]:
+    return {
+        "episode_id": episode.episode_id,
+        "validation_status": episode.validation_status.value,
+        "retrieval_eligible": episode.retrieval_eligible,
+    }
 
 
 def _sessions(request: Request) -> InMemoryChatSessionRegistry:

@@ -606,6 +606,8 @@ class PostgresTaskEpisodeRepository:
                     _task_episode_params(namespace, trusted_episode, expires_at),
                 )
                 row = await cursor.fetchone()
+        except (psycopg.OperationalError, psycopg.errors.QueryCanceled) as error:
+            raise MemorySourceUnavailableError("task episode write unavailable") from error
         except psycopg.errors.UniqueViolation as error:
             raise ValueError("task episode immutable identity conflict") from error
         if row is None:

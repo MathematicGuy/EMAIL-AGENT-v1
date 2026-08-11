@@ -1,21 +1,49 @@
 """Application-layer ports owned by the AI Chat feature."""
 
+from __future__ import annotations
+
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from cowork_agent.domain.chat_contracts import (
     ChatMessageRequest,
     ChatSummaryEpisode,
     ChatTurn,
     DeclarativeProfile,
+    EpisodeCitation,
     EpisodeTransition,
     EpisodicMemoryQuery,
-    MemoryContextResponse,
     MemoryNamespace,
     SemanticMemoryQuery,
     TaskEpisode,
 )
+
+if TYPE_CHECKING:
+    from .generation_context import GenerationContext
+
+
+@dataclass(frozen=True, slots=True)
+class ChatTaskProposal:
+    """Provider-supplied bounded proposal fields; server owns episode identity and state."""
+
+    task_title: str
+    minimal_request_paraphrase: str
+    action_plan: tuple[str, ...]
+    rag_citations: tuple[EpisodeCitation, ...]
+    missing_information: tuple[str, ...]
+    model_id: str | None
+    prompt_version: str | None
+    confidence: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatReplyChunk:
+    """One typed assistant chunk with an optional proposal from the configured reply provider."""
+
+    text: str
+    task_proposal: ChatTaskProposal | None = None
 
 
 class ChatReplyPort(Protocol):
@@ -24,8 +52,8 @@ class ChatReplyPort(Protocol):
     def stream_reply(
         self,
         request: ChatMessageRequest,
-        context: MemoryContextResponse,
-    ) -> AsyncIterator[str]: ...
+        context: GenerationContext,
+    ) -> AsyncIterator[str | ChatReplyChunk]: ...
 
 
 class ChatSessionBufferPort(Protocol):
