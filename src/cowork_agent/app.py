@@ -5,6 +5,8 @@ import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, UTC
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -103,7 +105,20 @@ class KnowledgeChatRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class SaveReportRequest(BaseModel):
+    filename: str
+    content: str
+
+
 def create_app() -> FastAPI:
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logging.getLogger("cowork_agent").setLevel(logging.INFO)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
@@ -568,6 +583,58 @@ def create_app() -> FastAPI:
         )
         response = await memory.retrieve(retrieval_request)
         return response.to_dict()
+
+    # ── Artifacts / Reports endpoints for chat-generated document display ──
+
+    REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
+    EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
+
+    @app.get("/api/v1/reports")
+    async def list_reports() -> list[dict[str, Any]]:
+        reports: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        dirs_to_scan = [d for d in (REPORTS_DIR, EXTRACTED_DIR) if d.exists()]
+        for folder in dirs_to_scan:
+            for item in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if item.is_file() and item.name != "ingestion-manifest.json" and item.name not in seen:
+                    try:
+                        seen.add(item.name)
+                        stat = item.stat()
+                        content = item.read_text(encoding="utf-8", errors="replace")
+                        mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
+                        reports.append({
+                            "filename": item.name,
+                            "content": content,
+                            "size": stat.st_size,
+                            "updated_at": mtime,
+                        })
+                    except Exception as exc:
+                        logger.warning("Failed to read report file %s: %s", item.name, exc)
+        return reports
+
+    @app.post("/api/v1/reports")
+    async def save_report(body: SaveReportRequest) -> dict[str, Any]:
+        safe_name = Path(body.filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        target_path = REPORTS_DIR / safe_name
+        target_path.write_text(body.content, encoding="utf-8")
+        stat = target_path.stat()
+        return {
+            "filename": safe_name,
+            "content": body.content,
+            "size": stat.st_size,
+            "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+        }
+
+    @app.delete("/api/v1/reports/{filename}")
+    async def delete_report(filename: str) -> dict[str, str]:
+        safe_name = Path(filename).name
+        target_path = REPORTS_DIR / safe_name
+        if target_path.is_file():
+            target_path.unlink()
+        return {"status": "success", "message": f"Deleted {safe_name}"}
 
     return app
 

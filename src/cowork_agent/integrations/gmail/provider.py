@@ -185,6 +185,7 @@ class GmailMailboxAdapter:
         self._settings = settings
         self._repository = repository
         self._cipher = cipher
+        self._service_cache: dict[str, Any] = {}
 
     async def search_unread(
         self,
@@ -282,6 +283,8 @@ class GmailMailboxAdapter:
             yield data[offset : offset + 64 * 1024]
 
     async def _service(self, connection_id: str) -> Any:
+        if connection_id in self._service_cache:
+            return self._service_cache[connection_id]
         connection = await self._repository.get(connection_id)
         if connection is None or connection.status != "active":
             raise MailboxNotConnectedError(connection_id)
@@ -299,9 +302,11 @@ class GmailMailboxAdapter:
             client_secret=self._settings.client_secret,
             scopes=list(connection.scopes),
         )
-        return await asyncio.to_thread(
+        service = await asyncio.to_thread(
             build, "gmail", "v1", credentials=credentials, cache_discovery=False
         )
+        self._service_cache[connection_id] = service
+        return service
 
     async def _call(self, operation: Callable[[], Mapping[str, Any]]) -> Mapping[str, Any]:
         """Bounded retry budget (T5.4): transient API/transport failures —
