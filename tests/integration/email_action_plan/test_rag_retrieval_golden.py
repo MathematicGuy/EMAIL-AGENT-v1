@@ -46,6 +46,17 @@ from tests.integration.email_action_plan.test_workflow import NOW, email, task_f
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 
+LEGACY_EMAIL_DOCUMENT_IDS = frozenset(
+    {
+        "cap_lai_cccd",
+        "dang_ky_ket_hon",
+        "dang_ky_xe",
+        "huong_dan_nop_ho_so_dai_hoc_vinuni",
+        "thue_dien_tu",
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+    }
+)
+
 #: Cases that cannot rank correctly under a non-semantic embedder. Measured, not
 #: guessed: each ranks a topically unrelated document first under HashingEmbedder
 #: and the expected document first under Gemini.
@@ -157,15 +168,19 @@ def test_email_retrieves_the_expected_corpus_document(
     asyncio.run(scenario())
 
 
-def test_every_corpus_document_is_covered_by_an_email_case() -> None:
-    """Guard the fixture spread: an email case per corpus document (PLAN T-2.4)."""
+def test_email_cases_cover_exactly_the_legacy_email_documents() -> None:
+    """Guard the E2E fixture boundary against retrieval-only documents."""
     covered = {
         document_id
         for case in _email_cases()
         for document_id in case.expected_document_ids
     }
-    corpus = {
-        document.document_id
-        for document in load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
-    }
-    assert covered == corpus, f"documents with no email case: {sorted(corpus - covered)}"
+    assert covered == LEGACY_EMAIL_DOCUMENT_IDS
+
+
+def test_selected_email_e2e_cases_are_from_the_legacy_query_range() -> None:
+    """Keep email E2E replay scoped to the original q-001 through q-032 cases."""
+    assert all(
+        case.id in {f"q-{number:03d}" for number in range(1, 33)}
+        for case in _email_cases()
+    )
