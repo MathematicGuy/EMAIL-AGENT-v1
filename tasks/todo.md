@@ -80,33 +80,33 @@ Chat.
 - [x] M3.2 Tests-first generic TaskEpisode domain contract
 - [x] M3.3 Consumer fixtures + port alignment; full AI Chat unit scope green
 - [x] M3.4a PostgreSQL migration/down + repository lifecycle/retrieval/deletion tests; parent gates green
-- [ ] [O] M3.4a fresh final Sol review after citation-key correction + before/after status/hash comparison
-- [ ] M3.4b Gateway write/transition/delete/retrieval wiring — needs accepted M3.4a
-- [ ] Checkpoint: system-generated episodes unretrievable; approved/completed only retrievable
+- [x] [O] M3.4a fresh final Sol review after citation-key correction + before/after status/hash comparison (verdict `ship`)
+- [x] M3.4b Gateway write/transition/delete/retrieval wiring — accepted in `0d0bc22`
+- [x] Checkpoint: system-generated episodes unretrievable; approved/completed only retrievable (186 impacted tests; live PostgreSQL 20 passed)
 
 ## V2-M4 — AI Chat Controller and SSE
 - [x] Chat session/message APIs + Chat Controller event loop + typed SSE handler (12 focused controller/API tests)
-- [ ] Inline approve/complete/reject transitions on episodes
-- [ ] Eligibility rule table on every transition; invalid transitions refused
-- [ ] Checkpoint: stream/task lifecycle works; approval/completion flips eligibility
+- [x] Inline approve/complete/reject transitions on episodes (`0d0bc22`)
+- [x] Eligibility rule table on every transition; invalid transitions refused
+- [x] Checkpoint: stream/task lifecycle works; approval/completion flips eligibility (included in 186-test gate; verdict `ship`)
 
 ## V2-M5 — Selective episodic and RAG retrieval for chat
 - [x] Episodic query contract + eligible-state filters + bounded PostgreSQL FTS relevance/min-score
 - [x] Selective chat-intent trigger policy (never every turn)
 - [x] Labeled persona/session/episode/semantic context + conflict precedence (FR-13)
-- [ ] Wire durable episodic retrieval through MemoryGateway and live reply-provider consumption — needs M3.4b
-- [ ] Checkpoint: approved/completed-only retrieval, even against model request
+- [x] Wire durable episodic retrieval through MemoryGateway and live reply-provider consumption (`0d0bc22`)
+- [x] Checkpoint: approved/completed-only retrieval, even against model request (verdict `ship`)
 
 ## V2-M6 — AI Chat memory evaluation and governance
 - [x] Memory-enabled vs memory-disabled paired evaluation contract and launch gate
 - [x] Retention, purge, and exact-scope deletion coordination; M3.4a SQL deletion/purge live-tested
 - [x] Zero-tolerance safety metrics encoded in the paired launch gate
-- [ ] Production telemetry sink/alerts, backup/restore, index propagation, and end-to-end runtime deletion proof
-- [ ] PRD-v2 launch thresholds established and evidenced on the labeled set
-- [ ] Checkpoint: PRD-v2 §16 criteria 1–18 pass
+- [x] Production telemetry sink/alerts, backup/restore, index propagation, and end-to-end runtime deletion proof (2026-08-11: LoggingMemoryOperationSink+Metrics runtime injection; scripts/backup_restore_chat_memory.py live proof; index propagation N/A — no user-memory index; deletion audit live tests)
+- [x] PRD-v2 launch thresholds established and evidenced on the labeled set (2026-08-11: product-approved 90d retention + Moderate-MVP thresholds in .env.example; scripts/run_paired_chat_evaluation.py exit 0, safety counters zero)
+- [x] Checkpoint: PRD-v2 §16 criteria 1–18 pass (AC-01..AC-18 DONE; fresh final review verdict `ship`)
 
 ## Gate: PRD-v2 §16 acceptance review
-- [ ] [O] Acceptance review passed → unlock DEMO Increment B
+- [x] [O] Acceptance review passed → unlock DEMO Increment B (2026-08-11, verdict `ship`)
 
 ## DEMO — Showcase frontend
 - [ ] DEMO-A AI Chat Assistant primary screen

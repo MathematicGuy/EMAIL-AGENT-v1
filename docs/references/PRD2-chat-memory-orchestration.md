@@ -18,8 +18,8 @@ formatting-only edits or unverified claims.
 | Updated | 2026-08-11 (Asia/Bangkok) |
 | Branch / implementation baseline | `dev` includes `0d0bc22` (`feat(chat): complete memory-aware chat runtime`); M3.1-M3.4b-C, V2-M4, and V2-M5 are committed and accepted; no history rewrite without explicit authorization |
 | Product frontier | PRD-v2 Multi-Turn AI Chat Memory |
-| Active milestone | **V2-M6 — Evaluation and governance (ACTIVE, outside this delivery)**; M3.4, V2-M4, and V2-M5 are complete |
-| PRD-v2 progress | M3.4a through M3.4b-C, V2-M4, and V2-M5 are accepted; remaining work is V2-M6 governance only; use §5–§7 for live status |
+| Active milestone | **PRD-v2 complete — V2-M6 DONE (fresh final review verdict `ship` 2026-08-11)**; next frontier is the separate DEMO frontend workstream |
+| PRD-v2 progress | All milestones M3.4a through V2-M6 accepted; AC-01..AC-18 DONE |
 | Tech stack authority | PostgreSQL (authoritative durable store); Qdrant (rebuildable enterprise RAG index) |
 
 ## 1. New-session launch sequence
@@ -83,7 +83,7 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 | V2-M3 Chat-native episodes | **DONE** | 100 | M3.1-M3.4b-C accepted: PostgreSQL durability, fail-closed producer/lifecycle/deletion, and eligible runtime wiring through Gateway | V2-M1, V2-M2 | Corrected cumulative verdict `ship`; 186 impacted tests; live PostgreSQL 20 passed; scoped Ruff, mypy, and diff check clean |
 | V2-M4 Chat Controller + SSE | **DONE** | 100 | Verified-principal session/message APIs, configured reply adapters, typed SSE, explicit bounded proposals, and originating-session approve/complete/reject/delete controls | V2-M1–M3 | Explicit-policy, proposal, SSE citation, lifecycle, cancellation, idempotency, and retry paths included in the 186-test parent gate; final verdict `ship` |
 | V2-M5 Selective episodic + RAG retrieval | **DONE** | 100 | Selective bounded episodic + semantic reads, eligible-only model context, real company-evidence consumption, citation allowlisting, precedence, and graceful degradation | V2-M4 | Real semantic-adapter/provider seam, cross-session eligible episodes, company-evidence precedence, and outage behavior included in the 186-test parent gate; final verdict `ship` |
-| V2-M6 Evaluation + governance | **ACTIVE** | 55 | Metadata-only Gateway events, paired launch gate, exact-scope retryable bulk deletion, optional durable retention settings, and explicit purge coordinator landed; production sink/alerts, backup/restore, and end-to-end runtime deletion proof remain | V2-M5 core contracts | Central governance focuses green; M3.4a live PostgreSQL deletion/purge paths pass, while Gateway runtime wiring remains |
+| V2-M6 Evaluation + governance | **DONE** | 100 | Production metadata-only sink/metrics injected at runtime; env-driven retention applied with retry-safe expiry; explicit purge CLI; exact-scope deletion audit; backup/restore proof; paired evaluation runner with product-approved thresholds; AC-18 audit 6/6 PASS | V2-M5 core contracts | 224 unit + 41 live-DB/API tests green; launch gate exit 0 (Moderate-MVP thresholds, safety counters zero); AC-16 and AC-18 evidence recorded |
 
 ## 6. PRD-v2 acceptance dashboard
 
@@ -104,9 +104,9 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 | AC-13 | Current company evidence outranks prior episode guidance | DONE | Configured provider payload declares and enforces current instruction → current company evidence → stored preference → advisory episode precedence |
 | AC-14 | TaskEpisodes exclude raw source content and tool payloads | DONE | Server-owned bounded proposals exclude raw email/transcript/tool/Gmail/run/mailbox fields; persisted citations must match current company-evidence coordinates |
 | AC-15 | Exact-scope deletion prevents later retrieval without deleting semantic RAG | DONE | Originating-session Gateway deletion and scoped PostgreSQL deletion/purge are proven; semantic company RAG is excluded |
-| AC-16 | Production telemetry is metadata-only | PARTIAL | Typed Gateway events exclude content, identity, query, URLs, citations, and exception text; production sink/alerts remain |
+| AC-16 | Production telemetry is metadata-only | DONE | `LoggingMemoryOperationSink` + thread-safe `MemoryOperationMetrics` injected into every `MemoryGateway` at runtime composition; only validated 8-field `to_dict()` metadata reaches logs/metrics; DENIED outcomes log ERROR as alertable safety incidents; sink failure can never block chat; purge emits metadata-only events |
 | AC-17 | Memory outage degrades chat and preserves standalone Email Agent | DONE | Optional reads degrade safely; transient episode writes preserve the reply and retry safely; standalone Email Agent remains separate and unchanged |
-| AC-18 | No in-chat tool, scheduler, recurring processing, or autonomous email action | PARTIAL | Public contract/SSE expose no tool surface; FastAPI rejects retired `tool_choices` with 422 before reply dispatch; final product-wide audit remains |
+| AC-18 | No in-chat tool, scheduler, recurring processing, or autonomous email action | DONE | 2026-08-11 audit 6/6 PASS: SSE/DTO contracts carry no tool fields (tool-shaped keys rejected, `extra="forbid"`); retired `tool_choices` rejected 422 before dispatch; purge/backup scripts are explicit-invocation only and unreferenced by src; Gmail adapter is read-only with `gmail.readonly` scope enforced; chat feature imports no email path; PRD-v1 digest workflow diff-empty since `ff614f0` |
 
 ## 7. Active execution queue
 
@@ -128,8 +128,9 @@ and dashboard update afterward.
 5. **V2-M5 selective retrieval completion — DONE:** eligible episodic and current
    company evidence are selectively bounded, labeled, allowlisted, and consumed
    with deterministic precedence; corrected final verdict `ship`.
-6. **Governance completion — NEXT / OUT OF CURRENT SCOPE:** close AC-16 and AC-18
-   with the remaining V2-M6 operational evidence.
+6. **Governance completion — DONE:** V2-M6 closed AC-16 (runtime production sink/metrics) and
+   AC-18 (2026-08-11 product audit 6/6 PASS); retention, purge CLI, deletion audit,
+   backup/restore, and the paired evaluation launch gate are evidenced; final delta review pending.
 
 ## 8. Source and test map for next tasks
 
@@ -170,8 +171,8 @@ python -m pytest -q
 2. **Broad-suite boundary:** unrelated missing-`docx` imports and duplicate
    `test_query_guard` module names prevent repository-wide collection; do not
    broaden this completed milestone to repair them.
-3. **Remaining product boundary:** AC-16 production telemetry operations and the
-   final AC-18 product-wide governance audit belong to V2-M6, not this delivery.
+3. **Final acceptance boundary — cleared:** fresh final review of the accumulated V2-M6 delta
+   returned `ship` (2026-08-11); reviewer operated read-only and before/after hashes matched.
 
 ## 11. Latest verification snapshot
 
@@ -180,11 +181,12 @@ results live in Git and reusable process lessons live in the orchestration playb
 
 | Scope | Latest evidence | Use |
 |---|---|---|
-| Live PostgreSQL persistence | 20 passed, zero skips against running `cowork-pg` | Current profile, chat-summary, and TaskEpisode storage/lifecycle regression evidence |
-| Corrected cumulative final review | `ship`; semantic citation seam, same-episode retry, PostgreSQL outage translation, finite explicit-task grammar, and full-message veto boundary accepted | M3.4b-C, V2-M4, and V2-M5 accepted |
-| Current AI Chat/runtime focus | 186 passed on the final policy-corrected snapshot | Current Gateway/controller/API/provider/persistence-failure regression evidence |
+| V2-M6 cumulative unit | 224 passed: `tests/unit/features/ai_chat` + runtime composition + memory config + purge script + evaluation runner | Current observability/retention/evaluation regression evidence |
+| Live PostgreSQL + Chat API | 41 passed, zero skips against running `cowork-pg` (`tests/integration/api/test_chat_api.py` + `tests/integration/persistence`), incl. deletion audit and backup/restore proof | Deletion non-retrievability, expiry-before-purge, exact-scope deletion, restore lifecycle/expiry evidence |
+| Launch gate | `scripts/run_paired_chat_evaluation.py --json` exit 0 with product-approved Moderate-MVP thresholds; all five hard safety counters zero; deltas 0.13/0.09/0.09, degradation 0.0 | AC-16/FR-17 evaluation evidence |
+| Governance audit | AC-18 audit 6/6 PASS with file:line citations; PRD-v1 digest path diff-empty since `ff614f0` | AC-18 evidence |
+| Static / hygiene | Scoped Ruff clean; `python -m mypy src` shows only the 5 pre-existing unrelated `docx_extractor` errors; `git diff --check` clean | Required for changed milestone paths |
 | Broad regression | Unavailable on merged baseline because unrelated `docx` imports and duplicate `test_query_guard` module names fail collection | Do not broaden milestone scope to repair unrelated baseline |
-| Static / hygiene | Scoped Ruff, mypy, and diff-check clean | Required for changed milestone paths |
 
 Evidence rule: a task report is a claim. Retain the exact command and output in the
 task handoff or review packet, not in this dashboard. Do not mark an AC `DONE` from

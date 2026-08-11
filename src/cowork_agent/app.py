@@ -35,6 +35,10 @@ from cowork_agent.features.ai_chat.controller import (
     UnavailableChatReply,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
+from cowork_agent.features.ai_chat.memory_observability import (
+    LoggingMemoryOperationSink,
+    MemoryOperationMetrics,
+)
 from cowork_agent.features.ai_chat.ports import (
     ChatReplyPort,
     DeclarativeMemoryPort,
@@ -162,8 +166,14 @@ def _chat_controller_factory(
                     app.state.chat_task_episode_repository,
                 ),
                 semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
+                memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
             ),
             reply=cast(ChatReplyPort, app.state.chat_reply),
+            episode_retention_seconds=getattr(
+                getattr(app.state, "chat_memory_settings", None),
+                "episode_retention_seconds",
+                None,
+            ),
         )
 
     return factory
@@ -236,10 +246,15 @@ def create_app() -> FastAPI:
                 app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
             chat_memory_settings = ChatMemorySettings.from_env()
+            app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = InMemoryChatSessionRegistry()
             app.state.chat_session_buffer = InMemoryChatSessionBuffer(
                 max_turns=chat_memory_settings.max_turns,
                 ttl_seconds=chat_memory_settings.ttl_seconds,
+            )
+            app.state.memory_metrics = MemoryOperationMetrics()
+            app.state.memory_operation_sink = LoggingMemoryOperationSink(
+                metrics=app.state.memory_metrics
             )
             app.state.chat_controllers = {}
             app.state.chat_reply = UnavailableChatReply()

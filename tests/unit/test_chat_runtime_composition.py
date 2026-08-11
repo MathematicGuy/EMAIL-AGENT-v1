@@ -242,3 +242,137 @@ def test_runtime_composition_degrades_when_semantic_retrieval_fails() -> None:
     assert events[0].code == "optional_memory_degraded"
     assert len(semantic_memory.requests) == 1
     assert reply.contexts[0].current_company_evidence is None
+
+
+def _controller_with_sink(
+    semantic_memory: RecordingSemanticMemory,
+    sink: object,
+    episodes: RecordingEpisodes | None = None,
+) -> tuple[object, RecordingReply]:
+    app = FastAPI()
+    reply = RecordingReply()
+    app.state.chat_session_buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
+    app.state.chat_profile_repository = None
+    app.state.chat_task_episode_repository = episodes
+    app.state.chat_reply = reply
+    app.state.memory_operation_sink = sink
+
+    factory = _chat_controller_factory(app)
+    app.state.semantic_memory = semantic_memory
+    return factory(_scope()), reply
+
+
+def test_runtime_injection_records_gateway_events() -> None:
+    from cowork_agent.features.ai_chat.memory_observability import (
+        MemoryOperation,
+        RecordingMemoryOperationSink,
+    )
+
+    semantic_memory = RecordingSemanticMemory(_response())
+    sink = RecordingMemoryOperationSink()
+    controller, reply = _controller_with_sink(semantic_memory, sink)
+
+    events = asyncio.run(
+        _events(controller, _request("What does the company policy say about travel?", key="5"))
+    )
+
+    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
+    assert len(sink.events) >= 1
+    read_events = [e for e in sink.events if e.operation == MemoryOperation.READ]
+    assert len(read_events) >= 1
+
+
+def test_runtime_sink_failure_isolation() -> None:
+    class RaisingSink:
+        def emit(self, event: object) -> None:
+            raise RuntimeError("sink failure")
+
+    semantic_memory = RecordingSemanticMemory(RuntimeError("provider unavailable"))
+    controller, reply = _controller_with_sink(semantic_memory, RaisingSink())
+
+    events = asyncio.run(
+        _events(controller, _request("What does the company procedure say?", key="6"))
+    )
+
+    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
+    assert events[0].code == "optional_memory_degraded"
+
+
+def test_factory_passes_episode_retention_seconds_from_chat_memory_settings() -> None:
+    """app.state.chat_memory_settings.episode_retention_seconds reaches the controller."""
+
+    from cowork_agent.config import ChatMemorySettings
+    from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
+
+    class RecordingEpisodicPort:
+        def __init__(self) -> None:
+            self.expires_at_values: list[object] = []
+
+        async def read_episodes(self, namespace: object, query: object) -> tuple[()]:
+            return ()
+
+        async def write_chat_summary(self, namespace: object, episode: object) -> object:
+            return episode
+
+        async def write_task_episode(
+            self, namespace: object, episode: object, *, expires_at: object
+        ) -> object:
+            self.expires_at_values.append(expires_at)
+            return episode
+
+        async def transition_task_episode(self, transition: object) -> None:
+            return None
+
+        async def delete_task_episode(self, namespace: object, *, episode_id: str) -> bool:
+            return False
+
+        async def delete_chat_summary(self, namespace: object) -> bool:
+            return False
+
+        async def delete_all_for_user(self, namespace: object) -> int:
+            return 0
+
+    class TaskProposalReply:
+        async def stream_reply(
+            self, request: object, context: object
+        ) -> object:
+            yield ChatReplyChunk(
+                "task",
+                ChatTaskProposal(
+                    task_title="Do it",
+                    minimal_request_paraphrase="Do",
+                    action_plan=("Step",),
+                    rag_citations=(),
+                    missing_information=(),
+                    model_id="m",
+                    prompt_version="p",
+                    confidence=0.5,
+                ),
+            )
+
+    port = RecordingEpisodicPort()
+    app = FastAPI()
+    app.state.chat_session_buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
+    app.state.chat_profile_repository = None
+    app.state.chat_task_episode_repository = port
+    app.state.chat_reply = TaskProposalReply()
+    app.state.chat_memory_settings = ChatMemorySettings(
+        max_turns=4, ttl_seconds=60, episode_retention_seconds=7200
+    )
+    app.state.semantic_memory = RecordingSemanticMemory(_response())
+
+    factory = _chat_controller_factory(app)
+    controller = factory(_scope())
+
+    async def run() -> None:
+        request = ChatMessageRequest(
+            session_id="session-1",
+            user_message="Please create a task.",
+            idempotency_key="idem-retention",
+        )
+        [event async for event in controller.stream_message(request)]
+
+    asyncio.run(run())
+
+    assert len(port.expires_at_values) == 1
+    assert port.expires_at_values[0] is not None
