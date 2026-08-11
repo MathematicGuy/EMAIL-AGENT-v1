@@ -194,7 +194,12 @@ def test_migrations_apply_once_and_are_idempotent() -> None:
         pool = await _pool()
         try:
             first = await apply_migrations(pool)
-            assert first == ("001_mail_todo.sql", "002_chat_profiles.sql")
+            assert first == (
+                "001_mail_todo.sql",
+                "002_chat_profiles.sql",
+                "003_chat_summary_episodes.sql",
+                "004_task_episodes.sql",
+            )
             assert await apply_migrations(pool) == ()
         finally:
             await pool.close()

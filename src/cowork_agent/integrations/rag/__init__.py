@@ -9,7 +9,13 @@ longer exported: they remain importable from their own modules for the
 offline retrieval-evaluation harness only.
 """
 
+from .chat_memory import SemanticChatMemoryAdapter
 from .null_memory import NullSemanticMemory
 from .qdrant import QdrantSemanticMemory, ingest_corpus
 
-__all__ = ["NullSemanticMemory", "QdrantSemanticMemory", "ingest_corpus"]
+__all__ = [
+    "NullSemanticMemory",
+    "QdrantSemanticMemory",
+    "SemanticChatMemoryAdapter",
+    "ingest_corpus",
+]

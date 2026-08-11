@@ -1,20 +1,21 @@
 # TARGET ARCHITECTURE
 
-## Cowork Agent — AI Chat Assistant with Executable `@Email` Tool
+## Cowork Agent — AI Chat Assistant with chat-native TaskEpisodes
 
 **Architecture level:** Level 2 — Production Engineer<br>
 **Status:** Baseline target architecture<br>
-**Agent pattern:** Multi-turn Chat Controller with deterministic tool pipelines<br>
+**Agent pattern:** Multi-turn Chat Controller with typed memory<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Primary use case:** Sustain grounded multi-turn chat and execute the stateless Email RAG pipeline as an in-chat `@Email` skill.
+**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../adr/ADR-004-chat-native-task-episodes.md)<br>
+**Primary use case:** Sustain grounded multi-turn chat with safe, selectively retrieved memory. The standalone PRD-v1 Email Agent remains a separate, stateless, memory-free product flow.
 
 ---
 
 ## 1. Product and Architecture Hypothesis
 
-> Can a multi-turn Cowork Chat Assistant combine typed memory, enterprise
-> knowledge, and executable tools while keeping raw email strictly ephemeral?
+> Can a multi-turn Cowork Chat Assistant combine typed memory and enterprise
+> knowledge while retaining only user-authorized, body-free task records?
 
 The primary transformation is:
 
@@ -23,30 +24,35 @@ User chat message + active session buffer
         +
 Explicit profile + eligible episodes + enterprise RAG
         ↓
-Chat response or @Email tool invocation
+Streamed chat response
         ↓
-Streamed response / rendered Action Plan card
+If and only if explicitly requested, bounded task proposal
         ↓
-Persisted chat turn and system-generated episode
+Persisted chat turn and system-generated, retrieval-ineligible TaskEpisode
 ```
 
 ### Current workflow characteristics
 
-- Gmail is accessed through a read-only Google integration.
 - The primary product entry is a multi-turn AI Chat session.
-- The Chat Controller owns session orchestration, context assembly, and SSE streaming.
-- `@Email` is an explicit in-chat skill; its internal workflow remains deterministic and one-shot.
-- The LLM may request only allow-listed tools under deterministic policy.
-- The RAG module is an external, pluggable semantic-memory provider.
+- The Chat Controller owns session orchestration, context assembly, task-proposal production, and SSE streaming.
+- A TaskEpisode can be proposed and persisted only after an explicit user request for a task or action plan; ordinary chat, background processes, and model inference alone cannot create one.
+- The RAG module is a company-knowledge provider. Its citations may be stored as coordinates, but copied chunks and source text may not.
+- Gmail is accessed only by the separate, standalone PRD-v1 Email Agent. AI Chat has no executable Email tool, mailbox selector, or Gmail state.
 - Reflexion and multi-agent orchestration are out of scope.
 - Email attachments are out of scope under ADR-003; record presence only and do not process
   content.
-- `@Email` Action Plans render with inline approve, complete, and reject controls.
-- System-generated episodes are persisted but are not eligible for retrieval until validated later.
+- System-generated TaskEpisodes are persisted but are not eligible for retrieval until approved or completed in their originating chat session.
 
 ---
 
-# 2. Overall Production Architecture
+# 2. Superseded pre-ADR-004 architecture (historical; not the target)
+
+The material in this historical section predates ADR-004. Its executable
+in-chat `@Email` path, Email-derived episodes, Gmail/run/tool provenance, and
+Action Plan card lifecycle are superseded and must not guide new work. The
+accepted replacement begins in §20. The standalone PRD-v1 Email Agent remains
+unchanged and memory-free; mentions of it in this historical record do not
+make it an AI Chat capability.
 
 ```mermaid
 flowchart TB
@@ -671,7 +677,7 @@ memory_type: string
 
 source_type:
   - user_config
-  - system_generated_task
+  - system_generated_chat_task
   - user_approved_task
   - company_document
   - migration
@@ -1426,3 +1432,140 @@ AI Chat client creates or resumes a session
 
 This document is the baseline target architecture for the Cowork AI Chat
 Assistant, its four-type memory engine, and the executable `@Email` tool.
+
+---
+
+# 20. Accepted ADR-004 chat-native target
+
+ADR-004 replaces the superseded AI Chat design above. The target has no
+executable in-chat tool and does not turn a standalone PRD-v1 Email run into
+an episode. The standalone PRD-v1 Email Agent remains available through its
+own APIs, is memory-free, and is not callable from AI Chat.
+
+```mermaid
+flowchart TB
+    CLIENT["AI Chat client"] --> API["Chat API / SSE"] --> CHAT["Chat Controller"]
+    CHAT --> GATE["Memory Gateway"]
+    GATE --> SHORT[("bounded session memory")]
+    GATE --> PROFILE[("explicit profile")]
+    GATE --> EPISODES[("chat summaries + TaskEpisodes")]
+    GATE --> RAG["Company RAG"]
+    CHAT -->|explicit task/action-plan request only| PROPOSAL["bounded task proposal"]
+    PROPOSAL --> EPISODES
+```
+
+## 20.1 Chat Controller and task creation
+
+1. Validate tenant, user, and mandatory `session_id`.
+2. Assemble bounded session context, explicit profile, eligible episodes, and
+   selective company-RAG context through the Memory Gateway.
+3. Stream the assistant response.
+4. Only after an explicit user request to create a task or action plan, render
+   one bounded proposal and persist a TaskEpisode.
+5. Record the chat turn and update the session buffer.
+
+Ordinary chat, assistant suggestions, classifier output, background work, and
+model-only inference must not create a TaskEpisode. The accepted request schema
+has no tool field: strict deserialization rejects retired `tool_choices` as an
+unexpected field, before it could select a mailbox, run Gmail work, or write a
+PRD-v1 task row.
+
+## 20.2 TaskEpisode lifecycle and access policy
+
+```text
+explicit user task request
+→ system_generated / retrieval_eligible=false
+→ user_approved or completed / retrieval_eligible=true
+→ rejected / retrieval_eligible=false
+```
+
+Allowed transitions are:
+
+```text
+system_generated → user_approved | completed | rejected
+user_approved → completed | rejected
+```
+
+Storage derives `retrieval_eligible` atomically from the resulting
+`validation_status`; callers cannot supply it independently. Approval,
+completion, rejection, and single-record deletion require the originating chat
+session. Eligible retrieval may cross sessions only for the same tenant, user,
+and `feature: ai_chat` scope. User-wide deletion spans that user's AI Chat
+sessions and never deletes semantic company RAG.
+
+## 20.3 TaskEpisode contract
+
+```yaml
+episode_id: string
+record_id: string
+tenant_id: string
+user_id: string
+chat_session_id: string
+chat_turn_id: string
+
+task_title: string
+minimal_request_paraphrase: string
+action_plan:
+  - string
+rag_citations:
+  - document_id: string
+    document_title: string
+    section: string | null
+    source_url: string
+missing_information:
+  - string
+
+validation_status: system_generated | user_approved | completed | rejected
+retrieval_eligible: boolean
+source_type: system_generated_chat_task
+creation_reason: explicit_user_task_request
+
+created_at: datetime
+updated_at: datetime
+pipeline_version: string
+model_id: string | null
+prompt_version: string | null
+confidence: number | null
+```
+
+`record_id` is an opaque, stable idempotency key derived deterministically
+from tenant, user, originating chat session, and originating chat turn. The
+derivation must not expose raw user text. The compact payload contains no raw
+email, attachment content, full chat transcript, copied RAG chunk, run field,
+tool field, Gmail field, mailbox identifier, or foreign key to a standalone
+PRD-v1 task row. Optional citations are company-RAG coordinates only.
+
+## 20.4 Four-type memory policy
+
+| Memory type | Read policy | Write policy | Initial storage |
+|---|---|---|---|
+| Short-term | Bounded active context for its `session_id` | Chat turns only | Redis or in-process state |
+| Long-term declarative | Compact profile per relevant turn | Explicit preference or trusted configuration only | PostgreSQL |
+| Episodic | Eligible summaries and TaskEpisodes for the same tenant, user, and `feature: ai_chat` | Summaries; TaskEpisodes after explicit user request only | PostgreSQL |
+| Semantic | Selective company-knowledge retrieval | No direct Chat Controller write | Company RAG |
+
+Every memory operation carries `tenant_id`, `user_id`, `session_id`,
+`feature: ai_chat`, `memory_type`, and `source_id`, and fails closed when the
+namespace is missing or inconsistent. The recommended logical key is
+`tenant_id / user_id / session_id / feature: ai_chat / memory_type / record_id`.
+
+## 20.5 Privacy, observability, and implementation order
+
+TaskEpisodes, logs, telemetry, fixtures, and semantic indexing must exclude
+raw email bodies, attachment content, full chat transcripts, copied RAG chunks,
+and full assembled prompts. Metadata-only safety counters for unvalidated
+retrieval, cross-tenant access, raw-email violations, rejected-episode
+retrieval, and expired-record retrieval must remain zero under test.
+
+Implement the accepted target in this order:
+
+1. Retain the completed standalone PRD-v1 Email Agent without memory changes.
+2. Define Chat Controller, session, SSE, Memory Gateway, and TaskEpisode
+   contracts against ADR-004.
+3. Implement bounded session memory and explicit-only declarative profiles.
+4. Implement body-free TaskEpisode persistence with deterministic `record_id`
+   and atomic lifecycle-derived eligibility.
+5. Implement originating-session mutation/deletion and same-tenant/user
+   cross-session eligible retrieval.
+6. Implement selective episodic and company-RAG retrieval, then evaluation,
+   retention, deletion-audit, and governance gates.

@@ -2,16 +2,18 @@ import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
+import psycopg
 import pytest
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
-    ChatToolChoice,
+    ChatSummaryEpisode,
     ChatTurn,
     DeclarativeProfile,
     DegradedMemorySource,
     EpisodeCitation,
     EpisodeSourceType,
+    EpisodicMemoryQuery,
     EpisodicMemoryRead,
     MemoryContextRequest,
     MemoryNamespace,
@@ -19,10 +21,12 @@ from cowork_agent.domain.chat_contracts import (
     MemoryProvenanceSource,
     MemoryReadOptions,
     MemoryType,
+    SemanticMemoryQuery,
     SemanticMemoryRead,
     TaskEpisode,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
+from cowork_agent.features.ai_chat.episode_policy import ChatSummaryWriteRejected
 from cowork_agent.features.ai_chat.memory_gateway import (
     MemoryGateway,
     MemorySourceUnavailableError,
@@ -30,6 +34,7 @@ from cowork_agent.features.ai_chat.memory_gateway import (
 )
 from cowork_agent.features.ai_chat.profile_policy import ProfileWriteRejected
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.persistence.repositories.postgres import PostgresChatProfileRepository
 
 NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
@@ -50,12 +55,28 @@ def _request(scope: ChatMemoryScope, *, all_sources: bool = True) -> MemoryConte
         reads=MemoryReadOptions(
             short_term=True,
             long_term=all_sources,
-            episodic=EpisodicMemoryRead(
-                enabled=all_sources,
-                retrieval_eligible_only=True,
-                max_items=2,
+            episodic=(
+                EpisodicMemoryQuery(
+                    query="Find related approved task history.",
+                    max_items=2,
+                    min_score=0.5,
+                    timeout_ms=500,
+                )
+                if all_sources
+                else EpisodicMemoryRead(
+                    enabled=False, retrieval_eligible_only=True, max_items=2
+                )
             ),
-            semantic=SemanticMemoryRead(enabled=all_sources),
+            semantic=(
+                SemanticMemoryQuery(
+                    query="Find current enterprise policy context.",
+                    max_items=2,
+                    min_score=0.5,
+                    timeout_ms=500,
+                )
+                if all_sources
+                else SemanticMemoryRead(enabled=False)
+            ),
         ),
     )
 
@@ -92,12 +113,9 @@ def _episode(
         record_id=episode_id,
         tenant_id="tenant-1",
         user_id="user@example.com",
-        run_id="run-1",
         chat_session_id=session_id,
         chat_turn_id="turn-1",
-        source_tool="@Email",
-        gmail_message_id="message-1",
-        gmail_url="https://mail.google.com/mail/u/0/#all/message-1",
+        creation_reason="explicit_user_task_request",
         task_title="Submit the report",
         minimal_request_paraphrase="Submit the requested report.",
         action_plan=("Open the approved template.",),
@@ -112,9 +130,33 @@ def _episode(
         missing_information=(),
         validation_status=status,
         retrieval_eligible=status in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED},
-        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
         created_at=NOW,
         updated_at=NOW,
+        pipeline_version="2",
+        model_id=None,
+        prompt_version=None,
+        confidence=None,
+    )
+
+
+def _chat_summary(
+    *, tenant_id: str = "tenant-1", session_id: str = "session-1"
+) -> ChatSummaryEpisode:
+    return ChatSummaryEpisode(
+        episode_id="chat-summary-1",
+        record_id="record-1",
+        tenant_id=tenant_id,
+        user_id="user@example.com",
+        chat_session_id=session_id,
+        chat_turn_id="turn-1",
+        summary="The user asked for help prioritizing the approved procedure.",
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        retrieval_eligible=False,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY,
+        created_at=NOW,
+        updated_at=NOW,
+        expires_at=None,
         pipeline_version="2",
         model_id=None,
         prompt_version=None,
@@ -151,25 +193,53 @@ class ProfileReader:
 class EpisodeReader:
     def __init__(self, episodes: tuple[TaskEpisode, ...]) -> None:
         self.episodes = episodes
-        self.calls: list[tuple[MemoryNamespace, int]] = []
+        self.calls: list[tuple[MemoryNamespace, EpisodicMemoryQuery]] = []
+        self.writes: list[tuple[MemoryNamespace, ChatSummaryEpisode]] = []
+        self.deletes: list[MemoryNamespace] = []
 
     async def read_episodes(
-        self, namespace: MemoryNamespace, *, max_items: int
+        self, namespace: MemoryNamespace, query: EpisodicMemoryQuery
     ) -> tuple[TaskEpisode, ...]:
-        self.calls.append((namespace, max_items))
+        self.calls.append((namespace, query))
         return self.episodes
+
+    async def write_chat_summary(
+        self, namespace: MemoryNamespace, episode: ChatSummaryEpisode
+    ) -> ChatSummaryEpisode:
+        self.writes.append((namespace, episode))
+        return episode
+
+    async def delete_chat_summary(self, namespace: MemoryNamespace) -> bool:
+        self.deletes.append(namespace)
+        return True
 
 
 class SemanticReader:
     def __init__(self, context: Mapping[str, object] | None = None) -> None:
         self.context = context
-        self.calls: list[MemoryNamespace] = []
+        self.calls: list[tuple[MemoryNamespace, SemanticMemoryQuery]] = []
 
     async def read_semantic_context(
-        self, namespace: MemoryNamespace
+        self, namespace: MemoryNamespace, query: SemanticMemoryQuery
     ) -> Mapping[str, object] | None:
-        self.calls.append(namespace)
+        self.calls.append((namespace, query))
         return self.context
+
+
+class UnavailableEpisodeReader(EpisodeReader):
+    async def read_episodes(
+        self, namespace: MemoryNamespace, query: EpisodicMemoryQuery
+    ) -> tuple[TaskEpisode, ...]:
+        del namespace, query
+        raise MemorySourceUnavailableError("episodic provider detail")
+
+
+class UnavailableSemanticReader(SemanticReader):
+    async def read_semantic_context(
+        self, namespace: MemoryNamespace, query: SemanticMemoryQuery
+    ) -> Mapping[str, object] | None:
+        del namespace, query
+        raise MemorySourceUnavailableError("semantic provider detail")
 
 
 class UnavailableProfileReader:
@@ -188,11 +258,40 @@ class UnavailableProfileReader:
         raise MemorySourceUnavailableError("sensitive provider detail")
 
 
+class _FailingProfileConnection:
+    def __init__(self, error_type: type[Exception] = psycopg.OperationalError) -> None:
+        self._error_type = error_type
+
+    async def execute(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise self._error_type("database unavailable")
+
+
+class _FailingProfileConnectionContext:
+    def __init__(self, error_type: type[Exception] = psycopg.OperationalError) -> None:
+        self._error_type = error_type
+
+    async def __aenter__(self) -> _FailingProfileConnection:
+        return _FailingProfileConnection(self._error_type)
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+
+class _FailingProfilePool:
+    def __init__(self, error_type: type[Exception] = psycopg.OperationalError) -> None:
+        self._error_type = error_type
+
+    def connection(self) -> _FailingProfileConnectionContext:
+        return _FailingProfileConnectionContext(self._error_type)
+
+
 def _gateway(
     *,
     profile_reader: ProfileReader | UnavailableProfileReader | None = None,
     episode_reader: EpisodeReader | None = None,
     semantic_reader: SemanticReader | None = None,
+    **kwargs: object,
 ) -> MemoryGateway:
     return MemoryGateway(
         scope=_scope(),
@@ -200,18 +299,22 @@ def _gateway(
         declarative_memory=profile_reader,
         episodic_memory=episode_reader,
         semantic_memory=semantic_reader,
+        **kwargs,
     )
 
 
-def test_gateway_assembles_typed_context_and_enforces_eligibility_and_bound() -> None:
+def test_gateway_fails_closed_on_lifecycle_and_truncates_an_overreturn() -> None:
     approved = _episode(episode_id="approved", status=ValidationStatus.USER_APPROVED)
     completed = _episode(episode_id="completed", status=ValidationStatus.COMPLETED)
     unvalidated = _episode(
         episode_id="unvalidated", status=ValidationStatus.SYSTEM_GENERATED
     )
+    object.__setattr__(unvalidated, "retrieval_eligible", True)
+    rejected = _episode(episode_id="rejected", status=ValidationStatus.REJECTED)
+    object.__setattr__(rejected, "retrieval_eligible", True)
     extra = _episode(episode_id="extra", status=ValidationStatus.USER_APPROVED)
     profiles = ProfileReader(_profile())
-    episodes = EpisodeReader((unvalidated, approved, completed, extra))
+    episodes = EpisodeReader((unvalidated, rejected, approved, completed, extra))
     semantic = SemanticReader({"citation_ids": ["doc-1#0"]})
     gateway = _gateway(
         profile_reader=profiles,
@@ -228,7 +331,8 @@ def test_gateway_assembles_typed_context_and_enforces_eligibility_and_bound() ->
     assert response.to_dict()["semantic_context"] == {"citation_ids": ["doc-1#0"]}
     assert response.degraded is False
     assert response.degraded_sources == ()
-    assert episodes.calls[0][1] == 2
+    assert episodes.calls[0][1] == _request(_scope()).reads.episodic
+    assert semantic.calls[0][1] == _request(_scope()).reads.semantic
 
 
 @pytest.mark.parametrize(
@@ -305,12 +409,43 @@ def test_typed_optional_source_failure_degrades_without_leaking_error_text() -> 
     assert "sensitive provider detail" not in str(response.to_dict())
 
 
-def _explicit_provenance(source_tool: ChatToolChoice | None = None) -> MemoryProvenance:
+def test_postgres_profile_read_failure_degrades_at_the_gateway_boundary() -> None:
+    repository = PostgresChatProfileRepository(_FailingProfilePool())  # type: ignore[arg-type]
+
+    response = asyncio.run(
+        _gateway(profile_reader=repository).read_context(_request(_scope()))
+    )
+
+    assert response.profile is None
+    assert response.degraded_sources == (
+        DegradedMemorySource.LONG_TERM,
+        DegradedMemorySource.EPISODIC,
+        DegradedMemorySource.SEMANTIC,
+    )
+    assert "database unavailable" not in str(response.to_dict())
+
+
+def test_postgres_profile_read_preserves_programming_errors() -> None:
+    repository = PostgresChatProfileRepository(
+        _FailingProfilePool(psycopg.ProgrammingError)  # type: ignore[arg-type]
+    )
+    namespace = MemoryNamespace(
+        scope=_scope(),
+        memory_type=MemoryType.LONG_TERM,
+        record_id=None,
+        source_id=None,
+    )
+
+    with pytest.raises(psycopg.ProgrammingError):
+        asyncio.run(repository.read_profile(namespace))
+
+
+def _explicit_provenance(
+    *, source_type: MemoryProvenanceSource = MemoryProvenanceSource.EXPLICIT_USER_CONFIG
+) -> MemoryProvenance:
     return MemoryProvenance(
-        source_type=MemoryProvenanceSource.EXPLICIT_USER_CONFIG,
+        source_type=source_type,
         source_id="chat-settings-form",
-        source_tool=source_tool,
-        run_id=None,
         chat_turn_id="turn-1",
         pipeline_version=None,
         model_id=None,
@@ -336,7 +471,10 @@ def test_gateway_refuses_a_non_explicit_profile_write_before_the_adapter() -> No
     with pytest.raises(ProfileWriteRejected):
         asyncio.run(
             gateway.write_profile(
-                _profile(), provenance=_explicit_provenance(ChatToolChoice.EMAIL)
+                _profile(),
+                provenance=_explicit_provenance(
+                    source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TASK
+                ),
             )
         )
 
@@ -374,6 +512,66 @@ def test_profile_deletion_prevents_later_retrieval() -> None:
     assert asyncio.run(gateway.delete_profile()) is True
     assert asyncio.run(gateway.read_context(_request(_scope()))).profile is None
     assert profiles.deletes[0].memory_type is MemoryType.LONG_TERM
+
+
+def test_delete_all_memory_is_exact_scope_retryable_and_never_calls_semantic() -> None:
+    class Profiles:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def delete_profile(self, namespace: MemoryNamespace) -> bool:
+            assert namespace.tenant_id == "tenant-1"
+            self.calls += 1
+            return self.calls == 1
+
+    class Episodes:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def delete_all_for_user(self, namespace: MemoryNamespace) -> int:
+            assert namespace.tenant_id == "tenant-1"
+            assert namespace.user_id == "user@example.com"
+            assert namespace.feature == "ai_chat"
+            self.calls += 1
+            return 2 if self.calls == 1 else 0
+
+    buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
+    gateway = MemoryGateway(
+        scope=_scope(), session_buffer=buffer, declarative_memory=Profiles(),
+        episodic_memory=Episodes(),
+    )
+    gateway.append_turn(_turn())
+
+    first = asyncio.run(gateway.delete_all_memory())
+    second = asyncio.run(gateway.delete_all_memory())
+
+    assert first.complete is second.complete is True
+    assert first.episodic_deleted_count == 2
+    assert second.episodic_deleted_count == 0
+    assert buffer.read(gateway._namespace(MemoryType.SHORT_TERM)) == ()
+
+
+def test_delete_all_memory_fails_closed_when_a_durable_adapter_is_missing() -> None:
+    with pytest.raises(MemorySourceUnavailableError):
+        asyncio.run(_gateway().delete_all_memory())
+
+
+def test_observability_sink_failure_and_huge_clock_do_not_change_read_semantics() -> None:
+    class RaisingSink:
+        def emit(self, event: object) -> None:
+            del event
+            raise RuntimeError("sink failure must not escape")
+
+    profiles = ProfileReader(_profile())
+    gateway = _gateway(
+        profile_reader=profiles,
+        memory_operation_sink=RaisingSink(),
+        monotonic_clock=lambda: 10**100,
+    )
+
+    response = asyncio.run(gateway.read_context(_request(_scope())))
+
+    assert response.profile == _profile()
 
 
 def test_profile_write_failure_surfaces_instead_of_degrading_silently() -> None:
@@ -416,6 +614,88 @@ def test_disabled_optional_sources_are_not_called_or_reported_degraded() -> None
     assert semantic.calls == []
 
 
+@pytest.mark.parametrize(
+    ("episodic_enabled", "semantic_enabled"),
+    [(True, False), (False, True)],
+    ids=["episodic_only", "semantic_only"],
+)
+def test_gateway_calls_only_the_independently_selected_optional_source(
+    episodic_enabled: bool, semantic_enabled: bool
+) -> None:
+    episodes = EpisodeReader(())
+    semantic = SemanticReader({"citation_ids": ["doc-1#0"]})
+    reads = MemoryReadOptions(
+        short_term=True,
+        long_term=True,
+        episodic=(
+            EpisodicMemoryQuery(
+                query="prior task",
+                max_items=2,
+                min_score=0.5,
+                timeout_ms=500,
+            )
+            if episodic_enabled
+            else EpisodicMemoryRead(
+                enabled=False, retrieval_eligible_only=True, max_items=1
+            )
+        ),
+        semantic=(
+            SemanticMemoryQuery(
+                query="company policy",
+                max_items=2,
+                min_score=0.5,
+                timeout_ms=500,
+            )
+            if semantic_enabled
+            else SemanticMemoryRead(enabled=False)
+        ),
+    )
+    request = MemoryContextRequest(
+        session_id="session-1", scope=_scope(), reads=reads
+    )
+
+    response = asyncio.run(
+        _gateway(
+            profile_reader=ProfileReader(_profile()),
+            episode_reader=episodes,
+            semantic_reader=semantic,
+        ).read_context(request)
+    )
+
+    assert bool(episodes.calls) is episodic_enabled
+    assert bool(semantic.calls) is semantic_enabled
+    assert response.degraded is False
+
+
+def test_episodic_unavailability_degrades_only_episodic_and_preserves_semantic() -> None:
+    response = asyncio.run(
+        _gateway(
+            profile_reader=ProfileReader(_profile()),
+            episode_reader=UnavailableEpisodeReader(()),
+            semantic_reader=SemanticReader({"citation_ids": ["doc-1#0"]}),
+        ).read_context(_request(_scope()))
+    )
+
+    assert response.episodes == ()
+    assert response.semantic_context == {"citation_ids": ("doc-1#0",)}
+    assert response.degraded_sources == (DegradedMemorySource.EPISODIC,)
+
+
+def test_semantic_unavailability_degrades_only_semantic_and_preserves_episodes() -> None:
+    approved = _episode(episode_id="approved", status=ValidationStatus.USER_APPROVED)
+    response = asyncio.run(
+        _gateway(
+            profile_reader=ProfileReader(_profile()),
+            episode_reader=EpisodeReader((approved,)),
+            semantic_reader=UnavailableSemanticReader(),
+        ).read_context(_request(_scope()))
+    )
+
+    assert response.episodes == (approved,)
+    assert response.semantic_context is None
+    assert response.degraded_sources == (DegradedMemorySource.SEMANTIC,)
+
+
 def test_gateway_rejects_turn_from_another_session_before_buffer_write() -> None:
     gateway = _gateway()
     foreign_turn = ChatTurn(
@@ -451,12 +731,123 @@ def test_gateway_exposes_no_durable_or_semantic_write_operation() -> None:
         if callable(value) and not name.startswith("_")
     }
 
-    # V2-M2 adds explicit declarative writes only; episodic and semantic
-    # writes must stay impossible through the gateway.
+    # V2-M3 adds only system-generated chat summaries; task and semantic
+    # writes remain impossible through the gateway.
     assert public_methods == {
         "append_turn",
         "read_context",
         "clear_session",
         "write_profile",
         "delete_profile",
+        "write_chat_summary",
+            "delete_chat_summary",
+            "delete_all_memory",
     }
+
+
+def test_gateway_writes_a_system_generated_chat_summary_to_its_exact_namespace() -> None:
+    episodes = EpisodeReader(())
+    episode = _chat_summary()
+
+    written = asyncio.run(_gateway(episode_reader=episodes).write_chat_summary(episode))
+
+    assert written == episode
+    assert episodes.writes == [
+        (
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.EPISODIC,
+                record_id=episode.record_id,
+                source_id=episode.chat_turn_id,
+            ),
+            episode,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "episode",
+    [
+        _chat_summary(tenant_id="tenant-2"),
+        ChatSummaryEpisode(
+            episode_id="chat-summary-user-2",
+            record_id="record-1",
+            tenant_id="tenant-1",
+            user_id="other@example.com",
+            chat_session_id="session-1",
+            chat_turn_id="turn-1",
+            summary="The user asked for help prioritizing the approved procedure.",
+            validation_status=ValidationStatus.SYSTEM_GENERATED,
+            retrieval_eligible=False,
+            source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY,
+            created_at=NOW,
+            updated_at=NOW,
+            expires_at=None,
+            pipeline_version="2",
+            model_id=None,
+            prompt_version=None,
+            confidence=None,
+        ),
+        _chat_summary(session_id="session-2"),
+    ],
+    ids=["foreign_tenant", "foreign_user", "foreign_session"],
+)
+def test_gateway_rejects_foreign_chat_summary_before_adapter_write(
+    episode: ChatSummaryEpisode,
+) -> None:
+    episodes = EpisodeReader(())
+
+    with pytest.raises(NamespaceAccessDenied):
+        asyncio.run(_gateway(episode_reader=episodes).write_chat_summary(episode))
+
+    assert episodes.writes == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("validation_status", ValidationStatus.USER_APPROVED),
+        ("retrieval_eligible", True),
+        ("source_type", EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK),
+    ],
+    ids=["validation_status", "retrieval_eligible", "source_type"],
+)
+def test_gateway_rejects_forged_summary_provenance_before_adapter_write(
+    field: str, value: object
+) -> None:
+    episodes = EpisodeReader(())
+    episode = _chat_summary()
+    object.__setattr__(episode, field, value)
+
+    with pytest.raises(ChatSummaryWriteRejected, match="invalid bounded shape"):
+        asyncio.run(_gateway(episode_reader=episodes).write_chat_summary(episode))
+
+    assert episodes.writes == []
+
+
+def test_gateway_requires_an_episodic_adapter_for_a_requested_summary_write() -> None:
+    with pytest.raises(MemorySourceUnavailableError, match="episodic"):
+        asyncio.run(_gateway().write_chat_summary(_chat_summary()))
+
+
+def test_gateway_deletes_only_the_in_scope_chat_summary_record() -> None:
+    episodes = EpisodeReader(())
+
+    deleted = asyncio.run(
+        _gateway(episode_reader=episodes).delete_chat_summary("record-to-delete")
+    )
+
+    assert deleted is True
+    assert episodes.deletes == [
+        MemoryNamespace(
+            scope=_scope(),
+            memory_type=MemoryType.EPISODIC,
+            record_id="record-to-delete",
+            source_id=None,
+        )
+    ]
+
+
+def test_gateway_requires_an_episodic_adapter_for_summary_deletion() -> None:
+    with pytest.raises(MemorySourceUnavailableError, match="episodic"):
+        asyncio.run(_gateway().delete_chat_summary("record-to-delete"))

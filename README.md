@@ -1,8 +1,8 @@
 # Cowork Agent (Email-to-Action-Plan)
 
-Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc. Runtime hiện tại tích hợp classifier/router riêng và Company Knowledge RAG truy hồi-only cục bộ. Hệ thống bộ nhớ bốn loại (Working, Profile, Episodic, Semantic RAG) được phân tách thành nền tảng cho **AI Chat Assistant**, trong đó quy trình xử lý email đóng vai trò công cụ thực thi **`@Email` Skill Tool**.
+Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc. Runtime hiện tại tích hợp classifier/router riêng và Company Knowledge RAG truy hồi-only cục bộ. Hệ thống bộ nhớ bốn loại (Working, Profile, Episodic, Semantic RAG) thuộc sở hữu của **AI Chat Assistant** và hoàn toàn phân tách khỏi Email Agent đơn lượt độc lập (tính năng `@Email` trong chat đã được bãi bỏ theo ADR-004).
 
-> **Trạng thái tài liệu — đọc trước khi dùng:** README này phân biệt **runtime hiện tại** và **kiến trúc mục tiêu**. Local V1-M3 đã hoàn thành khung Email RAG với classifier/router, `SemanticMemoryPort` và `HybridSemanticMemory` (in-memory dense search, BM25, RRF trên `data/extracted/*.md`, cùng Jina reranking tùy chọn). Qdrant và hệ thống bộ nhớ bốn loại được căn chỉnh làm nền tảng cho **AI Chat Assistant**, hỗ trợ công cụ thực thi `@Email` trong chat. Phân tích chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md) và phạm vi căn chỉnh bộ nhớ: [`docs/references/doc-update-scope-memory-chat.md`](docs/references/doc-update-scope-memory-chat.md).
+> **Trạng thái tài liệu — đọc trước khi dùng:** README này phân biệt **runtime hiện tại** và **kiến trúc mục tiêu**. Local V1-M3 đã hoàn thành khung Email RAG độc lập với classifier/router, `SemanticMemoryPort` và `HybridSemanticMemory` (in-memory dense search, BM25, RRF trên `data/extracted/*.md`, cùng Jina reranking tùy chọn). Qdrant và hệ thống bộ nhớ bốn loại được căn chỉnh làm nền tảng cho **AI Chat Assistant** để quản lý hội thoại đa lượt và các tác vụ sinh trực tiếp từ chat (chat-native tasks). Phân tích chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md) và phạm vi căn chỉnh bộ nhớ: [`docs/references/doc-update-scope-memory-chat.md`](docs/references/doc-update-scope-memory-chat.md).
 
 ---
 
@@ -12,7 +12,7 @@ Kiến trúc hệ thống phân tách thành **2 quy trình độc lập (2 sepa
 
 ### 1.1 Workflow 1: AI Chat Assistant & Hệ thống Bộ nhớ 4 Loại (Multi-Turn Conversational) — KIẾN TRÚC MỤC TIÊU
 
-Quy trình trò chuyện đa lượt (multi-turn AI Chat) do **Chat Controller** làm chủ, kết nối trực tiếp với hệ thống bộ nhớ 4 loại để duy trì ngữ cảnh, sở thích người dùng và lịch sử tác vụ qua các phiên hội thoại:
+Quy trình trò chuyện đa lượt (multi-turn AI Chat) do **Chat Controller** làm chủ, kết nối trực tiếp với hệ thống bộ nhớ 4 loại để duy trì ngữ cảnh, sở thích người dùng và lịch sử tác vụ sinh từ chat (chat-native tasks) qua các phiên hội thoại:
 
 ```text
 User Message (Web UI / Streamlit)
@@ -24,32 +24,31 @@ User Message (Web UI / Streamlit)
         └── 4. Semantic Memory (Enterprise RAG Corpus Access)
             └── Context Assembly & LLM Assistant Invocation
                 ├── Direct Response (Streaming Tokens to Chat Thread)
-                └── OR Execute Tool Skill (e.g. `@Email` Skill Tool)
-                    └── Render Embedded Action Plan Card in Chat Thread
-                        └── Auto-Record Turn & Episode (system_generated, retrieval_eligible=false)
+                └── OR Explicit Task Proposal Request (Render Chat Task Proposal)
+                    └── Record Turn & TaskEpisode (system_generated, retrieval_eligible=false)
 ```
 
 **Đặc điểm chính của Chat Memory Workflow:**
 - **Short-Term Working Memory**: Lưu trữ lịch sử câu hỏi/trả lời trong phiên hội thoại (`session_id`).
 - **Declarative Profile**: Áp dụng quy tắc persona, phong cách trả lời và cấu hình cá nhân của người dùng.
-- **Episodic Memory**: Tự động lưu vết kết quả từ công cụ `@Email` dưới dạng Task Episode (`system_generated`). Khi người dùng bấm `Approve` hoặc `Complete` trên UI Chat, trạng thái chuyển thành `retrieval_eligible = true` để phục vụ truy hồi cho các câu hỏi hội thoại sau này.
-- **Tích hợp `@Email` Skill Tool**: Công cụ `@Email` được kích hoạt như một skill thực thi stateless bên trong khung chat, hiển thị Action Plan Card đi kèm trích dẫn (citation chips) và bộ nút thao tác ngay trong luồng trò chuyện.
+- **Episodic Memory**: Lưu vết tóm tắt hội thoại và các tác vụ sinh trực tiếp từ chat (chat-native tasks) dưới dạng `TaskEpisode` (`system_generated`, `retrieval_eligible = false`). Khi người dùng bấm `Approve` hoặc `Complete` trên UI Chat, trạng thái chuyển thành `retrieval_eligible = true` để phục vụ truy hồi cho các câu hỏi hội thoại sau này.
+- **Chat-Native Task Proposals**: Các đề xuất tác vụ được sinh ra khi người dùng yêu cầu trực tiếp trong phiên chat, hỗ trợ nút bấm thao tác (`Approve`, `Complete`, `Reject`) ngay trên luồng hội thoại.
 
 ---
 
-### 1.2 Workflow 2: Standalone Email RAG Pipeline / Executable `@Email` Tool (Single-Turn Stateless) — ĐÃ TRIỂN KHAI LOCAL V1-M3
+### 1.2 Workflow 2: Standalone Email RAG Pipeline (Single-Turn Stateless) — ĐÃ TRIỂN KHAI LOCAL V1-M3
 
 Quy trình xử lý email vận hành theo dạng **đơn lượt (single-turn), không trạng thái (stateless)** và **hoàn toàn độc lập với hệ thống bộ nhớ 4 loại** nhằm đảm bảo tính riêng tư tuyệt đối cho dữ liệu email:
 
 ```text
-Trigger (Manual / Scheduled / In-Chat `@Email` Skill Call)
+Trigger (Manual / API Request)
 └── Gmail Fetch & Provider Normalization (Ephemeral Envelope)
     └── Batch Correlation & Intent Classification
         └── Route Decision: [NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG]
             ├── (If RETRIEVE_RAG) Hybrid Semantic Memory Retrieval (Dense + BM25 + RRF + Jina)
             └── Action Item & Action Plan Generation (Agent Core)
                 └── Output Schema & Grounding Validation
-                    └── Persist Task DTO & Task Episode Entry
+                    └── Persist Task DTO
                         └── Cleanup Temporary Email Envelope & Ephemeral Memory (Raw email deleted)
 ```
 
@@ -136,7 +135,7 @@ email-agent-v1/
 
 **Tóm tắt trạng thái triển khai:**
 - **Đã hoàn thành trong Runtime Local V1-M3:** Email RAG pipeline (`features/email_action_plan/`), Hybrid RAG (`integrations/rag/`), Gmail OAuth, Gemini/Groq providers, SQLite persistence, và Streamlit GUI (`gui/app.py`).
-- **Kiến trúc mục tiêu đang di cư (Target Roadmap):** Khung Chat API Controller, SSE token streaming handler, Logical Memory Gateway cho AI Chat (`feature: ai_chat`, `session_id`), và giao diện AI Chat UI tập trung hỗ trợ công cụ thực thi `@Email` Skill.
+- **Kiến trúc mục tiêu đang di cư (Target Roadmap):** Khung Chat API Controller, SSE token streaming handler, Logical Memory Gateway cho AI Chat (`feature: ai_chat`, `session_id`), và giao diện AI Chat UI tập trung hỗ trợ các tác vụ sinh trực tiếp từ chat (chat-native tasks).
 
 ---
 
@@ -144,18 +143,18 @@ email-agent-v1/
 
 - **Phân tách 2 Luồng nghiệp vụ (Decoupled Dual-Workflow Architecture):**
   - **AI Chat Assistant (Multi-Turn):** Quản lý phiên hội thoại (`session_id`), kết nối trực tiếp với hệ thống Bộ nhớ 4 loại (Working Memory, User Profile, Episodic Task Memory, Semantic Document RAG).
-  - **Email RAG Pipeline / `@Email` Skill (Single-Turn):** Hoạt động không trạng thái (stateless), không dính líu trực tiếp với hệ thống bộ nhớ 4 loại. Đóng vai trò là một Skill/Tool thực thi độc lập khi được kích hoạt.
+  - **Standalone Email RAG Pipeline (Single-Turn):** Hoạt động độc lập, không trạng thái (stateless), không tích hợp bộ nhớ 4 loại. Không còn công cụ thực thi `@Email` trong chat (đã bãi bỏ theo ADR-004).
 - **Định hướng phụ thuộc (Dependency Direction):**
   $$\text{domain} \leftarrow \text{features} \leftarrow \text{integrations / orchestration / persistence} \leftarrow \text{app entry points}$$
   `domain` giữ sự thuần khiết tuyệt đối, không chứa import từ bất kỳ thư viện framework, database, Gmail SDK hay LLM provider nào.
-- **Phân định trách nhiệm rõ ràng trong Email Tool Pipeline:**
+- **Phân định trách nhiệm rõ ràng trong Email Pipeline:**
   - **Classifier**: Phân loại tính hành động (`actionability`) và tính đầy đủ thông tin (`knowledge_sufficiency`).
   - **Router**: Đưa ra quyết định định tuyến không đổi (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`).
   - **Agent Core**: Làm chủ việc tổng hợp và sinh Action Plan cuối cùng; RAG chỉ đóng vai trò cung cấp ngữ cảnh bổ trợ và trích dẫn (citations).
 - **Quyền riêng tư & Bảo vệ dữ liệu (Data Privacy First):**
-  - Thư gốc (raw email) và nội dung chưa chuẩn hóa **chỉ tồn tại dưới dạng transient state** trong quá trình chạy lượt `@Email` tool và phải được **xóa sạch khỏi bộ nhớ** ngay sau khi hoàn tất (`cleanup`).
+  - Thư gốc (raw email) và nội dung chưa chuẩn hóa **chỉ tồn tại dưới dạng transient state** trong quá trình xử lý email và phải được **xóa sạch khỏi bộ nhớ** ngay sau khi hoàn tất (`cleanup`).
   - Tuyệt đối **không lưu trữ raw email** vào Long-term Profile, Episodic Memory hay Semantic Vector index.
-  - Các Action Plan sinh ra từ `@Email` chỉ được lưu dưới dạng `task_episode` với trạng thái ban đầu `validation_status = system_generated` và `retrieval_eligible = false` cho tới khi có thao tác xác nhận người dùng (`Approve` / `Complete`) trên giao diện Chat.
+  - Các `TaskEpisode` sinh ra từ chat (chat-native tasks) chỉ lưu trạng thái ban đầu `validation_status = system_generated` và `retrieval_eligible = false` cho tới khi có thao tác xác nhận người dùng (`Approve` / `Complete`) trên giao diện Chat.
 
 ---
 

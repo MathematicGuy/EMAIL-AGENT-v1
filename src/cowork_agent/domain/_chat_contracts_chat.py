@@ -7,13 +7,11 @@ from dataclasses import dataclass
 from typing import Self
 
 from ._chat_contracts_common import (
+    MAX_CHAT_MESSAGE_LENGTH,
     ChatEventType,
-    ChatToolChoice,
     MemoryCitationType,
     _as_enum,
-    _as_mapping,
-    _as_sequence,
-    _frozen_mapping,
+    _require_bounded_string,
     _require_string,
     _to_dict,
 )
@@ -25,12 +23,11 @@ class ChatMessageRequest:
 
     session_id: str
     user_message: str
-    tool_choices: tuple[ChatToolChoice, ...]
     idempotency_key: str
 
     def __post_init__(self) -> None:
         _require_string(self.session_id, "session_id")
-        _require_string(self.user_message, "user_message")
+        _require_bounded_string(self.user_message, "user_message", MAX_CHAT_MESSAGE_LENGTH)
         _require_string(self.idempotency_key, "idempotency_key")
 
     def to_dict(self) -> dict[str, object]:
@@ -38,12 +35,16 @@ class ChatMessageRequest:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
+        expected_fields = {"session_id", "user_message", "idempotency_key"}
+        unexpected_fields = set(data).difference(expected_fields)
+        if unexpected_fields:
+            raise ValueError(
+                f"unexpected field(s) for ChatMessageRequest: {sorted(unexpected_fields)}"
+            )
         return cls(
             session_id=_require_string(data["session_id"], "session_id"),
-            user_message=_require_string(data["user_message"], "user_message"),
-            tool_choices=tuple(
-                _as_enum(item, ChatToolChoice, "tool_choices")
-                for item in _as_sequence(data["tool_choices"], "tool_choices")
+            user_message=_require_bounded_string(
+                data["user_message"], "user_message", MAX_CHAT_MESSAGE_LENGTH
             ),
             idempotency_key=_require_string(data["idempotency_key"], "idempotency_key"),
         )
@@ -58,9 +59,6 @@ class ChatMessageStreamEvent:
     turn_id: str
     event_type: ChatEventType
     text: str | None = None
-    name: ChatToolChoice | None = None
-    call_id: str | None = None
-    action_plan: Mapping[str, object] | None = None
     memory_type: MemoryCitationType | None = None
     source_id: str | None = None
     code: str | None = None
@@ -70,18 +68,11 @@ class ChatMessageStreamEvent:
         _require_string(self.event_id, "event_id")
         _require_string(self.session_id, "session_id")
         _require_string(self.turn_id, "turn_id")
-        if self.action_plan is not None:
-            object.__setattr__(
-                self, "action_plan", _frozen_mapping(self.action_plan, "action_plan")
-            )
         self._validate_variant()
 
     def _validate_variant(self) -> None:
         payloads = {
             "text": self.text,
-            "name": self.name,
-            "call_id": self.call_id,
-            "action_plan": self.action_plan,
             "memory_type": self.memory_type,
             "source_id": self.source_id,
             "code": self.code,
@@ -89,8 +80,6 @@ class ChatMessageStreamEvent:
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.DELTA: ("text",),
-            ChatEventType.TOOL_CALL: ("name", "call_id"),
-            ChatEventType.TOOL_OUTPUT: ("action_plan",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
             ChatEventType.COMPLETED: (),
             ChatEventType.ERROR: ("code", "safe_message"),
@@ -109,42 +98,6 @@ class ChatMessageStreamEvent:
     @classmethod
     def delta(cls, *, event_id: str, session_id: str, turn_id: str, text: str) -> Self:
         return cls(event_id, session_id, turn_id, ChatEventType.DELTA, text=text)
-
-    @classmethod
-    def tool_call(
-        cls,
-        *,
-        event_id: str,
-        session_id: str,
-        turn_id: str,
-        name: ChatToolChoice,
-        call_id: str,
-    ) -> Self:
-        return cls(
-            event_id,
-            session_id,
-            turn_id,
-            ChatEventType.TOOL_CALL,
-            name=name,
-            call_id=call_id,
-        )
-
-    @classmethod
-    def tool_output(
-        cls,
-        *,
-        event_id: str,
-        session_id: str,
-        turn_id: str,
-        action_plan: Mapping[str, object],
-    ) -> Self:
-        return cls(
-            event_id,
-            session_id,
-            turn_id,
-            ChatEventType.TOOL_OUTPUT,
-            action_plan=action_plan,
-        )
 
     @classmethod
     def memory_citation(
@@ -195,9 +148,24 @@ class ChatMessageStreamEvent:
 def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent:
     """Restore and validate one typed stream event from an SSE-compatible mapping."""
 
+    expected_fields = {
+        "event_id",
+        "session_id",
+        "turn_id",
+        "event_type",
+        "text",
+        "memory_type",
+        "source_id",
+        "code",
+        "safe_message",
+    }
+    unexpected_fields = set(data).difference(expected_fields)
+    if unexpected_fields:
+        raise ValueError(
+            f"unexpected field(s) for ChatMessageStreamEvent: {sorted(unexpected_fields)}"
+        )
     event_type = _as_enum(data["event_type"], ChatEventType, "event_type")
     raw_text = data.get("text")
-    raw_call_id = data.get("call_id")
     raw_source_id = data.get("source_id")
     raw_code = data.get("code")
     raw_safe_message = data.get("safe_message")
@@ -207,15 +175,6 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         turn_id=_require_string(data["turn_id"], "turn_id"),
         event_type=event_type,
         text=raw_text if isinstance(raw_text, str) else None,
-        name=(
-            _as_enum(data["name"], ChatToolChoice, "name") if data.get("name") is not None else None
-        ),
-        call_id=raw_call_id if isinstance(raw_call_id, str) else None,
-        action_plan=(
-            _as_mapping(data["action_plan"], "action_plan")
-            if data.get("action_plan") is not None
-            else None
-        ),
         memory_type=(
             _as_enum(data["memory_type"], MemoryCitationType, "memory_type")
             if data.get("memory_type") is not None
