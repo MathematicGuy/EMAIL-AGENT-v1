@@ -37,3 +37,11 @@ tmp_pytest/
 .runlogs/
 .playwright-cli/
 node_modules/
+
+# Frontend dependencies, build output, and local environment
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+

@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -20,6 +21,49 @@ def redis_url(environ: Mapping[str, str] | None = None) -> str:
     """Redis connection URL (V1-H T5.2); empty keeps BackgroundTasks dispatch."""
     source = os.environ if environ is None else environ
     return source.get("REDIS_URL", "").strip()
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeIngestionSettings:
+    """Configuration for the administrator-operated knowledge ingestion CLI."""
+
+    api_key: str = field(repr=False)
+    ocr_enabled: bool
+    model: str
+    timeout_seconds: int
+    max_attempts: int
+    max_bytes: int
+    max_pdf_pages: int
+    max_ocr_pages: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "KnowledgeIngestionSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+
+        ocr_enabled = _boolean(environ, "KNOWLEDGE_INGEST_OCR_ENABLED", True)
+        api_key = environ.get("MISTRAL_API_KEY", "").strip()
+        if ocr_enabled and (not api_key or api_key.startswith("replace-with-")):
+            raise ValueError("MISTRAL_API_KEY must be configured when OCR is enabled")
+        return cls(
+            api_key=api_key,
+            ocr_enabled=ocr_enabled,
+            model=_non_empty_value(
+                environ, "KNOWLEDGE_INGEST_MODEL", "mistral-ocr-latest"
+            ),
+            timeout_seconds=_positive_int(environ, "KNOWLEDGE_INGEST_TIMEOUT_SECONDS", 60),
+            max_attempts=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_ATTEMPTS", 3),
+            max_bytes=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_BYTES", 26_214_400),
+            max_pdf_pages=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_PDF_PAGES", 100),
+            max_ocr_pages=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_OCR_PAGES", 100),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +144,7 @@ class GmailSettings:
     client_id: str = field(repr=False)
     client_secret: str = field(repr=False)
     redirect_uri: str
+    frontend_url: str | None
     scopes: tuple[str, ...]
     connection_db_path: Path
     token_encryption_key: str = field(repr=False)
@@ -128,6 +173,18 @@ class GmailSettings:
         ).strip()
         if not redirect_uri.startswith(("http://localhost", "https://")):
             raise ValueError("GMAIL_REDIRECT_URI must use HTTPS, except for localhost")
+        frontend_url = environ.get("FRONTEND_URL", "").strip().rstrip("/") or None
+        if frontend_url is not None:
+            frontend_parts = urlsplit(frontend_url)
+            secure_remote = frontend_parts.scheme == "https" and bool(
+                frontend_parts.hostname
+            )
+            local_http = frontend_parts.scheme == "http" and frontend_parts.hostname in {
+                "localhost",
+                "127.0.0.1",
+            }
+            if not (secure_remote or local_http):
+                raise ValueError("FRONTEND_URL must use HTTPS, except for localhost")
         scopes = tuple(environ.get("GMAIL_SCOPES", GMAIL_READONLY_SCOPE).split())
         if scopes != (GMAIL_READONLY_SCOPE,):
             raise ValueError("Gmail v1 must use only the gmail.readonly scope")
@@ -135,6 +192,7 @@ class GmailSettings:
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,
+            frontend_url=frontend_url,
             scopes=scopes,
             connection_db_path=Path(environ.get("GMAIL_CONNECTION_DB_PATH", ".data/mail_todo.db")),
             token_encryption_key=encryption_key,
@@ -294,6 +352,13 @@ def _boolean(environ: Mapping[str, str], name: str, default: bool) -> bool:
     if value not in {"true", "false"}:
         raise ValueError(f"{name} must be true or false")
     return value == "true"
+
+
+def _non_empty_value(environ: Mapping[str, str], name: str, default: str) -> str:
+    value = environ.get(name, default).strip()
+    if not value or value.startswith("replace-with-"):
+        raise ValueError(f"{name} must be configured")
+    return value
 
 
 def _required_secret(environ: Mapping[str, str], name: str) -> str:

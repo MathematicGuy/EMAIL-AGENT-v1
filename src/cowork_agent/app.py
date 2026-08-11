@@ -6,6 +6,7 @@ import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
@@ -90,13 +91,11 @@ from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
-from cowork_agent.persistence.repositories.local import (
-    InMemoryResultRepository,
-    InMemoryRunRepository,
-)
+from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
 )
+from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 from .api.chat import create_chat_router
@@ -198,7 +197,11 @@ def create_app() -> FastAPI:
                     settings.connection_db_path.parent / "tasks.db"
                 )
                 await task_repository.initialize()
-                run_repository = InMemoryRunRepository()
+                sqlite_run_repository = SQLiteRunRepository(
+                    settings.connection_db_path.parent / "runs.db"
+                )
+                await sqlite_run_repository.initialize()
+                run_repository = sqlite_run_repository
                 app.state.outbox_repository = InMemoryOutbox()
                 app.state.chat_profile_repository = None
                 app.state.pg_pool = None
@@ -316,23 +319,31 @@ def create_app() -> FastAPI:
         service = _connection_service(request)
         return RedirectResponse(service.begin(), status_code=302)
 
-    @app.get("/v1/mail-todo/oauth/gmail/callback")
+    @app.get("/v1/mail-todo/oauth/gmail/callback", response_model=None)
     async def gmail_callback(
         request: Request,
         state: str,
         code: str | None = None,
         error: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | RedirectResponse:
+        settings = _gmail_settings(request)
         if error:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "denied")
             raise HTTPException(status_code=400, detail=f"Google OAuth was denied: {error}")
         if not code:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "error")
             raise HTTPException(status_code=400, detail="Missing OAuth authorization code")
-        settings = _gmail_settings(request)
         authorization_response = f"{settings.redirect_uri}?{request.url.query}"
         try:
             connection = await _connection_service(request).complete(state, authorization_response)
         except ValueError as exc:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "error")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if settings.frontend_url:
+            return _frontend_mail_redirect(settings.frontend_url, "connected")
         return {
             "status": "connected",
             "connection": _public_connection(connection),
@@ -410,6 +421,28 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="Gmail reauthorization required") from exc
         except MailboxTemporaryError as exc:
             raise HTTPException(status_code=503, detail="Gmail is temporarily unavailable") from exc
+
+    @app.get("/v1/mail-todo/runs")
+    async def list_digest_runs(
+        request: Request,
+        mailbox_connection_id: str = Query(alias="mailboxConnectionId", min_length=1),
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        connection_repository: SQLiteMailboxConnectionRepository = (
+            request.app.state.connection_repository
+        )
+        connection = await connection_repository.get(mailbox_connection_id)
+        if connection is None:
+            raise HTTPException(status_code=404, detail="Gmail connection not found")
+        principal = principal_for_connection(connection)
+        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        repository = cast(RunRepository, request.app.state.run_repository)
+        runs = await repository.list_recent(
+            user_id=principal.user_id,
+            mailbox_connection_id=mailbox_connection_id,
+            limit=limit,
+        )
+        return {"runs": [_run_history_item(run) for run in runs]}
 
     @app.post("/v1/mail-todo/runs", status_code=202)
     async def create_digest_run(
@@ -644,6 +677,38 @@ def _public_connection(connection: Any) -> dict[str, Any]:
         "status": connection.status,
         "createdAt": connection.created_at.isoformat(),
     }
+
+
+def _run_history_item(run: DigestRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "mailboxConnectionId": run.mailbox_connection_id,
+        "status": run.status.value,
+        "createdAt": run.created_at.isoformat() if run.created_at else None,
+        "completedAt": run.completed_at.isoformat() if run.completed_at else None,
+        "progress": {
+            "emailsMatched": run.emails_matched,
+            "emailsProcessed": run.emails_processed,
+            "emailsToProcess": min(run.emails_matched, run.max_emails),
+            "maxEmails": run.max_emails,
+            "actionItemsCount": run.action_items_count,
+        },
+        "error": (
+            {"code": run.error_code, "message": run.error_message_safe}
+            if run.error_code
+            else None
+        ),
+    }
+
+
+def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse:
+    parts = urlsplit(frontend_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({"page": "dashboard", "view": "mail", "gmail": outcome})
+    location = urlunsplit(
+        (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), "dashboard")
+    )
+    return RedirectResponse(location, status_code=302)
 
 
 def main() -> None:

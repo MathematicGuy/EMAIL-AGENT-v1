@@ -8,7 +8,7 @@ query parameters.
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -45,6 +45,7 @@ def principal_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("OAUTH_STATE_SECRET", "principal-state-secret-at-least-32-characters")
     monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("FRONTEND_URL", "")
 
 
 @asynccontextmanager
@@ -142,6 +143,54 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
     asyncio.run(scenario())
 
 
+def test_oauth_callback_redirects_to_configured_frontend(
+    principal_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FRONTEND_URL", "http://localhost:5173")
+
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            settings = app.state.gmail_settings
+            app.state.gmail_connections = GmailConnectionService(
+                settings,
+                app.state.connection_repository,
+                TokenCipher(settings.token_encryption_key),
+                OAuthStateManager(
+                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                ),
+                FakeOAuthDriver(),
+            )
+            connect = await client.get(
+                "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
+            )
+            state = parse_qs(urlparse(connect.headers["location"]).query)["state"][0]
+            callback = await client.get(
+                "/v1/mail-todo/oauth/gmail/callback",
+                params={"state": state, "code": "test-code"},
+                follow_redirects=False,
+            )
+            assert callback.status_code == 302
+            location = urlparse(callback.headers["location"])
+            assert location.netloc == "localhost:5173"
+            assert location.fragment == "dashboard"
+            assert parse_qs(location.query) == {
+                "page": ["dashboard"],
+                "view": ["mail"],
+                "gmail": ["connected"],
+            }
+
+            denied = await client.get(
+                "/v1/mail-todo/oauth/gmail/callback",
+                params={"state": "safe", "error": "access_denied"},
+                follow_redirects=False,
+            )
+            assert parse_qs(urlparse(denied.headers["location"]).query)["gmail"] == [
+                "denied"
+            ]
+
+    asyncio.run(scenario())
+
+
 def test_no_route_accepts_caller_provided_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, _):
@@ -218,5 +267,66 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
             run = await app.state.run_repository.get(payload["id"])
             assert run is not None
             assert run.user_id == OWNER_EMAIL == connection.email_address
+
+    asyncio.run(scenario())
+
+
+def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
+            await app.state.connection_repository.upsert(connection)
+            now = datetime.now(UTC)
+            older = DigestRun(
+                id="run-old",
+                user_id=OWNER_EMAIL,
+                mailbox_connection_id=CONNECTION_ID,
+                trigger=RunTrigger.ON_DEMAND,
+                status=RunStatus.SUCCEEDED,
+                query="is:unread",
+                idempotency_key="history-old",
+                max_emails=20,
+                action_items_count=1,
+                created_at=now,
+                completed_at=now,
+            )
+            newer = DigestRun(
+                id="run-new",
+                user_id=OWNER_EMAIL,
+                mailbox_connection_id=CONNECTION_ID,
+                trigger=RunTrigger.ON_DEMAND,
+                status=RunStatus.PARTIAL,
+                query="is:unread",
+                idempotency_key="history-new",
+                max_emails=20,
+                emails_matched=3,
+                emails_processed=2,
+                created_at=now + timedelta(seconds=1),
+                completed_at=now + timedelta(seconds=2),
+            )
+            await app.state.run_repository.create(older)
+            await app.state.run_repository.create(newer)
+
+            response = await client.get(
+                "/v1/mail-todo/runs",
+                params={"mailboxConnectionId": CONNECTION_ID, "limit": 1},
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert [run["id"] for run in payload["runs"]] == ["run-new"]
+            assert payload["runs"][0]["progress"] == {
+                "emailsMatched": 3,
+                "emailsProcessed": 2,
+                "emailsToProcess": 3,
+                "maxEmails": 20,
+                "actionItemsCount": 0,
+            }
+            assert "body" not in response.text.lower()
+
+            missing = await client.get(
+                "/v1/mail-todo/runs",
+                params={"mailboxConnectionId": "missing"},
+            )
+            assert missing.status_code == 404
 
     asyncio.run(scenario())

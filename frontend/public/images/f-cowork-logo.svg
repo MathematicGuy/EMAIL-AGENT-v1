@@ -1,0 +1,51 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">F-cowork logo</title>
+  <desc id="desc">Minimal F-cowork logo using warm charcoal, terracotta coral, and soft pearl colors.</desc>
+
+  <defs>
+    <linearGradient id="coralGradient" x1="94" y1="86" x2="224" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E38A6D"/>
+      <stop offset="1" stop-color="#D97757"/>
+    </linearGradient>
+    <filter id="softShadow" x="30" y="30" width="300" height="300" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <!-- Brand mark -->
+  <g filter="url(#softShadow)">
+    <rect x="56" y="56" width="248" height="248" rx="62" fill="#292825"/>
+    <rect x="56.75" y="56.75" width="246.5" height="246.5" rx="61.25" stroke="#33312E" stroke-width="1.5"/>
+
+    <!-- Abstract F / workspace -->
+    <path d="M104 105C104 94.5066 112.507 86 123 86H247C257.493 86 266 94.5066 266 105V114C266 124.493 257.493 133 247 133H165V158H229C239.493 158 248 166.507 248 177V186C248 196.493 239.493 205 229 205H165V256C165 266.493 156.493 275 146 275H123C112.507 275 104 266.493 104 256V105Z" fill="#F3F2EF"/>
+
+    <!-- Coral collaboration panel -->
+    <path d="M104 196L165 160V275H123C112.507 275 104 266.493 104 256V196Z" fill="url(#coralGradient)"/>
+
+    <!-- Connection nodes -->
+    <circle cx="205" cy="235" r="8" fill="#D97757"/>
+    <circle cx="247" cy="235" r="8" fill="#D97757"/>
+    <circle cx="226" cy="259" r="8" fill="#D97757"/>
+    <path d="M212 239L220 252M240 239L232 252M213 235H239" stroke="#D97757" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g>
+    <text x="360" y="194"
+      fill="#F3F2EF"
+      font-family="Geist, Inter, Arial, sans-serif"
+      font-size="92"
+      font-weight="650"
+      letter-spacing="-4">F-cowork</text>
+
+    <text x="365" y="243"
+      fill="#949089"
+      font-family="Geist, Inter, Arial, sans-serif"
+      font-size="24"
+      font-weight="500"
+      letter-spacing="6">WORK BETTER, TOGETHER</text>
+
+    <rect x="360" y="266" width="96" height="7" rx="3.5" fill="#D97757"/>
+  </g>
+</svg>
