@@ -1,5 +1,73 @@
 # Cowork Agent (Email-to-Action-Plan)
 
+## Knowledge ingestion (PDF/DOCX to the RAG corpus)
+
+The RAG corpus is Markdown under `data/extracted/`. Administrators can convert
+local `.docx` and native-text `.pdf` files from a separate source directory
+with the `mail-todo-ingest-knowledge` CLI. This tool is intentionally separate
+from Gmail: raw email bodies and email attachments are never ingested.
+
+### Prerequisites
+
+Install the Python project, then install the local Rust PDF utility. The
+ingestion adapter calls its `detect-pdf` and `pdf2md` commands.
+
+```powershell
+python -m pip install -e ".[dev,gui]"
+cargo install pdf-inspector
+
+# Optional verification: both commands must be on PATH.
+detect-pdf --help
+pdf2md --help
+```
+
+`cargo` is supplied by the [Rust toolchain](https://rustup.rs/). Restart the
+shell after installation if Cargo's bin directory is not yet on `PATH`.
+
+### Ingest documents
+
+Place administrator-approved source files in `data/raw/` (or another source
+directory outside the output directory). The CLI recursively discovers only
+`.pdf` and `.docx` regular files, rejects symlinks, creates stable Markdown
+names, and stores hashes/status in `data/extracted/ingestion-manifest.json`.
+
+```powershell
+# Native-text PDFs and DOCX only. OCR is not active in the current runtime.
+$env:KNOWLEDGE_INGEST_OCR_ENABLED = "false"
+
+# Inspect what would be processed without writing files.
+mail-todo-ingest-knowledge --source data/raw --output data/extracted --dry-run
+
+# Convert changed files to Markdown. Unchanged files are skipped by manifest hash.
+mail-todo-ingest-knowledge --source data/raw --output data/extracted
+
+# Re-extract every source file, replacing its generated Markdown output.
+mail-todo-ingest-knowledge --source data/raw --output data/extracted --force
+```
+
+PDFs are first classified by `pdf-inspector`. Native-text pages are converted
+locally and carry `<!-- Page N -->` markers in their Markdown output. A scanned
+or mixed PDF that needs OCR currently reports `mistral_not_configured` and
+writes no partial document; do not treat `KNOWLEDGE_INGEST_OCR_ENABLED=true` as
+an enabled OCR backend yet.
+
+After successful ingestion, restart the API/worker. If Qdrant is enabled and
+already contains a collection, request a deliberate full re-index once:
+
+```powershell
+$env:QDRANT_REINDEX = "true"
+mail-todo-api
+
+# After the collection has been rebuilt, reset this to avoid rebuilding it on
+# every subsequent startup.
+$env:QDRANT_REINDEX = "false"
+```
+
+`QDRANT_REINDEX=true` recreates the entire collection from the committed
+Markdown corpus; it is not an incremental update. See
+[`docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`](docs/evaluations/email-rag/EMAIL-RAG-STATUS.md)
+for the current RAG runtime and known ingestion limitations.
+
 Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc. Runtime hiện tại tích hợp classifier/router riêng và Company Knowledge RAG truy hồi-only cục bộ. Hệ thống bộ nhớ bốn loại (Working, Profile, Episodic, Semantic RAG) được phân tách thành nền tảng cho **AI Chat Assistant**, trong đó quy trình xử lý email đóng vai trò công cụ thực thi **`@Email` Skill Tool**.
 
 > **Trạng thái tài liệu — đọc trước khi dùng:** README này phân biệt **runtime hiện tại** và **kiến trúc mục tiêu**. Local V1-M3 đã hoàn thành khung Email RAG với classifier/router, `SemanticMemoryPort` và `HybridSemanticMemory` (in-memory dense search, BM25, RRF trên `data/extracted/*.md`, cùng Jina reranking tùy chọn). Qdrant và hệ thống bộ nhớ bốn loại được căn chỉnh làm nền tảng cho **AI Chat Assistant**, hỗ trợ công cụ thực thi `@Email` trong chat. Phân tích chi tiết: [`docs/master-comparison.md`](docs/master-comparison.md) và phạm vi căn chỉnh bộ nhớ: [`docs/references/doc-update-scope-memory-chat.md`](docs/references/doc-update-scope-memory-chat.md).
