@@ -881,6 +881,41 @@ def test_build_retriever_returns_the_requested_stack() -> None:
     assert isinstance(_build("hybrid"), HybridSemanticMemory)
 
 
+def test_qdrant_evaluation_retriever_builds_in_memory_index_and_delegates() -> None:
+    """The evaluation Qdrant path is usable only after its one-time ingestion."""
+    module = load_module()
+    from cowork_agent.domain.target_contracts import (
+        RetrievalFilters,
+        RetrievalLimits,
+        RetrievalStatus,
+        SemanticRetrievalRequest,
+    )
+    from cowork_agent.integrations.rag.fakes import HashingEmbedder
+
+    retriever = module.build_retriever(
+        "qdrant", _tiny_corpus(), HashingEmbedder(), top_k=5, min_score=0.2
+    )
+    assert isinstance(retriever, module.QdrantEvaluationRetriever)
+    request = SemanticRetrievalRequest(
+        run_id="t",
+        tenant_id="local",
+        user_id="t",
+        query="hộ chiếu",
+        knowledge_gaps=(),
+        filters=RetrievalFilters(tenant_scope="local", document_status=()),
+        limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
+    )
+
+    with pytest.raises(RuntimeError, match="build_index"):
+        asyncio.run(retriever.retrieve(request))
+
+    asyncio.run(retriever.build_index())
+    response = asyncio.run(retriever.retrieve(request))
+
+    assert response.retrieval_status is RetrievalStatus.SUCCESS
+    assert response.chunks[0].document_id == "doc-b"
+
+
 def test_rerank_is_inert_unless_the_flag_is_passed() -> None:
     module = load_module()
     from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
@@ -904,7 +939,7 @@ def test_rerank_without_hybrid_exits_two() -> None:
 
 def test_every_retriever_runs_through_one_measurement_path(tmp_path: Path) -> None:
     fixture = _write_covering_fixture(tmp_path)
-    for retriever in ("dense", "bm25", "hybrid"):
+    for retriever in ("dense", "bm25", "hybrid", "qdrant"):
         output = tmp_path / f"{retriever}.json"
         result = subprocess.run(
             [
@@ -927,6 +962,12 @@ def test_every_retriever_runs_through_one_measurement_path(tmp_path: Path) -> No
         report = json.loads(output.read_text(encoding="utf-8"))
         assert report["retriever"] == retriever
         assert report["reranker"] is None
+        expected_score_kind = "bm25" if retriever == "bm25" else (
+            "rrf" if retriever == "hybrid" else "dense_cosine"
+        )
+        assert {
+            case["configured_score_kind"] for case in report["score_evidence"]["cases"]
+        } == {expected_score_kind}
         # Same shape for every stack, so the reports are directly comparable.
         assert set(report["document_level"]) == {"hit_at_1", "hit_at_3", "mrr", "recall_at_5"}
         assert report["by_probe"].keys() == {"lexical", "semantic", "mixed"}

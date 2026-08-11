@@ -12,7 +12,7 @@ saturates for any retriever, so an aggregate alone cannot tell dense, BM25
 and hybrid apart. An aggregate that improves while `semantic` regresses is a
 failure, and only the sliced report can see it.
 
-All three retrievers — dense, bm25 and hybrid — flow through one measurement
+All four retrievers — dense, bm25, hybrid and qdrant — flow through one measurement
 path, so their reports are directly comparable.
 
 Runs offline and deterministically with the HashingEmbedder; skips
@@ -68,7 +68,8 @@ LEVELS: tuple[str, ...] = (DOCUMENT_LEVEL, SECTION_LEVEL)
 DENSE = "dense"
 BM25 = "bm25"
 HYBRID = "hybrid"
-RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID)
+QDRANT = "qdrant"
+RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID, QDRANT)
 
 #: RetrievalStatus.NO_RESULTS, duplicated so the metric layer imports nothing.
 NO_RESULTS_STATUS = "no_results"
@@ -743,6 +744,52 @@ class Bm25OnlyRetriever:
         )
 
 
+class QdrantEvaluationRetriever:
+    """In-memory production Qdrant adapter for retrieval evaluation."""
+
+    _COLLECTION_NAME = "retrieval-eval"
+
+    def __init__(
+        self,
+        documents: Sequence[KnowledgeDocument],
+        embedder: EmbeddingPort,
+        *,
+        top_k_default: int,
+        min_score_default: float,
+    ) -> None:
+        self._documents = documents
+        self._embedder = embedder
+        self._top_k_default = top_k_default
+        self._min_score_default = min_score_default
+        self._memory: Any | None = None
+
+    async def build_index(self) -> None:
+        """Ingest the corpus once into an ephemeral Qdrant collection."""
+        if self._memory is not None:
+            return
+
+        from qdrant_client import AsyncQdrantClient
+
+        from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
+
+        client = AsyncQdrantClient(":memory:")
+        await ingest_corpus(client, self._COLLECTION_NAME, self._documents, self._embedder)
+        self._memory = QdrantSemanticMemory(
+            client,
+            self._COLLECTION_NAME,
+            self._embedder,
+            top_k_default=self._top_k_default,
+            min_score_default=self._min_score_default,
+        )
+
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
+        if self._memory is None:
+            raise RuntimeError(
+                "QdrantEvaluationRetriever.build_index() must be called before retrieve()"
+            )
+        return await self._memory.retrieve(request)
+
+
 class Retriever(Protocol):
     """The slice of SemanticMemoryPort this harness drives."""
 
@@ -763,6 +810,13 @@ def build_retriever(
     """Construct the named retrieval stack behind a single interface."""
     if name == BM25:
         return Bm25OnlyRetriever(documents, top_k_default=top_k)
+    if name == QDRANT:
+        return QdrantEvaluationRetriever(
+            documents,
+            embedder,
+            top_k_default=top_k,
+            min_score_default=min_score,
+        )
     if name == HYBRID:
         from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 
@@ -1113,6 +1167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     DENSE: DENSE_COSINE_SCORE,
                     BM25: BM25_SCORE,
                     HYBRID: RRF_SCORE,
+                    QDRANT: DENSE_COSINE_SCORE,
                 }[args.retriever]
             ),
             reranker_requested=args.rerank,
