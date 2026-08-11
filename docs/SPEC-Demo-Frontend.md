@@ -3,10 +3,10 @@
 | Field | Value |
 |---|---|
 | Document status | Active implementation spec — current-session AI Chat may start; full showcase remains gated on the explicit API gaps below and V2-M6 acceptance |
-| Version | 2.2 (Aligned to accepted V2-M3/V2-M4/V2-M5 runtime contracts) |
-| Date | 2026-08-11 |
+| Version | 2.3 (Increment A chat slice built against the accepted V2-M3/V2-M4/V2-M5 runtime contracts) |
+| Date | 2026-08-12 |
 | Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
-| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: not yet implemented.** |
+| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: §3.4 boundary BUILT and unit-verified; §9 live browser verification NOT YET RUN; Increment B locked.** |
 | Depends on | PRD-v1 and V2-M1–V2-M5 (DONE 100%); V2-M6 (ACTIVE 55%); missing frontend-facing read/profile/proposal contracts listed in §3.3 and §7 |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
@@ -81,10 +81,10 @@ Increment B screens are feature-flagged off until their backend endpoints exist;
 | **Increment A — Connect** | Gmail OAuth, Mailbox Connections list, Unread preview | **V1-M1** (DONE 100%) | `GET /v1/mail-todo/connections`, `/oauth/gmail/*`, `/unread-preview` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Knowledge** | RAG corpus status, document list, ad-hoc grounded query | **V1-M3** (DONE 100%) | `GET /v1/mail-todo/knowledge/ready`, `/documents`, `POST /chat` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Run Audit** | Standalone Email Agent run metadata & task results | **V1-M4** (DONE 100%) | `GET /v1/mail-todo/runs/{id}`, `/result`, `/tasks` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
-| **Increment A — AI Chat Assistant** | Multi-turn chat thread and streaming responses in the active browser session | **V2-M1–V2-M5** (DONE) | `POST /sessions` and `POST /messages` (**Implemented and runtime-bound**); `GET /sessions` and `GET /messages` (**Missing**) | **READY FOR CURRENT-SESSION SLICE** — configured Gemini/Groq/Faucet replies and typed SSE are live; persisted/reloadable session history remains blocked. |
+| **Increment A — AI Chat Assistant** | Multi-turn chat thread and streaming responses in the active browser session | **V2-M1–V2-M5** (DONE) | `POST /sessions` and `POST /messages` (**Implemented and runtime-bound**); `GET /sessions` and `GET /messages` (**Missing**) | **BUILT (current-session slice)** — the Streamlit thread, streaming, badges, and retry are implemented per §3.5 and unit-verified; persisted/reloadable session history remains blocked on the GET contracts. |
 | **Increment B — Preferences** | Persona/profile editor (language, tone, brevity, rules) | **V2-M2** (DONE repo layer) | Profile REST APIs (`GET/POST/PUT/DELETE /v1/cowork/chat/profile`) (**Missing**) | **BLOCKED** — DB repository landed in `PostgresChatProfileRepository`, but HTTP router is missing. |
 | **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task controls | **V2-M3/V2-M4** (DONE) | Originating-session approve/complete/reject endpoints (**Implemented**) | **PARTIAL** — lifecycle transport is ready, but a structured task-proposal SSE/read payload is missing; the client must not parse assistant prose to build a task card. |
-| **Increment B — Memory Transparency** | In-thread badges for declarative, episodic, and semantic sources | **V2-M5** (DONE) | Typed `memory_citation` SSE with `memory_type` and opaque `source_id` (**Implemented**) | **READY FOR BADGES** — detailed stored-memory views remain blocked on read APIs. |
+| **Increment B — Memory Transparency** | In-thread badges for declarative, episodic, and semantic sources | **V2-M5** (DONE) | Typed `memory_citation` SSE with `memory_type` and opaque `source_id` (**Implemented**) | **BUILT (badges only)** — in-thread badges render from typed `memory_citation`; detailed stored-memory views remain blocked on read APIs. |
 | **Increment B — Episode Insight** | Provenance view for chat summaries and TaskEpisodes | **V2-M3** (DONE), **V2-M6** (ACTIVE 55%) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Missing**) | **BLOCKED** — no frontend-safe episode listing/read contract. |
 | **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2/V2-M3** (DONE), **V2-M6** (ACTIVE) | Originating-session single-episode delete (**Implemented**); profile delete and list-refresh APIs (**Missing**) | **PARTIAL** — current-thread episode deletion is callable once an episode ID is received; full memory administration remains blocked. |
 
@@ -103,6 +103,32 @@ The first frontend slice may start now and must stay inside this contract:
 This boundary is intentionally narrower than the final showcase. It permits real
 frontend progress while preventing client-side storage or prose parsing from
 becoming an accidental backend.
+
+### 3.5 As-built status of the §3.4 boundary
+
+All six boundary clauses are implemented in `src/cowork_agent/gui/`:
+
+| Clause | Where | Status |
+|---|---|---|
+| 1. One server chat session per browser session | `app.py::_ensure_chat_session`, `chat_client.create_chat_session` | **Built** — created once, cached in `st.session_state`, reset only by the explicit "new session" control. |
+| 2. Idempotent messages, ordered `delta` rendering | `chat_client.stream_chat_turn`, `ChatTurnAccumulator`, `app.py::_run_chat_turn` | **Built** — body is exactly `session_id` / `user_message` / `idempotency_key`; deltas dedupe by `event_id` and append in arrival order. |
+| 3. Declarative / episodic / semantic badges | `chat_client.MEMORY_BADGES`, `app.py::memory_badges_html` | **Built** — icon + localized text per kind, repeat count suffix; `source_id` is never rendered. |
+| 4. Terminal state and safe retry | `ChatTurnAccumulator.is_terminal`, `app.py::chat_error_text` | **Built** — a failed turn keeps its idempotency key in `chat_pending_turn`, and the retry control reuses it; transport faults become a synthetic `error` event, never an exception in the DOM. |
+| 5. Session ID as browser-session UI state only | `st.session_state` keys `chat_session_id` / `chat_messages` / `chat_pending_turn` | **Built** — no cookie, no localStorage, no file, no DB. |
+| 6. No unbuilt capability claimed | `app.py::_screen_memory`, `MISSING_INCREMENT_B_ENDPOINTS` | **Built** — the Memory screen renders a lock notice plus the literal list of missing §7 contracts and no mocked profile, episode, or task-card UI (AGENTS.md invariant 4). |
+
+Out of scope of the built slice, by the same boundary: reloadable history,
+profile editing, episode browsing, and the structured task-proposal card.
+
+Fail-closed parsing is the demo's only trust boundary against the stream:
+`chat_client.parse_stream_event` drops any frame whose `event_type` is unknown
+or whose variant payload is missing, so a malformed frame can never render as
+assistant content.
+
+Automated coverage: `tests/unit/gui/test_chat_client.py` (transport, SSE
+framing, accumulation, failure mapping) and `tests/unit/gui/test_app.py`
+(presentation helpers, string-catalog parity, escaping). Ruff and mypy are
+clean over `src/cowork_agent/gui/` and `tests/unit/gui/`.
 
 ## 4. Technology decision
 
@@ -265,10 +291,25 @@ Parsing assistant text is prohibited.
 16. Episodes show provenance fields; deleted memory no longer appears after
     refresh.
 
+### 8.1 Current status per criterion
+
+| Criteria | Status |
+|---|---|
+| 1, 5, 6 (chat path) | **Implemented, unit-verified only.** Session creation, ordered turns, typed-SSE-only rendering, and backend-down / stream-failed / empty-reply copy are covered by `tests/unit/gui`. Final sign-off needs the §9 browser run. |
+| 2, 3, 4 (task proposal card) | **Blocked by contract.** Gated on the structured proposal event or read DTO in §7.1; no card is built and no prose is parsed. |
+| 7, 9, 10, 11 (Connect, Knowledge, Run audit) | **Pre-existing screens, unchanged by this slice.** Still awaiting the §9 browser run. |
+| 8 (no raw email or prompt leakage) | **By construction** — the demo stores only role, text, and `(memory_type, source_id)` pairs in `st.session_state`. Must still be confirmed against the live DOM, console, network history, localStorage, and sessionStorage per §9. |
+| 15 (memory badges without payloads) | **Implemented** — badges disclose the source kind only; `source_id` is never rendered. |
+| 12, 13, 14, 16 | **Blocked** — Increment B REST contracts are missing; the Memory screen stays locked and lists them. |
+
 ## 9. Live verification plan
 
 Performed with `frontend-ui-engineering` plus an available real-browser
-verification lane (Chrome DevTools or Playwright):
+verification lane (Chrome DevTools or Playwright).
+
+**Status: not yet run.** The steps below are still open for the built §3.4
+slice; nothing in this spec may be marked verified until they are executed
+against a running backend and GUI.
 
 1. Start backend (`mail-todo-api`) and GUI (`python scripts/run_gui.py`).
 2. Open the UI in a real browser, snapshot the accessible tree, and check
