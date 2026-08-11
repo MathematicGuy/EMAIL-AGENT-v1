@@ -9,22 +9,20 @@ from enum import Enum, StrEnum
 from types import MappingProxyType
 from typing import TypeVar
 
-CHAT_CONTRACTS_VERSION = "1.0.0"
+CHAT_CONTRACTS_VERSION = "2.0.0"
 AI_CHAT_FEATURE = "ai_chat"
-
-
-class ChatToolChoice(StrEnum):
-    """Allow-listed tools a Chat Controller may select for a turn."""
-
-    EMAIL = "@Email"
+MAX_CHAT_SUMMARY_LENGTH = 500
+MAX_CHAT_MESSAGE_LENGTH = 4_000
+MAX_RETRIEVAL_QUERY_LENGTH = 2_000
+MAX_EPISODIC_RETRIEVAL_ITEMS = 20
+MAX_SEMANTIC_RETRIEVAL_ITEMS = 20
+MAX_RETRIEVAL_TIMEOUT_MS = 10_000
 
 
 class ChatEventType(StrEnum):
     """Discriminant for one server-sent chat event."""
 
     DELTA = "delta"
-    TOOL_CALL = "tool_call"
-    TOOL_OUTPUT = "tool_output"
     MEMORY_CITATION = "memory_citation"
     COMPLETED = "completed"
     ERROR = "error"
@@ -58,7 +56,8 @@ class DegradedMemorySource(StrEnum):
 class EpisodeSourceType(StrEnum):
     """Provenance for a durable task-derived episode."""
 
-    SYSTEM_GENERATED_CHAT_TOOL_OUTPUT = "system_generated_chat_tool_output"
+    SYSTEM_GENERATED_CHAT_TASK = "system_generated_chat_task"
+    SYSTEM_GENERATED_CHAT_SUMMARY = "system_generated_chat_summary"
     USER_APPROVED_TASK = "user_approved_task"
 
 
@@ -68,6 +67,13 @@ _E = TypeVar("_E", bound=Enum)
 def _require_string(value: object, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_bounded_string(value: object, name: str, maximum_length: int) -> str:
+    value = _require_string(value, name)
+    if len(value) > maximum_length:
+        raise ValueError(f"{name} must not exceed {maximum_length} characters")
     return value
 
 
@@ -159,12 +165,25 @@ _RAW_EMAIL_SHAPED_KEYS = frozenset(
     }
 )
 
+_TOOL_PAYLOAD_SHAPED_KEYS = frozenset(
+    {
+        "tool_payload",
+        "tool_call",
+        "tool_output",
+        "tool_result",
+    }
+)
+
 
 def _reject_raw_email_shaped_keys(value: object) -> None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
-            if isinstance(key, str) and key.lower().replace("-", "_") in _RAW_EMAIL_SHAPED_KEYS:
-                raise ValueError("raw email-shaped keys are not allowed in memory contracts")
+            if isinstance(key, str):
+                normalized_key = key.lower().replace("-", "_")
+                if normalized_key in _RAW_EMAIL_SHAPED_KEYS:
+                    raise ValueError("raw email-shaped keys are not allowed in memory contracts")
+                if normalized_key in _TOOL_PAYLOAD_SHAPED_KEYS:
+                    raise ValueError("tool payload-shaped keys are not allowed in memory contracts")
             _reject_raw_email_shaped_keys(nested)
     elif isinstance(value, Sequence) and not isinstance(value, str):
         for nested in value:

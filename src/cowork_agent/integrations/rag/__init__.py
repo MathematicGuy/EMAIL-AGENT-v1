@@ -1,5 +1,6 @@
 """Semantic Memory (RAG) adapters."""
 
+from .chat_memory import SemanticChatMemoryAdapter
 from .hybrid import HybridSemanticMemory
 from .memory import InRepoSemanticMemory
 from .mmr import mmr_diversify
@@ -15,7 +16,9 @@ __all__ = [
     "QdrantSemanticMemory",
     "QueryTransformerPort",
     "RuleBasedQueryTransformer",
+    "SemanticChatMemoryAdapter",
     "ingest_corpus",
     "is_retrieval_query",
     "mmr_diversify",
 ]
+
