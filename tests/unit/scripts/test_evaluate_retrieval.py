@@ -1003,6 +1003,52 @@ def test_qdrant_evaluation_retriever_constructs_once_with_defaults_and_forwards_
     assert forwarded_requests[0] is request
 
 
+def test_qdrant_evaluator_raises_when_adapter_converts_query_failure_to_no_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Qdrant outage must not enter the report as an abstention or miss."""
+    module = load_module()
+    import qdrant_client
+
+    from cowork_agent.domain.target_contracts import (
+        RetrievalFilters,
+        RetrievalLimits,
+        SemanticRetrievalRequest,
+    )
+    from cowork_agent.integrations.rag import qdrant as production_qdrant
+    from cowork_agent.integrations.rag.fakes import HashingEmbedder
+
+    class FailingQueryClient:
+        def __init__(self, _location: str) -> None:
+            pass
+
+        async def query_points(self, **_kwargs: object) -> object:
+            raise ValueError("qdrant service unavailable")
+
+    async def fake_ingest(*_args: object, **_kwargs: object) -> int:
+        return 2
+
+    monkeypatch.setattr(qdrant_client, "AsyncQdrantClient", FailingQueryClient)
+    monkeypatch.setattr(production_qdrant, "ingest_corpus", fake_ingest)
+
+    retriever = module.QdrantEvaluationRetriever(
+        _tiny_corpus(), HashingEmbedder(), top_k_default=5, min_score_default=0.2
+    )
+    request = SemanticRetrievalRequest(
+        run_id="t",
+        tenant_id="local",
+        user_id="t",
+        query="passport",
+        knowledge_gaps=(),
+        filters=RetrievalFilters(tenant_scope="local", document_status=()),
+        limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
+    )
+    asyncio.run(retriever.build_index())
+
+    with pytest.raises(module.QdrantEvaluationError, match="Qdrant query failed"):
+        asyncio.run(retriever.retrieve(request))
+
+
 def test_rerank_is_inert_unless_the_flag_is_passed() -> None:
     module = load_module()
     from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
@@ -1090,7 +1136,7 @@ def test_dry_run_writes_report_without_provider_keys(tmp_path: Path) -> None:
     assert report["case_count"] == len(json.loads(fixture.read_text(encoding="utf-8")))
     for level in ("document_level", "section_level"):
         assert set(report[level]) >= {"hit_at_1", "hit_at_3", "mrr", "recall_at_5"}
-    assert report["section_level"]["excluded_case_count"] == 0
+    assert report["section_level"]["excluded_case_count"] == 12
     assert report["by_probe"].keys() == {"lexical", "semantic", "mixed"}
     assert report["abstention"]["case_count"] == 1
     assert set(report["latency_ms"]) == {"p50", "p95"}
@@ -1112,6 +1158,24 @@ def test_dry_run_writes_report_without_provider_keys(tmp_path: Path) -> None:
         assert case["query"] not in serialized
     assert '"query"' not in serialized
     assert '"text"' not in serialized
+
+
+def test_dry_run_real_fixture_report_has_one_hundred_cases_and_seventeen_documents(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "retrieval-eval-real-fixture.json"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--dry-run", "--output", str(output)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_subprocess_env(),
+    )
+    assert result.returncode == 0, result.stderr
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["case_count"] == 100
+    assert report["corpus"]["document_count"] == 17
 
 
 def _run_gated_eval(tmp_path: Path, *gate_flags: str) -> subprocess.CompletedProcess[str]:

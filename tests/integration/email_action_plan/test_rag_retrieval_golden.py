@@ -98,9 +98,12 @@ def _parameters() -> list[ParameterSet]:
 @pytest.fixture(scope="module")
 def semantic_memory() -> InRepoSemanticMemory:
     """One built index shared by every case; the corpus is static."""
-    memory = InRepoSemanticMemory(
-        load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID), HashingEmbedder()
+    documents = tuple(
+        document
+        for document in load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
+        if document.document_id in LEGACY_EMAIL_DOCUMENT_IDS
     )
+    memory = InRepoSemanticMemory(documents, HashingEmbedder())
     asyncio.run(memory.build_index())
     return memory
 
@@ -176,6 +179,13 @@ def test_email_cases_cover_exactly_the_legacy_email_documents() -> None:
         for document_id in case.expected_document_ids
     }
     assert covered == LEGACY_EMAIL_DOCUMENT_IDS
+
+
+def test_email_e2e_memory_contains_only_the_legacy_six_document_corpus(
+    semantic_memory: InRepoSemanticMemory,
+) -> None:
+    indexed_document_ids = {chunk.document_id for chunk in semantic_memory._chunks}
+    assert indexed_document_ids == LEGACY_EMAIL_DOCUMENT_IDS
 
 
 def test_selected_email_e2e_cases_are_from_the_legacy_query_range() -> None:

@@ -5,6 +5,7 @@ under ``data/extracted``; rule 5 is the anti-rot guard that stops the golden
 set from silently scoring 0.0 after a re-chunk.
 """
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -25,11 +26,29 @@ _spec.loader.exec_module(loader)
 
 RetrievalFixtureError = loader.RetrievalFixtureError
 
+LEGACY_CASE_SNAPSHOT_SHA256 = (
+    "656ab75870a3f3f9b3de0486debd3e0f835f2a4ef03fa97191e7950df00c1a7f"
+)
+
 
 def _write(tmp_path: Path, payload: object) -> Path:
     target = tmp_path / "retrieval_golden.json"
     target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return target
+
+
+def _repository_payload() -> list[dict[str, object]]:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    assert isinstance(payload, list)
+    return payload
+
+
+def _load_as_repository_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: object
+) -> None:
+    target = _write(tmp_path, payload)
+    monkeypatch.setattr(loader, "DEFAULT_FIXTURE_PATH", target)
+    loader.load_retrieval_golden()
 
 
 def _valid_case(**overrides: object) -> dict[str, object]:
@@ -156,9 +175,64 @@ def test_invalid_json_is_rejected(tmp_path: Path) -> None:
 # --- corpus-backed rules --------------------------------------------------
 
 
-def test_repository_fixture_requires_one_hundred_cases() -> None:
+def test_repository_fixture_requires_one_hundred_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _repository_payload()[:-1]
+
     with pytest.raises(RetrievalFixtureError, match="exactly 100"):
-        loader._validate_repository_fixture_contract((), FIXTURE_PATH)
+        _load_as_repository_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_legacy_case_objects_match_the_immutable_snapshot() -> None:
+    serialized = json.dumps(
+        _repository_payload()[:32],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    assert hashlib.sha256(serialized).hexdigest() == LEGACY_CASE_SNAPSHOT_SHA256
+
+
+def test_repository_fixture_rejects_changed_legacy_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _repository_payload()
+    payload[0]["query"] = "changed legacy query"
+
+    with pytest.raises(RetrievalFixtureError, match="legacy case snapshot"):
+        _load_as_repository_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_repository_fixture_requires_contiguous_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _repository_payload()
+    payload[32]["id"], payload[33]["id"] = payload[33]["id"], payload[32]["id"]
+
+    with pytest.raises(RetrievalFixtureError, match="contiguous IDs q-001 through q-100"):
+        _load_as_repository_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_repository_fixture_enforces_exact_appended_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _repository_payload()
+    payload[32]["expected_document_ids"] = ["dang-ky-tam-tru"]
+
+    with pytest.raises(RetrievalFixtureError, match="40 large-law cases"):
+        _load_as_repository_fixture(tmp_path, monkeypatch, payload)
+
+
+def test_repository_fixture_requires_null_email_bodies_on_appended_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _repository_payload()
+    payload[32]["email_body"] = "synthetic but not an email fixture"
+
+    with pytest.raises(RetrievalFixtureError, match="email_body: null"):
+        _load_as_repository_fixture(tmp_path, monkeypatch, payload)
 
 
 def test_real_fixture_has_expanded_distribution() -> None:

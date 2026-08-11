@@ -745,6 +745,29 @@ class Bm25OnlyRetriever:
         )
 
 
+class QdrantEvaluationError(RuntimeError):
+    """Raised when Qdrant failed instead of returning a quality outcome."""
+
+
+class _ErrorTrackingQdrantClient:
+    """Forward a Qdrant client while retaining query errors the adapter degrades."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self.query_error: Exception | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    async def query_points(self, *args: Any, **kwargs: Any) -> Any:
+        self.query_error = None
+        try:
+            return await self._client.query_points(*args, **kwargs)
+        except Exception as exc:
+            self.query_error = exc
+            raise
+
+
 class QdrantEvaluationRetriever:
     """In-memory production Qdrant adapter for retrieval evaluation."""
 
@@ -763,6 +786,7 @@ class QdrantEvaluationRetriever:
         self._top_k_default = top_k_default
         self._min_score_default = min_score_default
         self._memory: QdrantSemanticMemory | None = None
+        self._client: _ErrorTrackingQdrantClient | None = None
 
     async def build_index(self) -> None:
         """Ingest the corpus once into an ephemeral Qdrant collection."""
@@ -773,7 +797,7 @@ class QdrantEvaluationRetriever:
 
         from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 
-        client = AsyncQdrantClient(":memory:")
+        client = _ErrorTrackingQdrantClient(AsyncQdrantClient(":memory:"))
         await ingest_corpus(client, self._COLLECTION_NAME, self._documents, self._embedder)
         self._memory = QdrantSemanticMemory(
             client,
@@ -782,13 +806,20 @@ class QdrantEvaluationRetriever:
             top_k_default=self._top_k_default,
             min_score_default=self._min_score_default,
         )
+        self._client = client
 
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
-        if self._memory is None:
+        if self._memory is None or self._client is None:
             raise RuntimeError(
                 "QdrantEvaluationRetriever.build_index() must be called before retrieve()"
             )
-        return await self._memory.retrieve(request)
+        self._client.query_error = None
+        response = await self._memory.retrieve(request)
+        if self._client.query_error is not None:
+            raise QdrantEvaluationError(
+                "Qdrant query failed during retrieval evaluation"
+            ) from self._client.query_error
+        return response
 
 
 class Retriever(Protocol):
