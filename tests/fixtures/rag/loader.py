@@ -35,6 +35,19 @@ class Probe(StrEnum):
 #: Probe types every corpus document must carry at least once (SPEC §5.1).
 ANSWERABLE_PROBES: tuple[Probe, ...] = (Probe.LEXICAL, Probe.SEMANTIC, Probe.MIXED)
 
+EXPANDED_CASE_COUNT = 100
+LEGACY_CASE_IDS = tuple(f"q-{number:03d}" for number in range(1, 33))
+NEW_DOCUMENT_IDS = frozenset(
+    {
+        "01-2021-nd-cp-283247", "31-2024-qh15-523642", "41-2024-qh15-557190",
+        "49-2019-qh14-402073", "chi-tiet-thu-tuc-1-004194-1786097965866",
+        "chi-tiet-thu-tuc-1-115132-1786096253281", "chi-tiet-thu-tuc-1-115970-1786097982328",
+        "chi-tiet-thu-tuc-1-116194-1786096137126", "chi-tiet-thu-tuc-2-001194-1786096928665",
+        "chi-tiet-thu-tuc-3-000228-1786096860852", "dang-ky-tam-tru",
+    }
+)
+THREE_PROBE_NEW_DOCUMENT_IDS = NEW_DOCUMENT_IDS - {"dang-ky-tam-tru"}
+
 
 class RetrievalFixtureError(ValueError):
     """Raised when the fixture JSON violates the documented schema."""
@@ -144,7 +157,43 @@ def _validate_against_corpus(
                     f"{where}: section {section!r} is not emitted by load_corpus for "
                     f"{list(case.expected_document_ids)}; the golden set is stale"
                 )
-    _validate_probe_coverage(cases, tuple(sections_by_document), source)
+    if source.resolve() == DEFAULT_FIXTURE_PATH.resolve():
+        _validate_repository_fixture_contract(cases, source)
+        _validate_repository_fixture_coverage(cases, tuple(sections_by_document), source)
+    else:
+        _validate_probe_coverage(cases, tuple(sections_by_document), source)
+
+
+def _validate_repository_fixture_contract(cases: Sequence[RetrievalCase], source: Path) -> None:
+    """Enforce cardinality and immutable leading IDs for the checked-in fixture."""
+    if len(cases) != EXPANDED_CASE_COUNT:
+        raise RetrievalFixtureError(f"{source}: expected exactly 100 cases")
+    if tuple(case.id for case in cases[: len(LEGACY_CASE_IDS)]) != LEGACY_CASE_IDS:
+        raise RetrievalFixtureError(f"{source}: legacy case IDs q-001 through q-032 must lead")
+
+
+def _validate_repository_fixture_coverage(
+    cases: Sequence[RetrievalCase], document_ids: Sequence[str], source: Path
+) -> None:
+    """Enforce the V2 repository coverage allocation without constraining temp fixtures."""
+    covered: dict[str, set[Probe]] = {document_id: set() for document_id in document_ids}
+    for case in cases:
+        for document_id in case.expected_document_ids:
+            covered[document_id].add(case.probe)
+    missing_documents = [document_id for document_id, probes in covered.items() if not probes]
+    if missing_documents:
+        raise RetrievalFixtureError(f"{source}: missing document coverage: {missing_documents}")
+    missing_probes = [
+        f"{document_id}:{probe.value}"
+        for document_id in sorted(THREE_PROBE_NEW_DOCUMENT_IDS)
+        for probe in ANSWERABLE_PROBES
+        if probe not in covered[document_id]
+    ]
+    if missing_probes:
+        raise RetrievalFixtureError(f"{source}: missing new-document probe coverage: {missing_probes}")
+    unanswerable_count = sum(case.probe is Probe.UNANSWERABLE for case in cases)
+    if unanswerable_count != 12:
+        raise RetrievalFixtureError(f"{source}: expected exactly 12 unanswerable cases")
 
 
 def _validate_probe_coverage(

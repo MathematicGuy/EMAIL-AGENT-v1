@@ -14,6 +14,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
+FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "retrieval_golden.json"
 
 _LOADER_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "rag" / "loader.py"
 _spec = importlib.util.spec_from_file_location("retrieval_fixture_loader", _LOADER_PATH)
@@ -155,6 +156,18 @@ def test_invalid_json_is_rejected(tmp_path: Path) -> None:
 # --- corpus-backed rules --------------------------------------------------
 
 
+def test_repository_fixture_requires_one_hundred_cases() -> None:
+    with pytest.raises(RetrievalFixtureError, match="exactly 100"):
+        loader._validate_repository_fixture_contract((), FIXTURE_PATH)
+
+
+def test_real_fixture_has_expanded_distribution() -> None:
+    cases = loader.load_retrieval_golden(corpus_dir=CORPUS_DIR)
+    assert len(cases) == 100
+    assert sum(case.probe is loader.Probe.UNANSWERABLE for case in cases) == 12
+    assert all(case.email_body is None for case in cases[32:])
+
+
 def test_rule_4_rejects_unknown_document_id(tmp_path: Path) -> None:
     case = _valid_case(expected_document_ids=["dang_ky_tam_tru"])
     with pytest.raises(RetrievalFixtureError, match="unknown document id"):
@@ -178,12 +191,12 @@ def test_rule_5_rejects_a_section_belonging_to_another_document(tmp_path: Path) 
 
 
 def test_rule_5_accepts_a_real_section(tmp_path: Path) -> None:
-    section = _corpus_sections()["cap_lai_cccd"][0]
     cases = _covering_cases()
-    cases[0]["expected_sections"] = [section]
-    cases[0]["expected_document_ids"] = ["cap_lai_cccd"]
+    case = next(case for case in cases if case["expected_document_ids"] == ["cap_lai_cccd"])
+    section = _corpus_sections()["cap_lai_cccd"][0]
+    case["expected_sections"] = [section]
     loaded = loader.load_retrieval_golden(_write(tmp_path, cases), corpus_dir=CORPUS_DIR)
-    assert loaded[0].expected_sections == (section,)
+    assert loaded[cases.index(case)].expected_sections == (section,)
 
 
 def test_rule_6_rejects_missing_probe_coverage(tmp_path: Path) -> None:
