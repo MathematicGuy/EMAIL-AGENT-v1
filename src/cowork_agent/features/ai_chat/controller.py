@@ -25,6 +25,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 from .generation_context import GenerationContext, assemble_generation_context
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
 from .ports import ChatReplyChunk, ChatReplyPort, ChatTaskProposal
+from .retention import compute_expires_at
 from .retrieval_policy import is_explicit_task_request, select_memory_reads
 
 IdFactory = Callable[[], str]
@@ -61,6 +62,7 @@ class _PendingTaskEpisode:
     request: ChatMessageRequest
     episode: TaskEpisode
     replay_prefix: tuple[ChatMessageStreamEvent, ...]
+    expires_at: datetime | None = None
 
 
 class UnavailableChatReply:
@@ -122,12 +124,14 @@ class ChatController:
         reply: ChatReplyPort,
         new_id: IdFactory = _new_id,
         clock: Clock = _utc_now,
+        episode_retention_seconds: int | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
         self._reply = reply
         self._new_id = new_id
         self._clock = clock
+        self._episode_retention_seconds = episode_retention_seconds
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
@@ -255,15 +259,19 @@ class ChatController:
                     yield warning
                 else:
                     episode = self._new_task_episode(turn_id, task_proposal)
+                    expires_at = compute_expires_at(
+                        self._clock(), self._episode_retention_seconds
+                    )
                     try:
                         episode = await self._memory.write_task_episode(
-                            episode, expires_at=None
+                            episode, expires_at=expires_at
                         )
                     except MemorySourceUnavailableError:
                         pending_task_episode = _PendingTaskEpisode(
                             request=request,
                             episode=episode,
                             replay_prefix=tuple(emitted),
+                            expires_at=expires_at,
                         )
                         warning = self._error(
                             turn_id=turn_id,
@@ -311,7 +319,9 @@ class ChatController:
         if await is_cancelled():
             return
         try:
-            episode = await self._memory.write_task_episode(pending.episode, expires_at=None)
+            episode = await self._memory.write_task_episode(
+                pending.episode, expires_at=pending.expires_at
+            )
         except MemorySourceUnavailableError:
             _, cached_events = self._completed[pending.request.idempotency_key]
             for event in cached_events:

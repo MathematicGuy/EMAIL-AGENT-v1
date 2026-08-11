@@ -541,25 +541,24 @@ M3.4a acceptance.
 - **V2-M4 (chat/SSE/task lifecycle):** Chat API Controller, Chat Controller
   event loop, SSE handler, bounded task proposal DTO, and inline transactional
   approve/complete/reject controls in the originating chat session.
-  **Current:** session/message API, controller loop, and typed SSE are landed
-  with 12 focused tests. Inline TaskEpisode lifecycle controls remain and depend
-  on M3.4b.
+  **Current:** DONE and accepted (`0d0bc22`; 186-test gate; verdict `ship`).
 - **V2-M5 (selective chat retrieval):** eligibility-filtered episodes and
   enterprise RAG, bounded and relevance-scored from chat intent; labeled
   system/profile/session/episode/semantic context; conflict rules (FR-13).
-  **Current:** query contracts, deterministic intent policy, Gateway filtering
-  and degradation, ready-only semantic runtime, labeled precedence assembly,
-  and M3.4a PostgreSQL FTS bounds are landed. Durable Gateway/reply-provider
-  consumption remains after M3.4b.
+  **Current:** DONE and accepted (`0d0bc22`; durable Gateway/reply-provider
+  consumption, precedence, and citation allowlisting; verdict `ship`).
 - **V2-M6 (chat memory governance):** memory-enabled vs memory-disabled chat
   evaluation; retention, purge, deletion audits, zero-tolerance safety
   counters, and launch thresholds.
-  **Current:** metadata-only Gateway events, paired launch gate, exact-scope
-  bulk deletion, retention settings, purge coordination, and live M3.4a SQL
-  deletion/purge are landed. Production sink/alerts, backup/restore, index
-  propagation, end-to-end runtime deletion proof, and threshold evidence remain.
+  **Current:** DONE (2026-08-11). Production `LoggingMemoryOperationSink` +
+  `MemoryOperationMetrics` injected at runtime; env-driven retention applied
+  with retry-safe expiry (`compute_expires_at`); explicit purge/backup-restore
+  CLIs (no scheduler); live deletion audit and backup/restore proof; paired
+  evaluation runner with product-approved thresholds (gate exit 0, safety
+  counters zero); AC-18 audit 6/6 PASS; fresh final review verdict `ship`.
 
 **Gate:** PRD-v2 §16 acceptance criteria 1–18 with evidence → DEMO Increment B.
+**Status:** PASSED 2026-08-11 (AC-01..AC-18 DONE; verdict `ship`) → DEMO unlocked.
 
 ---
 
