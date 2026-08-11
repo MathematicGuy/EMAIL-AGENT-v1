@@ -1,22 +1,108 @@
-## Improvements for faster PRD-v2 acceptance closure
+# Sol Advisor Orchestration Efficiency Playbook
 
-This session was safe, but it spent too much time in silent verification tails
-and found acceptance gaps only during final review. The next orchestration should
-use these changes:
+Use this with `PRD2-chat-memory-orchestration.md`. The dashboard is the current
+state; this file records the durable operating method and lessons. It does not
+define a fixed team size or force a particular implementation lane.
 
-| Improvement | Why it is faster | Application to PRD2 §6 |
-|---|---|---|
-| Work by acceptance cluster, not by a broad milestone packet | Small dependency-ordered slices avoid reopening unrelated work | Accept M3.4a storage evidence for AC-07–AC-12, AC-14, and AC-15; split M3.4b into producer (AC-06/AC-07), lifecycle/deletion (AC-08/AC-09/AC-15), and retrieval/model-context (AC-10–AC-12); handle live reply consumption for AC-01, AC-05, AC-13, and AC-17 afterward |
-| Run an adversarial acceptance checklist before requesting Sol review | It catches contract-shaped omissions before an expensive fresh-review cycle | Require tests for unrelated-query exclusion, `min_score`, expiry/bounds, direct-SQL bypass, exact citation keys, lifecycle eligibility, cross-scope denial, and deletion non-retrievability |
-| Split implementation, focused verification, and reporting into explicit checkpoints | The parent can see which phase stalled and does not wait for an unreported broad command | The worker reports RED, patch complete, focused GREEN, and handoff separately; the parent owns persistence/domain/full-suite gates |
-| Require a command heartbeat | Long silence becomes distinguishable from legitimate test execution | Before a long command, report its exact scope; immediately afterward, report exit status and counts. If no process is active and two bounded waits return nothing, interrupt and reuse the same agent with a narrower correction |
-| Preflight the environment before delegation | It avoids skip-only evidence and agents waiting on infrastructure | Confirm Docker and `cowork-pg`, writable `TEMP`/`TMP` and pytest base temp, migration baseline, and no competing pytest process. If Docker is off, notify the user and pause the PostgreSQL lane |
-| Serialize shared PostgreSQL work while parallelizing only non-overlapping reads | It removes migration/schema races without wasting all concurrency | Only one parent or worker runs PostgreSQL tests at a time; status/hash capture, acceptance mapping, and read-only review-packet preparation may proceed independently |
-| Use a verification ladder and reuse valid evidence | Repeating the full suite after every small correction adds latency without improving the affected proof | Run the new RED/GREEN test first, then the persistence suite, then domain + AI Chat for shared contracts, and run the full suite once after the last correction before final review |
-| Make the final-review packet acceptance-indexed | A reviewer can target missing behavior instead of rediscovering the product contract | List affected AC IDs, allowed files, threat cases, exact parent evidence, residual gaps, and before-review hashes; require exactly `ship`, `fix-first`, or `rethink` |
-| Reserve capacity for the mandatory fresh reviewer | Correction cycles cannot finish if every child slot is already occupied | Reuse one implementer for every correction, retire stalled turns promptly, and avoid optional agents once parent gates are green |
-| Update trackers only at verified boundaries | It prevents repeated reconciliation of stale percentages and next actions | Keep PRD2 §6 authoritative; update `tasks/todo.md` and `tasks/plan.md` from it after a slice is accepted or explicitly marked `VERIFY` |
+## 1. Routing and ownership
 
-The most important change is to perform the acceptance-indexed adversarial
-check before the fresh Sol review. In this session, that would likely have found
-both late `fix-first` issues before consuming two reviewer cycles.
+The parent is architect, evidence owner, and final acceptor. It resolves
+ambiguity, writes complete packets, inspects actual diffs, reruns checks, and
+updates trackers. A worker report is evidence to verify, not acceptance.
+
+| Work shape | Route |
+|---|---|
+| Complex, multi-file, migration, security, concurrency, or uncertain debugging | Configured native Terra/high implementation lane, then fresh Sol review |
+| Independent, narrow task only when the user explicitly authorizes the Luna task lane | User-visible Luna/max app task; parent monitors, reads handoff, inspects its worktree, and reviews it itself |
+| Architecture/migration commitment or final native acceptance | Fresh Sol reviewer; behaviorally read-only, with observed sandbox state recorded |
+
+Luna/max is a separate app-task lane, not a native subagent or fallback. Parallel
+work requires non-overlapping ownership and independent worktrees; migrations,
+shared files, and dependency chains are serial.
+
+## 2. Packet standard
+
+Every implementation packet must state objective, exact owned files, interfaces,
+constraints, verification commands with expected evidence, and structured return.
+Add the affected PRD2 §6 acceptance IDs, excluded files, current base/status, and
+the one decision the worker must not invent. For a correction, send the exact
+finding and use the same worker/task rather than starting a replacement.
+
+For an acceptance review, include allowed files, complete diff or base/head,
+affected AC IDs, parent command output, threat cases, residual gaps, and
+before-review hashes. Require exactly `ship`, `fix-first`, or `rethink`.
+
+## 3. Acceptance-first slicing
+
+Do not give one worker an entire broad milestone. Create a small vertical slice
+with one observable acceptance boundary, then update the dashboard only after it
+is verified. Current PRD-v2 order is:
+
+1. M3.4a final review: storage evidence for AC-07–AC-12, AC-14, and AC-15.
+2. M3.4b-A: explicit-request producer (AC-06/AC-07).
+3. M3.4b-B: lifecycle and exact-scope deletion (AC-08/AC-09/AC-15).
+4. M3.4b-C: eligible retrieval and model-context isolation (AC-10–AC-12).
+5. Controller/reply consumption and precedence (AC-01, AC-05, AC-13, AC-17).
+6. Governance operational proof (AC-16–AC-18).
+
+Before a fresh review, run an acceptance-indexed adversarial checklist. For
+TaskEpisodes that includes unrelated-query exclusion, `min_score`, expiry and
+server bounds, direct-SQL bypass, exact citation keys, lifecycle eligibility,
+cross-scope denial, and deletion non-retrievability.
+
+## 4. Monitoring and interruption
+
+Require a short message at four boundaries: RED, patch complete, focused GREEN,
+and final handoff. Before a long command, report its scope; immediately after,
+report exit status and counts. The parent may inspect public status, messages,
+shared files/hashes, process command lines, and test output, but never hidden
+reasoning or a private continuous tool stream.
+
+Do not interrupt an identified active test process. If no process is active and
+two bounded waits yield no useful update, interrupt the stale turn, inspect the
+diff, run the smallest parent check, and return only concrete findings to the
+same worker.
+
+## 5. Verification and environment discipline
+
+Preflight Docker/`cowork-pg`, migration baseline, writable `TEMP`/`TMP` and
+pytest base temp, and no competing PostgreSQL test process before delegating a
+database slice. If Docker is unavailable, notify the user and pause the live
+database lane; skipped tests are not acceptance evidence.
+
+Run one PostgreSQL actor at a time. The verification ladder is targeted RED/GREEN,
+persistence, domain + AI Chat for shared contracts, lint/type/diff, then the full
+suite once after the final correction. A later fix invalidates the earlier Sol
+verdict and requires a new fresh review.
+
+## 6. Evidence and tracker discipline
+
+Keep the PRD2 dashboard small: current milestone, grouped AC status, next queue,
+blockers, and latest verification snapshot. Put exact command output in the task
+handoff/review packet; Git retains historical change evidence. Update
+`tasks/todo.md` and `tasks/plan.md` only from a verified PRD2 boundary.
+
+### Pruning maintenance rule
+
+At every verified milestone transition and before a session handoff, the parent
+must replace obsolete dashboard rows rather than append history. Keep in PRD2
+only the current status, next decision, active blocker, and newest proof needed
+for that decision; move reusable operating guidance here and historical detail
+to Git or a task handoff. Prune duplicate or project-specific lessons from this
+playbook unless they change future routing, verification, or interruption
+decisions. Do not date-bump either document for formatting-only edits or
+unverified reports.
+
+For a reviewer without enforced read-only isolation, capture before/after status
+and hashes. Stop the review if unexpected mutation occurs; never describe a
+requested sandbox as OS-enforced without host evidence.
+
+## 7. Session lessons to retain
+
+| Observation | Standing response |
+|---|---|
+| Final review found missing query/min-score behavior, then permissive citation keys | Use the acceptance-indexed checklist before the final review and include direct-storage tampering tests |
+| Worker turns stalled after substantive edits or focused tests | Use checkpoint reports and bounded interruption rather than waiting for an unreported broad run |
+| PostgreSQL work shares migration/schema state | Serialize database actors and keep parent verification outside a worker's active DB run |
+| Windows pytest temp teardown can fail independently of test bodies | Use an explicit writable external temp/base-temp for broad evidence and label the default-temp failure as environmental |
+| Dashboard history grew faster than actionable context | Keep only latest proof in PRD2; retain methods here and historical detail in Git |
