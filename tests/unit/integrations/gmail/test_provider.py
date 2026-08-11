@@ -46,6 +46,21 @@ def test_gmail_settings_allow_readonly_scope_and_redact_secrets(tmp_path: Path) 
     assert settings.scopes == (GMAIL_READONLY_SCOPE,)
     assert "client-secret" not in repr(settings)
     assert settings.redirect_uri.endswith("/oauth/gmail/callback")
+    assert settings.frontend_url is None
+
+
+def test_gmail_settings_accept_safe_frontend_url(tmp_path: Path) -> None:
+    values = gmail_environment(tmp_path)
+    values["FRONTEND_URL"] = "http://localhost:5173/"
+    settings = GmailSettings.from_env(values, load_env_file=False)
+    assert settings.frontend_url == "http://localhost:5173"
+
+
+def test_gmail_settings_reject_insecure_remote_frontend_url(tmp_path: Path) -> None:
+    values = gmail_environment(tmp_path)
+    values["FRONTEND_URL"] = "http://example.com"
+    with pytest.raises(ValueError, match="FRONTEND_URL"):
+        GmailSettings.from_env(values, load_env_file=False)
 
 
 def test_gmail_settings_reject_write_scope(tmp_path: Path) -> None:

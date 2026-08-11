@@ -30,6 +30,28 @@ class InMemoryRunRepository:
     async def get(self, run_id: str) -> DigestRun | None:
         return self.runs.get(run_id)
 
+    async def list_recent(
+        self, *, user_id: str, mailbox_connection_id: str, limit: int
+    ) -> tuple[DigestRun, ...]:
+        matching = (
+            run
+            for run in self.runs.values()
+            if run.user_id == user_id
+            and run.mailbox_connection_id == mailbox_connection_id
+        )
+        return tuple(
+            sorted(
+                matching,
+                key=lambda run: (
+                    float("-inf")
+                    if run.created_at is None
+                    else run.created_at.timestamp(),
+                    run.id,
+                ),
+                reverse=True,
+            )[:limit]
+        )
+
     async def claim(self, run_id: str, started_at: datetime) -> DigestRun | None:
         run = self.runs.get(run_id)
         if run is None or run.status is not RunStatus.QUEUED:

@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 
-from conftest import make_email, make_task
+from conftest import CONNECTION_ID, OWNER_EMAIL, make_email, make_task
 
 EMPTY_STATE_MESSAGE = "Không có công việc cần xử lý"
 
@@ -32,7 +32,12 @@ def test_duplicate_idempotency_key_returns_same_run(compat_session) -> None:
             second = await s.post_run("same-key")
             assert first.status_code == second.status_code == 202
             assert first.json()["id"] == second.json()["id"]
-            assert len(s.app.state.run_repository.runs) == 1
+            runs = await s.app.state.run_repository.list_recent(
+                user_id=OWNER_EMAIL,
+                mailbox_connection_id=CONNECTION_ID,
+                limit=10,
+            )
+            assert len(runs) == 1
 
     asyncio.run(scenario())
 
@@ -77,8 +82,13 @@ def test_result_before_terminal_state_returns_run_not_complete(compat_session) -
             run_id = None
             for _ in range(200):
                 await asyncio.sleep(0.01)
-                if s.app.state.run_repository.runs:
-                    run_id = next(iter(s.app.state.run_repository.runs))
+                runs = await s.app.state.run_repository.list_recent(
+                    user_id=OWNER_EMAIL,
+                    mailbox_connection_id=CONNECTION_ID,
+                    limit=1,
+                )
+                if runs:
+                    run_id = runs[0].id
                     break
             assert run_id is not None
             response = await s.get_result(run_id)

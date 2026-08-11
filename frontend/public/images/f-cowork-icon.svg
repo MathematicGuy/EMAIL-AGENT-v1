@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="130" y1="110" x2="300" y2="370" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E38A6D"/>
+      <stop offset="1" stop-color="#D97757"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="416" height="416" rx="104" fill="#292825"/>
+  <rect x="49.5" y="49.5" width="413" height="413" rx="102.5" stroke="#33312E" stroke-width="3"/>
+  <path d="M128 136C128 118.327 142.327 104 160 104H366C383.673 104 398 118.327 398 136V150C398 167.673 383.673 182 366 182H230V223H336C353.673 223 368 237.327 368 255V269C368 286.673 353.673 301 336 301H230V376C230 393.673 215.673 408 198 408H160C142.327 408 128 393.673 128 376V136Z" fill="#F3F2EF"/>
+  <path d="M128 286L230 224V408H160C142.327 408 128 393.673 128 376V286Z" fill="url(#g)"/>
+  <circle cx="294" cy="346" r="13" fill="#D97757"/>
+  <circle cx="364" cy="346" r="13" fill="#D97757"/>
+  <circle cx="329" cy="386" r="13" fill="#D97757"/>
+  <path d="M306 352L319 374M352 352L339 374M307 346H351" stroke="#D97757" stroke-width="8" stroke-linecap="round"/>
+</svg>
