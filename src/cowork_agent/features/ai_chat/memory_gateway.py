@@ -1,6 +1,7 @@
 """Fail-closed Memory Gateway facade for the AI Chat Controller."""
 
 from collections.abc import Callable
+from datetime import datetime
 from time import monotonic
 
 from cowork_agent.domain.chat_contracts import (
@@ -21,7 +22,12 @@ from cowork_agent.domain.chat_contracts import (
 from cowork_agent.domain.target_contracts import ValidationStatus
 
 from .deletion import MemoryDeletionReport
-from .episode_policy import authorize_chat_summary_write
+from .episode_policy import (
+    TaskEpisodeTransitionRejected,
+    authorize_chat_summary_write,
+    authorize_task_episode_write,
+    build_task_episode_transition,
+)
 from .memory_observability import (
     MemoryOperation,
     MemoryOperationEvent,
@@ -258,6 +264,92 @@ class MemoryGateway:
         authorize_chat_summary_write(namespace, episode)
         result = await self._require_episodic_memory().write_chat_summary(namespace, episode)
         self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.SUCCESS)
+        return result
+
+    async def write_task_episode(
+        self, episode: TaskEpisode, *, expires_at: datetime | None
+    ) -> TaskEpisode:
+        """Persist an authorized initial task episode at its supplied identity."""
+
+        if (
+            episode.tenant_id != self._scope.tenant_id
+            or episode.user_id != self._scope.user_id
+            or episode.chat_session_id != self._scope.session_id
+        ):
+            raise NamespaceAccessDenied("task episode scope does not match the verified chat scope")
+        namespace = MemoryNamespace(
+            scope=self._scope,
+            memory_type=MemoryType.EPISODIC,
+            record_id=episode.record_id,
+            source_id=episode.chat_turn_id,
+        )
+        trusted_episode = authorize_task_episode_write(
+            namespace, episode, expires_at=expires_at
+        )
+        result = await self._require_episodic_memory().write_task_episode(
+            namespace, trusted_episode, expires_at=expires_at
+        )
+        self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.SUCCESS)
+        return result
+
+    async def transition_task_episode(
+        self,
+        *,
+        record_id: str,
+        chat_turn_id: str,
+        episode_id: str,
+        from_status: ValidationStatus,
+        to_status: ValidationStatus,
+        transitioned_at: datetime,
+    ) -> TaskEpisode | None:
+        """Transition one originating-session task episode without caller eligibility control."""
+
+        namespace = MemoryNamespace(
+            scope=self._scope,
+            memory_type=MemoryType.EPISODIC,
+            record_id=record_id,
+            source_id=chat_turn_id,
+        )
+        transition = build_task_episode_transition(
+            namespace,
+            episode_id=episode_id,
+            from_status=from_status,
+            to_status=to_status,
+            transitioned_at=transitioned_at,
+        )
+        self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.REQUESTED)
+        result = await self._require_episodic_memory().transition_task_episode(transition)
+        self._emit(
+            MemoryType.EPISODIC,
+            MemoryOperation.WRITE,
+            MemoryOutcome.SUCCESS,
+            result_count=int(result is not None),
+        )
+        return result
+
+    async def delete_task_episode(
+        self, *, record_id: str, chat_turn_id: str, episode_id: str
+    ) -> bool:
+        """Delete exactly one originating-session task episode; a miss is idempotent."""
+
+        namespace = MemoryNamespace(
+            scope=self._scope,
+            memory_type=MemoryType.EPISODIC,
+            record_id=record_id,
+            source_id=chat_turn_id,
+        )
+        if not isinstance(episode_id, str) or not episode_id:
+            raise TaskEpisodeTransitionRejected("episode_id must be a nonempty string")
+        self._emit(MemoryType.EPISODIC, MemoryOperation.DELETE, MemoryOutcome.REQUESTED)
+        result = await self._require_episodic_memory().delete_task_episode(
+            namespace, episode_id=episode_id
+        )
+        self._emit(
+            MemoryType.EPISODIC,
+            MemoryOperation.DELETE,
+            MemoryOutcome.SUCCESS,
+            result_count=int(result),
+        )
         return result
 
     async def delete_chat_summary(self, record_id: str) -> bool:

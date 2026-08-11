@@ -2,11 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Document status | Spec — implementation gated on PRD-v1 and PRD-v2 completion |
-| Version | 2.0 |
+| Document status | Spec — implementation gated on PRD-v1 completion and PRD-v2 milestone readiness |
+| Version | 2.1 (Updated with Milestone Dependency & Backend API Readiness Analysis) |
 | Date | 2026-08-11 |
-| Milestone position | Final phase after `V2-M6` (master-comparison §7: `DEMO`) |
-| Depends on | PRD-v1 §15 acceptance passed; PRD-v2 §16 acceptance passed |
+| Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
+| Readiness Status | **Increment A: PARTIALLY READY (65%)** (Connect, Knowledge, Run Audit ready; AI Chat streaming registered, GET history/sessions & LLM binding pending); **Increment B: BLOCKED (0% UI / 35% API)** |
+| Depends on | PRD-v1 (DONE 100%), V2-M1 (DONE 100%), V2-M2 (Repo DONE, API pending), V2-M3 (ACTIVE 92%), V2-M4 (VERIFY 35%), V2-M5 (ACTIVE 70%), V2-M6 (ACTIVE 55%) |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
 
@@ -71,8 +72,21 @@ must never scaffold or mock unimplemented milestone work
 | Episode insight | Provenance view for chat summaries and chat-native TaskEpisodes: status, eligibility, source session/turn, and versions | FR-06, FR-14 |
 | Deletion | Delete a preference or episode with confirmation and post-deletion refresh | FR-15 |
 
-Increment B screens are feature-flagged off until their backend endpoints
-exist; the demo must run cleanly on an Increment-A-only backend.
+Increment B screens are feature-flagged off until their backend endpoints exist; the demo must run cleanly on an Increment-A-only backend.
+
+### 3.3 Milestone Dependency & Implementation Readiness Matrix
+
+| Increment / Screen | Capability | Prerequisite Milestones | Backend API Endpoint Status | Implementation Readiness Verdict |
+|---|---|---|---|---|
+| **Increment A — Connect** | Gmail OAuth, Mailbox Connections list, Unread preview | **V1-M1** (DONE 100%) | `GET /v1/mail-todo/connections`, `/oauth/gmail/*`, `/unread-preview` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
+| **Increment A — Knowledge** | RAG corpus status, document list, ad-hoc grounded query | **V1-M3** (DONE 100%) | `GET /v1/mail-todo/knowledge/ready`, `/documents`, `POST /chat` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
+| **Increment A — Run Audit** | Standalone Email Agent run metadata & task results | **V1-M4** (DONE 100%) | `GET /v1/mail-todo/runs/{id}`, `/result`, `/tasks` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
+| **Increment A — AI Chat Assistant** | Multi-turn chat thread, session sidebar, streaming responses | **V2-M1** (DONE), **V2-M4** (VERIFY 35%) | `POST /sessions` & `POST /messages` (**Implemented**); `GET /sessions` & `GET /messages` (**Missing**); resolver & reply adapter pending | **PARTIALLY READY** — Streaming chat UI can be built; multi-session history requires V2-M4B getter endpoints & `ChatReplyPort` binding in `app.py`. |
+| **Increment B — Preferences** | Persona/profile editor (language, tone, brevity, rules) | **V2-M2** (DONE repo layer) | Profile REST APIs (`GET/POST/PUT/DELETE /v1/cowork/chat/profile`) (**Missing**) | **BLOCKED** — DB repository landed in `PostgresChatProfileRepository`, but HTTP router is missing. |
+| **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task proposal controls | **V2-M3.4b-B** (ACTIVE), **V2-M4** (PARTIAL) | Task episode transition API (`POST /v1/cowork/chat/episodes/{id}/transition`) (**Missing**) | **BLOCKED** — Gateway lifecycle transition wiring (M3.4b-B) & REST API missing. |
+| **Increment B — Memory Transparency** | In-thread badges for profile rules, episodic hits, RAG citations | **V2-M5** (ACTIVE 70%) | Memory citation SSE emission & eligible episodic retrieval (**Missing / Pending V2-M3.4b-C**) | **BLOCKED** — Episodic retrieval pending Gateway wiring and provider SSE citation emission. |
+| **Increment B — Episode Insight** | Provenance view for chat summaries & TaskEpisodes | **V2-M3** (ACTIVE 92%), **V2-M6** (ACTIVE 55%) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Missing**) | **BLOCKED** — Episode listing REST API missing. |
+| **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2**, **V2-M3.4b-B**, **V2-M6** | Delete REST APIs (`DELETE /profile`, `DELETE /episodes/{id}`) (**Missing**) | **BLOCKED** — Deletion REST endpoints missing. |
 
 ## 4. Technology decision
 
@@ -142,33 +156,37 @@ Apply `frontend-ui-engineering` principles within Streamlit's constraints:
 12. **Memory transparency**: label declarative, episodic, and semantic sources
     with text plus icon; disclose source type and provenance, not full context.
 
-## 7. Backend API contract assumptions
+## 7. Backend API contract assumptions & live implementation status
 
-The demo consumes endpoints; it defines none. Expected inventory:
+The demo consumes FastAPI backend endpoints; it defines none. The table below details the exact backend API contract, its expected milestone owner, and its current live codebase status in `src/cowork_agent/app.py` and `src/cowork_agent/api/chat.py`:
 
-| Capability | Exists today | Expected from milestones |
-|---|---|---|
-| Create/list chat sessions | ✗ | V2-M1 / V2-M4 — `POST/GET /v1/cowork/chat/sessions` |
-| Send message and stream response | ✗ | V2-M4 — `POST /v1/cowork/chat/sessions/{session_id}/messages` (SSE) |
-| Chat history | ✗ | V2-M1 / V2-M4 — `GET /v1/cowork/chat/sessions/{session_id}/messages` |
-| Standalone Email Agent state | existing standalone run API only | Connect and Run audit expose it separately; AI Chat never calls it |
-| Health, OAuth connect/callback, connections list/delete, unread preview | ✔ `app.py` | — |
-| Create/Run-status/Run-result | ✔ `/v1/mail-todo/runs*` | Compatibility mapper preserves these through V1-M4 |
-| Task list/detail from persisted Tasks | ✗ | V1-M4 (or compatibility result shape suffices for Increment A) |
-| Route/telemetry summary | partial (dev `processedEmails`) | V1-M4 basic telemetry exposure |
-| Knowledge readiness (`GET /v1/mail-todo/knowledge/ready`) | ✗ (wired internally, not exposed as REST) | V1-M3 prerequisite — expose corpus readiness + chunk/doc counts |
-| Document list (`GET /v1/mail-todo/knowledge/documents`) | ✗ | V1-M3 prerequisite — list loaded documents with title, section count, source URL |
-| Grounded query (`POST /v1/mail-todo/knowledge/chat`) | ✗ | V1-M3 prerequisite — ad-hoc query returning grounded answer + citation chips + retrieval chunks with scores |
-| Profile read/write/delete | ✗ | V2-M2 |
-| Approve/complete/reject transitions | ✗ | V2-M4 in-chat episode transition endpoint |
-| Episode view + deletion | ✗ | V2-M3 / V2-M6 |
+| Endpoint Path | Method | Expected Milestone | Live Codebase Status | Scope / Required For | Notes / File Reference |
+|---|---|---|---|---|---|
+| `/health` | GET | Baseline | **Implemented** | System | `src/cowork_agent/app.py:310` |
+| `/v1/mail-todo/oauth/gmail/connect` | GET | V1-M1 | **Implemented** | Increment A (Connect) | `src/cowork_agent/app.py:314` |
+| `/v1/mail-todo/oauth/gmail/callback` | GET | V1-M1 | **Implemented** | Increment A (Connect) | `src/cowork_agent/app.py:319` |
+| `/v1/mail-todo/connections` | GET | V1-M1 | **Implemented** | Increment A (Connect) | `src/cowork_agent/app.py:342` |
+| `/v1/mail-todo/connections/{id}` | DELETE | V1-M1 | **Implemented** | Increment A (Connect) | `src/cowork_agent/app.py:349` |
+| `/v1/mail-todo/connections/{id}/unread-preview` | GET | V1-M1 | **Implemented** | Increment A (Connect) | `src/cowork_agent/app.py:362` |
+| `/v1/mail-todo/runs` | POST | V1-M4 | **Implemented** | Increment A (Run Audit) | `src/cowork_agent/app.py:414` |
+| `/v1/mail-todo/runs/{id}` | GET | V1-M4 | **Implemented** | Increment A (Run Audit) | `src/cowork_agent/app.py:459` |
+| `/v1/mail-todo/runs/{id}/result` | GET | V1-M4 | **Implemented** | Increment A (Run Audit) | `src/cowork_agent/app.py:496` |
+| `/v1/mail-todo/runs/{id}/tasks` | GET | V1-M4 | **Implemented** | Increment A (Run Audit) | `src/cowork_agent/app.py:511` |
+| `/v1/mail-todo/knowledge/ready` | GET | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:528` |
+| `/v1/mail-todo/knowledge/documents` | GET | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:552` |
+| `/v1/mail-todo/knowledge/chat` | POST | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:569` |
+| `/v1/cowork/chat/sessions` | POST | V2-M1 / V2-M4A | **Implemented** | Increment A (AI Chat) | `src/cowork_agent/api/chat.py:44` — Requires `chat_principal_resolver` in `app.py` |
+| `/v1/cowork/chat/sessions` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed for sidebar session history list |
+| `/v1/cowork/chat/sessions/{id}/messages` | POST | V2-M4A | **Implemented** | Increment A (AI Chat) | `src/cowork_agent/api/chat.py:56` (SSE) — Requires `ChatReplyPort` adapter binding |
+| `/v1/cowork/chat/sessions/{id}/messages` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed to reload prior turn history |
+| `/v1/cowork/chat/profile` | GET/POST/DELETE | V2-M2 | **Missing REST API** | Increment B (Preferences) | Domain & DB repo landed in `PostgresChatProfileRepository`; HTTP router missing |
+| `/v1/cowork/chat/episodes/{id}/transition` | POST | V2-M3.4b-B / V2-M4 | **Missing REST API** | Increment B (Task Controls) | Transition inline proposal: approve / complete / reject |
+| `/v1/cowork/chat/episodes` | GET | V2-M3 / V2-M6 | **Missing REST API** | Increment B (Episode Insight) | List TaskEpisodes & provenance |
+| `/v1/cowork/chat/episodes/{id}` | DELETE | V2-M3.4b-B / V2-M6 | **Missing REST API** | Increment B (Deletion) | Single TaskEpisode hard/soft deletion |
 
-If a needed read endpoint is missing at implementation time, file it against
-the owning milestone — do not work around it with client-side logic.
+If a needed read/write endpoint is missing at implementation time, file it against the owning milestone — do not work around it with client-side logic. Increment B features MUST remain feature-flagged off until their respective REST endpoints land.
 
 ## 8. Acceptance criteria
-
-The demo spec is accepted when:
 
 **Increment A**
 1. A first-time user can create a chat session and exchange multiple ordered

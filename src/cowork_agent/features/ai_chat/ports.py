@@ -1,6 +1,7 @@
 """Application-layer ports owned by the AI Chat feature."""
 
 from collections.abc import AsyncIterator, Mapping
+from datetime import datetime
 from typing import Protocol
 
 from cowork_agent.domain.chat_contracts import (
@@ -8,6 +9,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatSummaryEpisode,
     ChatTurn,
     DeclarativeProfile,
+    EpisodeTransition,
     EpisodicMemoryQuery,
     MemoryContextResponse,
     MemoryNamespace,
@@ -52,6 +54,22 @@ class EpisodicMemoryPort(Protocol):
     async def write_chat_summary(
         self, namespace: MemoryNamespace, episode: ChatSummaryEpisode
     ) -> ChatSummaryEpisode: ...
+
+    async def write_task_episode(
+        self,
+        namespace: MemoryNamespace,
+        episode: TaskEpisode,
+        *,
+        expires_at: datetime | None,
+    ) -> TaskEpisode: ...
+
+    async def transition_task_episode(
+        self, transition: EpisodeTransition
+    ) -> TaskEpisode | None: ...
+
+    async def delete_task_episode(
+        self, namespace: MemoryNamespace, *, episode_id: str
+    ) -> bool: ...
 
     async def delete_chat_summary(self, namespace: MemoryNamespace) -> bool: ...
 

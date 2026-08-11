@@ -1,6 +1,7 @@
 import asyncio
+import inspect
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
@@ -13,6 +14,7 @@ from cowork_agent.domain.chat_contracts import (
     DegradedMemorySource,
     EpisodeCitation,
     EpisodeSourceType,
+    EpisodeTransition,
     EpisodicMemoryQuery,
     EpisodicMemoryRead,
     MemoryContextRequest,
@@ -26,11 +28,20 @@ from cowork_agent.domain.chat_contracts import (
     TaskEpisode,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
-from cowork_agent.features.ai_chat.episode_policy import ChatSummaryWriteRejected
+from cowork_agent.features.ai_chat.episode_policy import (
+    ChatSummaryWriteRejected,
+    TaskEpisodeTransitionRejected,
+    TaskEpisodeWriteRejected,
+)
 from cowork_agent.features.ai_chat.memory_gateway import (
     MemoryGateway,
     MemorySourceUnavailableError,
     NamespaceAccessDenied,
+)
+from cowork_agent.features.ai_chat.memory_observability import (
+    MemoryOperation,
+    MemoryOutcome,
+    RecordingMemoryOperationSink,
 )
 from cowork_agent.features.ai_chat.profile_policy import ProfileWriteRejected
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
@@ -195,6 +206,11 @@ class EpisodeReader:
         self.episodes = episodes
         self.calls: list[tuple[MemoryNamespace, EpisodicMemoryQuery]] = []
         self.writes: list[tuple[MemoryNamespace, ChatSummaryEpisode]] = []
+        self.task_writes: list[tuple[MemoryNamespace, TaskEpisode, datetime | None]] = []
+        self.transitions: list[EpisodeTransition] = []
+        self.task_deletes: list[tuple[MemoryNamespace, str]] = []
+        self.transition_result: TaskEpisode | None = None
+        self.task_delete_results: list[bool] = []
         self.deletes: list[MemoryNamespace] = []
 
     async def read_episodes(
@@ -208,6 +224,26 @@ class EpisodeReader:
     ) -> ChatSummaryEpisode:
         self.writes.append((namespace, episode))
         return episode
+
+    async def write_task_episode(
+        self,
+        namespace: MemoryNamespace,
+        episode: TaskEpisode,
+        *,
+        expires_at: datetime | None,
+    ) -> TaskEpisode:
+        self.task_writes.append((namespace, episode, expires_at))
+        return episode
+
+    async def transition_task_episode(self, transition: EpisodeTransition) -> TaskEpisode | None:
+        self.transitions.append(transition)
+        return self.transition_result
+
+    async def delete_task_episode(
+        self, namespace: MemoryNamespace, *, episode_id: str
+    ) -> bool:
+        self.task_deletes.append((namespace, episode_id))
+        return self.task_delete_results.pop(0) if self.task_delete_results else False
 
     async def delete_chat_summary(self, namespace: MemoryNamespace) -> bool:
         self.deletes.append(namespace)
@@ -724,15 +760,13 @@ def test_gateway_clear_session_is_idempotent() -> None:
     assert response.turns == ()
 
 
-def test_gateway_exposes_no_durable_or_semantic_write_operation() -> None:
+def test_gateway_exposes_only_authorized_durable_write_operations() -> None:
     public_methods = {
         name
         for name, value in vars(MemoryGateway).items()
         if callable(value) and not name.startswith("_")
     }
 
-    # V2-M3 adds only system-generated chat summaries; task and semantic
-    # writes remain impossible through the gateway.
     assert public_methods == {
         "append_turn",
         "read_context",
@@ -740,8 +774,11 @@ def test_gateway_exposes_no_durable_or_semantic_write_operation() -> None:
         "write_profile",
         "delete_profile",
         "write_chat_summary",
-            "delete_chat_summary",
-            "delete_all_memory",
+        "write_task_episode",
+        "transition_task_episode",
+        "delete_task_episode",
+        "delete_chat_summary",
+        "delete_all_memory",
     }
 
 
@@ -851,3 +888,400 @@ def test_gateway_deletes_only_the_in_scope_chat_summary_record() -> None:
 def test_gateway_requires_an_episodic_adapter_for_summary_deletion() -> None:
     with pytest.raises(MemorySourceUnavailableError, match="episodic"):
         asyncio.run(_gateway().delete_chat_summary("record-to-delete"))
+
+
+def test_gateway_writes_a_task_episode_to_its_exact_namespace_and_forwards_expiry() -> None:
+    episodes = EpisodeReader(())
+    episode = _episode(episode_id="task-write", status=ValidationStatus.SYSTEM_GENERATED)
+    expires_at = NOW + timedelta(days=1)
+    gateway = _gateway(episode_reader=episodes)
+
+    assert asyncio.run(gateway.write_task_episode(episode, expires_at=expires_at)) == episode
+    assert asyncio.run(gateway.write_task_episode(episode, expires_at=expires_at)) == episode
+    assert episodes.task_writes == [
+        (
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.EPISODIC,
+                record_id=episode.record_id,
+                source_id=episode.chat_turn_id,
+            ),
+            episode,
+            expires_at,
+        ),
+        (
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.EPISODIC,
+                record_id=episode.record_id,
+                source_id=episode.chat_turn_id,
+            ),
+            episode,
+            expires_at,
+        ),
+    ]
+
+
+def test_gateway_dispatches_the_reconstructed_task_episode_not_a_disguised_subclass() -> None:
+    benign = _episode(episode_id="task-canonical", status=ValidationStatus.SYSTEM_GENERATED)
+
+    class DisguisedTaskEpisode(TaskEpisode):
+        def to_dict(self) -> dict[str, object]:
+            return benign.to_dict()
+
+    disguised = DisguisedTaskEpisode.from_dict(benign.to_dict())
+    object.__setattr__(disguised, "task_title", "Tampered task title")
+    episodes = EpisodeReader(())
+
+    result = asyncio.run(
+        _gateway(episode_reader=episodes).write_task_episode(disguised, expires_at=None)
+    )
+
+    received = episodes.task_writes[0][1]
+    assert type(received) is TaskEpisode
+    assert received == benign
+    assert result is received
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tenant_id", "tenant-2"),
+        ("user_id", "other@example.com"),
+        ("chat_session_id", "session-2"),
+    ],
+    ids=["tenant", "user", "session"],
+)
+def test_gateway_rejects_foreign_task_episode_before_adapter_write(
+    field: str, value: str
+) -> None:
+    episodes = EpisodeReader(())
+    episode = _episode(episode_id="foreign-task", status=ValidationStatus.SYSTEM_GENERATED)
+    object.__setattr__(episode, field, value)
+
+    with pytest.raises(NamespaceAccessDenied):
+        asyncio.run(_gateway(episode_reader=episodes).write_task_episode(episode, expires_at=None))
+
+    assert episodes.task_writes == []
+
+
+@pytest.mark.parametrize(
+    "expires_at",
+    [
+        datetime(2026, 8, 11, 9),
+        NOW,
+        "2026-08-11T09:00:00+00:00",
+    ],
+    ids=["naive", "equal_to_created_at", "not_datetime"],
+)
+def test_gateway_rejects_an_invalid_task_episode_expiry_before_adapter_write(
+    expires_at: object,
+) -> None:
+    episodes = EpisodeReader(())
+    episode = _episode(episode_id="task-expiry", status=ValidationStatus.SYSTEM_GENERATED)
+
+    with pytest.raises(TaskEpisodeWriteRejected):
+        asyncio.run(
+            _gateway(episode_reader=episodes).write_task_episode(
+                episode, expires_at=expires_at
+            )
+        )
+
+    assert episodes.task_writes == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("creation_reason", "implicit"),
+        ("validation_status", ValidationStatus.USER_APPROVED),
+        ("retrieval_eligible", True),
+        ("source_type", EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY),
+        ("action_plan", ("x" * 501,)),
+        ("rag_citations", ({"raw_email": "copied"},)),
+    ],
+    ids=["creation_reason", "status", "eligible", "source_type", "unbounded", "raw_shaped"],
+)
+def test_gateway_rejects_unauthorized_task_episode_before_adapter_write(
+    field: str, value: object
+) -> None:
+    episodes = EpisodeReader(())
+    episode = _episode(episode_id="task-forged", status=ValidationStatus.SYSTEM_GENERATED)
+    object.__setattr__(episode, field, value)
+
+    with pytest.raises(TaskEpisodeWriteRejected):
+        asyncio.run(_gateway(episode_reader=episodes).write_task_episode(episode, expires_at=None))
+
+    assert episodes.task_writes == []
+
+
+def test_gateway_requires_an_episodic_adapter_for_a_task_episode_write() -> None:
+    with pytest.raises(MemorySourceUnavailableError, match="episodic"):
+        asyncio.run(
+            _gateway().write_task_episode(
+                _episode(episode_id="task-adapter", status=ValidationStatus.SYSTEM_GENERATED),
+                expires_at=None,
+            )
+        )
+
+
+def test_task_episode_transition_and_deletion_gateway_signatures_keep_authority_internal() -> None:
+    transition_parameters = inspect.signature(MemoryGateway.transition_task_episode).parameters
+    deletion_parameters = inspect.signature(MemoryGateway.delete_task_episode).parameters
+
+    assert "namespace" not in transition_parameters
+    assert "retrieval_eligible" not in transition_parameters
+    assert "namespace" not in deletion_parameters
+    assert set(transition_parameters) == {
+        "self", "record_id", "chat_turn_id", "episode_id", "from_status", "to_status",
+        "transitioned_at",
+    }
+    assert set(deletion_parameters) == {"self", "record_id", "chat_turn_id", "episode_id"}
+
+
+@pytest.mark.parametrize(
+    ("from_status", "to_status", "retrieval_eligible"),
+    [
+        (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.USER_APPROVED, True),
+        (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.COMPLETED, True),
+        (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.REJECTED, False),
+        (ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED, True),
+        (ValidationStatus.USER_APPROVED, ValidationStatus.REJECTED, False),
+    ],
+)
+def test_gateway_transitions_a_task_episode_with_exact_canonical_scope_and_eligibility(
+    from_status: ValidationStatus, to_status: ValidationStatus, retrieval_eligible: bool
+) -> None:
+    episodes = EpisodeReader(())
+    returned = _episode(episode_id="task-transition", status=to_status)
+    episodes.transition_result = returned
+    sink = RecordingMemoryOperationSink()
+    transitioned_at = datetime(2026, 8, 11, 9, tzinfo=UTC)
+
+    result = asyncio.run(
+        _gateway(episode_reader=episodes, memory_operation_sink=sink).transition_task_episode(
+            record_id="record-transition", chat_turn_id="turn-transition",
+            episode_id="task-transition", from_status=from_status, to_status=to_status,
+            transitioned_at=transitioned_at,
+        )
+    )
+
+    expected_namespace = MemoryNamespace(
+        scope=_scope(), memory_type=MemoryType.EPISODIC,
+        record_id="record-transition", source_id="turn-transition",
+    )
+    assert result is returned
+    assert len(episodes.transitions) == 1
+    received = episodes.transitions[0]
+    assert type(received) is EpisodeTransition
+    assert received == EpisodeTransition(
+        episode_id="task-transition", namespace=expected_namespace,
+        from_status=from_status, to_status=to_status,
+        retrieval_eligible=retrieval_eligible, transitioned_at=transitioned_at,
+    )
+    assert [(event.operation, event.outcome, event.result_count) for event in sink.events] == [
+        (MemoryOperation.WRITE, MemoryOutcome.REQUESTED, 0),
+        (MemoryOperation.WRITE, MemoryOutcome.SUCCESS, 1),
+    ]
+
+
+def test_gateway_treats_a_missing_task_transition_as_a_safe_idempotent_miss() -> None:
+    episodes = EpisodeReader(())
+    sink = RecordingMemoryOperationSink()
+
+    result = asyncio.run(
+        _gateway(episode_reader=episodes, memory_operation_sink=sink).transition_task_episode(
+            record_id="record-transition",
+            chat_turn_id="turn-transition",
+            episode_id="missing-task",
+            from_status=ValidationStatus.SYSTEM_GENERATED,
+            to_status=ValidationStatus.REJECTED,
+            transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+        )
+    )
+
+    assert result is None
+    assert [(event.operation, event.outcome, event.result_count) for event in sink.events] == [
+        (MemoryOperation.WRITE, MemoryOutcome.REQUESTED, 0),
+        (MemoryOperation.WRITE, MemoryOutcome.SUCCESS, 0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("record_id", "chat_turn_id", "episode_id"),
+    [("", "turn", "episode"), ("record/with-slash", "turn", "episode"),
+     ("record", "", "episode"), ("record", "turn", "")],
+    ids=["empty_record", "slashed_record", "empty_turn", "empty_episode"],
+)
+def test_gateway_rejects_invalid_task_transition_identity_before_adapter(
+    record_id: str, chat_turn_id: str, episode_id: str
+) -> None:
+    episodes = EpisodeReader(())
+
+    with pytest.raises((ValueError, TaskEpisodeTransitionRejected)):
+        asyncio.run(
+            _gateway(episode_reader=episodes).transition_task_episode(
+                record_id=record_id, chat_turn_id=chat_turn_id, episode_id=episode_id,
+                from_status=ValidationStatus.SYSTEM_GENERATED,
+                to_status=ValidationStatus.USER_APPROVED,
+                transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+            )
+        )
+
+    assert episodes.transitions == []
+
+
+@pytest.mark.parametrize(
+    ("from_status", "to_status", "transitioned_at"),
+    [
+        (
+            ValidationStatus.COMPLETED,
+            ValidationStatus.REJECTED,
+            datetime(2026, 8, 11, 9, tzinfo=UTC),
+        ),
+        (
+            ValidationStatus.SYSTEM_GENERATED,
+            ValidationStatus.USER_APPROVED,
+            datetime(2026, 8, 11, 9),
+        ),
+        (
+            ValidationStatus.SYSTEM_GENERATED,
+            ValidationStatus.USER_APPROVED,
+            "2026-08-11T09:00:00+00:00",
+        ),
+    ],
+    ids=["invalid_status", "naive_time", "invalid_time_type"],
+)
+def test_gateway_rejects_invalid_task_transition_values_before_adapter(
+    from_status: ValidationStatus, to_status: ValidationStatus, transitioned_at: object
+) -> None:
+    episodes = EpisodeReader(())
+
+    with pytest.raises(TaskEpisodeTransitionRejected):
+        asyncio.run(
+            _gateway(episode_reader=episodes).transition_task_episode(
+                record_id="record-transition",
+                chat_turn_id="turn-transition",
+                episode_id="task-transition",
+                from_status=from_status,
+                to_status=to_status,
+                transitioned_at=transitioned_at,  # type: ignore[arg-type]
+            )
+        )
+
+    assert episodes.transitions == []
+
+
+def test_gateway_deletes_only_the_exact_originating_task_episode_and_is_idempotent() -> None:
+    episodes = EpisodeReader(())
+    episodes.task_delete_results = [True, False]
+    sink = RecordingMemoryOperationSink()
+    gateway = _gateway(episode_reader=episodes, memory_operation_sink=sink)
+
+    assert asyncio.run(
+        gateway.delete_task_episode(
+            record_id="record-delete", chat_turn_id="turn-delete", episode_id="task-delete"
+        )
+    )
+    assert not asyncio.run(
+        gateway.delete_task_episode(
+            record_id="record-delete", chat_turn_id="turn-delete", episode_id="task-delete"
+        )
+    )
+    expected = (
+        MemoryNamespace(
+            scope=_scope(), memory_type=MemoryType.EPISODIC,
+            record_id="record-delete", source_id="turn-delete",
+        ),
+        "task-delete",
+    )
+    assert episodes.task_deletes == [expected, expected]
+    assert [(event.operation, event.outcome, event.result_count) for event in sink.events] == [
+        (MemoryOperation.DELETE, MemoryOutcome.REQUESTED, 0),
+        (MemoryOperation.DELETE, MemoryOutcome.SUCCESS, 1),
+        (MemoryOperation.DELETE, MemoryOutcome.REQUESTED, 0),
+        (MemoryOperation.DELETE, MemoryOutcome.SUCCESS, 0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("record_id", "chat_turn_id", "episode_id"),
+    [("", "turn", "episode"), ("record/with-slash", "turn", "episode"),
+     ("record", "", "episode"), ("record", "turn", "")],
+    ids=["empty_record", "slashed_record", "empty_turn", "empty_episode"],
+)
+def test_gateway_rejects_invalid_task_episode_deletion_identity_before_adapter(
+    record_id: str, chat_turn_id: str, episode_id: str
+) -> None:
+    episodes = EpisodeReader(())
+
+    with pytest.raises((ValueError, TaskEpisodeTransitionRejected)):
+        asyncio.run(
+            _gateway(episode_reader=episodes).delete_task_episode(
+                record_id=record_id, chat_turn_id=chat_turn_id, episode_id=episode_id
+            )
+        )
+
+    assert episodes.task_deletes == []
+
+
+def test_gateway_requires_an_episodic_adapter_for_task_episode_lifecycle() -> None:
+    with pytest.raises(MemorySourceUnavailableError, match="episodic"):
+        asyncio.run(
+            _gateway().transition_task_episode(
+                record_id="record-transition", chat_turn_id="turn-transition",
+                episode_id="task-transition", from_status=ValidationStatus.SYSTEM_GENERATED,
+                to_status=ValidationStatus.USER_APPROVED,
+                transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+            )
+        )
+    with pytest.raises(MemorySourceUnavailableError, match="episodic"):
+        asyncio.run(
+            _gateway().delete_task_episode(
+                record_id="record-delete", chat_turn_id="turn-delete", episode_id="task-delete"
+            )
+        )
+
+
+def test_gateway_propagates_task_lifecycle_adapter_errors_without_success_telemetry() -> None:
+    class FailingEpisodeReader(EpisodeReader):
+        async def transition_task_episode(
+            self, transition: EpisodeTransition
+        ) -> TaskEpisode | None:
+            del transition
+            raise MemorySourceUnavailableError("episodic provider detail")
+
+        async def delete_task_episode(
+            self, namespace: MemoryNamespace, *, episode_id: str
+        ) -> bool:
+            del namespace, episode_id
+            raise RuntimeError("adapter error")
+
+    episodes = FailingEpisodeReader(())
+    transition_sink = RecordingMemoryOperationSink()
+    deletion_sink = RecordingMemoryOperationSink()
+
+    with pytest.raises(MemorySourceUnavailableError, match="episodic provider detail"):
+        asyncio.run(
+            _gateway(episode_reader=episodes, memory_operation_sink=transition_sink)
+            .transition_task_episode(
+                record_id="record-transition", chat_turn_id="turn-transition",
+                episode_id="task-transition", from_status=ValidationStatus.SYSTEM_GENERATED,
+                to_status=ValidationStatus.USER_APPROVED,
+                transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+            )
+        )
+    with pytest.raises(RuntimeError, match="adapter error"):
+        asyncio.run(
+            _gateway(episode_reader=episodes, memory_operation_sink=deletion_sink)
+            .delete_task_episode(
+                record_id="record-delete", chat_turn_id="turn-delete", episode_id="task-delete"
+            )
+        )
+
+    assert [(event.operation, event.outcome) for event in transition_sink.events] == [
+        (MemoryOperation.WRITE, MemoryOutcome.REQUESTED)
+    ]
+    assert [(event.operation, event.outcome) for event in deletion_sink.events] == [
+        (MemoryOperation.DELETE, MemoryOutcome.REQUESTED)
+    ]
