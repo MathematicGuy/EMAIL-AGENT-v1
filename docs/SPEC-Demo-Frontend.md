@@ -2,12 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Document status | Spec — implementation gated on PRD-v1 completion and PRD-v2 milestone readiness |
-| Version | 2.1 (Updated with Milestone Dependency & Backend API Readiness Analysis) |
+| Document status | Active implementation spec — current-session AI Chat may start; full showcase remains gated on the explicit API gaps below and V2-M6 acceptance |
+| Version | 2.2 (Aligned to accepted V2-M3/V2-M4/V2-M5 runtime contracts) |
 | Date | 2026-08-11 |
 | Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
-| Readiness Status | **Increment A: PARTIALLY READY (65%)** (Connect, Knowledge, Run Audit ready; AI Chat streaming registered, GET history/sessions & LLM binding pending); **Increment B: BLOCKED (0% UI / 35% API)** |
-| Depends on | PRD-v1 (DONE 100%), V2-M1 (DONE 100%), V2-M2 (Repo DONE, API pending), V2-M3 (ACTIVE 92%), V2-M4 (VERIFY 35%), V2-M5 (ACTIVE 70%), V2-M6 (ACTIVE 55%) |
+| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: not yet implemented.** |
+| Depends on | PRD-v1 and V2-M1–V2-M5 (DONE 100%); V2-M6 (ACTIVE 55%); missing frontend-facing read/profile/proposal contracts listed in §3.3 and §7 |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
 
@@ -81,12 +81,28 @@ Increment B screens are feature-flagged off until their backend endpoints exist;
 | **Increment A — Connect** | Gmail OAuth, Mailbox Connections list, Unread preview | **V1-M1** (DONE 100%) | `GET /v1/mail-todo/connections`, `/oauth/gmail/*`, `/unread-preview` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Knowledge** | RAG corpus status, document list, ad-hoc grounded query | **V1-M3** (DONE 100%) | `GET /v1/mail-todo/knowledge/ready`, `/documents`, `POST /chat` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Run Audit** | Standalone Email Agent run metadata & task results | **V1-M4** (DONE 100%) | `GET /v1/mail-todo/runs/{id}`, `/result`, `/tasks` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
-| **Increment A — AI Chat Assistant** | Multi-turn chat thread, session sidebar, streaming responses | **V2-M1** (DONE), **V2-M4** (VERIFY 35%) | `POST /sessions` & `POST /messages` (**Implemented**); `GET /sessions` & `GET /messages` (**Missing**); resolver & reply adapter pending | **PARTIALLY READY** — Streaming chat UI can be built; multi-session history requires V2-M4B getter endpoints & `ChatReplyPort` binding in `app.py`. |
+| **Increment A — AI Chat Assistant** | Multi-turn chat thread and streaming responses in the active browser session | **V2-M1–V2-M5** (DONE) | `POST /sessions` and `POST /messages` (**Implemented and runtime-bound**); `GET /sessions` and `GET /messages` (**Missing**) | **READY FOR CURRENT-SESSION SLICE** — configured Gemini/Groq/Faucet replies and typed SSE are live; persisted/reloadable session history remains blocked. |
 | **Increment B — Preferences** | Persona/profile editor (language, tone, brevity, rules) | **V2-M2** (DONE repo layer) | Profile REST APIs (`GET/POST/PUT/DELETE /v1/cowork/chat/profile`) (**Missing**) | **BLOCKED** — DB repository landed in `PostgresChatProfileRepository`, but HTTP router is missing. |
-| **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task proposal controls | **V2-M3.4b-B** (ACTIVE), **V2-M4** (PARTIAL) | Task episode transition API (`POST /v1/cowork/chat/episodes/{id}/transition`) (**Missing**) | **BLOCKED** — Gateway lifecycle transition wiring (M3.4b-B) & REST API missing. |
-| **Increment B — Memory Transparency** | In-thread badges for profile rules, episodic hits, RAG citations | **V2-M5** (ACTIVE 70%) | Memory citation SSE emission & eligible episodic retrieval (**Missing / Pending V2-M3.4b-C**) | **BLOCKED** — Episodic retrieval pending Gateway wiring and provider SSE citation emission. |
-| **Increment B — Episode Insight** | Provenance view for chat summaries & TaskEpisodes | **V2-M3** (ACTIVE 92%), **V2-M6** (ACTIVE 55%) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Missing**) | **BLOCKED** — Episode listing REST API missing. |
-| **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2**, **V2-M3.4b-B**, **V2-M6** | Delete REST APIs (`DELETE /profile`, `DELETE /episodes/{id}`) (**Missing**) | **BLOCKED** — Deletion REST endpoints missing. |
+| **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task controls | **V2-M3/V2-M4** (DONE) | Originating-session approve/complete/reject endpoints (**Implemented**) | **PARTIAL** — lifecycle transport is ready, but a structured task-proposal SSE/read payload is missing; the client must not parse assistant prose to build a task card. |
+| **Increment B — Memory Transparency** | In-thread badges for declarative, episodic, and semantic sources | **V2-M5** (DONE) | Typed `memory_citation` SSE with `memory_type` and opaque `source_id` (**Implemented**) | **READY FOR BADGES** — detailed stored-memory views remain blocked on read APIs. |
+| **Increment B — Episode Insight** | Provenance view for chat summaries and TaskEpisodes | **V2-M3** (DONE), **V2-M6** (ACTIVE 55%) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Missing**) | **BLOCKED** — no frontend-safe episode listing/read contract. |
+| **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2/V2-M3** (DONE), **V2-M6** (ACTIVE) | Originating-session single-episode delete (**Implemented**); profile delete and list-refresh APIs (**Missing**) | **PARTIAL** — current-thread episode deletion is callable once an episode ID is received; full memory administration remains blocked. |
+
+### 3.4 Immediate frontend implementation boundary
+
+The first frontend slice may start now and must stay inside this contract:
+
+1. create one server chat session for the active browser session;
+2. submit idempotent messages and render ordered `delta` events;
+3. render declarative, episodic, and semantic badges from `memory_citation`;
+4. finalize or expose a safe retry state from `completed` / `error`;
+5. retain the active session ID only as browser-session UI state;
+6. do not claim reloadable history, profile editing, episode browsing, or a
+   structured task card until the corresponding backend contracts land.
+
+This boundary is intentionally narrower than the final showcase. It permits real
+frontend progress while preventing client-side storage or prose parsing from
+becoming an accidental backend.
 
 ## 4. Technology decision
 
@@ -156,7 +172,7 @@ Apply `frontend-ui-engineering` principles within Streamlit's constraints:
 12. **Memory transparency**: label declarative, episodic, and semantic sources
     with text plus icon; disclose source type and provenance, not full context.
 
-## 7. Backend API contract assumptions & live implementation status
+## 7. Backend API contract and live implementation status
 
 The demo consumes FastAPI backend endpoints; it defines none. The table below details the exact backend API contract, its expected milestone owner, and its current live codebase status in `src/cowork_agent/app.py` and `src/cowork_agent/api/chat.py`:
 
@@ -175,25 +191,45 @@ The demo consumes FastAPI backend endpoints; it defines none. The table below de
 | `/v1/mail-todo/knowledge/ready` | GET | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:528` |
 | `/v1/mail-todo/knowledge/documents` | GET | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:552` |
 | `/v1/mail-todo/knowledge/chat` | POST | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:569` |
-| `/v1/cowork/chat/sessions` | POST | V2-M1 / V2-M4A | **Implemented** | Increment A (AI Chat) | `src/cowork_agent/api/chat.py:44` — Requires `chat_principal_resolver` in `app.py` |
+| `/v1/cowork/chat/sessions` | POST | V2-M1 / V2-M4 | **Implemented and composed** | Increment A (AI Chat) | Uses the verified single-active-mailbox principal and creates an in-memory active session. |
 | `/v1/cowork/chat/sessions` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed for sidebar session history list |
-| `/v1/cowork/chat/sessions/{id}/messages` | POST | V2-M4A | **Implemented** | Increment A (AI Chat) | `src/cowork_agent/api/chat.py:56` (SSE) — Requires `ChatReplyPort` adapter binding |
+| `/v1/cowork/chat/sessions/{id}/messages` | POST | V2-M4/V2-M5 | **Implemented and composed** | Increment A (AI Chat) | SSE; configured Gemini/Groq/Faucet reply adapter; exact body fields are `session_id`, `user_message`, and `idempotency_key`. |
 | `/v1/cowork/chat/sessions/{id}/messages` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed to reload prior turn history |
-| `/v1/cowork/chat/profile` | GET/POST/DELETE | V2-M2 | **Missing REST API** | Increment B (Preferences) | Domain & DB repo landed in `PostgresChatProfileRepository`; HTTP router missing |
-| `/v1/cowork/chat/episodes/{id}/transition` | POST | V2-M3.4b-B / V2-M4 | **Missing REST API** | Increment B (Task Controls) | Transition inline proposal: approve / complete / reject |
+| `/v1/cowork/chat/profile` | GET/POST/PUT | V2-M2 | **Missing REST API** | Increment B (Preferences) | Domain & DB repo landed in `PostgresChatProfileRepository`; HTTP router missing |
+| `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/approve` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; returns `episode_id`, `validation_status`, and `retrieval_eligible`. |
+| `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/complete` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; invalid or inaccessible records return 404. |
+| `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/reject` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; rejected memory remains retrieval-ineligible. |
+| `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}` | DELETE | V2-M3/V2-M4 | **Implemented** | Increment B (Deletion) | Originating session only; successful deletion returns 204. |
 | `/v1/cowork/chat/episodes` | GET | V2-M3 / V2-M6 | **Missing REST API** | Increment B (Episode Insight) | List TaskEpisodes & provenance |
-| `/v1/cowork/chat/episodes/{id}` | DELETE | V2-M3.4b-B / V2-M6 | **Missing REST API** | Increment B (Deletion) | Single TaskEpisode hard/soft deletion |
+| `/v1/cowork/chat/profile` | DELETE | V2-M2/V2-M6 | **Missing REST API** | Increment B (Deletion) | Required for complete profile administration. |
 
 If a needed read/write endpoint is missing at implementation time, file it against the owning milestone — do not work around it with client-side logic. Increment B features MUST remain feature-flagged off until their respective REST endpoints land.
+
+### 7.1 SSE event-to-UI mapping
+
+| SSE event | Payload used by UI | Required behavior |
+|---|---|---|
+| `delta` | `event_id`, `session_id`, `turn_id`, `text` | Deduplicate by event identity and append text in order to the active assistant message. |
+| `memory_citation` | `event_id`, `turn_id`, `memory_type`, `source_id` | Render a declarative / episodic / semantic badge. Treat `source_id` as opaque; never fetch or infer raw content from it. |
+| `completed` | `event_id`, `turn_id` | Mark the turn terminal, persist only UI-safe browser-session state, and re-enable the composer. |
+| `error` | `event_id`, `turn_id`, `code`, `safe_message` | Render the safe message, preserve the idempotency key for retry, and never display exception details. |
+
+There is currently **no structured task-proposal SSE variant**. Although the
+controller can persist a bounded TaskEpisode and emit an episodic citation, the
+frontend cannot reconstruct the task title, paraphrase, action plan, missing
+information, and citations from the public stream. A final task-proposal card
+therefore requires either a typed proposal event or a frontend-safe read DTO.
+Parsing assistant text is prohibited.
 
 ## 8. Acceptance criteria
 
 **Increment A**
 1. A first-time user can create a chat session and exchange multiple ordered
    messages without touching configuration beyond `.env`.
-2. An explicit task/action-plan request renders one bounded chat-native task
-   proposal in the same thread; retries share one logical `record_id`.
-3. Every task proposal card shows title, compact request paraphrase, action
+2. **GATED CONTRACT:** an explicit task/action-plan request renders one bounded
+   chat-native task proposal in the same thread; retries share one logical
+   `record_id`. This requires the structured proposal contract identified in §7.1.
+3. **GATED CONTRACT:** every task proposal card shows title, compact request paraphrase, action
    plan, `missing_information`, lifecycle state, and company citation chips
    where evidence exists.
 4. A proposal with missing information is visually distinct and lists its
@@ -231,13 +267,16 @@ If a needed read/write endpoint is missing at implementation time, file it again
 
 ## 9. Live verification plan
 
-Performed with `frontend-ui-engineering` plus the `playwright-cli` skill:
+Performed with `frontend-ui-engineering` plus an available real-browser
+verification lane (Chrome DevTools or Playwright):
 
 1. Start backend (`mail-todo-api`) and GUI (`python scripts/run_gui.py`).
-2. Open the UI with `playwright-cli`, snapshot the accessible tree, and check
+2. Open the UI in a real browser, snapshot the accessible tree, and check
    console plus network requests before interaction.
-3. Create a chat session, send two turns, reload, and verify ordered history.
-4. Explicitly request the same task or action plan twice from the originating
+3. Create a chat session and send two turns; verify ordered streaming in the
+   active browser session. Reload/history verification remains gated on the
+   missing GET contracts.
+4. After the structured proposal contract lands, explicitly request the same task or action plan twice from the originating
    session and verify one logical TaskEpisode and one in-thread proposal.
 5. Ask a chat question that needs company knowledge; verify citations appear
    only where evidence exists and raw email never appears in snapshots,
@@ -252,7 +291,7 @@ Performed with `frontend-ui-engineering` plus the `playwright-cli` skill:
    with scores and reranker status. Run a query with no matching content
    and verify the empty-state message. Force a corpus-unavailable state
    (e.g. empty `data/extracted/` directory) and verify the degraded indicator.
-8. Increment B: approve an episode in chat, send a relevant next turn, and
+8. Increment B: after the structured proposal contract lands, approve an episode in chat, send a relevant next turn, and
    verify the eligible episode is recalled and labeled; reject another and
    verify it is excluded.
 9. Test keyboard navigation and resize to 320, 768, 1024, and 1440 pixels.
@@ -266,7 +305,7 @@ Performed with `frontend-ui-engineering` plus the `playwright-cli` skill:
 | Task breakdown of this spec | `planning-and-task-breakdown` |
 | Build screens slice by slice | `incremental-implementation`, `frontend-ui-engineering` |
 | Verify against Streamlit/FastAPI docs | `source-driven-development` |
-| Runtime verification | `playwright-cli` snapshots, interactions, console/network checks, and screenshots (per §9) |
+| Runtime verification | Real-browser Chrome DevTools or Playwright snapshots, interactions, console/network checks, and screenshots (per §9) |
 | Review before merge | `code-review-and-quality` |
 | Commit | `git-workflow-and-versioning` |
 

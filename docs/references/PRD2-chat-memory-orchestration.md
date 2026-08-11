@@ -16,10 +16,10 @@ formatting-only edits or unverified claims.
 | Field | Current value |
 |---|---|
 | Updated | 2026-08-11 (Asia/Bangkok) |
-| Branch / implementation baseline | `2f746e7` on `feature/v2-m3-chat-summary`; live `dev` is `91dff59`, merge-base remains `2f746e7`; M3.1-M3.4a are committed and accepted; no merge, rebase, reset, or push without explicit authorization |
+| Branch / implementation baseline | `dev` includes `0d0bc22` (`feat(chat): complete memory-aware chat runtime`); M3.1-M3.4b-C, V2-M4, and V2-M5 are committed and accepted; no history rewrite without explicit authorization |
 | Product frontier | PRD-v2 Multi-Turn AI Chat Memory |
-| Active milestone | **V2-M3 — Generic TaskEpisode contract migration (ACTIVE)**; V2-M5 semantic runtime remains verified but generic episodic runtime is dependency-blocked |
-| PRD-v2 progress | M3.4a and M3.4b-A are accepted; M3.4b-B lifecycle/deletion wiring is the active next slice; use §5–§7 for live status |
+| Active milestone | **V2-M6 — Evaluation and governance (ACTIVE, outside this delivery)**; M3.4, V2-M4, and V2-M5 are complete |
+| PRD-v2 progress | M3.4a through M3.4b-C, V2-M4, and V2-M5 are accepted; remaining work is V2-M6 governance only; use §5–§7 for live status |
 | Tech stack authority | PostgreSQL (authoritative durable store); Qdrant (rebuildable enterprise RAG index) |
 
 ## 1. New-session launch sequence
@@ -29,11 +29,8 @@ Do these in order; do not reread the entire documentation set first.
 1. Read `AGENTS.md` (project rules and four non-negotiable invariants).
 2. Read this dashboard and `docs/references/improve-orchestration-efficiency.md`.
 3. Run `git status --short --branch` and inspect uncommitted worktree changes.
-4. For V2-M3/V2-M4A, read only:
-   - `docs/PRD-v2-Memory-Extension.md` FR-01, FR-02, FR-06..FR-10, FR-15..FR-18;
-   - `docs/references/qdrant-postgresql-techstack-evaluation.md` §1–3.
-5. Execute the immediate next task plan from §7 below.
-6. Update only the affected dashboard rows and latest-proof snapshot at a verified boundary.
+4. Execute the immediate next task plan from §7 below.
+5. Update only the affected dashboard rows and latest-proof snapshot at a verified boundary.
 
 Recommended skills for implementation: `api-and-interface-design`, `test-driven-development`, `incremental-implementation`, `security-and-hardening`, `git-workflow-and-versioning`.
 
@@ -57,10 +54,10 @@ Non-negotiable:
 - Domain and feature code remain framework-free (`domain ← features ← integrations/orchestration/persistence ← app`).
 
 Current active worktree state:
-- Branch `feature/v2-m3-chat-summary` is at `2f746e7`. M3.1-M3.4a are committed; M3.4a and the uncommitted M3.4b-A Gateway producer slice are accepted after fresh `ship` verdicts with unchanged post-review hashes.
-- `dev` is `91dff59`; merge-base is `2f746e7` with no feature-only commits and 7 `dev`-only commits. Reconciliation is a later explicit task; do not merge, rebase, reset, or push without explicit authorization.
-- Latest parent verification after M3.4b-A canonical-dispatch correction: 30 live PostgreSQL persistence tests passed with zero skips; 118 AI Chat unit tests passed; full suite 727 passed, 25 skipped, 4 xfailed using explicit external `TEMP`/`TMP` and a dedicated pytest base temp outside the managed sandbox; Ruff, `mypy src` across 79 files, and `git diff --check` were clean.
-- Docker Desktop and `cowork-pg` are currently running. Preflight them before a future live persistence or full-suite gate; do not treat a connection timeout or temp ACL cascade as a code regression.
+- Branch `dev` includes implementation commit `0d0bc22`. The accepted M3.4b-B whitespace-ID correction and the complete M3.4b-C/V2-M4/V2-M5 runtime are committed. Do not rewrite or reorder accepted history without explicit authorization.
+- The cumulative corrected final verdict is `ship`. Parent proof on the accepted snapshot is 186 impacted AI Chat/runtime tests and 20 live PostgreSQL persistence tests with zero skips, plus scoped Ruff, mypy, and diff-check green.
+- The merged repository-wide suite currently cannot collect because unrelated knowledge-ingestion modules lack `docx` and two unrelated test modules share `test_query_guard`; milestone verification stays scoped rather than changing those components.
+- Docker Desktop and `cowork-pg` were available for the final live persistence gate. Preflight them before a future database gate; do not treat a connection timeout or temp ACL cascade as a code regression.
 
 ## 4. Authority and selective document routing
 
@@ -83,32 +80,32 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 |---|---:|---:|---|---|---|
 | V2-M1 Gateway + session working memory | **DONE** | 100 | Chat/memory contracts; fail-closed namespace; bounded session TTL; no gateway bypass | PRD-v1 baseline | `7e42784..2a29e29`; 73 focused tests; deterministic suite exit 0 |
 | V2-M2 Declarative chat profile | **DONE** | 100 | Explicit-only profile CRUD; per-turn compact load; fallback; deletion/retention | V2-M1 | Policy/port/gateway/migration/repo landed; 496 passed; PostgreSQL gate 15 passed against `cowork-pg` |
-| V2-M3 Chat-native episodes | **ACTIVE** | 94 | M3.1-M3.4a and M3.4b-A accepted; PostgreSQL durability and fail-closed Gateway producer write are complete; lifecycle/deletion/retrieval wiring remains | V2-M1, V2-M2 | M3.4b-A final verdict `ship`; post-review hashes unchanged; live PostgreSQL 30 passed; AI Chat 118 passed; full 727 passed/25 skipped/4 xfailed; Ruff, mypy, and diff check clean |
-| V2-M4 Chat Controller + SSE | **VERIFY** | 35 | Session/message APIs, Chat Controller loop, and typed assistant SSE landed | V2-M1–M3 | 12 focused controller/API tests; principal binding, cancellation, replay, typed provider failure proven |
-| V2-M5 Selective episodic + RAG retrieval | **ACTIVE** | 70 | Query-scoped contracts, deterministic intent policy, Gateway filtering/degradation, ready-only Qdrant/semantic runtime, and labeled precedence assembler landed; eligible episodic runtime depends on M3.4b Gateway wiring | V2-M4A | Central post-fix focus 96 passed; generation-context 2 passed; Ruff and narrowed mypy clean |
+| V2-M3 Chat-native episodes | **DONE** | 100 | M3.1-M3.4b-C accepted: PostgreSQL durability, fail-closed producer/lifecycle/deletion, and eligible runtime wiring through Gateway | V2-M1, V2-M2 | Corrected cumulative verdict `ship`; 186 impacted tests; live PostgreSQL 20 passed; scoped Ruff, mypy, and diff check clean |
+| V2-M4 Chat Controller + SSE | **DONE** | 100 | Verified-principal session/message APIs, configured reply adapters, typed SSE, explicit bounded proposals, and originating-session approve/complete/reject/delete controls | V2-M1–M3 | Explicit-policy, proposal, SSE citation, lifecycle, cancellation, idempotency, and retry paths included in the 186-test parent gate; final verdict `ship` |
+| V2-M5 Selective episodic + RAG retrieval | **DONE** | 100 | Selective bounded episodic + semantic reads, eligible-only model context, real company-evidence consumption, citation allowlisting, precedence, and graceful degradation | V2-M4 | Real semantic-adapter/provider seam, cross-session eligible episodes, company-evidence precedence, and outage behavior included in the 186-test parent gate; final verdict `ship` |
 | V2-M6 Evaluation + governance | **ACTIVE** | 55 | Metadata-only Gateway events, paired launch gate, exact-scope retryable bulk deletion, optional durable retention settings, and explicit purge coordinator landed; production sink/alerts, backup/restore, and end-to-end runtime deletion proof remain | V2-M5 core contracts | Central governance focuses green; M3.4a live PostgreSQL deletion/purge paths pass, while Gateway runtime wiring remains |
 
 ## 6. PRD-v2 acceptance dashboard
 
 | ID | Acceptance statement | Status | Evidence |
 |---|---|---:|---|
-| AC-01 | Chat Controller accesses all four memories only through Gateway | PARTIAL | V2-M4A Controller reads working/profile context only through Gateway; episodic/semantic wiring pending V2-M5 |
+| AC-01 | Chat Controller accesses all four memories only through Gateway | DONE | Production controller composition injects working, profile, PostgreSQL episodic, and semantic adapters only through `MemoryGateway` |
 | AC-02 | Every operation carries tenant/user/session/`feature: ai_chat`/type | DONE | `310d2fd`, `2a29e29`; domain namespace + gateway tests |
 | AC-03 | Bounded working buffer preserves turns and expires by policy | DONE | `7e42784`, `2a29e29`; `tests/unit/features/ai_chat/test_session_buffer.py` |
 | AC-04 | Explicit persona/preferences persist and load in later sessions | DONE | Profile policy/gateway/PostgreSQL repo green (`test_chat_profile_repository.py` 15 passed) |
-| AC-05 | Assistant events stream to the active session | PARTIAL | Typed assistant delta/error/completed SSE proven by controller/API tests |
-| AC-06 | Only explicit user task requests create idempotent TaskEpisodes | PARTIAL | ADR-004 contract, scoped PostgreSQL upsert, and fail-closed Gateway producer authorization are proven; deterministic Controller producer construction remains |
-| AC-07 | New TaskEpisodes are system-generated and retrieval-ineligible | PARTIAL | Domain, PostgreSQL-generated eligibility, and canonical Gateway dispatch are proven; Controller integration remains |
-| AC-08 | Inline approval/completion makes episode eligible | PARTIAL | Session-scoped PostgreSQL transitions derive eligibility from approved/completed status; inline controller wiring remains |
-| AC-09 | Inline rejection keeps episode ineligible | PARTIAL | PostgreSQL lifecycle transitions keep non-approved/non-completed states ineligible; inline controller wiring remains |
-| AC-10 | Retrieval returns approved/completed episodes only | PARTIAL | PostgreSQL retrieval filters to eligible validated lifecycle states with expiry and scope enforcement; Gateway runtime wiring remains |
-| AC-11 | Model cannot retrieve unvalidated episodes directly | PARTIAL | Gateway filtering and PostgreSQL eligibility/status predicates are proven; live reply-provider consumption remains |
-| AC-12 | Episodic and semantic retrieval are selective and bounded | PARTIAL | Intent policy, Gateway bounds, ready-only semantic runtime, and bounded PostgreSQL FTS retrieval with timeout/max-items/min-score are proven; live combined consumption remains |
-| AC-13 | Current company evidence outranks prior episode guidance | PARTIAL | Typed assembler precedence and labeled advisory episodes proven; live reply-provider consumption pending |
-| AC-14 | TaskEpisodes exclude raw source content and tool payloads | PARTIAL | Domain guards plus PostgreSQL constraints enforce bounded body-free fields and the exact citation-key allowlist; fresh final review remains |
-| AC-15 | Exact-scope deletion prevents later retrieval without deleting semantic RAG | PARTIAL | Gateway semantic exclusion plus scoped PostgreSQL single/bulk deletion and expiry purge are proven; lifecycle wiring remains |
+| AC-05 | Assistant events stream to the active session | DONE | Active-session delta/error/episodic-citation/completed SSE, cancellation, and idempotent replay are proven |
+| AC-06 | Only explicit user task requests create idempotent TaskEpisodes | DONE | Full-message deterministic finite grammar is fail-closed on pre/post-cue negation; transient writes retry the same server-built episode without a second reply or turn |
+| AC-07 | New TaskEpisodes are system-generated and retrieval-ineligible | DONE | Controller owns identity/provenance/status and Gateway validates canonical `system_generated` / `retrieval_eligible=false` writes |
+| AC-08 | Inline approval/completion makes episode eligible | DONE | Originating-session controls call Gateway transitions; storage derives approved/completed eligibility atomically |
+| AC-09 | Inline rejection keeps episode ineligible | DONE | Originating-session rejection calls Gateway; storage-derived rejected eligibility remains false |
+| AC-10 | Retrieval returns approved/completed episodes only | DONE | PostgreSQL and Gateway apply same-tenant/user/feature, status, eligibility, expiry, relevance, timeout, and result bounds |
+| AC-11 | Model cannot retrieve unvalidated episodes directly | DONE | Configured reply adapters consume only labeled `GenerationContext`; advisory episodes are the Gateway-filtered eligible set |
+| AC-12 | Episodic and semantic retrieval are selective and bounded | DONE | Deterministic intent selection, bounded PostgreSQL FTS, ready-only semantic retrieval, and provider-context bounds are proven |
+| AC-13 | Current company evidence outranks prior episode guidance | DONE | Configured provider payload declares and enforces current instruction → current company evidence → stored preference → advisory episode precedence |
+| AC-14 | TaskEpisodes exclude raw source content and tool payloads | DONE | Server-owned bounded proposals exclude raw email/transcript/tool/Gmail/run/mailbox fields; persisted citations must match current company-evidence coordinates |
+| AC-15 | Exact-scope deletion prevents later retrieval without deleting semantic RAG | DONE | Originating-session Gateway deletion and scoped PostgreSQL deletion/purge are proven; semantic company RAG is excluded |
 | AC-16 | Production telemetry is metadata-only | PARTIAL | Typed Gateway events exclude content, identity, query, URLs, citations, and exception text; production sink/alerts remain |
-| AC-17 | Memory outage degrades chat and preserves standalone Email Agent | PARTIAL | Gateway degradation proven; standalone Email Agent remains separate by contract |
+| AC-17 | Memory outage degrades chat and preserves standalone Email Agent | DONE | Optional reads degrade safely; transient episode writes preserve the reply and retry safely; standalone Email Agent remains separate and unchanged |
 | AC-18 | No in-chat tool, scheduler, recurring processing, or autonomous email action | PARTIAL | Public contract/SSE expose no tool surface; FastAPI rejects retired `tool_choices` with 422 before reply dispatch; final product-wide audit remains |
 
 ## 7. Active execution queue
@@ -123,12 +120,16 @@ and dashboard update afterward.
 2. **M3.4b-A producer — DONE:** explicit-request initial writes are authorized,
    reconstructed to a canonical bounded `TaskEpisode`, and dispatched through
    the Gateway at exact scope/identity; fresh verdict `ship` and hashes unchanged.
-3. **M3.4b-B lifecycle/deletion — NEXT:** originating-session transitions and deletion
-   through Gateway (AC-08/AC-09/AC-15).
-4. **M3.4b-C retrieval:** eligible, bounded episode context through Gateway; prove
-   model isolation (AC-10–AC-12).
-5. **Controller/reply completion:** close AC-01, AC-05, AC-13, and AC-17.
-6. **Governance completion:** close AC-16–AC-18 with operational evidence.
+3. **M3.4b-B lifecycle/deletion — DONE:** originating-session transitions and deletion
+   through Gateway; corrected final verdict `ship` (AC-08/AC-09/AC-15).
+4. **Combined M3.4b-C + V2-M4 controller/reply completion — DONE:** production
+   episodic composition, model isolation, configured reply adapters, explicit
+   proposal SSE, lifecycle controls, and retry-safe degradation are accepted.
+5. **V2-M5 selective retrieval completion — DONE:** eligible episodic and current
+   company evidence are selectively bounded, labeled, allowlisted, and consumed
+   with deterministic precedence; corrected final verdict `ship`.
+6. **Governance completion — NEXT / OUT OF CURRENT SCOPE:** close AC-16 and AC-18
+   with the remaining V2-M6 operational evidence.
 
 ## 8. Source and test map for next tasks
 
@@ -163,13 +164,14 @@ python -m pytest -q
   request; no Email task FK, Gmail/run/tool fields, or automatic extraction.
 
 ### Active blockers
-1. **Branch boundary:** feature HEAD is `2f746e7`, live `dev` is `91dff59`, and their merge-base is `2f746e7` (`0` feature-only, `7` dev-only); do not merge, rebase, reset, or push unless explicitly authorized.
-2. **Gateway boundary:** M3.4a storage and M3.4b-A initial producer writes are
-   accepted, but TaskEpisode transition, single-record deletion, and eligible
-   retrieval are not yet wired through `MemoryGateway`; continue in §7 order.
-3. **Environment discipline:** Docker/`cowork-pg` is currently available. Broad
-   Windows pytest must run outside the managed sandbox with explicit external
-   `TEMP`/`TMP` and a unique dedicated `--basetemp` to avoid ACL cascades.
+1. **History boundary:** the accepted M3.4/V2-M4/V2-M5 runtime is committed in
+   `0d0bc22`; do not reset, rebase, amend, or otherwise rewrite that accepted
+   boundary without explicit authorization.
+2. **Broad-suite boundary:** unrelated missing-`docx` imports and duplicate
+   `test_query_guard` module names prevent repository-wide collection; do not
+   broaden this completed milestone to repair them.
+3. **Remaining product boundary:** AC-16 production telemetry operations and the
+   final AC-18 product-wide governance audit belong to V2-M6, not this delivery.
 
 ## 11. Latest verification snapshot
 
@@ -178,11 +180,11 @@ results live in Git and reusable process lessons live in the orchestration playb
 
 | Scope | Latest evidence | Use |
 |---|---|---|
-| Live PostgreSQL persistence | 30 passed, zero skips against running `cowork-pg` | Current M3.4a/M3.4b-A storage regression evidence |
-| M3.4b-A final review | `ship`; canonical validated object is dispatched; unchanged hashes under observed `workspace-write` / `managed` review runtime | Gateway producer boundary accepted; proceed to M3.4b-B |
-| Current AI Chat focus | 118 passed after the canonical-dispatch correction | Current Gateway/contract regression evidence |
-| Broad regression | Full suite: 727 passed, 25 skipped, 4 xfailed with explicit external temp outside the managed sandbox | Current acceptance-boundary proof |
-| Static / hygiene | Ruff clean; `mypy src` clean across 79 files; `git diff --check` clean | Required for source changes |
+| Live PostgreSQL persistence | 20 passed, zero skips against running `cowork-pg` | Current profile, chat-summary, and TaskEpisode storage/lifecycle regression evidence |
+| Corrected cumulative final review | `ship`; semantic citation seam, same-episode retry, PostgreSQL outage translation, finite explicit-task grammar, and full-message veto boundary accepted | M3.4b-C, V2-M4, and V2-M5 accepted |
+| Current AI Chat/runtime focus | 186 passed on the final policy-corrected snapshot | Current Gateway/controller/API/provider/persistence-failure regression evidence |
+| Broad regression | Unavailable on merged baseline because unrelated `docx` imports and duplicate `test_query_guard` module names fail collection | Do not broaden milestone scope to repair unrelated baseline |
+| Static / hygiene | Scoped Ruff, mypy, and diff-check clean | Required for changed milestone paths |
 
 Evidence rule: a task report is a claim. Retain the exact command and output in the
 task handoff or review packet, not in this dashboard. Do not mark an AC `DONE` from
@@ -191,10 +193,10 @@ a skipped database test.
 ## 12. End-of-session handoff template
 
 ```text
-ACTIVE MILESTONE / SLICE: V2-M3 TaskEpisode lifecycle/deletion Gateway wiring (M3.4b-B)
-STATUS AND PERCENT: ACTIVE, 94%; M3.4a and M3.4b-A accepted, lifecycle/deletion next
-COMMITS: 2f746e7 on feature/v2-m3-chat-summary; dev 91dff59; merge-base 2f746e7; no merge/rebase/push without explicit authorization
-TESTS / LINT / TYPES: live PostgreSQL 30 passed, zero skips; AI Chat 118 passed; full 727 passed, 25 skipped, 4 xfailed; Ruff pass; mypy 79 files pass; diff check clean
-AC EVIDENCE ADDED: M3.4b-A exact-scope initial write, canonical bounded dispatch, lifecycle/provenance/expiry denial, idempotent identity forwarding, and metadata-only success telemetry
-EXACT NEXT ACTION: implement tests-first originating-session TaskEpisode transition and exact single-record deletion through `MemoryGateway`, without retrieval/controller wiring
+ACTIVE MILESTONE / SLICE: V2-M6 governance (separate future delivery)
+STATUS AND PERCENT: V2-M3 DONE 100%; V2-M4 DONE 100%; V2-M5 DONE 100%
+COMMITS: dev includes accepted runtime commit 0d0bc22; no history rewrite without explicit authorization
+TESTS / LINT / TYPES: final impacted runtime 186 passed; live PostgreSQL 20 passed, zero skips; scoped Ruff, mypy, and diff check clean; broad suite blocked by unrelated collection errors
+AC EVIDENCE ADDED: production four-memory Gateway composition, configured labeled reply context, explicit bounded proposals, originating-session lifecycle, same-episode retry, selective eligible retrieval, real company-evidence precedence, and grounded citation allowlisting
+EXACT NEXT ACTION: start V2-M6 governance from the milestone-focused OS-temp handoff; do not replay V2-M3/V2-M4/V2-M5
 ```
