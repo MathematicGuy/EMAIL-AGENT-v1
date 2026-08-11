@@ -36,3 +36,4 @@ tmp_pytest/
 
 .runlogs/
 .playwright-cli/
+node_modules/

@@ -56,18 +56,5 @@ to the OS temp directory so continuity is preserved.
 
 - Architecture decisions: `docs/adr/ADR-001..003`
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-- Current-vs-target gap analysis and migration milestones:
-  `docs/master-comparison.md`
 - Product requirements: `docs/PRD-v1-Core-Email-and-RAG.md` and
   `docs/PRD-v2-Memory-Extension.md`
-
-## Non-negotiable invariants
-
-1. Raw email bodies and attachment content are never persisted or logged;
-   they exist only as transient in-run state.
-2. Gmail access stays read-only: only the `gmail.readonly` scope.
-3. Attachment processing is out of scope (ADR-003): record presence only.
-4. V1-M3 local retrieval is implemented by `HybridSemanticMemory` (in-repo
-   dense + BM25 + RRF + optional Jina reranking). Production Qdrant and the
-   PRD-v2 four-type memory system remain milestone-gated; do not scaffold
-   them unless the request explicitly cites `docs/master-comparison.md`.
