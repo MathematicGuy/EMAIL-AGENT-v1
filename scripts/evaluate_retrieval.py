@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from cowork_agent.integrations.rag.embeddings import EmbeddingPort
     from cowork_agent.integrations.rag.jina_reranker import RerankerPort
     from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
+    from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "loader.py"
@@ -761,7 +762,7 @@ class QdrantEvaluationRetriever:
         self._embedder = embedder
         self._top_k_default = top_k_default
         self._min_score_default = min_score_default
-        self._memory: Any | None = None
+        self._memory: QdrantSemanticMemory | None = None
 
     async def build_index(self) -> None:
         """Ingest the corpus once into an ephemeral Qdrant collection."""
