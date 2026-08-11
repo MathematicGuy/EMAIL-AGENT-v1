@@ -5,7 +5,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, Protocol, cast
@@ -879,3 +879,53 @@ def _require_confidence(value: object) -> float:
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("confidence must be between 0 and 1")
     return confidence
+
+
+class GeminiChatReply:
+    """Stream assistant replies using Gemini API key failover."""
+
+    def __init__(self, settings: GeminiSettings) -> None:
+        self._settings = settings
+
+    async def stream_reply(
+        self,
+        request: Any,
+        context: Any,
+    ) -> AsyncIterator[str]:
+        prompt_parts: list[str] = [
+            "Bạn là một trợ lý AI thông minh (Cowork Agent), hỗ trợ người dùng bằng tiếng Việt ngắn gọn, rõ ràng, hữu ích."
+        ]
+        if hasattr(context, "semantic") and context.semantic and getattr(context.semantic, "items", None):
+            prompt_parts.append("\nNgữ cảnh tài liệu liên quan:")
+            for item in context.semantic.items:
+                prompt_parts.append(f"- {getattr(item, 'text', item)}")
+
+        prompt_parts.append(f"\nUser: {request.user_message}")
+        prompt = "\n".join(prompt_parts)
+
+        keys = self._settings.api_keys
+        if not keys:
+            yield f"Đã nhận tin nhắn: '{request.user_message}' (Chưa cấu hình GEMINI_API_KEY)."
+            return
+
+        for key in keys:
+            try:
+                client = genai.Client(api_key=key)
+                response = await asyncio.to_thread(
+                    client.models.generate_content_stream,
+                    model=self._settings.model,
+                    contents=prompt,
+                )
+                yielded_any = False
+                for chunk in response:
+                    if chunk.text:
+                        yielded_any = True
+                        yield chunk.text
+                if yielded_any:
+                    return
+            except Exception as exc:
+                _CLASSIFIER_LOGGER.warning("Gemini chat reply attempt failed (%s): %s", key[:4] + "...", exc)
+                continue
+
+        yield f"Xin chào! Tôi đã nhận tin nhắn của bạn: '{request.user_message}'."
+

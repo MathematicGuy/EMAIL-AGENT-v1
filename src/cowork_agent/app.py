@@ -213,7 +213,11 @@ def create_app() -> FastAPI:
             )
             app.state.chat_controllers = {}
             app.state.chat_reply = UnavailableChatReply()
-            app.state.chat_principal_resolver = None
+
+            async def _dev_chat_principal_resolver(req: Request) -> VerifiedPrincipal:
+                return VerifiedPrincipal(tenant_id=LOCAL_TENANT_ID, user_id="demo-user")
+
+            app.state.chat_principal_resolver = _dev_chat_principal_resolver
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
             app.state.run_repository = run_repository
@@ -254,6 +258,8 @@ def create_app() -> FastAPI:
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
                     semantic_memory = await build_semantic_memory(gemini_settings)
+                    from cowork_agent.integrations.llm.providers.gemini import GeminiChatReply
+                    app.state.chat_reply = GeminiChatReply(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)

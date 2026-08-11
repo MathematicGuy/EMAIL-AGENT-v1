@@ -45,3 +45,4 @@ frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
+.playwright-mcp
