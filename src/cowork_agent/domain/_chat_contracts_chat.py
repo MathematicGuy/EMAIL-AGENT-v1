@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from ._chat_contracts_common import (
+    MAX_CHAT_MESSAGE_LENGTH,
     ChatEventType,
     ChatToolChoice,
     MemoryCitationType,
@@ -14,6 +15,7 @@ from ._chat_contracts_common import (
     _as_mapping,
     _as_sequence,
     _frozen_mapping,
+    _require_bounded_string,
     _require_string,
     _to_dict,
 )
@@ -30,7 +32,7 @@ class ChatMessageRequest:
 
     def __post_init__(self) -> None:
         _require_string(self.session_id, "session_id")
-        _require_string(self.user_message, "user_message")
+        _require_bounded_string(self.user_message, "user_message", MAX_CHAT_MESSAGE_LENGTH)
         _require_string(self.idempotency_key, "idempotency_key")
 
     def to_dict(self) -> dict[str, object]:
@@ -40,7 +42,9 @@ class ChatMessageRequest:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             session_id=_require_string(data["session_id"], "session_id"),
-            user_message=_require_string(data["user_message"], "user_message"),
+            user_message=_require_bounded_string(
+                data["user_message"], "user_message", MAX_CHAT_MESSAGE_LENGTH
+            ),
             tool_choices=tuple(
                 _as_enum(item, ChatToolChoice, "tool_choices")
                 for item in _as_sequence(data["tool_choices"], "tool_choices")

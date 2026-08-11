@@ -28,6 +28,8 @@ class ChatMemorySettings:
 
     max_turns: int
     ttl_seconds: int
+    profile_retention_seconds: int | None = None
+    episode_retention_seconds: int | None = None
 
     @classmethod
     def from_env(
@@ -43,6 +45,12 @@ class ChatMemorySettings:
         return cls(
             max_turns=_positive_int(environ, "CHAT_MEMORY_MAX_TURNS", 20),
             ttl_seconds=_positive_int(environ, "CHAT_MEMORY_TTL_SECONDS", 1800),
+            profile_retention_seconds=_optional_retention_seconds(
+                environ, "CHAT_PROFILE_RETENTION_SECONDS"
+            ),
+            episode_retention_seconds=_optional_retention_seconds(
+                environ, "CHAT_EPISODE_RETENTION_SECONDS"
+            ),
         )
 
 
@@ -259,6 +267,16 @@ def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
     value = int(environ.get(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _optional_retention_seconds(environ: Mapping[str, str], name: str) -> int | None:
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return None
+    value = int(raw)
+    if value <= 0 or value > 31_536_000:
+        raise ValueError(f"{name} must be between 1 and 31536000")
     return value
 
 

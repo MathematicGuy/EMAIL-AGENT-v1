@@ -9,10 +9,17 @@ import pytest
 from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
+    MAX_CHAT_MESSAGE_LENGTH,
+    MAX_CHAT_SUMMARY_LENGTH,
+    MAX_EPISODIC_RETRIEVAL_ITEMS,
+    MAX_RETRIEVAL_QUERY_LENGTH,
+    MAX_RETRIEVAL_TIMEOUT_MS,
+    MAX_SEMANTIC_RETRIEVAL_ITEMS,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatSummaryEpisode,
     ChatToolChoice,
     ChatTurn,
     DeclarativeProfile,
@@ -20,6 +27,7 @@ from cowork_agent.domain.chat_contracts import (
     EpisodeCitation,
     EpisodeSourceType,
     EpisodeTransition,
+    EpisodicMemoryQuery,
     EpisodicMemoryRead,
     MemoryCitationType,
     MemoryContextRequest,
@@ -29,6 +37,7 @@ from cowork_agent.domain.chat_contracts import (
     MemoryProvenanceSource,
     MemoryReadOptions,
     MemoryType,
+    SemanticMemoryQuery,
     SemanticMemoryRead,
     TaskEpisode,
     stream_event_from_dict,
@@ -83,6 +92,28 @@ def _episode() -> TaskEpisode:
     )
 
 
+def _chat_summary_episode() -> ChatSummaryEpisode:
+    return ChatSummaryEpisode(
+        episode_id="chat-summary-1",
+        record_id="record-1",
+        tenant_id="tenant-1",
+        user_id="user@example.com",
+        chat_session_id="session-1",
+        chat_turn_id="turn-1",
+        summary="The user asked for help prioritizing the approved procedure.",
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        retrieval_eligible=False,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY,
+        created_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
+        expires_at=None,
+        pipeline_version="2",
+        model_id="test-model",
+        prompt_version="chat-summary-v1",
+        confidence=0.87,
+    )
+
+
 def _context_request() -> MemoryContextRequest:
     return MemoryContextRequest(
         session_id="session-1",
@@ -92,8 +123,18 @@ def _context_request() -> MemoryContextRequest:
         reads=MemoryReadOptions(
             short_term=True,
             long_term=True,
-            episodic=EpisodicMemoryRead(enabled=True, retrieval_eligible_only=True, max_items=3),
-            semantic=SemanticMemoryRead(enabled=True),
+            episodic=EpisodicMemoryQuery(
+                query="Find related approved report tasks.",
+                max_items=3,
+                min_score=0.6,
+                timeout_ms=500,
+            ),
+            semantic=SemanticMemoryQuery(
+                query="Find the current report submission procedure.",
+                max_items=4,
+                min_score=0.7,
+                timeout_ms=750,
+            ),
         ),
     )
 
@@ -198,6 +239,196 @@ def test_chat_message_request_round_trips_and_uses_typed_tool_choices() -> None:
 
     assert ChatMessageRequest.from_dict(json.loads(json.dumps(request.to_dict()))) == request
     assert request.to_dict()["tool_choices"] == ["@Email"]
+
+
+def test_chat_message_request_accepts_the_exact_message_length_limit() -> None:
+    request = ChatMessageRequest(
+        session_id="session-1",
+        user_message="x" * MAX_CHAT_MESSAGE_LENGTH,
+        tool_choices=(),
+        idempotency_key="idem-1",
+    )
+
+    assert request.user_message == "x" * MAX_CHAT_MESSAGE_LENGTH
+
+
+def test_chat_message_request_rejects_a_message_above_the_contract_limit() -> None:
+    with pytest.raises(ValueError, match="user_message"):
+        ChatMessageRequest(
+            session_id="session-1",
+            user_message="x" * (MAX_CHAT_MESSAGE_LENGTH + 1),
+            tool_choices=(),
+            idempotency_key="idem-1",
+        )
+
+
+def test_enabled_retrieval_requests_are_query_scoped_and_round_trip() -> None:
+    reads = MemoryReadOptions(
+        short_term=True,
+        long_term=True,
+        episodic=EpisodicMemoryQuery(
+            query="Find related approved report tasks.",
+            max_items=3,
+            min_score=0.6,
+            timeout_ms=500,
+        ),
+        semantic=SemanticMemoryQuery(
+            query="Find the current report submission procedure.",
+            max_items=4,
+            min_score=0.7,
+            timeout_ms=750,
+        ),
+    )
+
+    payload = json.loads(json.dumps(reads.to_dict()))
+
+    assert reads.episodic.enabled is True
+    assert reads.semantic.enabled is True
+    assert payload["episodic"]["retrieval_eligible_only"] is True
+    assert payload["semantic"]["condition"] == "chat_intent_requires_enterprise_context"
+    assert MemoryReadOptions.from_dict(payload) == reads
+
+
+def test_disabled_retrieval_requests_keep_the_legacy_shape_and_round_trip() -> None:
+    reads = MemoryReadOptions(
+        short_term=False,
+        long_term=False,
+        episodic=EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=3),
+        semantic=SemanticMemoryRead(enabled=False),
+    )
+
+    assert MemoryReadOptions.from_dict(reads.to_dict()) == reads
+
+
+@pytest.mark.parametrize(
+    ("build", "match"),
+    [
+        (
+            lambda: EpisodicMemoryQuery(
+                query=" ", max_items=1, min_score=0.0, timeout_ms=1
+            ),
+            "query",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="x" * (MAX_RETRIEVAL_QUERY_LENGTH + 1),
+                max_items=1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "query",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=True, min_score=0.0, timeout_ms=1
+            ),
+            "max_items",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy",
+                max_items=MAX_SEMANTIC_RETRIEVAL_ITEMS + 1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "max_items",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work",
+                max_items=MAX_EPISODIC_RETRIEVAL_ITEMS + 1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "max_items",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy", max_items=1, min_score=True, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=1, min_score=-0.1, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy", max_items=1, min_score=1.1, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=1, min_score=0.0, timeout_ms=False
+            ),
+            "timeout_ms",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy",
+                max_items=1,
+                min_score=0.0,
+                timeout_ms=MAX_RETRIEVAL_TIMEOUT_MS + 1,
+            ),
+            "timeout_ms",
+        ),
+    ],
+)
+def test_enabled_retrieval_requests_reject_untrusted_or_unbounded_values(
+    build: object, match: str
+) -> None:
+    with pytest.raises((TypeError, ValueError), match=match):
+        build()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "enabled": True,
+            "query": "approved work",
+            "retrieval_eligible_only": False,
+            "max_items": 1,
+            "min_score": 0.0,
+            "timeout_ms": 1,
+        },
+        {
+            "enabled": True,
+            "query": "company policy",
+            "condition": "all_context",
+            "max_items": 1,
+            "min_score": 0.0,
+            "timeout_ms": 1,
+        },
+    ],
+)
+def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        if "retrieval_eligible_only" in payload:
+            MemoryReadOptions.from_dict(
+                {
+                    "short_term": False,
+                    "long_term": False,
+                    "episodic": payload,
+                    "semantic": SemanticMemoryRead(enabled=False).to_dict(),
+                }
+            )
+        else:
+            MemoryReadOptions.from_dict(
+                {
+                    "short_term": False,
+                    "long_term": False,
+                    "episodic": EpisodicMemoryRead(
+                        enabled=False, retrieval_eligible_only=True, max_items=1
+                    ).to_dict(),
+                    "semantic": payload,
+                }
+            )
 
 
 @pytest.mark.parametrize(
@@ -404,6 +635,55 @@ def test_task_episode_has_no_raw_email_body_field() -> None:
     forbidden = {"body", "raw_email", "normalized_body", "attachment_content"}
 
     assert not forbidden.intersection(field.name for field in fields(TaskEpisode))
+
+
+def test_chat_summary_episode_round_trips_with_the_bounded_system_contract() -> None:
+    episode = _chat_summary_episode()
+
+    assert ChatSummaryEpisode.from_dict(json.loads(json.dumps(episode.to_dict()))) == episode
+    assert MAX_CHAT_SUMMARY_LENGTH == 500
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"episode_id": ""},
+        {"summary": "x" * (MAX_CHAT_SUMMARY_LENGTH + 1)},
+        {"validation_status": ValidationStatus.USER_APPROVED.value},
+        {"retrieval_eligible": True},
+        {"source_type": EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT.value},
+        {"updated_at": "2026-08-10T08:59:00+00:00"},
+        {"expires_at": "2026-08-10T09:00:00+00:00"},
+        {"confidence": True},
+    ],
+)
+def test_chat_summary_episode_rejects_invalid_lifecycle_or_untrusted_shape(
+    change: dict[str, object],
+) -> None:
+    payload = {**_chat_summary_episode().to_dict(), **change}
+
+    with pytest.raises((TypeError, ValueError)):
+        ChatSummaryEpisode.from_dict(payload)
+
+
+def test_chat_summary_episode_from_dict_recursively_rejects_raw_email_shaped_keys() -> None:
+    payload = {**_chat_summary_episode().to_dict(), "metadata": {"raw_email": "forbidden"}}
+
+    with pytest.raises(ValueError, match="raw email"):
+        ChatSummaryEpisode.from_dict(payload)
+
+
+def test_chat_summary_episode_has_no_raw_email_or_transcript_fields() -> None:
+    forbidden = {
+        "body",
+        "raw_email",
+        "normalized_body",
+        "attachment_content",
+        "transcript",
+        "tool_payload",
+    }
+
+    assert not forbidden.intersection(field.name for field in fields(ChatSummaryEpisode))
 
 
 @pytest.mark.parametrize("build", [_episode, _profile, _provenance, _chat_turn])

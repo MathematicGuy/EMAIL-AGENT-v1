@@ -15,6 +15,8 @@ so the workflow and API layers are unchanged:
   ``outbox_events`` table (metadata-only payloads; T5.3 wires publication).
 - ``PostgresChatProfileRepository`` — V2-M2 declarative chat profile keyed by
   the AI Chat memory namespace; explicit-only, expiry-aware, deletable.
+- ``PostgresChatSummaryEpisodeRepository`` — V2-M3 bounded system-generated
+  chat summaries, retry-safe per completed chat turn and retrieval-ineligible.
 """
 
 import json
@@ -22,6 +24,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
+import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -33,12 +36,16 @@ from cowork_agent.domain import (
     RunTrigger,
 )
 from cowork_agent.domain.chat_contracts import (
+    ChatSummaryEpisode,
     DeclarativeProfile,
+    EpisodeSourceType,
     MemoryNamespace,
     MemoryProvenanceSource,
     MemoryType,
 )
-from cowork_agent.domain.target_contracts import Task
+from cowork_agent.domain.target_contracts import Task, ValidationStatus
+from cowork_agent.features.ai_chat.episode_policy import authorize_chat_summary_write
+from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPointer
 
 _RUN_COLUMNS = (
@@ -316,13 +323,20 @@ class PostgresChatProfileRepository:
         self._pool = pool
 
     async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
-        async with self._pool.connection() as connection:
-            cursor = await connection.execute(
-                f"SELECT {_PROFILE_COLUMNS} FROM chat_profiles"
-                " WHERE profile_key = %s AND (expires_at IS NULL OR expires_at > now())",
-                (_profile_key(namespace),),
-            )
-            row = await cursor.fetchone()
+        profile_key = _profile_key(namespace)
+        try:
+            async with self._pool.connection() as connection:
+                cursor = await connection.execute(
+                    f"SELECT {_PROFILE_COLUMNS} FROM chat_profiles"
+                    " WHERE profile_key = %s AND (expires_at IS NULL OR expires_at > now())",
+                    (profile_key,),
+                )
+                row = await cursor.fetchone()
+        except psycopg.OperationalError as error:
+            # Optional profile reads degrade through the feature gateway. Keep
+            # namespace validation above the adapter-error boundary and avoid
+            # exposing driver details to API/controller callers.
+            raise MemorySourceUnavailableError("chat profile read unavailable") from error
         return None if row is None else _profile_from_row(row)
 
     async def write_profile(
@@ -383,10 +397,130 @@ class PostgresChatProfileRepository:
             return cursor.rowcount
 
 
+class PostgresChatSummaryEpisodeRepository:
+    """Body-free, system-only chat-summary episode store (V2-M3)."""
+
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        self._pool = pool
+
+    async def write_chat_summary(
+        self, namespace: MemoryNamespace, episode: ChatSummaryEpisode
+    ) -> ChatSummaryEpisode:
+        """Upsert per chat turn without letting retries replace original identity."""
+
+        authorize_chat_summary_write(namespace, episode)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"""
+                INSERT INTO chat_summary_episodes (
+                    episode_key, {_CHAT_SUMMARY_COLUMNS}
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (tenant_id, user_id, feature, chat_session_id, chat_turn_id)
+                DO UPDATE SET
+                    summary = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.summary ELSE chat_summary_episodes.summary
+                    END,
+                    expires_at = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.expires_at ELSE chat_summary_episodes.expires_at
+                    END,
+                    pipeline_version = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.pipeline_version ELSE chat_summary_episodes.pipeline_version
+                    END,
+                    model_id = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.model_id ELSE chat_summary_episodes.model_id
+                    END,
+                    prompt_version = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.prompt_version ELSE chat_summary_episodes.prompt_version
+                    END,
+                    confidence = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.confidence ELSE chat_summary_episodes.confidence
+                    END,
+                    updated_at = CASE
+                        WHEN EXCLUDED.updated_at >= chat_summary_episodes.updated_at
+                        THEN EXCLUDED.updated_at ELSE chat_summary_episodes.updated_at
+                    END
+                RETURNING {_CHAT_SUMMARY_COLUMNS}
+                """,
+                (
+                    _chat_summary_key(namespace),
+                    episode.episode_id,
+                    episode.record_id,
+                    episode.tenant_id,
+                    episode.user_id,
+                    namespace.feature,
+                    episode.chat_session_id,
+                    episode.chat_turn_id,
+                    episode.summary,
+                    episode.validation_status.value,
+                    episode.retrieval_eligible,
+                    episode.source_type.value,
+                    episode.created_at,
+                    episode.updated_at,
+                    episode.expires_at,
+                    episode.pipeline_version,
+                    episode.model_id,
+                    episode.prompt_version,
+                    episode.confidence,
+                ),
+            )
+            row = await cursor.fetchone()
+        assert row is not None
+        return _chat_summary_from_row(row)
+
+    async def delete_chat_summary(self, namespace: MemoryNamespace) -> bool:
+        """Delete the row represented by the exact in-scope logical namespace key."""
+
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM chat_summary_episodes WHERE episode_key = %s",
+                (_chat_summary_deletion_key(namespace),),
+            )
+            return cursor.rowcount == 1
+
+    async def delete_all_for_user(self, namespace: MemoryNamespace) -> int:
+        """Delete only one tenant/user's AI Chat summary rows via bound values."""
+
+        if namespace.memory_type is not MemoryType.EPISODIC:
+            raise ValueError("chat summary deletion requires an episodic namespace")
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM chat_summary_episodes"
+                " WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.tenant_id, namespace.user_id, namespace.feature),
+            )
+            return cursor.rowcount
+
+    async def purge_expired(self, now: datetime) -> int:
+        """Delete compact summaries whose retention boundary has passed."""
+
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                "DELETE FROM chat_summary_episodes"
+                " WHERE expires_at IS NOT NULL AND expires_at <= %s",
+                (now,),
+            )
+            return cursor.rowcount
+
+
 _PROFILE_COLUMNS = (
     "profile_id, tenant_id, user_id, feature, language, timezone,"
     " assistant_persona, response_tone, source_type, expires_at,"
     " created_at, updated_at"
+)
+
+_CHAT_SUMMARY_COLUMNS = (
+    "episode_id, record_id, tenant_id, user_id, feature, chat_session_id,"
+    " chat_turn_id, summary, validation_status, retrieval_eligible, source_type,"
+    " created_at, updated_at, expires_at, pipeline_version, model_id,"
+    " prompt_version, confidence"
 )
 
 
@@ -397,6 +531,18 @@ def _profile_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.LONG_TERM:
         raise ValueError("chat profiles require a long-term namespace")
     return "/".join((namespace.tenant_id, namespace.user_id, namespace.feature, "long_term"))
+
+
+def _chat_summary_key(namespace: MemoryNamespace) -> str:
+    if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is None:
+        raise ValueError("chat summary writes require an episodic turn namespace")
+    return namespace.logical_key()
+
+
+def _chat_summary_deletion_key(namespace: MemoryNamespace) -> str:
+    if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is not None:
+        raise ValueError("chat summary deletion requires an episodic record namespace")
+    return namespace.logical_key()
 
 
 def _profile_from_row(row: Sequence[object]) -> DeclarativeProfile:
@@ -415,6 +561,31 @@ def _profile_from_row(row: Sequence[object]) -> DeclarativeProfile:
         expires_at=_as_datetime(row[9]),
         created_at=cast(datetime, row[10]),
         updated_at=cast(datetime, row[11]),
+    )
+
+
+def _chat_summary_from_row(row: Sequence[object]) -> ChatSummaryEpisode:
+    def optional(index: int) -> str | None:
+        return None if row[index] is None else str(row[index])
+
+    return ChatSummaryEpisode(
+        episode_id=str(row[0]),
+        record_id=str(row[1]),
+        tenant_id=str(row[2]),
+        user_id=str(row[3]),
+        chat_session_id=str(row[5]),
+        chat_turn_id=str(row[6]),
+        summary=str(row[7]),
+        validation_status=ValidationStatus(str(row[8])),
+        retrieval_eligible=cast(bool, row[9]),
+        source_type=EpisodeSourceType(str(row[10])),
+        created_at=cast(datetime, row[11]),
+        updated_at=cast(datetime, row[12]),
+        expires_at=_as_datetime(row[13]),
+        pipeline_version=str(row[14]),
+        model_id=optional(15),
+        prompt_version=optional(16),
+        confidence=None if row[17] is None else float(cast(float, row[17])),
     )
 
 

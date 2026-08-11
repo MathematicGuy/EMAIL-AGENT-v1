@@ -11,6 +11,12 @@ from typing import TypeVar
 
 CHAT_CONTRACTS_VERSION = "1.0.0"
 AI_CHAT_FEATURE = "ai_chat"
+MAX_CHAT_SUMMARY_LENGTH = 500
+MAX_CHAT_MESSAGE_LENGTH = 4_000
+MAX_RETRIEVAL_QUERY_LENGTH = 2_000
+MAX_EPISODIC_RETRIEVAL_ITEMS = 20
+MAX_SEMANTIC_RETRIEVAL_ITEMS = 20
+MAX_RETRIEVAL_TIMEOUT_MS = 10_000
 
 
 class ChatToolChoice(StrEnum):
@@ -59,6 +65,7 @@ class EpisodeSourceType(StrEnum):
     """Provenance for a durable task-derived episode."""
 
     SYSTEM_GENERATED_CHAT_TOOL_OUTPUT = "system_generated_chat_tool_output"
+    SYSTEM_GENERATED_CHAT_SUMMARY = "system_generated_chat_summary"
     USER_APPROVED_TASK = "user_approved_task"
 
 
@@ -68,6 +75,13 @@ _E = TypeVar("_E", bound=Enum)
 def _require_string(value: object, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_bounded_string(value: object, name: str, maximum_length: int) -> str:
+    value = _require_string(value, name)
+    if len(value) > maximum_length:
+        raise ValueError(f"{name} must not exceed {maximum_length} characters")
     return value
 
 
