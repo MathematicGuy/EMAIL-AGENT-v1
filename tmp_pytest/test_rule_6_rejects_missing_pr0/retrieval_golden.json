@@ -1,1 +1,0 @@
-[{"id": "q-001", "query": "Thủ tục cấp lại CCCD gồm những bước nào?", "probe": "mixed", "expected_document_ids": ["cap_lai_cccd"], "expected_sections": [], "email_body": null, "notes": "schema fixture"}]

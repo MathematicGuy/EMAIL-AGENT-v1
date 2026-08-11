@@ -604,7 +604,7 @@ def _check_health(base_url: str) -> tuple[int, Any]:
     try:
         import streamlit as st
 
-        @st.cache_data(ttl=5.0, show_spinner=False)
+        @st.cache_data(ttl=15.0, show_spinner=False)
         def _cached_health(url: str) -> tuple[int, Any]:
             return api_request(url, "GET", "/health")
 
@@ -709,7 +709,7 @@ def _load_connections(base_url: str, lang: str) -> list[dict[str, Any]]:
     import streamlit as st
 
     try:
-        @st.cache_data(ttl=10.0, show_spinner=False)
+        @st.cache_data(ttl=30.0, show_spinner=False)
         def _cached_connections(url: str) -> tuple[int, Any]:
             return api_request(url, "GET", "/v1/mail-todo/connections")
 
