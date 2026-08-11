@@ -84,6 +84,22 @@ class PostgresRunRepository:
             row = await cursor.fetchone()
         return None if row is None else _run_from_row(row)
 
+    async def list_recent(
+        self, *, user_id: str, mailbox_connection_id: str, limit: int
+    ) -> tuple[DigestRun, ...]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                f"""
+                SELECT {_RUN_COLUMNS} FROM digest_runs
+                WHERE user_id = %s AND mailbox_connection_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (user_id, mailbox_connection_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return tuple(_run_from_row(row) for row in rows)
+
     async def claim(self, run_id: str, started_at: datetime) -> DigestRun | None:
         """Compare-and-set: only a still-``queued`` run can be claimed, so at
         most one worker ever runs a given run even across processes."""
