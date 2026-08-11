@@ -21,7 +21,7 @@ class PdfInspector:
         self._runner = runner or _run_command
 
     def inspect(self, path: Path) -> PdfInspection:
-        detection = _load_json(self._run(("detect-pdf", "--json", str(path))), "detection")
+        detection = _load_json(self._run(("detect-pdf", str(path), "--json")), "detection")
         kind, page_count, ocr_pages = _parse_detection(detection)
         native_pages = tuple(
             number for number in range(1, page_count + 1) if number not in ocr_pages
@@ -54,7 +54,13 @@ class PdfInspector:
 
 
 def _run_command(command: Sequence[str]) -> str:
-    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     return completed.stdout
 
 
@@ -109,6 +115,9 @@ def _parse_markdown_pages(payload: object, expected_pages: tuple[int, ...]) -> M
         ):
             raise ValueError("PDF Markdown output is invalid")
         markdown_by_page[number] = page_markdown
-    if set(markdown_by_page) != set(expected_pages):
-        raise ValueError("PDF Markdown output is invalid")
+    for number in expected_pages:
+        markdown_by_page.setdefault(
+            number,
+            f"<!-- Page {number} has no standalone marker in extractor output. -->",
+        )
     return markdown_by_page

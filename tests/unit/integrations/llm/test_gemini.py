@@ -44,6 +44,28 @@ def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None
     assert "key-one" not in repr(settings)
 
 
+def test_settings_load_all_numbered_gemini_keys() -> None:
+    settings = GeminiSettings.from_env(
+        environment(
+            GEMINI_API_KEY_4="key-four",
+            GEMINI_API_KEY_5="key-five",
+            GEMINI_API_KEY_6="key-six",
+            GEMINI_MAX_ATTEMPTS_PER_REQUEST="6",
+        ),
+        load_env_file=False,
+    )
+
+    assert settings.api_keys == (
+        "key-one",
+        "key-two",
+        "key-three",
+        "key-four",
+        "key-five",
+        "key-six",
+    )
+    assert settings.max_attempts == 6
+
+
 def test_placeholder_keys_are_not_accepted_as_credentials() -> None:
     with pytest.raises(ValueError, match="At least one"):
         GeminiSettings.from_env(

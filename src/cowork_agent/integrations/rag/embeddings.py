@@ -20,6 +20,7 @@ from cowork_agent.integrations.llm.providers.gemini import (
 )
 
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
+_MAX_BATCH_CONTENTS = 100
 
 
 class EmbeddingPort(Protocol):
@@ -48,13 +49,14 @@ class GeminiEmbeddingAdapter:
     async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         if not texts:
             return ()
-        response = await self._embed_content(list(texts))
-        embeddings = []
-        for item in response.embeddings or ():
-            if item.values is None:
-                raise ValueError("Embedding response contained an empty vector")
-            values = tuple(float(value) for value in item.values)
-            embeddings.append(values)
+        embeddings: list[tuple[float, ...]] = []
+        for start in range(0, len(texts), _MAX_BATCH_CONTENTS):
+            batch = list(texts[start : start + _MAX_BATCH_CONTENTS])
+            response = await self._embed_content(batch)
+            for item in response.embeddings or ():
+                if item.values is None:
+                    raise ValueError("Embedding response contained an empty vector")
+                embeddings.append(tuple(float(value) for value in item.values))
         if len(embeddings) != len(texts):
             raise ValueError("Embedding response count does not match request count")
         return tuple(embeddings)

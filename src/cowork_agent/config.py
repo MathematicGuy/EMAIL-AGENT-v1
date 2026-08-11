@@ -200,16 +200,21 @@ class GeminiSettings:
                 load_dotenv(override=False)
             environ = os.environ
 
+        numbered_keys = sorted(
+            (int(name.removeprefix("GEMINI_API_KEY_")), value)
+            for name, value in environ.items()
+            if name.startswith("GEMINI_API_KEY_")
+            and name.removeprefix("GEMINI_API_KEY_").isdecimal()
+        )
         keys = tuple(
             value.strip()
-            for index in range(1, 4)
-            if (value := environ.get(f"GEMINI_API_KEY_{index}", "")).strip()
-            and not value.strip().startswith("replace-with-")
+            for _, value in numbered_keys
+            if value.strip() and not value.strip().startswith("replace-with-")
         )
         if not keys:
-            raise ValueError("At least one GEMINI_API_KEY_1..3 must be configured")
+            raise ValueError("At least one numbered GEMINI_API_KEY must be configured")
         if len(set(keys)) != len(keys):
-            raise ValueError("GEMINI_API_KEY_1..3 must be unique")
+            raise ValueError("Numbered GEMINI_API_KEY values must be unique")
 
         strategy = environ.get("GEMINI_KEY_ROTATION_STRATEGY", "round_robin").lower()
         if strategy != "round_robin":
