@@ -56,6 +56,12 @@ def test_api_rejects_out_of_range_max_emails(compat_session) -> None:
             for rejected in (0, 501):
                 response = await s.post_run(f"clamp-{rejected}", max_emails=rejected)
                 assert response.status_code == 422
-            assert len(s.app.state.run_repository.runs) == 0
+            connection = (await s.app.state.connection_repository.list_all())[0]
+            runs = await s.app.state.run_repository.list_recent(
+                user_id=connection.email_address,
+                mailbox_connection_id=connection.id,
+                limit=1,
+            )
+            assert runs == ()
 
     asyncio.run(scenario())
