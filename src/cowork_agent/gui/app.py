@@ -189,6 +189,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "chat_error_title": "Lượt chat thất bại [{code}]",
         "chat_error_stream_unavailable": "Mất kết nối tới luồng chat của backend.",
         "chat_error_http": "Backend từ chối lượt chat này.",
+        "chat_error_identity": (
+            "Backend không có đúng một kết nối Gmail active; chat cần đúng một "
+            "danh tính đã xác thực. Kiểm tra màn hình Kết nối."
+        ),
+        "chat_advisory_memory_degraded": (
+            "⚠️ Một phần bộ nhớ tùy chọn không khả dụng; câu trả lời vẫn tiếp tục "
+            "nhưng có thể kém cá nhân hóa hơn."
+        ),
+        "chat_session_renewed": (
+            "♻️ Phiên chat cũ đã hết hạn trên server; đã tự động tạo phiên mới để "
+            "tiếp tục."
+        ),
         "chat_retry": "↻ Thử lại lượt vừa rồi",
         "chat_retry_hint": ("Thử lại dùng lại đúng khóa idempotency nên sẽ không tạo lượt trùng."),
         "chat_history_note": (
@@ -345,6 +357,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "chat_error_title": "Chat turn failed [{code}]",
         "chat_error_stream_unavailable": "Lost the connection to the backend chat stream.",
         "chat_error_http": "The backend rejected this chat turn.",
+        "chat_error_identity": (
+            "The backend does not have exactly one active Gmail connection; chat needs "
+            "exactly one verified identity. Check the Connect screen."
+        ),
+        "chat_advisory_memory_degraded": (
+            "⚠️ Some optional memory was unavailable; the reply continues but may "
+            "be less personalized."
+        ),
+        "chat_session_renewed": (
+            "♻️ The previous chat session expired on the server; a new one was "
+            "created automatically to continue."
+        ),
         "chat_retry": "↻ Retry the last turn",
         "chat_retry_hint": (
             "Retrying reuses the same idempotency key, so it cannot create a duplicate turn."
@@ -622,8 +646,17 @@ def chat_error_text(code: object, safe_message: object, lang: str) -> str:
     code_text = str(code or "")
     if code_text == "stream_unavailable":
         return tr(lang, "chat_error_stream_unavailable")
+    if code_text == "http_503":
+        return tr(lang, "chat_error_identity")
     if code_text.startswith("http_"):
         return tr(lang, "chat_error_http")
+    return tr(lang, "error_unknown")
+
+
+def chat_advisory_text(code: object, lang: str) -> str:
+    """Localized copy for a non-terminal memory advisory (warn, not fail)."""
+    if code == "optional_memory_degraded":
+        return tr(lang, "chat_advisory_memory_degraded")
     return tr(lang, "error_unknown")
 
 
@@ -760,6 +793,7 @@ def _check_health(base_url: str) -> tuple[int, Any]:
 
 
 def read_settings() -> dict[str, Any]:
+    load_dotenv(override=False)
     llm_provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     if llm_provider == "groq":
         batch = max(1, int(os.getenv("GROQ_MAX_EMAILS_PER_BATCH", "5")))
@@ -986,6 +1020,9 @@ def _render_chat_message(message: Mapping[str, Any], lang: str) -> None:
         if citations:
             st.caption(tr(lang, "chat_badges_title"))
             st.markdown(memory_badges_html(citations, lang), unsafe_allow_html=True)
+        advisory_code = message.get("advisory_code")
+        if advisory_code:
+            st.warning(chat_advisory_text(advisory_code, lang))
         error_code = message.get("error_code")
         if error_code:
             st.error(
@@ -1008,30 +1045,54 @@ def _run_chat_turn(
     import streamlit as st
 
     accumulator = chat_client.ChatTurnAccumulator()
+    active_session = session_id
+    renewed = False
     with st.chat_message("assistant"):
         text_slot = st.empty()
         badge_slot = st.empty()
-        with st.spinner(tr(lang, "chat_thinking")):
-            events = chat_client.stream_chat_turn(
-                _get_http_client(),
-                base_url,
-                session_id=session_id,
-                user_message=user_message,
-                idempotency_key=idempotency_key,
-                timeout_seconds=float(settings["chat_stream_timeout_seconds"]),
-            )
-            for event in events:
-                if not accumulator.apply(event):
-                    continue
-                if event.event_type == "delta":
-                    text_slot.markdown(accumulator.text)
-                elif event.event_type == "memory_citation":
-                    badge_slot.markdown(
-                        memory_badges_html(accumulator.citations, lang),
-                        unsafe_allow_html=True,
-                    )
-                if accumulator.is_terminal:
+        warn_slot = st.empty()
+        for _attempt in range(2):
+            with st.spinner(tr(lang, "chat_thinking")):
+                events = chat_client.stream_chat_turn(
+                    _get_http_client(),
+                    base_url,
+                    session_id=active_session,
+                    user_message=user_message,
+                    idempotency_key=idempotency_key,
+                    timeout_seconds=float(settings["chat_stream_timeout_seconds"]),
+                )
+                for event in events:
+                    if not accumulator.apply(event):
+                        continue
+                    if event.event_type == "delta":
+                        text_slot.markdown(accumulator.text)
+                    elif event.event_type == "memory_citation":
+                        badge_slot.markdown(
+                            memory_badges_html(accumulator.citations, lang),
+                            unsafe_allow_html=True,
+                        )
+                    elif event.event_type == "error" and event.code in (
+                        chat_client.ADVISORY_ERROR_CODES
+                    ):
+                        warn_slot.warning(chat_advisory_text(event.code, lang))
+                    if accumulator.is_terminal:
+                        break
+            if _dead_session(accumulator):
+                # The server forgot the session (backend restart); one bounded
+                # renewal keeps retry honest instead of a permanent dead end.
+                fresh = _renew_chat_session(base_url)
+                if fresh is None:
                     break
+                active_session = fresh
+                renewed = True
+                accumulator = chat_client.ChatTurnAccumulator()
+                text_slot.empty()
+                badge_slot.empty()
+                warn_slot.empty()
+                continue
+            break
+        if renewed and accumulator.error_code is None:
+            st.info(tr(lang, "chat_session_renewed"))
 
     messages: list[dict[str, Any]] = st.session_state.setdefault("chat_messages", [])
     messages.append(accumulator.to_message())
@@ -1042,6 +1103,27 @@ def _run_chat_turn(
             "user_message": user_message,
             "idempotency_key": idempotency_key,
         }
+
+
+def _dead_session(accumulator: chat_client.ChatTurnAccumulator) -> bool:
+    return (
+        accumulator.error_code == "http_404"
+        and not accumulator.text
+        and not accumulator.completed
+    )
+
+
+def _renew_chat_session(base_url: str) -> str | None:
+    """Replace a server-side-expired session id, keeping displayed history."""
+    import streamlit as st
+
+    st.session_state.pop("chat_session_id", None)
+    st.session_state.pop("chat_pending_turn", None)
+    _, created = chat_client.create_chat_session(_get_http_client(), base_url)
+    if created is None:
+        return None
+    st.session_state["chat_session_id"] = created
+    return created
 
 
 def _screen_memory(lang: str) -> None:

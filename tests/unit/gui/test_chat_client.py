@@ -196,7 +196,32 @@ def test_accumulator_completed_and_error_are_terminal() -> None:
         "citations": [],
         "error_code": "stream_failed",
         "error_message": "Retry soon.",
+        "advisory_code": None,
+        "advisory_message": None,
     }
+
+
+def test_accumulator_memory_degraded_advisory_is_non_terminal() -> None:
+    accumulator = chat_client.ChatTurnAccumulator()
+    advisory = make_event(
+        "error",
+        "e1",
+        code="optional_memory_degraded",
+        safe_message="Some optional memory was unavailable.",
+    )
+    assert accumulator.apply(advisory) is True
+    assert accumulator.apply(advisory) is False
+    assert accumulator.is_terminal is False
+    assert accumulator.error_code is None
+    assert accumulator.advisory_code == "optional_memory_degraded"
+
+    accumulator.apply(make_event("delta", "e2", text="Reply still streams."))
+    accumulator.apply(make_event("completed", "e3"))
+    assert accumulator.is_terminal is True
+    message = accumulator.to_message()
+    assert message["text"] == "Reply still streams."
+    assert message["error_code"] is None
+    assert message["advisory_code"] == "optional_memory_degraded"
 
 
 def test_to_message_copies_citations_so_later_events_do_not_mutate_history() -> None:

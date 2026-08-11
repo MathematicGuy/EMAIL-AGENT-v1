@@ -6,7 +6,7 @@
 | Version | 2.3 (Increment A chat slice built against the accepted V2-M3/V2-M4/V2-M5 runtime contracts) |
 | Date | 2026-08-12 |
 | Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
-| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: §3.4 boundary BUILT and unit-verified; §9 live browser verification NOT YET RUN; Increment B locked.** |
+| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: §3.4 boundary BUILT, unit-verified, and §9 live-browser verified on 2026-08-12 (see §9 log; citation-chip branch pending embedding quota); Increment B locked.** |
 | Depends on | PRD-v1 and V2-M1–V2-M5 (DONE 100%); V2-M6 (ACTIVE 55%); missing frontend-facing read/profile/proposal contracts listed in §3.3 and §7 |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
@@ -295,10 +295,10 @@ Parsing assistant text is prohibited.
 
 | Criteria | Status |
 |---|---|
-| 1, 5, 6 (chat path) | **Implemented, unit-verified only.** Session creation, ordered turns, typed-SSE-only rendering, and backend-down / stream-failed / empty-reply copy are covered by `tests/unit/gui`. Final sign-off needs the §9 browser run. |
+| 1, 5, 6 (chat path) | **Live-verified 2026-08-12** (plus `tests/unit/gui`): session create, ordered streaming turns, typed-SSE-only rendering, backend-down gate, empty-reply copy. Three chat-page defects found and fixed in `gui/`, then live re-verified: advisory-as-terminal, dead-session 404 dead end, generic 503 copy (see §9 fixes list). |
 | 2, 3, 4 (task proposal card) | **Blocked by contract.** Gated on the structured proposal event or read DTO in §7.1; no card is built and no prose is parsed. |
-| 7, 9, 10, 11 (Connect, Knowledge, Run audit) | **Pre-existing screens, unchanged by this slice.** Still awaiting the §9 browser run. |
-| 8 (no raw email or prompt leakage) | **By construction** — the demo stores only role, text, and `(memory_type, source_id)` pairs in `st.session_state`. Must still be confirmed against the live DOM, console, network history, localStorage, and sessionStorage per §9. |
+| 7, 9, 10, 11 (Connect, Knowledge, Run audit) | **Live-verified 2026-08-12 in available branches**: Connect lists the single readonly connection; Run audit empty state renders; Knowledge degraded indicator, document list, and no-match empty state render. "Ready" + inline citation chips pending embedding quota (environmental). |
+| 8 (no raw email or prompt leakage) | **Live-verified 2026-08-12** — DOM, console, browser network history, localStorage, sessionStorage audited clean (Streamlit telemetry keys only); by construction the demo stores only role, text, and `(memory_type, source_id)` pairs in `st.session_state`. |
 | 15 (memory badges without payloads) | **Implemented** — badges disclose the source kind only; `source_id` is never rendered. |
 | 12, 13, 14, 16 | **Blocked** — Increment B REST contracts are missing; the Memory screen stays locked and lists them. |
 
@@ -307,9 +307,40 @@ Parsing assistant text is prohibited.
 Performed with `frontend-ui-engineering` plus an available real-browser
 verification lane (Chrome DevTools or Playwright).
 
-**Status: not yet run.** The steps below are still open for the built §3.4
-slice; nothing in this spec may be marked verified until they are executed
-against a running backend and GUI.
+**Status: run on 2026-08-12** (live Chrome via DevTools MCP against `mail-todo-api`
++ `scripts/run_gui.py`; evidence in `docs/evidence/demo-frontend-2026-08-12/`).
+
+| Step | Result |
+|---|---|
+| 1-2 | Backend + GUI up; initial a11y tree, console, and network captured. Console: zero errors/warnings (only Streamlit-internal a11y "issue" notices). Browser network is Streamlit-only — all backend calls are server-side by design. |
+| 3 | Session created per browser session; two ordered turns streamed (`01-chat-two-turns.png`). Reload/history remains gated on the missing GET contracts, and a page reload correctly starts a fresh session (no client-side persistence). |
+| 4, 8 | Skipped — gated on the structured task-proposal contract (Increment B). |
+| 5 | Company-knowledge turn returned no citation because retrieval had no evidence; badges never fabricated. Storage/DOM audit clean: localStorage holds only Streamlit telemetry keys (`ajs_anonymous_id`, `stMetricsConfig`), sessionStorage empty, cookies only Streamlit XSRF/telemetry, no prompt markers or raw email in DOM. |
+| 6 | Backend-down renders the actionable gate (`02-backend-down-gate.png`); a mid-stream failure renders the safe error with the idempotency retry control ("Thử lại dùng lại đúng khóa idempotency…"), never a stack trace. |
+| 7 | Knowledge screen live-verified in its DEGRADED branch: status "Suy giảm (chỉ BM25, không có embedding)", 6 documents with title/section/source, no-match query renders actionable empty state (`03-knowledge-degraded-no-match.png`). "Ready" status and inline citation chips NOT live-verified: Gemini embedding quota exhausted at startup composed `NullSemanticMemory` (environmental, not a code defect). |
+| 9 | 320/768/1024/1440 widths usable, sidebar collapses at 320, keyboard Tab reaches controls (`07`-`09` screenshots). |
+| 10 | This log + screenshots committed as evidence. |
+
+Screens: Memory lock lists exactly the §7 missing contracts (`04-memory-locked.png`);
+Connect shows the single readonly Gmail connection (`05-connect-screen.png`);
+Run audit renders its empty state (`06-run-audit-empty.png`).
+
+Chat-page fixes (2026-08-12, all scoped to `src/cowork_agent/gui/`, covered by
+`tests/unit/gui`, evidence in `docs/evidence/demo-frontend-2026-08-12/`):
+
+1. **Advisory is non-terminal** — `optional_memory_degraded` renders as a
+   warning while the reply still streams (`ADVISORY_ERROR_CODES`, accumulator
+   advisory fields; `10-advisory-non-terminal.png`).
+2. **Dead-session renewal** — an `http_404` with no content (server forgot the
+   session, e.g. backend restart) renews the session once and retries the same
+   idempotency key (`_renew_chat_session`; `11-session-renewal.png`).
+3. **Actionable 503 + env loading** — `http_503` chat turns show the identity
+   copy (`chat_error_identity`: exactly-one-active-Gmail-connection rule), and
+   `read_settings` now calls `load_dotenv(override=False)` so `.env` values
+   such as `APP_HOST_URL` apply to the GUI process.
+
+The steps below remain the normative plan; gated steps (4, 8) stay open until
+the structured proposal contract lands.
 
 1. Start backend (`mail-todo-api`) and GUI (`python scripts/run_gui.py`).
 2. Open the UI in a real browser, snapshot the accessible tree, and check

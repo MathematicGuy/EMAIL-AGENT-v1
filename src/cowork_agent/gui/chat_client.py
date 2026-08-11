@@ -29,6 +29,10 @@ KNOWN_EVENT_TYPES = frozenset({"delta", "memory_citation", "completed", "error"}
 #: Memory citation kinds the backend may cite (`MemoryCitationType`).
 KNOWN_MEMORY_TYPES = frozenset({"declarative", "episodic", "semantic"})
 
+#: Error codes the backend emits as a non-terminal advisory: the turn still
+#: streams deltas afterwards, so the UI warns instead of failing (SPEC §8.1).
+ADVISORY_ERROR_CODES = frozenset({"optional_memory_degraded"})
+
 #: Icon + i18n key per memory kind; color is never the only signal (§6.2).
 MEMORY_BADGES: dict[str, dict[str, str]] = {
     "declarative": {"icon": "👤", "css": "memory-declarative", "key": "chat_badge_declarative"},
@@ -147,6 +151,8 @@ class ChatTurnAccumulator:
     completed: bool = False
     error_code: str | None = None
     error_message: str | None = None
+    advisory_code: str | None = None
+    advisory_message: str | None = None
     _seen_event_ids: set[str] = field(default_factory=set)
 
     def apply(self, event: ChatStreamEvent) -> bool:
@@ -164,8 +170,12 @@ class ChatTurnAccumulator:
         elif event.event_type == "completed":
             self.completed = True
         elif event.event_type == "error":
-            self.error_code = event.code
-            self.error_message = event.safe_message
+            if event.code in ADVISORY_ERROR_CODES:
+                self.advisory_code = event.code
+                self.advisory_message = event.safe_message
+            else:
+                self.error_code = event.code
+                self.error_message = event.safe_message
         return True
 
     @property
@@ -181,6 +191,8 @@ class ChatTurnAccumulator:
             "citations": list(self.citations),
             "error_code": self.error_code,
             "error_message": self.error_message,
+            "advisory_code": self.advisory_code,
+            "advisory_message": self.advisory_message,
         }
 
 
@@ -274,6 +286,7 @@ def _transport_error(session_id: str, idempotency_key: str, *, code: str) -> Cha
 
 
 __all__ = [
+    "ADVISORY_ERROR_CODES",
     "CHAT_SESSIONS_PATH",
     "KNOWN_EVENT_TYPES",
     "KNOWN_MEMORY_TYPES",
