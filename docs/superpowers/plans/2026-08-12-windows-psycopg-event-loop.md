@@ -26,7 +26,7 @@
 - Consumes: `dotenv.load_dotenv(override=False)` and `database_url()`.
 - Produces: `main()` calls `uvicorn.run(..., loop="asyncio:SelectorEventLoop")` for a Windows process whose temporary `.env` contains `DATABASE_URL`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_main_loads_dotenv_before_selecting_windows_postgres_loop(
@@ -43,13 +43,13 @@ def test_main_loads_dotenv_before_selecting_windows_postgres_loop(
     assert captured["loop"] == "asyncio:SelectorEventLoop"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/unit/test_windows_psycopg_startup.py -q`
 
 Expected: FAIL because `main()` reads `DATABASE_URL` before loading `.env` and passes `loop="auto"`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 from dotenv import load_dotenv
@@ -60,13 +60,13 @@ def main() -> None:
     loop = "auto"
 ```
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run: `python -m pytest tests/unit/test_windows_psycopg_startup.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run static checks and commit**
+- [x] **Step 5: Run static checks and commit**
 
 Run: `python -m ruff check src/cowork_agent/app.py tests/unit/test_windows_psycopg_startup.py && python -m mypy src/cowork_agent/app.py`
 
