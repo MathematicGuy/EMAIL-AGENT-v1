@@ -5,7 +5,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -699,7 +699,12 @@ def create_app() -> FastAPI:
         dirs_to_scan = [d for d in (REPORTS_DIR, EXTRACTED_DIR) if d.exists()]
         for folder in dirs_to_scan:
             for item in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if item.is_file() and item.name != "ingestion-manifest.json" and item.name not in seen:
+                if (
+                    item.is_file()
+                    and item.name != "ingestion-manifest.json"
+                    and item.name not in seen
+                ):
+
                     try:
                         seen.add(item.name)
                         stat = item.stat()

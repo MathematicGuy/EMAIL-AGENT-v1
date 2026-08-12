@@ -902,7 +902,7 @@ def test_qdrant_evaluation_retriever_builds_in_memory_index_and_delegates() -> N
         user_id="t",
         query="hộ chiếu",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=()),
+        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
     )
 
@@ -1040,7 +1040,7 @@ def test_qdrant_evaluator_raises_when_adapter_converts_query_failure_to_no_resul
         user_id="t",
         query="passport",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=()),
+        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
     )
     asyncio.run(retriever.build_index())
