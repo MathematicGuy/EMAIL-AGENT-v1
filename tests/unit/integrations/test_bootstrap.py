@@ -11,7 +11,7 @@ from collections.abc import Sequence
 import pytest
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import GeminiSettings, QdrantSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
@@ -21,9 +21,9 @@ from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 COLLECTION = "bootstrap_company_knowledge"
 
 
-def _gemini_settings() -> GeminiSettings:
-    return GeminiSettings.from_env(
-        {"GEMINI_API_KEY_1": "key-1", "GEMINI_MODEL": "gemini-3.5-flash-lite"},
+def _jina_settings() -> JinaEmbeddingSettings:
+    return JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1", "JINA_EMBEDDING_MODEL": "jina-embeddings-v5-omni-small"},
         load_env_file=False,
     )
 
@@ -46,31 +46,29 @@ def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     client = AsyncQdrantClient(":memory:")
     monkeypatch.setattr(bootstrap, "AsyncQdrantClient", lambda **kwargs: client)
     monkeypatch.setattr(
-        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
+        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
     return client
 
 
 def test_disabled_qdrant_yields_hybrid_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
+        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
     memory = asyncio.run(
         bootstrap.build_semantic_memory(
-            _gemini_settings(), _qdrant_settings(QDRANT_ENABLED="false")
+            _jina_settings(), _qdrant_settings(QDRANT_ENABLED="false")
         )
     )
 
     assert isinstance(memory, HybridSemanticMemory)
 
 
-
-
 def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(
     local_qdrant: AsyncQdrantClient,
 ) -> None:
     memory = asyncio.run(
-        bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings())
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
     )
 
     assert isinstance(memory, QdrantSemanticMemory)
@@ -80,7 +78,7 @@ def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(
 def test_a_populated_collection_is_not_re_ingested_on_the_next_boot(
     local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings()))
+    asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
     ingested: list[str] = []
 
     async def _spy(client: object, collection: str, *args: object, **kwargs: object) -> int:
@@ -88,7 +86,7 @@ def test_a_populated_collection_is_not_re_ingested_on_the_next_boot(
         return 0
 
     monkeypatch.setattr(bootstrap, "ingest_corpus", _spy)
-    asyncio.run(bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings()))
+    asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
 
     assert ingested == []
 
@@ -96,7 +94,7 @@ def test_a_populated_collection_is_not_re_ingested_on_the_next_boot(
 def test_reindex_forces_ingestion_even_when_the_collection_is_populated(
     local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    asyncio.run(bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings()))
+    asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
     ingested: list[str] = []
     original = bootstrap.ingest_corpus
 
@@ -107,7 +105,7 @@ def test_reindex_forces_ingestion_even_when_the_collection_is_populated(
     monkeypatch.setattr(bootstrap, "ingest_corpus", _spy)
     asyncio.run(
         bootstrap.build_semantic_memory(
-            _gemini_settings(), _qdrant_settings(QDRANT_REINDEX="true")
+            _jina_settings(), _qdrant_settings(QDRANT_REINDEX="true")
         )
     )
 
@@ -122,11 +120,11 @@ def test_an_unreachable_qdrant_degrades_to_null_memory(
 
     monkeypatch.setattr(bootstrap, "AsyncQdrantClient", _explode)
     monkeypatch.setattr(
-        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
+        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
 
     memory = asyncio.run(
-        bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings())
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
     )
 
     assert isinstance(memory, HybridSemanticMemory)
@@ -137,12 +135,11 @@ def test_a_vector_size_mismatch_degrades_to_null_memory(
 ) -> None:
     memory = asyncio.run(
         bootstrap.build_semantic_memory(
-            _gemini_settings(), _qdrant_settings(QDRANT_VECTOR_SIZE="768")
+            _jina_settings(), _qdrant_settings(QDRANT_VECTOR_SIZE="768")
         )
     )
 
     assert isinstance(memory, HybridSemanticMemory)
-
 
 
 def test_a_missing_corpus_degrades_to_null_memory(
@@ -154,7 +151,7 @@ def test_a_missing_corpus_degrades_to_null_memory(
     monkeypatch.setattr(bootstrap, "load_corpus", _missing)
 
     memory = asyncio.run(
-        bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings())
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
     )
 
     assert isinstance(memory, NullSemanticMemory)

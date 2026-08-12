@@ -27,7 +27,7 @@ from cowork_agent.domain.chat_contracts import (
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionAccessDenied,
-    InMemoryChatSessionRegistry,
+    ChatSessionRegistryPort,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.ai_chat.ports import (
@@ -75,12 +75,10 @@ def create_chat_router() -> APIRouter:
     async def create_session(request: Request) -> dict[str, str]:
         principal = await _verified_principal(request)
         sessions = _sessions(request)
-        scope = sessions.create(
+        scope = await sessions.create(
             tenant_id=principal.tenant_id,
             user_id=principal.user_id,
         )
-        controller = _controller_factory(request)(scope)
-        _controllers(request)[scope.session_id] = controller
         return {"session_id": scope.session_id, "feature": scope.feature}
 
     @router.post("/sessions/{session_id}/messages")
@@ -101,16 +99,14 @@ def create_chat_router() -> APIRouter:
             raise HTTPException(status_code=422, detail="Invalid chat message") from exc
         principal = await _verified_principal(request)
         try:
-            _sessions(request).require(
+            scope = await _sessions(request).require(
                 session_id,
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
             )
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
-        controller = _controllers(request).get(session_id)
-        if controller is None:
-            raise HTTPException(status_code=404, detail="Chat session not found")
+        controller = _controller_factory(request)(scope)
         return StreamingResponse(
             _sse_events(controller, message, request),
             media_type="text/event-stream",
@@ -123,7 +119,7 @@ def create_chat_router() -> APIRouter:
     @router.get("/sessions")
     async def list_sessions(request: Request) -> dict[str, object]:
         principal = await _verified_principal(request)
-        scopes = _sessions(request).list_for(
+        scopes = await _sessions(request).list_for(
             tenant_id=principal.tenant_id, user_id=principal.user_id
         )
         return {
@@ -137,7 +133,7 @@ def create_chat_router() -> APIRouter:
     async def list_messages(session_id: str, request: Request) -> dict[str, object]:
         principal = await _verified_principal(request)
         try:
-            scope = _sessions(request).require(
+            scope = await _sessions(request).require(
                 session_id,
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
@@ -274,15 +270,12 @@ async def _verified_principal(request: Request) -> VerifiedPrincipal:
 async def _owned_controller(request: Request, session_id: str) -> ChatController:
     principal = await _verified_principal(request)
     try:
-        _sessions(request).require(
+        scope = await _sessions(request).require(
             session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
         )
     except ChatSessionAccessDenied as exc:
         raise HTTPException(status_code=404, detail="Chat session not found") from exc
-    controller = _controllers(request).get(session_id)
-    if controller is None:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return controller
+    return _controller_factory(request)(scope)
 
 
 async def _task_episode_action(
@@ -390,12 +383,8 @@ def _episodic_repository(request: Request) -> EpisodicMemoryPort:
     return cast(EpisodicMemoryPort, repository)
 
 
-def _sessions(request: Request) -> InMemoryChatSessionRegistry:
-    return cast(InMemoryChatSessionRegistry, request.app.state.chat_sessions)
-
-
-def _controllers(request: Request) -> dict[str, ChatController]:
-    return cast(dict[str, ChatController], request.app.state.chat_controllers)
+def _sessions(request: Request) -> ChatSessionRegistryPort:
+    return cast(ChatSessionRegistryPort, request.app.state.chat_sessions)
 
 
 def _controller_factory(request: Request) -> ControllerFactory:

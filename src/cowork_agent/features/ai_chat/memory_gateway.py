@@ -76,10 +76,11 @@ class MemoryGateway:
         self._memory_operation_sink = memory_operation_sink or NullMemoryOperationSink()
         self._monotonic_clock = monotonic_clock
 
-    def append_turn(self, turn: ChatTurn) -> None:
+    def append_turn(self, turn: ChatTurn) -> bool:
         if turn.session_id != self._scope.session_id:
             raise NamespaceAccessDenied("turn scope does not match the verified chat scope")
         self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
+        return True
 
     @observe(as_type="retriever", name="chat_memory_read_context")
     async def read_context(self, request: MemoryContextRequest) -> MemoryContextResponse:
@@ -93,12 +94,18 @@ class MemoryGateway:
                 "scope_denied",
             )
             raise
-        turns = (
-            self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
-            if request.reads.short_term
-            else ()
-        )
         degraded: list[DegradedMemorySource] = []
+        turns: tuple[ChatTurn, ...] = ()
+        if request.reads.short_term:
+            started = self._monotonic_clock()
+            turns = self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
+            self._emit(
+                MemoryType.SHORT_TERM,
+                MemoryOperation.READ,
+                MemoryOutcome.SUCCESS,
+                result_count=len(turns),
+                started=started,
+            )
 
         profile = None
         if request.reads.long_term:
@@ -293,6 +300,21 @@ class MemoryGateway:
             namespace, trusted_episode, expires_at=expires_at
         )
         self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.SUCCESS)
+        return result
+
+    async def _read_task_episode(self, episode_id: str) -> TaskEpisode | None:
+        """Load one originating-session episode for a request-scoped controller."""
+
+        namespace = self._namespace(MemoryType.EPISODIC)
+        result = await self._require_episodic_memory().read_task_episode(
+            namespace, episode_id=episode_id
+        )
+        if result is not None and (
+            result.tenant_id != self._scope.tenant_id
+            or result.user_id != self._scope.user_id
+            or result.chat_session_id != self._scope.session_id
+        ):
+            raise NamespaceAccessDenied("task episode scope does not match the verified scope")
         return result
 
     async def transition_task_episode(

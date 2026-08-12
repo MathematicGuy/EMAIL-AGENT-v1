@@ -10,21 +10,20 @@ digest runs.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import GeminiSettings, QdrantSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings, RerankerSettings
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import LOCAL_TENANT_ID
-from cowork_agent.integrations.rag.embeddings import EmbeddingPort, GeminiEmbeddingAdapter
+from cowork_agent.integrations.rag.embeddings import EmbeddingPort, JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
-from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
+from cowork_agent.integrations.rag.reranker import RerankerAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ TURBOVEC_SNAPSHOT_PATH = Path(__file__).resolve().parents[4] / ".data" / "turbov
 
 
 async def build_semantic_memory(
-    settings: GeminiSettings,
+    settings: JinaEmbeddingSettings,
     qdrant_settings: QdrantSettings | None = None,
 ) -> SemanticMemoryPort:
     """Best-effort RAG store with Qdrant, Turbovec, and in-repo fallback."""
@@ -58,6 +57,7 @@ async def build_semantic_memory(
                 TURBOVEC_SNAPSHOT_PATH,
             )
             return turbovec_memory
+            return await _build_qdrant_memory(resolved, JinaEmbeddingAdapter(settings))
         except Exception as exc:
             logger.warning(
                 "Turbovec memory setup failed (%s: %s); falling back...",
@@ -73,8 +73,8 @@ async def build_semantic_memory(
         documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
         memory = HybridSemanticMemory(
             documents,
-            GeminiEmbeddingAdapter(settings),
-            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
+            JinaEmbeddingAdapter(settings),
+            reranker=RerankerAdapter(settings=RerankerSettings.from_env()),
             query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
             enable_mmr=True,
             min_rerank_score=0.30,

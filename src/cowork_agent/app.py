@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import httpx
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from cowork_agent.config import (
@@ -21,8 +23,10 @@ from cowork_agent.config import (
     GeminiSettings,
     GmailSettings,
     GroqSettings,
+    JinaEmbeddingSettings,
+    SessionSettings,
+    SupabaseStorageSettings,
     database_url,
-    redis_url,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
@@ -33,6 +37,7 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
+    ChatSessionRegistryPort,
     InMemoryChatSessionRegistry,
     UnavailableChatReply,
 )
@@ -46,7 +51,9 @@ from cowork_agent.features.ai_chat.ports import (
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
 )
-from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.features.ai_chat.session_buffer import (
+    InMemoryChatSessionBuffer,
+)
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -54,6 +61,7 @@ from cowork_agent.features.email_action_plan.observability import (
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
+    MailboxConnectionRepository,
     MailboxTemporaryError,
     RouteClassifierPort,
     RunRepository,
@@ -72,6 +80,7 @@ from cowork_agent.identity import (
     VerifiedPrincipal,
     ensure_principal_owns_connection,
     principal_for_connection,
+    principal_from_opaque_session,
 )
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
@@ -105,6 +114,7 @@ from cowork_agent.integrations.rag.bootstrap import (
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
@@ -115,12 +125,18 @@ from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 from .api.chat import create_chat_router
 from .api.handlers import _jsonable
+from .api.projects import create_project_router
 
 logger = logging.getLogger(__name__)
 
 
 async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
-    """Derive the chat principal only from one verified connected mailbox."""
+    """Resolve chat identity from a session, with the local MVP fallback."""
+
+    if getattr(request.app.state, "session_repository", None) is not None:
+        principal = await _authenticated_principal(request)
+        assert principal is not None
+        return principal
 
     repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
     candidates = tuple(
@@ -186,6 +202,16 @@ def _chat_controller_factory(
     return factory
 
 
+def create_chat_session_buffer(
+    settings: ChatMemorySettings, *, durable: bool
+) -> InMemoryChatSessionBuffer:
+    """Keep bounded working turns local; durability belongs to Postgres metadata."""
+    del durable
+    return InMemoryChatSessionBuffer(
+        max_turns=settings.max_turns,
+        ttl_seconds=settings.ttl_seconds,
+    )
+
 
 def create_app() -> FastAPI:
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
@@ -207,26 +233,19 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             settings = GmailSettings.from_env()
-            repository = SQLiteMailboxConnectionRepository(settings.connection_db_path)
-            await repository.initialize()
+            session_settings = SessionSettings.from_env()
+            repository: MailboxConnectionRepository = SQLiteMailboxConnectionRepository(
+                settings.connection_db_path
+            )
+            local_repository = cast(SQLiteMailboxConnectionRepository, repository)
+            await local_repository.initialize()
             app.state.gmail_settings = settings
-            app.state.connection_repository = repository
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret,
-                    settings.oauth_state_ttl_seconds,
-                ),
-            )
-            app.state.gmail_mailbox = GmailMailboxAdapter(
-                settings,
-                repository,
-                TokenCipher(settings.token_encryption_key),
-            )
+            app.state.session_settings = session_settings
+            app.state.identity_repository = None
+            app.state.session_repository = None
             run_repository: RunRepository
             task_repository: TaskRepository
+            chat_session_registry: ChatSessionRegistryPort
             result_repository = InMemoryResultRepository()
             if database_url():
                 # V1-H T5.1 durable control plane: PostgreSQL is the source
@@ -235,12 +254,23 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.repositories.chat_sessions import (
+                    PostgresChatSessionRegistry,
+                )
+                from cowork_agent.persistence.repositories.identity import (
+                    PostgresIdentityRepository,
+                    PostgresMailboxConnectionRepository,
+                    PostgresSessionRepository,
+                )
                 from cowork_agent.persistence.repositories.postgres import (
                     PostgresChatProfileRepository,
                     PostgresOutboxRepository,
                     PostgresRunRepository,
                     PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
+                )
+                from cowork_agent.persistence.repositories.projects import (
+                    PostgresProjectRepository,
                 )
 
                 pool = AsyncConnectionPool(
@@ -254,6 +284,11 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
                 app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
                 app.state.pg_pool = pool
+                app.state.identity_repository = PostgresIdentityRepository(pool)
+                app.state.session_repository = PostgresSessionRepository(pool)
+                app.state.project_repository = PostgresProjectRepository(pool)
+                chat_session_registry = PostgresChatSessionRegistry(pool)
+                repository = PostgresMailboxConnectionRepository(pool)
             else:
                 task_repository = SQLiteTaskRepository(
                     settings.connection_db_path.parent / "tasks.db"
@@ -268,18 +303,51 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
+                app.state.project_repository = None
+                chat_session_registry = InMemoryChatSessionRegistry()
+            app.state.connection_repository = repository
+            app.state.gmail_connections = GmailConnectionService(
+                settings,
+                repository,
+                TokenCipher(settings.token_encryption_key),
+                OAuthStateManager(
+                    settings.oauth_state_secret,
+                    settings.oauth_state_ttl_seconds,
+                ),
+                principal_resolver=(
+                    app.state.identity_repository.resolve_or_create_principal
+                    if app.state.identity_repository is not None
+                    else None
+                ),
+            )
+            app.state.gmail_mailbox = GmailMailboxAdapter(
+                settings,
+                repository,
+                TokenCipher(settings.token_encryption_key),
+            )
+            if os.getenv("SUPABASE_URL", "").strip():
+                storage_settings = SupabaseStorageSettings.from_env()
+                storage_client = httpx.AsyncClient(timeout=30.0)
+                app.state.private_storage_client = storage_client
+                app.state.private_storage = SupabasePrivateStorage(
+                    storage_settings.url,
+                    storage_settings.secret_key,
+                    storage_settings.bucket,
+                    storage_client,
+                )
+            else:
+                app.state.private_storage_client = None
+                app.state.private_storage = None
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
-            app.state.chat_sessions = InMemoryChatSessionRegistry()
-            app.state.chat_session_buffer = InMemoryChatSessionBuffer(
-                max_turns=chat_memory_settings.max_turns,
-                ttl_seconds=chat_memory_settings.ttl_seconds,
+            app.state.chat_sessions = chat_session_registry
+            app.state.chat_session_buffer = create_chat_session_buffer(
+                chat_memory_settings, durable=app.state.pg_pool is not None
             )
             app.state.memory_metrics = MemoryOperationMetrics()
             app.state.memory_operation_sink = LoggingMemoryOperationSink(
                 metrics=app.state.memory_metrics
             )
-            app.state.chat_controllers = {}
             app.state.chat_reply = UnavailableChatReply()
             app.state.chat_principal_resolver = _resolve_chat_principal
 
@@ -291,23 +359,8 @@ def create_app() -> FastAPI:
             )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
-            queue_url = redis_url()
-            if queue_url:
-                # V1-H T5.2: durable queue dispatch replaces BackgroundTasks.
-                # The durable claim lives in PostgreSQL, so the queue
-                # requires the PG repositories.
-                if app.state.pg_pool is None:
-                    raise RuntimeError("REDIS_URL requires DATABASE_URL")
-                from redis.asyncio import Redis as AsyncRedis
-
-                from cowork_agent.orchestration.redis_queue import RedisRunQueue
-
-                redis_client = AsyncRedis.from_url(queue_url, decode_responses=True)
-                app.state.redis_client = redis_client
-                app.state.run_queue = RedisRunQueue(redis_client)
-            else:
-                app.state.redis_client = None
-                app.state.run_queue = None
+            app.state.run_queue = None
+            app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
@@ -321,7 +374,9 @@ def create_app() -> FastAPI:
                     gemini_settings = GeminiSettings.from_env()
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
-                    semantic_memory = await build_semantic_memory(gemini_settings)
+                    semantic_memory = await build_semantic_memory(
+                        JinaEmbeddingSettings.from_env()
+                    )
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
@@ -374,12 +429,13 @@ def create_app() -> FastAPI:
         pg_pool = getattr(app.state, "pg_pool", None)
         if pg_pool is not None:
             await pg_pool.close()
-        redis_client = getattr(app.state, "redis_client", None)
-        if redis_client is not None:
-            await redis_client.aclose()
+        private_storage_client = getattr(app.state, "private_storage_client", None)
+        if private_storage_client is not None:
+            await private_storage_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
+    app.include_router(create_project_router())
 
     @app.get("/health")
     @app.get("/api/v1/health")
@@ -401,7 +457,7 @@ def create_app() -> FastAPI:
         state: str,
         code: str | None = None,
         error: str | None = None,
-    ) -> dict[str, Any] | RedirectResponse:
+    ) -> dict[str, Any] | Response:
         settings = _gmail_settings(request)
         if error:
             if settings.frontend_url:
@@ -419,28 +475,46 @@ def create_app() -> FastAPI:
                 return _frontend_mail_redirect(settings.frontend_url, "error")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if settings.frontend_url:
-            return _frontend_mail_redirect(settings.frontend_url, "connected")
-        return {
-            "status": "connected",
-            "connection": _public_connection(connection),
-            "next": "Create a digest run with this mailbox connection ID.",
-        }
+            response: Response = _frontend_mail_redirect(settings.frontend_url, "connected")
+        else:
+            response = JSONResponse(
+                {
+                    "status": "connected",
+                    "connection": _public_connection(connection),
+                    "next": "Create a digest run with this mailbox connection ID.",
+                }
+            )
+        identity_repository = getattr(request.app.state, "identity_repository", None)
+        session_repository = getattr(request.app.state, "session_repository", None)
+        if identity_repository is not None and session_repository is not None:
+            principal = await identity_repository.resolve_or_create_principal(
+                connection.email_address
+            )
+            token, _ = await session_repository.create(
+                principal,
+                now=datetime.now(UTC),
+                ttl_seconds=_session_settings(request).session_ttl_seconds,
+            )
+            _set_session_cookie(response, _session_settings(request), token)
+        return response
 
     @app.get("/v1/mail-todo/connections")
     async def list_connections(request: Request) -> dict[str, Any]:
-        # Local single-user MVP: no identity parameter, so every Mailbox Connection is listed.
-        repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
-        connections = await repository.list_all()
+        repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+        principal = await _authenticated_principal(
+            request, required=getattr(request.app.state, "session_repository", None) is not None
+        )
+        connections = (
+            await repository.list_for_user(principal.user_id)
+            if principal is not None
+            else await cast(Any, repository).list_all()
+        )
         return {"connections": [_public_connection(item) for item in connections]}
 
     @app.delete("/v1/mail-todo/connections/{connection_id}")
     async def disconnect_gmail(connection_id: str, request: Request) -> dict[str, bool]:
-        repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
-        connection = await repository.get(connection_id)
-        if connection is None:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
-        principal = principal_for_connection(connection)
-        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        connection = await _owned_connection(request, connection_id, "Gmail connection not found")
+        principal = await _connection_principal(request, connection)
         deleted = await _connection_service(request).disconnect(connection_id, principal.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Gmail connection not found")
@@ -452,12 +526,7 @@ def create_app() -> FastAPI:
         request: Request,
         limit: int = Query(default=10, ge=1, le=20),
     ) -> dict[str, Any]:
-        repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
-        connection = await repository.get(connection_id)
-        if connection is None:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
-        principal = principal_for_connection(connection)
-        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        await _owned_connection(request, connection_id, "Gmail connection not found")
         try:
             page = await _gmail_mailbox(request).search_unread(
                 connection_id, DEFAULT_QUERY, limit
@@ -504,14 +573,10 @@ def create_app() -> FastAPI:
         mailbox_connection_id: str = Query(alias="mailboxConnectionId", min_length=1),
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
-        connection_repository: SQLiteMailboxConnectionRepository = (
-            request.app.state.connection_repository
+        connection = await _owned_connection(
+            request, mailbox_connection_id, "Gmail connection not found"
         )
-        connection = await connection_repository.get(mailbox_connection_id)
-        if connection is None:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
-        principal = principal_for_connection(connection)
-        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        principal = await _connection_principal(request, connection)
         repository = cast(RunRepository, request.app.state.run_repository)
         runs = await repository.list_recent(
             user_id=principal.user_id,
@@ -527,14 +592,10 @@ def create_app() -> FastAPI:
         background_tasks: BackgroundTasks,
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
     ) -> dict[str, str]:
-        connection_repository: SQLiteMailboxConnectionRepository = (
-            request.app.state.connection_repository
+        connection = await _owned_connection(
+            request, payload.mailbox_connection_id, "Gmail connection not found"
         )
-        connection = await connection_repository.get(payload.mailbox_connection_id)
-        if connection is None:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
-        principal = principal_for_connection(connection)
-        _require_owned_connection(principal, connection, detail="Gmail connection not found")
+        principal = await _connection_principal(request, connection)
         worker = _digest_worker(request)
         if worker is None:
             raise HTTPException(
@@ -763,6 +824,57 @@ def _connection_service(request: Request) -> GmailConnectionService:
     return cast(GmailConnectionService, request.app.state.gmail_connections)
 
 
+async def _authenticated_principal(
+    request: Request, *, required: bool = True
+) -> VerifiedPrincipal | None:
+    """Resolve the opaque session only in the PostgreSQL multi-user runtime."""
+    sessions = getattr(request.app.state, "session_repository", None)
+    if sessions is None:
+        return None
+    principal = await principal_from_opaque_session(
+        request.cookies.get(_session_settings(request).cookie_name), sessions
+    )
+    if principal is None and required:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return principal
+
+
+async def _connection_principal(
+    request: Request, connection: MailboxConnection
+) -> VerifiedPrincipal:
+    """Use the opaque session in Postgres mode and legacy identity locally."""
+    if getattr(request.app.state, "session_repository", None) is not None:
+        principal = await _authenticated_principal(request)
+        assert principal is not None
+        return principal
+    return principal_for_connection(connection)
+
+
+async def _owned_connection(
+    request: Request, connection_id: str, detail: str
+) -> MailboxConnection:
+    repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+    connection = await repository.get(connection_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail=detail)
+    principal = await _connection_principal(request, connection)
+    _require_owned_connection(principal, connection, detail=detail)
+    return connection
+
+
+def _set_session_cookie(response: Response, settings: SessionSettings, token: str) -> None:
+    """Set the one HttpOnly cookie that carries the opaque session token."""
+    response.set_cookie(
+        key=settings.cookie_name,
+        value=token,
+        max_age=settings.session_ttl_seconds,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
 def _require_owned_connection(
     principal: VerifiedPrincipal, connection: MailboxConnection, *, detail: str
 ) -> None:
@@ -775,18 +887,19 @@ def _require_owned_connection(
 
 async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
     """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
-    connection_repository: SQLiteMailboxConnectionRepository = (
-        request.app.state.connection_repository
-    )
-    connection = await connection_repository.get(run.mailbox_connection_id)
-    if connection is None:
+    connection = await _owned_connection(request, run.mailbox_connection_id, detail)
+    principal = await _connection_principal(request, connection)
+    if principal.user_id != run.user_id:
         raise HTTPException(status_code=404, detail=detail)
-    principal = VerifiedPrincipal(tenant_id=LOCAL_TENANT_ID, user_id=run.user_id)
     _require_owned_connection(principal, connection, detail=detail)
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
     return cast(GmailSettings, request.app.state.gmail_settings)
+
+
+def _session_settings(request: Request) -> SessionSettings:
+    return cast(SessionSettings, request.app.state.session_settings)
 
 
 def _gmail_mailbox(request: Request) -> GmailMailboxAdapter:
@@ -845,6 +958,7 @@ def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse
 
 
 def main() -> None:
+    load_dotenv(override=False)
     # Without a root handler the stdlib drops every INFO record, which silently
     # discards the whole trace-sink stream (§13) — the observability surface is
     # log lines, so an unconfigured logger means no observability at all.
@@ -852,7 +966,7 @@ def main() -> None:
     # kill the process at startup over a lowercase env var.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     loop = "auto"
-    if (database_url() or redis_url()) and sys.platform == "win32":
+    if database_url() and sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop. uvicorn builds
         # the loop from its own loop_factory, so setting the event loop *policy*
         # here has no effect — the loop has to be named in the config instead.

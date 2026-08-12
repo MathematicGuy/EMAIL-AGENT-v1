@@ -26,7 +26,10 @@ from cowork_agent.integrations.rag.query_transform import (
 class FakeEmbedder:
     """Deterministic embedder for unit testing."""
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self, texts: Sequence[str], *, task: str = "retrieval.query"
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         results: list[tuple[float, ...]] = []
         for text in texts:
             if "alpha" in text:

@@ -12,6 +12,7 @@ from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 from cowork_agent.config import GMAIL_READONLY_SCOPE, GmailSettings
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.target_contracts import BodyFormat, FetchStatus
+from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.integrations.gmail import provider as gmail_provider
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.provider import (
@@ -147,6 +148,47 @@ def test_oauth_completion_encrypts_and_persists_refresh_token(tmp_path: Path) ->
         assert cipher.decrypt(connection.encrypted_refresh_token) == "refresh-token"
         stored = await repository.get(connection.id)
         assert stored == connection
+
+    asyncio.run(scenario())
+
+
+def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Path) -> None:
+    class WorkspaceRepository:
+        def __init__(self) -> None:
+            self.workspace_id = ""
+            self.connection: MailboxConnection | None = None
+
+        async def upsert_for_workspace(
+            self, connection: MailboxConnection, *, workspace_id: str
+        ) -> MailboxConnection:
+            self.workspace_id = workspace_id
+            self.connection = connection
+            return connection
+
+    async def resolve_principal(email_address: str) -> VerifiedPrincipal:
+        assert email_address == "owner@example.com"
+        return VerifiedPrincipal(tenant_id="workspace-1", user_id="internal-user-1")
+
+    async def scenario() -> None:
+        settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+        repository = WorkspaceRepository()
+        driver = FakeOAuthDriver()
+        service = GmailConnectionService(
+            settings,
+            repository,  # type: ignore[arg-type]
+            TokenCipher(settings.token_encryption_key),
+            OAuthStateManager(settings.oauth_state_secret, 600),
+            driver,
+            principal_resolver=resolve_principal,
+        )
+        service.begin()
+        connection = await service.complete(
+            driver.state,
+            f"{settings.redirect_uri}?state={driver.state}&code=test-code",
+        )
+
+        assert connection.user_id == "internal-user-1"
+        assert repository.workspace_id == "workspace-1"
 
     asyncio.run(scenario())
 

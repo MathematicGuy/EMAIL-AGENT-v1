@@ -32,6 +32,7 @@ from cowork_agent.features.email_action_plan.ports import (
     MailboxTemporaryError,
 )
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
+from cowork_agent.identity import VerifiedPrincipal
 
 from .auth import OAuthStateManager, TokenCipher
 
@@ -74,6 +75,16 @@ class GmailOAuthDriver(Protocol):
     async def exchange(
         self, state: str, authorization_response: str, code_verifier: str
     ) -> GmailOAuthGrant: ...
+
+
+class GmailPrincipalResolver(Protocol):
+    async def __call__(self, email_address: str) -> VerifiedPrincipal: ...
+
+
+class WorkspaceMailboxConnectionRepository(Protocol):
+    async def upsert_for_workspace(
+        self, connection: MailboxConnection, *, workspace_id: str
+    ) -> MailboxConnection: ...
 
 
 class GoogleOAuthDriver:
@@ -137,12 +148,14 @@ class GmailConnectionService:
         cipher: TokenCipher,
         state_manager: OAuthStateManager,
         driver: GmailOAuthDriver | None = None,
+        principal_resolver: GmailPrincipalResolver | None = None,
     ) -> None:
         self._settings = settings
         self._repository = repository
         self._cipher = cipher
         self._state_manager = state_manager
         self._driver = driver or GoogleOAuthDriver(settings)
+        self._principal_resolver = principal_resolver
 
     def begin(self) -> str:
         """Start the OAuth flow; identity is bound at callback from the verified grant."""
@@ -157,10 +170,15 @@ class GmailConnectionService:
         grant = await self._driver.exchange(state, authorization_response, code_verifier)
         if grant.scopes != self._settings.scopes:
             raise ValueError("Google granted an unexpected Gmail OAuth scope")
+        principal = (
+            await self._principal_resolver(grant.email_address)
+            if self._principal_resolver is not None
+            else None
+        )
         now = datetime.now(UTC)
         connection = MailboxConnection(
             id=f"mbx_{uuid4().hex}",
-            user_id=grant.email_address,
+            user_id=principal.user_id if principal is not None else grant.email_address,
             provider="gmail",
             external_account_id=grant.email_address.lower(),
             email_address=grant.email_address,
@@ -170,6 +188,11 @@ class GmailConnectionService:
             created_at=now,
             updated_at=now,
         )
+        if principal is not None:
+            workspace_repository = cast(WorkspaceMailboxConnectionRepository, self._repository)
+            return await workspace_repository.upsert_for_workspace(
+                connection, workspace_id=principal.workspace_id
+            )
         return await self._repository.upsert(connection)
 
     async def disconnect(self, connection_id: str, user_id: str) -> bool:
