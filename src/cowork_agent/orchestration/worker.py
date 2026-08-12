@@ -12,11 +12,15 @@ import logging
 import os
 import sys
 
+import httpx
+from qdrant_client import AsyncQdrantClient
+
 from cowork_agent.config import (
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
+    QdrantSettings,
     database_url,
     redis_url,
 )
@@ -58,6 +62,8 @@ async def run_worker() -> None:
     from psycopg_pool import AsyncConnectionPool
     from redis.asyncio import Redis as AsyncRedis
 
+    from cowork_agent.orchestration.project_document_queue import RedisProjectDocumentConsumer
+    from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
     from cowork_agent.orchestration.redis_queue import RedisRunConsumer
     from cowork_agent.persistence.migrate import apply_migrations
     from cowork_agent.persistence.repositories.identity import (
@@ -68,10 +74,13 @@ async def run_worker() -> None:
         PostgresRunRepository,
         PostgresTaskRepository,
     )
+    from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 
     pool = AsyncConnectionPool(database_url(), min_size=1, max_size=4, open=False)
     await pool.open(wait=True)
     redis_client = AsyncRedis.from_url(redis_url(), decode_responses=True)
+    storage_client: httpx.AsyncClient | None = None
+    qdrant_client: AsyncQdrantClient | None = None
     try:
         await apply_migrations(pool)
         runs = PostgresRunRepository(pool)
@@ -124,9 +133,48 @@ async def run_worker() -> None:
             completion_outbox=outbox,
             publisher=LifecycleEventPublisher(outbox, LoggingTraceSink()),
         )
-        logger.info("Worker ready; consuming the durable run queue")
-        await consumer.run_forever()
+        document_consumer = None
+        if provider == "gemini" and os.getenv("SUPABASE_URL", "").strip():
+            from cowork_agent.config import SupabaseStorageSettings
+            from cowork_agent.integrations.knowledge_ingestion.project_documents import (
+                ProjectDocumentExtractor,
+            )
+            from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+            from cowork_agent.integrations.rag.project_documents import ProjectDocumentVectorStore
+            from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
+
+            qdrant = QdrantSettings.from_env()
+            if qdrant.enabled:
+                storage = SupabaseStorageSettings.from_env()
+                storage_client = httpx.AsyncClient(timeout=30.0)
+                qdrant_client = AsyncQdrantClient(url=qdrant.url, api_key=qdrant.api_key or None)
+                document_worker = ProjectDocumentIngestionWorker(
+                    PostgresProjectRepository(pool),
+                    SupabasePrivateStorage(
+                        storage.url, storage.secret_key, storage.bucket, storage_client
+                    ),
+                    ProjectDocumentExtractor(),
+                    ProjectDocumentVectorStore(
+                        qdrant_client,
+                        qdrant.project_collection_name,
+                        GeminiEmbeddingAdapter(gemini_settings),
+                    ),
+                )
+                document_consumer = RedisProjectDocumentConsumer(redis_client, document_worker)
+            else:
+                logger.warning(
+                    "Project document queue is disabled because Qdrant is not configured"
+                )
+        logger.info("Worker ready; consuming durable queues")
+        if document_consumer is None:
+            await consumer.run_forever()
+        else:
+            await asyncio.gather(consumer.run_forever(), document_consumer.run_forever())
     finally:
+        if storage_client is not None:
+            await storage_client.aclose()
+        if qdrant_client is not None:
+            await qdrant_client.close()
         await redis_client.aclose()
         await pool.close()
 

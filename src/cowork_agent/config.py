@@ -165,6 +165,7 @@ class QdrantSettings:
     url: str
     api_key: str = field(repr=False)
     collection_name: str
+    project_collection_name: str
     enabled: bool
     vector_size: int
     reindex: bool
@@ -188,6 +189,10 @@ class QdrantSettings:
             api_key=environ.get("QDRANT_API_KEY", "").strip(),
             collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
             or "company_knowledge",
+            project_collection_name=(
+                environ.get("QDRANT_PROJECT_COLLECTION", "project_documents").strip()
+                or "project_documents"
+            ),
             enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
             vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 768),
             reindex=_boolean(environ, "QDRANT_REINDEX", False),
