@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
 from google.genai import errors
 
 from cowork_agent.config import GeminiSettings, JinaEmbeddingSettings
-from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+from cowork_agent.integrations.rag.embeddings import (
+    GeminiEmbeddingAdapter,
+    JinaEmbeddingAdapter,
+)
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 
 
@@ -139,3 +143,62 @@ def test_hashing_embedder_accepts_retrieval_task() -> None:
     )
 
     assert len(vectors) == 1
+
+
+class _RecordingJinaTransport:
+    def __init__(self, response: Mapping[str, object]) -> None:
+        self.response = response
+        self.url = ""
+        self.headers: Mapping[str, str] = {}
+        self.payload: Mapping[str, object] = {}
+        self.timeout_seconds = 0.0
+
+    async def post_json(
+        self,
+        *,
+        url: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> Mapping[str, object]:
+        self.url = url
+        self.headers = headers
+        self.payload = payload
+        self.timeout_seconds = timeout_seconds
+        return self.response
+
+
+def _jina_settings() -> JinaEmbeddingSettings:
+    return JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "test-key"}, load_env_file=False
+    )
+
+
+def test_jina_adapter_posts_v5_model_and_passage_task() -> None:
+    transport = _RecordingJinaTransport(
+        {"data": [{"index": 0, "embedding": [0.1] * 1024}]}
+    )
+    adapter = JinaEmbeddingAdapter(_jina_settings(), transport=transport)
+
+    vectors = asyncio.run(adapter.embed(["policy"], task="retrieval.passage"))
+
+    assert vectors == ((0.1,) * 1024,)
+    assert transport.url == "https://api.jina.ai/v1/embeddings"
+    assert transport.headers["Authorization"] == "Bearer test-key"
+    assert transport.payload == {
+        "model": "jina-embeddings-v5-omni-small",
+        "input": ["policy"],
+        "task": "retrieval.passage",
+        "dimensions": 1024,
+        "embedding_type": "float",
+    }
+
+
+def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
+    transport = _RecordingJinaTransport(
+        {"data": [{"index": 0, "embedding": [0.1]}]}
+    )
+    adapter = JinaEmbeddingAdapter(_jina_settings(), transport=transport)
+
+    with pytest.raises(ValueError, match="dimension"):
+        asyncio.run(adapter.embed(["policy"]))
