@@ -14,6 +14,7 @@ from qdrant_client import AsyncQdrantClient
 from cowork_agent.config import GeminiSettings, QdrantSettings
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
+from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 
@@ -50,29 +51,19 @@ def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     return client
 
 
-def test_disabled_qdrant_yields_null_memory_rather_than_a_legacy_store() -> None:
+def test_disabled_qdrant_yields_hybrid_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
+    )
     memory = asyncio.run(
         bootstrap.build_semantic_memory(
             _gemini_settings(), _qdrant_settings(QDRANT_ENABLED="false")
         )
     )
 
-    assert isinstance(memory, NullSemanticMemory)
+    assert isinstance(memory, HybridSemanticMemory)
 
 
-def test_the_bootstrap_no_longer_constructs_the_deprecated_stores(
-    recwarn: pytest.WarningsRecorder,
-) -> None:
-    asyncio.run(
-        bootstrap.build_semantic_memory(
-            _gemini_settings(), _qdrant_settings(QDRANT_ENABLED="false")
-        )
-    )
-
-    deprecations = [
-        warning for warning in recwarn if issubclass(warning.category, DeprecationWarning)
-    ]
-    assert deprecations == []
 
 
 def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(
@@ -138,7 +129,7 @@ def test_an_unreachable_qdrant_degrades_to_null_memory(
         bootstrap.build_semantic_memory(_gemini_settings(), _qdrant_settings())
     )
 
-    assert isinstance(memory, NullSemanticMemory)
+    assert isinstance(memory, HybridSemanticMemory)
 
 
 def test_a_vector_size_mismatch_degrades_to_null_memory(
@@ -150,7 +141,8 @@ def test_a_vector_size_mismatch_degrades_to_null_memory(
         )
     )
 
-    assert isinstance(memory, NullSemanticMemory)
+    assert isinstance(memory, HybridSemanticMemory)
+
 
 
 def test_a_missing_corpus_degrades_to_null_memory(

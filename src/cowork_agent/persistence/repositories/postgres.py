@@ -606,6 +606,8 @@ class PostgresTaskEpisodeRepository:
                     _task_episode_params(namespace, trusted_episode, expires_at),
                 )
                 row = await cursor.fetchone()
+        except (psycopg.OperationalError, psycopg.errors.QueryCanceled) as error:
+            raise MemorySourceUnavailableError("task episode write unavailable") from error
         except psycopg.errors.UniqueViolation as error:
             raise ValueError("task episode immutable identity conflict") from error
         if row is None:
@@ -703,6 +705,35 @@ class PostgresTaskEpisodeRepository:
                         namespace.feature,
                         query.min_score,
                         limit,
+                    ),
+                )
+                rows = await cursor.fetchall()
+        except (psycopg.OperationalError, psycopg.errors.QueryCanceled) as error:
+            raise MemorySourceUnavailableError("task episode read unavailable") from error
+        return tuple(_task_episode_from_row(row) for row in rows)
+
+    async def list_episodes(
+        self, namespace: MemoryNamespace, *, limit: int = 100
+    ) -> tuple[TaskEpisode, ...]:
+        """Frontend-safe listing (demo read contract): every non-expired episode
+        of the owner regardless of status, newest first."""
+        _task_episode_read_namespace(namespace)
+        try:
+            async with self._pool.connection() as connection:
+                cursor = await connection.execute(
+                    f"""
+                    SELECT {_TASK_EPISODE_COLUMNS}
+                    FROM task_episodes
+                    WHERE tenant_id = %s AND user_id = %s AND feature = %s
+                        AND (expires_at IS NULL OR expires_at > now())
+                    ORDER BY created_at DESC, record_id DESC
+                    LIMIT %s
+                    """,
+                    (
+                        namespace.tenant_id,
+                        namespace.user_id,
+                        namespace.feature,
+                        max(1, min(limit, MAX_EPISODIC_RETRIEVAL_ITEMS)),
                     ),
                 )
                 rows = await cursor.fetchall()

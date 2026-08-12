@@ -338,7 +338,7 @@ class MemoryGateway:
             record_id=record_id,
             source_id=chat_turn_id,
         )
-        if not isinstance(episode_id, str) or not episode_id:
+        if not isinstance(episode_id, str) or not episode_id.strip():
             raise TaskEpisodeTransitionRejected("episode_id must be a nonempty string")
         self._emit(MemoryType.EPISODIC, MemoryOperation.DELETE, MemoryOutcome.REQUESTED)
         result = await self._require_episodic_memory().delete_task_episode(

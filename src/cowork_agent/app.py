@@ -5,6 +5,8 @@ import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -35,7 +37,15 @@ from cowork_agent.features.ai_chat.controller import (
     UnavailableChatReply,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
-from cowork_agent.features.ai_chat.ports import ChatReplyPort, DeclarativeMemoryPort
+from cowork_agent.features.ai_chat.memory_observability import (
+    LoggingMemoryOperationSink,
+    MemoryOperationMetrics,
+)
+from cowork_agent.features.ai_chat.ports import (
+    ChatReplyPort,
+    DeclarativeMemoryPort,
+    EpisodicMemoryPort,
+)
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
@@ -71,6 +81,11 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxNotConnectedError,
     MailboxReauthRequiredError,
 )
+from cowork_agent.integrations.llm.chat_reply import (
+    FaucetChatReply,
+    GeminiChatReply,
+    GroqChatReply,
+)
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
     FaucetRouteClassifier,
@@ -104,6 +119,20 @@ from .api.handlers import _jsonable
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
+    """Derive the chat principal only from one verified connected mailbox."""
+
+    repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+    candidates = tuple(
+        connection
+        for connection in await repository.list_all()
+        if connection.status == "active"
+    )
+    if len(candidates) != 1:
+        raise HTTPException(status_code=503, detail="Chat identity is unavailable")
+    return principal_for_connection(candidates[0])
+
+
 class CreateRunRequest(BaseModel):
     mailbox_connection_id: str = Field(alias="mailboxConnectionId")
     query: str = DEFAULT_QUERY
@@ -113,6 +142,11 @@ class CreateRunRequest(BaseModel):
 class KnowledgeChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     top_k: int = Field(default=5, ge=1, le=20)
+
+
+class SaveReportRequest(BaseModel):
+    filename: str
+    content: str
 
 
 def _chat_controller_factory(
@@ -134,15 +168,34 @@ def _chat_controller_factory(
                     DeclarativeMemoryPort | None,
                     app.state.chat_profile_repository,
                 ),
+                episodic_memory=cast(
+                    EpisodicMemoryPort | None,
+                    app.state.chat_task_episode_repository,
+                ),
                 semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
+                memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
             ),
             reply=cast(ChatReplyPort, app.state.chat_reply),
+            episode_retention_seconds=getattr(
+                getattr(app.state, "chat_memory_settings", None),
+                "episode_retention_seconds",
+                None,
+            ),
         )
 
     return factory
 
 
+
 def create_app() -> FastAPI:
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    logging.getLogger("cowork_agent").setLevel(logging.INFO)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
@@ -179,6 +232,7 @@ def create_app() -> FastAPI:
                     PostgresChatProfileRepository,
                     PostgresOutboxRepository,
                     PostgresRunRepository,
+                    PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
                 )
 
@@ -191,6 +245,7 @@ def create_app() -> FastAPI:
                 task_repository = PostgresTaskRepository(pool)
                 app.state.outbox_repository = PostgresOutboxRepository(pool)
                 app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
+                app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
                 app.state.pg_pool = pool
             else:
                 task_repository = SQLiteTaskRepository(
@@ -204,20 +259,22 @@ def create_app() -> FastAPI:
                 run_repository = sqlite_run_repository
                 app.state.outbox_repository = InMemoryOutbox()
                 app.state.chat_profile_repository = None
+                app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
             chat_memory_settings = ChatMemorySettings.from_env()
+            app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = InMemoryChatSessionRegistry()
             app.state.chat_session_buffer = InMemoryChatSessionBuffer(
                 max_turns=chat_memory_settings.max_turns,
                 ttl_seconds=chat_memory_settings.ttl_seconds,
             )
+            app.state.memory_metrics = MemoryOperationMetrics()
+            app.state.memory_operation_sink = LoggingMemoryOperationSink(
+                metrics=app.state.memory_metrics
+            )
             app.state.chat_controllers = {}
             app.state.chat_reply = UnavailableChatReply()
-
-            async def _dev_chat_principal_resolver(req: Request) -> VerifiedPrincipal:
-                return VerifiedPrincipal(tenant_id=LOCAL_TENANT_ID, user_id="demo-user")
-
-            app.state.chat_principal_resolver = _dev_chat_principal_resolver
+            app.state.chat_principal_resolver = _resolve_chat_principal
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
             app.state.run_repository = run_repository
@@ -258,18 +315,19 @@ def create_app() -> FastAPI:
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
                     semantic_memory = await build_semantic_memory(gemini_settings)
-                    from cowork_agent.integrations.llm.providers.gemini import GeminiChatReply
-                    app.state.chat_reply = GeminiChatReply(gemini_settings)
+                    app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)
                     generator = GroqActionPlanGenerator(groq_settings)
                     semantic_memory = NullSemanticMemory()
+                    app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
                 elif provider == "faucet":
                     faucet_settings = FaucetSettings.from_env()
                     classifier = FaucetRouteClassifier(faucet_settings)
                     generator = FaucetActionPlanGenerator(faucet_settings)
                     semantic_memory = NullSemanticMemory()
+                    app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
                 else:
                     raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
                 app.state.semantic_memory = semantic_memory
@@ -628,6 +686,63 @@ def create_app() -> FastAPI:
         )
         response = await memory.retrieve(retrieval_request)
         return response.to_dict()
+
+    # ── Artifacts / Reports endpoints for chat-generated document display ──
+
+    REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
+    EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
+
+    @app.get("/api/v1/reports")
+    async def list_reports() -> list[dict[str, Any]]:
+        reports: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        dirs_to_scan = [d for d in (REPORTS_DIR, EXTRACTED_DIR) if d.exists()]
+        for folder in dirs_to_scan:
+            for item in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if (
+                    item.is_file()
+                    and item.name != "ingestion-manifest.json"
+                    and item.name not in seen
+                ):
+
+                    try:
+                        seen.add(item.name)
+                        stat = item.stat()
+                        content = item.read_text(encoding="utf-8", errors="replace")
+                        mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
+                        reports.append({
+                            "filename": item.name,
+                            "content": content,
+                            "size": stat.st_size,
+                            "updated_at": mtime,
+                        })
+                    except Exception as exc:
+                        logger.warning("Failed to read report file %s: %s", item.name, exc)
+        return reports
+
+    @app.post("/api/v1/reports")
+    async def save_report(body: SaveReportRequest) -> dict[str, Any]:
+        safe_name = Path(body.filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        target_path = REPORTS_DIR / safe_name
+        target_path.write_text(body.content, encoding="utf-8")
+        stat = target_path.stat()
+        return {
+            "filename": safe_name,
+            "content": body.content,
+            "size": stat.st_size,
+            "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+        }
+
+    @app.delete("/api/v1/reports/{filename}")
+    async def delete_report(filename: str) -> dict[str, str]:
+        safe_name = Path(filename).name
+        target_path = REPORTS_DIR / safe_name
+        if target_path.is_file():
+            target_path.unlink()
+        return {"status": "success", "message": f"Deleted {safe_name}"}
 
     return app
 

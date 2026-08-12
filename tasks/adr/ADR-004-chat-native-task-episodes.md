@@ -89,7 +89,9 @@ request and weakens the system-generated trust boundary.
 
 ## Links
 
-- `../PRD-v2-Memory-Extension.md`
-- `../architectures/TARGET-ARCHITECTURE.md`
-- `../master-comparison.md`
-- `../references/PRD2-chat-memory-orchestration.md`
+- `./ADR-006-user-document-plane-and-classifier-routing.md` (extends this
+  decision with the user-document retrieval plane and classifier-gated routing)
+- `../prds/PRD-v2-Memory-Extension.md`
+- `../../docs/architectures/TARGET-ARCHITECTURE.md`
+- `../../docs/architectures/master-comparison.md`
+- `../../docs/references/PRD2-chat-memory-orchestration.md`

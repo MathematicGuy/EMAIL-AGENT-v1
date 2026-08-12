@@ -19,9 +19,7 @@ SAMPLE_TASK: dict[str, Any] = {
     "route": "retrieve_rag",
     "priority": "urgent",
     "deadline": "2026-08-15T17:00:00+00:00",
-    "action_plan": [
-        {"step": 1, "instruction": "Đọc quy trình", "supporting_citation_ids": ["c1"]}
-    ],
+    "action_plan": [{"step": 1, "instruction": "Đọc quy trình", "supporting_citation_ids": ["c1"]}],
     "supporting_documents": [
         {
             "citation_id": "c1",
@@ -132,6 +130,105 @@ def test_filter_tasks_by_priority() -> None:
     assert len(gui.filter_tasks(tasks, "high")) == 0
 
 
+def test_memory_badges_html_labels_each_kind_and_counts_repeats() -> None:
+    markup = gui.memory_badges_html(
+        [("semantic", "a"), ("semantic", "b"), ("declarative", "c")], "en"
+    )
+    assert "Company knowledge ×2" in markup
+    assert "Personal profile" in markup
+    assert markup.count("<span") == 2
+
+
+def test_memory_badges_html_never_renders_the_opaque_source_id() -> None:
+    markup = gui.memory_badges_html([("episodic", "episode-secret-id")], "en")
+    assert "episode-secret-id" not in markup
+    assert "Approved episode" in markup
+
+
+def test_build_proposal_card_escapes_content_and_marks_partial_plans() -> None:
+    proposal = {
+        "episode_id": "ep-1",
+        "task_title": "Fix <b>billing</b> import",
+        "minimal_request_paraphrase": "Import <script>alert(1)</script> rows",
+        "action_plan": ("Step <one>",),
+        "missing_information": ("Deadline <unknown>",),
+        "rag_citations": (
+            {
+                "document_id": "doc-1",
+                "document_title": "Policy <doc>",
+                "section": "S1",
+                "source_url": "https://example.com/policy",
+            },
+        ),
+        "validation_status": "system_generated",
+        "retrieval_eligible": False,
+    }
+    card = gui.build_proposal_card_html(proposal, "en")
+    assert "<b>" not in card and "<script>" not in card
+    assert "partial-plan" in card
+    assert "System generated" in card
+    assert "Policy &lt;doc&gt; · S1" in card
+    assert "https://example.com/policy" in card
+
+    complete = gui.build_proposal_card_html(
+        {**proposal, "missing_information": ()}, "en"
+    )
+    assert "partial-plan" not in complete
+
+
+def test_memory_badges_html_drops_unknown_memory_kinds() -> None:
+    assert gui.memory_badges_html([("raw_email", "m1")], "en") == ""
+    assert gui.memory_badges_html([], "vi") == ""
+
+
+def test_chat_error_text_prefers_backend_safe_message() -> None:
+    assert gui.chat_error_text("http_500", "Try again shortly.", "en") == "Try again shortly."
+
+
+def test_chat_error_text_localizes_client_side_codes() -> None:
+    assert gui.chat_error_text("stream_unavailable", None, "en") == (
+        "Lost the connection to the backend chat stream."
+    )
+    assert gui.chat_error_text("http_503", "  ", "en") == gui.tr(
+        "en", "chat_error_identity"
+    )
+    assert gui.chat_error_text("http_503", None, "vi") == gui.tr(
+        "vi", "chat_error_identity"
+    )
+    assert gui.chat_error_text("http_500", None, "en") == gui.tr("en", "chat_error_http")
+    assert gui.chat_error_text(None, None, "en") == gui.tr("en", "error_unknown")
+
+
+def test_read_settings_loads_app_host_url_from_dotenv(monkeypatch) -> None:
+    called: list[dict[str, object]] = []
+
+    def fake_load_dotenv(*args: object, **kwargs: object) -> bool:
+        called.append(kwargs)
+        monkeypatch.setenv("APP_HOST_URL", "http://from-dotenv:9999")
+        return True
+
+    monkeypatch.delenv("APP_HOST_URL", raising=False)
+    monkeypatch.setattr(gui, "load_dotenv", fake_load_dotenv)
+    settings = gui.read_settings()
+    assert settings["api_base_url"] == "http://from-dotenv:9999"
+    assert any(kwargs.get("override") is False for kwargs in called)
+
+
+def test_chat_advisory_text_localizes_known_code() -> None:
+    assert gui.chat_advisory_text("optional_memory_degraded", "en") == gui.tr(
+        "en", "chat_advisory_memory_degraded"
+    )
+    assert gui.chat_advisory_text("optional_memory_degraded", "vi") == gui.tr(
+        "vi", "chat_advisory_memory_degraded"
+    )
+    assert gui.chat_advisory_text("something_else", "en") == gui.tr("en", "error_unknown")
+
+
+def test_missing_increment_b_endpoints_are_declared_not_mocked() -> None:
+    assert gui.MISSING_INCREMENT_B_ENDPOINTS
+    assert all(isinstance(endpoint, str) for endpoint in gui.MISSING_INCREMENT_B_ENDPOINTS)
+
+
 def test_sort_tasks_by_priority_and_deadline() -> None:
     t_low = dict(SAMPLE_TASK, task_id="t1", priority="low", deadline="2026-08-20")
     t_urgent = dict(SAMPLE_TASK, task_id="t2", priority="urgent", deadline="2026-08-10")
@@ -149,4 +246,3 @@ def test_sort_tasks_by_priority_and_deadline() -> None:
 
     sorted_default = gui.sort_tasks(tasks, "default")
     assert [t["task_id"] for t in sorted_default] == ["t1", "t2", "t3"]
-

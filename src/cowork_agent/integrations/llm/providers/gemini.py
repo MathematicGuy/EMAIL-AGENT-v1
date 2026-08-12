@@ -48,6 +48,13 @@ _Thread = tuple[EphemeralEmailEnvelope, ...]
 _CLASSIFIER_LOGGER = logging.getLogger(__name__)
 
 
+def _mask_api_key(key: str) -> str:
+    """Safely mask API key values for compliance (OWASP/Security Best Practices)."""
+    if not key:
+        return "***"
+    return f"{key[:6]}...{key[-4:]}" if len(key) >= 10 else f"{key[:2]}***"
+
+
 class GeminiRateLimitError(RuntimeError):
     """One Gemini key exhausted its rate or quota allocation."""
 
@@ -196,7 +203,11 @@ class GeminiActionPlanGenerator:
     async def _generate(self, prompt: str) -> Mapping[str, Any]:
         keys = await self._rotator.candidates(self._settings.max_attempts)
         last_error: GeminiRateLimitError | None = None
-        for key in keys:
+        for idx, key in enumerate(keys, 1):
+            _CLASSIFIER_LOGGER.info(
+                "🔑 [Generator] Calling Gemini API (Key %d/%d: %s, model: %s)",
+                idx, len(keys), _mask_api_key(key), self._settings.model
+            )
             try:
                 return await self._transport.generate(
                     api_key=key,
@@ -208,6 +219,10 @@ class GeminiActionPlanGenerator:
                 )
             except GeminiRateLimitError as exc:
                 last_error = exc
+                _CLASSIFIER_LOGGER.warning(
+                    "⚠️ [Generator] Rate limit (429) on Gemini API Key %s, rotating to next key...",
+                    _mask_api_key(key)
+                )
                 if not self._settings.rotate_on_rate_limit:
                     raise
         raise last_error or RuntimeError("No Gemini API key was attempted")
@@ -597,7 +612,11 @@ class GeminiRouteClassifier:
 
     async def _generate(self, prompt: str) -> Mapping[str, Any] | None:
         keys = await self._rotator.candidates(self._settings.max_attempts)
-        for key in keys:
+        for idx, key in enumerate(keys, 1):
+            _CLASSIFIER_LOGGER.info(
+                "🔑 [Classifier] Calling Gemini API (Key %d/%d: %s, model: %s)",
+                idx, len(keys), _mask_api_key(key), self._settings.model
+            )
             try:
                 return await self._transport.generate(
                     api_key=key,
@@ -608,12 +627,16 @@ class GeminiRouteClassifier:
                     system_instruction=CLASSIFIER_SYSTEM_INSTRUCTION,
                 )
             except GeminiRateLimitError:
+                _CLASSIFIER_LOGGER.warning(
+                    "⚠️ [Classifier] Rate limit (429) on Gemini API Key %s, rotating to next key...",
+                    _mask_api_key(key)
+                )
                 continue
             except Exception as exc:
                 # §12.2: any transport failure (timeout, API error) maps to the
                 # per-message fallback; log metadata only, never email content.
                 _CLASSIFIER_LOGGER.warning(
-                    "Gemini classifier transport failed: %s", type(exc).__name__
+                    "Gemini classifier transport failed (%s): %s", _mask_api_key(key), type(exc).__name__
                 )
                 return None
         return None

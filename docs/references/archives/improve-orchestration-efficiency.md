@@ -36,14 +36,7 @@ before-review hashes. Require exactly `ship`, `fix-first`, or `rethink`.
 
 Do not give one worker an entire broad milestone. Create a small vertical slice
 with one observable acceptance boundary, then update the dashboard only after it
-is verified. Current PRD-v2 order is:
-
-1. M3.4a final review: storage evidence for AC-07–AC-12, AC-14, and AC-15.
-2. M3.4b-A: explicit-request producer (AC-06/AC-07).
-3. M3.4b-B: lifecycle and exact-scope deletion (AC-08/AC-09/AC-15).
-4. M3.4b-C: eligible retrieval and model-context isolation (AC-10–AC-12).
-5. Controller/reply consumption and precedence (AC-01, AC-05, AC-13, AC-17).
-6. Governance operational proof (AC-16–AC-18).
+is verified.
 
 Before a fresh review, run an acceptance-indexed adversarial checklist. For
 TaskEpisodes that includes unrelated-query exclusion, `min_score`, expiry and

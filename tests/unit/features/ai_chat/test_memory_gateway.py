@@ -1207,22 +1207,25 @@ def test_gateway_deletes_only_the_exact_originating_task_episode_and_is_idempote
 @pytest.mark.parametrize(
     ("record_id", "chat_turn_id", "episode_id"),
     [("", "turn", "episode"), ("record/with-slash", "turn", "episode"),
-     ("record", "", "episode"), ("record", "turn", "")],
-    ids=["empty_record", "slashed_record", "empty_turn", "empty_episode"],
+     ("record", "", "episode"), ("record", "turn", ""),
+     ("record", "turn", "   ")],
+    ids=["empty_record", "slashed_record", "empty_turn", "empty_episode", "whitespace_episode"],
 )
 def test_gateway_rejects_invalid_task_episode_deletion_identity_before_adapter(
     record_id: str, chat_turn_id: str, episode_id: str
 ) -> None:
     episodes = EpisodeReader(())
+    sink = RecordingMemoryOperationSink()
 
     with pytest.raises((ValueError, TaskEpisodeTransitionRejected)):
         asyncio.run(
-            _gateway(episode_reader=episodes).delete_task_episode(
+            _gateway(episode_reader=episodes, memory_operation_sink=sink).delete_task_episode(
                 record_id=record_id, chat_turn_id=chat_turn_id, episode_id=episode_id
             )
         )
 
     assert episodes.task_deletes == []
+    assert sink.events == ()
 
 
 def test_gateway_requires_an_episodic_adapter_for_task_episode_lifecycle() -> None:

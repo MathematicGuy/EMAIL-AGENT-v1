@@ -1,5 +1,7 @@
 """Deterministic retrieval-policy tests."""
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_MESSAGE_LENGTH,
     MAX_EPISODIC_RETRIEVAL_ITEMS,
@@ -19,6 +21,7 @@ from cowork_agent.features.ai_chat.retrieval_policy import (
     SEMANTIC_RETRIEVAL_MAX_ITEMS,
     SEMANTIC_RETRIEVAL_MIN_SCORE,
     SEMANTIC_RETRIEVAL_TIMEOUT_MS,
+    is_explicit_task_request,
     select_memory_reads,
 )
 
@@ -105,3 +108,40 @@ def test_policy_limits_are_code_owned_and_within_contract_bounds() -> None:
     assert 1 <= reads.semantic.max_items <= MAX_SEMANTIC_RETRIEVAL_ITEMS
     assert 1 <= reads.episodic.timeout_ms <= MAX_RETRIEVAL_TIMEOUT_MS
     assert 1 <= reads.semantic.timeout_ms <= MAX_RETRIEVAL_TIMEOUT_MS
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "add a task",
+        "draft a task",
+        "draft an action plan",
+        "add an action plan",
+        "turn this into a task",
+        "turn this into an action plan",
+    ],
+)
+def test_explicit_task_policy_accepts_common_unambiguous_requests(user_message: str) -> None:
+    assert is_explicit_task_request(_request(user_message)) is True
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "do not create a task",
+        "don't add a task",
+        "never turn this into a task",
+        "I don't want you to create a task",
+        "never ask me to turn this into a task",
+        "Create a task? No, do not.",
+    ],
+)
+def test_explicit_task_policy_rejects_negated_requests(user_message: str) -> None:
+    assert is_explicit_task_request(_request(user_message)) is False
+
+
+def test_explicit_task_policy_checks_for_retractions_beyond_the_retrieval_cutoff() -> None:
+    message = "create a task " + ("x " * (MAX_RETRIEVAL_QUERY_LENGTH // 2)) + "no"
+
+    assert len(message) > MAX_RETRIEVAL_QUERY_LENGTH
+    assert is_explicit_task_request(_request(message)) is False
