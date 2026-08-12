@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from uuid import NAMESPACE_URL, uuid5
 
+from langfuse import observe
+
 from cowork_agent.domain.chat_contracts import MemoryNamespace, MemoryType, SemanticMemoryQuery
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
@@ -35,6 +37,7 @@ class SemanticChatMemoryAdapter:
     def __init__(self, semantic_memory: SemanticMemoryPort) -> None:
         self._semantic_memory = semantic_memory
 
+    @observe(as_type="retriever", name="chat_semantic_memory_read")
     async def read_semantic_context(
         self, namespace: MemoryNamespace, query: SemanticMemoryQuery
     ) -> Mapping[str, object]:

@@ -100,6 +100,20 @@ def _episode() -> TaskEpisode:
     )
 
 
+def _task_proposal_payload() -> dict[str, object]:
+    episode = _episode()
+    return {
+        "episode_id": episode.episode_id,
+        "task_title": episode.task_title,
+        "minimal_request_paraphrase": episode.minimal_request_paraphrase,
+        "action_plan": list(episode.action_plan),
+        "missing_information": list(episode.missing_information),
+        "rag_citations": [citation.to_dict() for citation in episode.rag_citations],
+        "validation_status": episode.validation_status.value,
+        "retrieval_eligible": episode.retrieval_eligible,
+    }
+
+
 def _chat_summary_episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="chat-summary-1",
@@ -457,23 +471,99 @@ def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters(
             memory_type=MemoryCitationType.SEMANTIC,
             source_id="doc-1",
         ),
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-3",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=_task_proposal_payload(),
+        ),
         ChatMessageStreamEvent.completed(
-            event_id="event-3", session_id="session-1", turn_id="turn-1"
+            event_id="event-4", session_id="session-1", turn_id="turn-1"
         ),
         ChatMessageStreamEvent.error(
-            event_id="event-4",
+            event_id="event-5",
             session_id="session-1",
             turn_id="turn-1",
             code="memory_degraded",
             safe_message="Some optional context was unavailable.",
         ),
     ],
-    ids=["delta", "memory_citation", "completed", "error"],
+    ids=["delta", "memory_citation", "task_proposal", "completed", "error"],
 )
 def test_typed_stream_event_variants_round_trip(event: ChatMessageStreamEvent) -> None:
     payload = event.to_dict()
 
     assert stream_event_from_dict(json.loads(json.dumps(payload))) == event
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"raw_email": "forbidden"},
+        {"tool_payload": {"name": "forbidden"}},
+        {"extra": "not in the frontend contract"},
+        {"task_title": "x" * (MAX_TASK_TITLE_LENGTH + 1)},
+        {"minimal_request_paraphrase": 1},
+        {"action_plan": "not-a-sequence"},
+        {"action_plan": ["x"] * (MAX_TASK_ACTION_PLAN_ITEMS + 1)},
+        {"missing_information": [1]},
+        {"rag_citations": [{"document_id": "incomplete"}]},
+        {"validation_status": "unknown"},
+        {"retrieval_eligible": 1},
+    ],
+)
+def test_task_proposal_event_rejects_untrusted_or_unbounded_payloads(
+    change: dict[str, object],
+) -> None:
+    proposal = {**_task_proposal_payload(), **change}
+
+    with pytest.raises((KeyError, TypeError, ValueError)):
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-1",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=proposal,
+        )
+
+
+def test_task_proposal_event_requires_the_exact_frontend_safe_shape() -> None:
+    proposal = _task_proposal_payload()
+    proposal.pop("missing_information")
+
+    with pytest.raises((KeyError, ValueError)):
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-1",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=proposal,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "retrieval_eligible"),
+    [
+        (ValidationStatus.SYSTEM_GENERATED.value, True),
+        (ValidationStatus.USER_APPROVED.value, False),
+        (ValidationStatus.COMPLETED.value, False),
+        (ValidationStatus.REJECTED.value, True),
+    ],
+)
+def test_task_proposal_event_rejects_inconsistent_retrieval_eligibility(
+    status: str, retrieval_eligible: bool
+) -> None:
+    proposal = {
+        **_task_proposal_payload(),
+        "validation_status": status,
+        "retrieval_eligible": retrieval_eligible,
+    }
+
+    with pytest.raises(ValueError, match="retrieval_eligible"):
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-1",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=proposal,
+        )
 
 
 def test_stream_contract_has_no_tool_variants() -> None:

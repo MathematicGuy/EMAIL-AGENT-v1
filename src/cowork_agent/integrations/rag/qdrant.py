@@ -22,6 +22,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+from langfuse import observe
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -74,6 +75,7 @@ class QdrantSemanticMemory:
         self._top_k_default = top_k_default
         self._min_score_default = min_score_default
 
+    @observe(as_type="retriever", name="qdrant_semantic_retriever")
     async def retrieve(
         self, request: SemanticRetrievalRequest
     ) -> SemanticRetrievalResponse:

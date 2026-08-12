@@ -4,6 +4,8 @@ from collections.abc import Callable
 from datetime import datetime
 from time import monotonic
 
+from langfuse import observe
+
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatSummaryEpisode,
@@ -80,6 +82,7 @@ class MemoryGateway:
         self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
         return True
 
+    @observe(as_type="retriever", name="chat_memory_read_context")
     async def read_context(self, request: MemoryContextRequest) -> MemoryContextResponse:
         try:
             self._require_scope(request.scope)

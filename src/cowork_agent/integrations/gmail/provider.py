@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import html
+import logging
 import random
 import re
 import secrets
@@ -34,6 +35,8 @@ from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPa
 from cowork_agent.identity import VerifiedPrincipal
 
 from .auth import OAuthStateManager, TokenCipher
+
+logger = logging.getLogger(__name__)
 
 
 class MailboxNotConnectedError(LookupError):
@@ -340,9 +343,11 @@ class GmailMailboxAdapter:
             try:
                 return cast(Mapping[str, Any], await asyncio.to_thread(operation))
             except RefreshError as exc:
+                logger.warning("Gmail OAuth token refresh failed: %s", exc)
                 raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
             except HttpError as exc:
                 status = getattr(exc.resp, "status", None)
+                logger.warning("Gmail API HttpError (status=%s, attempt=%d/%d): %s", status, attempt, _RETRY_ATTEMPTS, exc)
                 if status in {401, 403}:
                     raise MailboxReauthRequiredError(
                         "Gmail authorization must be renewed"
@@ -351,6 +356,7 @@ class GmailMailboxAdapter:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))
             except TransportError as exc:
+                logger.warning("Gmail API TransportError (attempt=%d/%d): %s", attempt, _RETRY_ATTEMPTS, exc)
                 if attempt >= _RETRY_ATTEMPTS:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))

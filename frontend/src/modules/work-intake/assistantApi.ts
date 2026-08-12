@@ -130,8 +130,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function checkAssistantApi(signal?: AbortSignal): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/v1/health`, { signal });
-    return response.ok;
+    const response = await fetch(`${API_BASE_URL}/health`, { signal });
+    if (response.ok) return true;
+    const legacyResponse = await fetch(`${API_BASE_URL}/api/v1/health`, { signal });
+    return legacyResponse.ok;
   } catch {
     return false;
   }
@@ -141,31 +143,49 @@ export async function createConversation(
   scope: AssistantScope,
   signal?: AbortSignal
 ): Promise<string> {
-  const conversation = await request<ConversationView>(
-    `${API_BASE_URL}/v1/conversations`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        actor_id: scope.actorId,
-        project_id: scope.projectId,
-        workspace_id: scope.workspaceId,
-      }),
-      signal,
+  try {
+    const conversation = await request<ConversationView>(
+      `${API_BASE_URL}/v1/conversations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actor_id: scope.actorId,
+          project_id: scope.projectId,
+          workspace_id: scope.workspaceId,
+        }),
+        signal,
+      }
+    );
+    return conversation.conversation_id;
+  } catch (error) {
+    if (error instanceof AssistantApiError && (error.status === 404 || error.status === 405 || error.status === 0)) {
+      const session = await request<{ session_id: string }>(
+        `${API_BASE_URL}/v1/cowork/chat/sessions`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal }
+      );
+      return session.session_id;
     }
-  );
-  return conversation.conversation_id;
+    throw error;
+  }
 }
 
 export async function listConversations(
   scope: AssistantScope,
   signal?: AbortSignal
 ): Promise<ConversationView[]> {
-  const response = await request<{ items: ConversationView[] }>(
-    `${API_BASE_URL}/v1/conversations?${scopeParams(scope)}`,
-    { signal }
-  );
-  return response.items;
+  try {
+    const response = await request<{ items: ConversationView[] }>(
+      `${API_BASE_URL}/v1/conversations?${scopeParams(scope)}`,
+      { signal }
+    );
+    return response.items;
+  } catch (error) {
+    if (error instanceof AssistantApiError && (error.status === 404 || error.status === 405 || error.status === 0)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function listConversationMessages(
@@ -173,11 +193,18 @@ export async function listConversationMessages(
   scope: AssistantScope,
   signal?: AbortSignal
 ): Promise<ConversationMessage[]> {
-  const response = await request<{ items: ConversationMessage[] }>(
-    `${API_BASE_URL}/v1/conversations/${conversationId}/messages?${scopeParams(scope)}`,
-    { signal }
-  );
-  return response.items;
+  try {
+    const response = await request<{ items: ConversationMessage[] }>(
+      `${API_BASE_URL}/v1/conversations/${conversationId}/messages?${scopeParams(scope)}`,
+      { signal }
+    );
+    return response.items;
+  } catch (error) {
+    if (error instanceof AssistantApiError && (error.status === 404 || error.status === 405 || error.status === 0)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function sendConversationMessage(input: {
@@ -190,33 +217,49 @@ export async function sendConversationMessage(input: {
   scope: AssistantScope;
   signal?: AbortSignal;
 }): Promise<TurnAccepted> {
-  return request<TurnAccepted>(
-    `${API_BASE_URL}/v1/conversations/${input.conversationId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': newId('chat'),
-      },
-      body: JSON.stringify({
-        actor_id: input.scope.actorId,
-        project_id: input.scope.projectId,
-        workspace_id: input.scope.workspaceId,
-        model_id: input.modelId,
-        content: {
-          type: 'text',
-          text: input.text,
-          attachment_refs: input.attachmentRefs ?? [],
-          metadata: {},
+  try {
+    return await request<TurnAccepted>(
+      `${API_BASE_URL}/v1/conversations/${input.conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': newId('chat'),
         },
-        ...(input.replyToTurnId ? { reply_to_turn_id: input.replyToTurnId } : {}),
-        locale: 'vi-VN',
-        timezone: 'Asia/Ho_Chi_Minh',
-      }),
-      signal: input.signal,
+        body: JSON.stringify({
+          actor_id: input.scope.actorId,
+          project_id: input.scope.projectId,
+          workspace_id: input.scope.workspaceId,
+          model_id: input.modelId,
+          content: {
+            type: 'text',
+            text: input.text,
+            attachment_refs: input.attachmentRefs ?? [],
+            metadata: {},
+          },
+          ...(input.replyToTurnId ? { reply_to_turn_id: input.replyToTurnId } : {}),
+          locale: 'vi-VN',
+          timezone: 'Asia/Ho_Chi_Minh',
+        }),
+        signal: input.signal,
+      }
+    );
+  } catch (error) {
+    if (error instanceof AssistantApiError && (error.status === 404 || error.status === 405 || error.status === 0)) {
+      const turnId = newId('turn');
+      // Record pending message text for streamTurnEvents fallback
+      lastMessageBySession[input.conversationId] = input.text;
+      return {
+        conversation_id: input.conversationId,
+        turn_id: turnId,
+        events_url: `${API_BASE_URL}/v1/cowork/chat/sessions/${input.conversationId}/messages`,
+      };
     }
-  );
+    throw error;
+  }
 }
+
+const lastMessageBySession: Record<string, string> = {};
 
 function parseSseBlock(block: string): TurnEvent | null {
   let id = 0;
@@ -263,19 +306,46 @@ export async function streamTurnEvents(input: {
   params.set('after_sequence', cursor);
 
   let response: Response;
-  try {
-    response = await fetch(
-      `${API_BASE_URL}/v1/conversations/${input.conversationId}/turns/${input.turnId}/events?${params}`,
-      {
-        headers: { 'Last-Event-ID': cursor },
-        signal: input.signal,
-      }
-    );
-  } catch (error) {
-    if ((error as { name?: string }).name === 'AbortError') throw error;
-    throw new AssistantApiError(
-      error instanceof Error ? error.message : 'Không thể mở luồng sự kiện.'
-    );
+  const isCoworkChat = input.conversationId.length > 0 && lastMessageBySession[input.conversationId] !== undefined;
+
+  if (isCoworkChat) {
+    const userMsg = lastMessageBySession[input.conversationId] || 'Xin chào';
+    delete lastMessageBySession[input.conversationId];
+    try {
+      response = await fetch(
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${input.conversationId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: input.conversationId,
+            user_message: userMsg,
+            idempotency_key: input.turnId,
+          }),
+          signal: input.signal,
+        }
+      );
+    } catch (error) {
+      if ((error as { name?: string }).name === 'AbortError') throw error;
+      throw new AssistantApiError(
+        error instanceof Error ? error.message : 'Không thể mở luồng sự kiện.'
+      );
+    }
+  } else {
+    try {
+      response = await fetch(
+        `${API_BASE_URL}/v1/conversations/${input.conversationId}/turns/${input.turnId}/events?${params}`,
+        {
+          headers: { 'Last-Event-ID': cursor },
+          signal: input.signal,
+        }
+      );
+    } catch (error) {
+      if ((error as { name?: string }).name === 'AbortError') throw error;
+      throw new AssistantApiError(
+        error instanceof Error ? error.message : 'Không thể mở luồng sự kiện.'
+      );
+    }
   }
 
   if (!response.ok) {
@@ -301,6 +371,7 @@ export async function streamTurnEvents(input: {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let eventSeq = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -310,14 +381,47 @@ export async function streamTurnEvents(input: {
 
     for (const block of blocks) {
       const event = parseSseBlock(block);
-      if (event) input.onEvent(event);
+      if (event) {
+        // Normalize cowork/chat SSE events to frontend expected assistant events
+        if (event.event === 'delta') {
+          input.onEvent({
+            id: ++eventSeq,
+            event: 'assistant.delta',
+            data: { delta: event.data.text ?? '' },
+          });
+        } else if (event.event === 'completed') {
+          input.onEvent({
+            id: ++eventSeq,
+            event: 'assistant.completed',
+            data: {},
+          });
+        } else {
+          input.onEvent(event);
+        }
+      }
     }
 
     if (done) break;
   }
 
   const finalEvent = parseSseBlock(buffer);
-  if (finalEvent) input.onEvent(finalEvent);
+  if (finalEvent) {
+    if (finalEvent.event === 'delta') {
+      input.onEvent({
+        id: ++eventSeq,
+        event: 'assistant.delta',
+        data: { delta: finalEvent.data.text ?? '' },
+      });
+    } else if (finalEvent.event === 'completed') {
+      input.onEvent({
+        id: ++eventSeq,
+        event: 'assistant.completed',
+        data: {},
+      });
+    } else {
+      input.onEvent(finalEvent);
+    }
+  }
 }
 
 export async function cancelTurn(input: {

@@ -1,62 +1,58 @@
-# Implementation Plan — Architecture Doc Sync Audit (TARGET-ARCHITECTURE.md)
+# Implementation Plan — Email-RAG Documentation Sync Audit
 
-Audit and update `docs/architectures/TARGET-ARCHITECTURE.md` against actual implementation in `src/cowork_agent/` following `doc-sync-audit` guidelines and `/wgm` protocol. Each subagent focuses strictly on 1 Architecture Section at a time, while the supervisor synthesizes findings and performs targeted updates.
+Audit and update all documentation in `docs/evaluations/email-rag/` (`EMAIL-RAG-STATUS.md` and `RAG-EVALUATION-STATUS.md`) against ground-truth implementation source files using a team of 3 subagents and following the `/doc-sync-audit` skill.
 
-**Target File:** `docs/architectures/TARGET-ARCHITECTURE.md`
-**Ground-Truth Source Base:** `src/cowork_agent/` (domain, api, features/ai_chat, features/email_action_plan, integrations, persistence)
+**Target Directory:** `docs/evaluations/email-rag/`
+- `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`
+- `docs/evaluations/email-rag/RAG-EVALUATION-STATUS.md`
+
+**Ground-Truth Source Files:**
+- `src/cowork_agent/integrations/rag/` (`bootstrap.py`, `qdrant.py`, `hybrid.py`, `knowledge_base.py`, `bm25.py`, `rrf.py`, `jina_reranker.py`, `memory.py`, `null_memory.py`, `embeddings.py`, `chat_memory.py`)
+- `src/cowork_agent/ingestion_cli.py`
+- `src/cowork_agent/app.py`
+- `src/cowork_agent/gui/app.py`
+- `scripts/evaluate_retrieval.py`
+- `scripts/evaluate_routing.py`
+- `tests/unit/integrations/rag/`
+- `tests/integration/email_action_plan/`
+- `tests/fixtures/rag/`
 
 ---
 
 ## Tasks
 
-### Task 1: Ground-Truth Code Mapping
-- **Files:** `src/cowork_agent/`
-- **Validation command:** `python -m pytest -q`
+### Task 1: Subagent 1 — Extract Ground-Truth Facts from Source Code & Scripts
+- **Files:** `src/cowork_agent/integrations/rag/*`, `scripts/evaluate_retrieval.py`, `scripts/evaluate_routing.py`, `tests/`
+- **Validation command:** `python -m pytest tests/unit/integrations/rag -q`
 - **Criteria:**
-  - Index and map ground-truth source files for all 20 sections of `TARGET-ARCHITECTURE.md`.
-  - Identify exact source files for API routes, Chat Controller, TaskEpisodes, Memory Gateway, Four-Type Memory, RAG Module, Email Module, and domain models.
-- **Status:** pending
+  - Launch Subagent 1 (Ground-Truth Code & Evaluation Analyst).
+  - Extract exact factual details: retriever classes, fallback logic, CLI arguments, tenant ACL filtering, Qdrant settings, ingestion behavior, evaluation metrics, test cases, and open vs closed gaps.
+  - Produce a structured Ground-Truth Fact Sheet with `file:line` references.
+- **Status:** done
 
-### Task 2: Audit & Update Sections 1 – 5
-- **Files:** `docs/architectures/TARGET-ARCHITECTURE.md` (Sections 1 to 5)
-- **Validation command:** `python -m pytest -q`
+### Task 2: Subagent 2 — Audit & Update `EMAIL-RAG-STATUS.md`
+- **Files:** `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`
+- **Validation command:** `python -m pytest tests/unit/integrations/rag -q`
 - **Criteria:**
-  - Launch dedicated subagents for each section (§1 to §5), each focusing on exactly 1 section.
-  - Check alignment against actual source code.
-  - Apply minimal targeted edits for clear factual gaps with source citations (`file:line`). Mark ambiguous/future scope as `AMBIGUOUS`.
-- **Status:** pending
+  - Launch Subagent 2 (`EMAIL-RAG-STATUS.md` Auditor).
+  - Compare `EMAIL-RAG-STATUS.md` sections (Executive summary, Implemented architecture table, Runtime behavior, Security, Known gaps, Operational checks, Local knowledge ingestion) against Subagent 1's Fact Sheet.
+  - Make minimal targeted edits with source citations (`file:line`). Mark unclear items as `AMBIGUOUS`.
+- **Status:** done (verified 100% accurate & unchanged)
 
-### Task 3: Audit & Update Sections 6 – 10
-- **Files:** `docs/architectures/TARGET-ARCHITECTURE.md` (Sections 6 to 10)
-- **Validation command:** `python -m pytest -q`
+### Task 3: Subagent 3 — Audit & Update `RAG-EVALUATION-STATUS.md`
+- **Files:** `docs/evaluations/email-rag/RAG-EVALUATION-STATUS.md`
+- **Validation command:** `python -m pytest tests/unit/integrations/rag -q`
 - **Criteria:**
-  - Launch dedicated subagents for each section (§6 to §10), each focusing on exactly 1 section.
-  - Compare RAG architecture, agent-memory interaction, state ownership, database traces, and internal APIs with actual implementation.
-  - Apply minimal targeted edits with source citations.
-- **Status:** pending
+  - Launch Subagent 3 (`RAG-EVALUATION-STATUS.md` Auditor).
+  - Compare `RAG-EVALUATION-STATUS.md` sections (Coverage map, Plain English summary, Layer 1-3 evaluations, baseline results, summary table, open vs closed gaps) against Subagent 1's Fact Sheet.
+  - Make minimal targeted edits with source citations (`file:line`). Mark unclear items as `AMBIGUOUS`.
+- **Status:** done (updated committed corpus count to 17 docs, golden set to 100 cases, unanswerable queries to 12 cases)
 
-### Task 4: Audit & Update Sections 11 – 15
-- **Files:** `docs/architectures/TARGET-ARCHITECTURE.md` (Sections 11 to 15)
-- **Validation command:** `python -m pytest -q`
+### Task 4: Demo-Validation & Synthesis Report
+- **Files:** `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`, `docs/evaluations/email-rag/RAG-EVALUATION-STATUS.md`
+- **Validation command:** `python -m pytest -q && python -m ruff check .`
 - **Criteria:**
-  - Launch dedicated subagents for each section (§11 to §15), each focusing on exactly 1 section.
-  - Compare failure paths, retries/timeouts, human approval policy, observability/evaluation, and output contracts with source implementation.
-  - Status: pending
-
-### Task 5: Audit & Update Sections 16 – 20
-- **Files:** `docs/architectures/TARGET-ARCHITECTURE.md` (Sections 16 to 20, including §20.1–20.5)
-- **Validation command:** `python -m pytest -q`
-- **Criteria:**
-  - Launch dedicated subagents for each section (§16 to §20), each focusing on exactly 1 section.
-  - Validate Architecture Principles, Implementation Order, Out-of-Scope items, Baseline Summary, and Accepted ADR-004 Chat-Native Target (§20.1 to §20.5) against `src/cowork_agent/features/ai_chat/` & `domain/`.
-  - Apply minimal targeted edits with source citations.
-- **Status:** pending
-
-### Task 6: Synthesis, Codebase Verification & Audit Report
-- **Files:** `docs/architectures/TARGET-ARCHITECTURE.md`
-- **Validation command:** `python -m pytest -q && python -m ruff check . && python -m mypy src`
-- **Criteria:**
-  - Ensure all 20 sections have been audited and updated where factual drift occurred.
-  - Verify overall documentation consistency and run codebase checks (`pytest`, `ruff`, `mypy`).
-  - Generate full CHANGED / UNCHANGED / AMBIGUOUS report.
-- **Status:** pending
+  - Verify that all updated markdown documents pass formatting and syntax checks.
+  - Run full test suite and linter to confirm zero regressions.
+  - Synthesize findings into a final CHANGED / UNCHANGED / AMBIGUOUS audit report.
+- **Status:** done

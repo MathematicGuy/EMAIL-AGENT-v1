@@ -4,7 +4,7 @@
 > `cf2fd49801d5932b26de82af9d104d730cf58271`. Its findings that RAG/BM25/reranking were absent must
 > not be read as current worktree status. See
 > [`../../references/EMAIL-RAG-ARCHITECHTURE.md`](../../references/EMAIL-RAG-ARCHITECHTURE.md) and
-> [`../../master-comparison.md`](../../master-comparison.md) for the implemented local V1-M3 retrieval
+> [`../master-comparison.md`](../master-comparison.md) for the implemented local V1-M3 retrieval
 > slice and remaining target-only work.
 
 ## Scope

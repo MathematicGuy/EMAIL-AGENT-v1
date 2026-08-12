@@ -4,8 +4,8 @@
 > and evaluation-harness work landed (C4, C5, C6 all closed — see
 > [SPEC](./SPEC-rag-golden-set-and-eval.md) / [PLAN](./PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
-> `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the corpus is
-> **6 documents / 36 chunks** and chunking splits on **H1 and H2**. Corrected throughout.  
+> `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
+> **17 documents / 1,043 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.  
 > Purpose: map what is already tested vs. what is missing for the full Email-RAG quality evaluation story.  
 > The evaluation pipeline covers three conceptually distinct layers:  
 > **Routing** (does the classifier decide that RAG is needed?) →  
@@ -26,10 +26,10 @@ flowchart TD
     B1 --> C["Layer 2 · Semantic Retrieval"]
     B2 --> C
 
-    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 6 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
+    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
     C --> C2["✅ test_rag.py · ACL filtering\nTenant scope applied before scoring;\nforeign chunks excluded"]
     C --> C3["✅ test_rag.py · index mechanics\nScore ordering, top_k truncation,\ntimeout status, null memory fallback"]
-    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n32-case golden set, Gemini embeddings\nsliced by probe type; dense section MRR\n0.929, hybrid+rerank 0.955"]
+    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nGemini embeddings sliced by probe type;\ndense section MRR 0.929, hybrid+rerank 0.955"]
     C --> C5["✅ test_rag_retrieval_golden.py\n8 email→corpus cases over all 6 docs;\nreal InRepoSemanticMemory in the\nDigestWorker graph, 3 xfail under fake"]
     C --> C6["✅ 4-way comparison captured\ndense / bm25 / hybrid / hybrid+rerank\nin docs/baselines/; RRF alone REGRESSES\nsemantic 0.917→0.556"]
     C --> C7["❌ OPEN: abstention\nEvery retriever answers all 4\nunanswerable queries; rate 0.0\nat min_score=0.2"]
@@ -73,7 +73,7 @@ flowchart TD
 - ✅ **Corpus Loader & Chunking (`test_rag.py`)**: Tests that markdown guidebooks load cleanly and split into H1/H2 section chunks (ensures data ingest reliability).
 - ✅ **Tenant ACL Filtering (`test_rag.py`)**: Tests that private company guidebooks are never leaked to unauthorized users/tenants (ensures data privacy).
 - ✅ **Search Index Mechanics (`test_rag.py`)**: Tests score sorting, top-k limits, timeouts, and fallback handling when search fails (ensures basic system stability).
-- ✅ **Real AI Embedding Accuracy (Hit@K / MRR)**: 32 labeled questions run against the real Gemini embedder measure whether search returns the right *section*, not just the right document.
+- ✅ **Real AI Embedding Accuracy (Hit@K / MRR)**: 100 labeled questions (32 in legacy Gemini baseline) run against the real embedder measure whether search returns the right *section*, not just the right document.
 - ✅ **End-to-End Retrieval Fixtures**: 8 test emails — one per guidebook plus an unanswerable one — go through the real pipeline and must land on the correct document.
 - ✅ **Hybrid Search Benchmark**: Keyword, AI vector, fused, and reranked search all measured on the same questions. Fusion **alone** made semantic questions worse; the reranker is what recovers it.
 - ❌ **Abstention on Unanswerable Questions**: The system never says "I don't know" — every retriever returns confident-looking chunks for questions the guidebooks cannot answer.
@@ -122,7 +122,7 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 | Test File | What it checks |
 |---|---|
-| `test_rag.py` | Corpus loading (6 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
+| `test_rag.py` | Corpus loading (17 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
 | `test_bm25.py` | Tenant-scoped BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization, ACL filtering before scoring |
 | `test_rrf.py` | Reciprocal Rank Fusion, 1-based position rank scoring (`RRF_K=60`), duplicate handling, score fusion |
 | `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, tenant ACL gate, Jina reranker integration |
@@ -132,7 +132,7 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 ### ✅ C4 — Real-embedding Hit@K / MRR (closed 2026-08-09)
 
-`tests/fixtures/rag/retrieval_golden.json` holds **32 labeled cases** over the 6-document corpus, loaded by `tests/fixtures/rag/loader.py` and scored by `scripts/evaluate_retrieval.py`. Metrics are Hit@1, Hit@3, MRR, Recall@5 and abstention rate, reported at **document level and section level**.
+`tests/fixtures/rag/retrieval_golden.json` holds **100 labeled cases** (expanded from the 32 legacy baseline cases) over the 17-document corpus, loaded by `tests/fixtures/rag/loader.py` and scored by `scripts/evaluate_retrieval.py`. Metrics are Hit@1, Hit@3, MRR, Recall@5 and abstention rate, reported at **document level and section level**.
 
 Two design constraints make the numbers meaningful and must not be simplified away:
 
@@ -179,7 +179,7 @@ Four findings, in order of importance:
 
 ### ❌ C7 — Abstention on unanswerable queries (open)
 
-**No retriever abstains on any unanswerable query.** All 4 unanswerable cases (`q-029`–`q-032`) return chunks above threshold under dense, BM25, hybrid, and hybrid+rerank alike — `abstention_rate = 0.000` in every report, and under `HashingEmbedder` too. `min_score = 0.2` filters nothing: Gemini cosine similarity between a Vietnamese query and any Vietnamese administrative text sits comfortably above 0.2.
+**No retriever abstains on any unanswerable query.** All unanswerable cases (4 in the 32-case legacy set `q-029`–`q-032`, 12 in the 100-case expanded dataset) return chunks above threshold under dense, BM25, hybrid, and hybrid+rerank alike — `abstention_rate = 0.000` in every report, and under `HashingEmbedder` too. `min_score = 0.2` filters nothing: Gemini cosine similarity between a Vietnamese query and any Vietnamese administrative text sits comfortably above 0.2.
 
 This is a real product gap, not a measurement artifact, and it is the one SPEC §4 added the `unanswerable` probe specifically to catch. It also makes the SPEC §7 Phase-2 gate "abstention must not decrease" vacuous — it is already at the floor. `q-029` is marked `xfail` in the C5 integration test with that reason recorded.
 
