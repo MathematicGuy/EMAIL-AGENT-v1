@@ -24,7 +24,9 @@ import httpx
 CHAT_SESSIONS_PATH = "/v1/cowork/chat/sessions"
 
 #: Typed SSE variants the demo is allowed to render (SPEC §7.1).
-KNOWN_EVENT_TYPES = frozenset({"delta", "memory_citation", "completed", "error"})
+KNOWN_EVENT_TYPES = frozenset(
+    {"delta", "memory_citation", "task_proposal", "completed", "error"}
+)
 
 #: Memory citation kinds the backend may cite (`MemoryCitationType`).
 KNOWN_MEMORY_TYPES = frozenset({"declarative", "episodic", "semantic"})
@@ -56,6 +58,7 @@ class ChatStreamEvent:
     source_id: str | None = None
     code: str | None = None
     safe_message: str | None = None
+    proposal: Mapping[str, Any] | None = None
 
 
 def parse_stream_event(payload: Mapping[str, Any]) -> ChatStreamEvent | None:
@@ -78,12 +81,15 @@ def parse_stream_event(payload: Mapping[str, Any]) -> ChatStreamEvent | None:
     source_id = payload.get("source_id")
     code = payload.get("code")
     safe_message = payload.get("safe_message")
+    proposal = payload.get("proposal")
 
     if event_type == "delta" and not isinstance(text, str):
         return None
     if event_type == "memory_citation" and (
         memory_type not in KNOWN_MEMORY_TYPES or not isinstance(source_id, str) or not source_id
     ):
+        return None
+    if event_type == "task_proposal" and not _is_valid_proposal(proposal):
         return None
     if event_type == "error" and not (isinstance(code, str) and isinstance(safe_message, str)):
         return None
@@ -98,6 +104,21 @@ def parse_stream_event(payload: Mapping[str, Any]) -> ChatStreamEvent | None:
         source_id=source_id if isinstance(source_id, str) else None,
         code=code if isinstance(code, str) else None,
         safe_message=safe_message if isinstance(safe_message, str) else None,
+        proposal=proposal if event_type == "task_proposal" else None,
+    )
+
+
+def _is_valid_proposal(value: object) -> bool:
+    """The card needs the episode handle and a title; anything less is dropped."""
+    if not isinstance(value, Mapping):
+        return False
+    episode_id = value.get("episode_id")
+    task_title = value.get("task_title")
+    return (
+        isinstance(episode_id, str)
+        and bool(episode_id)
+        and isinstance(task_title, str)
+        and bool(task_title)
     )
 
 
@@ -153,6 +174,7 @@ class ChatTurnAccumulator:
     error_message: str | None = None
     advisory_code: str | None = None
     advisory_message: str | None = None
+    proposal: Mapping[str, Any] | None = None
     _seen_event_ids: set[str] = field(default_factory=set)
 
     def apply(self, event: ChatStreamEvent) -> bool:
@@ -167,6 +189,9 @@ class ChatTurnAccumulator:
             citation = (str(event.memory_type), str(event.source_id))
             if citation not in self.citations:
                 self.citations.append(citation)
+        elif event.event_type == "task_proposal":
+            if event.proposal is not None:
+                self.proposal = event.proposal
         elif event.event_type == "completed":
             self.completed = True
         elif event.event_type == "error":
@@ -193,6 +218,7 @@ class ChatTurnAccumulator:
             "error_message": self.error_message,
             "advisory_code": self.advisory_code,
             "advisory_message": self.advisory_message,
+            "proposal": self.proposal,
         }
 
 

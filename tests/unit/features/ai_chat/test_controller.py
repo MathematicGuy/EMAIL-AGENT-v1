@@ -242,9 +242,12 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     assert [event.event_type for event in task_events] == [
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
         ChatEventType.COMPLETED,
     ]
     assert task_events[1].source_id == written.episode_id
+    assert task_events[2].proposal is not None
+    assert task_events[2].proposal["episode_id"] == written.episode_id
 
 
 @pytest.mark.parametrize(
@@ -395,6 +398,7 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     assert [event.event_type for event in retry] == [
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
         ChatEventType.COMPLETED,
     ]
     assert replay == retry

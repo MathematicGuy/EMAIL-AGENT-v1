@@ -145,6 +145,37 @@ def test_memory_badges_html_never_renders_the_opaque_source_id() -> None:
     assert "Approved episode" in markup
 
 
+def test_build_proposal_card_escapes_content_and_marks_partial_plans() -> None:
+    proposal = {
+        "episode_id": "ep-1",
+        "task_title": "Fix <b>billing</b> import",
+        "minimal_request_paraphrase": "Import <script>alert(1)</script> rows",
+        "action_plan": ("Step <one>",),
+        "missing_information": ("Deadline <unknown>",),
+        "rag_citations": (
+            {
+                "document_id": "doc-1",
+                "document_title": "Policy <doc>",
+                "section": "S1",
+                "source_url": "https://example.com/policy",
+            },
+        ),
+        "validation_status": "system_generated",
+        "retrieval_eligible": False,
+    }
+    card = gui.build_proposal_card_html(proposal, "en")
+    assert "<b>" not in card and "<script>" not in card
+    assert "partial-plan" in card
+    assert "System generated" in card
+    assert "Policy &lt;doc&gt; · S1" in card
+    assert "https://example.com/policy" in card
+
+    complete = gui.build_proposal_card_html(
+        {**proposal, "missing_information": ()}, "en"
+    )
+    assert "partial-plan" not in complete
+
+
 def test_memory_badges_html_drops_unknown_memory_kinds() -> None:
     assert gui.memory_badges_html([("raw_email", "m1")], "en") == ""
     assert gui.memory_badges_html([], "vi") == ""

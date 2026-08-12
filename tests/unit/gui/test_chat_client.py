@@ -70,12 +70,52 @@ def test_parse_accepts_memory_citation_and_keeps_source_id_opaque() -> None:
     assert parsed.text is None
 
 
+def test_parse_accepts_task_proposal_and_keeps_the_structured_payload() -> None:
+    parsed = chat_client.parse_stream_event(
+        {
+            "event_type": "task_proposal",
+            "event_id": "e3",
+            "session_id": "s1",
+            "turn_id": "t1",
+            "proposal": {
+                "episode_id": "ep-1",
+                "task_title": "Prepare report",
+                "validation_status": "system_generated",
+            },
+        }
+    )
+    assert parsed is not None
+    assert parsed.proposal is not None
+    assert parsed.proposal["episode_id"] == "ep-1"
+    assert parsed.text is None
+
+
+def test_accumulator_stores_the_proposal_for_history_reruns() -> None:
+    accumulator = chat_client.ChatTurnAccumulator()
+    accumulator.apply(
+        make_event(
+            "task_proposal",
+            "e1",
+            proposal={"episode_id": "ep-1", "task_title": "Prepare report"},
+        )
+    )
+    assert accumulator.proposal == {"episode_id": "ep-1", "task_title": "Prepare report"}
+    assert accumulator.to_message()["proposal"] == {
+        "episode_id": "ep-1",
+        "task_title": "Prepare report",
+    }
+
+
 @pytest.mark.parametrize(
     "payload",
     [
         pytest.param(
-            {"event_type": "task_proposal", "event_id": "e", "session_id": "s", "turn_id": "t"},
+            {"event_type": "tool_call", "event_id": "e", "session_id": "s", "turn_id": "t"},
             id="unknown-event-type",
+        ),
+        pytest.param(
+            {"event_type": "task_proposal", "event_id": "e", "session_id": "s", "turn_id": "t"},
+            id="task-proposal-without-payload",
         ),
         pytest.param(
             {"event_type": "delta", "event_id": "", "session_id": "s", "turn_id": "t", "text": "x"},
@@ -198,6 +238,7 @@ def test_accumulator_completed_and_error_are_terminal() -> None:
         "error_message": "Retry soon.",
         "advisory_code": None,
         "advisory_message": None,
+        "proposal": None,
     }
 
 

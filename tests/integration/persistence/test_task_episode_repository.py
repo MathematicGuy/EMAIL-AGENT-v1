@@ -598,3 +598,64 @@ def test_storage_rejects_extra_rag_citation_keys_and_keeps_exact_shape_rows() ->
             await pool.close()
 
     _run_scenario(scenario)
+
+
+def test_list_episodes_returns_every_non_expired_status_newest_first() -> None:
+    async def scenario() -> None:
+        repository, pool = await _repository()
+        try:
+            await repository.write_task_episode(
+                _namespace(record_id="rec-old", turn_id="turn-old"),
+                _episode(episode_id="ep-old", record_id="rec-old", turn_id="turn-old"),
+                expires_at=None,
+            )
+            await repository.write_task_episode(
+                _namespace(record_id="rec-new", turn_id="turn-new"),
+                _episode(
+                    episode_id="ep-new",
+                    record_id="rec-new",
+                    turn_id="turn-new",
+                    created_at=NOW + timedelta(minutes=5),
+                    updated_at=NOW + timedelta(minutes=5),
+                ),
+                expires_at=None,
+            )
+            await repository.transition_task_episode(
+                EpisodeTransition(
+                    episode_id="ep-new",
+                    namespace=_namespace(record_id="rec-new", turn_id="turn-new"),
+                    from_status=ValidationStatus.SYSTEM_GENERATED,
+                    to_status=ValidationStatus.USER_APPROVED,
+                    retrieval_eligible=True,
+                    transitioned_at=NOW + timedelta(minutes=6),
+                )
+            )
+            await repository.write_task_episode(
+                _namespace(record_id="rec-expired", turn_id="turn-expired"),
+                _episode(episode_id="ep-expired", record_id="rec-expired", turn_id="turn-expired"),
+                expires_at=NOW + timedelta(hours=1),
+            )
+            await repository.write_task_episode(
+                _namespace(
+                    user_id="other@example.com", record_id="rec-foreign", turn_id="turn-foreign"
+                ),
+                _episode(
+                    episode_id="ep-foreign",
+                    record_id="rec-foreign",
+                    turn_id="turn-foreign",
+                    user_id="other@example.com",
+                ),
+                expires_at=None,
+            )
+
+            listed = await repository.list_episodes(_namespace())
+        finally:
+            await pool.close()
+
+        assert [episode.episode_id for episode in listed] == ["ep-new", "ep-old"]
+        assert [episode.validation_status for episode in listed] == [
+            ValidationStatus.USER_APPROVED,
+            ValidationStatus.SYSTEM_GENERATED,
+        ]
+
+    _run_scenario(scenario)

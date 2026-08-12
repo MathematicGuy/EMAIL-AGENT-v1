@@ -79,6 +79,10 @@ class EpisodicMemoryPort(Protocol):
         self, namespace: MemoryNamespace, query: EpisodicMemoryQuery
     ) -> tuple[TaskEpisode, ...]: ...
 
+    async def list_episodes(
+        self, namespace: MemoryNamespace, *, limit: int = 100
+    ) -> tuple[TaskEpisode, ...]: ...
+
     async def write_chat_summary(
         self, namespace: MemoryNamespace, episode: ChatSummaryEpisode
     ) -> ChatSummaryEpisode: ...

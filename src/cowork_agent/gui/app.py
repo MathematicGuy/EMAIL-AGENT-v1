@@ -20,7 +20,7 @@ import os
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from dotenv import load_dotenv
@@ -201,12 +201,42 @@ STRINGS: dict[str, dict[str, str]] = {
             "♻️ Phiên chat cũ đã hết hạn trên server; đã tự động tạo phiên mới để "
             "tiếp tục."
         ),
+        "chat_proposal_title": "📋 Đề xuất task trong chat",
+        "chat_proposal_plan": "Kế hoạch hành động",
+        "chat_proposal_missing": "Thiếu thông tin",
+        "chat_proposal_citations": "Trích dẫn tri thức công ty",
+        "chat_proposal_status": "Trạng thái",
+        "chat_action_approve": "✅ Duyệt",
+        "chat_action_complete": "🏁 Hoàn thành",
+        "chat_action_reject": "❌ Từ chối",
+        "chat_action_failed": "Thao tác task thất bại (mã {code}).",
+        "chat_history_label": "Phiên chat trên server",
+        "chat_load_history": "📥 Nạp lịch sử phiên",
+        "chat_history_note": (
+            "ℹ️ Lịch sử chat đọc từ backend; danh sách phiên nằm trong bộ nhớ "
+            "server nên mất khi backend khởi động lại."
+        ),
+        "memory_prefs_title": "👤 Hồ sơ cá nhân (Preferences)",
+        "memory_field_language": "Ngôn ngữ",
+        "memory_field_timezone": "Múi giờ",
+        "memory_field_persona": "Persona trợ lý",
+        "memory_field_tone": "Giọng điệu trả lời",
+        "memory_save": "💾 Lưu hồ sơ",
+        "memory_delete_profile": "🗑 Xóa hồ sơ",
+        "memory_saved_flash": "Đã lưu hồ sơ cá nhân.",
+        "memory_deleted_flash": "Đã xóa hồ sơ cá nhân.",
+        "memory_episodes_title": "🗂 Episode task",
+        "memory_refresh": "🗘 Làm mới",
+        "memory_episode_delete": "🗑 Xóa",
+        "memory_episodes_empty": "Chưa có episode nào.",
+        "memory_episode_deleted": "Đã xóa episode.",
+        "memory_episode_delete_failed": "Xóa episode thất bại (mã {code}).",
+        "memory_store_unavailable": (
+            "Backend chưa bật kho nhớ PostgreSQL (DATABASE_URL); màn hình Bộ nhớ "
+            "tạm khóa."
+        ),
         "chat_retry": "↻ Thử lại lượt vừa rồi",
         "chat_retry_hint": ("Thử lại dùng lại đúng khóa idempotency nên sẽ không tạo lượt trùng."),
-        "chat_history_note": (
-            "ℹ️ Lịch sử chat chỉ tồn tại trong phiên trình duyệt này: API đọc lại "
-            "lịch sử (`GET /sessions`, `GET /messages`) chưa có ở backend."
-        ),
         "memory_locked_title": "Màn hình Bộ nhớ chưa mở",
         "memory_locked_body": (
             "Increment B (hồ sơ cá nhân, thẻ task trong chat, provenance episode, xóa "
@@ -369,13 +399,43 @@ STRINGS: dict[str, dict[str, str]] = {
             "♻️ The previous chat session expired on the server; a new one was "
             "created automatically to continue."
         ),
+        "chat_proposal_title": "📋 In-chat task proposal",
+        "chat_proposal_plan": "Action plan",
+        "chat_proposal_missing": "Missing information",
+        "chat_proposal_citations": "Company knowledge citations",
+        "chat_proposal_status": "Status",
+        "chat_action_approve": "✅ Approve",
+        "chat_action_complete": "🏁 Complete",
+        "chat_action_reject": "❌ Reject",
+        "chat_action_failed": "Task action failed (code {code}).",
+        "chat_history_label": "Server chat sessions",
+        "chat_load_history": "📥 Load session history",
+        "chat_history_note": (
+            "ℹ️ Chat history is read from the backend; the session list lives in "
+            "server memory, so it is lost when the backend restarts."
+        ),
+        "memory_prefs_title": "👤 Persona profile (Preferences)",
+        "memory_field_language": "Language",
+        "memory_field_timezone": "Timezone",
+        "memory_field_persona": "Assistant persona",
+        "memory_field_tone": "Response tone",
+        "memory_save": "💾 Save profile",
+        "memory_delete_profile": "🗑 Delete profile",
+        "memory_saved_flash": "Profile saved.",
+        "memory_deleted_flash": "Profile deleted.",
+        "memory_episodes_title": "🗂 Task episodes",
+        "memory_refresh": "🗘 Refresh",
+        "memory_episode_delete": "🗑 Delete",
+        "memory_episodes_empty": "No episodes yet.",
+        "memory_episode_deleted": "Episode deleted.",
+        "memory_episode_delete_failed": "Episode deletion failed (code {code}).",
+        "memory_store_unavailable": (
+            "The backend has no PostgreSQL memory store (DATABASE_URL); the Memory "
+            "screen stays locked."
+        ),
         "chat_retry": "↻ Retry the last turn",
         "chat_retry_hint": (
             "Retrying reuses the same idempotency key, so it cannot create a duplicate turn."
-        ),
-        "chat_history_note": (
-            "ℹ️ Chat history lives only in this browser session: the history read APIs "
-            "(`GET /sessions`, `GET /messages`) do not exist in the backend yet."
         ),
         "memory_locked_title": "Memory screen not unlocked",
         "memory_locked_body": (
@@ -725,6 +785,65 @@ def build_task_card_html(task: Mapping[str, Any], index: int, lang: str) -> str:
     )
 
 
+def build_proposal_card_html(proposal: Mapping[str, Any], lang: str) -> str:
+    """Safe HTML for the structured chat-native task proposal (SPEC §6.11)."""
+    title = html.escape(str(proposal.get("task_title") or ""), quote=True)
+    paraphrase = html.escape(
+        str(proposal.get("minimal_request_paraphrase") or ""), quote=True
+    )
+    status = str(proposal.get("validation_status") or "system_generated")
+    status_text = html.escape(enum_label("validation_status", status, lang), quote=True)
+    missing = [str(item) for item in _as_list(proposal.get("missing_information"))]
+    partial_class = " partial-plan" if missing else ""
+    sections = [
+        f'<div class="task-card{partial_class}">',
+        '<div style="display: flex; justify-content: space-between;'
+        ' align-items: center; margin-bottom: 8px;">'
+        f'<strong style="font-size: 1.05rem; color: #1E293B;">'
+        f"{html.escape(tr(lang, 'chat_proposal_title'), quote=True)}</strong>"
+        f'<span class="badge bg-route">{status_text}</span></div>',
+        f'<p style="color: #1E293B; font-weight: 600; margin-bottom: 4px;">{title}</p>',
+        f'<p style="color: #475569; font-size: 0.9rem; margin-bottom: 8px;">{paraphrase}</p>',
+    ]
+    plan = [str(item) for item in _as_list(proposal.get("action_plan"))]
+    if plan:
+        items = "".join(
+            f"<li>{html.escape(step, quote=True)}</li>" for step in plan
+        )
+        sections.append(
+            f"<div style=\"font-size: 0.85rem; color: #334155; margin-bottom: 8px;\">"
+            f"<strong>{html.escape(tr(lang, 'chat_proposal_plan'), quote=True)}:"
+            f"</strong><ol style=\"margin: 4px 0 0 18px;\">{items}</ol></div>"
+        )
+    if missing:
+        items = "".join(
+            f"<li>{html.escape(entry, quote=True)}</li>" for entry in missing
+        )
+        sections.append(
+            f"<div style=\"font-size: 0.85rem; color: #92400E; margin-bottom: 8px;\">"
+            f"<strong>{html.escape(tr(lang, 'chat_proposal_missing'), quote=True)}:"
+            f"</strong><ul style=\"margin: 4px 0 0 18px;\">{items}</ul></div>"
+        )
+    citations = [item for item in _as_list(proposal.get("rag_citations"))]
+    chips = []
+    for citation in citations:
+        if not isinstance(citation, Mapping):
+            continue
+        doc_title = citation.get("document_title")
+        section = citation.get("section")
+        label = str(doc_title or "") + (f" · {section}" if section else "")
+        chips.append(citation_chip_html(label, citation.get("source_url")))
+    if chips:
+        sections.append(
+            f"<div style=\"margin-bottom: 4px;\"><strong style=\"font-size: 0.85rem; "
+            f"color: #334155;\">"
+            f"{html.escape(tr(lang, 'chat_proposal_citations'), quote=True)}:"
+            f"</strong><br/>{''.join(chips)}</div>"
+        )
+    sections.append("</div>")
+    return "".join(sections)
+
+
 def route_summary(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Routing/retrieval/validation summary for the Run audit screen."""
     routes: dict[str, int] = {}
@@ -897,7 +1016,7 @@ def main() -> None:
     elif screen == "knowledge":
         _screen_knowledge(base_url, lang)
     elif screen == "memory":
-        _screen_memory(lang)
+        _screen_memory(base_url, lang)
     else:
         _screen_audit(base_url, lang)
 
@@ -936,6 +1055,7 @@ def _screen_chat(base_url: str, lang: str, settings: dict[str, Any]) -> None:
     if st.sidebar.button(tr(lang, "chat_new_session"), use_container_width=True):
         _reset_chat_session()
         st.rerun()
+    _render_session_history(base_url, lang, session_id)
 
     st.caption(tr(lang, "chat_history_note"))
 
@@ -943,7 +1063,7 @@ def _screen_chat(base_url: str, lang: str, settings: dict[str, Any]) -> None:
     if not messages:
         st.info(tr(lang, "chat_empty"))
     for message in messages:
-        _render_chat_message(message, lang)
+        _render_chat_message(message, lang, base_url=base_url, session_id=session_id)
 
     # A failed turn keeps its idempotency key so a retry stays one logical turn.
     pending = st.session_state.get("chat_pending_turn")
@@ -978,6 +1098,59 @@ def _screen_chat(base_url: str, lang: str, settings: dict[str, Any]) -> None:
     st.rerun()
 
 
+def _render_session_history(base_url: str, lang: str, session_id: str) -> None:
+    """Sidebar switcher over the backend session list (GET /sessions)."""
+    import streamlit as st
+
+    code, body = api_request(base_url, "GET", chat_client.CHAT_SESSIONS_PATH)
+    if code != 200 or not isinstance(body, Mapping):
+        return
+    sessions = [
+        str(item.get("session_id"))
+        for item in _as_list(body.get("sessions"))
+        if isinstance(item, Mapping) and item.get("session_id")
+    ]
+    if not sessions:
+        return
+    labels = [f"{sid[:8]}…" for sid in sessions]
+    current_index = next(
+        (i for i, sid in enumerate(sessions) if sid == session_id), 0
+    )
+    chosen_label = st.sidebar.selectbox(
+        tr(lang, "chat_history_label"),
+        labels,
+        index=current_index,
+        key="chat_history_select",
+    )
+    chosen = sessions[labels.index(chosen_label)]
+    if chosen == session_id:
+        return
+    if st.sidebar.button(tr(lang, "chat_load_history"), use_container_width=True):
+        history_code, history = api_request(
+            base_url, "GET", f"{chat_client.CHAT_SESSIONS_PATH}/{chosen}/messages"
+        )
+        if history_code != 200 or not isinstance(history, Mapping):
+            st.session_state["flash"] = {
+                "message": tr(lang, "chat_action_failed", code=history_code),
+                "level": "error",
+            }
+            st.rerun()
+        reloaded: list[dict[str, Any]] = []
+        for turn in _as_list(history.get("turns")):
+            if not isinstance(turn, Mapping):
+                continue
+            reloaded.append(
+                {"role": "user", "text": str(turn.get("user_message") or "")}
+            )
+            reloaded.append(
+                {"role": "assistant", "text": str(turn.get("assistant_message") or "")}
+            )
+        st.session_state["chat_session_id"] = chosen
+        st.session_state["chat_messages"] = reloaded
+        st.session_state.pop("chat_pending_turn", None)
+        st.rerun()
+
+
 def _ensure_chat_session(base_url: str, lang: str) -> str | None:
     """Return the browser session's server chat session, creating it once."""
     import streamlit as st
@@ -1005,7 +1178,13 @@ def _reset_chat_session() -> None:
         st.session_state.pop(key, None)
 
 
-def _render_chat_message(message: Mapping[str, Any], lang: str) -> None:
+def _render_chat_message(
+    message: dict[str, Any],
+    lang: str,
+    *,
+    base_url: str | None = None,
+    session_id: str | None = None,
+) -> None:
     """Render one stored turn: assistant text, memory badges, and error state."""
     import streamlit as st
 
@@ -1020,6 +1199,13 @@ def _render_chat_message(message: Mapping[str, Any], lang: str) -> None:
         if citations:
             st.caption(tr(lang, "chat_badges_title"))
             st.markdown(memory_badges_html(citations, lang), unsafe_allow_html=True)
+        proposal = message.get("proposal")
+        if isinstance(proposal, Mapping):
+            st.markdown(
+                build_proposal_card_html(proposal, lang), unsafe_allow_html=True
+            )
+            if base_url is not None and session_id is not None:
+                _render_proposal_controls(message, proposal, lang, base_url, session_id)
         advisory_code = message.get("advisory_code")
         if advisory_code:
             st.warning(chat_advisory_text(advisory_code, lang))
@@ -1029,8 +1215,57 @@ def _render_chat_message(message: Mapping[str, Any], lang: str) -> None:
                 f"{tr(lang, 'chat_error_title', code=error_code)}: "
                 f"{chat_error_text(error_code, message.get('error_message'), lang)}"
             )
-        elif not text:
+        elif not text and not isinstance(proposal, Mapping):
             st.info(tr(lang, "chat_no_reply"))
+
+
+def _render_proposal_controls(
+    message: dict[str, Any],
+    proposal: Mapping[str, Any],
+    lang: str,
+    base_url: str,
+    session_id: str,
+) -> None:
+    """Inline Approve/Complete/Reject on a structured proposal (SPEC §3.2)."""
+    import streamlit as st
+
+    episode_id = str(proposal.get("episode_id") or "")
+    status = str(proposal.get("validation_status") or "")
+    if not episode_id:
+        return
+    if status == "system_generated":
+        actions: tuple[tuple[str, str, Literal["primary", "secondary"]], ...] = (
+            ("approve", "chat_action_approve", "primary"),
+            ("reject", "chat_action_reject", "secondary"),
+        )
+    elif status == "user_approved":
+        actions = (("complete", "chat_action_complete", "primary"),)
+    else:
+        return
+    columns = st.columns(len(actions))
+    for column, (action, label_key, kind) in zip(columns, actions, strict=True):
+        if column.button(
+            tr(lang, label_key),
+            key=f"chat_ep_{episode_id}_{action}",
+            type=kind,
+        ):
+            code, body = api_request(
+                base_url,
+                "POST",
+                f"/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/{action}",
+            )
+            if code == 200 and isinstance(body, Mapping):
+                message["proposal"] = {
+                    **proposal,
+                    "validation_status": body.get("validation_status", status),
+                    "retrieval_eligible": body.get("retrieval_eligible"),
+                }
+            else:
+                st.session_state["flash"] = {
+                    "message": tr(lang, "chat_action_failed", code=code),
+                    "level": "error",
+                }
+            st.rerun()
 
 
 def _run_chat_turn(
@@ -1051,6 +1286,7 @@ def _run_chat_turn(
         text_slot = st.empty()
         badge_slot = st.empty()
         warn_slot = st.empty()
+        proposal_slot = st.empty()
         for _attempt in range(2):
             with st.spinner(tr(lang, "chat_thinking")):
                 events = chat_client.stream_chat_turn(
@@ -1071,6 +1307,11 @@ def _run_chat_turn(
                             memory_badges_html(accumulator.citations, lang),
                             unsafe_allow_html=True,
                         )
+                    elif event.event_type == "task_proposal" and event.proposal is not None:
+                        proposal_slot.markdown(
+                            build_proposal_card_html(event.proposal, lang),
+                            unsafe_allow_html=True,
+                        )
                     elif event.event_type == "error" and event.code in (
                         chat_client.ADVISORY_ERROR_CODES
                     ):
@@ -1089,6 +1330,7 @@ def _run_chat_turn(
                 text_slot.empty()
                 badge_slot.empty()
                 warn_slot.empty()
+                proposal_slot.empty()
                 continue
             break
         if renewed and accumulator.error_code is None:
@@ -1126,19 +1368,144 @@ def _renew_chat_session(base_url: str) -> str | None:
     return created
 
 
-def _screen_memory(lang: str) -> None:
-    """Screen 4: Increment B memory administration — locked until §7 APIs land.
-
-    The screen exists so the IA is complete and the gap is visible; it renders
-    no mocked preference, episode, or task-card UI (AGENTS.md invariant 4).
-    """
+def _screen_memory(base_url: str, lang: str) -> None:
+    """Screen 4: Increment B memory administration (SPEC §3.2)."""
     import streamlit as st
 
-    st.warning(f"🔒 {tr(lang, 'memory_locked_title')}")
-    st.info(tr(lang, "memory_locked_body"))
-    st.markdown(f"**{tr(lang, 'memory_missing_heading')}**")
-    for endpoint in MISSING_INCREMENT_B_ENDPOINTS:
-        st.markdown(f"- `{endpoint}`")
+    code, body = api_request(base_url, "GET", "/v1/cowork/chat/episodes")
+    if code == 503:
+        st.warning(f"🔒 {tr(lang, 'memory_locked_title')}")
+        st.info(tr(lang, "memory_store_unavailable"))
+        return
+    if code != 200:
+        st.warning(f"🔒 {tr(lang, 'memory_locked_title')}")
+        st.info(tr(lang, "memory_locked_body"))
+        st.markdown(f"**{tr(lang, 'memory_missing_heading')}**")
+        for endpoint in MISSING_INCREMENT_B_ENDPOINTS:
+            st.markdown(f"- `{endpoint}`")
+        return
+
+    episodes = [item for item in _as_list(body.get("episodes")) if isinstance(item, Mapping)]
+    _render_preferences(base_url, lang)
+    st.markdown("---")
+    st.markdown(f"### {tr(lang, 'memory_episodes_title')}")
+    if st.button(tr(lang, "memory_refresh")):
+        st.rerun()
+    if not episodes:
+        st.info(tr(lang, "memory_episodes_empty"))
+    for episode in episodes:
+        _render_episode_row(base_url, lang, episode)
+
+
+def _render_preferences(base_url: str, lang: str) -> None:
+    import streamlit as st
+
+    st.markdown(f"### {tr(lang, 'memory_prefs_title')}")
+    code, profile = api_request(base_url, "GET", "/v1/cowork/chat/profile")
+    current: Mapping[str, Any] = profile if code == 200 and isinstance(profile, Mapping) else {}
+    with st.form("memory_preferences"):
+        language = st.text_input(
+            tr(lang, "memory_field_language"),
+            value=str(current.get("language") or ""),
+            max_chars=200,
+        )
+        timezone = st.text_input(
+            tr(lang, "memory_field_timezone"),
+            value=str(current.get("timezone") or ""),
+            max_chars=200,
+        )
+        persona = st.text_input(
+            tr(lang, "memory_field_persona"),
+            value=str(current.get("assistant_persona") or ""),
+            max_chars=200,
+        )
+        tone = st.text_input(
+            tr(lang, "memory_field_tone"),
+            value=str(current.get("response_tone") or ""),
+            max_chars=200,
+        )
+        submitted = st.form_submit_button(tr(lang, "memory_save"), type="primary")
+    if submitted:
+        payload = {
+            "language": language or None,
+            "timezone": timezone or None,
+            "assistant_persona": persona or None,
+            "response_tone": tone or None,
+        }
+        method = "PUT" if code == 200 else "POST"
+        save_code, _ = api_request(base_url, method, "/v1/cowork/chat/profile", json=payload)
+        st.session_state["flash"] = {
+            "message": (
+                tr(lang, "memory_saved_flash")
+                if save_code in (200, 201)
+                else tr(lang, "chat_action_failed", code=save_code)
+            ),
+            "level": "success" if save_code in (200, 201) else "error",
+        }
+        st.rerun()
+    if code == 200:
+        confirm = st.checkbox(tr(lang, "memory_delete_profile"))
+        if confirm:
+            delete_code, _ = api_request(base_url, "DELETE", "/v1/cowork/chat/profile")
+            st.session_state["flash"] = {
+                "message": (
+                    tr(lang, "memory_deleted_flash")
+                    if delete_code == 204
+                    else tr(lang, "chat_action_failed", code=delete_code)
+                ),
+                "level": "success" if delete_code == 204 else "error",
+            }
+            st.rerun()
+
+
+def _render_episode_row(
+    base_url: str, lang: str, episode: Mapping[str, Any]
+) -> None:
+    import streamlit as st
+
+    episode_id = str(episode.get("episode_id") or "")
+    status = str(episode.get("validation_status") or "unknown")
+    title = str(episode.get("task_title") or "")
+    created = str(episode.get("created_at") or "")[:19].replace("T", " ")
+    provenance = " · ".join(
+        part
+        for part in (
+            str(episode.get("model_id") or ""),
+            f"pipeline {episode.get('pipeline_version')}"
+            if episode.get("pipeline_version") is not None
+            else "",
+        )
+        if part
+    )
+    missing_count = len(_as_list(episode.get("missing_information")))
+    with st.container(border=True):
+        st.markdown(
+            f"**{html.escape(title)}** — "
+            f"{html.escape(enum_label('validation_status', status, lang))}"
+            + (f" · `{created}`" if created else "")
+            + (f" · {html.escape(provenance)}" if provenance else "")
+            + (f" · ⚠️ {missing_count}" if missing_count else ""),
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            tr(lang, "memory_episode_delete"),
+            key=f"memory_episode_delete_{episode_id}",
+        ):
+            session_id = str(episode.get("chat_session_id") or "")
+            delete_code, _ = api_request(
+                base_url,
+                "DELETE",
+                f"/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}",
+            )
+            st.session_state["flash"] = {
+                "message": (
+                    tr(lang, "memory_episode_deleted")
+                    if delete_code == 204
+                    else tr(lang, "memory_episode_delete_failed", code=delete_code)
+                ),
+                "level": "success" if delete_code == 204 else "error",
+            }
+            st.rerun()
 
 
 def _screen_connect(base_url: str, lang: str, connections: list[dict[str, Any]]) -> None:

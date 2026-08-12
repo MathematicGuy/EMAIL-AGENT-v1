@@ -2,11 +2,11 @@
 
 | Field | Value |
 |---|---|
-| Document status | Active implementation spec — current-session AI Chat may start; full showcase remains gated on the explicit API gaps below and V2-M6 acceptance |
-| Version | 2.3 (Increment A chat slice built against the accepted V2-M3/V2-M4/V2-M5 runtime contracts) |
+| Document status | Active implementation spec — full showcase implemented on `feature/demo-frontend-chat` |
+| Version | 2.4 (Increment B contracts + UI implemented and live-verified) |
 | Date | 2026-08-12 |
 | Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
-| Readiness Status | **Backend: READY for current-session chat streaming, memory-citation badges, and originating-session task lifecycle; PARTIAL for reload/history and memory administration. Demo UI: §3.4 boundary BUILT, unit-verified, and §9 live-browser verified on 2026-08-12 (see §9 log; citation-chip branch pending embedding quota); Increment B locked.** |
+| Readiness Status | **Backend: READY incl. Increment B read/profile/episode contracts and the typed `task_proposal` SSE event. Demo UI: §3.4 boundary and Increment B (preferences, in-chat task controls, episode insight, deletion, session history) BUILT and live-verified 2026-08-12; Memory screen unlocks dynamically and keeps the lock fallback for Increment-A-only or PG-less backends.** |
 | Depends on | PRD-v1 and V2-M1–V2-M5 (DONE 100%); V2-M6 (ACTIVE 55%); missing frontend-facing read/profile/proposal contracts listed in §3.3 and §7 |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
@@ -72,7 +72,10 @@ must never scaffold or mock unimplemented milestone work
 | Episode insight | Provenance view for chat summaries and chat-native TaskEpisodes: status, eligibility, source session/turn, and versions | FR-06, FR-14 |
 | Deletion | Delete a preference or episode with confirmation and post-deletion refresh | FR-15 |
 
-Increment B screens are feature-flagged off until their backend endpoints exist; the demo must run cleanly on an Increment-A-only backend.
+Increment B screens unlock dynamically by probing their contracts at render
+time (`GET /v1/cowork/chat/episodes`): on 503 (no PG store) or missing
+contracts the Memory screen renders the lock notice, so the demo still runs
+cleanly on an Increment-A-only backend.
 
 ### 3.3 Milestone Dependency & Implementation Readiness Matrix
 
@@ -81,12 +84,12 @@ Increment B screens are feature-flagged off until their backend endpoints exist;
 | **Increment A — Connect** | Gmail OAuth, Mailbox Connections list, Unread preview | **V1-M1** (DONE 100%) | `GET /v1/mail-todo/connections`, `/oauth/gmail/*`, `/unread-preview` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Knowledge** | RAG corpus status, document list, ad-hoc grounded query | **V1-M3** (DONE 100%) | `GET /v1/mail-todo/knowledge/ready`, `/documents`, `POST /chat` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
 | **Increment A — Run Audit** | Standalone Email Agent run metadata & task results | **V1-M4** (DONE 100%) | `GET /v1/mail-todo/runs/{id}`, `/result`, `/tasks` (**Implemented**) | **READY NOW** — full backend support in `app.py`. |
-| **Increment A — AI Chat Assistant** | Multi-turn chat thread and streaming responses in the active browser session | **V2-M1–V2-M5** (DONE) | `POST /sessions` and `POST /messages` (**Implemented and runtime-bound**); `GET /sessions` and `GET /messages` (**Missing**) | **BUILT (current-session slice)** — the Streamlit thread, streaming, badges, and retry are implemented per §3.5 and unit-verified; persisted/reloadable session history remains blocked on the GET contracts. |
-| **Increment B — Preferences** | Persona/profile editor (language, tone, brevity, rules) | **V2-M2** (DONE repo layer) | Profile REST APIs (`GET/POST/PUT/DELETE /v1/cowork/chat/profile`) (**Missing**) | **BLOCKED** — DB repository landed in `PostgresChatProfileRepository`, but HTTP router is missing. |
-| **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task controls | **V2-M3/V2-M4** (DONE) | Originating-session approve/complete/reject endpoints (**Implemented**) | **PARTIAL** — lifecycle transport is ready, but a structured task-proposal SSE/read payload is missing; the client must not parse assistant prose to build a task card. |
-| **Increment B — Memory Transparency** | In-thread badges for declarative, episodic, and semantic sources | **V2-M5** (DONE) | Typed `memory_citation` SSE with `memory_type` and opaque `source_id` (**Implemented**) | **BUILT (badges only)** — in-thread badges render from typed `memory_citation`; detailed stored-memory views remain blocked on read APIs. |
-| **Increment B — Episode Insight** | Provenance view for chat summaries and TaskEpisodes | **V2-M3** (DONE), **V2-M6** (ACTIVE 55%) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Missing**) | **BLOCKED** — no frontend-safe episode listing/read contract. |
-| **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2/V2-M3** (DONE), **V2-M6** (ACTIVE) | Originating-session single-episode delete (**Implemented**); profile delete and list-refresh APIs (**Missing**) | **PARTIAL** — current-thread episode deletion is callable once an episode ID is received; full memory administration remains blocked. |
+| **Increment A — AI Chat Assistant** | Multi-turn chat thread and streaming responses in the active browser session | **V2-M1–V2-M5** (DONE) | `POST /sessions` and `POST /messages` (**Implemented**); `GET /sessions` and `GET /messages` (**Implemented on this branch**, in-memory) | **BUILT + live-verified** — thread, streaming, badges, retry, and dead-session renewal per §3.5; sidebar session history with text-only reload via the new GET contracts (§9, evidence 01–15). |
+| **Increment B — Preferences** | Persona/profile editor (language, tone, brevity, rules) | **V2-M2** (DONE repo layer) | Profile REST APIs (`GET/POST/PUT/DELETE /v1/cowork/chat/profile`) (**Implemented on this branch**) | **BUILT + live-verified** — editor over `PostgresChatProfileRepository` through `profile_policy` (explicit-user-config provenance, 200-char bounds); 503 lock fallback without `DATABASE_URL`. |
+| **Increment B — In-chat Task Controls** | Inline Approve / Complete / Reject task controls | **V2-M3/V2-M4** (DONE) | Originating-session approve/complete/reject endpoints (**Implemented**); typed `task_proposal` SSE event (**Implemented on this branch**) | **BUILT + live-verified** — card renders only from the typed event (no prose parsing); controls call the REST lifecycle and update the stored status from the response (evidence 12–13). |
+| **Increment B — Memory Transparency** | In-thread badges for declarative, episodic, and semantic sources | **V2-M5** (DONE) | Typed `memory_citation` SSE with `memory_type` and opaque `source_id` (**Implemented**) | **BUILT + live-verified** — badges disclose the kind only; stored-episode detail now browsable via `GET /episodes` on the Memory screen. |
+| **Increment B — Episode Insight** | Provenance view for chat summaries and TaskEpisodes | **V2-M3** (DONE), **V2-M6** (DONE) | List TaskEpisodes API (`GET /v1/cowork/chat/episodes`) (**Implemented on this branch**) | **BUILT + live-verified** — rows show status, created_at, model/pipeline provenance, and missing-info count (evidence 14). |
+| **Increment B — Deletion** | Delete preference or single episode with refresh | **V2-M2/V2-M3** (DONE), **V2-M6** (DONE) | Originating-session single-episode delete (**Implemented**); profile delete (**Implemented on this branch**) | **BUILT + live-verified** — preference delete behind a confirm checkbox; episode delete refreshes the list; episode deletion stays originating-session-only by contract (404 once that controller is gone). |
 
 ### 3.4 Immediate frontend implementation boundary
 
@@ -218,18 +221,22 @@ The demo consumes FastAPI backend endpoints; it defines none. The table below de
 | `/v1/mail-todo/knowledge/documents` | GET | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:552` |
 | `/v1/mail-todo/knowledge/chat` | POST | V1-M3 | **Implemented** | Increment A (Knowledge) | `src/cowork_agent/app.py:569` |
 | `/v1/cowork/chat/sessions` | POST | V2-M1 / V2-M4 | **Implemented and composed** | Increment A (AI Chat) | Uses the verified single-active-mailbox principal and creates an in-memory active session. |
-| `/v1/cowork/chat/sessions` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed for sidebar session history list |
+| `/v1/cowork/chat/sessions` | GET | V2-M1 / V2-M4B | **Implemented on this branch** | Increment A (AI Chat) | Sidebar session history list; sourced from `InMemoryChatSessionRegistry.list_for` (lost on backend restart). |
 | `/v1/cowork/chat/sessions/{id}/messages` | POST | V2-M4/V2-M5 | **Implemented and composed** | Increment A (AI Chat) | SSE; configured Gemini/Groq/Faucet reply adapter; exact body fields are `session_id`, `user_message`, and `idempotency_key`. |
-| `/v1/cowork/chat/sessions/{id}/messages` | GET | V2-M1 / V2-M4B | **Missing** | Increment A (AI Chat) | Needed to reload prior turn history |
-| `/v1/cowork/chat/profile` | GET/POST/PUT | V2-M2 | **Missing REST API** | Increment B (Preferences) | Domain & DB repo landed in `PostgresChatProfileRepository`; HTTP router missing |
+| `/v1/cowork/chat/sessions/{id}/messages` | GET | V2-M1 / V2-M4B | **Implemented on this branch** | Increment A (AI Chat) | Reload prior turns from `InMemoryChatSessionBuffer` (text-only, bounded by max_turns/TTL). |
+| `/v1/cowork/chat/profile` | GET/POST/PUT | V2-M2 | **Implemented on this branch** | Increment B (Preferences) | Reads/writes `PostgresChatProfileRepository` through `profile_policy` (explicit-user-config provenance, 200-char bounds); 503 without `DATABASE_URL`, 422 on policy rejection. |
 | `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/approve` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; returns `episode_id`, `validation_status`, and `retrieval_eligible`. |
 | `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/complete` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; invalid or inaccessible records return 404. |
 | `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/reject` | POST | V2-M3/V2-M4 | **Implemented** | Increment B (Task Controls) | Originating session only; rejected memory remains retrieval-ineligible. |
 | `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}` | DELETE | V2-M3/V2-M4 | **Implemented** | Increment B (Deletion) | Originating session only; successful deletion returns 204. |
-| `/v1/cowork/chat/episodes` | GET | V2-M3 / V2-M6 | **Missing REST API** | Increment B (Episode Insight) | List TaskEpisodes & provenance |
-| `/v1/cowork/chat/profile` | DELETE | V2-M2/V2-M6 | **Missing REST API** | Increment B (Deletion) | Required for complete profile administration. |
+| `/v1/cowork/chat/episodes` | GET | V2-M3 / V2-M6 | **Implemented on this branch** | Increment B (Episode Insight) | `PostgresTaskEpisodeRepository.list_episodes`: every non-expired episode of the owner regardless of status, newest first; 503 without `DATABASE_URL`. |
+| `/v1/cowork/chat/profile` | DELETE | V2-M2/V2-M6 | **Implemented on this branch** | Increment B (Deletion) | 204; idempotent; 503 without `DATABASE_URL`. |
 
-If a needed read/write endpoint is missing at implementation time, file it against the owning milestone — do not work around it with client-side logic. Increment B features MUST remain feature-flagged off until their respective REST endpoints land.
+If a needed read/write endpoint is missing at implementation time, file it
+against the owning milestone — do not work around it with client-side logic.
+On this branch all Increment B contracts exist; the Memory screen still gates
+on them dynamically at render time (lock fallback), and the GUI never infers
+memory state from prose or client storage.
 
 ### 7.1 SSE event-to-UI mapping
 
@@ -237,15 +244,15 @@ If a needed read/write endpoint is missing at implementation time, file it again
 |---|---|---|
 | `delta` | `event_id`, `session_id`, `turn_id`, `text` | Deduplicate by event identity and append text in order to the active assistant message. |
 | `memory_citation` | `event_id`, `turn_id`, `memory_type`, `source_id` | Render a declarative / episodic / semantic badge. Treat `source_id` as opaque; never fetch or infer raw content from it. |
+| `task_proposal` | `event_id`, `turn_id`, `proposal` = frontend-safe episode subset (`episode_id`, `task_title`, `minimal_request_paraphrase`, `action_plan`, `missing_information`, `rag_citations`, `validation_status`, `retrieval_eligible`) | Render the in-thread proposal card (§6.11) and, per status, the Approve / Complete / Reject controls; lifecycle calls go through the REST endpoints and the stored status updates from their responses. Implemented on this branch; emitted after episode persistence and replayed on pending-episode retry. |
 | `completed` | `event_id`, `turn_id` | Mark the turn terminal, persist only UI-safe browser-session state, and re-enable the composer. |
 | `error` | `event_id`, `turn_id`, `code`, `safe_message` | Render the safe message, preserve the idempotency key for retry, and never display exception details. |
 
-There is currently **no structured task-proposal SSE variant**. Although the
-controller can persist a bounded TaskEpisode and emit an episodic citation, the
-frontend cannot reconstruct the task title, paraphrase, action plan, missing
-information, and citations from the public stream. A final task-proposal card
-therefore requires either a typed proposal event or a frontend-safe read DTO.
-Parsing assistant text is prohibited.
+The `task_proposal` variant closes the former structured-proposal gap: the
+controller projects the persisted TaskEpisode into the frontend-safe payload
+(`_proposal_payload`), so the card never reconstructs state from assistant
+prose. Parsing assistant text remains prohibited, and malformed proposal
+frames are dropped fail-closed by `chat_client.parse_stream_event`.
 
 ## 8. Acceptance criteria
 
@@ -296,11 +303,11 @@ Parsing assistant text is prohibited.
 | Criteria | Status |
 |---|---|
 | 1, 5, 6 (chat path) | **Live-verified 2026-08-12** (plus `tests/unit/gui`): session create, ordered streaming turns, typed-SSE-only rendering, backend-down gate, empty-reply copy. Three chat-page defects found and fixed in `gui/`, then live re-verified: advisory-as-terminal, dead-session 404 dead end, generic 503 copy (see §9 fixes list). |
-| 2, 3, 4 (task proposal card) | **Blocked by contract.** Gated on the structured proposal event or read DTO in §7.1; no card is built and no prose is parsed. |
+| 2, 3, 4 (task proposal card) | **Implemented + live-verified 2026-08-12** — the card renders only from the typed `task_proposal` SSE event (§7.1); no prose is parsed. It shows title, request paraphrase, ordered plan, missing-information warning with partial-plan styling, validation/eligibility status, and citation chips; approve/complete/reject controls call the originating-session lifecycle REST and update the stored status from the response; retries reuse one idempotency key so only one logical TaskEpisode exists (evidence 12–13). |
 | 7, 9, 10, 11 (Connect, Knowledge, Run audit) | **Live-verified 2026-08-12 in available branches**: Connect lists the single readonly connection; Run audit empty state renders; Knowledge degraded indicator, document list, and no-match empty state render. "Ready" + inline citation chips pending embedding quota (environmental). |
 | 8 (no raw email or prompt leakage) | **Live-verified 2026-08-12** — DOM, console, browser network history, localStorage, sessionStorage audited clean (Streamlit telemetry keys only); by construction the demo stores only role, text, and `(memory_type, source_id)` pairs in `st.session_state`. |
-| 15 (memory badges without payloads) | **Implemented** — badges disclose the source kind only; `source_id` is never rendered. |
-| 12, 13, 14, 16 | **Blocked** — Increment B REST contracts are missing; the Memory screen stays locked and lists them. |
+| 15 (memory badges without payloads) | **Implemented + live-verified 2026-08-12** — badges disclose the source kind only; `source_id` is never rendered (evidence 12–14). |
+| 12, 13, 14, 16 | **Implemented + live-verified 2026-08-12** — preferences editor saves via REST with flash confirmation and prefill; preference delete sits behind a confirm checkbox; episode rows show provenance (source session/turn, model/pipeline, versions) and delete refreshes the list; approved episodes are recalled on later turns with episodic badges. The Memory screen unlocks dynamically via a `GET /episodes` probe and keeps the §3.4 lock fallback for PG-less backends (evidence 14–15). |
 
 ## 9. Live verification plan
 

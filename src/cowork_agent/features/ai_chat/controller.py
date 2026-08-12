@@ -65,6 +65,20 @@ class _PendingTaskEpisode:
     expires_at: datetime | None = None
 
 
+def _proposal_payload(episode: TaskEpisode) -> dict[str, object]:
+    """Frontend-safe structured proposal for the task_proposal SSE event."""
+    return {
+        "episode_id": episode.episode_id,
+        "task_title": episode.task_title,
+        "minimal_request_paraphrase": episode.minimal_request_paraphrase,
+        "action_plan": list(episode.action_plan),
+        "missing_information": list(episode.missing_information),
+        "rag_citations": [citation.to_dict() for citation in episode.rag_citations],
+        "validation_status": episode.validation_status.value,
+        "retrieval_eligible": episode.retrieval_eligible,
+    }
+
+
 class UnavailableChatReply:
     """Fail-closed runtime default until a chat-capable LLM adapter is configured."""
 
@@ -111,6 +125,15 @@ class InMemoryChatSessionRegistry:
         if scope is None or scope.tenant_id != tenant_id or scope.user_id != user_id:
             raise ChatSessionAccessDenied(session_id)
         return scope
+
+    def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
+        """Owned scopes in creation order (GET /sessions read contract)."""
+        with self._lock:
+            return tuple(
+                scope
+                for scope in self._sessions.values()
+                if scope.tenant_id == tenant_id and scope.user_id == user_id
+            )
 
 
 class ChatController:
@@ -299,6 +322,14 @@ class ChatController:
                         )
                         emitted.append(citation)
                         yield citation
+                        proposal_event = ChatMessageStreamEvent.task_proposal(
+                            event_id=self._new_id(),
+                            session_id=self._scope.session_id,
+                            turn_id=turn_id,
+                            proposal=_proposal_payload(episode),
+                        )
+                        emitted.append(proposal_event)
+                        yield proposal_event
             completed = ChatMessageStreamEvent.completed(
                 event_id=self._new_id(),
                 session_id=self._scope.session_id,
@@ -346,12 +377,18 @@ class ChatController:
             memory_type=MemoryCitationType.EPISODIC,
             source_id=episode.episode_id,
         )
+        proposal_event = ChatMessageStreamEvent.task_proposal(
+            event_id=self._new_id(),
+            session_id=self._scope.session_id,
+            turn_id=episode.chat_turn_id,
+            proposal=_proposal_payload(episode),
+        )
         completed = ChatMessageStreamEvent.completed(
             event_id=self._new_id(),
             session_id=self._scope.session_id,
             turn_id=episode.chat_turn_id,
         )
-        replay = (*pending.replay_prefix, citation, completed)
+        replay = (*pending.replay_prefix, citation, proposal_event, completed)
         self._completed[pending.request.idempotency_key] = (pending.request, replay)
         del self._pending_task_episodes[pending.request.idempotency_key]
         for event in replay:

@@ -11,6 +11,8 @@ from ._chat_contracts_common import (
     ChatEventType,
     MemoryCitationType,
     _as_enum,
+    _as_mapping,
+    _frozen_mapping,
     _require_bounded_string,
     _require_string,
     _to_dict,
@@ -63,11 +65,16 @@ class ChatMessageStreamEvent:
     source_id: str | None = None
     code: str | None = None
     safe_message: str | None = None
+    proposal: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
         _require_string(self.session_id, "session_id")
         _require_string(self.turn_id, "turn_id")
+        if self.proposal is not None:
+            mapping = _as_mapping(self.proposal, "proposal")
+            _require_string(mapping.get("episode_id"), "proposal.episode_id")
+            _require_string(mapping.get("task_title"), "proposal.task_title")
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -77,10 +84,12 @@ class ChatMessageStreamEvent:
             "source_id": self.source_id,
             "code": self.code,
             "safe_message": self.safe_message,
+            "proposal": self.proposal,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.DELTA: ("text",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
+            ChatEventType.TASK_PROPOSAL: ("proposal",),
             ChatEventType.COMPLETED: (),
             ChatEventType.ERROR: ("code", "safe_message"),
         }
@@ -123,6 +132,23 @@ class ChatMessageStreamEvent:
         return cls(event_id, session_id, turn_id, ChatEventType.COMPLETED)
 
     @classmethod
+    def task_proposal(
+        cls,
+        *,
+        event_id: str,
+        session_id: str,
+        turn_id: str,
+        proposal: Mapping[str, object],
+    ) -> Self:
+        return cls(
+            event_id,
+            session_id,
+            turn_id,
+            ChatEventType.TASK_PROPOSAL,
+            proposal=_frozen_mapping(proposal, "proposal"),
+        )
+
+    @classmethod
     def error(
         cls,
         *,
@@ -158,6 +184,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "source_id",
         "code",
         "safe_message",
+        "proposal",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -169,6 +196,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
     raw_source_id = data.get("source_id")
     raw_code = data.get("code")
     raw_safe_message = data.get("safe_message")
+    raw_proposal = data.get("proposal")
     return ChatMessageStreamEvent(
         event_id=_require_string(data["event_id"], "event_id"),
         session_id=_require_string(data["session_id"], "session_id"),
@@ -183,5 +211,10 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         source_id=raw_source_id if isinstance(raw_source_id, str) else None,
         code=raw_code if isinstance(raw_code, str) else None,
         safe_message=raw_safe_message if isinstance(raw_safe_message, str) else None,
+        proposal=(
+            _frozen_mapping(_as_mapping(raw_proposal, "proposal"), "proposal")
+            if raw_proposal is not None
+            else None
+        ),
     )
 
