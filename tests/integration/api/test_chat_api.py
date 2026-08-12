@@ -68,6 +68,19 @@ class EpisodeStore:
         del namespace, limit
         return tuple(self.writes)
 
+    async def read_task_episode(
+        self, namespace: object, *, episode_id: str
+    ) -> TaskEpisode | None:
+        session_id = namespace.scope.session_id
+        return next(
+            (
+                episode
+                for episode in self.writes
+                if episode.episode_id == episode_id and episode.chat_session_id == session_id
+            ),
+            None,
+        )
+
     async def transition_task_episode(self, transition: EpisodeTransition) -> TaskEpisode | None:
         self.transitions.append(transition)
         for index, episode in enumerate(self.writes):
@@ -106,6 +119,34 @@ class ProfileStore:
         existed = self.profile is not None
         self.profile = None
         return existed
+
+
+class DurableSessionRegistry:
+    """Small async registry double: a durable adapter is the HTTP contract."""
+
+    def __init__(self) -> None:
+        self.scope = ChatMemoryScope(
+            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+        )
+        self.created: list[tuple[str, str]] = []
+        self.required: list[tuple[str, str, str]] = []
+
+    async def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope:
+        self.created.append((tenant_id, user_id))
+        return self.scope
+
+    async def require(
+        self, session_id: str, *, tenant_id: str, user_id: str
+    ) -> ChatMemoryScope:
+        self.required.append((session_id, tenant_id, user_id))
+        if self.scope != ChatMemoryScope(tenant_id, user_id, session_id):
+            from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
+
+            raise ChatSessionAccessDenied(session_id)
+        return self.scope
+
+    async def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
+        return (self.scope,) if (tenant_id, user_id) == ("tenant-1", "user@example.com") else ()
 
 
 def _app(
@@ -179,6 +220,43 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
         ]
         assert events[0]["code"] == "optional_memory_degraded"
         assert all(event["session_id"] == "session-1" for event in events)
+
+    asyncio.run(scenario())
+
+
+def test_message_endpoint_rebuilds_a_controller_from_an_async_owned_session_scope() -> None:
+    async def scenario() -> None:
+        principal = VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com")
+        app = _app(principal)
+        registry = DurableSessionRegistry()
+        factory_scopes: list[ChatMemoryScope] = []
+        original_factory = app.state.chat_controller_factory
+
+        def factory(scope: ChatMemoryScope) -> ChatController:
+            factory_scopes.append(scope)
+            return original_factory(scope)
+
+        app.state.chat_sessions = registry
+        app.state.chat_controller_factory = factory
+        del app.state.chat_controllers
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            created = await client.post("/v1/cowork/chat/sessions")
+            response = await client.post(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                json={
+                    "session_id": "session-1",
+                    "user_message": "Hello",
+                    "idempotency_key": "async-registry",
+                },
+            )
+
+        assert created.status_code == 201
+        assert response.status_code == 200
+        assert registry.created == [("tenant-1", "user@example.com")]
+        assert registry.required == [("session-1", "tenant-1", "user@example.com")]
+        assert factory_scopes == [registry.scope]
 
     asyncio.run(scenario())
 

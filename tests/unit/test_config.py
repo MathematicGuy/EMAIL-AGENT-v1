@@ -1,8 +1,45 @@
 import pytest
 
-from cowork_agent.config import QdrantSettings
+from cowork_agent.config import QdrantSettings, SessionSettings, SupabaseStorageSettings
 
 CLOUD_URL = "https://example.us-west-1-0.aws.cloud.qdrant.io"
+
+
+def test_session_settings_load_cookie_contract() -> None:
+    settings = SessionSettings.from_env(
+        {
+            "APP_SESSION_TTL_SECONDS": "3600",
+            "APP_SESSION_COOKIE_NAME": "cowork_session",
+            "APP_SESSION_COOKIE_SECURE": "true",
+        },
+        load_env_file=False,
+    )
+
+    assert settings.session_ttl_seconds == 3600
+    assert settings.cookie_name == "cowork_session"
+    assert settings.cookie_secure is True
+
+
+@pytest.mark.parametrize("ttl", ["0", "-1"])
+def test_session_settings_reject_non_positive_ttl(ttl: str) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        SessionSettings.from_env(
+            {"APP_SESSION_TTL_SECONDS": ttl}, load_env_file=False
+        )
+
+
+def test_supabase_storage_settings_keep_the_secret_out_of_repr() -> None:
+    settings = SupabaseStorageSettings.from_env(
+        {
+            "SUPABASE_URL": "https://project.supabase.co/",
+            "SUPABASE_SECRET_KEY": "server-secret",
+        },
+        load_env_file=False,
+    )
+
+    assert settings.url == "https://project.supabase.co"
+    assert settings.bucket == "project-documents"
+    assert "server-secret" not in repr(settings)
 
 
 def test_qdrant_settings_are_disabled_without_a_url() -> None:

@@ -6,6 +6,7 @@ import hashlib
 import math
 import re
 from collections.abc import Sequence
+from typing import Literal
 
 _DIMENSIONS = 64
 _TOKEN_PATTERN = re.compile(r"[0-9\w]+", re.UNICODE)
@@ -20,7 +21,13 @@ class HashingEmbedder:
     so results are stable across processes.
     """
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task: Literal["retrieval.query", "retrieval.passage"] = "retrieval.query",
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         return tuple(self._embed_one(text) for text in texts)
 
     def _embed_one(self, text: str) -> tuple[float, ...]:
@@ -39,5 +46,11 @@ class HashingEmbedder:
 class SlowEmbedder:
     """Embedder that always raises TimeoutError, to exercise timeout paths."""
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task: Literal["retrieval.query", "retrieval.passage"] = "retrieval.query",
+    ) -> tuple[tuple[float, ...], ...]:
+        del texts, task
         raise TimeoutError("embedding backend timed out")

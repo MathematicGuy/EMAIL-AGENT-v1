@@ -22,7 +22,10 @@ class FixedEmbedder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self, texts: Sequence[str], *, task: str = "retrieval.query"
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         values = tuple(texts)
         self.calls.append(values)
         if len(values) == 3:
