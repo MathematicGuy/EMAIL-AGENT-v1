@@ -42,6 +42,7 @@ from .ports import (
     SemanticChatMemoryPort,
 )
 from .profile_policy import authorize_profile_write
+from .session_buffer import ChatSessionBufferUnavailable
 
 
 class NamespaceAccessDenied(ValueError):
@@ -74,10 +75,20 @@ class MemoryGateway:
         self._memory_operation_sink = memory_operation_sink or NullMemoryOperationSink()
         self._monotonic_clock = monotonic_clock
 
-    def append_turn(self, turn: ChatTurn) -> None:
+    def append_turn(self, turn: ChatTurn) -> bool:
         if turn.session_id != self._scope.session_id:
             raise NamespaceAccessDenied("turn scope does not match the verified chat scope")
-        self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
+        try:
+            self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
+        except ChatSessionBufferUnavailable:
+            self._emit(
+                MemoryType.SHORT_TERM,
+                MemoryOperation.WRITE,
+                MemoryOutcome.DEGRADED,
+                "unavailable",
+            )
+            return False
+        return True
 
     async def read_context(self, request: MemoryContextRequest) -> MemoryContextResponse:
         try:
@@ -90,12 +101,29 @@ class MemoryGateway:
                 "scope_denied",
             )
             raise
-        turns = (
-            self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
-            if request.reads.short_term
-            else ()
-        )
         degraded: list[DegradedMemorySource] = []
+        turns: tuple[ChatTurn, ...] = ()
+        if request.reads.short_term:
+            started = self._monotonic_clock()
+            try:
+                turns = self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
+            except ChatSessionBufferUnavailable:
+                degraded.append(DegradedMemorySource.SHORT_TERM)
+                self._emit(
+                    MemoryType.SHORT_TERM,
+                    MemoryOperation.READ,
+                    MemoryOutcome.DEGRADED,
+                    "unavailable",
+                    started=started,
+                )
+            else:
+                self._emit(
+                    MemoryType.SHORT_TERM,
+                    MemoryOperation.READ,
+                    MemoryOutcome.SUCCESS,
+                    result_count=len(turns),
+                    started=started,
+                )
 
         profile = None
         if request.reads.long_term:

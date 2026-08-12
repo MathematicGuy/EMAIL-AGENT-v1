@@ -79,6 +79,7 @@ __all__ = [
     "ChatMessageRequest",
     "ChatMessageStreamEvent",
     "ChatTurn",
+    "DegradedMemorySource",
     "DeclarativeProfile",
     "DegradedMemorySource",
     "EpisodeCitation",
