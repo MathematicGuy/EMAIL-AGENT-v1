@@ -225,7 +225,7 @@ class GeminiSettings:
 
         keys = tuple(
             value.strip()
-            for index in range(1, 4)
+            for index in range(1, 100)
             if (value := environ.get(f"GEMINI_API_KEY_{index}", "")).strip()
             and not value.strip().startswith("replace-with-")
         )
@@ -238,14 +238,18 @@ class GeminiSettings:
         if strategy != "round_robin":
             raise ValueError("Only round_robin Gemini key rotation is supported")
 
-        max_attempts = _positive_int(environ, "GEMINI_MAX_ATTEMPTS_PER_REQUEST", 3)
+        rotate_on_rate_limit = _boolean(environ, "GEMINI_ROTATE_ON_RATE_LIMIT", True)
+        raw_max_attempts = _positive_int(environ, "GEMINI_MAX_ATTEMPTS_PER_REQUEST", 3)
+        max_attempts = (
+            max(raw_max_attempts, len(keys)) if rotate_on_rate_limit else raw_max_attempts
+        )
         model = environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
         if not model or model.startswith("replace-with-"):
             raise ValueError("GEMINI_MODEL must be a real Gemini model name")
         return cls(
             api_keys=keys,
             model=model,
-            rotate_on_rate_limit=_boolean(environ, "GEMINI_ROTATE_ON_RATE_LIMIT", True),
+            rotate_on_rate_limit=rotate_on_rate_limit,
             max_attempts=min(max_attempts, len(keys)),
             max_emails_per_batch=_positive_int(
                 environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5
