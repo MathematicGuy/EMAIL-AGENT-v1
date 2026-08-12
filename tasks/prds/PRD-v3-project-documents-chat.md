@@ -220,6 +220,7 @@ project_id: string
 tenant_id: string
 user_id: string
 name: string
+is_default: boolean
 created_at: datetime
 updated_at: datetime
 ```
@@ -239,7 +240,7 @@ phiên phải mang `project_id`, và fail closed khi thiếu hoặc không nhấ
 ### FR-04 — Tải tài liệu lên
 
 `POST /v1/cowork/chat/projects/{project_id}/documents` nhận multipart, trả `202`
-kèm `document_id` và `status`. Việc trích xuất chạy trong job nền.
+kèm `document_id` và `status` (hoặc `200` nếu trùng nội dung byte cũ). Việc trích xuất chạy trong job nền.
 
 ### FR-05 — Kiểm tra đầu vào
 
@@ -272,6 +273,29 @@ gồm `tenant_id`, `user_id`, `project_id`, `document_id`, `page_start`,
 `page_end`, `document_title`, `section`, `expires_at`.
 
 ### FR-09 — Trạng thái ingestion
+
+Hợp đồng bản ghi tài liệu project (`ProjectDocument`):
+
+```yaml
+document_id: string
+tenant_id: string
+user_id: string
+project_id: string
+filename: string
+media_type: string
+byte_size: integer
+content_sha256: string
+status: string
+reason_code: string | null
+page_count: integer | null
+ocr_page_count: integer | null
+chunk_count: integer | null
+created_at: datetime
+updated_at: datetime
+expires_at: datetime
+```
+
+Chuyển đổi trạng thái:
 
 ```text
 received → extracting → indexing → ready
@@ -334,9 +358,10 @@ validation.
 
 ### FR-15 — Trích dẫn trong TaskEpisode
 
-TaskEpisode có thể trích dẫn tài liệu project dưới dạng toạ độ:
+TaskEpisode mở rộng hợp đồng mang thêm `project_id` và trích dẫn toạ độ:
 
 ```yaml
+project_id: string
 rag_citations:
   - citation_scope: company | project_document
     document_id: string
@@ -347,7 +372,7 @@ rag_citations:
     source_url: string | null
 ```
 
-Episode ghi thêm `project_id`. Phạm vi **truy hồi** episodic giữ nguyên theo
+Episode ghi bắt buộc `project_id`. Phạm vi **truy hồi** episodic giữ nguyên theo
 PRD-v2 FR-09 (tenant, user, `feature: ai_chat`).
 
 ### FR-16 — Xoá
@@ -384,6 +409,7 @@ thái loading / empty / error / success theo chuẩn của SPEC-Demo-Frontend §
 | Tình huống | Hành vi |
 |---|---|
 | Vi phạm kiểm tra đầu vào | `failed(reason_code)` ngay lúc upload, không giữ byte ngoài bản ghi lỗi |
+| Vector store / Qdrant tắt hoặc không khả dụng lúc upload | API upload trả `503` (`index_unavailable`), từ chối ngay thay vì nhận file |
 | Trích xuất lỗi | `failed`, không index, chat không bị ảnh hưởng |
 | OCR lỗi | retry có giới hạn, sau đó `failed(ocr_failed)` |
 | Embedding lỗi | giữ `indexing`, retry backoff có giới hạn, sau đó `failed(embedding_unavailable)` |
@@ -446,7 +472,7 @@ PRD-v3 được chấp nhận khi:
 1. Người dùng tạo, liệt kê và xoá được project.
 2. Default project tồn tại và `POST /sessions` không kèm `project_id` vẫn chạy.
 3. Mọi phiên chat mang `project_id`, thiếu thì fail closed.
-4. Upload trả `202` và trạng thái theo dõi được qua endpoint status.
+4. Upload trả `202` (hoặc `200` nếu trùng nội dung) và trạng thái theo dõi được qua endpoint status.
 5. Kiểm tra media type dựa trên nội dung, không dựa trên phần mở rộng.
 6. Vượt giới hạn kích thước, trang, hạn ngạch hoặc tài liệu mã hoá trả đúng
    reason code.
