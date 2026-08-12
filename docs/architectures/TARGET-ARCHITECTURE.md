@@ -186,7 +186,7 @@ flowchart TB
     BUILD --> TASKDB --> CARD --> SSE
 
     BUILD -->|tool result DTO| CHAT
-    CHAT -->|write turn + tool episode<br/>status=system_generated| MEMAPI
+    CHAT -->|"write turn + tool episode<br/>status=system_generated"| MEMAPI
     CARD --> APPROVAL
     APPROVAL -->|lifecycle command| CHAT
     CHAT -->|set lifecycle + eligibility| MEMAPI
@@ -287,14 +287,14 @@ flowchart LR
     POLICY --> RESULT
     RESULT --> TOOL -->|formatted Action Plan DTO| CHAT
 
-    CONNECTOR -. 429 / 5xx .-> LIMIT
-    CONNECTOR -. timeout .-> TIMEOUT
-    AUTH -. expired .-> AUTHFAIL
-    AUTH -. revoked .-> PERMFAIL
-    FETCH -. partial page/batch .-> PARTIAL
+    CONNECTOR -.->|"429 / 5xx"| LIMIT
+    CONNECTOR -.->|"timeout"| TIMEOUT
+    AUTH -.->|"expired"| AUTHFAIL
+    AUTH -.->|"revoked"| PERMFAIL
+    FETCH -.->|"partial page/batch"| PARTIAL
 
-    RESULT -. development only .-> DEVTRACE
-    API -. production telemetry .-> PRODTRACE
+    RESULT -.->|"development only"| DEVTRACE
+    API -.->|"production telemetry"| PRODTRACE
 ```
 
 ## Email module responsibilities
@@ -450,12 +450,12 @@ flowchart TB
     VALIDATE --> GROUND
     GROUND --> FINAL
 
-    CLASSIFY -. invalid output .-> CLASSFAIL
+    CLASSIFY -.->|"invalid output"| CLASSFAIL
     CLASSFAIL --> FAILOPEN --> RAG
 
-    VALIDATE -. schema invalid .-> GENFAIL
+    VALIDATE -.->|"schema invalid"| GENFAIL
     GENFAIL --> GEN
-    GENFAIL -. retry exhausted .-> HARDFAIL
+    GENFAIL -.->|"retry exhausted"| HARDFAIL
 ```
 
 ### Router purpose
@@ -609,7 +609,7 @@ flowchart TB
     WRITEPOL -->|session turns + active tool state| SHORT
     WRITEPOL -->|explicit/manual only| LONG
     WRITEPOL -->|store system_generated| EPISODE
-    WRITEPOL -. no direct agent write .-> SEM
+    WRITEPOL -.->|"no direct agent write"| SEM
 
     WRITEPOL --> PROV
     READPOL --> PROV
@@ -701,7 +701,85 @@ retrieval_eligible: boolean
 ---
 
 # 6. RAG Module Architecture
+
+**Scope of this section:** the **company knowledge corpus** — administrator-owned,
+curated, rebuildable, and read through `SemanticMemoryPort`. The user-document
+plane ("chat with the PDF") is a separate plane with its own ingestion job,
+collection, and ACL key; it is specified in §21 and is not described here.
+
+The ingestion pipeline is drawn as its own flowchart, above the retrieval
+runtime, for both the current and the target architecture. Ingestion and
+retrieval are separate lifecycles: they share only the index and the document
+registry, they fail independently, and an ingestion outage must never turn into a
+retrieval outage.
+
 ## 6.1 CURRENT - RAG Module Architecture
+
+### 6.1.1 Current corpus and ingestion pipeline
+
+```mermaid
+flowchart TB
+
+    %% =========================================================
+    %% OFFLINE CORPUS PREPARATION (ingestion_cli.py)
+    %% =========================================================
+    subgraph PREP["1. OFFLINE CORPUS PREPARATION (ingestion_cli.py · administrator-operated)"]
+        BINARY["Local binary sources<br/>DOCX · native-text PDF"]
+        CLI["Knowledge Ingestion CLI<br/>mail-todo-ingest-knowledge --source --output"]
+        OCRGAP["OCR path<br/>fails with mistral_not_configured"]
+        MANIFEST[("Ingestion manifest<br/>content hashes")]
+        MD_OUT["Markdown output<br/>written atomically"]
+    end
+
+    BINARY --> CLI --> MD_OUT
+    CLI --> MANIFEST
+    CLI -.->|"scanned / mixed PDF"| OCRGAP
+
+    %% =========================================================
+    %% CORPUS LOAD & INDEX BUILD (knowledge_base.py · qdrant.py · embeddings.py)
+    %% =========================================================
+    subgraph INGEST_CURRENT["2. CURRENT CORPUS & INGESTION PLANE (knowledge_base.py · qdrant.py · embeddings.py)"]
+        STATIC_FILES["Static Markdown Corpus<br/>RAG_CORPUS_PATH (data/extracted/*.md)"]
+        LOADER["Corpus Loader<br/>knowledge_base.load_corpus()"]
+        SPLITTER["Section & Paragraph Chunker<br/>_split_sections() · _split_long_text()"]
+        INGEST_FN["Qdrant Ingest Engine<br/>qdrant.ingest_corpus()"]
+        RECREATE["Collection recreate<br/>whole-corpus replacement, not incremental"]
+        EMBED_INGEST["Gemini Embedding Adapter<br/>GeminiEmbeddingAdapter.embed()"]
+        ROTATOR_INGEST["Gemini Key Rotator<br/>GeminiKeyRotator.candidates() · 429 failover"]
+        QDRANT_COLL[("Qdrant collection<br/>upsert in 128-item batches")]
+        INREPO_IDX[("In-repo dense + BM25 index<br/>built in process, fallback only")]
+    end
+
+    MD_OUT --> STATIC_FILES --> LOADER --> SPLITTER --> INGEST_FN
+    INGEST_FN --> RECREATE --> QDRANT_COLL
+    INGEST_FN <--> EMBED_INGEST
+    EMBED_INGEST <--> ROTATOR_INGEST
+    SPLITTER --> INREPO_IDX
+
+    %% =========================================================
+    %% TRIGGERS
+    %% =========================================================
+    subgraph TRIGGER["3. INGESTION TRIGGERS (bootstrap.py)"]
+        BOOT["Application boot"]
+        MISSING{"Collection missing or empty?"}
+        REINDEX{"QDRANT_REINDEX=true?"}
+        SKIP["No ingestion this boot"]
+    end
+
+    BOOT --> MISSING
+    MISSING -->|yes| INGEST_FN
+    MISSING -->|no| REINDEX
+    REINDEX -->|yes| INGEST_FN
+    REINDEX -->|no| SKIP
+```
+
+Current ingestion limits, stated plainly: no document registry, no version
+history, no incremental document update, no upload API, no asynchronous job, and
+no failed-ingestion record. Re-ingestion recreates the collection, so an
+ingestion failure mid-run leaves the corpus replaced rather than merged. Scanned
+and mixed PDFs stop at `mistral_not_configured` and produce no partial output.
+
+### 6.1.2 Current retrieval runtime
 
 ```mermaid
 flowchart TB
@@ -709,90 +787,77 @@ flowchart TB
     %% =========================================================
     %% CALLERS & WORKFLOW INTEGRATION
     %% =========================================================
-    subgraph CALLERS["1. RAG CALLERS & ENTRY POINTS"]
-        CHAT["AI Chat Controller & Gateway<br/>memory_gateway.py · SemanticChatMemoryAdapter"]
-        EMAIL["Email Action Plan Workflow<br/>workflow.py · RETRIEVE_RAG candidate"]
-        BOOTSTRAP["RAG Bootstrap Factory<br/>bootstrap.py · build_semantic_memory()"]
+    subgraph CALLERS["1. RAG CALLERS & ENTRY POINTS (memory_gateway.py · workflow.py · bootstrap.py)"]
+        CHAT["AI Chat Controller & Gateway<br/>SemanticChatMemoryAdapter.read_semantic_context()"]
+        EMAIL["Email Action Plan Workflow<br/>ActionPlanWorkflow._retrieve_if_needed()"]
+        KAPI["Knowledge chat API<br/>POST /v1/mail-todo/knowledge/chat"]
+        BOOTSTRAP["RAG Bootstrap Factory<br/>bootstrap.build_semantic_memory()"]
     end
 
-    CHAT -->|read_semantic_context()| BOOTSTRAP
-    EMAIL -->|retrieve(request)| BOOTSTRAP
-
-    %% =========================================================
-    %% CORPUS & INGESTION PLANE (V1-M3 Baseline)
-    %% =========================================================
-    subgraph INGEST_CURRENT["2. CURRENT CORPUS & INGESTION PLANE"]
-        STATIC_FILES["Static Markdown Corpus<br/>data/extracted/*.md"]
-        LOADER["Corpus Loader<br/>knowledge_base.py · load_corpus()"]
-        SPLITTER["Section & Paragraph Chunker<br/>H1/H2 headings · 1200-char soft cap"]
-        INGEST_FN["Qdrant Ingest Engine<br/>qdrant.py · ingest_corpus()"]
-        EMBED_INGEST["Gemini Embedding Adapter<br/>embeddings.py · gemini-embedding-001"]
-        ROTATOR_INGEST["Key Rotator<br/>GeminiKeyRotator · 429 backoff"]
-    end
-
-    STATIC_FILES --> LOADER --> SPLITTER --> INGEST_FN
-    INGEST_FN <--> EMBED_INGEST
-    EMBED_INGEST <--> ROTATOR_INGEST
+    CHAT -->|"read_semantic_context()"| BOOTSTRAP
+    EMAIL -->|"retrieve(request)"| BOOTSTRAP
+    KAPI -->|"retrieve(request)"| BOOTSTRAP
 
     %% =========================================================
     %% SECURITY & PRE-PROCESSING GUARD
     %% =========================================================
-    subgraph GUARD_PLANE["3. SECURITY GUARD & QUERY TRANSFORM"]
-        ACL_GUARD["Tenant & Status ACL Guard<br/>tenant_id == tenant_scope<br/>document_status == ready"]
-        QUERY_GUARD["Query Guard<br/>query_guard.py · is_retrieval_query()"]
-        QUERY_TRANSFORM["Query Transformer<br/>query_transform.py · RuleBasedQueryTransformer<br/>domain expansion + HyDE"]
+    subgraph GUARD_PLANE["2. SECURITY GUARD & QUERY TRANSFORM PLANE (qdrant.py · query_guard.py · query_transform.py)"]
+        ACL_GUARD["Tenant & Status ACL Guard<br/>qdrant.Filter(tenant_id, document_status)"]
+        QUERY_GUARD["Query Guard<br/>query_guard.is_retrieval_query()"]
+        QUERY_TRANSFORM["Query Transformer<br/>RuleBasedQueryTransformer.transform() · expansion + HyDE"]
     end
 
     BOOTSTRAP --> ACL_GUARD
     ACL_GUARD -->|authorized| QUERY_GUARD
-    ACL_GUARD -. unauthorized .-> DENIED["RetrievalStatus.AUTHORIZATION_DENIED"]
+    ACL_GUARD -.->|"empty tenant scope"| DENIED["RetrievalStatus.AUTHORIZATION_DENIED"]
     QUERY_GUARD -->|valid query| QUERY_TRANSFORM
 
     %% =========================================================
     %% DUAL RETRIEVAL ENGINES & FALLBACK
     %% =========================================================
-    subgraph ENGINES["4. RUNTIME RETRIEVAL ENGINES"]
-        
-        subgraph QDRANT_ENGINE["Production Primary: Qdrant Engine (qdrant.py)"]
-            QDRANT_MEM["QdrantSemanticMemory"]
-            QDRANT_FILTER["Payload Filter<br/>tenant_id + document_status=ready"]
-            EMBED_QUERY["Gemini Embedding Adapter<br/>embeddings.py"]
-            QDRANT_STORE[("Qdrant Vector DB<br/>Distance.COSINE collection")]
+    subgraph ENGINES["3. RUNTIME RETRIEVAL ENGINES (qdrant.py · hybrid.py · null_memory.py)"]
+
+        subgraph QDRANT_ENGINE["Configured Primary: Qdrant Engine (qdrant.py · QDRANT_ENABLED=true)"]
+            QDRANT_MEM["Qdrant Semantic Memory<br/>QdrantSemanticMemory.retrieve()"]
+            QDRANT_FILTER["Server-Side Payload Filter<br/>FieldCondition(tenant_id, document_status)"]
+            EMBED_QUERY["Gemini Embedder<br/>GeminiEmbeddingAdapter.embed()"]
+            QDRANT_STORE[("Qdrant Vector DB<br/>AsyncQdrantClient.query_points()")]
         end
 
-        subgraph HYBRID_ENGINE["Fallback / Eval Engine: Hybrid Semantic Memory (hybrid.py)"]
-            HYBRID_MEM["HybridSemanticMemory"]
-            DENSE_SEARCH["In-Repo Dense Search<br/>memory.py · NumPy cosine dot product"]
-            BM25_SEARCH["BM25 Lexical Search<br/>bm25.py · Okapi BM25"]
-            RRF_FUSION["Reciprocal Rank Fusion<br/>rrf.py · RRF (k=60)"]
-            JINA_RERANK["Jina Cross-Encoder Reranker<br/>jina_reranker.py · jina-reranker-v2"]
-            MMR_DIVERSIFY["MMR Diversifier<br/>mmr.py · mmr_diversify()"]
+        subgraph HYBRID_ENGINE["Deprecated Fallback / Eval Engine (hybrid.py · memory.py · bm25.py · rrf.py · jina_reranker.py · mmr.py)"]
+            HYBRID_MEM["Hybrid Semantic Memory<br/>HybridSemanticMemory.retrieve() · emits DeprecationWarning"]
+            DENSE_SEARCH["In-Repo Dense Search<br/>InRepoSemanticMemory.retrieve()"]
+            BM25_SEARCH["BM25 Lexical Search<br/>BM25SearchAdapter.search()"]
+            RRF_FUSION["Reciprocal Rank Fusion<br/>ReciprocalRankFusion.fuse() · k=60, unweighted"]
+            JINA_RERANK["Jina Cross-Encoder Reranker<br/>JinaRerankerAdapter.rerank() · silent fallback on error"]
+            MMR_DIVERSIFY["MMR Diversifier<br/>mmr_diversify() · lambda_mult=0.7"]
         end
 
-        subgraph NULL_ENGINE["Graceful Fallback: Null Memory (null_memory.py)"]
-            NULL_MEM["NullSemanticMemory<br/>returns empty NO_RESULTS"]
+        subgraph NULL_ENGINE["Graceful Degrader: Null Memory (null_memory.py)"]
+            NULL_MEM["Null Semantic Memory<br/>NullSemanticMemory.retrieve()"]
         end
     end
 
-    QUERY_TRANSFORM -->|Primary Store| QDRANT_MEM
+    QUERY_TRANSFORM -->|"configured store"| QDRANT_MEM
     QDRANT_MEM --> QDRANT_FILTER --> EMBED_QUERY
     EMBED_QUERY <--> QDRANT_STORE
 
-    QUERY_TRANSFORM -. Fallback if Qdrant unconfigured .-> HYBRID_MEM
+    QUERY_TRANSFORM -.->|"QDRANT_ENABLED=false or boot failure"| HYBRID_MEM
     HYBRID_MEM --> DENSE_SEARCH
     HYBRID_MEM --> BM25_SEARCH
     DENSE_SEARCH --> RRF_FUSION
     BM25_SEARCH --> RRF_FUSION
     RRF_FUSION --> JINA_RERANK --> MMR_DIVERSIFY
 
-    BOOTSTRAP -. Error / Missing Store .-> NULL_MEM
+    BOOTSTRAP -.->|"hybrid build failure · non-Gemini provider"| NULL_MEM
+    QDRANT_STORE -.->|"known query failure"| NULL_MEM
 
     %% =========================================================
     %% RESPONSE CONTRACT
     %% =========================================================
-    subgraph RESPONSE_PLANE["5. RETRIEVAL RESPONSE CONTRACT"]
-        RESP["SemanticRetrievalResponse<br/>query_id · tenant_id · chunks · status · latency_ms"]
-        CHUNKS["SemanticChunk[]<br/>chunk_id · doc_id · title · section · text · url · scores"]
+    subgraph RESPONSE_PLANE["4. RETRIEVAL RESPONSE CONTRACT PLANE (target_contracts.py)"]
+        RESP["Structured Retrieval Response<br/>SemanticRetrievalResponse"]
+        CHUNKS["Semantic Chunk List<br/>tuple[SemanticChunk, ...]"]
     end
 
     QDRANT_STORE --> RESP
@@ -807,92 +872,283 @@ flowchart TB
 |---|---|---|---|
 | **Entry Point Factory** | `src/cowork_agent/integrations/rag/bootstrap.py` | `build_semantic_memory()` | Async factory. Attempts Qdrant vector store initialization first; falls back to `HybridSemanticMemory`, then `NullSemanticMemory` on store/backend error. |
 | **Workflow Callers** | `src/cowork_agent/features/email_action_plan/workflow.py`<br/>`src/cowork_agent/integrations/rag/chat_memory.py` | `SemanticMemoryPort`<br/>`SemanticChatMemoryAdapter` | Email Action Plan workflow triggers retrieval for `RETRIEVE_RAG` candidates. AI Chat Memory Gateway delegates to `SemanticChatMemoryAdapter` for `current_company_evidence`. |
+| **Offline Ingestion CLI** | `src/cowork_agent/ingestion_cli.py` | `mail-todo-ingest-knowledge` | Administrator-operated. Discovers local DOCX/native-text PDF, writes Markdown atomically, records hashes in a manifest. Never writes to Qdrant and never downloads Gmail attachments. Scanned/mixed PDFs fail with `mistral_not_configured`. |
 | **Corpus Loading & Chunker** | `src/cowork_agent/integrations/rag/knowledge_base.py` | `load_corpus()`, `_split_sections()`, `_split_long_text()` | Reads `data/extracted/*.md` corpus files deterministically. Extracts H1 titles, splits by heading structure, and splits paragraph text exceeding 1200 chars. |
-| **Corpus Ingestion & Embeddings** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/embeddings.py` | `ingest_corpus()`, `GeminiEmbeddingAdapter` | Embeds chunks via `gemini-embedding-001` with `GeminiKeyRotator` (failover on 429). Upserts points with payload metadata into Qdrant collection in 128-item batches. |
-| **Security ACL & Query Guard** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/query_guard.py` | Server-side `Filter`<br/>`is_retrieval_query()` | Enforces `tenant_id == tenant_scope` and `document_status == ('ready',)` BEFORE vector query embedding or scoring. Filters out greeting/filler queries. |
+| **Corpus Ingestion & Embeddings** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/embeddings.py` | `ingest_corpus()`, `GeminiEmbeddingAdapter` | Embeds chunks via `gemini-embedding-001` with `GeminiKeyRotator` (failover on 429). Recreates the collection, then upserts points with payload metadata in 128-item batches — a corpus replacement, not an incremental update. |
+| **Security ACL & Query Guard** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/query_guard.py` | Server-side `Filter`<br/>`is_retrieval_query()` | Enforces `tenant_id == tenant_scope` and `document_status == ('ready',)` BEFORE vector query embedding or scoring. Filters out greeting/filler queries. Per-user, group, and document-level ACL are not implemented. |
 | **Query Expansion & HyDE** | `src/cowork_agent/integrations/rag/query_transform.py` | `RuleBasedQueryTransformer` | Expands queries with domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates HyDE hypothetical documents. |
-| **Primary Production Engine** | `src/cowork_agent/integrations/rag/qdrant.py` | `QdrantSemanticMemory` | Queries Qdrant vector collection (`Distance.COSINE`) with server-side payload filter and score threshold (`min_score`). |
-| **In-Process Fallback Engine** | `src/cowork_agent/integrations/rag/hybrid.py`<br/>`memory.py`, `bm25.py`, `rrf.py`<br/>`jina_reranker.py`, `mmr.py` | `HybridSemanticMemory`, `InRepoSemanticMemory`, `BM25SearchAdapter`, `ReciprocalRankFusion`, `JinaRerankerAdapter`, `mmr_diversify` | Parallel dense (NumPy cosine matrix) and lexical (Okapi BM25) search. Fuses ranks via Reciprocal Rank Fusion (`k=60`). Reranks via Jina API (`jina-reranker-v2-base-multilingual`). Applies dynamic cutoff and MMR diversity (`lambda_mult=0.7`). |
-| **Null Degrader** | `src/cowork_agent/integrations/rag/null_memory.py` | `NullSemanticMemory` | Safe fallback returning `RetrievalStatus.NO_RESULTS` when vector database or embedding API is unreachable. |
+| **Primary Production Engine** | `src/cowork_agent/integrations/rag/qdrant.py` | `QdrantSemanticMemory` | Queries Qdrant vector collection (`Distance.COSINE`) with server-side payload filter and score threshold (`min_score`). Enabled by `QDRANT_ENABLED`; a URL alone does not enable it. |
+| **In-Process Fallback Engine** | `src/cowork_agent/integrations/rag/hybrid.py`<br/>`memory.py`, `bm25.py`, `rrf.py`<br/>`jina_reranker.py`, `mmr.py` | `HybridSemanticMemory`, `InRepoSemanticMemory`, `BM25SearchAdapter`, `ReciprocalRankFusion`, `JinaRerankerAdapter`, `mmr_diversify` | Parallel dense (NumPy cosine matrix) and lexical (Okapi BM25) search. Fuses ranks via unweighted Reciprocal Rank Fusion (`k=60`). Reranks via Jina API (`jina-reranker-v2-base-multilingual`). Applies dynamic cutoff and MMR diversity (`lambda_mult=0.7`). Deprecated: fallback and evaluation only. |
+| **Null Degrader** | `src/cowork_agent/integrations/rag/null_memory.py` | `NullSemanticMemory` | Safe fallback returning `RetrievalStatus.NO_RESULTS` when vector database or embedding API is unreachable. Also the store for non-Gemini providers. |
 | **Response Contract** | `src/cowork_agent/domain/target_contracts.py` | `SemanticRetrievalResponse`, `SemanticChunk` | Immutable dataclasses carrying `query_id`, `tenant_id`, `chunks`, `retrieval_status`, and `latency_ms`. |
 
+### 6.1.3 Measured behaviour the target must respect
 
+These are evaluation results and incident findings, not design opinions. The
+target architecture below is shaped by them.
 
+| Finding | Evidence | Consequence for the target |
+|---|---|---|
+| Unweighted RRF over dense + BM25 **regresses** semantic recall against dense-only; only the cross-encoder reranker recovers it | retained real-embedding benchmark on the in-repo variants | The target must not draw "hybrid search" as an unconditional improvement. Lexical fusion is opt-in, weighted, and only valid with reranking on top |
+| The Jina reranker returned Cloudflare `403` for the default `urllib` User-Agent, and the silent fallback hid a total reranker outage | reranker incident | The target reranker must report whether it ran. A silent bypass is a defect, not a graceful degradation |
+| `RetrievalLimits.timeout_ms` is not enforced as one end-to-end deadline; each transport has its own timeout | EMAIL-RAG-STATUS known gaps | The target enforces a single retrieval deadline across embedding, search, and rerank |
+| `no_results` is structurally supported, but no validated score or margin policy separates unrelated Vietnamese queries from relevant content | EMAIL-RAG-STATUS known gaps | The target makes abstention an explicit, calibrated stage rather than an accident of `min_score` |
+| Qdrant adapter mechanics are tested, but retrieval quality is benchmarked only on the in-repo variants | EMAIL-RAG-STATUS known gaps | The target treats the Qdrant quality benchmark as a launch gate, not an optional extra |
+| Ingestion is whole-corpus replacement with no registry or version history | `ingest_corpus()` recreates the collection | The target introduces a document registry with incremental, versioned upsert |
+
+### 6.1.4 What the current module is missing for "chat with the PDF"
+
+The company corpus described above cannot serve the user-document feature as
+specified in [PRD-v4](../../tasks/prds/PRD-v4-chat-with-user-documents.md), the
+[SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md), and §21. The gap is
+not tuning; the required scope key, lifecycle, and routing authority do not exist
+in the current module.
+
+| Required by SPEC / PRD-v4 | Current state | Blocking |
+|---|---|---|
+| Scope key `tenant_id` + `user_id` + `document_id` | The Qdrant filter carries `tenant_id` and `document_status` only. There is no `user_id` field to filter on | Yes — cross-user isolation is not expressible, so no user document can be indexed safely |
+| A separate user-document collection | One company collection. Chunks would co-mingle with curated corpus content | Yes |
+| Runtime upload path (`POST /v1/cowork/chat/documents`, `202`, off the request path) | Administrator CLI only; ingestion runs at application boot | Yes |
+| Document status machine `received → extracting → indexing → ready → failed → deleted` with `reason_code` | No registry, no per-document status, no failure record | Yes — status polling and the failure table in §21.11 have nothing to read |
+| Page-aware chunking with `page_start` / `page_end` | `_split_sections()` / `_split_long_text()` produce section and paragraph chunks with no page coordinates | Yes — page-level citation is impossible as chunked today |
+| OCR for scanned and mixed PDFs | Fails with `mistral_not_configured`; no partial output | Yes for scanned uploads, which are an ordinary case |
+| Validation and quota at upload: sniffed media type, byte size, page cap, per-user quota, with the §21.4 reason codes | The CLI validates local files it was pointed at; there is no untrusted-upload guard | Yes |
+| Per-document deletion that purges index points, extracted text, and stored bytes | `ingest_corpus()` recreates the whole collection; there is no delete-by-`document_id` | Yes — deletion is a user-data obligation, not an optimisation |
+| Retention with `expires_at` and purge of expired documents | No TTL concept; the corpus is permanent and rebuildable | Yes |
+| Qdrant mandatory with announced degradation | Bootstrap silently falls back to the deprecated in-repo hybrid engine, then to `NullSemanticMemory` | Yes — for user documents that fallback would return an empty or company-only result while looking healthy |
+| Classifier-gated retrieval (`IntentDecision`, `needs_rag`, truth table, fail-open) | `retrieval_policy` gates chat retrieval on hard-coded cue phrases; `query_guard.is_retrieval_query()` only filters greetings | Yes — this is the routing authority the SPEC moves to the classifier |
+| Labeled fixture set and the §21.13 routing metrics (recall ≥ 0.95, missed-RAG ≤ 0.05) | No routing fixtures and no routing metrics exist | Yes — the launch gate has nothing to measure |
+| `citation_scope` on citations and page fields on the chunk contract | `SemanticChunk` has `section` and `source_url`; no `page_start`, `page_end`, or scope discriminator | Yes |
+| `user_document_evidence` labeled context section and its precedence | The assembler knows `current_company_evidence` only | Yes |
+| Turn graph `classify → retrieve → assemble → generate → persist` with lean durable state | The chat turn is a straight-line controller call | No — behaviourally replaceable, but required for the routing and clarify branches |
+| Telemetry: `user_document.*` and `chat.intent.*` metadata events | Neither vocabulary exists | No — not blocking correctness, blocking evaluation |
+
+Two consequences worth stating explicitly:
+
+- **The user-document plane is greenfield, not a configuration of the company
+  corpus.** Everything reusable is at the port and contract level —
+  `SemanticMemoryPort` shape, `RetrievalStatus`, the ACL-before-embedding
+  discipline, the Gemini embedding adapter with key rotation, and the chunker's
+  paragraph-splitting logic. The store, the scope key, the lifecycle, and the
+  routing are new.
+- **The silent fallback ladder is safe for the company corpus and unsafe here.**
+  A curated corpus is rebuildable, so degrading to another engine is a quality
+  event. A user's uploaded document exists in exactly one place, so the same
+  fallback would answer from the wrong evidence set without saying so. §21
+  therefore makes Qdrant mandatory for that plane and requires degradation to be
+  announced.
 
 ## 6.2 TARGET - RAG Module Architecture
+
+### 6.2.1 Target corpus and ingestion pipeline
+
 ```mermaid
 flowchart TB
 
     %% =========================================================
-    %% INGESTION PLANE
+    %% SOURCES & ENTRY
     %% =========================================================
-    subgraph INGEST["RAG INGESTION PLANE"]
-        SOURCES["Company Sources<br/>Drive · PDFs · Wiki · SOP repository"]
-        INGESTAPI["Document Ingestion API"]
-        INGESTQ[("Ingestion Queue")]
-        PARSER["Document Parser"]
-        CHUNK["Chunker"]
-        META["Metadata + Provenance Enricher"]
-        ACL["Tenant / Document ACL Tagger"]
-        EMBED["Embedding Service"]
-        OBJ[("Object / Document Store")]
-        INDEX[("Vector + Keyword Index")]
-        FAILED[("Failed Ingestion Queue")]
+    subgraph SOURCES_PLANE["1. COMPANY SOURCES & INGESTION ENTRY"]
+        SOURCES["Company sources<br/>DOCX · PDF · Markdown · Wiki · SOP repository"]
+        CLI2["Administrator ingestion CLI<br/>existing mail-todo-ingest-knowledge"]
+        INGESTAPI["Document Ingestion API<br/>administrator-scoped"]
+        INGESTQ[("Ingestion queue<br/>asynchronous, off the request path")]
     end
 
+    SOURCES --> CLI2 --> INGESTQ
     SOURCES --> INGESTAPI --> INGESTQ
-    INGESTQ --> PARSER --> CHUNK --> META --> ACL --> EMBED
+
+    %% =========================================================
+    %% EXTRACTION & ENRICHMENT
+    %% =========================================================
+    subgraph PROCESS["2. EXTRACTION & ENRICHMENT"]
+        PARSER["Document Parser<br/>native text per page"]
+        OCR["Mistral OCR<br/>scanned and mixed pages · bounded page cap"]
+        CHUNK["Section & paragraph chunker<br/>page-aware: page_start · page_end"]
+        META["Metadata + provenance enricher<br/>document_version · source_url · content hash"]
+        ACL2["ACL tagger<br/>tenant_id · document_status · document-level ACL"]
+        EMBED["Embedding service<br/>key rotation · 429 backoff · bounded attempts"]
+    end
+
+    INGESTQ --> PARSER
+    PARSER -->|native pages| CHUNK
+    PARSER -->|pages needing OCR| OCR --> CHUNK
+    CHUNK --> META --> ACL2 --> EMBED
+
+    %% =========================================================
+    %% STORES
+    %% =========================================================
+    subgraph STORES["3. STORES"]
+        REGISTRY[("Document registry<br/>document_id · version · hash · status")]
+        OBJ[("Object / document store")]
+        INDEX[("Vector index — incremental upsert by document_id<br/>optional keyword index")]
+        FAILED[("Failed ingestion queue<br/>reason_code · retryable flag")]
+    end
+
+    META --> REGISTRY
     PARSER --> OBJ
     EMBED --> INDEX
-    PARSER -. parse failure .-> FAILED
-    EMBED -. repeated failure .-> FAILED
+    REGISTRY -->|"supersede prior version"| INDEX
+
+    PARSER -.->|"parse failure · encrypted"| FAILED
+    OCR -.->|"page cap or attempts exhausted"| FAILED
+    EMBED -.->|"attempts exhausted"| FAILED
 
     %% =========================================================
-    %% RETRIEVAL PLANE
+    %% LIFECYCLE OPERATIONS
     %% =========================================================
-    subgraph RETRIEVE["RAG RETRIEVAL PLANE"]
-        PORT["SemanticMemoryPort Request"]
-        RETAPI["Retrieval API"]
-        AUTH["Tenant + User Authorization"]
-        QUERY["Query Normalizer"]
-        FILTER["Metadata / ACL Filters"]
-        HYBRID["Hybrid Search<br/>vector + keyword"]
-        RERANK["Reranker"]
-        THRESHOLD{"Minimum relevance met?"}
-        PACK["Context Pack Builder"]
-        EMPTY["Empty Retrieval Result"]
-        RESPONSE["Structured Retrieval Response"]
+    subgraph LIFECYCLE["4. LIFECYCLE OPERATIONS"]
+        UPDATE["Incremental document update<br/>re-embed only changed documents"]
+        REMOVE["Document removal<br/>delete points by document_id"]
+        REBUILD["Full corpus rebuild<br/>explicit operator action only"]
+        SWAP["Build to a new collection, then swap alias"]
     end
 
-    PORT --> RETAPI --> AUTH --> QUERY --> FILTER --> HYBRID
-    HYBRID <--> INDEX
-    HYBRID <--> OBJ
-    HYBRID --> RERANK --> THRESHOLD
+    UPDATE --> INDEX
+    REMOVE --> INDEX
+    REBUILD --> SWAP --> INDEX
+```
 
+Target ingestion rules:
+
+- **Incremental by default.** A changed document re-embeds that document only; a
+  removed document deletes its points by `document_id`. Whole-corpus replacement
+  becomes an explicit operator action, and it builds into a new collection and
+  swaps an alias so a failed rebuild never leaves the corpus empty.
+- **The registry is authoritative** for `document_id`, `document_version`,
+  content hash, and `document_status`. Retrieval filters on registry-owned fields;
+  nothing infers status from the filesystem.
+- **OCR closes the current gap.** `mistral_not_configured` stops being a dead end
+  for scanned and mixed PDFs, bounded by the existing page, timeout, and attempt
+  caps. Partial or empty extraction is never indexed.
+- **Failures are recorded, not lost.** Every failure lands in the failed queue
+  with a `reason_code` and a retryable flag.
+- **Ingestion never blocks retrieval.** The queue is off the request path, and an
+  ingestion outage leaves the last good index serving.
+- Raw email bodies and Gmail attachments remain excluded from this corpus.
+
+### 6.2.2 Target retrieval runtime
+
+```mermaid
+flowchart TB
+
+    %% =========================================================
+    %% CALLERS
+    %% =========================================================
+    subgraph CALLERS2["1. CALLERS"]
+        EMAIL2["Email Action Plan workflow<br/>RETRIEVE_RAG candidates only"]
+        CHAT2["AI Chat<br/>routed by the §21 intent classifier · flag-gated"]
+        KAPI2["Knowledge chat API<br/>retrieval-only, no generation"]
+        PORT["SemanticMemoryPort request"]
+    end
+
+    EMAIL2 --> PORT
+    CHAT2 --> PORT
+    KAPI2 --> PORT
+
+    %% =========================================================
+    %% ADMISSION
+    %% =========================================================
+    subgraph ADMIT["2. ADMISSION & AUTHORIZATION"]
+        DEADLINE["Single retrieval deadline<br/>one budget across embed · search · rerank"]
+        AUTH["Tenant + user authorization<br/>fails closed on missing scope"]
+        FILTER["ACL / metadata filter assembled BEFORE query embedding<br/>tenant_id · document_status · document ACL"]
+        ADMITQ["Query admission<br/>email path: query_guard · chat path: classifier retrieval_query"]
+    end
+
+    PORT --> DEADLINE --> AUTH --> FILTER --> ADMITQ
+    AUTH -.->|"empty or inconsistent scope"| DENIED2["authorization_denied"]
+
+    %% =========================================================
+    %% QUERY UNDERSTANDING
+    %% =========================================================
+    subgraph QU["3. QUERY UNDERSTANDING (each stage independently flagged and measured)"]
+        NORM["Query normalizer"]
+        EXPAND["Domain expansion + HyDE<br/>RuleBasedQueryTransformer"]
+    end
+
+    ADMITQ --> NORM --> EXPAND
+
+    %% =========================================================
+    %% SEARCH
+    %% =========================================================
+    subgraph SEARCH2["4. SEARCH — dense primary, fusion opt-in"]
+        DENSE2["Dense vector search<br/>primary path"]
+        LEX["Keyword / BM25 search<br/>optional, off by default"]
+        FUSE["Weighted fusion<br/>enabled only with reranking on top"]
+        RERANK["Cross-encoder reranker<br/>reports applied · bypassed · failed"]
+        DIVERSE["MMR diversification"]
+        INDEX2[("Serving index<br/>written by the §6.2.1 pipeline")]
+        OBJ2[("Object / document store")]
+    end
+
+    EXPAND --> DENSE2
+    EXPAND -.->|"fusion enabled"| LEX
+    DENSE2 --> FUSE
+    LEX --> FUSE
+    FUSE --> RERANK --> DIVERSE
+    DENSE2 -->|"fusion disabled"| RERANK
+    DENSE2 <--> INDEX2
+    LEX <--> INDEX2
+
+    %% =========================================================
+    %% ABSTENTION & PACKING
+    %% =========================================================
+    subgraph OUT["5. ABSTENTION & RESPONSE"]
+        THRESHOLD{"Calibrated score AND margin met?"}
+        PACK["Context pack builder<br/>chunk text + citation coordinates"]
+        EMPTY["Structured empty result<br/>no_results"]
+        RESPONSE["Structured retrieval response<br/>retrieval_mode · reranked · degraded · latency_ms"]
+    end
+
+    DIVERSE --> THRESHOLD
     THRESHOLD -->|yes| PACK --> RESPONSE
     THRESHOLD -->|no| EMPTY --> RESPONSE
-
-    %% =========================================================
-    %% OPTIONAL GENERATION
-    %% =========================================================
-    subgraph OPTIONAL["OPTIONAL RAG GENERATION API"]
-        RAGGEN["RAG Answer Generator<br/>not used by Cowork workflow"]
-    end
-
-    RESPONSE -. optional standalone RAG use .-> RAGGEN
+    PACK <--> OBJ2
 
     %% =========================================================
     %% RESILIENCE
     %% =========================================================
-    subgraph RESILIENCE["RESILIENCE"]
-        TIMEOUT["Retrieval timeout budget"]
-        RETRY["One technical retry"]
-        FALLBACK["Return empty structured result<br/>Agent creates partial plan"]
+    subgraph RESILIENCE["6. RESILIENCE — degradation is always announced"]
+        RETRY["One technical retry inside the deadline"]
+        DEGRADE["Degraded result<br/>degraded=true, reason recorded"]
+        NEVERBLOCK["Caller proceeds: Email builds a partial plan,<br/>chat states that evidence is unavailable"]
     end
 
-    RETAPI -. timeout .-> TIMEOUT --> RETRY
-    RETRY -. exhausted .-> FALLBACK
+    DEADLINE -.->|"budget exceeded"| RETRY
+    RERANK -.->|"reranker unavailable"| DEGRADE
+    DENSE2 -.->|"store unavailable"| DEGRADE
+    RETRY -.->|"exhausted"| DEGRADE --> NEVERBLOCK --> RESPONSE
 ```
+
+### 6.2.3 What the target changes, and why
+
+| Area | Current (§6.1) | Target (§6.2) | Reason |
+|---|---|---|---|
+| Store strategy | Qdrant when `QDRANT_ENABLED`, deprecated in-repo hybrid as fallback, null as last resort | Qdrant is the single serving store; the in-repo stack is retained **only** as the offline evaluation harness | Two live retrieval implementations with different ranking behaviour cannot both be the thing measured. The fallback silently changes answer quality |
+| Hybrid search | Unweighted RRF over dense + BM25, always on in the fallback engine | Dense primary; lexical fusion is opt-in, weighted, and only valid with reranking enabled | Measured: unweighted fusion regresses semantic recall against dense-only; only the reranker recovers it |
+| Reranker | Silent fallback on error | Reports `applied`, `bypassed`, or `failed` in the response; a bypass sets `degraded` | A Cloudflare `403` disabled reranking entirely and the response looked healthy |
+| Timeout | Per-transport timeouts | One end-to-end retrieval deadline covering embedding, search, and rerank | `RetrievalLimits.timeout_ms` is currently not enforced as a real budget |
+| Abstention | `min_score` threshold only | Calibrated score **and** margin policy, evaluated on Vietnamese negatives | Unrelated queries currently pass the raw threshold too easily |
+| ACL | `tenant_id` + `document_status` | Adds document-level ACL, still assembled before query embedding | Company-wide-within-tenant is not sufficient once documents have owners |
+| Ingestion shape | Whole-corpus collection recreate, no registry | Registry-backed incremental upsert; rebuild via new collection plus alias swap | A failed rebuild currently leaves the corpus replaced |
+| OCR | `mistral_not_configured` dead end | Mistral OCR in the pipeline, bounded and failure-recorded | Scanned PDFs are ordinary company documents |
+| Query understanding | Expansion and HyDE always on in the hybrid path | Each stage independently flagged and measured | Expansion and HyDE are ranking changes and must be attributable |
+| Failure records | None | Failed ingestion queue with `reason_code` | Operators currently cannot see what failed to ingest |
+| Callers | Chat retrieval gated by cue phrases | Chat retrieval routed by the §21 intent classifier and flag-gated | Routing authority moved; see §21.5 |
+
+### 6.2.4 Retrieval quality gates
+
+The target is not "done" when the diagram is built. These gates apply to the
+company corpus, measured on the live serving store, not the in-repo harness:
+
+- a live Qdrant retrieval benchmark exists and is the reference for every ranking
+  change;
+- any fusion, expansion, HyDE, rerank, or threshold change reports its delta
+  against dense-only on that benchmark before it is enabled by default;
+- an abstention set of unrelated Vietnamese queries must return `no_results`;
+- the response reports `retrieval_mode`, `reranked`, and `degraded` so quality
+  regressions are attributable to a stage rather than to "RAG".
 
 ## Cowork Agent integration rule
 
@@ -937,8 +1193,24 @@ retrieval_status:
     - authorization_denied
     - partial
 
+retrieval_mode: dense | dense_reranked | fused_reranked
+reranked:
+  enum:
+    - applied
+    - bypassed
+    - failed
+degraded: boolean
+degraded_reason: string | null
+
 latency_ms: integer
 ```
+
+`retrieval_mode`, `reranked`, and `degraded` are additions over the current
+`SemanticRetrievalResponse`. They exist so a quality regression is attributable
+to a stage instead of to "RAG", and so a bypassed reranker or an unavailable
+store is visible to the caller rather than indistinguishable from a healthy
+low-recall answer. The §21 user-document response extends the same chunk shape
+with `page_start` and `page_end`, and its citations carry `citation_scope`.
 
 ---
 
@@ -1766,10 +2038,10 @@ flowchart TB
     DETECT -->|native pages| PCHUNK
     DETECT -->|pages needing OCR| OCR --> PCHUNK
     PCHUNK --> UEMBED --> UINDEX
-    VALID -. rejected .-> UFAIL
-    DETECT -. encrypted · no text .-> UFAIL
-    OCR -. attempts or page cap exhausted .-> UFAIL
-    UEMBED -. attempts exhausted .-> UFAIL
+    VALID -.->|"rejected"| UFAIL
+    DETECT -.->|"encrypted / no text"| UFAIL
+    OCR -.->|"attempts or page cap exhausted"| UFAIL
+    UEMBED -.->|"attempts exhausted"| UFAIL
 
     subgraph CHATTURN["CHAT TURN"]
         CHAT["Chat Controller"]
@@ -1783,7 +2055,7 @@ flowchart TB
     end
 
     CHAT --> CLS --> RES --> GATE --> GW --> DOCPORT --> DACL --> UINDEX
-    GW -. flag-disabled in this baseline .-> COMPANY["Company RAG"]
+    GW -.->|"flag-disabled in this baseline"| COMPANY["Company RAG"]
     DOCPORT --> CTX --> CHAT
 ```
 
