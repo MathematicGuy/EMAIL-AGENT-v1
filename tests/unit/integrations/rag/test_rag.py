@@ -48,7 +48,18 @@ def _built_memory(corpus_dir: Path = CORPUS_DIR, *, tenant_id: str = "local"):
 def test_load_corpus_reads_the_committed_documents() -> None:
     documents = load_corpus(CORPUS_DIR, tenant_id="local")
     assert [doc.document_id for doc in documents] == [
+        "01-2021-nd-cp-283247",
+        "31-2024-qh15-523642",
+        "41-2024-qh15-557190",
+        "49-2019-qh14-402073",
         "cap_lai_cccd",
+        "chi-tiet-thu-tuc-1-004194-1786097965866",
+        "chi-tiet-thu-tuc-1-115132-1786096253281",
+        "chi-tiet-thu-tuc-1-115970-1786097982328",
+        "chi-tiet-thu-tuc-1-116194-1786096137126",
+        "chi-tiet-thu-tuc-2-001194-1786096928665",
+        "chi-tiet-thu-tuc-3-000228-1786096860852",
+        "dang-ky-tam-tru",
         "dang_ky_ket_hon",
         "dang_ky_xe",
         "huong_dan_nop_ho_so_dai_hoc_vinuni",

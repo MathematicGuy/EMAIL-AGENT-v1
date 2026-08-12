@@ -7,7 +7,7 @@ and by the end-to-end email→corpus integration fixtures.
 
 ## Files
 
-- `retrieval_golden.json` — the labeled cases (32 cases).
+- `retrieval_golden.json` — the labeled cases (100 cases).
 - `loader.py` — typed loader with schema **and corpus** validation, used by
   the harness and by the loader unit test.
 
@@ -52,8 +52,11 @@ All raise `RetrievalFixtureError` with a `path[index]:` prefix.
 4. Every `expected_document_ids` entry is a real `data/extracted/*.md` stem.
 5. Every `expected_sections` entry equals a `section` that `load_corpus`
    actually emits for one of that case's `expected_document_ids`.
-6. Every corpus document carries at least one `lexical`, one `semantic` and
-   one `mixed` case, and the set contains at least one `unanswerable` case.
+6. Temporary fixtures retain generic per-document `lexical`, `semantic`, and
+   `mixed` coverage plus an `unanswerable` case. The checked-in 100-case
+   fixture instead enforces all 17 documents, exactly 12 unanswerables, and
+   three-probe coverage for every newly covered document allocated at least
+   three cases. `dang-ky-tam-tru` intentionally has two answerable cases.
 
 Rules 4–6 need the corpus, so `load_retrieval_golden` takes an optional
 `corpus_dir`. Pure-schema callers (rules 1–3) omit it; the harness always
@@ -64,6 +67,13 @@ Without it, a re-chunk that renames a section makes the golden set silently
 score 0.0 instead of failing loudly.
 
 ## Growing the set
+
+The checked-in fixture preserves `q-001` through `q-032` unchanged. It then
+allocates `q-033` through `q-072` to four large legal documents (10 each),
+`q-073` through `q-090` to six detailed procedures (3 each), `q-091` through
+`q-092` to `dang-ky-tam-tru`, and `q-093` through `q-100` to unanswerables.
+All appended cases are normalized synthetic retrieval queries with
+`email_body: null`; they are not email E2E fixtures.
 
 Keep the SPEC §5.1 distribution satisfied when adding cases — one `lexical`,
 one `semantic` and 2–3 `mixed` per document, plus the `unanswerable` block.
