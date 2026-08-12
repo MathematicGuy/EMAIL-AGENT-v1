@@ -28,7 +28,7 @@ Audit and update all documentation in `docs/evaluations/email-rag/` (`EMAIL-RAG-
   - Launch Subagent 1 (Ground-Truth Code & Evaluation Analyst).
   - Extract exact factual details: retriever classes, fallback logic, CLI arguments, tenant ACL filtering, Qdrant settings, ingestion behavior, evaluation metrics, test cases, and open vs closed gaps.
   - Produce a structured Ground-Truth Fact Sheet with `file:line` references.
-- **Status:** pending
+- **Status:** done
 
 ### Task 2: Subagent 2 — Audit & Update `EMAIL-RAG-STATUS.md`
 - **Files:** `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`
@@ -37,7 +37,7 @@ Audit and update all documentation in `docs/evaluations/email-rag/` (`EMAIL-RAG-
   - Launch Subagent 2 (`EMAIL-RAG-STATUS.md` Auditor).
   - Compare `EMAIL-RAG-STATUS.md` sections (Executive summary, Implemented architecture table, Runtime behavior, Security, Known gaps, Operational checks, Local knowledge ingestion) against Subagent 1's Fact Sheet.
   - Make minimal targeted edits with source citations (`file:line`). Mark unclear items as `AMBIGUOUS`.
-- **Status:** pending
+- **Status:** done (verified 100% accurate & unchanged)
 
 ### Task 3: Subagent 3 — Audit & Update `RAG-EVALUATION-STATUS.md`
 - **Files:** `docs/evaluations/email-rag/RAG-EVALUATION-STATUS.md`
@@ -46,7 +46,7 @@ Audit and update all documentation in `docs/evaluations/email-rag/` (`EMAIL-RAG-
   - Launch Subagent 3 (`RAG-EVALUATION-STATUS.md` Auditor).
   - Compare `RAG-EVALUATION-STATUS.md` sections (Coverage map, Plain English summary, Layer 1-3 evaluations, baseline results, summary table, open vs closed gaps) against Subagent 1's Fact Sheet.
   - Make minimal targeted edits with source citations (`file:line`). Mark unclear items as `AMBIGUOUS`.
-- **Status:** pending
+- **Status:** done (updated committed corpus count to 17 docs, golden set to 100 cases, unanswerable queries to 12 cases)
 
 ### Task 4: Demo-Validation & Synthesis Report
 - **Files:** `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`, `docs/evaluations/email-rag/RAG-EVALUATION-STATUS.md`
@@ -55,4 +55,4 @@ Audit and update all documentation in `docs/evaluations/email-rag/` (`EMAIL-RAG-
   - Verify that all updated markdown documents pass formatting and syntax checks.
   - Run full test suite and linter to confirm zero regressions.
   - Synthesize findings into a final CHANGED / UNCHANGED / AMBIGUOUS audit report.
-- **Status:** pending
+- **Status:** done
