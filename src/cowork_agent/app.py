@@ -189,9 +189,16 @@ def _chat_controller_factory(
 
 def create_app() -> FastAPI:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_file = os.getenv("LOG_FILE", ".data/app.log")
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
         force=True,
     )
     logging.getLogger("cowork_agent").setLevel(logging.INFO)
@@ -375,8 +382,13 @@ def create_app() -> FastAPI:
     app.include_router(create_chat_router())
 
     @app.get("/health")
+    @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/conversations")
+    async def legacy_list_conversations() -> dict[str, list[object]]:
+        return {"items": []}
 
     @app.get("/v1/mail-todo/oauth/gmail/connect")
     async def connect_gmail(request: Request) -> RedirectResponse:

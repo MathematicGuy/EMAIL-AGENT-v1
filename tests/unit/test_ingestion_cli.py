@@ -6,8 +6,9 @@ from cowork_agent import ingestion_cli
 from cowork_agent.integrations.knowledge_ingestion.models import IngestionOutcome
 
 
-def test_cli_rejects_nested_source_and_output(tmp_path: Path, capsys) -> None:
+def test_cli_rejects_nested_source_and_output(tmp_path: Path, monkeypatch, capsys) -> None:
     """Accepting nested paths lets the CLI rediscover its own Markdown output."""
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
     source = tmp_path / "source"
     source.mkdir()
 

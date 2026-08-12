@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from langfuse import observe
+
 from cowork_agent.domain.chat_contracts import MemoryType
 
 from .memory_observability import (
@@ -69,6 +71,7 @@ class MemoryPurgeCoordinator:
         self._episodes = episodes
         self._sink = sink
 
+    @observe(name="chat_retention_purge_expired")
     async def purge_expired(self, now: datetime) -> MemoryPurgeReport:
         if now.tzinfo is None or now.utcoffset() != timedelta(0):
             raise ValueError("now must be timezone-aware UTC")

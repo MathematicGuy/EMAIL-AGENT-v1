@@ -10,6 +10,7 @@ from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langfuse import observe
 from pydantic import BaseModel, ConfigDict
 
 from cowork_agent.domain.chat_contracts import (
@@ -83,6 +84,7 @@ def create_chat_router() -> APIRouter:
         return {"session_id": scope.session_id, "feature": scope.feature}
 
     @router.post("/sessions/{session_id}/messages")
+    @observe(name="api_chat_create_message")
     async def create_message(
         session_id: str,
         payload: _ChatMessagePayload,
