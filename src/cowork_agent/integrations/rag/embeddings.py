@@ -8,7 +8,7 @@ never logged.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Literal, Protocol
 
 from google import genai
 from google.genai import errors, types
@@ -22,11 +22,18 @@ from cowork_agent.integrations.llm.providers.gemini import (
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 _MAX_BATCH_CONTENTS = 100
 
+EmbeddingTask = Literal["retrieval.query", "retrieval.passage"]
+
 
 class EmbeddingPort(Protocol):
     """Embeds texts into fixed-size vector tuples."""
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]: ...
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task: EmbeddingTask = "retrieval.query",
+    ) -> tuple[tuple[float, ...], ...]: ...
 
 
 class GeminiEmbeddingAdapter:
@@ -46,7 +53,13 @@ class GeminiEmbeddingAdapter:
         self._model = model
         self._client = client
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task: EmbeddingTask = "retrieval.query",
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         if not texts:
             return ()
         embeddings: list[tuple[float, ...]] = []

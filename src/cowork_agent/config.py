@@ -320,6 +320,36 @@ class GeminiSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class JinaEmbeddingSettings:
+    """Jina embedding API configuration for the RAG retrieval path."""
+
+    api_key: str = field(repr=False)
+    model: str
+    dimensions: int
+    timeout_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "JinaEmbeddingSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        return cls(
+            api_key=_required_secret(environ, "JINA_API_KEY"),
+            model=_non_empty_value(
+                environ, "JINA_EMBEDDING_MODEL", "jina-embeddings-v5-omni-small"
+            ),
+            dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
+            timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GroqSettings:
     api_key: str = field(repr=False)
     model: str
