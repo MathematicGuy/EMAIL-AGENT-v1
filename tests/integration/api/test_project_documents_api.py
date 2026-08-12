@@ -66,22 +66,12 @@ class Storage:
         return "https://storage.example/download-token"
 
 
-class Queue:
-    def __init__(self) -> None:
-        self.document_ids: list[str] = []
-
-    async def enqueue(self, document_id: str) -> None:
-        self.document_ids.append(document_id)
-
-
 def test_project_document_api_authorizes_then_returns_only_signed_urls() -> None:
     async def scenario() -> None:
         app = FastAPI()
         app.include_router(create_project_router())
         app.state.project_repository = Projects()
         app.state.private_storage = Storage()
-        queue = Queue()
-        app.state.project_document_queue = queue
 
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
@@ -124,7 +114,6 @@ def test_project_document_api_authorizes_then_returns_only_signed_urls() -> None
         assert download.json()["download_url"] == "https://storage.example/download-token"
         assert completed.status_code == 202
         assert completed.json() == {"document_id": "doc-1", "status": "queued"}
-        assert queue.document_ids == ["doc-1"]
         assert foreign.status_code == 404
 
     asyncio.run(scenario())

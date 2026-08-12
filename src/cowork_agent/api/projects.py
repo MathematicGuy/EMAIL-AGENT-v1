@@ -43,10 +43,6 @@ class ProjectRepository(Protocol):
     ) -> DocumentIngestionJob | None: ...
 
 
-class DocumentQueue(Protocol):
-    async def enqueue(self, document_id: str) -> None: ...
-
-
 class PrivateStorage(Protocol):
     async def create_signed_upload_url(self, object_key: str) -> str: ...
 
@@ -125,10 +121,6 @@ def create_project_router() -> APIRouter:
             raise HTTPException(
                 status_code=404, detail="Project document not available for ingestion"
             )
-        try:
-            await _document_queue(request).enqueue(document_id)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail="Document queue unavailable") from exc
         return {"document_id": document_id, "status": job.status}
 
     @router.get("/projects/{project_id}/documents/{document_id}/download")
@@ -180,13 +172,6 @@ def _storage(request: Request) -> PrivateStorage:
     if storage is None:
         raise HTTPException(status_code=503, detail="Private storage unavailable")
     return cast(PrivateStorage, storage)
-
-
-def _document_queue(request: Request) -> DocumentQueue:
-    queue = getattr(request.app.state, "project_document_queue", None)
-    if queue is None:
-        raise HTTPException(status_code=503, detail="Document queue unavailable")
-    return cast(DocumentQueue, queue)
 
 
 def _project_response(project: Project) -> dict[str, object]:

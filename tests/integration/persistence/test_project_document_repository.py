@@ -92,6 +92,7 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
             queued = await projects.mark_upload_completed(owner, default.id, document.id)
             assert queued is not None
             assert queued.status == "queued"
+            assert await projects.next_claimable_job() == document.id
             claimed = await projects.claim_job(document.id)
             assert claimed is not None
             assert claimed.id == document.id

@@ -293,6 +293,24 @@ class PostgresProjectRepository:
                     raise RuntimeError("document state changed while claiming ingestion job")
         return _document(row[:9] + ("extracting", row[10]))
 
+    async def next_claimable_job(self) -> str | None:
+        """Return one opaque queued job ID; `claim_job` remains the CAS authority."""
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT jobs.document_id
+                FROM document_ingestion_jobs AS jobs
+                JOIN project_documents AS documents ON documents.id = jobs.document_id
+                WHERE jobs.status IN ('queued', 'failed')
+                  AND documents.status = 'received'
+                  AND documents.expires_at > now()
+                ORDER BY jobs.available_at, jobs.created_at, jobs.id
+                LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+        return None if row is None else str(row[0])
+
     async def transition_document(
         self,
         document_id: str,
