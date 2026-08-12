@@ -1,11 +1,4 @@
-"""Separate worker process consuming the durable run queue (V1-H T5.2).
-
-Run as ``mail-todo-worker`` (requires ``DATABASE_URL`` and ``REDIS_URL``).
-The PostgreSQL CAS claim is the single-execution authority: this process
-may be restarted or run alongside peers without double-processing a run,
-and nothing is lost because undelivered/failed messages stay in the
-stream's pending list until claimed or dead-lettered.
-"""
+"""Separate worker process polling durable Supabase Postgres jobs."""
 
 import asyncio
 import logging
@@ -22,10 +15,8 @@ from cowork_agent.config import (
     GroqSettings,
     QdrantSettings,
     database_url,
-    redis_url,
 )
 from cowork_agent.features.email_action_plan.observability import (
-    LifecycleEventPublisher,
     LoggingTraceSink,
     dev_trace_sink_from_env,
 )
@@ -60,11 +51,9 @@ async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
     # check in main() must run even without them installed.
     from psycopg_pool import AsyncConnectionPool
-    from redis.asyncio import Redis as AsyncRedis
 
-    from cowork_agent.orchestration.project_document_queue import RedisProjectDocumentConsumer
+    from cowork_agent.orchestration.postgres_poller import CallableJobSource, PostgresPoller
     from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
-    from cowork_agent.orchestration.redis_queue import RedisRunConsumer
     from cowork_agent.persistence.migrate import apply_migrations
     from cowork_agent.persistence.repositories.identity import (
         PostgresMailboxConnectionRepository,
@@ -78,7 +67,6 @@ async def run_worker() -> None:
 
     pool = AsyncConnectionPool(database_url(), min_size=1, max_size=4, open=False)
     await pool.open(wait=True)
-    redis_client = AsyncRedis.from_url(redis_url(), decode_responses=True)
     storage_client: httpx.AsyncClient | None = None
     qdrant_client: AsyncQdrantClient | None = None
     try:
@@ -126,14 +114,8 @@ async def run_worker() -> None:
             ),
             completion_outbox=outbox,
         )
-        consumer = RedisRunConsumer(
-            redis_client,
-            runs,
-            digest_worker,
-            completion_outbox=outbox,
-            publisher=LifecycleEventPublisher(outbox, LoggingTraceSink()),
-        )
-        document_consumer = None
+        digest_poller = PostgresPoller(CallableJobSource(runs.next_claimable_run), digest_worker)
+        document_poller = None
         if provider == "gemini" and os.getenv("SUPABASE_URL", "").strip():
             from cowork_agent.config import SupabaseStorageSettings
             from cowork_agent.integrations.knowledge_ingestion.project_documents import (
@@ -160,22 +142,24 @@ async def run_worker() -> None:
                         GeminiEmbeddingAdapter(gemini_settings),
                     ),
                 )
-                document_consumer = RedisProjectDocumentConsumer(redis_client, document_worker)
+                document_poller = PostgresPoller(
+                    CallableJobSource(PostgresProjectRepository(pool).next_claimable_job),
+                    document_worker,
+                )
             else:
                 logger.warning(
-                    "Project document queue is disabled because Qdrant is not configured"
+                    "Project document polling is disabled because Qdrant is not configured"
                 )
-        logger.info("Worker ready; consuming durable queues")
-        if document_consumer is None:
-            await consumer.run_forever()
+        logger.info("Worker ready; polling durable Postgres jobs")
+        if document_poller is None:
+            await digest_poller.run_forever()
         else:
-            await asyncio.gather(consumer.run_forever(), document_consumer.run_forever())
+            await asyncio.gather(digest_poller.run_forever(), document_poller.run_forever())
     finally:
         if storage_client is not None:
             await storage_client.aclose()
         if qdrant_client is not None:
             await qdrant_client.close()
-        await redis_client.aclose()
         await pool.close()
 
 
@@ -188,8 +172,8 @@ def main() -> None:
         from asyncio import windows_events
 
         asyncio.set_event_loop_policy(windows_events.WindowsSelectorEventLoopPolicy())
-    if not database_url() or not redis_url():
-        raise SystemExit("mail-todo-worker requires DATABASE_URL and REDIS_URL")
+    if not database_url():
+        raise SystemExit("mail-todo-worker requires DATABASE_URL")
     asyncio.run(run_worker())
 
 

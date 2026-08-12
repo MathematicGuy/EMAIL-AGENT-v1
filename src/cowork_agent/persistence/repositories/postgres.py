@@ -129,6 +129,20 @@ class PostgresRunRepository:
             row = await cursor.fetchone()
         return None if row is None else _run_from_row(row)
 
+    async def next_claimable_run(self) -> str | None:
+        """One queued run ID for polling; ``claim`` remains the CAS authority."""
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id FROM digest_runs
+                WHERE status = 'queued'
+                ORDER BY created_at, id
+                LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+        return None if row is None else str(row[0])
+
     async def save(self, run: DigestRun) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
