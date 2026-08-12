@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
+from cowork_agent.integrations.key_rotation import APIKeyRotator
+
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 
@@ -347,6 +349,51 @@ class JinaEmbeddingSettings:
             dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
             timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RerankerSettings:
+    """Configuration for RerankerAdapter with key rotation."""
+
+    model: str
+    rotator: APIKeyRotator
+    timeout_seconds: float = 10.0
+    rotate_on_rate_limit: bool = True
+    max_attempts: int = 3
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "RerankerSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+
+        model = environ.get("RERANKER_MODEL", "rerank-v4.0-fast").strip() or "rerank-v4.0-fast"
+        model_lower = model.lower()
+        if model_lower.startswith("rerank-") or "cohere" in model_lower:
+            prefix = "COHERE_API_KEY"
+            provider_name = "Cohere"
+        else:
+            prefix = "JINA_API_KEY"
+            provider_name = "Jina"
+
+        rotator = APIKeyRotator.from_env(prefix, environ=environ, provider_name=provider_name)
+        rotate_on_rate_limit = _boolean(environ, "RERANKER_ROTATE_ON_RATE_LIMIT", True)
+        timeout_seconds = float(_positive_int(environ, "RERANKER_TIMEOUT_SECONDS", 10))
+
+        return cls(
+            model=model,
+            rotator=rotator,
+            timeout_seconds=timeout_seconds,
+            rotate_on_rate_limit=rotate_on_rate_limit,
+            max_attempts=len(rotator.keys),
+        )
+
 
 
 @dataclass(frozen=True, slots=True)

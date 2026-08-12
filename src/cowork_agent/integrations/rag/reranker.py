@@ -12,25 +12,15 @@ from typing import Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from cowork_agent.config import RerankerSettings
 from cowork_agent.domain.target_contracts import SemanticChunk
-from cowork_agent.integrations.key_rotation import APIKeyRotator, mask_api_key
+from cowork_agent.integrations.key_rotation import mask_api_key
 
 COHERE_RERANK_ENDPOINT = "https://api.cohere.com/v2/rerank"
 JINA_RERANK_ENDPOINT = "https://api.jina.ai/v1/rerank"
 _USER_AGENT = "cowork-agent/1.0"
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class RerankerSettings:
-    """Configuration settings for RerankerAdapter with key rotation."""
-
-    model: str
-    rotator: APIKeyRotator
-    timeout_seconds: float = 10.0
-    rotate_on_rate_limit: bool = True
-    max_attempts: int = 3
 
 
 class RerankerTransport(Protocol):

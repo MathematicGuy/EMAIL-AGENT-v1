@@ -10,21 +10,20 @@ digest runs.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings, RerankerSettings
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.rag.embeddings import EmbeddingPort, JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
-from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
+from cowork_agent.integrations.rag.reranker import RerankerAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ async def build_semantic_memory(
         memory = HybridSemanticMemory(
             documents,
             JinaEmbeddingAdapter(settings),
-            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
+            reranker=RerankerAdapter(settings=RerankerSettings.from_env()),
             query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
             enable_mmr=True,
             min_rerank_score=0.30,

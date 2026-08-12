@@ -1,6 +1,11 @@
 import pytest
 
-from cowork_agent.config import QdrantSettings, SessionSettings, SupabaseStorageSettings
+from cowork_agent.config import (
+    QdrantSettings,
+    RerankerSettings,
+    SessionSettings,
+    SupabaseStorageSettings,
+)
 
 CLOUD_URL = "https://example.us-west-1-0.aws.cloud.qdrant.io"
 
@@ -48,7 +53,7 @@ def test_qdrant_settings_are_disabled_without_a_url() -> None:
     assert settings.enabled is False
     assert settings.url == ""
     assert settings.collection_name == "company_knowledge"
-    assert settings.vector_size == 768
+    assert settings.vector_size == 1024
 
 
 def test_qdrant_settings_load_cloud_configuration_from_env() -> None:
@@ -101,3 +106,34 @@ def test_qdrant_settings_never_repr_the_api_key() -> None:
 def test_qdrant_settings_reject_a_non_positive_vector_size(value: str) -> None:
     with pytest.raises(ValueError, match="must be positive"):
         QdrantSettings.from_env({"QDRANT_VECTOR_SIZE": value}, load_env_file=False)
+
+
+def test_reranker_settings_cohere_model_from_env() -> None:
+    settings = RerankerSettings.from_env(
+        {
+            "RERANKER_MODEL": "rerank-v4.0-fast",
+            "COHERE_API_KEY": "cohere-key-1",
+        },
+        load_env_file=False,
+    )
+
+    assert settings.model == "rerank-v4.0-fast"
+    assert settings.rotator.provider_name == "Cohere"
+    assert settings.rotator.keys == ("cohere-key-1",)
+    assert settings.timeout_seconds == 10.0
+    assert settings.rotate_on_rate_limit is True
+
+
+def test_reranker_settings_jina_model_from_env() -> None:
+    settings = RerankerSettings.from_env(
+        {
+            "RERANKER_MODEL": "jina-reranker-v2",
+            "JINA_API_KEY": "jina-key-1",
+        },
+        load_env_file=False,
+    )
+
+    assert settings.model == "jina-reranker-v2"
+    assert settings.rotator.provider_name == "Jina"
+    assert settings.rotator.keys == ("jina-key-1",)
+
