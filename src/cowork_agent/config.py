@@ -24,6 +24,35 @@ def redis_url(environ: Mapping[str, str] | None = None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionSettings:
+    """Opaque FastAPI session-cookie policy."""
+
+    session_ttl_seconds: int
+    cookie_name: str
+    cookie_secure: bool
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "SessionSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        cookie_name = environ.get("APP_SESSION_COOKIE_NAME", "cowork_session").strip()
+        if not cookie_name:
+            raise ValueError("APP_SESSION_COOKIE_NAME must not be empty")
+        return cls(
+            session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
+            cookie_name=cookie_name,
+            cookie_secure=_boolean(environ, "APP_SESSION_COOKIE_SECURE", True),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeIngestionSettings:
     """Configuration for the administrator-operated knowledge ingestion CLI."""
 
