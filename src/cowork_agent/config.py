@@ -24,6 +24,32 @@ def redis_url(environ: Mapping[str, str] | None = None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class SupabaseStorageSettings:
+    """Server-only private Supabase Storage configuration."""
+
+    url: str
+    secret_key: str = field(repr=False)
+    bucket: str = "project-documents"
+
+    @classmethod
+    def from_env(
+        cls, environ: Mapping[str, str] | None = None, *, load_env_file: bool = True
+    ) -> "SupabaseStorageSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        url = environ.get("SUPABASE_URL", "").strip().rstrip("/")
+        if not url.startswith("https://"):
+            raise ValueError("SUPABASE_URL must use HTTPS")
+        return cls(
+            url=url,
+            secret_key=_required_secret(environ, "SUPABASE_SECRET_KEY"),
+            bucket=_non_empty_value(environ, "SUPABASE_STORAGE_BUCKET", "project-documents"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SessionSettings:
     """Opaque FastAPI session-cookie policy."""
 
