@@ -25,7 +25,6 @@ from cowork_agent.config import (
     SessionSettings,
     SupabaseStorageSettings,
     database_url,
-    redis_url,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
@@ -52,8 +51,6 @@ from cowork_agent.features.ai_chat.ports import (
 )
 from cowork_agent.features.ai_chat.session_buffer import (
     InMemoryChatSessionBuffer,
-    RedisChatSessionBuffer,
-    RedisClient,
 )
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
@@ -203,6 +200,16 @@ def _chat_controller_factory(
     return factory
 
 
+def create_chat_session_buffer(
+    settings: ChatMemorySettings, *, durable: bool
+) -> InMemoryChatSessionBuffer:
+    """Keep bounded working turns local; durability belongs to Postgres metadata."""
+    del durable
+    return InMemoryChatSessionBuffer(
+        max_turns=settings.max_turns,
+        ttl_seconds=settings.ttl_seconds,
+    )
+
 
 def create_app() -> FastAPI:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -325,27 +332,9 @@ def create_app() -> FastAPI:
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = chat_session_registry
-            queue_url = redis_url()
-            if app.state.pg_pool is not None:
-                if not queue_url:
-                    raise RuntimeError("DATABASE_URL requires REDIS_URL for durable chat memory")
-                from redis import Redis
-
-                chat_redis_client = cast(
-                    RedisClient, Redis.from_url(queue_url, decode_responses=True)
-                )
-                app.state.chat_redis_client = chat_redis_client
-                app.state.chat_session_buffer = RedisChatSessionBuffer(
-                    chat_redis_client,
-                    max_turns=chat_memory_settings.max_turns,
-                    ttl_seconds=chat_memory_settings.ttl_seconds,
-                )
-            else:
-                app.state.chat_redis_client = None
-                app.state.chat_session_buffer = InMemoryChatSessionBuffer(
-                    max_turns=chat_memory_settings.max_turns,
-                    ttl_seconds=chat_memory_settings.ttl_seconds,
-                )
+            app.state.chat_session_buffer = create_chat_session_buffer(
+                chat_memory_settings, durable=app.state.pg_pool is not None
+            )
             app.state.memory_metrics = MemoryOperationMetrics()
             app.state.memory_operation_sink = LoggingMemoryOperationSink(
                 metrics=app.state.memory_metrics
@@ -361,27 +350,8 @@ def create_app() -> FastAPI:
             )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
-            if queue_url:
-                # V1-H T5.2: durable queue dispatch replaces BackgroundTasks.
-                # The durable claim lives in PostgreSQL, so the queue
-                # requires the PG repositories.
-                if app.state.pg_pool is None:
-                    raise RuntimeError("REDIS_URL requires DATABASE_URL")
-                from redis.asyncio import Redis as AsyncRedis
-
-                from cowork_agent.orchestration.project_document_queue import (
-                    RedisProjectDocumentQueue,
-                )
-                from cowork_agent.orchestration.redis_queue import RedisRunQueue
-
-                redis_client = AsyncRedis.from_url(queue_url, decode_responses=True)
-                app.state.redis_client = redis_client
-                app.state.run_queue = RedisRunQueue(redis_client)
-                app.state.project_document_queue = RedisProjectDocumentQueue(redis_client)
-            else:
-                app.state.redis_client = None
-                app.state.run_queue = None
-                app.state.project_document_queue = None
+            app.state.run_queue = None
+            app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
@@ -448,14 +418,6 @@ def create_app() -> FastAPI:
         pg_pool = getattr(app.state, "pg_pool", None)
         if pg_pool is not None:
             await pg_pool.close()
-        redis_client = getattr(app.state, "redis_client", None)
-        if redis_client is not None:
-            await redis_client.aclose()
-        closing_chat_redis_client = cast(
-            RedisClient | None, getattr(app.state, "chat_redis_client", None)
-        )
-        if closing_chat_redis_client is not None:
-            closing_chat_redis_client.close()
         private_storage_client = getattr(app.state, "private_storage_client", None)
         if private_storage_client is not None:
             await private_storage_client.aclose()
@@ -987,7 +949,7 @@ def main() -> None:
     # kill the process at startup over a lowercase env var.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     loop = "auto"
-    if (database_url() or redis_url()) and sys.platform == "win32":
+    if database_url() and sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop. uvicorn builds
         # the loop from its own loop_factory, so setting the event loop *policy*
         # here has no effect — the loop has to be named in the config instead.

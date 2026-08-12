@@ -36,9 +36,6 @@ gui = [
 postgres = [
   "psycopg[binary,pool]>=3.2,<4",
 ]
-redis = [
-  "redis>=5,<7",
-]
 
 [project.scripts]
 mail-todo-api = "cowork_agent.app:main"
