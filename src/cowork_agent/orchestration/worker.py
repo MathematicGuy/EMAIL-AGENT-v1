@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 from cowork_agent.config import (
     FaucetSettings,
@@ -137,7 +138,19 @@ async def run_worker() -> None:
 def main() -> None:
     # See app.main(): INFO records are dropped without a root handler, and the
     # trace sink plus lifecycle publication are INFO-only.
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_file = os.getenv("LOG_FILE", ".data/worker.log")
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
     if sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop.
         from asyncio import windows_events
