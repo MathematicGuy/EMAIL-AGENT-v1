@@ -369,14 +369,19 @@ def create_app() -> FastAPI:
                     raise RuntimeError("REDIS_URL requires DATABASE_URL")
                 from redis.asyncio import Redis as AsyncRedis
 
+                from cowork_agent.orchestration.project_document_queue import (
+                    RedisProjectDocumentQueue,
+                )
                 from cowork_agent.orchestration.redis_queue import RedisRunQueue
 
                 redis_client = AsyncRedis.from_url(queue_url, decode_responses=True)
                 app.state.redis_client = redis_client
                 app.state.run_queue = RedisRunQueue(redis_client)
+                app.state.project_document_queue = RedisProjectDocumentQueue(redis_client)
             else:
                 app.state.redis_client = None
                 app.state.run_queue = None
+                app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
