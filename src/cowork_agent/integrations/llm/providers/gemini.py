@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from google import genai
 from google.genai import errors, types
+from langfuse import observe
 
 from cowork_agent.config import GeminiSettings
 from cowork_agent.domain import Priority
@@ -169,6 +170,7 @@ class GeminiActionPlanGenerator:
         """Create the production adapter from `.env` and process environment."""
         return cls(GeminiSettings.from_env())
 
+    @observe(as_type="generation", name="gemini_action_plan_generator")
     async def generate(
         self,
         *,
@@ -562,6 +564,7 @@ class GeminiRouteClassifier:
         """Create the production adapter from `.env` and process environment."""
         return cls(GeminiSettings.from_env())
 
+    @observe(as_type="generation", name="gemini_route_classifier")
     async def classify(
         self,
         user_timezone: str,

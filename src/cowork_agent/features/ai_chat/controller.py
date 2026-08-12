@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from langfuse import observe
+
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -162,6 +164,7 @@ class ChatController:
         self._task_episodes: dict[str, TaskEpisode] = {}
         self._turn_lock = asyncio.Lock()
 
+    @observe(name="chat_stream_message")
     async def stream_message(
         self,
         request: ChatMessageRequest,

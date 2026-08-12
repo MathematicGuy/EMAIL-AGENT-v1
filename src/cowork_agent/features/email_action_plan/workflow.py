@@ -4,6 +4,8 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import replace
+
+from langfuse import observe
 from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import uuid4
@@ -159,6 +161,7 @@ class DigestWorker:
         self._dev_trace = dev_trace
         self._completion_outbox = completion_outbox
 
+    @observe(name="execute_digest_run")
     async def execute(
         self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
     ) -> DigestRun | None:
@@ -413,6 +416,7 @@ class DigestWorker:
                 type(exc).__name__,
             )
 
+    @observe(name="fetch_threads")
     async def _fetch_threads(
         self, run: DigestRun
     ) -> tuple[list[tuple[EphemeralEmailEnvelope, ...]], int]:

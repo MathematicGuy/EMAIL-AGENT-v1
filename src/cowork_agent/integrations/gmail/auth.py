@@ -9,6 +9,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections.abc import Callable
 
 from cryptography.fernet import Fernet, InvalidToken
+from langfuse import observe
 
 
 class TokenCipher:
@@ -56,6 +57,7 @@ class OAuthStateManager:
         signature = hmac.new(self._secret, encoded, hashlib.sha256).digest()
         return f"{encoded.decode()}.{urlsafe_b64encode(signature).rstrip(b'=').decode()}"
 
+    @observe(name="gmail_oauth_consume_state")
     async def consume(self, state: str) -> str | None:
         """Validate signature, expiry and single use, then return the pending context."""
         try:
