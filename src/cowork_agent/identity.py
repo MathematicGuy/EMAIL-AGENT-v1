@@ -7,6 +7,8 @@ Caller-provided identifiers are never used for authorization decisions.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Protocol
 
 from cowork_agent.domain import MailboxConnection
 
@@ -15,6 +17,12 @@ LOCAL_TENANT_ID: str = "local"
 
 class ConnectionNotOwnedError(LookupError):
     """The Verified Principal does not own the given Mailbox Connection."""
+
+
+class OpaqueSessionResolver(Protocol):
+    async def resolve(
+        self, token: str, *, now: datetime
+    ) -> "VerifiedPrincipal | None": ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,5 +47,17 @@ def ensure_principal_owns_connection(
     principal: VerifiedPrincipal, connection: MailboxConnection
 ) -> None:
     """Central ownership guard; every ownership decision goes through this function."""
-    if principal.user_id != connection.email_address:
+    if principal.user_id != connection.user_id:
         raise ConnectionNotOwnedError(connection.id)
+
+
+async def principal_from_opaque_session(
+    token: str | None,
+    sessions: OpaqueSessionResolver,
+    *,
+    now: datetime | None = None,
+) -> VerifiedPrincipal | None:
+    """Resolve an opaque cookie token; absent tokens are unauthenticated."""
+    if not token:
+        return None
+    return await sessions.resolve(token, now=now or datetime.now(UTC))
