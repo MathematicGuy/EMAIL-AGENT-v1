@@ -15,10 +15,10 @@ formatting-only edits or unverified claims.
 
 | Field | Current value |
 |---|---|
-| Updated | 2026-08-11 (Asia/Bangkok) |
-| Branch / implementation baseline | `dev` includes `0d0bc22` (`feat(chat): complete memory-aware chat runtime`); M3.1-M3.4b-C, V2-M4, and V2-M5 are committed and accepted; no history rewrite without explicit authorization |
-| Product frontier | PRD-v2 Multi-Turn AI Chat Memory |
-| Active milestone | **PRD-v2 complete — V2-M6 DONE (fresh final review verdict `ship` 2026-08-11)**; next frontier is the separate DEMO frontend workstream |
+| Updated | 2026-08-12 (Asia/Bangkok) |
+| Branch / implementation baseline | `feature/demo-fe-chat` includes `fd86a8d` (Increment B contracts and memory UI); PRD-v2 M3.1 through V2-M6 are accepted; no history rewrite without explicit authorization |
+| Product frontier | PRD-v2 + DEMO closeout |
+| Active milestone | **PRD-v2 complete — V2-M6 DONE; DEMO Increment B implemented and live-verified.** Post-hardening closeout verification is active. Remaining environmental limitation: Knowledge `Ready` / inline citations are not browser-verified while Gemini embedding quota keeps retrieval degraded. |
 | PRD-v2 progress | All milestones M3.4a through V2-M6 accepted; AC-01..AC-18 DONE |
 | Tech stack authority | PostgreSQL (authoritative durable store); Qdrant (rebuildable enterprise RAG index) |
 
@@ -53,8 +53,8 @@ Non-negotiable:
 - SQLite is explicitly local-only / dev baseline; do not rely on it as a production store.
 - Domain and feature code remain framework-free (`domain ← features ← integrations/orchestration/persistence ← app`).
 
-Current active worktree state:
-- Branch `dev` includes implementation commit `0d0bc22`. The accepted M3.4b-B whitespace-ID correction and the complete M3.4b-C/V2-M4/V2-M5 runtime are committed. Do not rewrite or reorder accepted history without explicit authorization.
+Accepted backend snapshot (historical baseline):
+- Branch `dev` includes implementation commit `0d0bc22`. The accepted M3.4b-B whitespace-ID correction and the complete M3.4b-C/V2-M4/V2-M5 runtime are committed. The current DEMO worktree is identified in the dashboard header; do not rewrite or reorder accepted history without explicit authorization.
 - The cumulative corrected final verdict is `ship`. Parent proof on the accepted snapshot is 186 impacted AI Chat/runtime tests and 20 live PostgreSQL persistence tests with zero skips, plus scoped Ruff, mypy, and diff-check green.
 - The merged repository-wide suite currently cannot collect because unrelated knowledge-ingestion modules lack `docx` and two unrelated test modules share `test_query_guard`; milestone verification stays scoped rather than changing those components.
 - Docker Desktop and `cowork-pg` were available for the final live persistence gate. Preflight them before a future database gate; do not treat a connection timeout or temp ACL cascade as a code regression.
@@ -68,7 +68,7 @@ Current active worktree state:
 | Tech stack & storage authority | `docs/references/qdrant-postgresql-techstack-evaluation.md` |
 | Product behavior / acceptance | `docs/PRD-v2-Memory-Extension.md` relevant FR + §16–17 |
 | Component ownership, APIs, SSE | `docs/architectures/TARGET-ARCHITECTURE.md` accepted ADR-004 target in §20 |
-| Exact DTO contracts / sequencing | `docs/master-comparison.md` active §6 contracts and accepted ADR-004 V2 milestone group |
+| Exact DTO contracts / sequencing | `docs/architectures/master-comparison.md` active §6 contracts and accepted ADR-004 V2 milestone group |
 
 Conflict precedence: `AGENTS.md` > PRD-v2 > Target Architecture > Master Comparison > Dashboard/Trackers.
 
@@ -83,7 +83,7 @@ Status legend: `NEXT` = ready now, `BLOCKED` = dependency not met, `ACTIVE` = im
 | V2-M3 Chat-native episodes | **DONE** | 100 | M3.1-M3.4b-C accepted: PostgreSQL durability, fail-closed producer/lifecycle/deletion, and eligible runtime wiring through Gateway | V2-M1, V2-M2 | Corrected cumulative verdict `ship`; 186 impacted tests; live PostgreSQL 20 passed; scoped Ruff, mypy, and diff check clean |
 | V2-M4 Chat Controller + SSE | **DONE** | 100 | Verified-principal session/message APIs, configured reply adapters, typed SSE, explicit bounded proposals, and originating-session approve/complete/reject/delete controls | V2-M1–M3 | Explicit-policy, proposal, SSE citation, lifecycle, cancellation, idempotency, and retry paths included in the 186-test parent gate; final verdict `ship` |
 | V2-M5 Selective episodic + RAG retrieval | **DONE** | 100 | Selective bounded episodic + semantic reads, eligible-only model context, real company-evidence consumption, citation allowlisting, precedence, and graceful degradation | V2-M4 | Real semantic-adapter/provider seam, cross-session eligible episodes, company-evidence precedence, and outage behavior included in the 186-test parent gate; final verdict `ship` |
-| V2-M6 Evaluation + governance | **DONE** | 100 | Production metadata-only sink/metrics injected at runtime; env-driven retention applied with retry-safe expiry; explicit purge CLI; exact-scope deletion audit; backup/restore proof; paired evaluation runner with product-approved thresholds; AC-18 audit 6/6 PASS | V2-M5 core contracts | 224 unit + 41 live-DB/API tests green; launch gate exit 0 (Moderate-MVP thresholds, safety counters zero); AC-16 and AC-18 evidence recorded |
+| V2-M6 Evaluation + governance | **DONE** | 100 | Production metadata-only sink/metrics injected at runtime; env-driven retention applied with retry-safe expiry; explicit purge CLI; exact-scope deletion audit; backup/restore proof; paired evaluation runner with product-approved thresholds; AC-18 audit 6/6 PASS | V2-M5 core contracts | 224 unit + 41 live-DB/API tests green; launch gate exit 0 (Moderate-MVP thresholds, safety counters zero); AC-16 and AC-18 evidence recorded; final review accepted (`ship`) |
 
 ## 6. PRD-v2 acceptance dashboard
 
@@ -130,7 +130,11 @@ and dashboard update afterward.
    with deterministic precedence; corrected final verdict `ship`.
 6. **Governance completion — DONE:** V2-M6 closed AC-16 (runtime production sink/metrics) and
    AC-18 (2026-08-11 product audit 6/6 PASS); retention, purge CLI, deletion audit,
-   backup/restore, and the paired evaluation launch gate are evidenced; final delta review pending.
+   backup/restore, and the paired evaluation launch gate are evidenced; final review accepted (`ship`).
+7. **DEMO Increment B closeout — ACTIVE:** contracts and UI are implemented and
+   previously live-verified. The hardened exact-shape proposal boundary is approved and
+   API-reverified; complete the fresh browser proposal/lifecycle rerun. Keep the Knowledge
+   `Ready` / inline-citation case explicitly unverified while embedding quota is degraded.
 
 ## 8. Source and test map for next tasks
 
@@ -185,7 +189,7 @@ results live in Git and reusable process lessons live in the orchestration playb
 | Live PostgreSQL + Chat API | 41 passed, zero skips against running `cowork-pg` (`tests/integration/api/test_chat_api.py` + `tests/integration/persistence`), incl. deletion audit and backup/restore proof | Deletion non-retrievability, expiry-before-purge, exact-scope deletion, restore lifecycle/expiry evidence |
 | Launch gate | `scripts/run_paired_chat_evaluation.py --json` exit 0 with product-approved Moderate-MVP thresholds; all five hard safety counters zero; deltas 0.13/0.09/0.09, degradation 0.0 | AC-16/FR-17 evaluation evidence |
 | Governance audit | AC-18 audit 6/6 PASS with file:line citations; PRD-v1 digest path diff-empty since `ff614f0` | AC-18 evidence |
-| Static / hygiene | Scoped Ruff clean; `python -m mypy src` shows only the 5 pre-existing unrelated `docx_extractor` errors; `git diff --check` clean | Required for changed milestone paths |
+| Static / hygiene | Post-hardening closeout: scoped Ruff clean; `python -m mypy src` clean across 94 source files; scoped `git diff --check` clean | Required for changed milestone paths |
 | Broad regression | Unavailable on merged baseline because unrelated `docx` imports and duplicate `test_query_guard` module names fail collection | Do not broaden milestone scope to repair unrelated baseline |
 
 Evidence rule: a task report is a claim. Retain the exact command and output in the
@@ -195,10 +199,10 @@ a skipped database test.
 ## 12. End-of-session handoff template
 
 ```text
-ACTIVE MILESTONE / SLICE: V2-M6 governance (separate future delivery)
-STATUS AND PERCENT: V2-M3 DONE 100%; V2-M4 DONE 100%; V2-M5 DONE 100%
-COMMITS: dev includes accepted runtime commit 0d0bc22; no history rewrite without explicit authorization
-TESTS / LINT / TYPES: final impacted runtime 186 passed; live PostgreSQL 20 passed, zero skips; scoped Ruff, mypy, and diff check clean; broad suite blocked by unrelated collection errors
-AC EVIDENCE ADDED: production four-memory Gateway composition, configured labeled reply context, explicit bounded proposals, originating-session lifecycle, same-episode retry, selective eligible retrieval, real company-evidence precedence, and grounded citation allowlisting
-EXACT NEXT ACTION: start V2-M6 governance from the milestone-focused OS-temp handoff; do not replay V2-M3/V2-M4/V2-M5
+ACTIVE MILESTONE / SLICE: DEMO Increment B post-hardening closeout
+STATUS AND PERCENT: PRD-v2 V2-M1–V2-M6 DONE 100%; DEMO implemented and previously live-verified; fresh post-hardening browser rerun pending
+COMMITS: feature/demo-fe-chat includes fd86a8d; no history rewrite without explicit authorization
+TESTS / LINT / TYPES: retain the exact focused verification and live-runtime evidence in the task handoff
+AC EVIDENCE ADDED: exact-shape typed proposal boundary, persisted lifecycle transition, UI-safe payload, and prior Increment B browser evidence
+EXACT NEXT ACTION: run the fresh real-browser proposal/lifecycle flow; keep Knowledge Ready/inline citations explicitly unverified while embedding quota is degraded
 ```

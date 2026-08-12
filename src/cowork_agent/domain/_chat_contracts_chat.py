@@ -12,11 +12,97 @@ from ._chat_contracts_common import (
     MemoryCitationType,
     _as_enum,
     _as_mapping,
+    _as_sequence,
     _frozen_mapping,
+    _reject_raw_email_shaped_keys,
     _require_bounded_string,
     _require_string,
     _to_dict,
 )
+from ._chat_contracts_memory import (
+    MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
+    MAX_TASK_ACTION_PLAN_ITEMS,
+    MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
+    MAX_TASK_MISSING_INFORMATION_ITEMS,
+    MAX_TASK_RAG_CITATIONS,
+    MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
+    MAX_TASK_TITLE_LENGTH,
+    EpisodeCitation,
+)
+from .target_contracts import ValidationStatus
+
+_TASK_PROPOSAL_FIELDS = frozenset(
+    {
+        "episode_id",
+        "task_title",
+        "minimal_request_paraphrase",
+        "action_plan",
+        "missing_information",
+        "rag_citations",
+        "validation_status",
+        "retrieval_eligible",
+    }
+)
+
+
+def _validated_task_proposal(value: object) -> Mapping[str, object]:
+    proposal = _as_mapping(value, "proposal")
+    _reject_raw_email_shaped_keys(proposal)
+    if set(proposal) != _TASK_PROPOSAL_FIELDS:
+        raise ValueError("proposal must contain exactly the frontend-safe fields")
+
+    _require_string(proposal["episode_id"], "proposal.episode_id")
+    _require_bounded_string(
+        proposal["task_title"], "proposal.task_title", MAX_TASK_TITLE_LENGTH
+    )
+    _require_bounded_string(
+        proposal["minimal_request_paraphrase"],
+        "proposal.minimal_request_paraphrase",
+        MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
+    )
+
+    for field, max_items, max_item_length in (
+        (
+            "action_plan",
+            MAX_TASK_ACTION_PLAN_ITEMS,
+            MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
+        ),
+        (
+            "missing_information",
+            MAX_TASK_MISSING_INFORMATION_ITEMS,
+            MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
+        ),
+    ):
+        items = _as_sequence(proposal[field], f"proposal.{field}")
+        if len(items) > max_items:
+            raise ValueError(f"proposal.{field} must not contain more than {max_items} items")
+        for item in items:
+            _require_bounded_string(item, f"proposal.{field} item", max_item_length)
+
+    citations = _as_sequence(proposal["rag_citations"], "proposal.rag_citations")
+    if len(citations) > MAX_TASK_RAG_CITATIONS:
+        raise ValueError(
+            "proposal.rag_citations must not contain more than "
+            f"{MAX_TASK_RAG_CITATIONS} items"
+        )
+    for citation in citations:
+        EpisodeCitation.from_dict(_as_mapping(citation, "proposal.rag_citations item"))
+
+    validation_status = _as_enum(
+        proposal["validation_status"], ValidationStatus, "proposal.validation_status"
+    )
+    retrieval_eligible = proposal["retrieval_eligible"]
+    if not isinstance(retrieval_eligible, bool):
+        raise TypeError("proposal.retrieval_eligible must be a boolean")
+    expected_eligibility = {
+        ValidationStatus.SYSTEM_GENERATED: False,
+        ValidationStatus.USER_APPROVED: True,
+        ValidationStatus.COMPLETED: True,
+        ValidationStatus.REJECTED: False,
+    }[validation_status]
+    if retrieval_eligible != expected_eligibility:
+        raise ValueError("proposal.retrieval_eligible must match validation_status")
+    return _frozen_mapping(proposal, "proposal")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,9 +158,7 @@ class ChatMessageStreamEvent:
         _require_string(self.session_id, "session_id")
         _require_string(self.turn_id, "turn_id")
         if self.proposal is not None:
-            mapping = _as_mapping(self.proposal, "proposal")
-            _require_string(mapping.get("episode_id"), "proposal.episode_id")
-            _require_string(mapping.get("task_title"), "proposal.task_title")
+            object.__setattr__(self, "proposal", _validated_task_proposal(self.proposal))
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -145,7 +229,7 @@ class ChatMessageStreamEvent:
             session_id,
             turn_id,
             ChatEventType.TASK_PROPOSAL,
-            proposal=_frozen_mapping(proposal, "proposal"),
+            proposal=proposal,
         )
 
     @classmethod
@@ -212,9 +296,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         code=raw_code if isinstance(raw_code, str) else None,
         safe_message=raw_safe_message if isinstance(raw_safe_message, str) else None,
         proposal=(
-            _frozen_mapping(_as_mapping(raw_proposal, "proposal"), "proposal")
-            if raw_proposal is not None
-            else None
+            _as_mapping(raw_proposal, "proposal") if raw_proposal is not None else None
         ),
     )
 

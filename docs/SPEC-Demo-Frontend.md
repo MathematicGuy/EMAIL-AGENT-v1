@@ -2,12 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Document status | Active implementation spec — full showcase implemented on `feature/demo-frontend-chat` |
+| Document status | Active implementation spec — full showcase implemented on `feature/demo-fe-chat` |
 | Version | 2.4 (Increment B contracts + UI implemented and live-verified) |
 | Date | 2026-08-12 |
 | Milestone position | Final showcase phase after `V2-M6` (master-comparison §7: `DEMO`) |
 | Readiness Status | **Backend: READY incl. Increment B read/profile/episode contracts and the typed `task_proposal` SSE event. Demo UI: §3.4 boundary and Increment B (preferences, in-chat task controls, episode insight, deletion, session history) BUILT and live-verified 2026-08-12; Memory screen unlocks dynamically and keeps the lock fallback for Increment-A-only or PG-less backends.** |
-| Depends on | PRD-v1 and V2-M1–V2-M5 (DONE 100%); V2-M6 (ACTIVE 55%); missing frontend-facing read/profile/proposal contracts listed in §3.3 and §7 |
+| Depends on | PRD-v1 and V2-M1–V2-M6 (DONE 100%); Increment B contracts and UI complete. Remaining environmental limitation: the Knowledge `Ready` / inline-citation browser path is unverified while Gemini embedding quota keeps this environment degraded. |
 | Governs | `src/cowork_agent/gui/` (demo surface) |
 | Vocabulary | All terms follow `CONTEXT.md` / `UBIQUITOUS_LANGUAGE.md` |
 
@@ -118,10 +118,7 @@ All six boundary clauses are implemented in `src/cowork_agent/gui/`:
 | 3. Declarative / episodic / semantic badges | `chat_client.MEMORY_BADGES`, `app.py::memory_badges_html` | **Built** — icon + localized text per kind, repeat count suffix; `source_id` is never rendered. |
 | 4. Terminal state and safe retry | `ChatTurnAccumulator.is_terminal`, `app.py::chat_error_text` | **Built** — a failed turn keeps its idempotency key in `chat_pending_turn`, and the retry control reuses it; transport faults become a synthetic `error` event, never an exception in the DOM. |
 | 5. Session ID as browser-session UI state only | `st.session_state` keys `chat_session_id` / `chat_messages` / `chat_pending_turn` | **Built** — no cookie, no localStorage, no file, no DB. |
-| 6. No unbuilt capability claimed | `app.py::_screen_memory`, `MISSING_INCREMENT_B_ENDPOINTS` | **Built** — the Memory screen renders a lock notice plus the literal list of missing §7 contracts and no mocked profile, episode, or task-card UI (AGENTS.md invariant 4). |
-
-Out of scope of the built slice, by the same boundary: reloadable history,
-profile editing, episode browsing, and the structured task-proposal card.
+| 6. Increment B capability boundary | `app.py::_screen_memory`, `chat_client` | **Built** — real profile, episode, history, and typed task-proposal contracts are used; the lock fallback appears only when the backend lacks the optional PostgreSQL-backed contracts. |
 
 Fail-closed parsing is the demo's only trust boundary against the stream:
 `chat_client.parse_stream_event` drops any frame whose `event_type` is unknown
@@ -320,16 +317,17 @@ verification lane (Chrome DevTools or Playwright).
 | Step | Result |
 |---|---|
 | 1-2 | Backend + GUI up; initial a11y tree, console, and network captured. Console: zero errors/warnings (only Streamlit-internal a11y "issue" notices). Browser network is Streamlit-only — all backend calls are server-side by design. |
-| 3 | Session created per browser session; two ordered turns streamed (`01-chat-two-turns.png`). Reload/history remains gated on the missing GET contracts, and a page reload correctly starts a fresh session (no client-side persistence). |
-| 4, 8 | Skipped — gated on the structured task-proposal contract (Increment B). |
+| 3 | Session created per browser session; two ordered turns streamed (`01-chat-two-turns.png`). Session history and text-only reload were later live-verified through the implemented GET contracts (evidence 15); no client-side durable persistence was introduced. |
+| 4, 8 | Increment B was later live-verified (evidence 12–15): one typed proposal card rendered without prose parsing, lifecycle controls updated persisted status/eligibility, and an approved episode was recalled on a relevant later turn. A 2026-08-12 post-hardening API rerun additionally reconfirmed the exact eight-field `task_proposal` payload and `system_generated/false` → `user_approved/true` transition without raw-email or tool-shaped fields. |
 | 5 | Company-knowledge turn returned no citation because retrieval had no evidence; badges never fabricated. Storage/DOM audit clean: localStorage holds only Streamlit telemetry keys (`ajs_anonymous_id`, `stMetricsConfig`), sessionStorage empty, cookies only Streamlit XSRF/telemetry, no prompt markers or raw email in DOM. |
 | 6 | Backend-down renders the actionable gate (`02-backend-down-gate.png`); a mid-stream failure renders the safe error with the idempotency retry control ("Thử lại dùng lại đúng khóa idempotency…"), never a stack trace. |
 | 7 | Knowledge screen live-verified in its DEGRADED branch: status "Suy giảm (chỉ BM25, không có embedding)", 6 documents with title/section/source, no-match query renders actionable empty state (`03-knowledge-degraded-no-match.png`). "Ready" status and inline citation chips NOT live-verified: Gemini embedding quota exhausted at startup composed `NullSemanticMemory` (environmental, not a code defect). |
 | 9 | 320/768/1024/1440 widths usable, sidebar collapses at 320, keyboard Tab reaches controls (`07`-`09` screenshots). |
 | 10 | This log + screenshots committed as evidence. |
 
-Screens: Memory lock lists exactly the §7 missing contracts (`04-memory-locked.png`);
-Connect shows the single readonly Gmail connection (`05-connect-screen.png`);
+Screens: Memory unlock, preferences, episode insight, deletion, and history are
+shown in evidence 12–15; the capability-probe lock fallback remains recorded in
+`04-memory-locked.png`. Connect shows the single readonly Gmail connection (`05-connect-screen.png`);
 Run audit renders its empty state (`06-run-audit-empty.png`).
 
 Chat-page fixes (2026-08-12, all scoped to `src/cowork_agent/gui/`, covered by
@@ -346,16 +344,14 @@ Chat-page fixes (2026-08-12, all scoped to `src/cowork_agent/gui/`, covered by
    `read_settings` now calls `load_dotenv(override=False)` so `.env` values
    such as `APP_HOST_URL` apply to the GUI process.
 
-The steps below remain the normative plan; gated steps (4, 8) stay open until
-the structured proposal contract lands.
+The steps below remain the normative regression plan.
 
 1. Start backend (`mail-todo-api`) and GUI (`python scripts/run_gui.py`).
 2. Open the UI in a real browser, snapshot the accessible tree, and check
    console plus network requests before interaction.
-3. Create a chat session and send two turns; verify ordered streaming in the
-   active browser session. Reload/history verification remains gated on the
-   missing GET contracts.
-4. After the structured proposal contract lands, explicitly request the same task or action plan twice from the originating
+3. Create a chat session and send two turns; verify ordered streaming and
+   reload/history in the active browser session.
+4. Explicitly request the same task or action plan twice from the originating
    session and verify one logical TaskEpisode and one in-thread proposal.
 5. Ask a chat question that needs company knowledge; verify citations appear
    only where evidence exists and raw email never appears in snapshots,
@@ -370,7 +366,7 @@ the structured proposal contract lands.
    with scores and reranker status. Run a query with no matching content
    and verify the empty-state message. Force a corpus-unavailable state
    (e.g. empty `data/extracted/` directory) and verify the degraded indicator.
-8. Increment B: after the structured proposal contract lands, approve an episode in chat, send a relevant next turn, and
+8. Increment B: approve an episode in chat, send a relevant next turn, and
    verify the eligible episode is recalled and labeled; reject another and
    verify it is excluded.
 9. Test keyboard navigation and resize to 320, 768, 1024, and 1440 pixels.
