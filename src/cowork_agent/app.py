@@ -188,7 +188,7 @@ def _chat_controller_factory(
 
 
 def create_app() -> FastAPI:
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
     log_file = os.getenv("LOG_FILE", ".data/app.log")
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if log_file:

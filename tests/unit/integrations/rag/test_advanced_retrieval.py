@@ -17,7 +17,10 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from cowork_agent.integrations.rag.mmr import mmr_diversify
-from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
+from cowork_agent.integrations.rag.query_transform import (
+    LLMQueryTransformer,
+    RuleBasedQueryTransformer,
+)
 
 
 class FakeEmbedder:
@@ -83,13 +86,29 @@ def test_mmr_diversify_filters_and_orders() -> None:
 
 
 def test_rule_based_query_transformer() -> None:
-    transformer = RuleBasedQueryTransformer(enable_hyde=True, num_expansions=3)
+    transformer = RuleBasedQueryTransformer(enable_hyde=True, num_expansions=3, num_hyde=3)
     res = asyncio.run(transformer.transform("xin nghỉ phép", knowledge_gaps=("quy trình",)))
 
     assert res.original_query == "xin nghỉ phép"
     assert "xin nghỉ phép quy trình" in res.expanded_queries
-    assert res.hypothetical_doc is not None
-    assert "Tài liệu quy định chi tiết" in res.hypothetical_doc
+    assert len(res.hypothetical_docs) == 3
+    assert "Tài liệu quy định chi tiết" in res.hypothetical_docs[0]
+
+
+def test_llm_query_transformer() -> None:
+    class DummyLLM:
+        async def generate(self, prompt: str) -> Any:
+            class Resp:
+                text = '["HyDE doc 1", "HyDE doc 2", "HyDE doc 3"]'
+
+            return Resp()
+
+    transformer = LLMQueryTransformer(DummyLLM(), enable_hyde=True, num_expansions=3, num_hyde=3)
+    res = asyncio.run(transformer.transform("xin nghỉ phép", knowledge_gaps=("quy trình",)))
+
+    assert res.original_query == "xin nghỉ phép"
+    assert len(res.expanded_queries) == 3
+    assert res.hypothetical_docs == ("HyDE doc 1", "HyDE doc 2", "HyDE doc 3")
 
 
 def test_hybrid_with_multi_query_and_mmr() -> None:

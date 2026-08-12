@@ -92,15 +92,16 @@ class HybridSemanticMemory:
         candidate_limit = _candidate_limit(final_top_k)
 
         try:
-            # Multi-Query Expansion & HyDE if transformer present
+            # Multi-Query Expansion & Multi-HyDE if transformer present
             queries_to_search = [query_str]
             if self._query_transformer is not None:
                 transformed = await self._query_transformer.transform(
                     request.query, request.knowledge_gaps
                 )
-                queries_to_search.extend(transformed.expanded_queries)
-                if transformed.hypothetical_doc:
-                    queries_to_search.append(transformed.hypothetical_doc)
+                for eq in transformed.expanded_queries:
+                    if eq != query_str and eq not in queries_to_search:
+                        queries_to_search.append(eq)
+                queries_to_search.extend(transformed.hypothetical_docs)
 
             all_dense_results: list[tuple[str, float]] = []
             all_lexical_results: list[tuple[str, float]] = []
