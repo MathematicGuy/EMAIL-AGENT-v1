@@ -32,21 +32,42 @@ logger = logging.getLogger(__name__)
 RAG_CORPUS_PATH = Path(__file__).resolve().parents[4] / "data" / "extracted"
 
 
+TURBOVEC_SNAPSHOT_PATH = Path(__file__).resolve().parents[4] / ".data" / "turbovec_index.tvim"
+
+
 async def build_semantic_memory(
     settings: GeminiSettings,
     qdrant_settings: QdrantSettings | None = None,
 ) -> SemanticMemoryPort:
-    """Best-effort RAG store with Qdrant and in-repo fallback."""
-    resolved = QdrantSettings.from_env() if qdrant_settings is None else qdrant_settings
-    if resolved.enabled:
+    """Best-effort RAG store with Qdrant, Turbovec, and in-repo fallback."""
+    provider = os.getenv("RAG_STORE_PROVIDER", "").lower()
+    if provider == "turbovec":
         try:
-            return await _build_qdrant_memory(resolved, GeminiEmbeddingAdapter(settings))
+            from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+
+            documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
+            turbovec_memory = TurbovecSemanticMemory(
+                documents,
+                GeminiEmbeddingAdapter(settings),
+                bit_width=4,
+                index_path=TURBOVEC_SNAPSHOT_PATH,
+            )
+            await turbovec_memory.build_index()
+            logger.info(
+                "Semantic memory backed by Turbovec 4-bit Index (%s)",
+                TURBOVEC_SNAPSHOT_PATH,
+            )
+            return turbovec_memory
         except Exception as exc:
             logger.warning(
-                "Qdrant memory setup failed (%s: %s); falling back to in-repo memory",
+                "Turbovec memory setup failed (%s: %s); falling back...",
                 type(exc).__name__,
                 exc,
             )
+
+    resolved = QdrantSettings.from_env() if qdrant_settings is None else qdrant_settings
+    if resolved.enabled:
+        return await _build_qdrant_memory(resolved, GeminiEmbeddingAdapter(settings))
 
     try:
         documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)

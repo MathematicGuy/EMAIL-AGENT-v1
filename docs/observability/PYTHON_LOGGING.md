@@ -1,9 +1,9 @@
-# Python Standard Logging Specification
+# Python Infrastructure Logging Specification
 
 | Field | Value |
 |---|---|
-| Tool Name | Python Standard Logging (`logging`) |
-| Category | Infrastructure Logging, Server Error Diagnostics & Local File Audit |
+| Component Name | Python Standard Logging (`logging`) |
+| Telemetry Domain | System Diagnostic Logging, Infrastructure Error Audit & Local Log Files |
 | Target Layer | `src/cowork_agent/app.py`, `src/cowork_agent/orchestration/`, `src/cowork_agent/integrations/` |
 | Specification Status | Approved Project Standard |
 
@@ -12,7 +12,7 @@
 ## 1. Purpose & Scope
 
 ### Primary Utility
-Python Standard `logging` chịu trách nhiệm ghi nhận các sự kiện hạ tầng server mà **Langfuse KHÔNG THỂ bắt được**, bao gồm:
+Python Standard `logging` chịu trách nhiệm ghi nhận các sự kiện hạ tầng server mà **Langfuse Tracing KHÔNG THỂ bắt được**, bao gồm:
 - **Server Boot & Lifespan:** Lỗi khởi động FastAPI (`app.py`), lỗi bind port `8000`, lỗi nạp biến môi trường `.env`.
 - **Infrastructure Crashes:** Lỗi sập kết nối SQLite DB (`runs.db`), lỗi ngắt kết nối Redis Queue (`redis_queue.py`), lỗi crash tiến trình Worker ngầm (`worker.py`).
 - **Transport & Network Retries:** Lỗi HTTP transport retries từ Google Gmail API (`provider.py`) hoặc Qdrant connection failure (`bootstrap.py`).
