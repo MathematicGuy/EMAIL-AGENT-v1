@@ -7,7 +7,7 @@ import json
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
