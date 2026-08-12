@@ -3,6 +3,7 @@
 import asyncio
 import os
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -97,6 +98,16 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
             assert claimed is not None
             assert claimed.id == document.id
             assert claimed.status == "extracting"
+            async with pool.connection() as connection:
+                await connection.execute(
+                    "UPDATE document_ingestion_jobs SET claimed_at = now() - interval '16 minutes'"
+                )
+            assert await projects.reset_stale_jobs(
+                claimed_before=datetime.now(UTC) - timedelta(minutes=15)
+            ) == 1
+            assert await projects.next_claimable_job() == document.id
+            claimed = await projects.claim_job(document.id)
+            assert claimed is not None
             assert await projects.transition_document(
                 document.id,
                 from_status="extracting",

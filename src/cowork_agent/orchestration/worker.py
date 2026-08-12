@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 
 import httpx
 from qdrant_client import AsyncQdrantClient
@@ -17,12 +18,14 @@ from cowork_agent.config import (
     database_url,
 )
 from cowork_agent.features.email_action_plan.observability import (
+    LifecycleEventPublisher,
     LoggingTraceSink,
     dev_trace_sink_from_env,
 )
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
+    RunRepository,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
@@ -43,9 +46,34 @@ from cowork_agent.integrations.llm.providers.groq import (
 )
 from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.orchestration.document_recovery import (
+    ProjectDocumentLeaseRepository,
+    recover_stale_document_jobs,
+)
+from cowork_agent.orchestration.recovery import sweep_stuck_runs
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 
 logger = logging.getLogger(__name__)
+
+
+class PostgresWorkerMaintenance:
+    """Recover expired claims and publish durable lifecycle events."""
+
+    def __init__(
+        self,
+        runs: RunRepository,
+        documents: ProjectDocumentLeaseRepository,
+        publisher: LifecycleEventPublisher,
+    ) -> None:
+        self._runs = runs
+        self._documents = documents
+        self._publisher = publisher
+
+    async def run(self) -> None:
+        now = datetime.now(UTC)
+        await sweep_stuck_runs(self._runs, now=now)
+        await recover_stale_document_jobs(self._documents, now=now)
+        await self._publisher.publish_pending()
 
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
@@ -114,7 +142,17 @@ async def run_worker() -> None:
             ),
             completion_outbox=outbox,
         )
-        digest_poller = PostgresPoller(CallableJobSource(runs.next_claimable_run), digest_worker)
+        projects = PostgresProjectRepository(pool)
+        maintenance = PostgresWorkerMaintenance(
+            runs,
+            projects,
+            LifecycleEventPublisher(outbox, LoggingTraceSink()),
+        )
+        digest_poller = PostgresPoller(
+            CallableJobSource(runs.next_claimable_run),
+            digest_worker,
+            maintenance=maintenance,
+        )
         document_poller = None
         if provider == "gemini" and os.getenv("SUPABASE_URL", "").strip():
             from cowork_agent.config import SupabaseStorageSettings
@@ -131,7 +169,7 @@ async def run_worker() -> None:
                 storage_client = httpx.AsyncClient(timeout=30.0)
                 qdrant_client = AsyncQdrantClient(url=qdrant.url, api_key=qdrant.api_key or None)
                 document_worker = ProjectDocumentIngestionWorker(
-                    PostgresProjectRepository(pool),
+                    projects,
                     SupabasePrivateStorage(
                         storage.url, storage.secret_key, storage.bucket, storage_client
                     ),
@@ -143,7 +181,7 @@ async def run_worker() -> None:
                     ),
                 )
                 document_poller = PostgresPoller(
-                    CallableJobSource(PostgresProjectRepository(pool).next_claimable_job),
+                    CallableJobSource(projects.next_claimable_job),
                     document_worker,
                 )
             else:

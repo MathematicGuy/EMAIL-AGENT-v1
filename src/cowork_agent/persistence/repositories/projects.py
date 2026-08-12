@@ -311,6 +311,35 @@ class PostgresProjectRepository:
             row = await cursor.fetchone()
         return None if row is None else str(row[0])
 
+    async def reset_stale_jobs(self, *, claimed_before: datetime) -> int:
+        """Release expired worker leases; vector upserts are deterministic on retry."""
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                cursor = await connection.execute(
+                    """
+                    UPDATE document_ingestion_jobs AS jobs
+                    SET status = 'queued', claimed_at = NULL, updated_at = now()
+                    FROM project_documents AS documents
+                    WHERE jobs.document_id = documents.id
+                      AND jobs.status IN ('extracting', 'indexing')
+                      AND jobs.claimed_at < %s
+                      AND documents.status IN ('extracting', 'indexing')
+                    RETURNING jobs.document_id
+                    """,
+                    (claimed_before,),
+                )
+                rows = await cursor.fetchall()
+                for row in rows:
+                    await connection.execute(
+                        """
+                        UPDATE project_documents
+                        SET status = 'received', error_code = NULL, updated_at = now()
+                        WHERE id = %s AND status IN ('extracting', 'indexing')
+                        """,
+                        (row[0],),
+                    )
+        return len(rows)
+
     async def transition_document(
         self,
         document_id: str,
