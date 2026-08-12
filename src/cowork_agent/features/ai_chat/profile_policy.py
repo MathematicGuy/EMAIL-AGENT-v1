@@ -2,14 +2,12 @@
 
 Long-term writes are authorized only for an explicit user configuration, an
 explicit "remember this" request, or a trusted administrative configuration —
-all of which carry ``explicit_user_config`` provenance. Anything derived from
-an email body or ordinary chat text arrives with tool/corpus provenance and is
-refused here, before any adapter is reached.
+all of which carry ``explicit_user_config`` provenance. All other provenance
+is refused here, before any adapter is reached.
 """
 
 from cowork_agent.domain.chat_contracts import (
     PROFILE_PREFERENCE_FIELDS,
-    ChatToolChoice,
     DeclarativeProfile,
     MemoryNamespace,
     MemoryProvenance,
@@ -39,8 +37,6 @@ def authorize_profile_write(
         raise ProfileWriteRejected("profile scope does not match the write namespace")
     if provenance.source_type is not MemoryProvenanceSource.EXPLICIT_USER_CONFIG:
         raise ProfileWriteRejected("long-term writes require explicit_user_config provenance")
-    if provenance.source_tool is ChatToolChoice.EMAIL:
-        raise ProfileWriteRejected("preferences may not be inferred from tool or email output")
     for name in PROFILE_PREFERENCE_FIELDS:
         value = getattr(profile, name)
         if value is not None and len(value) > MAX_PREFERENCE_LENGTH:

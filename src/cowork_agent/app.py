@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, UTC
 from pathlib import Path
@@ -16,6 +16,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from cowork_agent.config import (
+    ChatMemorySettings,
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
@@ -24,11 +25,28 @@ from cowork_agent.config import (
     redis_url,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
+from cowork_agent.domain.chat_contracts import ChatMemoryScope
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
     SemanticRetrievalRequest,
 )
+from cowork_agent.features.ai_chat.controller import (
+    ChatController,
+    InMemoryChatSessionRegistry,
+    UnavailableChatReply,
+)
+from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
+from cowork_agent.features.ai_chat.memory_observability import (
+    LoggingMemoryOperationSink,
+    MemoryOperationMetrics,
+)
+from cowork_agent.features.ai_chat.ports import (
+    ChatReplyPort,
+    DeclarativeMemoryPort,
+    EpisodicMemoryPort,
+)
+from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -63,6 +81,11 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxNotConnectedError,
     MailboxReauthRequiredError,
 )
+from cowork_agent.integrations.llm.chat_reply import (
+    FaucetChatReply,
+    GeminiChatReply,
+    GroqChatReply,
+)
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
     FaucetRouteClassifier,
@@ -79,6 +102,7 @@ from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_semantic_memory,
 )
+from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
@@ -89,9 +113,24 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
+from .api.chat import create_chat_router
 from .api.handlers import _jsonable
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
+    """Derive the chat principal only from one verified connected mailbox."""
+
+    repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+    candidates = tuple(
+        connection
+        for connection in await repository.list_all()
+        if connection.status == "active"
+    )
+    if len(candidates) != 1:
+        raise HTTPException(status_code=503, detail="Chat identity is unavailable")
+    return principal_for_connection(candidates[0])
 
 
 class CreateRunRequest(BaseModel):
@@ -108,6 +147,44 @@ class KnowledgeChatRequest(BaseModel):
 class SaveReportRequest(BaseModel):
     filename: str
     content: str
+
+
+def _chat_controller_factory(
+    app: FastAPI,
+) -> Callable[[ChatMemoryScope], ChatController]:
+    """Compose each scoped controller from runtime state at creation time."""
+
+    def factory(scope: ChatMemoryScope) -> ChatController:
+        semantic_memory = cast(
+            SemanticMemoryPort,
+            getattr(app.state, "semantic_memory", NullSemanticMemory()),
+        )
+        return ChatController(
+            scope=scope,
+            memory=MemoryGateway(
+                scope=scope,
+                session_buffer=app.state.chat_session_buffer,
+                declarative_memory=cast(
+                    DeclarativeMemoryPort | None,
+                    app.state.chat_profile_repository,
+                ),
+                episodic_memory=cast(
+                    EpisodicMemoryPort | None,
+                    app.state.chat_task_episode_repository,
+                ),
+                semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
+                memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
+            ),
+            reply=cast(ChatReplyPort, app.state.chat_reply),
+            episode_retention_seconds=getattr(
+                getattr(app.state, "chat_memory_settings", None),
+                "episode_retention_seconds",
+                None,
+            ),
+        )
+
+    return factory
+
 
 
 def create_app() -> FastAPI:
@@ -152,8 +229,10 @@ def create_app() -> FastAPI:
 
                 from cowork_agent.persistence.migrate import apply_migrations
                 from cowork_agent.persistence.repositories.postgres import (
+                    PostgresChatProfileRepository,
                     PostgresOutboxRepository,
                     PostgresRunRepository,
+                    PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
                 )
 
@@ -165,6 +244,8 @@ def create_app() -> FastAPI:
                 run_repository = PostgresRunRepository(pool)
                 task_repository = PostgresTaskRepository(pool)
                 app.state.outbox_repository = PostgresOutboxRepository(pool)
+                app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
+                app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
                 app.state.pg_pool = pool
             else:
                 task_repository = SQLiteTaskRepository(
@@ -177,7 +258,25 @@ def create_app() -> FastAPI:
                 await sqlite_run_repository.initialize()
                 run_repository = sqlite_run_repository
                 app.state.outbox_repository = InMemoryOutbox()
+                app.state.chat_profile_repository = None
+                app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
+            chat_memory_settings = ChatMemorySettings.from_env()
+            app.state.chat_memory_settings = chat_memory_settings
+            app.state.chat_sessions = InMemoryChatSessionRegistry()
+            app.state.chat_session_buffer = InMemoryChatSessionBuffer(
+                max_turns=chat_memory_settings.max_turns,
+                ttl_seconds=chat_memory_settings.ttl_seconds,
+            )
+            app.state.memory_metrics = MemoryOperationMetrics()
+            app.state.memory_operation_sink = LoggingMemoryOperationSink(
+                metrics=app.state.memory_metrics
+            )
+            app.state.chat_controllers = {}
+            app.state.chat_reply = UnavailableChatReply()
+            app.state.chat_principal_resolver = _resolve_chat_principal
+
+            app.state.chat_controller_factory = _chat_controller_factory(app)
             app.state.run_repository = run_repository
             app.state.create_run = CreateDigestRun(run_repository)
             app.state.get_result = GetDigestResult(
@@ -216,16 +315,19 @@ def create_app() -> FastAPI:
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
                     semantic_memory = await build_semantic_memory(gemini_settings)
+                    app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
                     classifier = GroqRouteClassifier(groq_settings)
                     generator = GroqActionPlanGenerator(groq_settings)
                     semantic_memory = NullSemanticMemory()
+                    app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
                 elif provider == "faucet":
                     faucet_settings = FaucetSettings.from_env()
                     classifier = FaucetRouteClassifier(faucet_settings)
                     generator = FaucetActionPlanGenerator(faucet_settings)
                     semantic_memory = NullSemanticMemory()
+                    app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
                 else:
                     raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
                 app.state.semantic_memory = semantic_memory
@@ -270,6 +372,7 @@ def create_app() -> FastAPI:
             await redis_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
+    app.include_router(create_chat_router())
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -575,7 +678,7 @@ def create_app() -> FastAPI:
             query=body.query,
             knowledge_gaps=(),
             filters=RetrievalFilters(
-                tenant_scope=LOCAL_TENANT_ID, document_status=()
+                tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)
             ),
             limits=RetrievalLimits(
                 top_k=body.top_k, min_score=-1.0, timeout_ms=8_000

@@ -4,7 +4,6 @@ import pytest
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
-    ChatToolChoice,
     DeclarativeProfile,
     MemoryNamespace,
     MemoryProvenance,
@@ -53,13 +52,10 @@ def _profile(**overrides: object) -> DeclarativeProfile:
 def _provenance(
     *,
     source_type: MemoryProvenanceSource = MemoryProvenanceSource.EXPLICIT_USER_CONFIG,
-    source_tool: ChatToolChoice | None = None,
 ) -> MemoryProvenance:
     return MemoryProvenance(
         source_type=source_type,
         source_id="chat-settings-form",
-        source_tool=source_tool,
-        run_id=None,
         chat_turn_id="turn-1",
         pipeline_version=None,
         model_id=None,
@@ -71,10 +67,9 @@ def test_explicit_user_configuration_is_authorized() -> None:
     authorize_profile_write(_namespace(), _profile(), _provenance())
 
 
-def test_passive_inference_from_chat_or_email_is_rejected() -> None:
+def test_chat_task_provenance_is_rejected() -> None:
     inferred = _provenance(
-        source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
-        source_tool=ChatToolChoice.EMAIL,
+        source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TASK,
     )
 
     with pytest.raises(ProfileWriteRejected):
@@ -87,13 +82,6 @@ def test_enterprise_corpus_provenance_is_rejected() -> None:
             _namespace(),
             _profile(),
             _provenance(source_type=MemoryProvenanceSource.ENTERPRISE_CORPUS),
-        )
-
-
-def test_explicit_provenance_derived_from_the_email_tool_is_still_rejected() -> None:
-    with pytest.raises(ProfileWriteRejected):
-        authorize_profile_write(
-            _namespace(), _profile(), _provenance(source_tool=ChatToolChoice.EMAIL)
         )
 
 

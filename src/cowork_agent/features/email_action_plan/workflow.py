@@ -533,7 +533,9 @@ class DigestWorker:
             user_id=run.user_id,
             query=query or "; ".join(gaps),
             knowledge_gaps=gaps,
-            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=()),
+            filters=RetrievalFilters(
+                tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)
+            ),
             limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
         )
         for attempt in (1, 2):

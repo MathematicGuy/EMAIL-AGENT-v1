@@ -1,7 +1,12 @@
 """Cowork Demo — Streamlit showcase frontend (SPEC-Demo-Frontend Increment A).
 
-Five-screen information architecture on the proven 3-step spine:
-Connect → Run (@Email) → Tasks (+ Task detail) → Knowledge (RAG) → Run audit.
+Five-screen information architecture (SPEC §5) with the AI Chat Assistant as
+the landing screen: Chat → Connect (Gmail + standalone Email Agent) →
+Knowledge (RAG) → Memory (Increment B, feature-flagged) → Run audit.
+
+The chat screen stays inside the SPEC §3.4 boundary: one server session per
+browser session, idempotent messages, and typed SSE rendering only. Chat
+transport lives in ``cowork_agent.gui.chat_client``.
 
 The module is import-safe: all Streamlit side effects live in ``main()``,
 which only runs under ``streamlit run`` (``__name__ == "__main__"``).
@@ -15,12 +20,26 @@ import os
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from dotenv import load_dotenv
 
+from cowork_agent.gui import chat_client
+
 SUPPORTED_LANGUAGES = ("vi", "en")
+
+#: SPEC-Demo-Frontend §5 information architecture; AI Chat is the landing screen.
+SCREENS = ("chat", "connect", "knowledge", "memory", "audit")
+
+#: SPEC-Demo-Frontend §7 endpoints that Increment B needs and the backend lacks.
+MISSING_INCREMENT_B_ENDPOINTS = (
+    "GET/POST/PUT/DELETE /v1/cowork/chat/profile",
+    "GET /v1/cowork/chat/episodes",
+    "GET /v1/cowork/chat/sessions",
+    "GET /v1/cowork/chat/sessions/{id}/messages",
+    "structured task-proposal SSE event or read DTO",
+)
 
 STRINGS: dict[str, dict[str, str]] = {
     "vi": {
@@ -67,9 +86,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "run_create_failed": "❌ Tạo tiến trình quét thất bại (mã {code}).",
         "tasks_found": "🎉 Đã tìm thấy và trích xuất **{count} công việc** từ email chưa đọc!",
         "tasks_empty": "💌 Không có công việc nào mới trong các email chưa đọc vừa quét.",
-        "tasks_none_yet": (
-            "Chưa có kết quả nào. Bấm nút **'{button}'** ở Bước 2 để chạy!"
-        ),
+        "tasks_none_yet": ("Chưa có kết quả nào. Bấm nút **'{button}'** ở Bước 2 để chạy!"),
         "tasks_fetch_error": "Không thể tải danh sách task (mã {code}).",
         "deadline_label": "Hạn chót",
         "confidence_label": "Độ tin cậy phân loại",
@@ -142,6 +159,91 @@ STRINGS: dict[str, dict[str, str]] = {
         "knowledge_status_label": "Trạng thái kho tri thức",
         "knowledge_doc_count": "{count} tài liệu",
         "knowledge_chunk_count": "{count} chunks",
+        "nav_label": "Màn hình",
+        "nav_chat": "💬 Trợ Lý AI Chat",
+        "nav_connect": "🔗 Kết nối",
+        "nav_knowledge": "📚 Kho tri thức",
+        "nav_memory": "🧠 Bộ nhớ",
+        "nav_audit": "🔎 Kiểm toán Run",
+        "chat_title": "Trợ Lý AI Chat",
+        "chat_subtitle": (
+            "Trò chuyện nhiều lượt với Cowork. Bộ nhớ đủ điều kiện sẽ được gắn nhãn "
+            "ngay trong luồng hội thoại."
+        ),
+        "chat_input_placeholder": "Nhập tin nhắn cho trợ lý…",
+        "chat_empty": "Chưa có tin nhắn nào. Hãy bắt đầu cuộc trò chuyện bên dưới.",
+        "chat_session_label": "Phiên chat hiện tại",
+        "chat_session_creating": "Đang tạo phiên chat…",
+        "chat_session_error": "Không thể tạo phiên chat (mã {code}).",
+        "chat_session_error_help": (
+            "Kiểm tra backend đã bật và đã có đúng một tài khoản Gmail được kết nối "
+            "(phiên chat dùng danh tính đã xác thực đó)."
+        ),
+        "chat_new_session": "🗘 Phiên mới",
+        "chat_thinking": "Trợ lý đang trả lời…",
+        "chat_no_reply": "Trợ lý không trả về nội dung nào cho lượt này.",
+        "chat_badges_title": "Nguồn bộ nhớ đã dùng",
+        "chat_badge_declarative": "Hồ sơ cá nhân",
+        "chat_badge_episodic": "Episode đã duyệt",
+        "chat_badge_semantic": "Tri thức công ty",
+        "chat_error_title": "Lượt chat thất bại [{code}]",
+        "chat_error_stream_unavailable": "Mất kết nối tới luồng chat của backend.",
+        "chat_error_http": "Backend từ chối lượt chat này.",
+        "chat_error_identity": (
+            "Backend không có đúng một kết nối Gmail active; chat cần đúng một "
+            "danh tính đã xác thực. Kiểm tra màn hình Kết nối."
+        ),
+        "chat_advisory_memory_degraded": (
+            "⚠️ Một phần bộ nhớ tùy chọn không khả dụng; câu trả lời vẫn tiếp tục "
+            "nhưng có thể kém cá nhân hóa hơn."
+        ),
+        "chat_session_renewed": (
+            "♻️ Phiên chat cũ đã hết hạn trên server; đã tự động tạo phiên mới để "
+            "tiếp tục."
+        ),
+        "chat_proposal_title": "📋 Đề xuất task trong chat",
+        "chat_proposal_plan": "Kế hoạch hành động",
+        "chat_proposal_missing": "Thiếu thông tin",
+        "chat_proposal_citations": "Trích dẫn tri thức công ty",
+        "chat_proposal_status": "Trạng thái",
+        "chat_action_approve": "✅ Duyệt",
+        "chat_action_complete": "🏁 Hoàn thành",
+        "chat_action_reject": "❌ Từ chối",
+        "chat_action_failed": "Thao tác task thất bại (mã {code}).",
+        "chat_history_label": "Phiên chat trên server",
+        "chat_load_history": "📥 Nạp lịch sử phiên",
+        "chat_history_note": (
+            "ℹ️ Lịch sử chat đọc từ backend; danh sách phiên nằm trong bộ nhớ "
+            "server nên mất khi backend khởi động lại."
+        ),
+        "memory_prefs_title": "👤 Hồ sơ cá nhân (Preferences)",
+        "memory_field_language": "Ngôn ngữ",
+        "memory_field_timezone": "Múi giờ",
+        "memory_field_persona": "Persona trợ lý",
+        "memory_field_tone": "Giọng điệu trả lời",
+        "memory_save": "💾 Lưu hồ sơ",
+        "memory_delete_profile": "🗑 Xóa hồ sơ",
+        "memory_saved_flash": "Đã lưu hồ sơ cá nhân.",
+        "memory_deleted_flash": "Đã xóa hồ sơ cá nhân.",
+        "memory_episodes_title": "🗂 Episode task",
+        "memory_refresh": "🗘 Làm mới",
+        "memory_episode_delete": "🗑 Xóa",
+        "memory_episodes_empty": "Chưa có episode nào.",
+        "memory_episode_deleted": "Đã xóa episode.",
+        "memory_episode_delete_failed": "Xóa episode thất bại (mã {code}).",
+        "memory_store_unavailable": (
+            "Backend chưa bật kho nhớ PostgreSQL (DATABASE_URL); màn hình Bộ nhớ "
+            "tạm khóa."
+        ),
+        "chat_retry": "↻ Thử lại lượt vừa rồi",
+        "chat_retry_hint": ("Thử lại dùng lại đúng khóa idempotency nên sẽ không tạo lượt trùng."),
+        "memory_locked_title": "Màn hình Bộ nhớ chưa mở",
+        "memory_locked_body": (
+            "Increment B (hồ sơ cá nhân, thẻ task trong chat, provenance episode, xóa "
+            "bộ nhớ) chờ các contract backend còn thiếu theo SPEC §7. Demo không dựng "
+            "giao diện giả cho phần chưa có."
+        ),
+        "memory_missing_heading": "Còn thiếu ở backend:",
     },
     "en": {
         "app_title": "📧 Module Mail",
@@ -256,6 +358,92 @@ STRINGS: dict[str, dict[str, str]] = {
         "knowledge_status_label": "Corpus status",
         "knowledge_doc_count": "{count} documents",
         "knowledge_chunk_count": "{count} chunks",
+        "nav_label": "Screen",
+        "nav_chat": "💬 AI Chat Assistant",
+        "nav_connect": "🔗 Connect",
+        "nav_knowledge": "📚 Knowledge",
+        "nav_memory": "🧠 Memory",
+        "nav_audit": "🔎 Run audit",
+        "chat_title": "AI Chat Assistant",
+        "chat_subtitle": (
+            "Multi-turn conversation with Cowork. Eligible memory is labeled inline in the thread."
+        ),
+        "chat_input_placeholder": "Message the assistant…",
+        "chat_empty": "No messages yet. Start the conversation below.",
+        "chat_session_label": "Active chat session",
+        "chat_session_creating": "Creating chat session…",
+        "chat_session_error": "Could not create a chat session (code {code}).",
+        "chat_session_error_help": (
+            "Check that the backend is running and exactly one Gmail account is "
+            "connected — the chat session uses that verified identity."
+        ),
+        "chat_new_session": "🗘 New session",
+        "chat_thinking": "Assistant is replying…",
+        "chat_no_reply": "The assistant returned no content for this turn.",
+        "chat_badges_title": "Memory sources used",
+        "chat_badge_declarative": "Personal profile",
+        "chat_badge_episodic": "Approved episode",
+        "chat_badge_semantic": "Company knowledge",
+        "chat_error_title": "Chat turn failed [{code}]",
+        "chat_error_stream_unavailable": "Lost the connection to the backend chat stream.",
+        "chat_error_http": "The backend rejected this chat turn.",
+        "chat_error_identity": (
+            "The backend does not have exactly one active Gmail connection; chat needs "
+            "exactly one verified identity. Check the Connect screen."
+        ),
+        "chat_advisory_memory_degraded": (
+            "⚠️ Some optional memory was unavailable; the reply continues but may "
+            "be less personalized."
+        ),
+        "chat_session_renewed": (
+            "♻️ The previous chat session expired on the server; a new one was "
+            "created automatically to continue."
+        ),
+        "chat_proposal_title": "📋 In-chat task proposal",
+        "chat_proposal_plan": "Action plan",
+        "chat_proposal_missing": "Missing information",
+        "chat_proposal_citations": "Company knowledge citations",
+        "chat_proposal_status": "Status",
+        "chat_action_approve": "✅ Approve",
+        "chat_action_complete": "🏁 Complete",
+        "chat_action_reject": "❌ Reject",
+        "chat_action_failed": "Task action failed (code {code}).",
+        "chat_history_label": "Server chat sessions",
+        "chat_load_history": "📥 Load session history",
+        "chat_history_note": (
+            "ℹ️ Chat history is read from the backend; the session list lives in "
+            "server memory, so it is lost when the backend restarts."
+        ),
+        "memory_prefs_title": "👤 Persona profile (Preferences)",
+        "memory_field_language": "Language",
+        "memory_field_timezone": "Timezone",
+        "memory_field_persona": "Assistant persona",
+        "memory_field_tone": "Response tone",
+        "memory_save": "💾 Save profile",
+        "memory_delete_profile": "🗑 Delete profile",
+        "memory_saved_flash": "Profile saved.",
+        "memory_deleted_flash": "Profile deleted.",
+        "memory_episodes_title": "🗂 Task episodes",
+        "memory_refresh": "🗘 Refresh",
+        "memory_episode_delete": "🗑 Delete",
+        "memory_episodes_empty": "No episodes yet.",
+        "memory_episode_deleted": "Episode deleted.",
+        "memory_episode_delete_failed": "Episode deletion failed (code {code}).",
+        "memory_store_unavailable": (
+            "The backend has no PostgreSQL memory store (DATABASE_URL); the Memory "
+            "screen stays locked."
+        ),
+        "chat_retry": "↻ Retry the last turn",
+        "chat_retry_hint": (
+            "Retrying reuses the same idempotency key, so it cannot create a duplicate turn."
+        ),
+        "memory_locked_title": "Memory screen not unlocked",
+        "memory_locked_body": (
+            "Increment B (persona profile, in-chat task cards, episode provenance, "
+            "memory deletion) is waiting on backend contracts still missing per SPEC "
+            "§7. The demo does not mock UI for work that does not exist."
+        ),
+        "memory_missing_heading": "Missing from the backend:",
     },
 }
 
@@ -367,6 +555,18 @@ _GUI_CSS = """
     text-decoration: none;
 }
 .citation-chip:hover { background-color: #BFDBFE; }
+.memory-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    padding: 2px 10px;
+    margin: 2px 4px 2px 0;
+    border: 1px solid transparent;
+}
+.memory-declarative { background-color: #E0F2FE; color: #075985; border-color: #BAE6FD; }
+.memory-episodic { background-color: #DCFCE7; color: #166534; border-color: #BBF7D0; }
+.memory-semantic { background-color: #DBEAFE; color: #1E40AF; border-color: #BFDBFE; }
 </style>
 """
 
@@ -476,9 +676,48 @@ def citation_chip_html(title: object, url: object) -> str:
         return f'<span class="citation-chip">📎 {label}</span>'
     escaped = html.escape(href, quote=True)
     return (
-        f'<a class="citation-chip" href="{escaped}"'
-        f' target="_blank" rel="noopener">📎 {label}</a>'
+        f'<a class="citation-chip" href="{escaped}" target="_blank" rel="noopener">📎 {label}</a>'
     )
+
+
+def memory_badges_html(citations: Sequence[tuple[str, str]], lang: str) -> str:
+    """Render one badge per cited memory kind, with a count when repeated.
+
+    ``source_id`` is deliberately never rendered: SPEC §7.1 treats it as opaque,
+    so the badge discloses the source *type*, not the stored payload.
+    """
+    counts: dict[str, int] = {}
+    for memory_type, _source_id in citations:
+        if memory_type in chat_client.MEMORY_BADGES:
+            counts[memory_type] = counts.get(memory_type, 0) + 1
+    badges = []
+    for memory_type, count in counts.items():
+        label = tr(lang, chat_client.MEMORY_BADGES[memory_type]["key"])
+        badges.append(
+            chat_client.memory_badge_html(memory_type, label if count == 1 else f"{label} ×{count}")
+        )
+    return "".join(badges)
+
+
+def chat_error_text(code: object, safe_message: object, lang: str) -> str:
+    """Pick the copy for a failed turn; backend safe messages win when present."""
+    if isinstance(safe_message, str) and safe_message.strip():
+        return safe_message
+    code_text = str(code or "")
+    if code_text == "stream_unavailable":
+        return tr(lang, "chat_error_stream_unavailable")
+    if code_text == "http_503":
+        return tr(lang, "chat_error_identity")
+    if code_text.startswith("http_"):
+        return tr(lang, "chat_error_http")
+    return tr(lang, "error_unknown")
+
+
+def chat_advisory_text(code: object, lang: str) -> str:
+    """Localized copy for a non-terminal memory advisory (warn, not fail)."""
+    if code == "optional_memory_degraded":
+        return tr(lang, "chat_advisory_memory_degraded")
+    return tr(lang, "error_unknown")
 
 
 def _as_list(value: object) -> list[Any]:
@@ -546,6 +785,65 @@ def build_task_card_html(task: Mapping[str, Any], index: int, lang: str) -> str:
     )
 
 
+def build_proposal_card_html(proposal: Mapping[str, Any], lang: str) -> str:
+    """Safe HTML for the structured chat-native task proposal (SPEC §6.11)."""
+    title = html.escape(str(proposal.get("task_title") or ""), quote=True)
+    paraphrase = html.escape(
+        str(proposal.get("minimal_request_paraphrase") or ""), quote=True
+    )
+    status = str(proposal.get("validation_status") or "system_generated")
+    status_text = html.escape(enum_label("validation_status", status, lang), quote=True)
+    missing = [str(item) for item in _as_list(proposal.get("missing_information"))]
+    partial_class = " partial-plan" if missing else ""
+    sections = [
+        f'<div class="task-card{partial_class}">',
+        '<div style="display: flex; justify-content: space-between;'
+        ' align-items: center; margin-bottom: 8px;">'
+        f'<strong style="font-size: 1.05rem; color: #1E293B;">'
+        f"{html.escape(tr(lang, 'chat_proposal_title'), quote=True)}</strong>"
+        f'<span class="badge bg-route">{status_text}</span></div>',
+        f'<p style="color: #1E293B; font-weight: 600; margin-bottom: 4px;">{title}</p>',
+        f'<p style="color: #475569; font-size: 0.9rem; margin-bottom: 8px;">{paraphrase}</p>',
+    ]
+    plan = [str(item) for item in _as_list(proposal.get("action_plan"))]
+    if plan:
+        items = "".join(
+            f"<li>{html.escape(step, quote=True)}</li>" for step in plan
+        )
+        sections.append(
+            f"<div style=\"font-size: 0.85rem; color: #334155; margin-bottom: 8px;\">"
+            f"<strong>{html.escape(tr(lang, 'chat_proposal_plan'), quote=True)}:"
+            f"</strong><ol style=\"margin: 4px 0 0 18px;\">{items}</ol></div>"
+        )
+    if missing:
+        items = "".join(
+            f"<li>{html.escape(entry, quote=True)}</li>" for entry in missing
+        )
+        sections.append(
+            f"<div style=\"font-size: 0.85rem; color: #92400E; margin-bottom: 8px;\">"
+            f"<strong>{html.escape(tr(lang, 'chat_proposal_missing'), quote=True)}:"
+            f"</strong><ul style=\"margin: 4px 0 0 18px;\">{items}</ul></div>"
+        )
+    citations = [item for item in _as_list(proposal.get("rag_citations"))]
+    chips = []
+    for citation in citations:
+        if not isinstance(citation, Mapping):
+            continue
+        doc_title = citation.get("document_title")
+        section = citation.get("section")
+        label = str(doc_title or "") + (f" · {section}" if section else "")
+        chips.append(citation_chip_html(label, citation.get("source_url")))
+    if chips:
+        sections.append(
+            f"<div style=\"margin-bottom: 4px;\"><strong style=\"font-size: 0.85rem; "
+            f"color: #334155;\">"
+            f"{html.escape(tr(lang, 'chat_proposal_citations'), quote=True)}:"
+            f"</strong><br/>{''.join(chips)}</div>"
+        )
+    sections.append("</div>")
+    return "".join(sections)
+
+
 def route_summary(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Routing/retrieval/validation summary for the Run audit screen."""
     routes: dict[str, int] = {}
@@ -604,7 +902,7 @@ def _check_health(base_url: str) -> tuple[int, Any]:
     try:
         import streamlit as st
 
-        @st.cache_data(ttl=5.0, show_spinner=False)
+        @st.cache_data(ttl=15.0, show_spinner=False)
         def _cached_health(url: str) -> tuple[int, Any]:
             return api_request(url, "GET", "/health")
 
@@ -614,6 +912,7 @@ def _check_health(base_url: str) -> tuple[int, Any]:
 
 
 def read_settings() -> dict[str, Any]:
+    load_dotenv(override=False)
     llm_provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     if llm_provider == "groq":
         batch = max(1, int(os.getenv("GROQ_MAX_EMAILS_PER_BATCH", "5")))
@@ -633,6 +932,9 @@ def read_settings() -> dict[str, Any]:
             0.5, float(os.getenv("STREAMLIT_POLL_INTERVAL_SECONDS", "1.5"))
         ),
         "poll_buffer_seconds": max(0, int(os.getenv("STREAMLIT_POLL_BUFFER_SECONDS", "30"))),
+        "chat_stream_timeout_seconds": max(
+            5.0, float(os.getenv("STREAMLIT_CHAT_TIMEOUT_SECONDS", "90"))
+        ),
     }
 
 
@@ -650,10 +952,10 @@ def main() -> None:
     base_url: str = settings["api_base_url"]
 
     st.set_page_config(
-        page_title="Module Mail — Cowork Demo",
-        page_icon="📧",
+        page_title="Cowork Demo",
+        page_icon="💬",
         layout="centered",
-        initial_sidebar_state="collapsed",
+        initial_sidebar_state="expanded",
     )
     st.markdown(_GUI_CSS, unsafe_allow_html=True)
 
@@ -661,16 +963,29 @@ def main() -> None:
     with col_lang:
         lang = str(
             st.selectbox(
-                "🌐 Language / Ngôn ngữ", options=list(SUPPORTED_LANGUAGES), index=0,
-                format_func=str.upper, key="demo_language",
+                "🌐 Language / Ngôn ngữ",
+                options=list(SUPPORTED_LANGUAGES),
+                index=0,
+                format_func=str.upper,
+                key="demo_language",
             )
         )
 
+    screen = str(
+        st.sidebar.radio(
+            tr(lang, "nav_label"),
+            options=list(SCREENS),
+            format_func=lambda key: tr(lang, f"nav_{key}"),
+            key="demo_screen",
+        )
+    )
+
     with col_title:
         st.markdown(
-            f'<div class="main-title">{tr(lang, "app_title")}</div>', unsafe_allow_html=True
+            f'<div class="main-title">{tr(lang, "nav_" + screen)}</div>', unsafe_allow_html=True
         )
-        st.markdown(f'<div class="subtitle">{tr(lang, "subtitle")}</div>', unsafe_allow_html=True)
+        subtitle = tr(lang, "chat_subtitle") if screen == "chat" else tr(lang, "subtitle")
+        st.markdown(f'<div class="subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
     flash = st.session_state.pop("flash", None)
     if isinstance(flash, dict) and flash.get("message"):
@@ -689,17 +1004,21 @@ def main() -> None:
         st.info(tr(lang, "backend_down_help"))
         st.stop()
 
-    connections = _load_connections(base_url, lang)
-
-    _screen_connect(base_url, lang, connections)
-    st.markdown("---")
-    _screen_run(base_url, lang, settings, connections)
-    st.markdown("---")
-    _screen_tasks(base_url, lang)
-    st.markdown("---")
-    _screen_knowledge(base_url, lang)
-    st.markdown("---")
-    _screen_audit(base_url, lang)
+    if screen == "chat":
+        _screen_chat(base_url, lang, settings)
+    elif screen == "connect":
+        connections = _load_connections(base_url, lang)
+        _screen_connect(base_url, lang, connections)
+        st.markdown("---")
+        _screen_run(base_url, lang, settings, connections)
+        st.markdown("---")
+        _screen_tasks(base_url, lang)
+    elif screen == "knowledge":
+        _screen_knowledge(base_url, lang)
+    elif screen == "memory":
+        _screen_memory(base_url, lang)
+    else:
+        _screen_audit(base_url, lang)
 
     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
     st.caption(f"⚡ *Streamlit Rerun Latency: {elapsed_ms:.1f} ms*")
@@ -709,7 +1028,8 @@ def _load_connections(base_url: str, lang: str) -> list[dict[str, Any]]:
     import streamlit as st
 
     try:
-        @st.cache_data(ttl=10.0, show_spinner=False)
+
+        @st.cache_data(ttl=30.0, show_spinner=False)
         def _cached_connections(url: str) -> tuple[int, Any]:
             return api_request(url, "GET", "/v1/mail-todo/connections")
 
@@ -723,6 +1043,471 @@ def _load_connections(base_url: str, lang: str) -> list[dict[str, Any]]:
     return []
 
 
+def _screen_chat(base_url: str, lang: str, settings: dict[str, Any]) -> None:
+    """Screen 1: AI Chat Assistant, limited to the SPEC §3.4 boundary."""
+    import streamlit as st
+
+    session_id = _ensure_chat_session(base_url, lang)
+    if session_id is None:
+        return
+
+    st.sidebar.caption(f"{tr(lang, 'chat_session_label')}: `{session_id[:8]}…`")
+    if st.sidebar.button(tr(lang, "chat_new_session"), use_container_width=True):
+        _reset_chat_session()
+        st.rerun()
+    _render_session_history(base_url, lang, session_id)
+
+    st.caption(tr(lang, "chat_history_note"))
+
+    messages: list[dict[str, Any]] = st.session_state.setdefault("chat_messages", [])
+    if not messages:
+        st.info(tr(lang, "chat_empty"))
+    for message in messages:
+        _render_chat_message(message, lang, base_url=base_url, session_id=session_id)
+
+    # A failed turn keeps its idempotency key so a retry stays one logical turn.
+    pending = st.session_state.get("chat_pending_turn")
+    if isinstance(pending, dict):
+        st.caption(tr(lang, "chat_retry_hint"))
+        if st.button(tr(lang, "chat_retry"), type="primary"):
+            _run_chat_turn(
+                base_url,
+                lang,
+                settings,
+                session_id,
+                str(pending["user_message"]),
+                str(pending["idempotency_key"]),
+            )
+            st.rerun()
+
+    prompt = st.chat_input(tr(lang, "chat_input_placeholder"))
+    if not prompt or not prompt.strip():
+        return
+
+    user_message = prompt.strip()
+    messages.append({"role": "user", "text": user_message})
+    _render_chat_message(messages[-1], lang)
+    _run_chat_turn(
+        base_url,
+        lang,
+        settings,
+        session_id,
+        user_message,
+        chat_client.new_idempotency_key(),
+    )
+    st.rerun()
+
+
+def _render_session_history(base_url: str, lang: str, session_id: str) -> None:
+    """Sidebar switcher over the backend session list (GET /sessions)."""
+    import streamlit as st
+
+    code, body = api_request(base_url, "GET", chat_client.CHAT_SESSIONS_PATH)
+    if code != 200 or not isinstance(body, Mapping):
+        return
+    sessions = [
+        str(item.get("session_id"))
+        for item in _as_list(body.get("sessions"))
+        if isinstance(item, Mapping) and item.get("session_id")
+    ]
+    if not sessions:
+        return
+    labels = [f"{sid[:8]}…" for sid in sessions]
+    current_index = next(
+        (i for i, sid in enumerate(sessions) if sid == session_id), 0
+    )
+    chosen_label = st.sidebar.selectbox(
+        tr(lang, "chat_history_label"),
+        labels,
+        index=current_index,
+        key="chat_history_select",
+    )
+    chosen = sessions[labels.index(chosen_label)]
+    if chosen == session_id:
+        return
+    if st.sidebar.button(tr(lang, "chat_load_history"), use_container_width=True):
+        history_code, history = api_request(
+            base_url, "GET", f"{chat_client.CHAT_SESSIONS_PATH}/{chosen}/messages"
+        )
+        if history_code != 200 or not isinstance(history, Mapping):
+            st.session_state["flash"] = {
+                "message": tr(lang, "chat_action_failed", code=history_code),
+                "level": "error",
+            }
+            st.rerun()
+        reloaded: list[dict[str, Any]] = []
+        for turn in _as_list(history.get("turns")):
+            if not isinstance(turn, Mapping):
+                continue
+            reloaded.append(
+                {"role": "user", "text": str(turn.get("user_message") or "")}
+            )
+            reloaded.append(
+                {"role": "assistant", "text": str(turn.get("assistant_message") or "")}
+            )
+        st.session_state["chat_session_id"] = chosen
+        st.session_state["chat_messages"] = reloaded
+        st.session_state.pop("chat_pending_turn", None)
+        st.rerun()
+
+
+def _ensure_chat_session(base_url: str, lang: str) -> str | None:
+    """Return the browser session's server chat session, creating it once."""
+    import streamlit as st
+
+    session_id = st.session_state.get("chat_session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+
+    with st.spinner(tr(lang, "chat_session_creating")):
+        code, created = chat_client.create_chat_session(_get_http_client(), base_url)
+    if created is None:
+        st.error(tr(lang, "chat_session_error", code=code))
+        st.info(tr(lang, "chat_session_error_help"))
+        return None
+    st.session_state["chat_session_id"] = created
+    st.session_state["chat_messages"] = []
+    st.session_state.pop("chat_pending_turn", None)
+    return created
+
+
+def _reset_chat_session() -> None:
+    import streamlit as st
+
+    for key in ("chat_session_id", "chat_messages", "chat_pending_turn"):
+        st.session_state.pop(key, None)
+
+
+def _render_chat_message(
+    message: dict[str, Any],
+    lang: str,
+    *,
+    base_url: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Render one stored turn: assistant text, memory badges, and error state."""
+    import streamlit as st
+
+    role = str(message.get("role") or "assistant")
+    with st.chat_message(role):
+        text = str(message.get("text") or "")
+        if text:
+            st.markdown(text)
+        citations = [
+            (str(kind), str(source)) for kind, source in _as_list(message.get("citations"))
+        ]
+        if citations:
+            st.caption(tr(lang, "chat_badges_title"))
+            st.markdown(memory_badges_html(citations, lang), unsafe_allow_html=True)
+        proposal = message.get("proposal")
+        if isinstance(proposal, Mapping):
+            st.markdown(
+                build_proposal_card_html(proposal, lang), unsafe_allow_html=True
+            )
+            if base_url is not None and session_id is not None:
+                _render_proposal_controls(message, proposal, lang, base_url, session_id)
+        advisory_code = message.get("advisory_code")
+        if advisory_code:
+            st.warning(chat_advisory_text(advisory_code, lang))
+        error_code = message.get("error_code")
+        if error_code:
+            st.error(
+                f"{tr(lang, 'chat_error_title', code=error_code)}: "
+                f"{chat_error_text(error_code, message.get('error_message'), lang)}"
+            )
+        elif not text and not isinstance(proposal, Mapping):
+            st.info(tr(lang, "chat_no_reply"))
+
+
+def _render_proposal_controls(
+    message: dict[str, Any],
+    proposal: Mapping[str, Any],
+    lang: str,
+    base_url: str,
+    session_id: str,
+) -> None:
+    """Inline Approve/Complete/Reject on a structured proposal (SPEC §3.2)."""
+    import streamlit as st
+
+    episode_id = str(proposal.get("episode_id") or "")
+    status = str(proposal.get("validation_status") or "")
+    if not episode_id:
+        return
+    if status == "system_generated":
+        actions: tuple[tuple[str, str, Literal["primary", "secondary"]], ...] = (
+            ("approve", "chat_action_approve", "primary"),
+            ("reject", "chat_action_reject", "secondary"),
+        )
+    elif status == "user_approved":
+        actions = (("complete", "chat_action_complete", "primary"),)
+    else:
+        return
+    columns = st.columns(len(actions))
+    for column, (action, label_key, kind) in zip(columns, actions, strict=True):
+        if column.button(
+            tr(lang, label_key),
+            key=f"chat_ep_{episode_id}_{action}",
+            type=kind,
+        ):
+            code, body = api_request(
+                base_url,
+                "POST",
+                f"/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/{action}",
+            )
+            if code == 200 and isinstance(body, Mapping):
+                message["proposal"] = {
+                    **proposal,
+                    "validation_status": body.get("validation_status", status),
+                    "retrieval_eligible": body.get("retrieval_eligible"),
+                }
+            else:
+                st.session_state["flash"] = {
+                    "message": tr(lang, "chat_action_failed", code=code),
+                    "level": "error",
+                }
+            st.rerun()
+
+
+def _run_chat_turn(
+    base_url: str,
+    lang: str,
+    settings: dict[str, Any],
+    session_id: str,
+    user_message: str,
+    idempotency_key: str,
+) -> None:
+    """Stream one assistant turn and fold it into browser-session state."""
+    import streamlit as st
+
+    accumulator = chat_client.ChatTurnAccumulator()
+    active_session = session_id
+    renewed = False
+    with st.chat_message("assistant"):
+        text_slot = st.empty()
+        badge_slot = st.empty()
+        warn_slot = st.empty()
+        proposal_slot = st.empty()
+        for _attempt in range(2):
+            with st.spinner(tr(lang, "chat_thinking")):
+                events = chat_client.stream_chat_turn(
+                    _get_http_client(),
+                    base_url,
+                    session_id=active_session,
+                    user_message=user_message,
+                    idempotency_key=idempotency_key,
+                    timeout_seconds=float(settings["chat_stream_timeout_seconds"]),
+                )
+                for event in events:
+                    if not accumulator.apply(event):
+                        continue
+                    if event.event_type == "delta":
+                        text_slot.markdown(accumulator.text)
+                    elif event.event_type == "memory_citation":
+                        badge_slot.markdown(
+                            memory_badges_html(accumulator.citations, lang),
+                            unsafe_allow_html=True,
+                        )
+                    elif event.event_type == "task_proposal" and event.proposal is not None:
+                        proposal_slot.markdown(
+                            build_proposal_card_html(event.proposal, lang),
+                            unsafe_allow_html=True,
+                        )
+                    elif event.event_type == "error" and event.code in (
+                        chat_client.ADVISORY_ERROR_CODES
+                    ):
+                        warn_slot.warning(chat_advisory_text(event.code, lang))
+                    if accumulator.is_terminal:
+                        break
+            if _dead_session(accumulator):
+                # The server forgot the session (backend restart); one bounded
+                # renewal keeps retry honest instead of a permanent dead end.
+                fresh = _renew_chat_session(base_url)
+                if fresh is None:
+                    break
+                active_session = fresh
+                renewed = True
+                accumulator = chat_client.ChatTurnAccumulator()
+                text_slot.empty()
+                badge_slot.empty()
+                warn_slot.empty()
+                proposal_slot.empty()
+                continue
+            break
+        if renewed and accumulator.error_code is None:
+            st.info(tr(lang, "chat_session_renewed"))
+
+    messages: list[dict[str, Any]] = st.session_state.setdefault("chat_messages", [])
+    messages.append(accumulator.to_message())
+    if accumulator.error_code is None:
+        st.session_state.pop("chat_pending_turn", None)
+    else:
+        st.session_state["chat_pending_turn"] = {
+            "user_message": user_message,
+            "idempotency_key": idempotency_key,
+        }
+
+
+def _dead_session(accumulator: chat_client.ChatTurnAccumulator) -> bool:
+    return (
+        accumulator.error_code == "http_404"
+        and not accumulator.text
+        and not accumulator.completed
+    )
+
+
+def _renew_chat_session(base_url: str) -> str | None:
+    """Replace a server-side-expired session id, keeping displayed history."""
+    import streamlit as st
+
+    st.session_state.pop("chat_session_id", None)
+    st.session_state.pop("chat_pending_turn", None)
+    _, created = chat_client.create_chat_session(_get_http_client(), base_url)
+    if created is None:
+        return None
+    st.session_state["chat_session_id"] = created
+    return created
+
+
+def _screen_memory(base_url: str, lang: str) -> None:
+    """Screen 4: Increment B memory administration (SPEC §3.2)."""
+    import streamlit as st
+
+    code, body = api_request(base_url, "GET", "/v1/cowork/chat/episodes")
+    if code == 503:
+        st.warning(f"🔒 {tr(lang, 'memory_locked_title')}")
+        st.info(tr(lang, "memory_store_unavailable"))
+        return
+    if code != 200:
+        st.warning(f"🔒 {tr(lang, 'memory_locked_title')}")
+        st.info(tr(lang, "memory_locked_body"))
+        st.markdown(f"**{tr(lang, 'memory_missing_heading')}**")
+        for endpoint in MISSING_INCREMENT_B_ENDPOINTS:
+            st.markdown(f"- `{endpoint}`")
+        return
+
+    episodes = [item for item in _as_list(body.get("episodes")) if isinstance(item, Mapping)]
+    _render_preferences(base_url, lang)
+    st.markdown("---")
+    st.markdown(f"### {tr(lang, 'memory_episodes_title')}")
+    if st.button(tr(lang, "memory_refresh")):
+        st.rerun()
+    if not episodes:
+        st.info(tr(lang, "memory_episodes_empty"))
+    for episode in episodes:
+        _render_episode_row(base_url, lang, episode)
+
+
+def _render_preferences(base_url: str, lang: str) -> None:
+    import streamlit as st
+
+    st.markdown(f"### {tr(lang, 'memory_prefs_title')}")
+    code, profile = api_request(base_url, "GET", "/v1/cowork/chat/profile")
+    current: Mapping[str, Any] = profile if code == 200 and isinstance(profile, Mapping) else {}
+    with st.form("memory_preferences"):
+        language = st.text_input(
+            tr(lang, "memory_field_language"),
+            value=str(current.get("language") or ""),
+            max_chars=200,
+        )
+        timezone = st.text_input(
+            tr(lang, "memory_field_timezone"),
+            value=str(current.get("timezone") or ""),
+            max_chars=200,
+        )
+        persona = st.text_input(
+            tr(lang, "memory_field_persona"),
+            value=str(current.get("assistant_persona") or ""),
+            max_chars=200,
+        )
+        tone = st.text_input(
+            tr(lang, "memory_field_tone"),
+            value=str(current.get("response_tone") or ""),
+            max_chars=200,
+        )
+        submitted = st.form_submit_button(tr(lang, "memory_save"), type="primary")
+    if submitted:
+        payload = {
+            "language": language or None,
+            "timezone": timezone or None,
+            "assistant_persona": persona or None,
+            "response_tone": tone or None,
+        }
+        method = "PUT" if code == 200 else "POST"
+        save_code, _ = api_request(base_url, method, "/v1/cowork/chat/profile", json=payload)
+        st.session_state["flash"] = {
+            "message": (
+                tr(lang, "memory_saved_flash")
+                if save_code in (200, 201)
+                else tr(lang, "chat_action_failed", code=save_code)
+            ),
+            "level": "success" if save_code in (200, 201) else "error",
+        }
+        st.rerun()
+    if code == 200:
+        confirm = st.checkbox(tr(lang, "memory_delete_profile"))
+        if confirm:
+            delete_code, _ = api_request(base_url, "DELETE", "/v1/cowork/chat/profile")
+            st.session_state["flash"] = {
+                "message": (
+                    tr(lang, "memory_deleted_flash")
+                    if delete_code == 204
+                    else tr(lang, "chat_action_failed", code=delete_code)
+                ),
+                "level": "success" if delete_code == 204 else "error",
+            }
+            st.rerun()
+
+
+def _render_episode_row(
+    base_url: str, lang: str, episode: Mapping[str, Any]
+) -> None:
+    import streamlit as st
+
+    episode_id = str(episode.get("episode_id") or "")
+    status = str(episode.get("validation_status") or "unknown")
+    title = str(episode.get("task_title") or "")
+    created = str(episode.get("created_at") or "")[:19].replace("T", " ")
+    provenance = " · ".join(
+        part
+        for part in (
+            str(episode.get("model_id") or ""),
+            f"pipeline {episode.get('pipeline_version')}"
+            if episode.get("pipeline_version") is not None
+            else "",
+        )
+        if part
+    )
+    missing_count = len(_as_list(episode.get("missing_information")))
+    with st.container(border=True):
+        st.markdown(
+            f"**{html.escape(title)}** — "
+            f"{html.escape(enum_label('validation_status', status, lang))}"
+            + (f" · `{created}`" if created else "")
+            + (f" · {html.escape(provenance)}" if provenance else "")
+            + (f" · ⚠️ {missing_count}" if missing_count else ""),
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            tr(lang, "memory_episode_delete"),
+            key=f"memory_episode_delete_{episode_id}",
+        ):
+            session_id = str(episode.get("chat_session_id") or "")
+            delete_code, _ = api_request(
+                base_url,
+                "DELETE",
+                f"/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}",
+            )
+            st.session_state["flash"] = {
+                "message": (
+                    tr(lang, "memory_episode_deleted")
+                    if delete_code == 204
+                    else tr(lang, "memory_episode_delete_failed", code=delete_code)
+                ),
+                "level": "success" if delete_code == 204 else "error",
+            }
+            st.rerun()
+
+
 def _screen_connect(base_url: str, lang: str, connections: list[dict[str, Any]]) -> None:
     import streamlit as st
 
@@ -734,7 +1519,8 @@ def _screen_connect(base_url: str, lang: str, connections: list[dict[str, Any]])
     with col_action:
         connect_url = f"{base_url.rstrip('/')}/v1/mail-todo/oauth/gmail/connect"
         st.link_button(
-            tr(lang, "connect_gmail"), connect_url,
+            tr(lang, "connect_gmail"),
+            connect_url,
             type="secondary" if connections else "primary",
             use_container_width=True,
         )
@@ -747,11 +1533,10 @@ def _screen_connect(base_url: str, lang: str, connections: list[dict[str, Any]])
             email = str(connection.get("emailAddress") or tr(lang, "unknown"))
             status = str(connection.get("status") or tr(lang, "unknown"))
             row_left, row_right = st.columns([3, 1])
-            row_left.markdown(
-                f"📫 **{html.escape(email)}** · `{html.escape(status)}`"
-            )
+            row_left.markdown(f"📫 **{html.escape(email)}** · `{html.escape(status)}`")
             if row_right.button(
-                tr(lang, "disconnect"), key=f"disconnect-{connection.get('id')}",
+                tr(lang, "disconnect"),
+                key=f"disconnect-{connection.get('id')}",
                 use_container_width=True,
             ):
                 code, _ = api_request(
@@ -805,9 +1590,7 @@ def _screen_run(
             horizontal=True,
         )
         selected_query = (
-            "is:unread in:inbox category:primary"
-            if scan_mode == "unread"
-            else "in:inbox"
+            "is:unread in:inbox category:primary" if scan_mode == "unread" else "in:inbox"
         )
 
         max_emails = st.slider(
@@ -816,7 +1599,9 @@ def _screen_run(
         st.caption(tr(lang, "scan_ordering_hint", max_emails=max_emails))
 
         start_clicked = st.button(
-            tr(lang, "start_run"), type="primary", use_container_width=True,
+            tr(lang, "start_run"),
+            type="primary",
+            use_container_width=True,
             disabled=not selected_connection_id,
         )
         if not selected_connection_id:
@@ -829,6 +1614,7 @@ def _screen_run(
             )
 
     if hasattr(st, "fragment"):
+
         @st.fragment
         def _run_fragment() -> None:
             _render_run_body()
@@ -868,7 +1654,9 @@ def _create_and_watch_run(
     with st.status(tr(lang, "run_creating"), expanded=True) as status:
         if run_id is None:
             code, res = api_request(
-                base_url, "POST", "/v1/mail-todo/runs",
+                base_url,
+                "POST",
+                "/v1/mail-todo/runs",
                 headers={"Idempotency-Key": idempotency_key, "Content-Type": "application/json"},
                 json={
                     "mailboxConnectionId": connection_id,
@@ -919,7 +1707,8 @@ def _poll_run(
         progress = dict(raw_progress) if isinstance(raw_progress, dict) else {}
         progress_line.write(
             tr(
-                lang, "run_progress",
+                lang,
+                "run_progress",
                 processed=progress.get("emailsProcessed", 0),
                 total=progress.get("emailsToProcess", max_emails),
                 matched=progress.get("emailsMatched", 0),
@@ -1015,9 +1804,7 @@ def _fetch_knowledge_documents(base_url: str) -> tuple[int, Any]:
         return api_request(base_url, "GET", "/v1/mail-todo/knowledge/documents")
 
 
-def _post_knowledge_chat(
-    base_url: str, query: str, top_k: int = 5
-) -> tuple[int, Any]:
+def _post_knowledge_chat(base_url: str, query: str, top_k: int = 5) -> tuple[int, Any]:
     return api_request(
         base_url,
         "POST",
@@ -1054,10 +1841,7 @@ def _gmail_pointer_html(task: Mapping[str, Any], lang: str) -> str:
     if href is None:
         return ""
     label = html.escape(tr(lang, "open_gmail"), quote=True)
-    return (
-        f'<a href="{html.escape(href, quote=True)}" target="_blank"'
-        f' rel="noopener">{label}</a>'
-    )
+    return f'<a href="{html.escape(href, quote=True)}" target="_blank" rel="noopener">{label}</a>'
 
 
 def _screen_tasks(base_url: str, lang: str) -> None:
@@ -1119,6 +1903,7 @@ def _screen_tasks(base_url: str, lang: str) -> None:
         _screen_task_detail(base_url, lang, display_tasks)
 
     if hasattr(st, "fragment"):
+
         @st.fragment
         def _tasks_fragment() -> None:
             _render_content()
@@ -1136,7 +1921,8 @@ def _screen_task_detail(base_url: str, lang: str, tasks: list[dict[str, Any]]) -
         for index, task in enumerate(tasks, 1)
     }
     selected = st.selectbox(
-        tr(lang, "detail_picker"), options=list(options.keys()),
+        tr(lang, "detail_picker"),
+        options=list(options.keys()),
         format_func=lambda x: options[x],
     )
     task = next((t for t in tasks if str(t.get("task_id")) == selected), None)
@@ -1156,9 +1942,7 @@ def _screen_task_detail(base_url: str, lang: str, tasks: list[dict[str, Any]]) -
     if documents:
         st.markdown(f"**{tr(lang, 'supporting_docs')}:**")
         st.markdown(
-            "".join(
-                citation_chip_html(doc.get("title"), doc.get("url")) for doc in documents
-            ),
+            "".join(citation_chip_html(doc.get("title"), doc.get("url")) for doc in documents),
             unsafe_allow_html=True,
         )
 
@@ -1188,9 +1972,7 @@ def _screen_knowledge(base_url: str, lang: str) -> None:
     import streamlit as st
 
     def _render_knowledge_body() -> None:
-        st.markdown(
-            f"### 📚 {tr(lang, 'knowledge_title')}", unsafe_allow_html=True
-        )
+        st.markdown(f"### 📚 {tr(lang, 'knowledge_title')}", unsafe_allow_html=True)
 
         # ── Corpus status ──
         status_code, status_res = _fetch_knowledge_status(base_url)
@@ -1253,16 +2035,12 @@ def _screen_knowledge(base_url: str, lang: str) -> None:
         if not query or not query.strip():
             return
 
-        search_clicked = st.button(
-            tr(lang, "knowledge_query_button"), key="knowledge_search_btn"
-        )
+        search_clicked = st.button(tr(lang, "knowledge_query_button"), key="knowledge_search_btn")
         if not search_clicked:
             return
 
         with st.spinner(tr(lang, "loading")):
-            chat_code, chat_res = _post_knowledge_chat(
-                base_url, query.strip(), top_k
-            )
+            chat_code, chat_res = _post_knowledge_chat(base_url, query.strip(), top_k)
 
         if chat_code != 200 or not isinstance(chat_res, dict):
             st.error(tr(lang, "knowledge_fetch_error", code=chat_code))
@@ -1299,8 +2077,7 @@ def _screen_knowledge(base_url: str, lang: str) -> None:
                 chip_html = citation_chip_html(title, source_url)
                 st.markdown(chip_html, unsafe_allow_html=True)
                 st.markdown(
-                    f"**{tr(lang, 'knowledge_score_label')}:** `{score:.4f}` · "
-                    f"{reranker_text}"
+                    f"**{tr(lang, 'knowledge_score_label')}:** `{score:.4f}` · {reranker_text}"
                 )
                 st.markdown(text)
 
@@ -1355,9 +2132,7 @@ def _screen_audit(base_url: str, lang: str) -> None:
                 for index, item in enumerate(processed, 1):
                     subject = html.escape(str(item.get("subject") or tr(lang, "unknown")))
                     sender = html.escape(str(item.get("sender") or tr(lang, "unknown")))
-                    st.markdown(
-                        f"**{index}. {subject}**  \n{tr(lang, 'sender_label')}: `{sender}`"
-                    )
+                    st.markdown(f"**{index}. {subject}**  \n{tr(lang, 'sender_label')}: `{sender}`")
 
         if tasks_code == 200 and tasks:
             summary = route_summary(tasks)
@@ -1375,8 +2150,10 @@ def _screen_audit(base_url: str, lang: str) -> None:
             st.table(route_rows)
             st.caption(
                 tr(
-                    lang, "audit_retrieval",
-                    tasks=summary["retrieval_tasks"], docs=summary["document_count"],
+                    lang,
+                    "audit_retrieval",
+                    tasks=summary["retrieval_tasks"],
+                    docs=summary["document_count"],
                 )
             )
             validation_summary = ", ".join(
@@ -1390,6 +2167,7 @@ def _screen_audit(base_url: str, lang: str) -> None:
         st.caption(tr(lang, "audit_telemetry_note"))
 
     if hasattr(st, "fragment"):
+
         @st.fragment
         def _audit_fragment() -> None:
             _render_audit_body()

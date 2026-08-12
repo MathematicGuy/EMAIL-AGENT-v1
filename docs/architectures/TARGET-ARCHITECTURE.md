@@ -1,20 +1,21 @@
 # TARGET ARCHITECTURE
 
-## Cowork Agent — AI Chat Assistant with Executable `@Email` Tool
+## Cowork Agent — AI Chat Assistant with chat-native TaskEpisodes
 
 **Architecture level:** Level 2 — Production Engineer<br>
 **Status:** Baseline target architecture<br>
-**Agent pattern:** Multi-turn Chat Controller with deterministic tool pipelines<br>
+**Agent pattern:** Multi-turn Chat Controller with typed memory<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Primary use case:** Sustain grounded multi-turn chat and execute the stateless Email RAG pipeline as an in-chat `@Email` skill.
+**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../adr/ADR-004-chat-native-task-episodes.md)<br>
+**Primary use case:** Sustain grounded multi-turn chat with safe, selectively retrieved memory. The standalone PRD-v1 Email Agent remains a separate, stateless, memory-free product flow.
 
 ---
 
 ## 1. Product and Architecture Hypothesis
 
-> Can a multi-turn Cowork Chat Assistant combine typed memory, enterprise
-> knowledge, and executable tools while keeping raw email strictly ephemeral?
+> Can a multi-turn Cowork Chat Assistant combine typed memory and enterprise
+> knowledge while retaining only user-authorized, body-free task records?
 
 The primary transformation is:
 
@@ -23,30 +24,35 @@ User chat message + active session buffer
         +
 Explicit profile + eligible episodes + enterprise RAG
         ↓
-Chat response or @Email tool invocation
+Streamed chat response
         ↓
-Streamed response / rendered Action Plan card
+If and only if explicitly requested, bounded task proposal
         ↓
-Persisted chat turn and system-generated episode
+Persisted chat turn and system-generated, retrieval-ineligible TaskEpisode
 ```
 
 ### Current workflow characteristics
 
-- Gmail is accessed through a read-only Google integration.
 - The primary product entry is a multi-turn AI Chat session.
-- The Chat Controller owns session orchestration, context assembly, and SSE streaming.
-- `@Email` is an explicit in-chat skill; its internal workflow remains deterministic and one-shot.
-- The LLM may request only allow-listed tools under deterministic policy.
-- The RAG module is an external, pluggable semantic-memory provider.
+- The Chat Controller owns session orchestration, context assembly, task-proposal production, and SSE streaming.
+- A TaskEpisode can be proposed and persisted only after an explicit user request for a task or action plan; ordinary chat, background processes, and model inference alone cannot create one.
+- The RAG module is a company-knowledge provider. Its citations may be stored as coordinates, but copied chunks and source text may not.
+- Gmail is accessed only by the separate, standalone PRD-v1 Email Agent. AI Chat has no executable Email tool, mailbox selector, or Gmail state.
 - Reflexion and multi-agent orchestration are out of scope.
 - Email attachments are out of scope under ADR-003; record presence only and do not process
   content.
-- `@Email` Action Plans render with inline approve, complete, and reject controls.
-- System-generated episodes are persisted but are not eligible for retrieval until validated later.
+- System-generated TaskEpisodes are persisted but are not eligible for retrieval until approved or completed in their originating chat session.
 
 ---
 
-# 2. Overall Production Architecture
+# 2. Superseded pre-ADR-004 architecture (historical; not the target)
+
+The material in this historical section predates ADR-004. Its executable
+in-chat `@Email` path, Email-derived episodes, Gmail/run/tool provenance, and
+Action Plan card lifecycle are superseded and must not guide new work. The
+accepted replacement begins in §20. The standalone PRD-v1 Email Agent remains
+unchanged and memory-free; mentions of it in this historical record do not
+make it an AI Chat capability.
 
 ```mermaid
 flowchart TB
@@ -671,7 +677,7 @@ memory_type: string
 
 source_type:
   - user_config
-  - system_generated_task
+  - system_generated_chat_task
   - user_approved_task
   - company_document
   - migration
@@ -986,10 +992,12 @@ added to task rows, chat history, traces, indexes, or any durable memory type.
 # 10. Suggested Internal Service APIs
 
 ```text
-POST /v1/cowork/chat/sessions
-GET  /v1/cowork/chat/sessions
-POST /v1/cowork/chat/sessions/{session_id}/messages  # SSE response
-GET  /v1/cowork/chat/sessions/{session_id}/messages
+POST   /v1/cowork/chat/sessions
+POST   /v1/cowork/chat/sessions/{session_id}/messages  # SSE response
+POST   /v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/approve
+POST   /v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/complete
+POST   /v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/reject
+DELETE /v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}
 
 POST /v1/cowork/tools/email
 POST /v1/cowork/email-action-plan/runs
@@ -1426,3 +1434,504 @@ AI Chat client creates or resumes a session
 
 This document is the baseline target architecture for the Cowork AI Chat
 Assistant, its four-type memory engine, and the executable `@Email` tool.
+
+---
+
+# 20. Accepted ADR-004 chat-native target
+
+ADR-004 replaces the superseded AI Chat design above. The target has no
+executable in-chat tool and does not turn a standalone PRD-v1 Email run into
+an episode. The standalone PRD-v1 Email Agent remains available through its
+own APIs, is memory-free, and is not callable from AI Chat.
+
+```mermaid
+flowchart TB
+    CLIENT["AI Chat client"] --> API["Chat API / SSE"] --> CHAT["Chat Controller"]
+    CHAT --> GATE["Memory Gateway"]
+    GATE --> SHORT[("bounded session memory")]
+    GATE --> PROFILE[("explicit profile")]
+    GATE --> EPISODES[("chat summaries + TaskEpisodes")]
+    GATE --> RAG["Company RAG"]
+    CHAT -->|explicit task/action-plan request only| PROPOSAL["bounded task proposal"]
+    PROPOSAL --> EPISODES
+```
+
+## 20.1 Chat Controller and task creation
+
+1. Validate tenant, user, and mandatory `session_id`.
+2. Assemble bounded session context, explicit profile, eligible episodes, and
+   selective company-RAG context through the Memory Gateway.
+3. Stream the assistant response.
+4. Only after an explicit user request to create a task or action plan, render
+   one bounded proposal and persist a TaskEpisode.
+5. Record the chat turn and update the session buffer.
+
+Ordinary chat, assistant suggestions, classifier output, background work, and
+model-only inference must not create a TaskEpisode. The accepted request schema
+has no tool field: strict deserialization rejects retired `tool_choices` as an
+unexpected field, before it could select a mailbox, run Gmail work, or write a
+PRD-v1 task row.
+
+## 20.2 TaskEpisode lifecycle and access policy
+
+```text
+explicit user task request
+→ system_generated / retrieval_eligible=false
+→ user_approved or completed / retrieval_eligible=true
+→ rejected / retrieval_eligible=false
+```
+
+Allowed transitions are:
+
+```text
+system_generated → user_approved | completed | rejected
+user_approved → completed | rejected
+```
+
+Storage derives `retrieval_eligible` atomically from the resulting
+`validation_status`; callers cannot supply it independently. Approval,
+completion, rejection, and single-record deletion require the originating chat
+session. Eligible retrieval may cross sessions only for the same tenant, user,
+and `feature: ai_chat` scope. User-wide deletion spans that user's AI Chat
+sessions and never deletes semantic company RAG.
+
+## 20.3 TaskEpisode contract
+
+```yaml
+episode_id: string
+record_id: string
+tenant_id: string
+user_id: string
+chat_session_id: string
+chat_turn_id: string
+
+task_title: string
+minimal_request_paraphrase: string
+action_plan:
+  - string
+rag_citations:
+  - document_id: string
+    document_title: string
+    section: string | null
+    source_url: string
+missing_information:
+  - string
+
+validation_status: system_generated | user_approved | completed | rejected
+retrieval_eligible: boolean
+source_type: system_generated_chat_task
+creation_reason: explicit_user_task_request
+
+created_at: datetime
+updated_at: datetime
+pipeline_version: string
+model_id: string | null
+prompt_version: string | null
+confidence: number | null
+```
+
+`record_id` is an opaque, stable idempotency key derived deterministically
+from tenant, user, originating chat session, and originating chat turn. The
+derivation must not expose raw user text. The compact payload contains no raw
+email, attachment content, full chat transcript, copied RAG chunk, run field,
+tool field, Gmail field, mailbox identifier, or foreign key to a standalone
+PRD-v1 task row. Optional citations are company-RAG coordinates only.
+
+## 20.4 Four-type memory policy
+
+| Memory type | Read policy | Write policy | Initial storage |
+|---|---|---|---|
+| Short-term | Bounded active context for its `session_id` | Chat turns only | Redis or in-process state |
+| Long-term declarative | Compact profile per relevant turn | Explicit preference or trusted configuration only | PostgreSQL |
+| Episodic | Eligible summaries and TaskEpisodes for the same tenant, user, and `feature: ai_chat` | Summaries; TaskEpisodes after explicit user request only | PostgreSQL |
+| Semantic | Selective company-knowledge retrieval | No direct Chat Controller write | Company RAG |
+
+Every memory operation carries `tenant_id`, `user_id`, `session_id`,
+`feature: ai_chat`, `memory_type`, and `source_id`, and fails closed when the
+namespace is missing or inconsistent. The recommended logical key is
+`tenant_id / user_id / session_id / feature: ai_chat / memory_type / record_id`.
+
+## 20.5 Privacy, observability, and implementation order
+
+TaskEpisodes, logs, telemetry, fixtures, and semantic indexing must exclude
+raw email bodies, attachment content, full chat transcripts, copied RAG chunks,
+and full assembled prompts. Metadata-only safety counters for unvalidated
+retrieval, cross-tenant access, raw-email violations, rejected-episode
+retrieval, and expired-record retrieval must remain zero under test.
+
+Implement the accepted target in this order:
+
+1. Retain the completed standalone PRD-v1 Email Agent without memory changes.
+2. Define Chat Controller, session, SSE, Memory Gateway, and TaskEpisode
+   contracts against ADR-004.
+3. Implement bounded session memory and explicit-only declarative profiles.
+4. Implement body-free TaskEpisode persistence with deterministic `record_id`
+   and atomic lifecycle-derived eligibility.
+5. Implement originating-session mutation/deletion and same-tenant/user
+   cross-session eligible retrieval.
+6. Implement selective episodic and company-RAG retrieval, then evaluation,
+   retention, deletion-audit, and governance gates.
+
+
+---
+
+# 21. Accepted extension — Projects and AI Chat with user documents ("chat with the PDF")
+
+**Status:** Accepted<br>
+**Decision authority:** [ADR-005 — Project-scoped chat documents](../adr/ADR-005-project-scoped-chat-documents.md)<br>
+**Extends:** §20 accepted ADR-004 chat-native target<br>
+**Does not change:** the standalone PRD-v1 Email Agent, the company RAG corpus,
+the declarative profile, or the TaskEpisode trust boundary
+
+This extension lets a user create a **Project**, upload documents into it, open
+one or many chat sessions inside it, and ask grounded questions answered from
+those documents with page-level citations. It adds a project container and a
+second semantic retrieval **plane** — not a fifth memory type.
+
+## 21.1 The Project container
+
+A Project is a user-owned workspace that holds documents and chat sessions.
+
+```text
+tenant → user → project → { documents, chat sessions }
+```
+
+```yaml
+project_id: string
+tenant_id: string
+user_id: string
+name: string
+created_at: datetime
+updated_at: datetime
+```
+
+Rules:
+
+- Every chat session belongs to exactly one project. `project_id` becomes a
+  mandatory field of the chat session scope.
+- A user always has a default project, created on first use, so an existing
+  session flow keeps working without asking the user to choose one.
+- Documents are members of a project, not attachments of a session. Upload once,
+  every session in that project can ground on it. There is no per-session
+  attach/detach step.
+- Deleting a project deletes its documents (bytes, extracted text, and vector
+  points) and its session state.
+- A project never spans users or tenants, and a document is never visible from
+  another project.
+
+## 21.2 Source classes and the boundary between them
+
+| Property | Company semantic corpus (existing) | Project document (new) |
+|---|---|---|
+| Owner | Workspace administrator | The uploading user |
+| Provenance | Curated, approved, `document_status: ready` | Self-service upload, unreviewed |
+| Ingestion | Offline CLI into `data/extracted/` | Runtime ingestion job |
+| Durability | Rebuildable from the repo corpus | User data; not rebuildable |
+| Scope key | `tenant_id` | `tenant_id` + `user_id` + `project_id` + `document_id` |
+| Store | Company Qdrant collection | Separate project-document Qdrant collection |
+| Deletion | Corpus re-index | Explicit deletion + 30-day TTL purge |
+| Retrieval trigger | Selective, cue-driven | Deterministic when the project has ready documents |
+
+Both planes are `memory_type: semantic` and are read through retrieval-only
+ports. They are never merged: a user upload cannot enter the company corpus,
+and company documents are never re-scoped to a project. The namespace carries
+`document_scope: company | project_document`; a request that omits or
+mismatches it fails closed.
+
+Raw email remains excluded from both planes. Gmail attachment processing stays
+out of scope under ADR-003: a document enters this plane only through an
+explicit user upload into a project.
+
+## 21.3 Architecture
+
+```mermaid
+flowchart TB
+    subgraph INGEST["PROJECT DOCUMENT INGESTION PLANE"]
+        UP["Project Document API<br/>multipart upload"]
+        VALID["Validator<br/>type · size · pages · quota · encryption"]
+        QUAR[("Document object store<br/>encrypted · TTL")]
+        JOB["Ingestion job<br/>off the request path"]
+        DETECT["PdfInspector · DocxExtractor<br/>native text per page"]
+        OCR["Mistral OCR<br/>scanned and mixed pages"]
+        PCHUNK["Page-aware chunker"]
+        UEMBED["Embedding service"]
+        UINDEX[("Qdrant project-document collection<br/>tenant · user · project · document filters")]
+        UFAIL["failed(reason_code)"]
+    end
+
+    UP --> VALID --> QUAR --> JOB --> DETECT
+    DETECT -->|native pages| PCHUNK
+    DETECT -->|pages needing OCR| OCR --> PCHUNK
+    PCHUNK --> UEMBED --> UINDEX
+    VALID -. rejected .-> UFAIL
+    DETECT -. encrypted · no text .-> UFAIL
+    OCR -. attempts or page cap exhausted .-> UFAIL
+    UEMBED -. attempts exhausted .-> UFAIL
+
+    subgraph CHATTURN["CHAT TURN INSIDE A PROJECT"]
+        CHAT["Chat Controller"]
+        GATE["Memory Gateway"]
+        DOCPORT["ProjectDocumentPort<br/>retrieval-only"]
+        DACL["ACL filter built before embedding<br/>tenant · user · project · ready · unexpired"]
+        CTX["Context assembler<br/>labeled sections"]
+    end
+
+    CHAT --> GATE --> DOCPORT --> DACL --> UINDEX
+    GATE --> COMPANY["Company RAG"]
+    DOCPORT --> CTX
+    COMPANY --> CTX --> CHAT
+```
+
+## 21.4 Ingestion contract and status machine
+
+```text
+received → extracting → indexing → ready
+any state → failed(reason_code)
+ready|failed → deleted
+```
+
+```yaml
+document_id: string          # opaque; derived from tenant, user, project, content sha256
+tenant_id: string
+user_id: string
+project_id: string
+
+filename: string
+media_type: application/pdf | application/vnd.openxmlformats-officedocument.wordprocessingml.document
+byte_size: integer
+page_count: integer | null
+ocr_page_count: integer | null
+content_sha256: string
+
+status: received | extracting | indexing | ready | failed | deleted
+reason_code: string | null
+chunk_count: integer | null
+
+created_at: datetime
+updated_at: datetime
+expires_at: datetime         # created_at + retention, default 30 days
+```
+
+Reason codes reuse the existing ingestion vocabulary and add the cases a
+runtime upload introduces:
+
+```text
+file_too_large · pdf_page_limit_exceeded · empty_extraction
+unsupported_media_type · encrypted_document
+ocr_page_limit_exceeded · ocr_failed
+quota_exceeded · embedding_unavailable · index_unavailable
+```
+
+Rules:
+
+- Validation runs on sniffed content type, not on the filename extension.
+- `document_id` is derived from `tenant_id`, `user_id`, `project_id`, and the
+  content digest, so re-uploading identical bytes into the same project returns
+  the existing record instead of indexing a second copy. The derivation never
+  encodes filename or document text.
+- Extraction reuses the PRD-v1 `PdfInspector` and `DocxExtractor` and their
+  size, page, and encryption guards. Because `PdfInspector` shells out to local
+  commands, extraction runs in the job, never on the request path.
+- **OCR is enabled.** Pages that `PdfInspector` reports as needing OCR are sent
+  to the configured Mistral OCR provider, bounded by the existing
+  `max_ocr_pages`, `timeout_seconds`, and `max_attempts` settings. Native pages
+  are never re-OCR'd. A document that exceeds the OCR page cap fails as
+  `ocr_page_limit_exceeded`; a provider failure after bounded retries fails as
+  `ocr_failed`. Partial or empty extraction output is never indexed.
+- The upload responds `202` and the job runs off the request path. A chat turn
+  never blocks on ingestion.
+- Chunking is page-aware: every chunk carries `page_start` and `page_end`
+  derived from the extractor's `<!-- Page N -->` markers, then splits on
+  paragraph boundaries under the existing size cap.
+
+## 21.5 Retrieval contract
+
+Qdrant is the store for this plane. Unlike the company corpus, there is no
+in-repo fallback index: a project document exists only in Qdrant, so an
+unavailable vector store degrades the plane explicitly rather than silently
+substituting other evidence.
+
+```yaml
+# request
+tenant_id: string
+user_id: string
+project_id: string
+session_id: string
+feature: ai_chat
+document_scope: project_document
+
+query: string
+document_ids:                 # optional narrowing; default is every ready document in the project
+  - string
+
+limits:
+  top_k: integer
+  min_score: number
+  timeout_ms: integer
+```
+
+```yaml
+# response
+chunks:
+  - chunk_id: string
+    document_id: string
+    document_title: string
+    section: string | null
+    page_start: integer
+    page_end: integer
+    text: string
+    relevance_score: number
+    rerank_score: number | null
+
+retrieval_status: success | no_results | timeout | authorization_denied | partial
+degraded: boolean
+latency_ms: integer
+```
+
+ACL is applied first: the `tenant_id`, `user_id`, `project_id`, `ready`-status,
+and unexpired conditions are assembled **before** the query is embedded, so a
+chunk from another user or another project is never scored. A project with no
+ready documents is not an error; it disables the plane for that turn.
+
+**Trigger policy.** When the session's project holds at least one ready
+document, the plane is queried on every turn. This is deterministic and does
+not depend on cue phrases: the user put the document in the project in order to
+ask about it. Company-RAG retrieval keeps its existing selective cue policy and
+is unchanged.
+
+## 21.6 Context assembly and conflict precedence
+
+The assembler gains one labeled section, `project_document_evidence`:
+
+```text
+current_instruction
+> project_document_evidence
+> current_company_evidence
+> stored_preference
+> advisory_episode
+```
+
+Scope of authority is explicit, because rank alone is not the whole rule:
+
+- A project document is authoritative for **its own content** — what it says,
+  on which page.
+- Company RAG remains authoritative for **company procedure and policy**.
+- When a project document contradicts current company policy on a procedure,
+  both are surfaced with their citations and the conflict is stated. It is
+  never silently resolved in favour of the higher rank.
+- When no chunk clears the score threshold, the assistant states that the
+  answer is not present in the project documents and lists what is missing.
+  Invention from parametric knowledge is a validation failure, as in §11.
+
+## 21.7 Memory interaction
+
+| Memory type | Change |
+|---|---|
+| Short-term | None in content. The session scope gains `project_id`. |
+| Long-term declarative | None. Documents are never a preference source. |
+| Episodic | Records `project_id`; citations may carry document coordinates. |
+| Semantic (company) | None. |
+| Semantic (project document) | New plane defined here. |
+
+Episodic **retrieval** scope is unchanged: eligible episodes are still selected
+by tenant, user, and `feature: ai_chat` as accepted in PRD-v2 FR-09. Episodes
+persist `project_id` so a stricter project-scoped retrieval can be enabled later
+without a data migration, but this extension does not change the rule.
+
+A TaskEpisode may cite a project document as coordinates only:
+
+```yaml
+rag_citations:
+  - citation_scope: company | project_document
+    document_id: string
+    document_title: string
+    section: string | null
+    page_start: integer | null
+    page_end: integer | null
+    source_url: string | null
+```
+
+Copied document text, extracted page text, and full chat transcripts remain
+banned from episodes, logs, telemetry, and fixtures. Deleting a document does
+not delete episodes that cite it; such a citation renders as unavailable.
+
+## 21.8 Suggested internal API surface
+
+```text
+POST   /v1/cowork/chat/projects                                        → 201 {project_id}
+GET    /v1/cowork/chat/projects                                        list for tenant+user
+DELETE /v1/cowork/chat/projects/{project_id}                           204, cascades to documents and sessions
+POST   /v1/cowork/chat/projects/{project_id}/documents                 multipart → 202 {document_id, status}
+GET    /v1/cowork/chat/projects/{project_id}/documents                 list with status
+GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}   status + reason_code
+DELETE /v1/cowork/chat/projects/{project_id}/documents/{document_id}   204, purges index + object + text
+POST   /v1/cowork/chat/sessions                                        body gains optional {project_id}
+GET    /v1/cowork/chat/sessions?project_id=...                         sessions of one project
+```
+
+`POST /sessions` without a `project_id` resolves to the user's default project,
+so the existing client contract keeps working. No new SSE event type is
+introduced: document evidence is disclosed through the existing
+`memory_citation` event, discriminated by `citation_scope`. Ingestion progress
+is polled through the document status endpoint, not streamed.
+
+## 21.9 Failure and fallback paths
+
+| Failure | Behavior |
+|---|---|
+| Validation rejection | `failed(reason_code)` at upload; no job, no retained bytes beyond the failure record |
+| Extraction failure | `failed`, document never indexed, chat unaffected |
+| OCR provider outage | bounded retries, then `failed(ocr_failed)`; native-text pages are not indexed alone |
+| Embedding provider outage | remain `indexing`, bounded retries with backoff, then `failed(embedding_unavailable)` |
+| Qdrant unavailable at query time | one retry, then empty result with `degraded: true`; the turn states that document evidence is unavailable |
+| Retrieval timeout | one retry, then `timeout` + `degraded: true` |
+| Document deleted or expired mid-session | excluded by the retrieval filter; the turn proceeds without it |
+| No chunk above threshold | `no_results`; the answer states the documents do not cover the question |
+
+A degraded document plane never falls back to unsourced generation, and never
+affects the standalone PRD-v1 Email Agent.
+
+## 21.10 Privacy, retention, and deletion
+
+- Uploaded bytes, extracted text, and OCR output are user-owned durable data:
+  encrypted at rest, access-checked on every read, and excluded from logs,
+  production telemetry, traces, and test fixtures.
+- OCR sends page images to an external provider. That transfer is part of the
+  documented upload path and must be disclosed in product copy; OCR output is
+  never retained by the pipeline outside the project's own storage.
+- Document text never enters the company corpus, TaskEpisodes, the declarative
+  profile, or any PRD-v1 Email path.
+- **Retention defaults to 30 days** from upload, configurable per tenant.
+  Expired documents are excluded from retrieval before ranking and purged by
+  the existing background purge mechanism.
+- Deletion is supported per document, per project, per user, and feature-wide.
+  It purges the object store, the extracted text, and the Qdrant points, and is
+  repeatable until every store confirms.
+- These metadata-only safety counters must remain zero under test: cross-tenant
+  document retrieval, cross-user document retrieval, cross-project document
+  retrieval, retrieval of an expired or deleted document, and document text
+  appearing in an episode, log, or telemetry field.
+
+## 21.11 Implementation order
+
+1. Project container: contract, storage, default project, and `project_id` on
+   the chat session scope.
+2. Ingestion contracts and job: validation, extraction, Mistral OCR, page-aware
+   chunking, and the status machine — no retrieval yet.
+3. Qdrant project-document collection with ACL-first filtering and deletion
+   propagation.
+4. Deterministic per-turn retrieval and the `project_document_evidence` context
+   section with conflict precedence.
+5. Grounded page-level citation rendering and `citation_scope` on episodes.
+6. Retention, deletion audit, safety counters, and evaluation gates.
+
+## 21.12 Out of scope for this extension
+
+- sharing a project or document with another user or at workspace level;
+- promoting a project document into the company corpus;
+- image, chart, and table-structure understanding beyond OCR text;
+- document editing, annotation, or re-generation;
+- scheduled or automatic re-ingestion;
+- ingesting Gmail attachments (remains out of scope under ADR-003);
+- project-scoped episodic retrieval (deferred; `project_id` is recorded now);
+- any executable in-chat tool, including `@Email`.

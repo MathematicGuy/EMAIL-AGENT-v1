@@ -824,6 +824,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
         assert request.tenant_id == LOCAL_TENANT_ID
         assert request.user_id == "u1"
         assert request.query == "quy trình nghỉ phép"
+        assert request.filters.document_status == ("ready",)
         assert request.knowledge_gaps == ("quy trình nghỉ phép",)
         assert request.filters.tenant_scope == LOCAL_TENANT_ID
         assert generator.received_retrievals == (memory.response,)

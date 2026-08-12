@@ -1,1 +1,0 @@
-[{"id": "r-001", "sender": "sender@example.com", "body": "Body", "thread_id": null, "labels": {"actionability": "action_required", "email_is_sufficient": true, "expected_route": "DIRECT_PLAN", "reason_codes": ["email_self_contained"]}}]

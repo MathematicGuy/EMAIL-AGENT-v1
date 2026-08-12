@@ -14,6 +14,7 @@ Two invariants shape this module:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Sequence
@@ -25,7 +26,9 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchAny,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -44,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 #: Payload key carrying the ACL scope; also the indexed filter field.
 TENANT_PAYLOAD_KEY = "tenant_id"
+DOCUMENT_STATUS_PAYLOAD_KEY = "document_status"
+APPROVED_DOCUMENT_STATUS = "ready"
 
 #: Stable namespace so re-ingesting the same chunk_id overwrites its point.
 _POINT_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/rag/chunk")
@@ -73,9 +78,17 @@ class QdrantSemanticMemory:
         self, request: SemanticRetrievalRequest
     ) -> SemanticRetrievalResponse:
         started = time.monotonic()
+        tenant_id = request.tenant_id
         tenant_scope = request.filters.tenant_scope
-        if not tenant_scope:
-            # No scope, no candidates: refuse before spending an embedding call.
+        document_status = request.filters.document_status
+        if (
+            not tenant_id.strip()
+            or not tenant_scope.strip()
+            or tenant_id != tenant_scope
+            or document_status != (APPROVED_DOCUMENT_STATUS,)
+        ):
+            # No exact tenant scope or approved status allowlist: refuse before
+            # spending an embedding call or touching the vector store.
             return _response(request, (), RetrievalStatus.AUTHORIZATION_DENIED, started)
         # ACL first: the filter exists before the query text is embedded, so
         # scoring can only ever run over this tenant's points.
@@ -83,39 +96,42 @@ class QdrantSemanticMemory:
             must=[
                 FieldCondition(
                     key=TENANT_PAYLOAD_KEY, match=MatchValue(value=tenant_scope)
-                )
+                ),
+                FieldCondition(
+                    key=DOCUMENT_STATUS_PAYLOAD_KEY,
+                    match=MatchAny(any=list(document_status)),
+                ),
             ]
         )
 
         try:
-            (query_vector,) = await self._embedder.embed((_query_text(request),))
-        except TimeoutError:
-            return _response(request, (), RetrievalStatus.TIMEOUT, started)
-
-        min_score = (
-            request.limits.min_score
-            if request.limits.min_score >= 0
-            else self._min_score_default
-        )
-        top_k = request.limits.top_k if request.limits.top_k > 0 else self._top_k_default
-        try:
-            result = await self._client.query_points(
-                collection_name=self._collection_name,
-                query=list(query_vector),
-                query_filter=query_filter,
-                limit=top_k,
-                score_threshold=min_score,
-                with_payload=True,
-            )
-        except (UnexpectedResponse, ResponseHandlingException, ValueError) as exc:
-            # Degrade instead of failing the digest run (constitution §4); the
-            # message is the only evidence of why retrieval went quiet.
+            async with asyncio.timeout(_timeout_seconds(request.limits.timeout_ms)):
+                (query_vector,) = await self._embedder.embed((_query_text(request),))
+                min_score = (
+                    request.limits.min_score
+                    if request.limits.min_score >= 0
+                    else self._min_score_default
+                )
+                top_k = (
+                    request.limits.top_k
+                    if request.limits.top_k > 0
+                    else self._top_k_default
+                )
+                result = await self._client.query_points(
+                    collection_name=self._collection_name,
+                    query=list(query_vector),
+                    query_filter=query_filter,
+                    limit=top_k,
+                    score_threshold=min_score,
+                    timeout=_qdrant_timeout(request.limits.timeout_ms),
+                    with_payload=True,
+                )
+        except (TimeoutError, UnexpectedResponse, ResponseHandlingException, ValueError) as exc:
             logger.warning(
-                "Qdrant retrieval failed (%s: %s); returning structured empty results",
+                "Qdrant retrieval unavailable (%s)",
                 type(exc).__name__,
-                exc,
             )
-            return _response(request, (), RetrievalStatus.NO_RESULTS, started)
+            return _response(request, (), RetrievalStatus.TIMEOUT, started)
 
         chunks = tuple(
             _to_semantic_chunk(payload, point.score)
@@ -158,6 +174,12 @@ async def ingest_corpus(
         collection_name=collection_name,
         vectors_config=VectorParams(size=observed_size, distance=Distance.COSINE),
     )
+    for field_name in (TENANT_PAYLOAD_KEY, DOCUMENT_STATUS_PAYLOAD_KEY):
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name=field_name,
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
 
     points = [
         PointStruct(
@@ -177,6 +199,7 @@ async def ingest_corpus(
 def _payload(chunk: KnowledgeChunk) -> dict[str, object]:
     return {
         TENANT_PAYLOAD_KEY: chunk.tenant_id,
+        DOCUMENT_STATUS_PAYLOAD_KEY: APPROVED_DOCUMENT_STATUS,
         "chunk_id": chunk.chunk_id,
         "document_id": chunk.document_id,
         "document_title": chunk.document_title,
@@ -204,6 +227,22 @@ def _to_semantic_chunk(payload: dict[str, object], score: float) -> SemanticChun
 def _query_text(request: SemanticRetrievalRequest) -> str:
     parts = [request.query, *request.knowledge_gaps]
     return "\n".join(part for part in parts if part)
+
+
+def _timeout_seconds(timeout_ms: int) -> float | None:
+    return timeout_ms / 1000 if timeout_ms > 0 else None
+
+
+def _qdrant_timeout(timeout_ms: int) -> int | None:
+    """Use only whole seconds that fit in the caller's remaining budget.
+
+    The surrounding ``asyncio.timeout`` is the authoritative end-to-end
+    deadline over embedding and Qdrant; sub-second budgets therefore never get
+    rounded up into a longer server-side request.
+    """
+    if timeout_ms < 1000:
+        return None
+    return timeout_ms // 1000
 
 
 def _response(

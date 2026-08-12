@@ -25,6 +25,7 @@ dependencies = [
 dev = [
   "mypy>=1.14",
   "pytest>=8",
+  "pytest-xdist>=3.5",
   "ruff>=0.9",
 ]
 gui = [
@@ -51,6 +52,7 @@ where = ["src"]
 # it collection only works under `python -m pytest`, which happens to add the CWD.
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
 
 [tool.ruff]
 target-version = "py311"

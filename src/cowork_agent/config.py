@@ -72,6 +72,8 @@ class ChatMemorySettings:
 
     max_turns: int
     ttl_seconds: int
+    profile_retention_seconds: int | None = None
+    episode_retention_seconds: int | None = None
 
     @classmethod
     def from_env(
@@ -87,6 +89,12 @@ class ChatMemorySettings:
         return cls(
             max_turns=_positive_int(environ, "CHAT_MEMORY_MAX_TURNS", 20),
             ttl_seconds=_positive_int(environ, "CHAT_MEMORY_TTL_SECONDS", 1800),
+            profile_retention_seconds=_optional_retention_seconds(
+                environ, "CHAT_PROFILE_RETENTION_SECONDS"
+            ),
+            episode_retention_seconds=_optional_retention_seconds(
+                environ, "CHAT_EPISODE_RETENTION_SECONDS"
+            ),
         )
 
 
@@ -225,6 +233,7 @@ class GeminiSettings:
             value.strip()
             for _, value in numbered_keys
             if value.strip() and not value.strip().startswith("replace-with-")
+
         )
         if not keys:
             raise ValueError("At least one numbered GEMINI_API_KEY must be configured")
@@ -235,14 +244,18 @@ class GeminiSettings:
         if strategy != "round_robin":
             raise ValueError("Only round_robin Gemini key rotation is supported")
 
-        max_attempts = _positive_int(environ, "GEMINI_MAX_ATTEMPTS_PER_REQUEST", 3)
+        rotate_on_rate_limit = _boolean(environ, "GEMINI_ROTATE_ON_RATE_LIMIT", True)
+        raw_max_attempts = _positive_int(environ, "GEMINI_MAX_ATTEMPTS_PER_REQUEST", 3)
+        max_attempts = (
+            max(raw_max_attempts, len(keys)) if rotate_on_rate_limit else raw_max_attempts
+        )
         model = environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
         if not model or model.startswith("replace-with-"):
             raise ValueError("GEMINI_MODEL must be a real Gemini model name")
         return cls(
             api_keys=keys,
             model=model,
-            rotate_on_rate_limit=_boolean(environ, "GEMINI_ROTATE_ON_RATE_LIMIT", True),
+            rotate_on_rate_limit=rotate_on_rate_limit,
             max_attempts=min(max_attempts, len(keys)),
             max_emails_per_batch=_positive_int(
                 environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5
@@ -322,6 +335,16 @@ def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
     value = int(environ.get(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _optional_retention_seconds(environ: Mapping[str, str], name: str) -> int | None:
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return None
+    value = int(raw)
+    if value <= 0 or value > 31_536_000:
+        raise ValueError(f"{name} must be between 1 and 31536000")
     return value
 
 

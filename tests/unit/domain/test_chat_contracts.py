@@ -1,25 +1,44 @@
 """Framework-free V2-M1 chat and memory contract tests."""
 
 import json
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError, fields, replace
 from datetime import UTC, datetime
 
 import pytest
 
+import cowork_agent.domain.chat_contracts as chat_contracts
 from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
+    MAX_CHAT_MESSAGE_LENGTH,
+    MAX_CHAT_SUMMARY_LENGTH,
+    MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH,
+    MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
+    MAX_EPISODE_CITATION_SECTION_LENGTH,
+    MAX_EPISODE_CITATION_SOURCE_URL_LENGTH,
+    MAX_EPISODIC_RETRIEVAL_ITEMS,
+    MAX_RETRIEVAL_QUERY_LENGTH,
+    MAX_RETRIEVAL_TIMEOUT_MS,
+    MAX_SEMANTIC_RETRIEVAL_ITEMS,
+    MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
+    MAX_TASK_ACTION_PLAN_ITEMS,
+    MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
+    MAX_TASK_MISSING_INFORMATION_ITEMS,
+    MAX_TASK_RAG_CITATIONS,
+    MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
+    MAX_TASK_TITLE_LENGTH,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
-    ChatToolChoice,
+    ChatSummaryEpisode,
     ChatTurn,
     DeclarativeProfile,
     DegradedMemorySource,
     EpisodeCitation,
     EpisodeSourceType,
     EpisodeTransition,
+    EpisodicMemoryQuery,
     EpisodicMemoryRead,
     MemoryCitationType,
     MemoryContextRequest,
@@ -29,6 +48,7 @@ from cowork_agent.domain.chat_contracts import (
     MemoryProvenanceSource,
     MemoryReadOptions,
     MemoryType,
+    SemanticMemoryQuery,
     SemanticMemoryRead,
     TaskEpisode,
     stream_event_from_dict,
@@ -53,12 +73,9 @@ def _episode() -> TaskEpisode:
         record_id="record-1",
         tenant_id="tenant-1",
         user_id="user@example.com",
-        run_id="run-1",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
-        source_tool="@Email",
-        gmail_message_id="gmail-message-1",
-        gmail_url="https://mail.google.com/mail/u/0/#all/gmail-message-1",
+        creation_reason="explicit_user_task_request",
         task_title="Submit the report",
         minimal_request_paraphrase="The sender requests the quarterly report.",
         action_plan=("Open the approved template.", "Submit the report."),
@@ -73,12 +90,34 @@ def _episode() -> TaskEpisode:
         missing_information=("The report deadline is not stated.",),
         validation_status=ValidationStatus.SYSTEM_GENERATED,
         retrieval_eligible=False,
-        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
         created_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
         updated_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
         pipeline_version="2",
         model_id=None,
         prompt_version=None,
+        confidence=0.87,
+    )
+
+
+def _chat_summary_episode() -> ChatSummaryEpisode:
+    return ChatSummaryEpisode(
+        episode_id="chat-summary-1",
+        record_id="record-1",
+        tenant_id="tenant-1",
+        user_id="user@example.com",
+        chat_session_id="session-1",
+        chat_turn_id="turn-1",
+        summary="The user asked for help prioritizing the approved procedure.",
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        retrieval_eligible=False,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY,
+        created_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
+        expires_at=None,
+        pipeline_version="2",
+        model_id="test-model",
+        prompt_version="chat-summary-v1",
         confidence=0.87,
     )
 
@@ -92,8 +131,18 @@ def _context_request() -> MemoryContextRequest:
         reads=MemoryReadOptions(
             short_term=True,
             long_term=True,
-            episodic=EpisodicMemoryRead(enabled=True, retrieval_eligible_only=True, max_items=3),
-            semantic=SemanticMemoryRead(enabled=True),
+            episodic=EpisodicMemoryQuery(
+                query="Find related approved report tasks.",
+                max_items=3,
+                min_score=0.6,
+                timeout_ms=500,
+            ),
+            semantic=SemanticMemoryQuery(
+                query="Find the current report submission procedure.",
+                max_items=4,
+                min_score=0.7,
+                timeout_ms=750,
+            ),
         ),
     )
 
@@ -146,10 +195,8 @@ def _transition() -> EpisodeTransition:
 
 def _provenance() -> MemoryProvenance:
     return MemoryProvenance(
-        source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TOOL_OUTPUT,
-        source_id="gmail-message-1",
-        source_tool=ChatToolChoice.EMAIL,
-        run_id="run-1",
+        source_type=MemoryProvenanceSource.SYSTEM_GENERATED_CHAT_TASK,
+        source_id="episode-1",
         chat_turn_id="turn-1",
         pipeline_version="2",
         model_id=None,
@@ -188,16 +235,213 @@ def test_contracts_round_trip_through_json(build) -> None:
     assert type(instance).from_dict(json.loads(json.dumps(payload))) == instance
 
 
-def test_chat_message_request_round_trips_and_uses_typed_tool_choices() -> None:
+def test_chat_message_request_round_trips_without_a_tool_choice_contract() -> None:
     request = ChatMessageRequest(
         session_id="session-1",
-        user_message="Please use @Email for unread requests.",
-        tool_choices=(ChatToolChoice.EMAIL,),
+        user_message="Help me make an action plan.",
         idempotency_key="idem-1",
     )
 
     assert ChatMessageRequest.from_dict(json.loads(json.dumps(request.to_dict()))) == request
-    assert request.to_dict()["tool_choices"] == ["@Email"]
+    assert "tool_choices" not in request.to_dict()
+    assert not hasattr(chat_contracts, "ChatToolChoice")
+    assert "ChatToolChoice" not in chat_contracts.__all__
+
+
+def test_chat_message_request_accepts_the_exact_message_length_limit() -> None:
+    request = ChatMessageRequest(
+        session_id="session-1",
+        user_message="x" * MAX_CHAT_MESSAGE_LENGTH,
+        idempotency_key="idem-1",
+    )
+
+    assert request.user_message == "x" * MAX_CHAT_MESSAGE_LENGTH
+
+
+def test_chat_message_request_rejects_a_message_above_the_contract_limit() -> None:
+    with pytest.raises(ValueError, match="user_message"):
+        ChatMessageRequest(
+            session_id="session-1",
+            user_message="x" * (MAX_CHAT_MESSAGE_LENGTH + 1),
+            idempotency_key="idem-1",
+        )
+
+
+def test_chat_message_request_from_dict_rejects_retired_tool_choices() -> None:
+    payload = {**ChatMessageRequest("session-1", "Help me plan.", "idem-1").to_dict()}
+    payload["tool_choices"] = ["@Email"]
+
+    with pytest.raises(ValueError, match="unexpected field"):
+        ChatMessageRequest.from_dict(payload)
+
+
+def test_enabled_retrieval_requests_are_query_scoped_and_round_trip() -> None:
+    reads = MemoryReadOptions(
+        short_term=True,
+        long_term=True,
+        episodic=EpisodicMemoryQuery(
+            query="Find related approved report tasks.",
+            max_items=3,
+            min_score=0.6,
+            timeout_ms=500,
+        ),
+        semantic=SemanticMemoryQuery(
+            query="Find the current report submission procedure.",
+            max_items=4,
+            min_score=0.7,
+            timeout_ms=750,
+        ),
+    )
+
+    payload = json.loads(json.dumps(reads.to_dict()))
+
+    assert reads.episodic.enabled is True
+    assert reads.semantic.enabled is True
+    assert payload["episodic"]["retrieval_eligible_only"] is True
+    assert payload["semantic"]["condition"] == "chat_intent_requires_enterprise_context"
+    assert MemoryReadOptions.from_dict(payload) == reads
+
+
+def test_disabled_retrieval_requests_keep_the_legacy_shape_and_round_trip() -> None:
+    reads = MemoryReadOptions(
+        short_term=False,
+        long_term=False,
+        episodic=EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=3),
+        semantic=SemanticMemoryRead(enabled=False),
+    )
+
+    assert MemoryReadOptions.from_dict(reads.to_dict()) == reads
+
+
+@pytest.mark.parametrize(
+    ("build", "match"),
+    [
+        (
+            lambda: EpisodicMemoryQuery(
+                query=" ", max_items=1, min_score=0.0, timeout_ms=1
+            ),
+            "query",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="x" * (MAX_RETRIEVAL_QUERY_LENGTH + 1),
+                max_items=1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "query",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=True, min_score=0.0, timeout_ms=1
+            ),
+            "max_items",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy",
+                max_items=MAX_SEMANTIC_RETRIEVAL_ITEMS + 1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "max_items",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work",
+                max_items=MAX_EPISODIC_RETRIEVAL_ITEMS + 1,
+                min_score=0.0,
+                timeout_ms=1,
+            ),
+            "max_items",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy", max_items=1, min_score=True, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=1, min_score=-0.1, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy", max_items=1, min_score=1.1, timeout_ms=1
+            ),
+            "min_score",
+        ),
+        (
+            lambda: EpisodicMemoryQuery(
+                query="approved work", max_items=1, min_score=0.0, timeout_ms=False
+            ),
+            "timeout_ms",
+        ),
+        (
+            lambda: SemanticMemoryQuery(
+                query="company policy",
+                max_items=1,
+                min_score=0.0,
+                timeout_ms=MAX_RETRIEVAL_TIMEOUT_MS + 1,
+            ),
+            "timeout_ms",
+        ),
+    ],
+)
+def test_enabled_retrieval_requests_reject_untrusted_or_unbounded_values(
+    build: object, match: str
+) -> None:
+    with pytest.raises((TypeError, ValueError), match=match):
+        build()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "enabled": True,
+            "query": "approved work",
+            "retrieval_eligible_only": False,
+            "max_items": 1,
+            "min_score": 0.0,
+            "timeout_ms": 1,
+        },
+        {
+            "enabled": True,
+            "query": "company policy",
+            "condition": "all_context",
+            "max_items": 1,
+            "min_score": 0.0,
+            "timeout_ms": 1,
+        },
+    ],
+)
+def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        if "retrieval_eligible_only" in payload:
+            MemoryReadOptions.from_dict(
+                {
+                    "short_term": False,
+                    "long_term": False,
+                    "episodic": payload,
+                    "semantic": SemanticMemoryRead(enabled=False).to_dict(),
+                }
+            )
+        else:
+            MemoryReadOptions.from_dict(
+                {
+                    "short_term": False,
+                    "long_term": False,
+                    "episodic": EpisodicMemoryRead(
+                        enabled=False, retrieval_eligible_only=True, max_items=1
+                    ).to_dict(),
+                    "semantic": payload,
+                }
+            )
 
 
 @pytest.mark.parametrize(
@@ -206,43 +450,36 @@ def test_chat_message_request_round_trips_and_uses_typed_tool_choices() -> None:
         ChatMessageStreamEvent.delta(
             event_id="event-1", session_id="session-1", turn_id="turn-1", text="Hello"
         ),
-        ChatMessageStreamEvent.tool_call(
-            event_id="event-2",
-            session_id="session-1",
-            turn_id="turn-1",
-            name=ChatToolChoice.EMAIL,
-            call_id="call-1",
-        ),
-        ChatMessageStreamEvent.tool_output(
-            event_id="event-3",
-            session_id="session-1",
-            turn_id="turn-1",
-            action_plan={"task_id": "task-1"},
-        ),
         ChatMessageStreamEvent.memory_citation(
-            event_id="event-4",
+            event_id="event-2",
             session_id="session-1",
             turn_id="turn-1",
             memory_type=MemoryCitationType.SEMANTIC,
             source_id="doc-1",
         ),
         ChatMessageStreamEvent.completed(
-            event_id="event-5", session_id="session-1", turn_id="turn-1"
+            event_id="event-3", session_id="session-1", turn_id="turn-1"
         ),
         ChatMessageStreamEvent.error(
-            event_id="event-6",
+            event_id="event-4",
             session_id="session-1",
             turn_id="turn-1",
             code="memory_degraded",
             safe_message="Some optional context was unavailable.",
         ),
     ],
-    ids=["delta", "tool_call", "tool_output", "memory_citation", "completed", "error"],
+    ids=["delta", "memory_citation", "completed", "error"],
 )
 def test_typed_stream_event_variants_round_trip(event: ChatMessageStreamEvent) -> None:
     payload = event.to_dict()
 
     assert stream_event_from_dict(json.loads(json.dumps(payload))) == event
+
+
+def test_stream_contract_has_no_tool_variants() -> None:
+    assert all(not event_type.name.startswith("TOOL_") for event_type in ChatEventType)
+    assert not hasattr(ChatMessageStreamEvent, "tool_call")
+    assert not hasattr(ChatMessageStreamEvent, "tool_output")
 
 
 def test_stream_event_rejects_payload_for_the_wrong_variant() -> None:
@@ -401,9 +638,85 @@ def test_task_episode_rejects_an_inconsistent_retrieval_eligibility(
 
 
 def test_task_episode_has_no_raw_email_body_field() -> None:
-    forbidden = {"body", "raw_email", "normalized_body", "attachment_content"}
+    forbidden = {
+        "body",
+        "raw_email",
+        "normalized_body",
+        "attachment_content",
+        "run_id",
+        "source_tool",
+        "gmail_message_id",
+        "gmail_url",
+    }
 
     assert not forbidden.intersection(field.name for field in fields(TaskEpisode))
+    assert not forbidden.intersection(_episode().to_dict())
+
+
+def test_memory_provenance_has_no_email_or_run_ownership_fields() -> None:
+    forbidden = {"source_tool", "run_id", "gmail_message_id", "gmail_url"}
+
+    assert not forbidden.intersection(field.name for field in fields(MemoryProvenance))
+    assert not forbidden.intersection(_provenance().to_dict())
+
+
+@pytest.mark.parametrize("removed_field", ["source_tool", "run_id"])
+def test_memory_provenance_from_dict_rejects_removed_ownership_fields(
+    removed_field: str,
+) -> None:
+    payload = {**_provenance().to_dict(), removed_field: "legacy-value"}
+
+    with pytest.raises(ValueError, match="unexpected field"):
+        MemoryProvenance.from_dict(payload)
+
+
+def test_chat_summary_episode_round_trips_with_the_bounded_system_contract() -> None:
+    episode = _chat_summary_episode()
+
+    assert ChatSummaryEpisode.from_dict(json.loads(json.dumps(episode.to_dict()))) == episode
+    assert MAX_CHAT_SUMMARY_LENGTH == 500
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"episode_id": ""},
+        {"summary": "x" * (MAX_CHAT_SUMMARY_LENGTH + 1)},
+        {"validation_status": ValidationStatus.USER_APPROVED.value},
+        {"retrieval_eligible": True},
+        {"source_type": EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK.value},
+        {"updated_at": "2026-08-10T08:59:00+00:00"},
+        {"expires_at": "2026-08-10T09:00:00+00:00"},
+        {"confidence": True},
+    ],
+)
+def test_chat_summary_episode_rejects_invalid_lifecycle_or_untrusted_shape(
+    change: dict[str, object],
+) -> None:
+    payload = {**_chat_summary_episode().to_dict(), **change}
+
+    with pytest.raises((TypeError, ValueError)):
+        ChatSummaryEpisode.from_dict(payload)
+
+
+def test_chat_summary_episode_from_dict_recursively_rejects_raw_email_shaped_keys() -> None:
+    payload = {**_chat_summary_episode().to_dict(), "metadata": {"raw_email": "forbidden"}}
+
+    with pytest.raises(ValueError, match="raw email"):
+        ChatSummaryEpisode.from_dict(payload)
+
+
+def test_chat_summary_episode_has_no_raw_email_or_transcript_fields() -> None:
+    forbidden = {
+        "body",
+        "raw_email",
+        "normalized_body",
+        "attachment_content",
+        "transcript",
+        "tool_payload",
+    }
+
+    assert not forbidden.intersection(field.name for field in fields(ChatSummaryEpisode))
 
 
 @pytest.mark.parametrize("build", [_episode, _profile, _provenance, _chat_turn])
@@ -413,11 +726,163 @@ def test_durable_contracts_have_no_raw_email_shaped_fields(build) -> None:
     assert not forbidden.intersection(field.name for field in fields(type(build())))
 
 
-def test_task_episode_requires_the_explicit_email_tool_source() -> None:
+def test_task_episode_requires_the_explicit_user_task_request_creation_reason() -> None:
     payload = _episode().to_dict()
-    payload.pop("source_tool")
+    payload["creation_reason"] = "implicit_model_extraction"
 
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="creation_reason"):
+        TaskEpisode.from_dict(payload)
+
+
+def test_task_episode_contract_version_and_compact_bounds_are_public() -> None:
+    assert CHAT_CONTRACTS_VERSION == "2.0.0"
+    assert (
+        MAX_TASK_TITLE_LENGTH,
+        MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
+        MAX_TASK_ACTION_PLAN_ITEMS,
+        MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
+        MAX_TASK_MISSING_INFORMATION_ITEMS,
+        MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
+        MAX_TASK_RAG_CITATIONS,
+    ) == (200, 1_000, 20, 500, 20, 500, 20)
+    assert (
+        MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH,
+        MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
+        MAX_EPISODE_CITATION_SECTION_LENGTH,
+        MAX_EPISODE_CITATION_SOURCE_URL_LENGTH,
+    ) == (256, 300, 300, 2_048)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("task_title", "x" * 201, "task_title"),
+        ("minimal_request_paraphrase", "x" * 1_001, "minimal_request_paraphrase"),
+        ("action_plan", ("x",) * 21, "action_plan"),
+        ("action_plan", ("x" * 501,), "action_plan"),
+        ("missing_information", ("x",) * 21, "missing_information"),
+        ("missing_information", ("x" * 501,), "missing_information"),
+        ("rag_citations", (_episode().rag_citations[0],) * 21, "rag_citations"),
+    ],
+)
+def test_task_episode_direct_construction_enforces_compact_bounds(
+    field: str, value: object, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        replace(_episode(), **{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("task_title", "x" * 201, "task_title"),
+        ("minimal_request_paraphrase", "x" * 1_001, "minimal_request_paraphrase"),
+        ("action_plan", ["x"] * 21, "action_plan"),
+        ("action_plan", ["x" * 501], "action_plan"),
+        ("missing_information", ["x"] * 21, "missing_information"),
+        ("missing_information", ["x" * 501], "missing_information"),
+        ("rag_citations", [_episode().rag_citations[0].to_dict()] * 21, "rag_citations"),
+    ],
+)
+def test_task_episode_from_dict_enforces_compact_bounds(
+    field: str, value: object, match: str
+) -> None:
+    payload = _episode().to_dict()
+    payload[field] = value
+
+    with pytest.raises(ValueError, match=match):
+        TaskEpisode.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("document_id", "x" * 257, "document_id"),
+        ("document_title", "x" * 301, "document_title"),
+        ("section", "x" * 301, "section"),
+        ("source_url", "x" * 2_049, "source_url"),
+    ],
+)
+def test_episode_citation_enforces_compact_bounds_direct_and_from_dict(
+    field: str, value: str, match: str
+) -> None:
+    citation = _episode().rag_citations[0]
+
+    with pytest.raises(ValueError, match=match):
+        replace(citation, **{field: value})
+
+    payload = citation.to_dict()
+    payload[field] = value
+    with pytest.raises(ValueError, match=match):
+        EpisodeCitation.from_dict(payload)
+
+
+def test_task_episode_defensively_freezes_accepted_sequence_inputs() -> None:
+    action_plan = ["Open the approved template."]
+    citations = [_episode().rag_citations[0]]
+    missing_information = ["The report deadline is not stated."]
+
+    episode = replace(
+        _episode(),
+        action_plan=action_plan,
+        rag_citations=citations,
+        missing_information=missing_information,
+    )
+    action_plan.append("Submit the report.")
+    citations.clear()
+    missing_information.clear()
+
+    assert episode.action_plan == ("Open the approved template.",)
+    assert episode.rag_citations == (_episode().rag_citations[0],)
+    assert episode.missing_information == ("The report deadline is not stated.",)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("action_plan", "one step", "sequence"),
+        ("action_plan", [1], "action_plan item"),
+        ("missing_information", "one note", "sequence"),
+        ("missing_information", [1], "missing_information item"),
+        ("rag_citations", "one citation", "sequence"),
+        ("rag_citations", [{"document_id": "doc-1"}], "EpisodeCitation"),
+        ("validation_status", "system_generated", "ValidationStatus"),
+        ("source_type", "system_generated_chat_task", "EpisodeSourceType"),
+        ("created_at", "2026-08-10T09:00:00+00:00", "created_at"),
+        ("updated_at", "2026-08-10T09:00:00+00:00", "updated_at"),
+    ],
+)
+def test_task_episode_direct_construction_rejects_untrusted_types(
+    field: str, value: object, match: str
+) -> None:
+    with pytest.raises((TypeError, ValueError), match=match):
+        replace(_episode(), **{field: value})
+
+
+@pytest.mark.parametrize("nested", [{"raw_email": "copied"}, {"tool_payload": {}}])
+def test_task_episode_direct_construction_rejects_nested_raw_or_tool_payload_shapes(
+    nested: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="raw email|tool payload"):
+        replace(_episode(), rag_citations=[nested])
+
+
+def test_task_episode_requires_the_system_generated_chat_task_source_type() -> None:
+    payload = _episode().to_dict()
+    payload["source_type"] = EpisodeSourceType.SYSTEM_GENERATED_CHAT_SUMMARY.value
+
+    with pytest.raises(ValueError, match="source_type"):
+        TaskEpisode.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "removed_field",
+    ["run_id", "source_tool", "gmail_message_id", "gmail_url"],
+)
+def test_task_episode_from_dict_rejects_removed_email_shaped_fields(removed_field: str) -> None:
+    payload = {**_episode().to_dict(), removed_field: "legacy-value"}
+
+    with pytest.raises(ValueError, match="unexpected field"):
         TaskEpisode.from_dict(payload)
 
 
@@ -466,4 +931,4 @@ def test_contracts_are_frozen() -> None:
 
 
 def test_contract_version_is_declared() -> None:
-    assert CHAT_CONTRACTS_VERSION == "1.0.0"
+    assert CHAT_CONTRACTS_VERSION == "2.0.0"

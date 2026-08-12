@@ -1,5 +1,5 @@
 # Email RAG — Architecture Implementation Status
-> **Document status:** current snapshot as of 2026-08-10. This report describes
+> **Document status:** current snapshot as of 2026-08-12. This report describes
 > the code in this checkout, not a target architecture.
 
 ## Executive summary
@@ -99,8 +99,10 @@ absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
 ## Source of truth
 
 - `src/cowork_agent/integrations/rag/bootstrap.py`
+- `src/cowork_agent/integrations/rag/knowledge_base.py`
 - `src/cowork_agent/integrations/rag/qdrant.py`
 - `src/cowork_agent/integrations/rag/hybrid.py`
+- `src/cowork_agent/ingestion_cli.py`
 - `src/cowork_agent/app.py`
 - `src/cowork_agent/features/email_action_plan/workflow.py`
 - `src/cowork_agent/gui/app.py`

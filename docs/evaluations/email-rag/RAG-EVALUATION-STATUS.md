@@ -1,6 +1,6 @@
 # RAG Evaluation — Status Report
 
-> **Document status:** current snapshot as of 2026-08-10, revised after the golden-set
+> **Document status:** current snapshot as of 2026-08-12, revised after the golden-set
 > and evaluation-harness work landed (C4, C5, C6 all closed — see
 > [SPEC](./SPEC-rag-golden-set-and-eval.md) / [PLAN](./PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
@@ -82,7 +82,7 @@ flowchart TD
 - ✅ **Pipeline Integration Wiring (`test_workflow.py`)**: Tests that retrieved guidebook chunks are correctly passed to the AI plan writer (ensures plumbing works).
 - ✅ **Graceful Error Degradation (`test_workflow.py`)**: Tests that if search fails, the system warns the user instead of breaking or crashing (ensures high reliability).
 - ✅ **Fake Citation Stripping (`test_workflow.py`)**: Tests that citations to non-existent document chunks are automatically removed before saving (prevents broken links).
-- ✅ **Citation Accuracy Verification (`test_citation_accuracy.py`)**: Inspects plan-step word overlap with each cited retrieved chunk and reports missing chunk IDs.
+- ❌ **Citation Accuracy Verification**: Missing automated check verifying that plan steps accurately cite retrieved chunk content (bogus citation ID stripping tested in `test_workflow.py`).
 - ❌ **Plan Faithfulness / Hallucination Check**: Missing automated checks (e.g. RAGAS) to ensure generated action plans don't fabricate steps absent from the guidebooks.
 - ❌ **Context Relevance Scoring**: Missing evaluation measuring if retrieved chunks are actually relevant to the email's request before generating the plan.
 
@@ -239,7 +239,7 @@ implemented evaluation mechanics from runtime guarantees.
 | Evaluation area | Current status | Evidence boundary |
 |---|---|---|
 | C7 abstention | Runtime missing; evaluation-only support available | All four retained unanswerable cases return chunks in every retained baseline (`abstention_rate = 0.000`). `evaluate_retrieval.py` now emits score evidence and absolute-score/margin sweeps, but it does not select or apply a runtime gate. |
-| Citation accuracy | Partial | `test_citation_accuracy.py` validates citation IDs and lexical-overlap signals. It does not prove a generated claim is semantically supported by the cited chunk. |
+| Citation accuracy | Missing | No automated claim-to-chunk lexical or semantic citation accuracy test exists (`test_workflow.py` validates bogus citation ID stripping). |
 | Plan faithfulness | Missing | No automated claim-to-evidence or generated-plan faithfulness evaluation exists. |
 | Context relevance | Partial labels | The 32-case golden set supports document/section Hit@K, MRR, and Recall@5. It does not provide exhaustive semantic relevance judgments for every returned chunk against the email need. |
 | Reranker evidence | Partial | Retained Jina baseline results are useful only when reranking actually ran. Runtime fallback preserves candidate order but does not publish an applied/fallback signal. |

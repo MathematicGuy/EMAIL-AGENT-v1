@@ -35,6 +35,7 @@ FOREIGN_TENANT = "tenant-intruder"
 
 def _request(
     *,
+    tenant_id: str = OWNER_TENANT,
     tenant_scope: str = OWNER_TENANT,
     query: str = "hồ sơ đăng ký kết hôn cần giấy tờ gì",
     top_k: int = 5,
@@ -42,7 +43,7 @@ def _request(
 ) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-integration",
-        tenant_id=OWNER_TENANT,
+        tenant_id=tenant_id,
         user_id="user@example.com",
         query=query,
         knowledge_gaps=(),
@@ -85,7 +86,11 @@ def test_retrieval_returns_citable_chunks_from_the_committed_corpus(
 def test_a_foreign_tenant_retrieves_nothing_from_the_same_collection(
     memory: QdrantSemanticMemory,
 ) -> None:
-    response = asyncio.run(memory.retrieve(_request(tenant_scope=FOREIGN_TENANT)))
+    response = asyncio.run(
+        memory.retrieve(
+            _request(tenant_id=FOREIGN_TENANT, tenant_scope=FOREIGN_TENANT)
+        )
+    )
 
     assert response.retrieval_status is RetrievalStatus.NO_RESULTS
     assert response.chunks == ()
