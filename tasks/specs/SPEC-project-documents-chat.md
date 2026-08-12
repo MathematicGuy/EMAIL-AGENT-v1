@@ -512,7 +512,7 @@ CREATE INDEX chat_project_documents_expiry_idx ON chat_project_documents (expire
 
 ### 10.3 `007_episode_project_scope.sql`
 
-- `ALTER TABLE chat_task_episodes ADD COLUMN project_id TEXT;`
+- `ALTER TABLE task_episodes ADD COLUMN project_id TEXT;`
 - backfill về default project của user;
 - `ALTER ... SET NOT NULL` sau backfill;
 - mở rộng JSON citation để chấp nhận `citation_scope`, `page_start`, `page_end`.
