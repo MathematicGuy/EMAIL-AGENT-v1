@@ -4,7 +4,7 @@
 
 **Goal:** Make Supabase Postgres the durable identity, workspace, mailbox-connection, and opaque FastAPI session store for Gmail OAuth.
 
-**Architecture:** Gmail is the identity provider. Its verified callback email maps to an internal user and default workspace; FastAPI stores only a SHA-256 hash of a random session token and sends the plaintext only in a Secure, HttpOnly, SameSite=Lax cookie. FastAPI resolves that cookie on every protected request. The browser never receives a Supabase key or calls its data API.
+**Architecture:** Gmail is the identity provider. Its verified callback email maps to an internal user and default workspace; each opaque session is bound to that user and workspace. FastAPI stores only a SHA-256 hash of a random session token and sends the plaintext only in a Secure, HttpOnly, SameSite=Lax cookie. FastAPI resolves that cookie on every protected request. The browser never receives a Supabase key or calls its data API.
 
 **Tech Stack:** Python 3.11+, FastAPI, psycopg async pool, Supabase-managed PostgreSQL, pytest, ruff, mypy.
 
@@ -71,7 +71,7 @@ git commit -m "feat(auth): add opaque session configuration"
 - Create: `src/cowork_agent/persistence/migrations/005_identity_workspace_sessions.down.sql`
 - Test: `tests/unit/persistence/test_identity_session_migration.py`, `tests/integration/persistence/test_identity_repositories.py`
 
-**Interfaces:** tables `app_users`, `workspaces`, `workspace_members`, `app_sessions`; `mailbox_connections.workspace_id`.
+**Interfaces:** tables `app_users`, `workspaces`, `workspace_members`, `app_sessions` (bound to both `user_id` and `workspace_id`); `mailbox_connections.workspace_id`.
 
 - [ ] **Step 1: Write a failing migration contract test**
 
@@ -244,4 +244,3 @@ git commit -m "docs(adr): record Supabase Postgres session boundary"
 ## Deferred by Design
 
 Increment 2 replaces in-memory chat sessions with durable sessions and Redis buffering. Increment 3 adds private Supabase Storage, project/document/job durability, Qdrant project retrieval, citations, retention, and three-store deletion. Neither starts until this plan’s migration and authorization-isolation gates are green.
-

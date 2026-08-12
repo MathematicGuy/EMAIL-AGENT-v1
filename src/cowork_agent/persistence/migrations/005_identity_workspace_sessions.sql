@@ -26,6 +26,7 @@ CREATE TABLE workspace_members (
 CREATE TABLE app_sessions (
     token_hash char(64) PRIMARY KEY,
     user_id uuid NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     expires_at timestamptz NOT NULL,
     revoked_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
