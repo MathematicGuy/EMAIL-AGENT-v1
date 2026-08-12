@@ -1,13 +1,15 @@
 """Durable authorization metadata for AI Chat sessions."""
 
 from collections.abc import Callable
-from typing import Protocol
 from uuid import uuid4
 
 from psycopg_pool import AsyncConnectionPool
 
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
-from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
+from cowork_agent.features.ai_chat.controller import (
+    ChatSessionAccessDenied,
+    ChatSessionRegistryPort,
+)
 
 IdFactory = Callable[[], str]
 
@@ -16,21 +18,7 @@ def _new_id() -> str:
     return str(uuid4())
 
 
-class ChatSessionRegistryPort(Protocol):
-    """Authoritative session ownership contract used by the HTTP adapter."""
-
-    async def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope: ...
-
-    async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
-    ) -> ChatMemoryScope: ...
-
-    async def list_for(
-        self, *, tenant_id: str, user_id: str
-    ) -> tuple[ChatMemoryScope, ...]: ...
-
-
-class PostgresChatSessionRegistry:
+class PostgresChatSessionRegistry(ChatSessionRegistryPort):
     """PostgreSQL session registry that requires current workspace membership."""
 
     def __init__(self, pool: AsyncConnectionPool, *, new_id: IdFactory = _new_id) -> None:

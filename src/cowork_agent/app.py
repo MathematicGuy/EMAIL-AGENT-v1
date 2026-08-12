@@ -34,6 +34,7 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
+    ChatSessionRegistryPort,
     InMemoryChatSessionRegistry,
     UnavailableChatReply,
 )
@@ -47,7 +48,11 @@ from cowork_agent.features.ai_chat.ports import (
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
 )
-from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.features.ai_chat.session_buffer import (
+    InMemoryChatSessionBuffer,
+    RedisChatSessionBuffer,
+    RedisClient,
+)
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -220,6 +225,7 @@ def create_app() -> FastAPI:
             app.state.session_repository = None
             run_repository: RunRepository
             task_repository: TaskRepository
+            chat_session_registry: ChatSessionRegistryPort
             result_repository = InMemoryResultRepository()
             if database_url():
                 # V1-H T5.1 durable control plane: PostgreSQL is the source
@@ -228,6 +234,9 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.repositories.chat_sessions import (
+                    PostgresChatSessionRegistry,
+                )
                 from cowork_agent.persistence.repositories.identity import (
                     PostgresIdentityRepository,
                     PostgresMailboxConnectionRepository,
@@ -254,6 +263,7 @@ def create_app() -> FastAPI:
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
                 app.state.session_repository = PostgresSessionRepository(pool)
+                chat_session_registry = PostgresChatSessionRegistry(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
                 task_repository = SQLiteTaskRepository(
@@ -269,6 +279,7 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
+                chat_session_registry = InMemoryChatSessionRegistry()
             app.state.connection_repository = repository
             app.state.gmail_connections = GmailConnectionService(
                 settings,
@@ -291,16 +302,32 @@ def create_app() -> FastAPI:
             )
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
-            app.state.chat_sessions = InMemoryChatSessionRegistry()
-            app.state.chat_session_buffer = InMemoryChatSessionBuffer(
-                max_turns=chat_memory_settings.max_turns,
-                ttl_seconds=chat_memory_settings.ttl_seconds,
-            )
+            app.state.chat_sessions = chat_session_registry
+            queue_url = redis_url()
+            if app.state.pg_pool is not None:
+                if not queue_url:
+                    raise RuntimeError("DATABASE_URL requires REDIS_URL for durable chat memory")
+                from redis import Redis
+
+                chat_redis_client = cast(
+                    RedisClient, Redis.from_url(queue_url, decode_responses=True)
+                )
+                app.state.chat_redis_client = chat_redis_client
+                app.state.chat_session_buffer = RedisChatSessionBuffer(
+                    chat_redis_client,
+                    max_turns=chat_memory_settings.max_turns,
+                    ttl_seconds=chat_memory_settings.ttl_seconds,
+                )
+            else:
+                app.state.chat_redis_client = None
+                app.state.chat_session_buffer = InMemoryChatSessionBuffer(
+                    max_turns=chat_memory_settings.max_turns,
+                    ttl_seconds=chat_memory_settings.ttl_seconds,
+                )
             app.state.memory_metrics = MemoryOperationMetrics()
             app.state.memory_operation_sink = LoggingMemoryOperationSink(
                 metrics=app.state.memory_metrics
             )
-            app.state.chat_controllers = {}
             app.state.chat_reply = UnavailableChatReply()
             app.state.chat_principal_resolver = _resolve_chat_principal
 
@@ -312,7 +339,6 @@ def create_app() -> FastAPI:
             )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
-            queue_url = redis_url()
             if queue_url:
                 # V1-H T5.2: durable queue dispatch replaces BackgroundTasks.
                 # The durable claim lives in PostgreSQL, so the queue
@@ -398,6 +424,11 @@ def create_app() -> FastAPI:
         redis_client = getattr(app.state, "redis_client", None)
         if redis_client is not None:
             await redis_client.aclose()
+        closing_chat_redis_client = cast(
+            RedisClient | None, getattr(app.state, "chat_redis_client", None)
+        )
+        if closing_chat_redis_client is not None:
+            closing_chat_redis_client.close()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())

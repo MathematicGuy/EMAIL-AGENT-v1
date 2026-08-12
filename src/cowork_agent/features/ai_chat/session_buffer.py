@@ -7,12 +7,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from cowork_agent.domain.chat_contracts import ChatTurn, MemoryNamespace, MemoryType
+from redis.exceptions import RedisError
 
-try:  # Redis stays an optional local-development dependency.
-    from redis.exceptions import RedisError
-except ImportError:  # pragma: no cover - only when durable Redis is not installed
-    RedisError = Exception
+from cowork_agent.domain.chat_contracts import ChatTurn, MemoryNamespace, MemoryType
 
 
 class _RedisPipeline(Protocol):
@@ -31,6 +28,8 @@ class RedisClient(Protocol):
     def lrange(self, key: str, start: int, stop: int) -> list[str]: ...
 
     def delete(self, key: str) -> object: ...
+
+    def close(self) -> None: ...
 
 
 class ChatSessionBufferUnavailable(RuntimeError):

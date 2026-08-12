@@ -426,12 +426,16 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
 def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
     ids = iter(("session-1", "session-2"))
     registry = InMemoryChatSessionRegistry(new_id=lambda: next(ids))
-    scope = registry.create(tenant_id="tenant-1", user_id="user@example.com")
 
-    assert registry.require(
-        scope.session_id, tenant_id="tenant-1", user_id="user@example.com"
-    ) == scope
-    with pytest.raises(ChatSessionAccessDenied):
-        registry.require(
-            scope.session_id, tenant_id="tenant-1", user_id="other@example.com"
-        )
+    async def scenario() -> None:
+        scope = await registry.create(tenant_id="tenant-1", user_id="user@example.com")
+
+        assert await registry.require(
+            scope.session_id, tenant_id="tenant-1", user_id="user@example.com"
+        ) == scope
+        with pytest.raises(ChatSessionAccessDenied):
+            await registry.require(
+                scope.session_id, tenant_id="tenant-1", user_id="other@example.com"
+            )
+
+    asyncio.run(scenario())

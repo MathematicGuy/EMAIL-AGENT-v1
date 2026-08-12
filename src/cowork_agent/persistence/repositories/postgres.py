@@ -645,6 +645,35 @@ class PostgresTaskEpisodeRepository:
             row = await cursor.fetchone()
         return None if row is None else _task_episode_from_row(row)
 
+    async def read_task_episode(
+        self, namespace: MemoryNamespace, *, episode_id: str
+    ) -> TaskEpisode | None:
+        _task_episode_read_namespace(namespace)
+        if not isinstance(episode_id, str) or not episode_id.strip():
+            raise ValueError("episode_id must be a non-empty string")
+        try:
+            async with self._pool.connection() as connection:
+                cursor = await connection.execute(
+                    f"""
+                    SELECT {_TASK_EPISODE_COLUMNS}
+                    FROM task_episodes
+                    WHERE tenant_id = %s AND user_id = %s AND feature = %s
+                        AND chat_session_id = %s AND episode_id = %s
+                        AND (expires_at IS NULL OR expires_at > now())
+                    """,
+                    (
+                        namespace.tenant_id,
+                        namespace.user_id,
+                        namespace.feature,
+                        namespace.session_id,
+                        episode_id,
+                    ),
+                )
+                row = await cursor.fetchone()
+        except (psycopg.OperationalError, psycopg.errors.QueryCanceled) as error:
+            raise MemorySourceUnavailableError("task episode read unavailable") from error
+        return None if row is None else _task_episode_from_row(row)
+
     async def delete_task_episode(self, namespace: MemoryNamespace, *, episode_id: str) -> bool:
         _task_episode_mutation_key(namespace, episode_id)
         async with self._pool.connection() as connection:

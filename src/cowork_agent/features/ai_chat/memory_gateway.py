@@ -320,6 +320,21 @@ class MemoryGateway:
         self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.SUCCESS)
         return result
 
+    async def _read_task_episode(self, episode_id: str) -> TaskEpisode | None:
+        """Load one originating-session episode for a request-scoped controller."""
+
+        namespace = self._namespace(MemoryType.EPISODIC)
+        result = await self._require_episodic_memory().read_task_episode(
+            namespace, episode_id=episode_id
+        )
+        if result is not None and (
+            result.tenant_id != self._scope.tenant_id
+            or result.user_id != self._scope.user_id
+            or result.chat_session_id != self._scope.session_id
+        ):
+            raise NamespaceAccessDenied("task episode scope does not match the verified scope")
+        return result
+
     async def transition_task_episode(
         self,
         *,

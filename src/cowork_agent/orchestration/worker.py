@@ -49,9 +49,6 @@ from cowork_agent.integrations.llm.providers.groq import (
 from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
-from cowork_agent.persistence.repositories.mailbox_connections import (
-    SQLiteMailboxConnectionRepository,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +60,9 @@ async def run_worker() -> None:
 
     from cowork_agent.orchestration.redis_queue import RedisRunConsumer
     from cowork_agent.persistence.migrate import apply_migrations
+    from cowork_agent.persistence.repositories.identity import (
+        PostgresMailboxConnectionRepository,
+    )
     from cowork_agent.persistence.repositories.postgres import (
         PostgresOutboxRepository,
         PostgresRunRepository,
@@ -78,10 +78,7 @@ async def run_worker() -> None:
         tasks = PostgresTaskRepository(pool)
         outbox = PostgresOutboxRepository(pool)
         settings = GmailSettings.from_env()
-        connection_repository = SQLiteMailboxConnectionRepository(
-            settings.connection_db_path
-        )
-        await connection_repository.initialize()
+        connection_repository = PostgresMailboxConnectionRepository(pool)
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         classifier: RouteClassifierPort
         generator: ActionPlanGeneratorPort

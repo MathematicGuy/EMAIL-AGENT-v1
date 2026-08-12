@@ -8,6 +8,7 @@ import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import uuid4
 
 from cowork_agent.domain.chat_contracts import (
@@ -51,6 +52,20 @@ class ChatScopeMismatch(ValueError):
 
 class ChatSessionAccessDenied(LookupError):
     """The session is absent or belongs to another verified principal."""
+
+
+class ChatSessionRegistryPort(Protocol):
+    """Durable or local authority for chat-session ownership."""
+
+    async def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope: ...
+
+    async def require(
+        self, session_id: str, *, tenant_id: str, user_id: str
+    ) -> ChatMemoryScope: ...
+
+    async def list_for(
+        self, *, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, ...]: ...
 
 
 class ChatReplyUnavailable(RuntimeError):
@@ -100,7 +115,7 @@ class InMemoryChatSessionRegistry:
         self._sessions: dict[str, ChatMemoryScope] = {}
         self._lock = threading.Lock()
 
-    def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope:
+    async def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope:
         with self._lock:
             session_id = self._new_id()
             while session_id in self._sessions:
@@ -113,7 +128,7 @@ class InMemoryChatSessionRegistry:
             self._sessions[session_id] = scope
             return scope
 
-    def require(
+    async def require(
         self,
         session_id: str,
         *,
@@ -126,7 +141,9 @@ class InMemoryChatSessionRegistry:
             raise ChatSessionAccessDenied(session_id)
         return scope
 
-    def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
+    async def list_for(
+        self, *, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, ...]:
         """Owned scopes in creation order (GET /sessions read contract)."""
         with self._lock:
             return tuple(
@@ -406,7 +423,7 @@ class ChatController:
         return await self._transition_task_episode(episode_id, ValidationStatus.REJECTED)
 
     async def delete_task_episode(self, episode_id: str) -> bool:
-        episode = self._task_episodes.get(episode_id)
+        episode = await self._task_episode_for_id(episode_id)
         if episode is None:
             return False
         deleted = await self._memory.delete_task_episode(
@@ -461,7 +478,7 @@ class ChatController:
     async def _transition_task_episode(
         self, episode_id: str, to_status: ValidationStatus
     ) -> TaskEpisode | None:
-        episode = self._task_episodes.get(episode_id)
+        episode = await self._task_episode_for_id(episode_id)
         if episode is None:
             return None
         transitioned = await self._memory.transition_task_episode(
@@ -475,6 +492,15 @@ class ChatController:
         if transitioned is not None:
             self._task_episodes[episode_id] = transitioned
         return transitioned
+
+    async def _task_episode_for_id(self, episode_id: str) -> TaskEpisode | None:
+        episode = self._task_episodes.get(episode_id)
+        if episode is not None:
+            return episode
+        episode = await self._memory._read_task_episode(episode_id)
+        if episode is not None:
+            self._task_episodes[episode_id] = episode
+        return episode
 
     def _error(
         self,
