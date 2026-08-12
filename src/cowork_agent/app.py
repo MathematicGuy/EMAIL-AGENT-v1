@@ -12,6 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
@@ -942,6 +943,7 @@ def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse
 
 
 def main() -> None:
+    load_dotenv(override=False)
     # Without a root handler the stdlib drops every INFO record, which silently
     # discards the whole trace-sink stream (§13) — the observability surface is
     # log lines, so an unconfigured logger means no observability at all.
