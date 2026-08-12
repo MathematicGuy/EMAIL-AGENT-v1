@@ -88,6 +88,36 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
             assert created_again is False
             assert duplicate.id == document.id
             assert await projects.require_document(other, default.id, document.id) is None
+
+            queued = await projects.mark_upload_completed(owner, default.id, document.id)
+            assert queued is not None
+            assert queued.status == "queued"
+            claimed = await projects.claim_job(document.id)
+            assert claimed is not None
+            assert claimed.id == document.id
+            assert claimed.status == "extracting"
+            assert await projects.transition_document(
+                document.id,
+                from_status="extracting",
+                to_status="indexing",
+            )
+            assert await projects.transition_document(
+                document.id,
+                from_status="indexing",
+                to_status="ready",
+                page_count=1,
+                chunk_count=2,
+            )
+            assert await projects.finish_job(document.id, status="completed")
+            deleting = await projects.begin_deletion(owner, default.id, document.id)
+            assert deleting is not None
+            assert deleting.status == "deleting"
+            await projects.record_deletion_audit(
+                document.id,
+                postgres_outcome="hidden",
+                qdrant_outcome="deleted",
+                storage_outcome="pending",
+            )
         finally:
             await pool.close()
 

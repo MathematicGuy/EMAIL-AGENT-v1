@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from cowork_agent.identity import VerifiedPrincipal
 
 _DOCUMENT_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document")
+_JOB_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-job")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,14 @@ class ProjectDocument:
     storage_key: str
     status: str
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentIngestionJob:
+    id: str
+    document_id: str
+    status: str
+    attempts: int
 
 
 class PostgresProjectRepository:
@@ -220,6 +229,172 @@ class PostgresProjectRepository:
             rows = await cursor.fetchall()
         return tuple(_document(row) for row in rows)
 
+    async def mark_upload_completed(
+        self, principal: VerifiedPrincipal, project_id: str, document_id: str
+    ) -> DocumentIngestionJob | None:
+        """Create the metadata-only job after a client finishes its signed upload."""
+        document = await self.require_document(principal, project_id, document_id)
+        if document is None or document.status != "received":
+            return None
+        job_id = str(uuid5(_JOB_NAMESPACE, document.id))
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                INSERT INTO document_ingestion_jobs (id, document_id, status)
+                VALUES (%s, %s, 'queued')
+                ON CONFLICT (document_id) DO UPDATE
+                    SET status = CASE
+                        WHEN document_ingestion_jobs.status = 'failed' THEN 'queued'
+                        ELSE document_ingestion_jobs.status
+                    END,
+                    error_code = NULL,
+                    updated_at = now()
+                RETURNING id, document_id, status, attempts
+                """,
+                (job_id, document.id),
+            )
+            row = await cursor.fetchone()
+        return None if row is None else _job(row)
+
+    async def claim_job(self, document_id: str) -> ProjectDocument | None:
+        """Atomically move a queued document to extracting for one worker."""
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                cursor = await connection.execute(
+                    """
+                    UPDATE document_ingestion_jobs AS jobs
+                    SET status = 'extracting', attempts = attempts + 1,
+                        claimed_at = now(), updated_at = now(), error_code = NULL
+                    FROM project_documents AS documents
+                    WHERE jobs.document_id = documents.id
+                      AND jobs.document_id = %s
+                      AND jobs.status IN ('queued', 'failed')
+                      AND documents.status = 'received'
+                    RETURNING documents.id, documents.project_id, documents.workspace_id,
+                        documents.user_id, documents.filename, documents.media_type,
+                        documents.byte_size, documents.content_sha256, documents.storage_key,
+                        documents.status, documents.expires_at
+                    """,
+                    (document_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                cursor = await connection.execute(
+                    """
+                    UPDATE project_documents
+                    SET status = 'extracting', error_code = NULL, updated_at = now()
+                    WHERE id = %s AND status = 'received'
+                    RETURNING id
+                    """,
+                    (document_id,),
+                )
+                if await cursor.fetchone() is None:
+                    raise RuntimeError("document state changed while claiming ingestion job")
+        return _document(row[:9] + ("extracting", row[10]))
+
+    async def transition_document(
+        self,
+        document_id: str,
+        *,
+        from_status: str,
+        to_status: str,
+        page_count: int | None = None,
+        ocr_page_count: int | None = None,
+        chunk_count: int | None = None,
+        error_code: str | None = None,
+    ) -> bool:
+        """Guard the documented state machine; no content crosses this boundary."""
+        allowed = {
+            ("extracting", "indexing"),
+            ("indexing", "ready"),
+            ("extracting", "failed"),
+            ("indexing", "failed"),
+            ("deleting", "deleted"),
+        }
+        if (from_status, to_status) not in allowed:
+            raise ValueError("invalid project document state transition")
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE project_documents
+                SET status = %s, page_count = COALESCE(%s, page_count),
+                    ocr_page_count = COALESCE(%s, ocr_page_count),
+                    chunk_count = COALESCE(%s, chunk_count), error_code = %s,
+                    deleted_at = CASE WHEN %s = 'deleted' THEN now() ELSE deleted_at END,
+                    updated_at = now()
+                WHERE id = %s AND status = %s
+                RETURNING id
+                """,
+                (
+                    to_status,
+                    page_count,
+                    ocr_page_count,
+                    chunk_count,
+                    error_code,
+                    to_status,
+                    document_id,
+                    from_status,
+                ),
+            )
+            return await cursor.fetchone() is not None
+
+    async def finish_job(
+        self, document_id: str, *, status: str, error_code: str | None = None
+    ) -> bool:
+        if status not in {"completed", "failed"}:
+            raise ValueError("job status must be completed or failed")
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE document_ingestion_jobs
+                SET status = %s, error_code = %s, completed_at = now(), updated_at = now()
+                WHERE document_id = %s AND status IN ('extracting', 'indexing')
+                RETURNING id
+                """,
+                (status, error_code, document_id),
+            )
+            return await cursor.fetchone() is not None
+
+    async def begin_deletion(
+        self, principal: VerifiedPrincipal, project_id: str, document_id: str
+    ) -> ProjectDocument | None:
+        document = await self.require_document(principal, project_id, document_id)
+        if document is None or document.status in {"deleting", "deleted"}:
+            return None
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                UPDATE project_documents
+                SET status = 'deleting', deleted_at = now(), updated_at = now()
+                WHERE id = %s AND project_id = %s AND workspace_id = %s AND user_id = %s
+                  AND status <> 'deleted'
+                RETURNING id, project_id, workspace_id, user_id, filename, media_type, byte_size,
+                    content_sha256, storage_key, status, expires_at
+                """,
+                (document_id, project_id, principal.workspace_id, principal.user_id),
+            )
+            row = await cursor.fetchone()
+        return None if row is None else _document(row)
+
+    async def record_deletion_audit(
+        self,
+        document_id: str,
+        *,
+        postgres_outcome: str,
+        qdrant_outcome: str,
+        storage_outcome: str,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """
+                INSERT INTO document_deletion_audits (
+                    id, document_id, postgres_outcome, qdrant_outcome, storage_outcome
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (str(uuid4()), document_id, postgres_outcome, qdrant_outcome, storage_outcome),
+            )
+
     async def _one_project(
         self, principal: VerifiedPrincipal, *, is_default: bool
     ) -> Project | None:
@@ -257,4 +432,10 @@ def _document(row: tuple[object, ...]) -> ProjectDocument:
             if isinstance(row[10], datetime)
             else datetime.fromisoformat(str(row[10]))
         ),
+    )
+
+
+def _job(row: tuple[object, ...]) -> DocumentIngestionJob:
+    return DocumentIngestionJob(
+        id=str(row[0]), document_id=str(row[1]), status=str(row[2]), attempts=int(cast(int, row[3]))
     )
