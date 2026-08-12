@@ -67,6 +67,13 @@ def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
             )
 
             assert scope.session_id == "session-1"
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT project_id FROM chat_sessions WHERE id = %s", (scope.session_id,)
+                )
+                row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] is not None
             assert await sessions.require(
                 scope.session_id, tenant_id=owner.workspace_id, user_id=owner.user_id
             ) == scope

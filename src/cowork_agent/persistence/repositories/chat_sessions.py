@@ -30,9 +30,13 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """
-                INSERT INTO chat_sessions (id, workspace_id, user_id, feature)
-                SELECT %s, members.workspace_id, members.user_id, %s
+                INSERT INTO chat_sessions (id, workspace_id, user_id, project_id, feature)
+                SELECT %s, members.workspace_id, members.user_id, projects.id, %s
                 FROM workspace_members AS members
+                JOIN projects
+                  ON projects.workspace_id = members.workspace_id
+                 AND projects.user_id = members.user_id
+                 AND projects.is_default = TRUE
                 WHERE members.workspace_id = %s AND members.user_id = %s
                 RETURNING id
                 """,
