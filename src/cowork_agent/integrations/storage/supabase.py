@@ -1,5 +1,6 @@
 """Private Supabase Storage adapter used only by FastAPI/worker processes."""
 
+from pathlib import Path
 from urllib.parse import quote
 
 import httpx
@@ -38,6 +39,22 @@ class SupabasePrivateStorage:
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
+            raise StorageUnavailable("private storage unavailable") from exc
+
+    async def download_to(self, object_key: str, target: Path) -> None:
+        """Stream a private source into a caller-owned secure temporary path."""
+        path = quote(object_key, safe="/")
+        try:
+            async with self._client.stream(
+                "GET",
+                f"{self._url}/storage/v1/object/{self._bucket}/{path}",
+                headers=self._headers(),
+            ) as response:
+                response.raise_for_status()
+                with target.open("wb") as output:
+                    async for chunk in response.aiter_bytes():
+                        output.write(chunk)
+        except (httpx.HTTPError, OSError) as exc:
             raise StorageUnavailable("private storage unavailable") from exc
 
     async def _signed_url(self, operation: str, object_key: str, payload: dict[str, object]) -> str:

@@ -8,7 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.integrations.storage.supabase import StorageUnavailable
-from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
+from cowork_agent.persistence.repositories.projects import (
+    DocumentIngestionJob,
+    Project,
+    ProjectDocument,
+)
 
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 
@@ -33,6 +37,14 @@ class ProjectRepository(Protocol):
     async def list_documents(
         self, principal: VerifiedPrincipal, project_id: str
     ) -> tuple[ProjectDocument, ...]: ...
+
+    async def mark_upload_completed(
+        self, principal: VerifiedPrincipal, project_id: str, document_id: str
+    ) -> DocumentIngestionJob | None: ...
+
+
+class DocumentQueue(Protocol):
+    async def enqueue(self, document_id: str) -> None: ...
 
 
 class PrivateStorage(Protocol):
@@ -103,6 +115,22 @@ def create_project_router() -> APIRouter:
         documents = await _projects(request).list_documents(principal, project_id)
         return {"documents": [_document_response(document) for document in documents]}
 
+    @router.post("/projects/{project_id}/documents/{document_id}/complete", status_code=202)
+    async def complete_upload(
+        project_id: str, document_id: str, request: Request
+    ) -> dict[str, str]:
+        principal = await _principal(request)
+        job = await _projects(request).mark_upload_completed(principal, project_id, document_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404, detail="Project document not available for ingestion"
+            )
+        try:
+            await _document_queue(request).enqueue(document_id)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Document queue unavailable") from exc
+        return {"document_id": document_id, "status": job.status}
+
     @router.get("/projects/{project_id}/documents/{document_id}/download")
     async def download_document(
         project_id: str, document_id: str, request: Request
@@ -152,6 +180,13 @@ def _storage(request: Request) -> PrivateStorage:
     if storage is None:
         raise HTTPException(status_code=503, detail="Private storage unavailable")
     return cast(PrivateStorage, storage)
+
+
+def _document_queue(request: Request) -> DocumentQueue:
+    queue = getattr(request.app.state, "project_document_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Document queue unavailable")
+    return cast(DocumentQueue, queue)
 
 
 def _project_response(project: Project) -> dict[str, object]:

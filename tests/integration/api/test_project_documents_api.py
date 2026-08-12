@@ -6,7 +6,11 @@ from fastapi import FastAPI, Request
 
 from cowork_agent.api.projects import create_project_router
 from cowork_agent.identity import VerifiedPrincipal
-from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
+from cowork_agent.persistence.repositories.projects import (
+    DocumentIngestionJob,
+    Project,
+    ProjectDocument,
+)
 
 
 class Projects:
@@ -44,6 +48,13 @@ class Projects:
     ) -> tuple[ProjectDocument, ...]:
         return () if self.document is None else (self.document,)
 
+    async def mark_upload_completed(
+        self, principal: VerifiedPrincipal, project_id: str, document_id: str
+    ) -> DocumentIngestionJob | None:
+        if await self.require_document(principal, project_id, document_id) is None:
+            return None
+        return DocumentIngestionJob("job-1", document_id, "queued", 0)
+
 
 class Storage:
     async def create_signed_upload_url(self, object_key: str) -> str:
@@ -55,12 +66,22 @@ class Storage:
         return "https://storage.example/download-token"
 
 
+class Queue:
+    def __init__(self) -> None:
+        self.document_ids: list[str] = []
+
+    async def enqueue(self, document_id: str) -> None:
+        self.document_ids.append(document_id)
+
+
 def test_project_document_api_authorizes_then_returns_only_signed_urls() -> None:
     async def scenario() -> None:
         app = FastAPI()
         app.include_router(create_project_router())
         app.state.project_repository = Projects()
         app.state.private_storage = Storage()
+        queue = Queue()
+        app.state.project_document_queue = queue
 
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
@@ -83,6 +104,9 @@ def test_project_document_api_authorizes_then_returns_only_signed_urls() -> None
             download = await client.get(
                 "/v1/cowork/chat/projects/project-1/documents/doc-1/download"
             )
+            completed = await client.post(
+                "/v1/cowork/chat/projects/project-1/documents/doc-1/complete"
+            )
             foreign = await client.post(
                 "/v1/cowork/chat/projects/not-owned/documents",
                 json={
@@ -98,6 +122,9 @@ def test_project_document_api_authorizes_then_returns_only_signed_urls() -> None
         assert "secret" not in upload.text
         assert download.status_code == 200
         assert download.json()["download_url"] == "https://storage.example/download-token"
+        assert completed.status_code == 202
+        assert completed.json() == {"document_id": "doc-1", "status": "queued"}
+        assert queue.document_ids == ["doc-1"]
         assert foreign.status_code == 404
 
     asyncio.run(scenario())

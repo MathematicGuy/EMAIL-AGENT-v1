@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import httpx
 
@@ -36,3 +37,21 @@ def test_signed_urls_use_server_secret_and_canonical_private_object_path() -> No
     )
     assert request.url.path.endswith(expected_path)
     assert b"server-secret" not in request.content
+
+
+def test_download_to_keeps_private_source_out_of_postgres_and_memory(tmp_path: Path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer server-secret"
+        return httpx.Response(200, content=b"private source bytes")
+
+    async def scenario() -> None:
+        target = tmp_path / "source.pdf"
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        storage = SupabasePrivateStorage(
+            "https://project.supabase.co", "server-secret", "project-documents", client
+        )
+        await storage.download_to("workspace/a/user/b/project/c/document/d/source", target)
+        await client.aclose()
+        assert target.read_bytes() == b"private source bytes"
+
+    asyncio.run(scenario())
