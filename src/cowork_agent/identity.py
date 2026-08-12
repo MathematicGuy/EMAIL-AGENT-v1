@@ -19,10 +19,15 @@ class ConnectionNotOwnedError(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class VerifiedPrincipal:
-    """Authenticated tenant + user identity scoping every operation."""
+    """Authenticated workspace + user identity scoping every operation."""
 
     tenant_id: str
     user_id: str
+
+    @property
+    def workspace_id(self) -> str:
+        """Workspace authorization scope; ``tenant_id`` remains a transition alias."""
+        return self.tenant_id
 
 
 def principal_for_connection(connection: MailboxConnection) -> VerifiedPrincipal:
