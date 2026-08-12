@@ -391,6 +391,10 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/v1/conversations")
+    async def legacy_list_conversations() -> dict[str, list[object]]:
+        return {"items": []}
+
     @app.get("/v1/mail-todo/oauth/gmail/connect")
     async def connect_gmail(request: Request) -> RedirectResponse:
         service = _connection_service(request)
