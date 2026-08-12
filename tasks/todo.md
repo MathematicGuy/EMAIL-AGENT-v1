@@ -4,9 +4,8 @@ Checklist companion to `tasks/plan.md`. One line per task; tick when the task's
 acceptance criteria AND the Definition of Done are met. `[O]` = orchestrator
 (main agent) task; others are subagent-dispatchable.
 
-V2 scope authority: `docs/references/doc-update-scope-memory-chat.md` and
-`docs/references/memory-system-and-chat-demo-analysis.md` realign memory to AI
-Chat.
+V2 scope authority: `docs/references/memory-system-and-chat-demo-analysis.md`
+realigns memory to AI Chat.
 
 ## Phase 0 — Fixtures, baseline, contract freeze
 - [x] P0-A Compatibility test suite (`tests/compatibility/`) — lanes: API contract · ordering/dedupe · query guard · privacy

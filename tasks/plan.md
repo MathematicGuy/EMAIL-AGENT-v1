@@ -2,7 +2,7 @@
 
 ## Overview
 
-Execution roadmap for EMAIL-AGENT-v1, decomposing `docs/master-comparison.md` Step 7
+Execution roadmap for EMAIL-AGENT-v1, decomposing `docs/architectures/master-comparison.md` Step 7
 (single source of truth for sequencing) into subagent-dispatchable tasks. Scope:
 Phase 0 (fixtures + decisions) → V1-M1..M4 → PRD-v1 §15 gate → V1-H hardening →
 V2-M1..M6 → PRD-v2 §16 gate → DEMO showcase (SPEC-Demo-Frontend). The main agent

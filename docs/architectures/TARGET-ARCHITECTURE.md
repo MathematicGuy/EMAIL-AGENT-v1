@@ -7,7 +7,7 @@
 **Agent pattern:** Multi-turn Chat Controller with typed memory<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../adr/ADR-004-chat-native-task-episodes.md)<br>
+**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../../tasks/adr/ADR-004-chat-native-task-episodes.md), extended by [ADR-006 — User-document plane and classifier-gated retrieval](../../tasks/adr/ADR-006-user-document-plane-and-classifier-routing.md) (§21)<br>
 **Primary use case:** Sustain grounded multi-turn chat with safe, selectively retrieved memory. The standalone PRD-v1 Email Agent remains a separate, stateless, memory-free product flow.
 
 ---
@@ -701,7 +701,125 @@ retrieval_eligible: boolean
 ---
 
 # 6. RAG Module Architecture
+## 6.1 CURRENT - RAG Module Architecture
 
+```mermaid
+flowchart TB
+
+    %% =========================================================
+    %% CALLERS & WORKFLOW INTEGRATION
+    %% =========================================================
+    subgraph CALLERS["1. RAG CALLERS & ENTRY POINTS"]
+        CHAT["AI Chat Controller & Gateway<br/>memory_gateway.py · SemanticChatMemoryAdapter"]
+        EMAIL["Email Action Plan Workflow<br/>workflow.py · RETRIEVE_RAG candidate"]
+        BOOTSTRAP["RAG Bootstrap Factory<br/>bootstrap.py · build_semantic_memory()"]
+    end
+
+    CHAT -->|read_semantic_context()| BOOTSTRAP
+    EMAIL -->|retrieve(request)| BOOTSTRAP
+
+    %% =========================================================
+    %% CORPUS & INGESTION PLANE (V1-M3 Baseline)
+    %% =========================================================
+    subgraph INGEST_CURRENT["2. CURRENT CORPUS & INGESTION PLANE"]
+        STATIC_FILES["Static Markdown Corpus<br/>data/extracted/*.md"]
+        LOADER["Corpus Loader<br/>knowledge_base.py · load_corpus()"]
+        SPLITTER["Section & Paragraph Chunker<br/>H1/H2 headings · 1200-char soft cap"]
+        INGEST_FN["Qdrant Ingest Engine<br/>qdrant.py · ingest_corpus()"]
+        EMBED_INGEST["Gemini Embedding Adapter<br/>embeddings.py · gemini-embedding-001"]
+        ROTATOR_INGEST["Key Rotator<br/>GeminiKeyRotator · 429 backoff"]
+    end
+
+    STATIC_FILES --> LOADER --> SPLITTER --> INGEST_FN
+    INGEST_FN <--> EMBED_INGEST
+    EMBED_INGEST <--> ROTATOR_INGEST
+
+    %% =========================================================
+    %% SECURITY & PRE-PROCESSING GUARD
+    %% =========================================================
+    subgraph GUARD_PLANE["3. SECURITY GUARD & QUERY TRANSFORM"]
+        ACL_GUARD["Tenant & Status ACL Guard<br/>tenant_id == tenant_scope<br/>document_status == ready"]
+        QUERY_GUARD["Query Guard<br/>query_guard.py · is_retrieval_query()"]
+        QUERY_TRANSFORM["Query Transformer<br/>query_transform.py · RuleBasedQueryTransformer<br/>domain expansion + HyDE"]
+    end
+
+    BOOTSTRAP --> ACL_GUARD
+    ACL_GUARD -->|authorized| QUERY_GUARD
+    ACL_GUARD -. unauthorized .-> DENIED["RetrievalStatus.AUTHORIZATION_DENIED"]
+    QUERY_GUARD -->|valid query| QUERY_TRANSFORM
+
+    %% =========================================================
+    %% DUAL RETRIEVAL ENGINES & FALLBACK
+    %% =========================================================
+    subgraph ENGINES["4. RUNTIME RETRIEVAL ENGINES"]
+        
+        subgraph QDRANT_ENGINE["Production Primary: Qdrant Engine (qdrant.py)"]
+            QDRANT_MEM["QdrantSemanticMemory"]
+            QDRANT_FILTER["Payload Filter<br/>tenant_id + document_status=ready"]
+            EMBED_QUERY["Gemini Embedding Adapter<br/>embeddings.py"]
+            QDRANT_STORE[("Qdrant Vector DB<br/>Distance.COSINE collection")]
+        end
+
+        subgraph HYBRID_ENGINE["Fallback / Eval Engine: Hybrid Semantic Memory (hybrid.py)"]
+            HYBRID_MEM["HybridSemanticMemory"]
+            DENSE_SEARCH["In-Repo Dense Search<br/>memory.py · NumPy cosine dot product"]
+            BM25_SEARCH["BM25 Lexical Search<br/>bm25.py · Okapi BM25"]
+            RRF_FUSION["Reciprocal Rank Fusion<br/>rrf.py · RRF (k=60)"]
+            JINA_RERANK["Jina Cross-Encoder Reranker<br/>jina_reranker.py · jina-reranker-v2"]
+            MMR_DIVERSIFY["MMR Diversifier<br/>mmr.py · mmr_diversify()"]
+        end
+
+        subgraph NULL_ENGINE["Graceful Fallback: Null Memory (null_memory.py)"]
+            NULL_MEM["NullSemanticMemory<br/>returns empty NO_RESULTS"]
+        end
+    end
+
+    QUERY_TRANSFORM -->|Primary Store| QDRANT_MEM
+    QDRANT_MEM --> QDRANT_FILTER --> EMBED_QUERY
+    EMBED_QUERY <--> QDRANT_STORE
+
+    QUERY_TRANSFORM -. Fallback if Qdrant unconfigured .-> HYBRID_MEM
+    HYBRID_MEM --> DENSE_SEARCH
+    HYBRID_MEM --> BM25_SEARCH
+    DENSE_SEARCH --> RRF_FUSION
+    BM25_SEARCH --> RRF_FUSION
+    RRF_FUSION --> JINA_RERANK --> MMR_DIVERSIFY
+
+    BOOTSTRAP -. Error / Missing Store .-> NULL_MEM
+
+    %% =========================================================
+    %% RESPONSE CONTRACT
+    %% =========================================================
+    subgraph RESPONSE_PLANE["5. RETRIEVAL RESPONSE CONTRACT"]
+        RESP["SemanticRetrievalResponse<br/>query_id · tenant_id · chunks · status · latency_ms"]
+        CHUNKS["SemanticChunk[]<br/>chunk_id · doc_id · title · section · text · url · scores"]
+    end
+
+    QDRANT_STORE --> RESP
+    MMR_DIVERSIFY --> RESP
+    NULL_MEM --> RESP
+    RESP --> CHUNKS
+```
+
+### Current RAG Component Verification Summary (V1-M3 Live Implementation)
+
+| Layer / Component | File Source | Class / Function | Runtime Verification & State |
+|---|---|---|---|
+| **Entry Point Factory** | `src/cowork_agent/integrations/rag/bootstrap.py` | `build_semantic_memory()` | Async factory. Attempts Qdrant vector store initialization first; falls back to `HybridSemanticMemory`, then `NullSemanticMemory` on store/backend error. |
+| **Workflow Callers** | `src/cowork_agent/features/email_action_plan/workflow.py`<br/>`src/cowork_agent/integrations/rag/chat_memory.py` | `SemanticMemoryPort`<br/>`SemanticChatMemoryAdapter` | Email Action Plan workflow triggers retrieval for `RETRIEVE_RAG` candidates. AI Chat Memory Gateway delegates to `SemanticChatMemoryAdapter` for `current_company_evidence`. |
+| **Corpus Loading & Chunker** | `src/cowork_agent/integrations/rag/knowledge_base.py` | `load_corpus()`, `_split_sections()`, `_split_long_text()` | Reads `data/extracted/*.md` corpus files deterministically. Extracts H1 titles, splits by heading structure, and splits paragraph text exceeding 1200 chars. |
+| **Corpus Ingestion & Embeddings** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/embeddings.py` | `ingest_corpus()`, `GeminiEmbeddingAdapter` | Embeds chunks via `gemini-embedding-001` with `GeminiKeyRotator` (failover on 429). Upserts points with payload metadata into Qdrant collection in 128-item batches. |
+| **Security ACL & Query Guard** | `src/cowork_agent/integrations/rag/qdrant.py`<br/>`src/cowork_agent/integrations/rag/query_guard.py` | Server-side `Filter`<br/>`is_retrieval_query()` | Enforces `tenant_id == tenant_scope` and `document_status == ('ready',)` BEFORE vector query embedding or scoring. Filters out greeting/filler queries. |
+| **Query Expansion & HyDE** | `src/cowork_agent/integrations/rag/query_transform.py` | `RuleBasedQueryTransformer` | Expands queries with domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates HyDE hypothetical documents. |
+| **Primary Production Engine** | `src/cowork_agent/integrations/rag/qdrant.py` | `QdrantSemanticMemory` | Queries Qdrant vector collection (`Distance.COSINE`) with server-side payload filter and score threshold (`min_score`). |
+| **In-Process Fallback Engine** | `src/cowork_agent/integrations/rag/hybrid.py`<br/>`memory.py`, `bm25.py`, `rrf.py`<br/>`jina_reranker.py`, `mmr.py` | `HybridSemanticMemory`, `InRepoSemanticMemory`, `BM25SearchAdapter`, `ReciprocalRankFusion`, `JinaRerankerAdapter`, `mmr_diversify` | Parallel dense (NumPy cosine matrix) and lexical (Okapi BM25) search. Fuses ranks via Reciprocal Rank Fusion (`k=60`). Reranks via Jina API (`jina-reranker-v2-base-multilingual`). Applies dynamic cutoff and MMR diversity (`lambda_mult=0.7`). |
+| **Null Degrader** | `src/cowork_agent/integrations/rag/null_memory.py` | `NullSemanticMemory` | Safe fallback returning `RetrievalStatus.NO_RESULTS` when vector database or embedding API is unreachable. |
+| **Response Contract** | `src/cowork_agent/domain/target_contracts.py` | `SemanticRetrievalResponse`, `SemanticChunk` | Immutable dataclasses carrying `query_id`, `tenant_id`, `chunks`, `retrieval_status`, and `latency_ms`. |
+
+
+
+
+## 6.2 TARGET - RAG Module Architecture
 ```mermaid
 flowchart TB
 
@@ -1444,6 +1562,10 @@ executable in-chat tool and does not turn a standalone PRD-v1 Email run into
 an episode. The standalone PRD-v1 Email Agent remains available through its
 own APIs, is memory-free, and is not callable from AI Chat.
 
+This section is extended by §21, which adds the user-document retrieval plane
+and moves per-turn retrieval routing to an intent classifier. Where the two
+sections differ on retrieval routing, §21 governs.
+
 ```mermaid
 flowchart TB
     CLIENT["AI Chat client"] --> API["Chat API / SSE"] --> CHAT["Chat Controller"]
@@ -1575,91 +1697,72 @@ Implement the accepted target in this order:
 
 ---
 
-# 21. Accepted extension — Projects and AI Chat with user documents ("chat with the PDF")
+# 21. Accepted extension — AI Chat with user documents ("chat with the PDF")
 
 **Status:** Accepted<br>
-**Decision authority:** [ADR-005 — Project-scoped chat documents](../adr/ADR-005-project-scoped-chat-documents.md)<br>
-**Extends:** §20 accepted ADR-004 chat-native target<br>
+**Decision authority:** [ADR-006 — User-document plane and classifier-gated retrieval](../../tasks/adr/ADR-006-user-document-plane-and-classifier-routing.md)<br>
+**Product authority:** [PRD-v4](../../tasks/prds/PRD-v4-chat-with-user-documents.md), [SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md)<br>
+**Extends:** §20, the accepted ADR-004 chat-native target<br>
+**Replaces:** the withdrawn project-scoped document design (Project container,
+two coexisting document planes, always-on retrieval)<br>
 **Does not change:** the standalone PRD-v1 Email Agent, the company RAG corpus,
 the declarative profile, or the TaskEpisode trust boundary
 
-This extension lets a user create a **Project**, upload documents into it, open
-one or many chat sessions inside it, and ask grounded questions answered from
-those documents with page-level citations. It adds a project container and a
-second semantic retrieval **plane** — not a fifth memory type.
+This extension lets a user upload documents, ask grounded questions about them in
+any of their chat sessions, and receive page-level citations. It adds one
+semantic retrieval **plane** — not a fifth memory type — and moves per-turn
+routing from cue phrases to a single intent classifier.
 
-## 21.1 The Project container
+## 21.1 What this replaces
 
-A Project is a user-owned workspace that holds documents and chat sessions.
+| Concern | Withdrawn design | Accepted here |
+|---|---|---|
+| Container | `Project`; every session bound to one | None. Documents belong to the user: `tenant -> user -> document` |
+| Document planes in chat | Two: company and project, split by `document_scope` | One: user documents. Company RAG serves the standalone Email Agent and is disabled in chat behind a flag |
+| Retrieval trigger | Deterministic: retrieve on every turn when ready documents exist | The intent classifier decides per turn |
+| Routing authority | Cue phrases in `retrieval_policy` | One structured LLM call per turn |
 
-```text
-tenant → user → project → { documents, chat sessions }
-```
-
-```yaml
-project_id: string
-tenant_id: string
-user_id: string
-name: string
-created_at: datetime
-updated_at: datetime
-```
-
-Rules:
-
-- Every chat session belongs to exactly one project. `project_id` becomes a
-  mandatory field of the chat session scope.
-- A user always has a default project, created on first use, so an existing
-  session flow keeps working without asking the user to choose one.
-- Documents are members of a project, not attachments of a session. Upload once,
-  every session in that project can ground on it. There is no per-session
-  attach/detach step.
-- Deleting a project deletes its documents (bytes, extracted text, and vector
-  points) and its session state.
-- A project never spans users or tenants, and a document is never visible from
-  another project.
+A project container adds a key, an API surface, a migration, and a failure branch
+without improving answer quality for a single user's corpus. Narrowing the search
+is served by an optional `document_ids` filter on the request instead.
 
 ## 21.2 Source classes and the boundary between them
 
-| Property | Company semantic corpus (existing) | Project document (new) |
+| Property | Company semantic corpus (existing) | User document (new) |
 |---|---|---|
 | Owner | Workspace administrator | The uploading user |
 | Provenance | Curated, approved, `document_status: ready` | Self-service upload, unreviewed |
 | Ingestion | Offline CLI into `data/extracted/` | Runtime ingestion job |
 | Durability | Rebuildable from the repo corpus | User data; not rebuildable |
-| Scope key | `tenant_id` | `tenant_id` + `user_id` + `project_id` + `document_id` |
-| Store | Company Qdrant collection | Separate project-document Qdrant collection |
-| Deletion | Corpus re-index | Explicit deletion + 30-day TTL purge |
-| Retrieval trigger | Selective, cue-driven | Deterministic when the project has ready documents |
+| Scope key | `tenant_id` | `tenant_id` + `user_id` + `document_id` |
+| Store | Company Qdrant collection or in-repo hybrid index | Separate user-document Qdrant collection |
+| Deletion | Corpus re-index | Explicit deletion plus 30-day TTL purge |
+| Consumer | Standalone PRD-v1 Email Agent; AI Chat behind `CHAT_COMPANY_RAG_ENABLED` | AI Chat |
 
-Both planes are `memory_type: semantic` and are read through retrieval-only
-ports. They are never merged: a user upload cannot enter the company corpus,
-and company documents are never re-scoped to a project. The namespace carries
-`document_scope: company | project_document`; a request that omits or
-mismatches it fails closed.
-
-Raw email remains excluded from both planes. Gmail attachment processing stays
-out of scope under ADR-003: a document enters this plane only through an
-explicit user upload into a project.
+Both are `memory_type: semantic` and are read through retrieval-only ports. They
+are never merged: a user upload cannot enter the company corpus, and company
+documents are never re-scoped to a user. Raw email is excluded from both; a
+document enters this plane only through an explicit user upload, and Gmail
+attachment processing remains out of scope under ADR-003.
 
 ## 21.3 Architecture
 
 ```mermaid
 flowchart TB
-    subgraph INGEST["PROJECT DOCUMENT INGESTION PLANE"]
-        UP["Project Document API<br/>multipart upload"]
-        VALID["Validator<br/>type · size · pages · quota · encryption"]
-        QUAR[("Document object store<br/>encrypted · TTL")]
+    subgraph INGEST["USER DOCUMENT INGESTION PLANE"]
+        UP["Document API<br/>multipart upload"]
+        VALID["Validator<br/>sniffed type · size · pages · quota"]
+        OBJ[("Document object store<br/>encrypted · TTL")]
         JOB["Ingestion job<br/>off the request path"]
         DETECT["PdfInspector · DocxExtractor<br/>native text per page"]
         OCR["Mistral OCR<br/>scanned and mixed pages"]
         PCHUNK["Page-aware chunker"]
         UEMBED["Embedding service"]
-        UINDEX[("Qdrant project-document collection<br/>tenant · user · project · document filters")]
+        UINDEX[("Qdrant user-document collection<br/>tenant · user · document filters")]
         UFAIL["failed(reason_code)"]
     end
 
-    UP --> VALID --> QUAR --> JOB --> DETECT
+    UP --> VALID --> OBJ --> JOB --> DETECT
     DETECT -->|native pages| PCHUNK
     DETECT -->|pages needing OCR| OCR --> PCHUNK
     PCHUNK --> UEMBED --> UINDEX
@@ -1668,33 +1771,34 @@ flowchart TB
     OCR -. attempts or page cap exhausted .-> UFAIL
     UEMBED -. attempts exhausted .-> UFAIL
 
-    subgraph CHATTURN["CHAT TURN INSIDE A PROJECT"]
+    subgraph CHATTURN["CHAT TURN"]
         CHAT["Chat Controller"]
-        GATE["Memory Gateway"]
-        DOCPORT["ProjectDocumentPort<br/>retrieval-only"]
-        DACL["ACL filter built before embedding<br/>tenant · user · project · ready · unexpired"]
+        CLS["Intent Classifier<br/>layered prompt · structured output<br/>sole routing authority"]
+        RES["Deterministic Resolver<br/>truth table only"]
+        GATE["Precondition gate<br/>no ready documents ⇒ RAG downgrades to CHAT"]
+        GW["Memory Gateway"]
+        DOCPORT["UserDocumentRetrievalPort<br/>retrieval-only"]
+        DACL["ACL filter built before embedding<br/>tenant · user · ready · unexpired"]
         CTX["Context assembler<br/>labeled sections"]
     end
 
-    CHAT --> GATE --> DOCPORT --> DACL --> UINDEX
-    GATE --> COMPANY["Company RAG"]
-    DOCPORT --> CTX
-    COMPANY --> CTX --> CHAT
+    CHAT --> CLS --> RES --> GATE --> GW --> DOCPORT --> DACL --> UINDEX
+    GW -. flag-disabled in this baseline .-> COMPANY["Company RAG"]
+    DOCPORT --> CTX --> CHAT
 ```
 
 ## 21.4 Ingestion contract and status machine
 
 ```text
-received → extracting → indexing → ready
-any state → failed(reason_code)
-ready|failed → deleted
+received -> extracting -> indexing -> ready
+any state -> failed(reason_code)
+ready | failed -> deleted
 ```
 
 ```yaml
-document_id: string          # opaque; derived from tenant, user, project, content sha256
+document_id: string          # opaque; derived from tenant, user, content sha256
 tenant_id: string
 user_id: string
-project_id: string
 
 filename: string
 media_type: application/pdf | application/vnd.openxmlformats-officedocument.wordprocessingml.document
@@ -1712,8 +1816,7 @@ updated_at: datetime
 expires_at: datetime         # created_at + retention, default 30 days
 ```
 
-Reason codes reuse the existing ingestion vocabulary and add the cases a
-runtime upload introduces:
+Reason codes:
 
 ```text
 file_too_large · pdf_page_limit_exceeded · empty_extraction
@@ -1725,43 +1828,131 @@ quota_exceeded · embedding_unavailable · index_unavailable
 Rules:
 
 - Validation runs on sniffed content type, not on the filename extension.
-- `document_id` is derived from `tenant_id`, `user_id`, `project_id`, and the
-  content digest, so re-uploading identical bytes into the same project returns
-  the existing record instead of indexing a second copy. The derivation never
-  encodes filename or document text.
-- Extraction reuses the PRD-v1 `PdfInspector` and `DocxExtractor` and their
-  size, page, and encryption guards. Because `PdfInspector` shells out to local
-  commands, extraction runs in the job, never on the request path.
-- **OCR is enabled.** Pages that `PdfInspector` reports as needing OCR are sent
-  to the configured Mistral OCR provider, bounded by the existing
-  `max_ocr_pages`, `timeout_seconds`, and `max_attempts` settings. Native pages
-  are never re-OCR'd. A document that exceeds the OCR page cap fails as
+- `document_id` is derived from `tenant_id`, `user_id`, and the content digest,
+  so re-uploading identical bytes returns the existing record instead of indexing
+  a second copy. The derivation never encodes filename or document text.
+- Extraction reuses the PRD-v1 `PdfInspector` and `DocxExtractor` and their size,
+  page, and encryption guards. Because `PdfInspector` shells out to local
+  commands, extraction runs inside the job, never on the request path.
+- **OCR is enabled.** Pages that `PdfInspector` reports as needing OCR are sent to
+  the configured Mistral OCR provider, bounded by the existing `max_ocr_pages`,
+  `timeout_seconds`, and `max_attempts` settings. Native pages are never
+  re-processed by OCR. Exceeding the page cap fails as
   `ocr_page_limit_exceeded`; a provider failure after bounded retries fails as
   `ocr_failed`. Partial or empty extraction output is never indexed.
 - The upload responds `202` and the job runs off the request path. A chat turn
   never blocks on ingestion.
-- Chunking is page-aware: every chunk carries `page_start` and `page_end`
-  derived from the extractor's `<!-- Page N -->` markers, then splits on
-  paragraph boundaries under the existing size cap.
+- Chunking is page-aware: every chunk carries `page_start` and `page_end` derived
+  from the extractor's `<!-- Page N -->` markers, then splits on paragraph
+  boundaries under the existing size cap.
+- The administrator-operated `KnowledgeIngestionService` CLI is not modified; the
+  two ingestion lifecycles stay separate.
 
-## 21.5 Retrieval contract
+## 21.5 Routing
+
+Routing is centralized in **one structured LLM call per turn**. No keyword or
+regex layer may conclude on its behalf, including concluding "yes". A rules layer
+strong enough to resolve the hard cases is already a classifier — one that cannot
+be improved by prompting or measured against a labeled fixture set.
+
+### Classifier contract
+
+```yaml
+intent: chat | knowledge_query | action_request     # observability label only
+needs_rag: boolean
+needs_tool: boolean
+tool_name: string | null
+needs_clarification: boolean
+retrieval_query: string | null
+confidence: number
+reason_codes:
+  - general_chat
+  - user_document_required
+  - explicit_document_reference
+  - external_action_requested
+  - missing_information
+```
+
+### Resolver truth table
+
+Evaluated top-down; `intent` never participates.
+
+| Condition | Route |
+|---|---|
+| `needs_clarification` | `CLARIFY` |
+| `needs_rag and needs_tool` | `RAG_TOOL` |
+| `needs_rag` | `RAG` |
+| `needs_tool` | `TOOL` |
+| otherwise | `CHAT` |
+
+This baseline executes `CHAT`, `RAG`, and `CLARIFY`. The action axis exists in
+the contract but is disabled at runtime: `needs_tool` is forced to `false`, and
+`TOOL` and `RAG_TOOL` are unreachable. There is still no executable in-chat tool.
+
+### Layered prompt
+
+Hard cases are resolved by prompt structure, not by phrase lists. The prompt is
+assembled in five fixed tiers: the decision principle; precedence rules; bounded
+evidence; calibrated exemplars; the output schema.
+
+The decision principle is a single question:
+
+> Would the quality or correctness of the requested answer depend on retrieving
+> information from the user's own documents?
+
+The precedence tier is where trap cases are settled, in order: the subject of the
+final request governs; mentioning a document is not needing one; topic-shift
+markers reset the subject; a bare deictic reference with no conversational
+antecedent points at the documents; vague recall favours retrieval; general
+knowledge is chat; an undecidable case with ready documents present resolves to
+retrieval.
+
+Evidence given to the classifier is bounded to the current message, the bounded
+session turns, and the **titles** of ready documents — never document text or
+chunks. Prompts are versioned; changing one requires re-running the labeled
+fixture set without regressing the §21.13 thresholds.
+
+### Deterministic layers
+
+Three deterministic mechanisms remain, and each may only **narrow** capability.
+None may originate a route:
+
+| Mechanism | Effect |
+|---|---|
+| Precondition gate | no ready documents ⇒ `RAG` becomes `CHAT`; no embedding and no vector-store call |
+| Schema validation | invalid structured output triggers the failure policy |
+| Tool-axis downgrade | `needs_tool = true` becomes `false` while the axis is disabled |
+
+### Failure policy
+
+```text
+classifier timeout or invalid schema
+-> retry once
+-> still failing: treat as needs_rag = true when ready documents exist
+-> record reason_codes += classifier_unavailable
+```
+
+Retrieval routing fails **open**, because answering without evidence is the more
+damaging error. The action axis fails **closed**. Stated as a rule: retrieval
+routing favours recall, tool routing favours precision.
+
+## 21.6 Retrieval contract
 
 Qdrant is the store for this plane. Unlike the company corpus, there is no
-in-repo fallback index: a project document exists only in Qdrant, so an
-unavailable vector store degrades the plane explicitly rather than silently
-substituting other evidence.
+in-repo fallback index: a user document exists only in Qdrant, so an unavailable
+vector store degrades the plane explicitly rather than silently substituting
+other evidence.
 
 ```yaml
 # request
 tenant_id: string
 user_id: string
-project_id: string
 session_id: string
 feature: ai_chat
-document_scope: project_document
+document_scope: user_document
 
 query: string
-document_ids:                 # optional narrowing; default is every ready document in the project
+document_ids:                 # optional narrowing; default is every ready document
   - string
 
 limits:
@@ -1788,24 +1979,38 @@ degraded: boolean
 latency_ms: integer
 ```
 
-ACL is applied first: the `tenant_id`, `user_id`, `project_id`, `ready`-status,
-and unexpired conditions are assembled **before** the query is embedded, so a
-chunk from another user or another project is never scored. A project with no
-ready documents is not an error; it disables the plane for that turn.
+ACL is applied first: the `tenant_id`, `user_id`, `ready`-status, and unexpired
+conditions are assembled **before** the query is embedded, so a chunk belonging to
+another user is never scored. A missing or inconsistent scope fails closed before
+any I/O.
 
-**Trigger policy.** When the session's project holds at least one ready
-document, the plane is queried on every turn. This is deterministic and does
-not depend on cue phrases: the user put the document in the project in order to
-ask about it. Company-RAG retrieval keeps its existing selective cue policy and
-is unchanged.
+## 21.7 Turn orchestration and durable state
 
-## 21.6 Context assembly and conflict precedence
+The turn is a small graph — `classify -> retrieve -> assemble -> generate ->
+persist` — with conditional edges to `assemble` for `CHAT` and to `clarify` for
+`CLARIFY`. Node behaviour is framework-free and unit-testable in isolation; only
+the graph assembly module knows the orchestration library.
 
-The assembler gains one labeled section, `project_document_evidence`:
+Durable turn state stays lean:
+
+```text
+messages · tenant_id · user_id · session_id · query
+needs_rag · needs_tool · needs_clarification · route · retrieval_query
+citation_ids · errors · final_answer
+```
+
+Document bytes, extracted text, retrieved chunks, and assembled prompts are
+forbidden in this state. Retrieved chunks belong to the per-turn context plane.
+The `ChatSessionBufferPort` remains the source of truth for session state; a
+graph checkpointer, if enabled, is a development aid only.
+
+## 21.8 Context assembly and conflict precedence
+
+The assembler gains one labeled section, `user_document_evidence`:
 
 ```text
 current_instruction
-> project_document_evidence
+> user_document_evidence
 > current_company_evidence
 > stored_preference
 > advisory_episode
@@ -1813,36 +2018,35 @@ current_instruction
 
 Scope of authority is explicit, because rank alone is not the whole rule:
 
-- A project document is authoritative for **its own content** — what it says,
-  on which page.
-- Company RAG remains authoritative for **company procedure and policy**.
-- When a project document contradicts current company policy on a procedure,
-  both are surfaced with their citations and the conflict is stated. It is
-  never silently resolved in favour of the higher rank.
-- When no chunk clears the score threshold, the assistant states that the
-  answer is not present in the project documents and lists what is missing.
-  Invention from parametric knowledge is a validation failure, as in §11.
+- A user document is authoritative for **its own content** — what it says, on
+  which page.
+- Company RAG remains authoritative for **company procedure and policy** wherever
+  it is enabled.
+- When the two contradict each other, both are surfaced with their citations and
+  the conflict is stated. It is never silently resolved in favour of the higher
+  rank.
+- When no chunk clears the score threshold, the assistant states that the answer
+  is not present in the user's documents and lists what is missing. Invention from
+  parametric knowledge is a validation failure, as in §11.
 
-## 21.7 Memory interaction
+## 21.9 Memory interaction
 
 | Memory type | Change |
 |---|---|
-| Short-term | None in content. The session scope gains `project_id`. |
-| Long-term declarative | None. Documents are never a preference source. |
-| Episodic | Records `project_id`; citations may carry document coordinates. |
-| Semantic (company) | None. |
-| Semantic (project document) | New plane defined here. |
+| Short-term | None |
+| Long-term declarative | None. Documents are never a preference source |
+| Episodic | Citations may carry document coordinates |
+| Semantic (company) | None to the corpus; chat-side retrieval is flag-disabled in this baseline |
+| Semantic (user document) | New plane defined here |
 
-Episodic **retrieval** scope is unchanged: eligible episodes are still selected
-by tenant, user, and `feature: ai_chat` as accepted in PRD-v2 FR-09. Episodes
-persist `project_id` so a stricter project-scoped retrieval can be enabled later
-without a data migration, but this extension does not change the rule.
+Episodic retrieval scope is unchanged: eligible episodes are still selected by
+tenant, user, and `feature: ai_chat` as accepted in PRD-v2 FR-09.
 
-A TaskEpisode may cite a project document as coordinates only:
+A TaskEpisode may cite a user document as coordinates only:
 
 ```yaml
 rag_citations:
-  - citation_scope: company | project_document
+  - citation_scope: company | user_document
     document_id: string
     document_title: string
     section: string | null
@@ -1852,86 +2056,120 @@ rag_citations:
 ```
 
 Copied document text, extracted page text, and full chat transcripts remain
-banned from episodes, logs, telemetry, and fixtures. Deleting a document does
-not delete episodes that cite it; such a citation renders as unavailable.
+banned from episodes, logs, telemetry, and fixtures. Deleting a document does not
+delete episodes that cite it; such a citation renders as unavailable.
 
-## 21.8 Suggested internal API surface
+## 21.10 Internal API surface
 
 ```text
-POST   /v1/cowork/chat/projects                                        → 201 {project_id}
-GET    /v1/cowork/chat/projects                                        list for tenant+user
-DELETE /v1/cowork/chat/projects/{project_id}                           204, cascades to documents and sessions
-POST   /v1/cowork/chat/projects/{project_id}/documents                 multipart → 202 {document_id, status}
-GET    /v1/cowork/chat/projects/{project_id}/documents                 list with status
-GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}   status + reason_code
-DELETE /v1/cowork/chat/projects/{project_id}/documents/{document_id}   204, purges index + object + text
-POST   /v1/cowork/chat/sessions                                        body gains optional {project_id}
-GET    /v1/cowork/chat/sessions?project_id=...                         sessions of one project
+POST   /v1/cowork/chat/documents                 multipart -> 202 {document_id, status}
+GET    /v1/cowork/chat/documents                 list with status
+GET    /v1/cowork/chat/documents/{document_id}   status, reason_code, counts
+DELETE /v1/cowork/chat/documents/{document_id}   204; purges index, object, text
 ```
 
-`POST /sessions` without a `project_id` resolves to the user's default project,
-so the existing client contract keeps working. No new SSE event type is
-introduced: document evidence is disclosed through the existing
-`memory_citation` event, discriminated by `citation_scope`. Ingestion progress
-is polled through the document status endpoint, not streamed.
+Chat session and message endpoints are unchanged. No new SSE event type is
+introduced: document evidence is disclosed through the existing `memory_citation`
+event, discriminated by `citation_scope`. Ingestion progress is polled through the
+document status endpoint, not streamed.
 
-## 21.9 Failure and fallback paths
+## 21.11 Failure and fallback paths
 
 | Failure | Behavior |
 |---|---|
 | Validation rejection | `failed(reason_code)` at upload; no job, no retained bytes beyond the failure record |
-| Extraction failure | `failed`, document never indexed, chat unaffected |
+| Extraction failure | `failed`; the document is never indexed and chat is unaffected |
 | OCR provider outage | bounded retries, then `failed(ocr_failed)`; native-text pages are not indexed alone |
 | Embedding provider outage | remain `indexing`, bounded retries with backoff, then `failed(embedding_unavailable)` |
-| Qdrant unavailable at query time | one retry, then empty result with `degraded: true`; the turn states that document evidence is unavailable |
-| Retrieval timeout | one retry, then `timeout` + `degraded: true` |
+| Qdrant unavailable at query time | one retry, then an empty result with `degraded: true`; the turn states that document evidence is unavailable |
+| Retrieval timeout | one retry, then `timeout` with `degraded: true` |
 | Document deleted or expired mid-session | excluded by the retrieval filter; the turn proceeds without it |
 | No chunk above threshold | `no_results`; the answer states the documents do not cover the question |
+| Classifier unavailable | retry once, then fail open to retrieval; see §21.5 |
 
 A degraded document plane never falls back to unsourced generation, and never
 affects the standalone PRD-v1 Email Agent.
 
-## 21.10 Privacy, retention, and deletion
+## 21.12 Privacy, retention, and deletion
 
 - Uploaded bytes, extracted text, and OCR output are user-owned durable data:
   encrypted at rest, access-checked on every read, and excluded from logs,
   production telemetry, traces, and test fixtures.
 - OCR sends page images to an external provider. That transfer is part of the
   documented upload path and must be disclosed in product copy; OCR output is
-  never retained by the pipeline outside the project's own storage.
+  never retained by the pipeline outside the document's own storage.
 - Document text never enters the company corpus, TaskEpisodes, the declarative
   profile, or any PRD-v1 Email path.
-- **Retention defaults to 30 days** from upload, configurable per tenant.
-  Expired documents are excluded from retrieval before ranking and purged by
-  the existing background purge mechanism.
-- Deletion is supported per document, per project, per user, and feature-wide.
-  It purges the object store, the extracted text, and the Qdrant points, and is
-  repeatable until every store confirms.
-- These metadata-only safety counters must remain zero under test: cross-tenant
-  document retrieval, cross-user document retrieval, cross-project document
-  retrieval, retrieval of an expired or deleted document, and document text
-  appearing in an episode, log, or telemetry field.
+- **Retention defaults to 30 days** from upload, configurable per tenant. Expired
+  documents are excluded from retrieval before ranking and purged by the existing
+  background purge mechanism.
+- Deletion is supported per document, per user, and feature-wide. It purges the
+  object store, the extracted text, and the Qdrant points, and is repeatable until
+  every store confirms.
 
-## 21.11 Implementation order
+## 21.13 Observability and evaluation gates
 
-1. Project container: contract, storage, default project, and `project_id` on
-   the chat session scope.
-2. Ingestion contracts and job: validation, extraction, Mistral OCR, page-aware
-   chunking, and the status machine — no retrieval yet.
-3. Qdrant project-document collection with ACL-first filtering and deletion
+Metadata-only events extend the existing vocabulary:
+
+```text
+user_document.upload.accepted · user_document.upload.rejected
+user_document.ingestion.started · user_document.ocr.invoked
+user_document.ingestion.completed · user_document.ingestion.failed
+user_document.deleted · user_document.expired
+
+chat.intent.classified · chat.intent.precondition_downgraded
+chat.intent.classifier_retried · chat.intent.fallback_to_rag
+chat.route.decided
+user_document.retrieval.requested · .completed · .empty · .degraded
+```
+
+Raw query text, chunk text, page text, and assembled prompts are prohibited
+telemetry fields.
+
+Routing quality is gated on a labeled fixture set of at least 60 cases, split
+evenly across obvious-RAG, obvious-chat, ambiguous, and distractor groups, with no
+overlap between prompt exemplars and fixture cases:
+
+| Metric | Threshold |
+|---|---|
+| Retrieval recall | >= 0.95 |
+| Missed-RAG rate | <= 0.05 |
+| Retrieval precision | >= 0.75 |
+| Citation accuracy | >= 0.90 |
+| Classifier p95 latency | <= 1500 ms |
+
+Missed-RAG rate is the deciding metric: it measures the assistant answering
+confidently without reading a document it should have read.
+
+These metadata-only safety counters must remain zero under test: cross-tenant
+document retrieval, cross-user document retrieval, retrieval of an expired or
+deleted document, and document text appearing in an episode, log, or telemetry
+field.
+
+## 21.14 Implementation order
+
+1. Contracts: document record, chunk, classifier decision, route, retrieval
+   query and response, and the citation-scope extension.
+2. Ingestion job: validation, extraction, Mistral OCR, page-aware chunking, and
+   the status machine — no retrieval yet.
+3. Qdrant user-document collection with ACL-first filtering and deletion
    propagation.
-4. Deterministic per-turn retrieval and the `project_document_evidence` context
-   section with conflict precedence.
-5. Grounded page-level citation rendering and `citation_scope` on episodes.
+4. Classifier, layered prompt, resolver, labeled fixture set, and the §21.13
+   metrics.
+5. Turn graph, the `user_document_evidence` context section, and page-level
+   citation rendering.
 6. Retention, deletion audit, safety counters, and evaluation gates.
 
-## 21.12 Out of scope for this extension
+Steps 1 to 3 do not change chat behaviour; chat behaviour changes at step 4.
 
-- sharing a project or document with another user or at workspace level;
-- promoting a project document into the company corpus;
+## 21.15 Out of scope for this extension
+
+- sharing a document with another user or at workspace level;
+- promoting a user document into the company corpus;
+- a project or folder container for grouping documents;
 - image, chart, and table-structure understanding beyond OCR text;
 - document editing, annotation, or re-generation;
 - scheduled or automatic re-ingestion;
-- ingesting Gmail attachments (remains out of scope under ADR-003);
-- project-scoped episodic retrieval (deferred; `project_id` is recorded now);
+- ingesting Gmail attachments, which remains out of scope under ADR-003;
+- document-scoped episodic retrieval;
 - any executable in-chat tool, including `@Email`.
