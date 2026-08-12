@@ -130,8 +130,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function checkAssistantApi(signal?: AbortSignal): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/v1/health`, { signal });
-    return response.ok;
+    const response = await fetch(`${API_BASE_URL}/health`, { signal });
+    if (response.ok) return true;
+    const legacyResponse = await fetch(`${API_BASE_URL}/api/v1/health`, { signal });
+    return legacyResponse.ok;
   } catch {
     return false;
   }

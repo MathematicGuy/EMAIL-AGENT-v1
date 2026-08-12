@@ -382,6 +382,7 @@ def create_app() -> FastAPI:
     app.include_router(create_chat_router())
 
     @app.get("/health")
+    @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
