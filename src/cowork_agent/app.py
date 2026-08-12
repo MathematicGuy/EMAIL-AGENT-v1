@@ -23,6 +23,7 @@ from cowork_agent.config import (
     GeminiSettings,
     GmailSettings,
     GroqSettings,
+    JinaEmbeddingSettings,
     SessionSettings,
     SupabaseStorageSettings,
     database_url,
@@ -373,7 +374,9 @@ def create_app() -> FastAPI:
                     gemini_settings = GeminiSettings.from_env()
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
-                    semantic_memory = await build_semantic_memory(gemini_settings)
+                    semantic_memory = await build_semantic_memory(
+                        JinaEmbeddingSettings.from_env()
+                    )
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()

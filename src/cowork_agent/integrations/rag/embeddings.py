@@ -10,8 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from collections.abc import Sequence
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal, Protocol
 from urllib.request import Request, urlopen
 

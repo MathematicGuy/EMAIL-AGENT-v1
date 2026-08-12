@@ -33,7 +33,10 @@ class _RecordingEmbedder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
 
-    async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         self.calls.append(tuple(texts))
         return ((1.0, 0.0),)
 
@@ -356,8 +359,10 @@ def test_retrieve_reports_timeout_when_the_embedder_times_out() -> None:
 
 def test_retrieve_enforces_a_subsecond_deadline_across_embedding_and_query() -> None:
     class DelayedEmbedder:
-        async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
-            del texts
+        async def embed(
+            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+        ) -> tuple[tuple[float, ...], ...]:
+            del texts, task
             await asyncio.sleep(0.05)
             return ((1.0, 0.0),)
 

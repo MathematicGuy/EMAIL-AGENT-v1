@@ -98,7 +98,9 @@ class ProjectDocumentVectorStore:
         expiry = _epoch(expires_at)
         if expiry <= datetime.now(UTC).timestamp():
             raise ValueError("expired documents must not be indexed")
-        vectors = await self._embedder.embed(tuple(chunk.text for chunk in chunks))
+        vectors = await self._embedder.embed(
+            tuple(chunk.text for chunk in chunks), task="retrieval.passage"
+        )
         if len(vectors) != len(chunks) or not vectors or not vectors[0]:
             raise ValueError("embedding response does not match project chunks")
         await self._ensure_collection(len(vectors[0]))
@@ -144,7 +146,7 @@ class ProjectDocumentVectorStore:
         _require_scope(workspace_id, user_id, project_id)
         # Deliberately precedes embed(): never score another project's vector.
         query_filter = _retrieval_filter(workspace_id, user_id, project_id, now)
-        (vector,) = await self._embedder.embed((query,))
+        (vector,) = await self._embedder.embed((query,), task="retrieval.query")
         result = await self._client.query_points(
             collection_name=self._collection_name,
             query=list(vector),

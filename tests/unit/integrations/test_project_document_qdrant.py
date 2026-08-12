@@ -17,7 +17,10 @@ class RecordingEmbedder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
 
-    async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         self.calls.append(texts)
         return ((1.0, 0.0),)
 

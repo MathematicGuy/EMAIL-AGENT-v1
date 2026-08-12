@@ -188,7 +188,7 @@ class QdrantSettings:
                 or "project_documents"
             ),
             enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
-            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 768),
+            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 1024),
             reindex=_boolean(environ, "QDRANT_REINDEX", False),
         )
 

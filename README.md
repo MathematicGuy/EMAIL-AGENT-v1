@@ -253,8 +253,11 @@ GEMINI_API_KEY_1="your_key_1"
 GEMINI_API_KEY_2="your_key_2"
 GEMINI_API_KEY_3="your_key_3"
 
-# Optional hybrid-RAG reranking; blank means pass-through after RRF
-JINA_API_KEY=""
+# Jina embeddings power RAG indexing and retrieval; the same key enables reranking.
+JINA_API_KEY="your_jina_api_key"
+JINA_EMBEDDING_MODEL="jina-embeddings-v5-omni-small"
+JINA_EMBEDDING_DIMENSIONS=1024
+JINA_EMBEDDING_TIMEOUT_SECONDS=30
 
 # Gmail OAuth Credentials
 GMAIL_CLIENT_ID="your_gmail_client_id"
@@ -264,6 +267,11 @@ GMAIL_CLIENT_SECRET="your_gmail_client_secret"
 TOKEN_ENCRYPTION_KEY="your_fernet_key"
 OAUTH_STATE_SECRET="your_oauth_state_secret"
 ```
+
+When migrating an existing Qdrant company-knowledge collection from Gemini,
+set `QDRANT_REINDEX=true` for one startup so every vector is recreated with
+Jina. Set it back to `false` after that startup. Set
+`QDRANT_VECTOR_SIZE=1024` to match the default Jina v5 Omni Small output.
 
 ### 4.3 Khởi chạy dịch vụ
 

@@ -141,9 +141,9 @@ def test_acl_filtering_happens_before_embedding(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, ...]] = []
 
-        async def embed(self, texts):
+        async def embed(self, texts, *, task: str = "retrieval.query"):
             self.calls.append(tuple(texts))
-            return await super().embed(texts)
+            return await super().embed(texts, task=task)
 
     spy = SpyEmbedder()
     memory = InRepoSemanticMemory(documents, spy)

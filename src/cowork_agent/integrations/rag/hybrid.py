@@ -170,8 +170,12 @@ class HybridSemanticMemory:
             if self._enable_mmr and filtered_reranked:
                 cand_chunks = filtered_reranked[: candidate_limit]
                 cand_texts = tuple(c.text for c in cand_chunks)
-                cand_vecs = await self._embedder.embed(cand_texts)
-                (query_vec,) = await self._embedder.embed((query_str,))
+                cand_vecs = await self._embedder.embed(
+                    cand_texts, task="retrieval.passage"
+                )
+                (query_vec,) = await self._embedder.embed(
+                    (query_str,), task="retrieval.query"
+                )
                 chunks = mmr_diversify(
                     chunks=cand_chunks,
                     chunk_vectors=cand_vecs,

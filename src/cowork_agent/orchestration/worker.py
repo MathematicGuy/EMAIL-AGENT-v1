@@ -14,6 +14,7 @@ from cowork_agent.config import (
     GeminiSettings,
     GmailSettings,
     GroqSettings,
+    JinaEmbeddingSettings,
     QdrantSettings,
     database_url,
 )
@@ -111,7 +112,8 @@ async def run_worker() -> None:
             gemini_settings = GeminiSettings.from_env()
             classifier = GeminiRouteClassifier(gemini_settings)
             generator = GeminiActionPlanGenerator(gemini_settings)
-            semantic_memory = await build_semantic_memory(gemini_settings)
+            jina_embedding_settings = JinaEmbeddingSettings.from_env()
+            semantic_memory = await build_semantic_memory(jina_embedding_settings)
         elif provider == "groq":
             groq_settings = GroqSettings.from_env()
             classifier = GroqRouteClassifier(groq_settings)
@@ -159,7 +161,7 @@ async def run_worker() -> None:
             from cowork_agent.integrations.knowledge_ingestion.project_documents import (
                 ProjectDocumentExtractor,
             )
-            from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+            from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
             from cowork_agent.integrations.rag.project_documents import ProjectDocumentVectorStore
             from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 
@@ -177,7 +179,7 @@ async def run_worker() -> None:
                     ProjectDocumentVectorStore(
                         qdrant_client,
                         qdrant.project_collection_name,
-                        GeminiEmbeddingAdapter(gemini_settings),
+                        JinaEmbeddingAdapter(jina_embedding_settings),
                     ),
                 )
                 document_poller = PostgresPoller(
