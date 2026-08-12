@@ -201,6 +201,25 @@ class PostgresProjectRepository:
             row = await cursor.fetchone()
         return None if row is None else _document(row)
 
+    async def list_documents(
+        self, principal: VerifiedPrincipal, project_id: str
+    ) -> tuple[ProjectDocument, ...]:
+        if await self.require_project(principal, project_id) is None:
+            return ()
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
+                    content_sha256, storage_key, status, expires_at
+                FROM project_documents
+                WHERE project_id = %s AND workspace_id = %s AND user_id = %s
+                ORDER BY created_at DESC, id
+                """,
+                (project_id, principal.workspace_id, principal.user_id),
+            )
+            rows = await cursor.fetchall()
+        return tuple(_document(row) for row in rows)
+
     async def _one_project(
         self, principal: VerifiedPrincipal, *, is_default: bool
     ) -> Project | None:

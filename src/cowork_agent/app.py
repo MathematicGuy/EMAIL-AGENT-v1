@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import httpx
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -22,6 +23,7 @@ from cowork_agent.config import (
     GmailSettings,
     GroqSettings,
     SessionSettings,
+    SupabaseStorageSettings,
     database_url,
     redis_url,
 )
@@ -113,6 +115,7 @@ from cowork_agent.integrations.rag.bootstrap import (
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
@@ -123,6 +126,7 @@ from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 
 from .api.chat import create_chat_router
 from .api.handlers import _jsonable
+from .api.projects import create_project_router
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +253,9 @@ def create_app() -> FastAPI:
                     PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
                 )
+                from cowork_agent.persistence.repositories.projects import (
+                    PostgresProjectRepository,
+                )
 
                 pool = AsyncConnectionPool(
                     database_url(), min_size=1, max_size=8, open=False
@@ -263,6 +270,7 @@ def create_app() -> FastAPI:
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
                 app.state.session_repository = PostgresSessionRepository(pool)
+                app.state.project_repository = PostgresProjectRepository(pool)
                 chat_session_registry = PostgresChatSessionRegistry(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
@@ -279,6 +287,7 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.pg_pool = None
+                app.state.project_repository = None
                 chat_session_registry = InMemoryChatSessionRegistry()
             app.state.connection_repository = repository
             app.state.gmail_connections = GmailConnectionService(
@@ -300,6 +309,19 @@ def create_app() -> FastAPI:
                 repository,
                 TokenCipher(settings.token_encryption_key),
             )
+            if os.getenv("SUPABASE_URL", "").strip():
+                storage_settings = SupabaseStorageSettings.from_env()
+                storage_client = httpx.AsyncClient(timeout=30.0)
+                app.state.private_storage_client = storage_client
+                app.state.private_storage = SupabasePrivateStorage(
+                    storage_settings.url,
+                    storage_settings.secret_key,
+                    storage_settings.bucket,
+                    storage_client,
+                )
+            else:
+                app.state.private_storage_client = None
+                app.state.private_storage = None
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = chat_session_registry
@@ -429,9 +451,13 @@ def create_app() -> FastAPI:
         )
         if closing_chat_redis_client is not None:
             closing_chat_redis_client.close()
+        private_storage_client = getattr(app.state, "private_storage_client", None)
+        if private_storage_client is not None:
+            await private_storage_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
+    app.include_router(create_project_router())
 
     @app.get("/health")
     async def health() -> dict[str, str]:
