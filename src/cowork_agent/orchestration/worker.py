@@ -6,17 +6,20 @@ import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import (
     FaucetSettings,
+    GeminiEmbeddingSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
     QdrantSettings,
+    UserDocumentsSettings,
     database_url,
 )
 from cowork_agent.features.email_action_plan.observability import (
@@ -77,13 +80,30 @@ class PostgresWorkerMaintenance:
         await recover_stale_document_jobs(self._documents, now=now)
         await self._publisher.publish_pending()
 
+
+class HeartbeatRepository(Protocol):
+    async def record_document_worker_heartbeat(self) -> None: ...
+
+
+class ProjectDocumentWorkerHeartbeat:
+    """Publish liveness only from a fully composed document poller."""
+
+    def __init__(self, projects: HeartbeatRepository) -> None:
+        self._projects = projects
+
+    async def run(self) -> None:
+        await self._projects.record_document_worker_heartbeat()
+
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
     # check in main() must run even without them installed.
     from psycopg_pool import AsyncConnectionPool
 
     from cowork_agent.orchestration.postgres_poller import CallableJobSource, PostgresPoller
-    from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
+    from cowork_agent.orchestration.project_document_worker import (
+        ProjectDocumentCleanupWorker,
+        ProjectDocumentIngestionWorker,
+    )
     from cowork_agent.persistence.migrate import apply_migrations
     from cowork_agent.persistence.repositories.identity import (
         PostgresMailboxConnectionRepository,
@@ -157,45 +177,68 @@ async def run_worker() -> None:
             maintenance=maintenance,
         )
         document_poller = None
-        if provider == "gemini" and os.getenv("SUPABASE_URL", "").strip():
+        cleanup_poller = None
+        document_settings = UserDocumentsSettings.from_env()
+        if document_settings.enabled:
             from cowork_agent.config import SupabaseStorageSettings
             from cowork_agent.integrations.knowledge_ingestion.project_documents import (
                 ProjectDocumentExtractor,
             )
-            from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
+            from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
             from cowork_agent.integrations.rag.project_documents import ProjectDocumentVectorStore
             from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 
-            qdrant = QdrantSettings.from_env()
-            if qdrant.enabled:
+            try:
+                qdrant = QdrantSettings.from_env()
+                if not qdrant.enabled:
+                    raise ValueError("Qdrant is not configured")
                 storage = SupabaseStorageSettings.from_env()
+                embedding = GeminiEmbeddingSettings.from_env()
                 storage_client = httpx.AsyncClient(timeout=30.0)
                 qdrant_client = AsyncQdrantClient(url=qdrant.url, api_key=qdrant.api_key or None)
+                private_storage = SupabasePrivateStorage(
+                    storage.url, storage.secret_key, storage.bucket, storage_client
+                )
+                document_vectors = ProjectDocumentVectorStore(
+                    qdrant_client,
+                    qdrant.project_collection_name,
+                    GeminiEmbeddingAdapter(embedding),
+                    vector_size=embedding.dimensions,
+                )
+                await asyncio.wait_for(
+                    document_vectors.ensure_collection(),
+                    timeout=document_settings.retrieval_timeout_ms / 1000,
+                )
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
-                    SupabasePrivateStorage(
-                        storage.url, storage.secret_key, storage.bucket, storage_client
-                    ),
+                    private_storage,
                     ProjectDocumentExtractor(),
-                    ProjectDocumentVectorStore(
-                        qdrant_client,
-                        qdrant.project_collection_name,
-                        JinaEmbeddingAdapter(jina_embedding_settings),
-                    ),
+                    document_vectors,
+                    max_pages=document_settings.max_pages,
+                )
+                cleanup_worker = ProjectDocumentCleanupWorker(
+                    projects, private_storage, document_vectors
                 )
                 document_poller = PostgresPoller(
                     CallableJobSource(projects.next_claimable_job),
                     document_worker,
+                    maintenance=ProjectDocumentWorkerHeartbeat(projects),
                 )
-            else:
-                logger.warning(
-                    "Project document polling is disabled because Qdrant is not configured"
+                cleanup_poller = PostgresPoller(
+                    CallableJobSource(projects.next_claimable_cleanup),
+                    cleanup_worker,
+                )
+            except Exception:
+                logger.exception(
+                    "Project document polling is degraded; digest polling remains online"
                 )
         logger.info("Worker ready; polling durable Postgres jobs")
-        if document_poller is None:
-            await digest_poller.run_forever()
-        else:
-            await asyncio.gather(digest_poller.run_forever(), document_poller.run_forever())
+        pollers = [digest_poller.run_forever()]
+        if document_poller is not None:
+            pollers.append(document_poller.run_forever())
+        if cleanup_poller is not None:
+            pollers.append(cleanup_poller.run_forever())
+        await asyncio.gather(*pollers)
     finally:
         if storage_client is not None:
             await storage_client.aclose()

@@ -19,6 +19,7 @@ import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
 import { ProjectDocumentPanel } from '../modules/project-documents/ProjectDocumentPanel';
+import { areProjectDocumentsEnabled } from '../modules/project-documents/api';
 
 interface DashboardProps {
   onNavigateHome?: () => void;
@@ -43,6 +44,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
   const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState('warm-charcoal');
   const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
@@ -50,6 +52,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     () => projects.find((project) => project.id === activeProjectId),
     [projects, activeProjectId]
   );
+
+  useEffect(() => {
+    let active = true;
+    const refreshDocumentHealth = () => {
+      void areProjectDocumentsEnabled().then((enabled) => {
+        if (active) setProjectDocumentsEnabled(enabled);
+      });
+    };
+    refreshDocumentHealth();
+    const timer = window.setInterval(refreshDocumentHealth, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
@@ -171,7 +188,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
               attachments={selectedAttachments}
               attachmentError={attachmentError}
-              onSelectFiles={selectAttachments}
+              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
               onRemoveAttachment={removeAttachment}
               activeProject={activeProject}
               projects={projects}
@@ -190,7 +207,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
               attachments={selectedAttachments}
               attachmentError={attachmentError}
-              onSelectFiles={selectAttachments}
+              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
               onRemoveAttachment={removeAttachment}
               workflows={workflows}
               onApproveWorkflowPlan={approveWorkflowPlan}
@@ -256,10 +273,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           onClose={() => setIsWorkIntakePanelOpen(false)}
         />
       )}
-      <ProjectDocumentPanel
-        projectId={activeProjectId}
-        projectName={activeProject?.name}
-      />
+      {projectDocumentsEnabled && (
+        <ProjectDocumentPanel
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+        />
+      )}
     </div>
   );
 };

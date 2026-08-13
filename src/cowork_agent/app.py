@@ -1,8 +1,8 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
+import asyncio
 import logging
 import os
-import shutil
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -22,11 +22,11 @@ from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
     FaucetSettings,
+    GeminiEmbeddingSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
-    KnowledgeIngestionSettings,
     QdrantSettings,
     SessionSettings,
     SupabaseStorageSettings,
@@ -35,7 +35,6 @@ from cowork_agent.config import (
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
-from cowork_agent.domain.project_documents import ProjectDocument
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -49,8 +48,8 @@ from cowork_agent.features.ai_chat.controller import (
 )
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
 from cowork_agent.features.ai_chat.intent.service import (
+    CanonicalReadyDocumentCatalog,
     ChatRoutingService,
-    RepositoryReadyDocumentCatalog,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.memory_observability import (
@@ -124,10 +123,6 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
 )
-from cowork_agent.integrations.project_documents.encrypted_store import EncryptedDocumentStore
-from cowork_agent.integrations.project_documents.ingestion import ProjectDocumentIngestionService
-from cowork_agent.integrations.project_documents.mistral_ocr import MistralOcrClient
-from cowork_agent.integrations.project_documents.qdrant_store import QdrantProjectDocumentStore
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_semantic_memory,
@@ -136,17 +131,15 @@ from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.rag.project_documents import (
+    CanonicalProjectDocumentRetriever,
+    ProjectDocumentVectorStore,
+)
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
-from cowork_agent.orchestration.document_ingestion import DocumentIngestionDispatcher
-from cowork_agent.orchestration.document_retention import DocumentRetentionManager
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
-)
-from cowork_agent.persistence.repositories.project_documents import (
-    InMemoryProjectDocumentRepository,
-    InMemoryProjectRepository,
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
@@ -270,9 +263,15 @@ def create_app() -> FastAPI:
             try:
                 import importlib.util
 
-                script_path = Path(__file__).resolve().parents[2] / "scripts" / "update_corpus2skill.py"
+                script_path = (
+                    Path(__file__).resolve().parents[2]
+                    / "scripts"
+                    / "update_corpus2skill.py"
+                )
                 if script_path.exists():
-                    spec = importlib.util.spec_from_file_location("update_corpus2skill", script_path)
+                    spec = importlib.util.spec_from_file_location(
+                        "update_corpus2skill", script_path
+                    )
                     if spec and spec.loader:
                         mod = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(mod)
@@ -303,6 +302,9 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.repositories.chat_sessions import (
+                    PostgresChatSessionRegistry,
+                )
                 from cowork_agent.persistence.repositories.identity import (
                     PostgresIdentityRepository,
                     PostgresMailboxConnectionRepository,
@@ -314,15 +316,6 @@ def create_app() -> FastAPI:
                     PostgresRunRepository,
                     PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
-                )
-                from cowork_agent.persistence.repositories.project_documents import (
-                    PostgresChatSessionRepository,
-                )
-                from cowork_agent.persistence.repositories.project_documents import (
-                    PostgresProjectDocumentRepository as LegacyProjectDocumentRepository,
-                )
-                from cowork_agent.persistence.repositories.project_documents import (
-                    PostgresProjectRepository as LegacyProjectRepository,
                 )
                 from cowork_agent.persistence.repositories.projects import (
                     PostgresProjectRepository,
@@ -338,14 +331,12 @@ def create_app() -> FastAPI:
                 app.state.outbox_repository = PostgresOutboxRepository(pool)
                 app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
                 app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
-                app.state.chat_project_repository = LegacyProjectRepository(pool)
-                app.state.project_document_repository = LegacyProjectDocumentRepository(pool)
-                chat_session_registry = PostgresChatSessionRepository(pool)
+                app.state.project_repository = PostgresProjectRepository(pool)
+                chat_session_registry = PostgresChatSessionRegistry(pool)
                 app.state.chat_session_repository = chat_session_registry
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
                 app.state.session_repository = PostgresSessionRepository(pool)
-                app.state.project_repository = PostgresProjectRepository(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
                 task_repository = SQLiteTaskRepository(
@@ -360,8 +351,6 @@ def create_app() -> FastAPI:
                 app.state.outbox_repository = InMemoryOutbox()
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
-                app.state.chat_project_repository = InMemoryProjectRepository()
-                app.state.project_document_repository = InMemoryProjectDocumentRepository()
                 app.state.chat_session_repository = None
                 app.state.pg_pool = None
                 app.state.project_repository = None
@@ -386,16 +375,23 @@ def create_app() -> FastAPI:
                 repository,
                 TokenCipher(settings.token_encryption_key),
             )
-            if os.getenv("SUPABASE_URL", "").strip():
-                storage_settings = SupabaseStorageSettings.from_env()
-                storage_client = httpx.AsyncClient(timeout=30.0)
-                app.state.private_storage_client = storage_client
-                app.state.private_storage = SupabasePrivateStorage(
-                    storage_settings.url,
-                    storage_settings.secret_key,
-                    storage_settings.bucket,
-                    storage_client,
-                )
+            user_documents_settings = UserDocumentsSettings.from_env()
+            app.state.document_embeddings_configured = False
+            if user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip():
+                try:
+                    storage_settings = SupabaseStorageSettings.from_env()
+                    storage_client = httpx.AsyncClient(timeout=30.0)
+                    app.state.private_storage_client = storage_client
+                    app.state.private_storage = SupabasePrivateStorage(
+                        storage_settings.url,
+                        storage_settings.secret_key,
+                        storage_settings.bucket,
+                        storage_client,
+                    )
+                except ValueError:
+                    logger.warning("Project document storage is unavailable")
+                    app.state.private_storage_client = None
+                    app.state.private_storage = None
             else:
                 app.state.private_storage_client = None
                 app.state.private_storage = None
@@ -411,18 +407,15 @@ def create_app() -> FastAPI:
             )
             app.state.chat_reply = UnavailableChatReply()
             app.state.chat_routing_service = None
-            user_documents_settings = UserDocumentsSettings.from_env()
-            if user_documents_settings.enabled and app.state.pg_pool is None:
-                raise ValueError("DATABASE_URL is required when user documents are enabled")
             app.state.user_documents_settings = user_documents_settings
-            app.state.ready_document_catalog = RepositoryReadyDocumentCatalog(
-                app.state.project_document_repository
+            app.state.ready_document_catalog = (
+                CanonicalReadyDocumentCatalog(app.state.project_repository)
+                if app.state.project_repository is not None
+                else None
             )
             app.state.project_document_store = None
             app.state.project_document_vectors = None
-            app.state.document_ingestion_dispatcher = None
             app.state.project_document_qdrant_client = None
-            app.state.document_retention_manager = None
             app.state.chat_principal_resolver = _resolve_chat_principal
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
@@ -436,73 +429,45 @@ def create_app() -> FastAPI:
             app.state.redis_client = None
             app.state.run_queue = None
 
-            if user_documents_settings.enabled:
-                qdrant_settings = QdrantSettings.from_env()
-                if not qdrant_settings.enabled:
-                    raise ValueError(
-                        "QDRANT_URL and QDRANT_ENABLED=true are required for user documents"
+            if user_documents_settings.enabled and app.state.project_repository is not None:
+                document_qdrant = None
+                try:
+                    qdrant_settings = QdrantSettings.from_env()
+                    if not qdrant_settings.enabled:
+                        raise ValueError("Qdrant is not configured")
+                    from qdrant_client import AsyncQdrantClient
+
+                    document_embedding_settings = GeminiEmbeddingSettings.from_env()
+                    app.state.document_embeddings_configured = True
+                    document_qdrant = AsyncQdrantClient(
+                        url=qdrant_settings.url,
+                        api_key=qdrant_settings.api_key or None,
                     )
-                from qdrant_client import AsyncQdrantClient
-
-                document_gemini_settings = GeminiSettings.from_env()
-                ingestion_settings = KnowledgeIngestionSettings.from_env()
-                document_store = EncryptedDocumentStore(
-                    user_documents_settings.store_path,
-                    user_documents_settings.encryption_key,
-                )
-                document_qdrant = AsyncQdrantClient(
-                    url=qdrant_settings.url,
-                    api_key=qdrant_settings.api_key or None,
-                )
-                document_vectors = QdrantProjectDocumentStore(
-                    client=document_qdrant,
-                    collection_name=user_documents_settings.collection_name,
-                    embedder=GeminiEmbeddingAdapter(
-                        document_gemini_settings,
-                        model=user_documents_settings.embedding_model,
-                    ),
-                    projects=app.state.chat_project_repository,
-                    documents=app.state.project_document_repository,
-                )
-                ingestion = ProjectDocumentIngestionService(
-                    documents=app.state.project_document_repository,
-                    store=document_store,
-                    vectors=document_vectors,
-                    ocr=(
-                        MistralOcrClient(
-                            api_key=ingestion_settings.api_key,
-                            model=ingestion_settings.model,
-                            timeout_seconds=ingestion_settings.timeout_seconds,
-                            max_attempts=ingestion_settings.max_attempts,
+                    vector_store = ProjectDocumentVectorStore(
+                        document_qdrant,
+                        qdrant_settings.project_collection_name,
+                        GeminiEmbeddingAdapter(document_embedding_settings),
+                        vector_size=document_embedding_settings.dimensions,
+                    )
+                    await asyncio.wait_for(
+                        vector_store.ensure_collection(),
+                        timeout=user_documents_settings.retrieval_timeout_ms / 1000,
+                    )
+                    if app.state.project_repository is not None:
+                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
+                            app.state.project_repository,
+                            vector_store,
+                            top_k=user_documents_settings.top_k,
+                            min_score=user_documents_settings.min_score,
+                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
                         )
-                        if ingestion_settings.ocr_enabled
-                        else None
-                    ),
-                    max_pages=user_documents_settings.max_pages,
-                )
-
-                async def process_document(document: ProjectDocument) -> object:
-                    return await ingestion.process(document, worker_id=f"api-{os.getpid()}")
-
-                dispatcher = DocumentIngestionDispatcher(
-                    documents=app.state.project_document_repository,
-                    process=process_document,
-                    stream_name=user_documents_settings.ingestion_stream,
-                    redis=None,
-                )
-                app.state.project_document_store = document_store
-                app.state.project_document_vectors = document_vectors
-                app.state.document_ingestion_dispatcher = dispatcher
-                app.state.project_document_qdrant_client = document_qdrant
-                retention = DocumentRetentionManager(
-                    documents=app.state.project_document_repository,
-                    store=document_store,
-                    vectors=document_vectors,
-                )
-                app.state.document_retention_manager = retention
-                await dispatcher.recover()
-                await retention.run_once()
-                retention.start()
+                    app.state.project_document_qdrant_client = document_qdrant
+                except Exception:
+                    logger.exception(
+                        "Project document vector store is unavailable; API remains online"
+                    )
+                    if document_qdrant is not None:
+                        await document_qdrant.close()
             app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
@@ -563,7 +528,11 @@ def create_app() -> FastAPI:
                         tool_axis_enabled=intent_settings.tool_axis_enabled,
                         sink=LoggingIntentRoutingSink(),
                     )
-                    if intent_settings.enabled and user_documents_settings.enabled
+                    if (
+                        intent_settings.enabled
+                        and user_documents_settings.enabled
+                        and app.state.ready_document_catalog is not None
+                    )
                     else None
                 )
                 app.state.semantic_memory = semantic_memory
@@ -598,14 +567,8 @@ def create_app() -> FastAPI:
                 app.state.llm_configuration_error = str(exc)
                 app.state.llm_provider_label = provider_label
         except ValueError as exc:
-            raise RuntimeError(f"Invalid Gmail configuration: {exc}") from exc
+            raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
-        document_dispatcher = getattr(app.state, "document_ingestion_dispatcher", None)
-        if document_dispatcher is not None:
-            await document_dispatcher.close()
-        retention_manager = getattr(app.state, "document_retention_manager", None)
-        if retention_manager is not None:
-            await retention_manager.close()
         document_qdrant_to_close = getattr(app.state, "project_document_qdrant_client", None)
         if document_qdrant_to_close is not None:
             await document_qdrant_to_close.close()
@@ -631,20 +594,22 @@ def create_app() -> FastAPI:
         checks: dict[str, str] = {
             "feature": "enabled" if settings.enabled else "disabled",
             "postgresql": "disabled",
-            "encrypted_store": "disabled",
+            "supabase_storage": "disabled",
             "redis": "disabled",
             "redis_mode": "redis" if app.state.redis_client is not None else "local",
             "qdrant": "disabled",
             "gemini_embeddings": "disabled",
-            "mistral_ocr": "disabled",
-            "local_pdf_tools": "ready"
-            if shutil.which("detect-pdf") and shutil.which("pdf2md")
-            else "unavailable",
+            "ocr": "optional_unavailable",
+            "classifier": "disabled",
+            "worker_queue": "unavailable",
         }
         if not settings.enabled:
             return JSONResponse({"status": "disabled", "checks": checks})
-        checks["gemini_embeddings"] = "configured"
-        checks["mistral_ocr"] = "configured"
+        if app.state.document_embeddings_configured:
+            checks["gemini_embeddings"] = "configured"
+        checks["classifier"] = (
+            "ready" if app.state.chat_routing_service is not None else "unavailable"
+        )
         pool = app.state.pg_pool
         if pool is not None:
             try:
@@ -653,8 +618,9 @@ def create_app() -> FastAPI:
                 checks["postgresql"] = "ready"
             except Exception:
                 checks["postgresql"] = "unavailable"
-        store = app.state.project_document_store
-        checks["encrypted_store"] = "ready" if store and store.healthy() else "unavailable"
+        checks["supabase_storage"] = (
+            "configured" if app.state.private_storage is not None else "unavailable"
+        )
         redis_client = app.state.redis_client
         if redis_client is not None:
             try:
@@ -671,12 +637,21 @@ def create_app() -> FastAPI:
                 checks["qdrant"] = "ready"
             except Exception:
                 checks["qdrant"] = "unavailable"
+        project_repository = app.state.project_repository
+        if project_repository is not None:
+            try:
+                if await project_repository.worker_heartbeat_is_fresh(
+                    max_age_seconds=120
+                ):
+                    checks["worker_queue"] = "ready"
+            except Exception:
+                checks["worker_queue"] = "unavailable"
         required = [
-            "encrypted_store",
+            "supabase_storage",
             "qdrant",
             "gemini_embeddings",
-            "mistral_ocr",
-            "local_pdf_tools",
+            "classifier",
+            "worker_queue",
         ]
         if pool is not None:
             required.append("postgresql")

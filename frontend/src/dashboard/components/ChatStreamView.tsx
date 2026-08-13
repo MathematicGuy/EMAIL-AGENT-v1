@@ -620,6 +620,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   const prevLastMessageRef = useRef<ChatMessage | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const isVietnamese = navigator.language.toLowerCase().startsWith('vi');
 
   // Detect when user scrolls up
   const handleScroll = () => {
@@ -815,8 +816,8 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
                         >
                           <FileText className="h-3 w-3 text-[#d97757]" />
                           {citation.unavailable
-                            ? `${citation.documentTitle} · unavailable`
-                            : `${citation.documentTitle} · page ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
+                            ? `${citation.documentTitle} · ${isVietnamese ? 'không khả dụng' : 'unavailable'}`
+                            : `${citation.documentTitle}${citation.section ? ` · ${citation.section}` : ''} · ${isVietnamese ? 'trang' : 'page'} ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
                         </span>
                       ))}
                     </div>

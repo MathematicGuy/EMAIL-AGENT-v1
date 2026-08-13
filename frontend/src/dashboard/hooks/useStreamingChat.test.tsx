@@ -93,7 +93,31 @@ describe('useStreamingChat Project chat client', () => {
       const url = String(input);
       if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
       if (url.endsWith('/projects/project-1/documents') && init?.method === 'POST') {
+        return Promise.resolve(json({
+          document_id: 'document-1',
+          status: 'received',
+          upload_url: 'https://storage.example/upload',
+        }, 202));
+      }
+      if (url === 'https://storage.example/upload' && init?.method === 'PUT') {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      if (url.endsWith('/documents/document-1/complete') && init?.method === 'POST') {
         return Promise.resolve(json({ document_id: 'document-1', status: 'received' }, 202));
+      }
+      if (url.endsWith('/documents/document-1')) {
+        return Promise.resolve(json({
+          document_id: 'document-1',
+          filename: 'policy.pdf',
+          media_type: 'application/pdf',
+          byte_size: 9,
+          status: 'ready',
+          error_code: null,
+          page_count: 1,
+          chunk_count: 1,
+          ocr_page_count: 0,
+          expires_at: '2026-09-12T00:00:00Z',
+        }));
       }
       if (url.endsWith('/projects/project-1/documents')) {
         return Promise.resolve(json({ documents: [] }));
@@ -106,7 +130,7 @@ describe('useStreamingChat Project chat client', () => {
     act(() => result.current.selectAttachments([
       new File(['%PDF-test'], 'policy.pdf', { type: 'application/pdf' }),
     ]));
-    await waitFor(() => expect(result.current.selectedAttachments[0]?.status).toBe('uploaded'));
+    await waitFor(() => expect(result.current.selectedAttachments[0]?.status).toBe('ready'));
     expect(result.current.selectedAttachments[0]?.documentId).toBe('document-1');
   });
 });

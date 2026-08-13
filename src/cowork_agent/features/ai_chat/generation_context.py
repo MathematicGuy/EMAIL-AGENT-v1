@@ -37,6 +37,8 @@ class ContextSource(StrEnum):
 class ChatResponseMode(StrEnum):
     NORMAL = "normal"
     CLARIFY = "clarify"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    EVIDENCE_UNAVAILABLE = "evidence_unavailable"
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,7 +6,7 @@ from cowork_agent.config import ChatIntentSettings
 def test_chat_intent_settings_use_safe_document_routing_defaults() -> None:
     settings = ChatIntentSettings.from_env({}, default_model="provider-model", load_env_file=False)
 
-    assert settings.enabled is False
+    assert settings.enabled is True
     assert settings.model == "provider-model"
     assert settings.timeout_ms == 10_000
     assert settings.max_attempts == 2
