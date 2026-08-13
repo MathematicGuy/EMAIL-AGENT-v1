@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import GeminiSettings, QdrantSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -24,6 +24,7 @@ from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -136,15 +137,14 @@ def test_results_are_ordered_by_descending_relevance(
     assert scores == sorted(scores, reverse=True)
 
 
-def test_an_unreachable_qdrant_degrades_the_bootstrap_to_in_repo_memory(
+def test_an_unreachable_qdrant_falls_back_to_in_repo_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        bootstrap, "GeminiEmbeddingAdapter", lambda settings: HashingEmbedder()
+        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
-    gemini = GeminiSettings.from_env(
-        {"GEMINI_API_KEY_1": "key-1", "GEMINI_MODEL": "gemini-3.5-flash-lite"},
-        load_env_file=False,
+    jina = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "test-key"}, load_env_file=False
     )
     # Port 1 is reserved and never listening: a real connection attempt, not a
     # patched-out one, is what proves the degrade path.
@@ -158,9 +158,25 @@ def test_an_unreachable_qdrant_degrades_the_bootstrap_to_in_repo_memory(
         load_env_file=False,
     )
 
-    result = asyncio.run(bootstrap.build_semantic_memory(gemini, qdrant))
+    result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
 
     assert isinstance(result, HybridSemanticMemory)
     assert asyncio.run(result.retrieve(_request())).retrieval_status is (
         RetrievalStatus.NO_RESULTS
     )
+
+
+def test_bootstrap_uses_jina_settings_without_gemini_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
+    jina = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "test-key"}, load_env_file=False
+    )
+    qdrant = QdrantSettings.from_env(
+        {"QDRANT_ENABLED": "false"}, load_env_file=False
+    )
+
+    result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
+
+    assert not isinstance(result, NullSemanticMemory)

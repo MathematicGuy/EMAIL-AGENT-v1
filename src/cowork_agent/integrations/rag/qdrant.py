@@ -104,7 +104,9 @@ class QdrantSemanticMemory:
 
         try:
             async with asyncio.timeout(_timeout_seconds(request.limits.timeout_ms)):
-                (query_vector,) = await self._embedder.embed((_query_text(request),))
+                (query_vector,) = await self._embedder.embed(
+                    (_query_text(request),), task="retrieval.query"
+                )
                 min_score = (
                     request.limits.min_score
                     if request.limits.min_score >= 0
@@ -154,7 +156,9 @@ async def ingest_corpus(
     if not chunks:
         raise ValueError("Qdrant ingestion requires a non-empty corpus")
 
-    vectors = await embedder.embed(tuple(chunk.text for chunk in chunks))
+    vectors = await embedder.embed(
+        tuple(chunk.text for chunk in chunks), task="retrieval.passage"
+    )
     observed_size = len(vectors[0])
     if vector_size is not None and vector_size != observed_size:
         raise ValueError(

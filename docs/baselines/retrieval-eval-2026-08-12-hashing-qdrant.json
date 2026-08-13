@@ -1,0 +1,2090 @@
+{
+  "generated_at": "2026-08-12T14:37:53.259010Z",
+  "embedder": "hashing",
+  "retriever": "qdrant",
+  "reranker": null,
+  "corpus": {
+    "document_count": 17,
+    "chunk_count": 1043,
+    "corpus_dir": "data/extracted"
+  },
+  "limits": {
+    "top_k": 5,
+    "min_score": 0.2
+  },
+  "case_count": 100,
+  "document_level": {
+    "hit_at_1": 0.0,
+    "hit_at_3": 0.0,
+    "mrr": 0.0,
+    "recall_at_5": 0.0
+  },
+  "section_level": {
+    "hit_at_1": 0.0,
+    "hit_at_3": 0.0,
+    "mrr": 0.0,
+    "recall_at_5": 0.0,
+    "excluded_case_count": 40
+  },
+  "by_probe": {
+    "lexical": {
+      "case_count": 25,
+      "document_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0,
+        "excluded_case_count": 12
+      }
+    },
+    "mixed": {
+      "case_count": 38,
+      "document_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0,
+        "excluded_case_count": 16
+      }
+    },
+    "semantic": {
+      "case_count": 25,
+      "document_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0
+      },
+      "section_level": {
+        "hit_at_1": 0.0,
+        "hit_at_3": 0.0,
+        "mrr": 0.0,
+        "recall_at_5": 0.0,
+        "excluded_case_count": 12
+      }
+    }
+  },
+  "by_document": {
+    "01-2021-nd-cp-283247": {
+      "case_count": 10,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "31-2024-qh15-523642": {
+      "case_count": 10,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "41-2024-qh15-557190": {
+      "case_count": 10,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "49-2019-qh14-402073": {
+      "case_count": 10,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "cap_lai_cccd": {
+      "case_count": 5,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-1-004194-1786097965866": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-1-115132-1786096253281": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-1-115970-1786097982328": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-1-116194-1786096137126": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-2-001194-1786096928665": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "chi-tiet-thu-tuc-3-000228-1786096860852": {
+      "case_count": 3,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "dang-ky-tam-tru": {
+      "case_count": 2,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "dang_ky_ket_hon": {
+      "case_count": 5,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "dang_ky_xe": {
+      "case_count": 5,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "huong_dan_nop_ho_so_dai_hoc_vinuni": {
+      "case_count": 4,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "thu_tuc_dang_ky_bhxh_luatvietnam": {
+      "case_count": 5,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    },
+    "thue_dien_tu": {
+      "case_count": 4,
+      "mrr": 0.0,
+      "section_mrr": 0.0
+    }
+  },
+  "abstention": {
+    "case_count": 12,
+    "abstention_rate": 1.0,
+    "false_answer_case_ids": []
+  },
+  "latency_ms": {
+    "p50": 0,
+    "p95": 0
+  },
+  "misses": [
+    {
+      "case_id": "q-001",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-002",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-003",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-004",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-005",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "cap_lai_cccd"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-006",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-007",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-008",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-009",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thue_dien_tu"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-010",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "dang_ky_ket_hon"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-011",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_ket_hon"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-012",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_ket_hon"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-013",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "dang_ky_ket_hon"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-014",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_ket_hon"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-015",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-016",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-017",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-018",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-019",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-020",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-021",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-022",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-023",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "dang_ky_xe"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-024",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-025",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-026",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-027",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-028",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "thu_tuc_dang_ky_bhxh_luatvietnam"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-033",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-034",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-035",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-036",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-037",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-038",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-039",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-040",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-041",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-042",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "01-2021-nd-cp-283247"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-043",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-044",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-045",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-046",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-047",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-048",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-049",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-050",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-051",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-052",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "31-2024-qh15-523642"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-053",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-054",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-055",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-056",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-057",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-058",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-059",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-060",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-061",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-062",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "41-2024-qh15-557190"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-063",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-064",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-065",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-066",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-067",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-068",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-069",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-070",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-071",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-072",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "49-2019-qh14-402073"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-073",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-004194-1786097965866"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-074",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-004194-1786097965866"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-075",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-004194-1786097965866"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-076",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115132-1786096253281"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-077",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115132-1786096253281"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-078",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115132-1786096253281"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-079",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115970-1786097982328"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-080",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115970-1786097982328"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-081",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-115970-1786097982328"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-082",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-116194-1786096137126"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-083",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-116194-1786096137126"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-084",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-1-116194-1786096137126"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-085",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-2-001194-1786096928665"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-086",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-2-001194-1786096928665"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-087",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-2-001194-1786096928665"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-088",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-3-000228-1786096860852"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-089",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-3-000228-1786096860852"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-090",
+      "probe": "mixed",
+      "expected_document_ids": [
+        "chi-tiet-thu-tuc-3-000228-1786096860852"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-091",
+      "probe": "lexical",
+      "expected_document_ids": [
+        "dang-ky-tam-tru"
+      ],
+      "returned_document_ids": []
+    },
+    {
+      "case_id": "q-092",
+      "probe": "semantic",
+      "expected_document_ids": [
+        "dang-ky-tam-tru"
+      ],
+      "returned_document_ids": []
+    }
+  ],
+  "score_evidence": {
+    "cases": [
+      {
+        "case_id": "q-001",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-002",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-003",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-004",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-005",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-006",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-007",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-008",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-009",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-010",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-011",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-012",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-013",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-014",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-015",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-016",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-017",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-018",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-019",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-020",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-021",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-022",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-023",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-024",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-025",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-026",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-027",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-028",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-029",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-030",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-031",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-032",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-033",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-034",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-035",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-036",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-037",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-038",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-039",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-040",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-041",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-042",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-043",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-044",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-045",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-046",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-047",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-048",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-049",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-050",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-051",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-052",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-053",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-054",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-055",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-056",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-057",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-058",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-059",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-060",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-061",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-062",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-063",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-064",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-065",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-066",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-067",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-068",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-069",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-070",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-071",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-072",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-073",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-074",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-075",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-076",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-077",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-078",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-079",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-080",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-081",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-082",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-083",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-084",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-085",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-086",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-087",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-088",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-089",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-090",
+        "probe": "mixed",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-091",
+        "probe": "lexical",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-092",
+        "probe": "semantic",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-093",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-094",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-095",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-096",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-097",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-098",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-099",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      },
+      {
+        "case_id": "q-100",
+        "probe": "unanswerable",
+        "configured_score_kind": "dense_cosine",
+        "observed_score_kind": null,
+        "reranker_requested": false,
+        "reranker_applied": false,
+        "returned_scores": [],
+        "top_score": null,
+        "runner_up_score": null,
+        "delta": null
+      }
+    ]
+  },
+  "evaluation_only_calibration_sweeps": {
+    "absolute_score": [],
+    "margin": [],
+    "margin_summary": []
+  }
+}

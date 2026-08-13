@@ -1,9 +1,9 @@
-# Langfuse Observability Integration Specification
+# Langfuse Telemetry & Tracing Specification
 
 | Field | Value |
 |---|---|
-| Tool Name | Langfuse Python SDK (`langfuse`) |
-| Category | AI Observability, Tracing, Metrics & LLM Cost Tracking |
+| Component Name | Langfuse Python Provider (`langfuse`) |
+| Telemetry Domain | AI Execution Tracing, Span Hierarchy, Token & LLM Cost Tracking |
 | Target Layer | `src/cowork_agent/features/`, `src/cowork_agent/integrations/`, `src/cowork_agent/api/` |
 | Specification Status | Approved Project Standard |
 
@@ -12,20 +12,20 @@
 ## 1. Purpose & Scope
 
 ### Primary Utility
-Langfuse thu thập dữ liệu tự động (automated telemetry) về toàn bộ vòng đời thực thi AI Agent bao gồm:
-- Cây liên vết Trace & Spans (Trace hierarchy & execution latencies).
-- Dữ liệu Input / Output của từng bước (Classifier, Generator, Retriever).
-- Đếm số lượng Tokens (Prompt / Completion) và tính toán chi phí (LLM Cost Tracking).
+Langfuse chịu trách nhiệm thu thập dữ liệu giám sát tự động (automated telemetry) về toàn bộ vòng đời thực thi của AI Agent bao gồm:
+- **Trace & Spans Hierarchy:** Cây liên vết và độ trễ thực thi (execution latency) của các bước xử lý.
+- **Payload Monitoring:** Dữ liệu Input / Output của từng thành phần (Classifier, Generator, Retriever).
+- **Token & Cost Telemetry:** Đếm chính xác số lượng Tokens (Prompt / Completion) và tính toán chi phí gọi LLM API.
 
-### In-Scope (Bắt buộc dùng)
+### In-Scope (Bắt buộc dùng Langfuse Tracing)
 - **LLM Providers:** Tất cả các provider Gemini (`gemini.py`), Groq (`groq.py`), Faucet (`faucet.py`).
 - **Workflow Controllers:** Các luồng xử lý chính `execute()` trong `workflow.py` và `stream_message()` trong `controller.py`.
 - **RAG Retrievers:** Các hàm truy vấn tri thức `retrieve()` trong `qdrant.py` và `chat_memory.py`.
 - **API Routers:** Các endpoint API chính trong `api/chat.py`.
 
-### Out-of-Scope (Cấm dùng)
-- **Domain Layer:** Không được import hay gọi `@observe` trong `src/cowork_agent/domain/` (giữ domain pure python, không phụ thuộc framework).
-- **Local Error Logging:** Không dùng `@observe` thay thế cho `python logging` khi bắt lỗi crash hạ tầng local (server boot failure, socket timeout).
+### Out-of-Scope (Cấm dùng Langfuse Tracing)
+- **Domain Layer:** Không được import hay gọi `@observe` trong `src/cowork_agent/domain/` (giữ domain pure python, không phụ thuộc framework/telemetry).
+- **Local Infrastructure Error Logging:** Không dùng `@observe` thay thế cho `python logging` khi bắt lỗi crash hạ tầng server (boot failure, socket timeout).
 
 ---
 
@@ -87,7 +87,7 @@ async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrieval
 
 ## 5. Failure Handling & Fallback Policy
 
-- **Non-blocking Execution:** Langfuse SDK xử lý gửi log hoàn toàn bất đồng bộ ở background thread. Lỗi kết nối mạng hoặc sai API Key (`401 Unauthorized`) KHÔNG ĐƯỢC LÀM CRASH luồng chính của ứng dụng.
+- **Non-blocking Telemetry:** Langfuse SDK xử lý gửi telemetry data hoàn toàn bất đồng bộ ở background thread. Lỗi kết nối mạng hoặc sai API Key (`401 Unauthorized`) KHÔNG ĐƯỢC LÀM CRASH luồng chính của ứng dụng.
 - **Mock/Silent Mode:** Khi thiếu `LANGFUSE_PUBLIC_KEY` hoặc `LANGFUSE_SECRET_KEY`, SDK tự động fallback về chế độ im lặng (silent/mock mode).
 
 ---

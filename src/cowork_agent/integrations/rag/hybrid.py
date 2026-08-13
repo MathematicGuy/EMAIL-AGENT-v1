@@ -6,7 +6,7 @@ import time
 import warnings
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Final
+from typing import Any, Final
 from uuid import uuid4
 
 from cowork_agent.domain.target_contracts import (
@@ -46,6 +46,7 @@ class HybridSemanticMemory:
         relative_cutoff_ratio: float = 0.0,
         top_k_default: int = 5,
         min_score_default: float = 0.2,
+        dense_backend: str = "numpy",
     ) -> None:
         warnings.warn(
             "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
@@ -57,12 +58,24 @@ class HybridSemanticMemory:
             raise ValueError("HybridSemanticMemory requires a non-empty corpus")
         self._chunks_by_id = {chunk.chunk_id: chunk for chunk in self._chunks}
         self._embedder = embedder
-        self._dense = InRepoSemanticMemory(
-            documents,
-            embedder,
-            top_k_default=top_k_default,
-            min_score_default=min_score_default,
-        )
+        self._dense: Any
+        if dense_backend == "turbovec":
+            from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+
+            self._dense = TurbovecSemanticMemory(
+                documents,
+                embedder,
+                bit_width=4,
+                top_k_default=top_k_default,
+                min_score_default=min_score_default,
+            )
+        else:
+            self._dense = InRepoSemanticMemory(
+                documents,
+                embedder,
+                top_k_default=top_k_default,
+                min_score_default=min_score_default,
+            )
         self._bm25 = BM25SearchAdapter(self._chunks)
         self._reranker = reranker
         self._query_transformer = query_transformer
@@ -90,15 +103,16 @@ class HybridSemanticMemory:
         candidate_limit = _candidate_limit(final_top_k)
 
         try:
-            # Multi-Query Expansion & HyDE if transformer present
+            # Multi-Query Expansion & Multi-HyDE if transformer present
             queries_to_search = [query_str]
             if self._query_transformer is not None:
                 transformed = await self._query_transformer.transform(
                     request.query, request.knowledge_gaps
                 )
-                queries_to_search.extend(transformed.expanded_queries)
-                if transformed.hypothetical_doc:
-                    queries_to_search.append(transformed.hypothetical_doc)
+                for eq in transformed.expanded_queries:
+                    if eq != query_str and eq not in queries_to_search:
+                        queries_to_search.append(eq)
+                queries_to_search.extend(transformed.hypothetical_docs)
 
             all_dense_results: list[tuple[str, float]] = []
             all_lexical_results: list[tuple[str, float]] = []
@@ -165,8 +179,12 @@ class HybridSemanticMemory:
             if self._enable_mmr and filtered_reranked:
                 cand_chunks = filtered_reranked[:candidate_limit]
                 cand_texts = tuple(c.text for c in cand_chunks)
-                cand_vecs = await self._embedder.embed(cand_texts)
-                (query_vec,) = await self._embedder.embed((query_str,))
+                cand_vecs = await self._embedder.embed(
+                    cand_texts, task="retrieval.passage"
+                )
+                (query_vec,) = await self._embedder.embed(
+                    (query_str,), task="retrieval.query"
+                )
                 chunks = mmr_diversify(
                     chunks=cand_chunks,
                     chunk_vectors=cand_vecs,

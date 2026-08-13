@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
+from cowork_agent.integrations.key_rotation import APIKeyRotator
+
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 
@@ -17,10 +19,59 @@ def database_url(environ: Mapping[str, str] | None = None) -> str:
     return source.get("DATABASE_URL", "").strip()
 
 
-def redis_url(environ: Mapping[str, str] | None = None) -> str:
-    """Redis connection URL (V1-H T5.2); empty keeps BackgroundTasks dispatch."""
-    source = os.environ if environ is None else environ
-    return source.get("REDIS_URL", "").strip()
+@dataclass(frozen=True, slots=True)
+class SupabaseStorageSettings:
+    """Server-only private Supabase Storage configuration."""
+
+    url: str
+    secret_key: str = field(repr=False)
+    bucket: str = "project-documents"
+
+    @classmethod
+    def from_env(
+        cls, environ: Mapping[str, str] | None = None, *, load_env_file: bool = True
+    ) -> "SupabaseStorageSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        url = environ.get("SUPABASE_URL", "").strip().rstrip("/")
+        if not url.startswith("https://"):
+            raise ValueError("SUPABASE_URL must use HTTPS")
+        return cls(
+            url=url,
+            secret_key=_required_secret(environ, "SUPABASE_SECRET_KEY"),
+            bucket=_non_empty_value(environ, "SUPABASE_STORAGE_BUCKET", "project-documents"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSettings:
+    """Opaque FastAPI session-cookie policy."""
+
+    session_ttl_seconds: int
+    cookie_name: str
+    cookie_secure: bool
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "SessionSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        cookie_name = environ.get("APP_SESSION_COOKIE_NAME", "cowork_session").strip()
+        if not cookie_name:
+            raise ValueError("APP_SESSION_COOKIE_NAME must not be empty")
+        return cls(
+            session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
+            cookie_name=cookie_name,
+            cookie_secure=_boolean(environ, "APP_SESSION_COOKIE_SECURE", True),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +269,7 @@ class QdrantSettings:
     url: str
     api_key: str = field(repr=False)
     collection_name: str
+    project_collection_name: str
     enabled: bool
     vector_size: int
     reindex: bool
@@ -241,8 +293,12 @@ class QdrantSettings:
             api_key=environ.get("QDRANT_API_KEY", "").strip(),
             collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
             or "company_knowledge",
+            project_collection_name=(
+                environ.get("QDRANT_PROJECT_COLLECTION", "project_documents").strip()
+                or "project_documents"
+            ),
             enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
-            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 768),
+            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 1024),
             reindex=_boolean(environ, "QDRANT_REINDEX", False),
         )
 
@@ -366,6 +422,81 @@ class GeminiSettings:
             max_input_tokens=_positive_int(environ, "GEMINI_MAX_INPUT_TOKENS", 40_000),
             timeout_seconds=_positive_int(environ, "GEMINI_TIMEOUT_SECONDS", 60),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class JinaEmbeddingSettings:
+    """Jina embedding API configuration for the RAG retrieval path."""
+
+    api_key: str = field(repr=False)
+    model: str
+    dimensions: int
+    timeout_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "JinaEmbeddingSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        return cls(
+            api_key=_required_secret(environ, "JINA_API_KEY"),
+            model=_non_empty_value(
+                environ, "JINA_EMBEDDING_MODEL", "jina-embeddings-v5-omni-small"
+            ),
+            dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
+            timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RerankerSettings:
+    """Configuration for RerankerAdapter with key rotation."""
+
+    model: str
+    rotator: APIKeyRotator
+    timeout_seconds: float = 10.0
+    rotate_on_rate_limit: bool = True
+    max_attempts: int = 3
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "RerankerSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+
+        model = environ.get("RERANKER_MODEL", "rerank-v4.0-fast").strip() or "rerank-v4.0-fast"
+        model_lower = model.lower()
+        if model_lower.startswith("rerank-") or "cohere" in model_lower:
+            prefix = "COHERE_API_KEY"
+            provider_name = "Cohere"
+        else:
+            prefix = "JINA_API_KEY"
+            provider_name = "Jina"
+
+        rotator = APIKeyRotator.from_env(prefix, environ=environ, provider_name=provider_name)
+        rotate_on_rate_limit = _boolean(environ, "RERANKER_ROTATE_ON_RATE_LIMIT", True)
+        timeout_seconds = float(_positive_int(environ, "RERANKER_TIMEOUT_SECONDS", 10))
+
+        return cls(
+            model=model,
+            rotator=rotator,
+            timeout_seconds=timeout_seconds,
+            rotate_on_rate_limit=rotate_on_rate_limit,
+            max_attempts=len(rotator.keys),
+        )
+
 
 
 @dataclass(frozen=True, slots=True)

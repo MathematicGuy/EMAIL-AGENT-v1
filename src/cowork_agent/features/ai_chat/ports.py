@@ -92,6 +92,10 @@ class DeclarativeMemoryPort(Protocol):
 
 
 class EpisodicMemoryPort(Protocol):
+    async def read_task_episode(
+        self, namespace: MemoryNamespace, *, episode_id: str
+    ) -> TaskEpisode | None: ...
+
     async def read_episodes(
         self, namespace: MemoryNamespace, query: EpisodicMemoryQuery
     ) -> tuple[TaskEpisode, ...]: ...

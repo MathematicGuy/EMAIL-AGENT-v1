@@ -43,6 +43,7 @@ from cowork_agent.features.email_action_plan.shaping import (
     group_by_thread,
     parse_iso_datetime,
 )
+from cowork_agent.integrations.key_rotation import APIKeyRotator
 
 _Thread = tuple[EphemeralEmailEnvelope, ...]
 
@@ -77,18 +78,10 @@ class GeminiKeyRotator:
     """Select a different first key per request without exposing key values."""
 
     def __init__(self, keys: Sequence[str]) -> None:
-        if not keys:
-            raise ValueError("At least one Gemini API key is required")
-        self._keys = tuple(keys)
-        self._index = 0
-        self._lock = asyncio.Lock()
+        self._rotator = APIKeyRotator(keys, provider_name="Gemini")
 
     async def candidates(self, max_attempts: int) -> tuple[str, ...]:
-        async with self._lock:
-            start = self._index
-            self._index = (self._index + 1) % len(self._keys)
-        attempts = min(max_attempts, len(self._keys))
-        return tuple(self._keys[(start + offset) % len(self._keys)] for offset in range(attempts))
+        return await self._rotator.candidates(max_attempts)
 
 
 class GoogleGenAITransport:

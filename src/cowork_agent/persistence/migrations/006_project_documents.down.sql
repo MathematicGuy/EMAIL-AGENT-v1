@@ -1,2 +1,2 @@
-DROP TABLE IF EXISTS project_document_chunks;
-DROP TABLE IF EXISTS project_documents;
+DROP TABLE IF EXISTS user_project_document_chunks;
+DROP TABLE IF EXISTS user_project_documents;

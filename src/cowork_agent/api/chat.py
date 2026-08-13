@@ -31,7 +31,7 @@ from cowork_agent.domain.project_documents import ProjectDocumentStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionAccessDenied,
-    InMemoryChatSessionRegistry,
+    ChatSessionRegistryPort,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.ai_chat.ports import (
@@ -44,7 +44,6 @@ from cowork_agent.features.ai_chat.profile_policy import (
     authorize_profile_write,
 )
 from cowork_agent.features.user_documents.ports import (
-    ChatSessionRepositoryPort,
     ProjectDocumentRepositoryPort,
     ProjectRepositoryPort,
 )
@@ -135,21 +134,11 @@ def create_chat_router() -> APIRouter:
             principal.tenant_id, principal.user_id, project_id, at=at
         )
         await _purge_document_objects(request, document_ids)
-        removed_sessions = _sessions(request).delete_project(
+        removed_sessions = await _sessions(request).delete_project(
             tenant_id=principal.tenant_id,
             user_id=principal.user_id,
             project_id=project_id,
         )
-        durable_sessions = _session_repository(request)
-        if durable_sessions is not None:
-            removed_sessions = tuple(
-                set(removed_sessions)
-                | set(
-                    await durable_sessions.delete_project(
-                        principal.tenant_id, principal.user_id, project_id, at=at
-                    )
-                )
-            )
         for session_id in removed_sessions:
             _controllers(request).pop(session_id, None)
         deleted, _replacement = await projects.delete_owned(
@@ -182,14 +171,17 @@ def create_chat_router() -> APIRouter:
                 raise HTTPException(status_code=404, detail="Project not found")
             project_id = owned_project.project_id
         sessions = _sessions(request)
-        scope = sessions.create(
-            tenant_id=principal.tenant_id,
-            user_id=principal.user_id,
-            project_id=project_id,
-        )
-        durable_sessions = _session_repository(request)
-        if durable_sessions is not None:
-            await durable_sessions.save(scope, created_at=datetime.now(UTC))
+        if project_id == "default-project":
+            scope = await sessions.create(
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+            )
+        else:
+            scope = await sessions.create(
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+                project_id=project_id,
+            )
         controller = _controller_factory(request)(scope)
         _controllers(request)[scope.session_id] = controller
         response = {
@@ -238,7 +230,8 @@ def create_chat_router() -> APIRouter:
                     raise HTTPException(status_code=404, detail="Document not found")
         controller = _controllers(request).get(session_id)
         if controller is None:
-            raise HTTPException(status_code=404, detail="Chat session not found")
+            controller = _controller_factory(request)(scope)
+            _controllers(request)[session_id] = controller
         return StreamingResponse(
             _sse_events(controller, message, request),
             media_type="text/event-stream",
@@ -253,16 +246,17 @@ def create_chat_router() -> APIRouter:
         request: Request, project_id: str | None = Query(default=None)
     ) -> dict[str, object]:
         principal = await _verified_principal(request)
-        durable_sessions = _session_repository(request)
-        scopes = (
-            await durable_sessions.list_owned(principal.tenant_id, principal.user_id, project_id)
-            if durable_sessions is not None
-            else _sessions(request).list_for(
+        if project_id is None:
+            scopes = await _sessions(request).list_for(
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+            )
+        else:
+            scopes = await _sessions(request).list_for(
                 tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
                 project_id=project_id,
             )
-        )
         return {"sessions": [_session_response(scope) for scope in scopes]}
 
     @router.post("/projects/{project_id}/documents")
@@ -507,12 +501,13 @@ async def _verified_principal(request: Request) -> VerifiedPrincipal:
 async def _owned_controller(request: Request, session_id: str) -> ChatController:
     principal = await _verified_principal(request)
     try:
-        await _require_session(request, principal, session_id)
+        scope = await _require_session(request, principal, session_id)
     except ChatSessionAccessDenied as exc:
         raise HTTPException(status_code=404, detail="Chat session not found") from exc
     controller = _controllers(request).get(session_id)
     if controller is None:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+        controller = _controller_factory(request)(scope)
+        _controllers(request)[session_id] = controller
     return controller
 
 
@@ -611,38 +606,24 @@ def _episodic_repository(request: Request) -> EpisodicMemoryPort:
     return cast(EpisodicMemoryPort, repository)
 
 
-def _sessions(request: Request) -> InMemoryChatSessionRegistry:
-    return cast(InMemoryChatSessionRegistry, request.app.state.chat_sessions)
-
-
-def _session_repository(request: Request) -> ChatSessionRepositoryPort | None:
-    return cast(
-        ChatSessionRepositoryPort | None,
-        getattr(request.app.state, "chat_session_repository", None),
-    )
-
-
 async def _require_session(
     request: Request, principal: VerifiedPrincipal, session_id: str
 ) -> ChatMemoryScope:
-    try:
-        return _sessions(request).require(
-            session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
-        )
-    except ChatSessionAccessDenied as exc:
-        repository = _session_repository(request)
-        if repository is None:
-            raise
-        scope = await repository.get_owned(principal.tenant_id, principal.user_id, session_id)
-        if scope is None:
-            raise ChatSessionAccessDenied(session_id) from exc
-        _sessions(request).register(scope)
-        _controllers(request).setdefault(session_id, _controller_factory(request)(scope))
-        return scope
+    return await _sessions(request).require(
+        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+    )
 
 
 def _controllers(request: Request) -> dict[str, ChatController]:
-    return cast(dict[str, ChatController], request.app.state.chat_controllers)
+    controllers = getattr(request.app.state, "chat_controllers", None)
+    if controllers is None:
+        controllers = {}
+        request.app.state.chat_controllers = controllers
+    return cast(dict[str, ChatController], controllers)
+
+
+def _sessions(request: Request) -> ChatSessionRegistryPort:
+    return cast(ChatSessionRegistryPort, request.app.state.chat_sessions)
 
 
 def _controller_factory(request: Request) -> ControllerFactory:

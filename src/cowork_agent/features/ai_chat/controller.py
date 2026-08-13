@@ -8,6 +8,7 @@ import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import uuid4
 
 from langfuse import observe
@@ -67,6 +68,34 @@ class ChatSessionAccessDenied(LookupError):
     """The session is absent or belongs to another verified principal."""
 
 
+class ChatSessionRegistryPort(Protocol):
+    """Durable or local authority for chat-session ownership."""
+
+    async def create(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        project_id: str = "default-project",
+    ) -> ChatMemoryScope: ...
+
+    async def require(
+        self, session_id: str, *, tenant_id: str, user_id: str
+    ) -> ChatMemoryScope: ...
+
+    async def list_for(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        project_id: str | None = None,
+    ) -> tuple[ChatMemoryScope, ...]: ...
+
+    async def delete_project(
+        self, *, tenant_id: str, user_id: str, project_id: str
+    ) -> tuple[str, ...]: ...
+
+
 class ChatReplyUnavailable(RuntimeError):
     """The configured chat-response provider cannot serve this turn."""
 
@@ -114,7 +143,7 @@ class InMemoryChatSessionRegistry:
         self._sessions: dict[str, ChatMemoryScope] = {}
         self._lock = threading.Lock()
 
-    def create(
+    async def create(
         self, *, tenant_id: str, user_id: str, project_id: str = "default-project"
     ) -> ChatMemoryScope:
         with self._lock:
@@ -130,7 +159,7 @@ class InMemoryChatSessionRegistry:
             self._sessions[session_id] = scope
             return scope
 
-    def require(
+    async def require(
         self,
         session_id: str,
         *,
@@ -143,7 +172,7 @@ class InMemoryChatSessionRegistry:
             raise ChatSessionAccessDenied(session_id)
         return scope
 
-    def register(self, scope: ChatMemoryScope) -> ChatMemoryScope:
+    async def register(self, scope: ChatMemoryScope) -> ChatMemoryScope:
         """Restore one durable scope into the process-local controller registry."""
         with self._lock:
             existing = self._sessions.get(scope.session_id)
@@ -152,7 +181,7 @@ class InMemoryChatSessionRegistry:
             self._sessions[scope.session_id] = scope
         return scope
 
-    def list_for(
+    async def list_for(
         self, *, tenant_id: str, user_id: str, project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
         """Owned scopes in creation order (GET /sessions read contract)."""
@@ -165,7 +194,9 @@ class InMemoryChatSessionRegistry:
                 and (project_id is None or scope.project_id == project_id)
             )
 
-    def delete_project(self, *, tenant_id: str, user_id: str, project_id: str) -> tuple[str, ...]:
+    async def delete_project(
+        self, *, tenant_id: str, user_id: str, project_id: str
+    ) -> tuple[str, ...]:
         with self._lock:
             removed = tuple(
                 session_id
@@ -521,7 +552,7 @@ class ChatController:
         return await self._transition_task_episode(episode_id, ValidationStatus.REJECTED)
 
     async def delete_task_episode(self, episode_id: str) -> bool:
-        episode = self._task_episodes.get(episode_id)
+        episode = await self._task_episode_for_id(episode_id)
         if episode is None:
             return False
         deleted = await self._memory.delete_task_episode(
@@ -598,7 +629,7 @@ class ChatController:
     async def _transition_task_episode(
         self, episode_id: str, to_status: ValidationStatus
     ) -> TaskEpisode | None:
-        episode = self._task_episodes.get(episode_id)
+        episode = await self._task_episode_for_id(episode_id)
         if episode is None:
             return None
         transitioned = await self._memory.transition_task_episode(
@@ -612,6 +643,15 @@ class ChatController:
         if transitioned is not None:
             self._task_episodes[episode_id] = transitioned
         return transitioned
+
+    async def _task_episode_for_id(self, episode_id: str) -> TaskEpisode | None:
+        episode = self._task_episodes.get(episode_id)
+        if episode is not None:
+            return episode
+        episode = await self._memory._read_task_episode(episode_id)
+        if episode is not None:
+            self._task_episodes[episode_id] = episode
+        return episode
 
     def _error(
         self,

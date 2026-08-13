@@ -19,7 +19,10 @@ from cowork_agent.integrations.rag.query_guard import is_retrieval_query
 
 class DummyEmbedder:
 
-    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self, texts: Sequence[str], *, task: str = "retrieval.query"
+    ) -> tuple[tuple[float, ...], ...]:
+        del task
         return tuple((0.1, 0.2) for _ in texts)
 
 

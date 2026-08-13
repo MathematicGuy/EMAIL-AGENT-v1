@@ -1,2 +1,2 @@
-DROP TABLE IF EXISTS chat_sessions;
-DROP TABLE IF EXISTS chat_projects;
+DROP TABLE IF EXISTS user_chat_sessions;
+DROP TABLE IF EXISTS user_chat_projects;

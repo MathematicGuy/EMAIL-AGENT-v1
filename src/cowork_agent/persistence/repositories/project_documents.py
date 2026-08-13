@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
+from uuid import uuid4
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -313,7 +314,7 @@ class PostgresProjectRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """
-                INSERT INTO chat_projects
+                INSERT INTO user_chat_projects
                     (project_id, tenant_id, user_id, name, is_default, created_at, updated_at)
                 VALUES (%s, %s, %s, 'Default Project', true, now(), now())
                 ON CONFLICT (project_id) DO UPDATE SET
@@ -333,7 +334,7 @@ class PostgresProjectRepository:
 
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """INSERT INTO chat_projects
+                """INSERT INTO user_chat_projects
                 (project_id, tenant_id, user_id, name, is_default, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, false, now(), now())
                 RETURNING project_id, tenant_id, user_id, name, is_default,
@@ -357,7 +358,7 @@ class PostgresProjectRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 f"""SELECT project_id, tenant_id, user_id, name, is_default, created_at, updated_at
-                FROM chat_projects WHERE tenant_id=%s AND user_id=%s AND project_id=%s
+                FROM user_chat_projects WHERE tenant_id=%s AND user_id=%s AND project_id=%s
                 {active_clause}""",
                 (tenant_id, user_id, project_id),
             )
@@ -368,7 +369,7 @@ class PostgresProjectRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """SELECT project_id, tenant_id, user_id, name, is_default, created_at, updated_at
-                FROM chat_projects WHERE tenant_id=%s AND user_id=%s AND deleted_at IS NULL
+                FROM user_chat_projects WHERE tenant_id=%s AND user_id=%s AND deleted_at IS NULL
                 ORDER BY is_default DESC, created_at, project_id""",
                 (tenant_id, user_id),
             )
@@ -379,7 +380,7 @@ class PostgresProjectRepository:
     ) -> tuple[bool, ChatProject | None]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """UPDATE chat_projects SET deleted_at=%s, is_default=false, updated_at=%s
+                """UPDATE user_chat_projects SET deleted_at=%s, is_default=false, updated_at=%s
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s AND deleted_at IS NULL
                 RETURNING is_default""",
                 (at, at, tenant_id, user_id, project_id),
@@ -400,10 +401,31 @@ class PostgresChatSessionRepository:
     def __init__(self, pool: AsyncConnectionPool) -> None:
         self._pool = pool
 
+    async def create(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        project_id: str = "default-project",
+    ) -> ChatMemoryScope:
+        resolved_project_id = (
+            deterministic_default_project_id(tenant_id, user_id)
+            if project_id == "default-project"
+            else project_id
+        )
+        scope = ChatMemoryScope(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=str(uuid4()),
+            project_id=resolved_project_id,
+        )
+        await self.save(scope, created_at=datetime.now(UTC))
+        return scope
+
     async def save(self, scope: ChatMemoryScope, *, created_at: datetime) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
-                """INSERT INTO chat_sessions
+                """INSERT INTO user_chat_sessions
                 (session_id, tenant_id, user_id, project_id, created_at, deleted_at)
                 VALUES (%s,%s,%s,%s,%s,NULL)
                 ON CONFLICT (session_id) DO NOTHING""",
@@ -421,7 +443,7 @@ class PostgresChatSessionRepository:
     ) -> ChatMemoryScope | None:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """SELECT tenant_id, user_id, session_id, project_id FROM chat_sessions
+                """SELECT tenant_id, user_id, session_id, project_id FROM user_chat_sessions
                 WHERE tenant_id=%s AND user_id=%s AND session_id=%s AND deleted_at IS NULL""",
                 (tenant_id, user_id, session_id),
             )
@@ -437,6 +459,16 @@ class PostgresChatSessionRepository:
             )
         )
 
+    async def require(
+        self, session_id: str, *, tenant_id: str, user_id: str
+    ) -> ChatMemoryScope:
+        from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
+
+        scope = await self.get_owned(tenant_id, user_id, session_id)
+        if scope is None:
+            raise ChatSessionAccessDenied(session_id)
+        return scope
+
     async def list_owned(
         self, tenant_id: str, user_id: str, project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
@@ -446,7 +478,7 @@ class PostgresChatSessionRepository:
         )
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""SELECT tenant_id, user_id, session_id, project_id FROM chat_sessions
+                f"""SELECT tenant_id, user_id, session_id, project_id FROM user_chat_sessions
                 WHERE tenant_id=%s AND user_id=%s AND deleted_at IS NULL {project_clause}
                 ORDER BY created_at, session_id""",
                 params,
@@ -461,15 +493,26 @@ class PostgresChatSessionRepository:
                 for row in await cursor.fetchall()
             )
 
+    async def list_for(
+        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+    ) -> tuple[ChatMemoryScope, ...]:
+        return await self.list_owned(tenant_id, user_id, project_id)
+
     async def delete_project(
-        self, tenant_id: str, user_id: str, project_id: str, *, at: datetime
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        project_id: str,
+        at: datetime | None = None,
     ) -> tuple[str, ...]:
+        deleted_at = at or datetime.now(UTC)
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """UPDATE chat_sessions SET deleted_at=%s
+                """UPDATE user_chat_sessions SET deleted_at=%s
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s AND deleted_at IS NULL
                 RETURNING session_id""",
-                (at, tenant_id, user_id, project_id),
+                (deleted_at, tenant_id, user_id, project_id),
             )
             return tuple(str(row[0]) for row in await cursor.fetchall())
 
@@ -481,12 +524,12 @@ class PostgresProjectDocumentRepository:
     async def create_or_get(self, **values: object) -> tuple[ProjectDocument, bool]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""INSERT INTO project_documents
+                f"""INSERT INTO user_project_documents
                 (document_id, project_id, tenant_id, user_id, title, media_type, size_bytes,
                  sha256, status, reason_code, created_at, updated_at, expires_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'received',NULL,%s,%s,%s)
                 ON CONFLICT (tenant_id, user_id, project_id, sha256) WHERE status <> 'deleted'
-                DO UPDATE SET updated_at = project_documents.updated_at
+                DO UPDATE SET updated_at = user_project_documents.updated_at
                 RETURNING {_DOC_COLUMNS}, (xmax = 0) AS inserted""",
                 (
                     values["document_id"],
@@ -510,7 +553,7 @@ class PostgresProjectDocumentRepository:
     async def get_job(self, document_id: str) -> ProjectDocument | None:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""SELECT {_DOC_COLUMNS} FROM project_documents
+                f"""SELECT {_DOC_COLUMNS} FROM user_project_documents
                 WHERE document_id=%s AND status <> 'deleted'""",
                 (document_id,),
             )
@@ -522,7 +565,7 @@ class PostgresProjectDocumentRepository:
     ) -> ProjectDocument | None:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""SELECT {_DOC_COLUMNS} FROM project_documents
+                f"""SELECT {_DOC_COLUMNS} FROM user_project_documents
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s
                     AND document_id=%s AND status <> 'deleted'""",
                 (tenant_id, user_id, project_id, document_id),
@@ -536,7 +579,7 @@ class PostgresProjectDocumentRepository:
         suffix = "" if include_deleted else "AND status <> 'deleted'"
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""SELECT {_DOC_COLUMNS} FROM project_documents
+                f"""SELECT {_DOC_COLUMNS} FROM user_project_documents
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s {suffix}
                 ORDER BY created_at DESC, document_id DESC""",
                 (tenant_id, user_id, project_id),
@@ -548,7 +591,7 @@ class PostgresProjectDocumentRepository:
     ) -> tuple[ProjectDocument, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""SELECT {_DOC_COLUMNS} FROM project_documents
+                f"""SELECT {_DOC_COLUMNS} FROM user_project_documents
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s
                     AND status='ready' AND expires_at > %s
                 ORDER BY created_at DESC""",
@@ -572,7 +615,7 @@ class PostgresProjectDocumentRepository:
             raise ValueError("invalid document transition")
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                f"""UPDATE project_documents SET status=%s, reason_code=%s, updated_at=%s,
+                f"""UPDATE user_project_documents SET status=%s, reason_code=%s, updated_at=%s,
                 page_count=COALESCE(%s,page_count), chunk_count=COALESCE(%s,chunk_count),
                 ocr_page_count=COALESCE(%s,ocr_page_count),
                 lease_owner=CASE WHEN %s IN ('ready','failed','deleted')
@@ -606,7 +649,7 @@ class PostgresProjectDocumentRepository:
     ) -> bool:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """UPDATE project_documents SET lease_owner=%s, lease_expires_at=%s,
+                """UPDATE user_project_documents SET lease_owner=%s, lease_expires_at=%s,
                 attempt_count=attempt_count+1 WHERE document_id=%s
                 AND status IN ('received','extracting','indexing')
                 AND (lease_expires_at IS NULL OR lease_expires_at <= %s) RETURNING document_id""",
@@ -617,7 +660,7 @@ class PostgresProjectDocumentRepository:
     async def reclaimable(self, *, now: datetime, limit: int = 100) -> tuple[str, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """SELECT document_id FROM project_documents
+                """SELECT document_id FROM user_project_documents
                 WHERE status IN ('received','extracting','indexing')
                 AND (lease_expires_at IS NULL OR lease_expires_at <= %s)
                 ORDER BY updated_at LIMIT %s""",
@@ -630,7 +673,7 @@ class PostgresProjectDocumentRepository:
     ) -> tuple[str, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """UPDATE project_documents SET status='deleted', reason_code=NULL,
+                """UPDATE user_project_documents SET status='deleted', reason_code=NULL,
                 deleted_at=%s, updated_at=%s, lease_owner=NULL, lease_expires_at=NULL,
                 cleanup_completed_at=NULL
                 WHERE tenant_id=%s AND user_id=%s AND project_id=%s AND status <> 'deleted'
@@ -643,11 +686,11 @@ class PostgresProjectDocumentRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """WITH expired AS (
-                    SELECT document_id FROM project_documents
+                    SELECT document_id FROM user_project_documents
                     WHERE status <> 'deleted' AND expires_at <= %s
                     ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT %s
                 )
-                UPDATE project_documents AS document SET status='deleted', reason_code=NULL,
+                UPDATE user_project_documents AS document SET status='deleted', reason_code=NULL,
                     deleted_at=%s, updated_at=%s, lease_owner=NULL, lease_expires_at=NULL,
                     cleanup_completed_at=NULL
                 FROM expired WHERE document.document_id=expired.document_id
@@ -659,7 +702,7 @@ class PostgresProjectDocumentRepository:
     async def cleanup_candidates(self, *, limit: int = 100) -> tuple[str, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """SELECT document_id FROM project_documents
+                """SELECT document_id FROM user_project_documents
                 WHERE status='deleted' AND cleanup_completed_at IS NULL
                 ORDER BY deleted_at NULLS FIRST, document_id LIMIT %s""",
                 (limit,),
@@ -669,7 +712,7 @@ class PostgresProjectDocumentRepository:
     async def confirm_cleanup(self, document_id: str, *, at: datetime) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
-                """UPDATE project_documents SET cleanup_completed_at=%s
+                """UPDATE user_project_documents SET cleanup_completed_at=%s
                 WHERE document_id=%s AND status='deleted'""",
                 (at, document_id),
             )

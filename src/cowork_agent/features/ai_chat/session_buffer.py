@@ -1,4 +1,4 @@
-"""Bounded in-memory Chat Session Working Memory adapter."""
+"""Bounded in-process Chat Session Working Memory adapter."""
 
 import threading
 from collections.abc import Callable

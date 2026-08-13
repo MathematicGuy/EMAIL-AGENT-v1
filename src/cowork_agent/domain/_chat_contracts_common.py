@@ -49,6 +49,7 @@ class MemoryCitationType(StrEnum):
 class DegradedMemorySource(StrEnum):
     """Optional memory source unavailable while a chat turn still proceeds."""
 
+    SHORT_TERM = "short_term"
     LONG_TERM = "long_term"
     EPISODIC = "episodic"
     SEMANTIC = "semantic"

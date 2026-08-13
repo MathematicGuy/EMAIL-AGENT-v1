@@ -15,16 +15,16 @@ from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import GeminiSettings, QdrantSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings, RerankerSettings
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import LOCAL_TENANT_ID
-from cowork_agent.integrations.rag.embeddings import EmbeddingPort, GeminiEmbeddingAdapter
+from cowork_agent.integrations.rag.embeddings import EmbeddingPort, JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
-from cowork_agent.integrations.rag.jina_reranker import JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
+from cowork_agent.integrations.rag.reranker import RerankerAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,43 @@ logger = logging.getLogger(__name__)
 RAG_CORPUS_PATH = Path(__file__).resolve().parents[4] / "data" / "extracted"
 
 
+TURBOVEC_SNAPSHOT_PATH = Path(__file__).resolve().parents[4] / ".data" / "turbovec_index.tvim"
+
+
 async def build_semantic_memory(
-    settings: GeminiSettings,
+    settings: JinaEmbeddingSettings,
     qdrant_settings: QdrantSettings | None = None,
 ) -> SemanticMemoryPort:
-    """Best-effort RAG store with Qdrant and in-repo fallback."""
+    """Best-effort RAG store with Qdrant, Turbovec, and in-repo fallback."""
+    provider = os.getenv("RAG_STORE_PROVIDER", "").lower()
+    if provider == "turbovec":
+        try:
+            from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+
+            documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
+            turbovec_memory = TurbovecSemanticMemory(
+                documents,
+                JinaEmbeddingAdapter(settings),
+                bit_width=4,
+                index_path=TURBOVEC_SNAPSHOT_PATH,
+            )
+            await turbovec_memory.build_index()
+            logger.info(
+                "Semantic memory backed by Turbovec 4-bit Index (%s)",
+                TURBOVEC_SNAPSHOT_PATH,
+            )
+            return turbovec_memory
+        except Exception as exc:
+            logger.warning(
+                "Turbovec memory setup failed (%s: %s); falling back...",
+                type(exc).__name__,
+                exc,
+            )
+
     resolved = QdrantSettings.from_env() if qdrant_settings is None else qdrant_settings
     if resolved.enabled:
         try:
-            return await _build_qdrant_memory(resolved, GeminiEmbeddingAdapter(settings))
+            return await _build_qdrant_memory(resolved, JinaEmbeddingAdapter(settings))
         except Exception as exc:
             logger.warning(
                 "Qdrant memory setup failed (%s: %s); falling back to in-repo memory",
@@ -52,8 +80,8 @@ async def build_semantic_memory(
         documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
         memory = HybridSemanticMemory(
             documents,
-            GeminiEmbeddingAdapter(settings),
-            reranker=JinaRerankerAdapter(api_key=os.getenv("JINA_API_KEY")),
+            JinaEmbeddingAdapter(settings),
+            reranker=RerankerAdapter(settings=RerankerSettings.from_env()),
             query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
             enable_mmr=True,
             min_rerank_score=0.30,

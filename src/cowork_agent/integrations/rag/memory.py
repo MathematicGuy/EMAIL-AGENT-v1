@@ -59,7 +59,9 @@ class InRepoSemanticMemory:
 
     async def build_index(self) -> None:
         """Embed every chunk once and unit-normalize the matrix."""
-        vectors = await self._embedder.embed(tuple(chunk.text for chunk in self._chunks))
+        vectors = await self._embedder.embed(
+            tuple(chunk.text for chunk in self._chunks), task="retrieval.passage"
+        )
         matrix = np.asarray(vectors, dtype=np.float32)
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
@@ -79,7 +81,9 @@ class InRepoSemanticMemory:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
         query_text = _query_text(request)
         try:
-            (query_vector,) = await self._embedder.embed((query_text,))
+            (query_vector,) = await self._embedder.embed(
+                (query_text,), task="retrieval.query"
+            )
         except Exception:
             return _response(request, (), RetrievalStatus.TIMEOUT, started)
 

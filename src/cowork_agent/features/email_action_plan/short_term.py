@@ -3,8 +3,7 @@
 This is the local in-process adapter for Short-Term Memory (target
 architecture §Memory System, box 1): it holds Ephemeral Envelopes — including
 raw email bodies — only until the Run finalizer clears them or the safety TTL
-expires. Entries are never persisted or logged; the durable Redis adapter is a
-later milestone.
+expires. Entries are never persisted or logged.
 """
 
 import threading
