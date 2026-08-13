@@ -168,11 +168,16 @@ def test_project_embedding_uses_gemini_2_dimensions_and_document_task() -> None:
     client = _ProjectEmbeddingClient()
     vectors = asyncio.run(
         GeminiEmbeddingAdapter(settings, client=client).embed(
-            ["document text"], task="retrieval.passage"
+            ["first document chunk", "second document chunk"], task="retrieval.passage"
         )
     )
 
     assert len(vectors[0]) == 3072
+    assert len(vectors) == 2
+    assert [call["contents"] for call in client.calls] == [
+        ["first document chunk"],
+        ["second document chunk"],
+    ]
     assert client.calls[0]["model"] == "gemini-embedding-2"
     config = client.calls[0]["config"]
     assert config.output_dimensionality == 3072

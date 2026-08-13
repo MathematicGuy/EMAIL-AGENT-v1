@@ -6,6 +6,7 @@ from pathlib import Path
 from cowork_agent.integrations.knowledge_ingestion.project_documents import (
     ExtractedProjectDocument,
     ExtractedProjectDocumentChunk,
+    ProjectDocumentExtractionError,
 )
 from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
 from cowork_agent.persistence.repositories.projects import ProjectDocument
@@ -118,5 +119,34 @@ def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
             "delay_seconds": 30,
         }]
         assert repository.finished == []
+
+    asyncio.run(scenario())
+
+
+def test_worker_preserves_the_safe_native_extraction_failure_code() -> None:
+    class FailingExtractor:
+        def extract(self, path: Path, media_type: str) -> ExtractedProjectDocument:
+            del path, media_type
+            raise ProjectDocumentExtractionError("native_extraction_failed")
+
+    async def scenario() -> None:
+        repository = Repository()
+        worker = ProjectDocumentIngestionWorker(
+            repository, Storage(), FailingExtractor(), Vectors()
+        )
+
+        await worker.execute("document-1")
+
+        assert repository.transitions == [{
+            "document_id": "document-1",
+            "from_status": "extracting",
+            "to_status": "failed",
+            "error_code": "native_extraction_failed",
+        }]
+        assert repository.finished == [{
+            "document_id": "document-1",
+            "status": "failed",
+            "error_code": "native_extraction_failed",
+        }]
 
     asyncio.run(scenario())

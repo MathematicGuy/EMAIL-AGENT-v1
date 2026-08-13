@@ -44,4 +44,24 @@ describe('ProjectDocumentPanel', () => {
       (init as RequestInit | undefined)?.method === 'DELETE'
     )).toBe(true));
   });
+
+  it('explains a native PDF extraction failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ documents: [{
+      document_id: 'document-1',
+      filename: 'report.pdf',
+      media_type: 'application/pdf',
+      byte_size: 10,
+      status: 'failed',
+      error_code: 'native_extraction_failed',
+      page_count: 0,
+      chunk_count: 0,
+      ocr_page_count: 0,
+      expires_at: '2026-09-12T00:00:00Z',
+    }] })));
+    render(<ProjectDocumentPanel projectId="project-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Project documents' }));
+
+    expect(await screen.findByText(/PDF text could not be extracted/i)).toBeTruthy();
+  });
 });

@@ -200,6 +200,7 @@ class UserDocumentsSettings:
     top_k: int
     min_score: float
     retrieval_timeout_ms: int
+    startup_timeout_ms: int
     ingestion_stream: str
 
     @classmethod
@@ -236,7 +237,10 @@ class UserDocumentsSettings:
             top_k=_bounded_positive_int(environ, "USER_DOCUMENTS_TOP_K", 8, maximum=20),
             min_score=min_score,
             retrieval_timeout_ms=_bounded_positive_int(
-                environ, "USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS", 3_000, maximum=10_000
+                environ, "USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS", 10_000, maximum=10_000
+            ),
+            startup_timeout_ms=_bounded_positive_int(
+                environ, "USER_DOCUMENTS_STARTUP_TIMEOUT_MS", 30_000, maximum=120_000
             ),
             ingestion_stream=_non_empty_value(
                 environ, "USER_DOCUMENTS_INGESTION_STREAM", "cowork:project-document-ingestion"

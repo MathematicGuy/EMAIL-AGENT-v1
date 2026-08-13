@@ -284,27 +284,27 @@ class ProjectDocumentVectorStore:
                 collection_name=self._collection_name,
                 vectors_config=VectorParams(size=self._vector_size, distance=Distance.COSINE),
             )
-            for key in _REQUIRED_KEYWORD_INDEXES:
-                await self._client.create_payload_index(
-                    collection_name=self._collection_name,
-                    field_name=key,
-                    field_schema=PayloadSchemaType.KEYWORD,
+        else:
+            collection = await self._client.get_collection(self._collection_name)
+            vectors = collection.config.params.vectors
+            size = getattr(vectors, "size", None)
+            distance = getattr(vectors, "distance", None)
+            if size != self._vector_size or distance != Distance.COSINE:
+                raise ValueError(
+                    f"project document collection configuration size={size}, distance={distance} "
+                    f"does not match size={self._vector_size}, distance={Distance.COSINE}"
                 )
+        for key in _REQUIRED_KEYWORD_INDEXES:
             await self._client.create_payload_index(
                 collection_name=self._collection_name,
-                field_name="expires_at_epoch",
-                field_schema=PayloadSchemaType.FLOAT,
+                field_name=key,
+                field_schema=PayloadSchemaType.KEYWORD,
             )
-            return
-        collection = await self._client.get_collection(self._collection_name)
-        vectors = collection.config.params.vectors
-        size = getattr(vectors, "size", None)
-        distance = getattr(vectors, "distance", None)
-        if size != self._vector_size or distance != Distance.COSINE:
-            raise ValueError(
-                f"project document collection configuration size={size}, distance={distance} "
-                f"does not match size={self._vector_size}, distance={Distance.COSINE}"
-            )
+        await self._client.create_payload_index(
+            collection_name=self._collection_name,
+            field_name="expires_at_epoch",
+            field_schema=PayloadSchemaType.FLOAT,
+        )
 
 
 class ReadyProjectDocumentRepository(Protocol):
