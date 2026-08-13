@@ -16,19 +16,31 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatRoute,
     ChatTurn,
     EpisodeSourceType,
     MemoryCitationType,
     MemoryContextRequest,
+    RoutingOutcome,
     TaskEpisode,
 )
+from cowork_agent.domain.project_documents import ProjectDocumentResponse
 from cowork_agent.domain.target_contracts import ValidationStatus
 
-from .generation_context import GenerationContext, assemble_generation_context
+from .generation_context import (
+    ChatResponseMode,
+    GenerationContext,
+    assemble_generation_context,
+)
+from .intent.service import ChatRoutingService
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
 from .ports import ChatReplyChunk, ChatReplyPort, ChatTaskProposal
 from .retention import compute_expires_at
-from .retrieval_policy import is_explicit_task_request, select_memory_reads
+from .retrieval_policy import (
+    clarification_memory_reads,
+    is_explicit_task_request,
+    select_memory_reads,
+)
 
 IdFactory = Callable[[], str]
 Clock = Callable[[], datetime]
@@ -102,7 +114,9 @@ class InMemoryChatSessionRegistry:
         self._sessions: dict[str, ChatMemoryScope] = {}
         self._lock = threading.Lock()
 
-    def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope:
+    def create(
+        self, *, tenant_id: str, user_id: str, project_id: str = "default-project"
+    ) -> ChatMemoryScope:
         with self._lock:
             session_id = self._new_id()
             while session_id in self._sessions:
@@ -111,6 +125,7 @@ class InMemoryChatSessionRegistry:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 session_id=session_id,
+                project_id=project_id,
             )
             self._sessions[session_id] = scope
             return scope
@@ -128,14 +143,40 @@ class InMemoryChatSessionRegistry:
             raise ChatSessionAccessDenied(session_id)
         return scope
 
-    def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
+    def register(self, scope: ChatMemoryScope) -> ChatMemoryScope:
+        """Restore one durable scope into the process-local controller registry."""
+        with self._lock:
+            existing = self._sessions.get(scope.session_id)
+            if existing is not None and existing != scope:
+                raise ChatSessionAccessDenied(scope.session_id)
+            self._sessions[scope.session_id] = scope
+        return scope
+
+    def list_for(
+        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+    ) -> tuple[ChatMemoryScope, ...]:
         """Owned scopes in creation order (GET /sessions read contract)."""
         with self._lock:
             return tuple(
                 scope
                 for scope in self._sessions.values()
-                if scope.tenant_id == tenant_id and scope.user_id == user_id
+                if scope.tenant_id == tenant_id
+                and scope.user_id == user_id
+                and (project_id is None or scope.project_id == project_id)
             )
+
+    def delete_project(self, *, tenant_id: str, user_id: str, project_id: str) -> tuple[str, ...]:
+        with self._lock:
+            removed = tuple(
+                session_id
+                for session_id, scope in self._sessions.items()
+                if scope.tenant_id == tenant_id
+                and scope.user_id == user_id
+                and scope.project_id == project_id
+            )
+            for session_id in removed:
+                del self._sessions[session_id]
+        return removed
 
 
 class ChatController:
@@ -150,6 +191,8 @@ class ChatController:
         new_id: IdFactory = _new_id,
         clock: Clock = _utc_now,
         episode_retention_seconds: int | None = None,
+        routing: ChatRoutingService | None = None,
+        company_rag_enabled: bool = True,
     ) -> None:
         self._scope = scope
         self._memory = memory
@@ -157,11 +200,14 @@ class ChatController:
         self._new_id = new_id
         self._clock = clock
         self._episode_retention_seconds = episode_retention_seconds
+        self._routing = routing
+        self._company_rag_enabled = company_rag_enabled
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
         self._pending_task_episodes: dict[str, _PendingTaskEpisode] = {}
         self._task_episodes: dict[str, TaskEpisode] = {}
+        self._routing_outcomes: dict[str, RoutingOutcome] = {}
         self._turn_lock = asyncio.Lock()
 
     @observe(name="chat_stream_message")
@@ -210,7 +256,21 @@ class ChatController:
             if await is_cancelled():
                 return
 
-            context = await self._memory.read_context(self._context_request(request))
+            routing_outcome = await self._route_turn(request)
+            response_mode = (
+                ChatResponseMode.CLARIFY
+                if routing_outcome is not None and routing_outcome.route is ChatRoute.CLARIFY
+                else ChatResponseMode.NORMAL
+            )
+            project_documents: ProjectDocumentResponse | None = None
+            if routing_outcome is not None and routing_outcome.route is ChatRoute.RAG:
+                project_documents = await self._memory._read_project_documents(
+                    query=routing_outcome.retrieval_query or request.user_message,
+                    document_ids=request.document_ids,
+                )
+            context = await self._memory.read_context(
+                self._context_request(request, routing_outcome)
+            )
             emitted: list[ChatMessageStreamEvent] = []
             if context.degraded:
                 warning = self._error(
@@ -220,11 +280,25 @@ class ChatController:
                 )
                 emitted.append(warning)
                 yield warning
+            if project_documents is not None and project_documents.degraded:
+                warning = self._error(
+                    turn_id=turn_id,
+                    code="project_documents_degraded",
+                    safe_message="Project document evidence is temporarily unavailable.",
+                )
+                emitted.append(warning)
+                yield warning
 
             chunks: list[str] = []
             task_proposal: ChatTaskProposal | None = None
+            selected_citation_ids: list[str] = []
             pending_task_episode: _PendingTaskEpisode | None = None
-            generation_context = assemble_generation_context(request, context)
+            generation_context = assemble_generation_context(
+                request,
+                context,
+                response_mode=response_mode,
+                project_documents=project_documents,
+            )
             try:
                 async for chunk in self._reply.stream_reply(request, generation_context):
                     if await is_cancelled():
@@ -232,6 +306,9 @@ class ChatController:
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
                             task_proposal = chunk.task_proposal
+                        for citation_id in chunk.citation_ids:
+                            if citation_id not in selected_citation_ids:
+                                selected_citation_ids.append(citation_id)
                         text = chunk.text
                     else:
                         text = chunk
@@ -272,9 +349,46 @@ class ChatController:
                     user_message=request.user_message,
                     assistant_message=assistant_message,
                     created_at=self._clock(),
+                    citation_coordinates=tuple(
+                        {
+                            "citation_scope": "project_document",
+                            "project_id": item.project_id,
+                            "document_id": item.document_id,
+                            "document_title": item.title,
+                            "section": item.section,
+                            "page_start": item.page_start,
+                            "page_end": item.page_end,
+                        }
+                        for item in (
+                            project_documents.evidence if project_documents is not None else ()
+                        )
+                        if item.citation_id in selected_citation_ids
+                    ),
                 )
             )
-            if is_explicit_task_request(request):
+            if project_documents is not None:
+                evidence_by_id = {item.citation_id: item for item in project_documents.evidence}
+                for citation_id in selected_citation_ids:
+                    evidence = evidence_by_id.get(citation_id)
+                    if evidence is None:
+                        continue
+                    citation = ChatMessageStreamEvent.memory_citation(
+                        event_id=self._new_id(),
+                        session_id=self._scope.session_id,
+                        turn_id=turn_id,
+                        memory_type=MemoryCitationType.SEMANTIC,
+                        source_id=evidence.citation_id,
+                        citation_scope="project_document",
+                        project_id=evidence.project_id,
+                        document_id=evidence.document_id,
+                        document_title=evidence.title,
+                        section=evidence.section,
+                        page_start=evidence.page_start,
+                        page_end=evidence.page_end,
+                    )
+                    emitted.append(citation)
+                    yield citation
+            if response_mode is ChatResponseMode.NORMAL and is_explicit_task_request(request):
                 if task_proposal is None:
                     warning = self._error(
                         turn_id=turn_id,
@@ -285,9 +399,7 @@ class ChatController:
                     yield warning
                 else:
                     episode = self._new_task_episode(turn_id, task_proposal)
-                    expires_at = compute_expires_at(
-                        self._clock(), self._episode_retention_seconds
-                    )
+                    expires_at = compute_expires_at(self._clock(), self._episode_retention_seconds)
                     try:
                         episode = await self._memory.write_task_episode(
                             episode, expires_at=expires_at
@@ -421,16 +533,37 @@ class ChatController:
             del self._task_episodes[episode_id]
         return deleted
 
-    def _context_request(self, request: ChatMessageRequest) -> MemoryContextRequest:
+    async def _route_turn(self, request: ChatMessageRequest) -> RoutingOutcome | None:
+        if self._routing is None:
+            return None
+        cached = self._routing_outcomes.get(request.idempotency_key)
+        if cached is not None:
+            return cached
+        outcome = await self._routing.route(
+            scope=self._scope,
+            request=request,
+            recent_turns=self._memory._read_active_turns(),
+        )
+        self._routing_outcomes[request.idempotency_key] = outcome
+        return outcome
+
+    def _context_request(
+        self,
+        request: ChatMessageRequest,
+        routing_outcome: RoutingOutcome | None = None,
+    ) -> MemoryContextRequest:
+        reads = (
+            clarification_memory_reads()
+            if routing_outcome is not None and routing_outcome.route is ChatRoute.CLARIFY
+            else select_memory_reads(request, company_rag_enabled=self._company_rag_enabled)
+        )
         return MemoryContextRequest(
             session_id=self._scope.session_id,
             scope=self._scope,
-            reads=select_memory_reads(request),
+            reads=reads,
         )
 
-    def _new_task_episode(
-        self, turn_id: str, proposal: ChatTaskProposal
-    ) -> TaskEpisode:
+    def _new_task_episode(self, turn_id: str, proposal: ChatTaskProposal) -> TaskEpisode:
         """Build a body-free task record from trusted scope and turn metadata only."""
 
         created_at = self._clock()
@@ -459,6 +592,7 @@ class ChatController:
             model_id=proposal.model_id,
             prompt_version=proposal.prompt_version,
             confidence=proposal.confidence,
+            project_id=self._scope.project_id,
         )
 
     async def _transition_task_episode(

@@ -39,9 +39,7 @@ class PdfInspector:
             return {}
         page_argument = ",".join(str(page) for page in pages)
         payload = _load_json(
-            self._run(
-                ("pdf2md", str(path), "--json", "--pages", "--select-pages", page_argument)
-            ),
+            self._run(("pdf2md", str(path), "--json", "--pages", "--select-pages", page_argument)),
             "Markdown",
         )
         return _parse_markdown_pages(payload, pages)
@@ -109,10 +107,7 @@ def _parse_markdown_pages(payload: object, expected_pages: tuple[int, ...]) -> M
     for index in range(1, len(parts), 2):
         number = int(parts[index])
         page_markdown = parts[index + 1].strip()
-        if (
-            number not in expected_pages
-            or number in markdown_by_page
-        ):
+        if number not in expected_pages or number in markdown_by_page:
             raise ValueError("PDF Markdown output is invalid")
         markdown_by_page[number] = page_markdown
     for number in expected_pages:

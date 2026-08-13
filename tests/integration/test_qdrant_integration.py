@@ -22,8 +22,8 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
+from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
-from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -136,7 +136,7 @@ def test_results_are_ordered_by_descending_relevance(
     assert scores == sorted(scores, reverse=True)
 
 
-def test_an_unreachable_qdrant_degrades_the_bootstrap_to_null_memory(
+def test_an_unreachable_qdrant_degrades_the_bootstrap_to_in_repo_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -160,7 +160,7 @@ def test_an_unreachable_qdrant_degrades_the_bootstrap_to_null_memory(
 
     result = asyncio.run(bootstrap.build_semantic_memory(gemini, qdrant))
 
-    assert isinstance(result, NullSemanticMemory)
+    assert isinstance(result, HybridSemanticMemory)
     assert asyncio.run(result.retrieve(_request())).retrieval_status is (
         RetrievalStatus.NO_RESULTS
     )

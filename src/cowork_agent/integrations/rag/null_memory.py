@@ -17,9 +17,7 @@ class NullSemanticMemory:
     instead of failing.
     """
 
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse:
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         return SemanticRetrievalResponse(
             query_id=f"q_{uuid4().hex}",
             tenant_id=request.tenant_id,

@@ -36,16 +36,13 @@ class InMemoryRunRepository:
         matching = (
             run
             for run in self.runs.values()
-            if run.user_id == user_id
-            and run.mailbox_connection_id == mailbox_connection_id
+            if run.user_id == user_id and run.mailbox_connection_id == mailbox_connection_id
         )
         return tuple(
             sorted(
                 matching,
                 key=lambda run: (
-                    float("-inf")
-                    if run.created_at is None
-                    else run.created_at.timestamp(),
+                    float("-inf") if run.created_at is None else run.created_at.timestamp(),
                     run.id,
                 ),
                 reverse=True,

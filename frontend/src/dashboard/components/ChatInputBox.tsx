@@ -158,7 +158,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.docx,.md"
+                accept=".pdf,.docx"
                 aria-label="Chọn tài liệu từ máy"
                 className="sr-only"
                 onChange={(event) => {

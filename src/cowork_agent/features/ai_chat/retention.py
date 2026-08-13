@@ -16,9 +16,7 @@ from .memory_observability import (
 )
 
 
-def compute_expires_at(
-    now: datetime, retention_seconds: int | None
-) -> datetime | None:
+def compute_expires_at(now: datetime, retention_seconds: int | None) -> datetime | None:
     """Return ``now + retention_seconds`` or ``None`` when retention is unset.
 
     ``now`` must be timezone-aware UTC. ``retention_seconds`` must be a

@@ -178,9 +178,7 @@ class SQLiteTaskRepository:
         return database
 
 
-def _task_key(
-    tenant_id: str, user_id: str, gmail_message_id: str, pipeline_version: str
-) -> str:
+def _task_key(tenant_id: str, user_id: str, gmail_message_id: str, pipeline_version: str) -> str:
     return ":".join((tenant_id, user_id, gmail_message_id, pipeline_version))
 
 

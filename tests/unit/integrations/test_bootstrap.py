@@ -1,8 +1,8 @@
 """Tests for the RAG bootstrap wiring (Qdrant migration, Task C).
 
-The point of these tests is the degrade contract: whichever store is
-configured, a failure to build it must return NullSemanticMemory rather than
-raise, because a broken index may never block a digest run.
+The point of these tests is the degrade contract: Qdrant failure uses the
+in-repo hybrid adapter, while failure of all stores returns NullSemanticMemory;
+a broken index may never block a digest run.
 """
 
 import asyncio
@@ -114,7 +114,7 @@ def test_reindex_forces_ingestion_even_when_the_collection_is_populated(
     assert ingested == [COLLECTION]
 
 
-def test_an_unreachable_qdrant_degrades_to_null_memory(
+def test_an_unreachable_qdrant_degrades_to_in_repo_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _explode(**kwargs: object) -> AsyncQdrantClient:
@@ -132,7 +132,7 @@ def test_an_unreachable_qdrant_degrades_to_null_memory(
     assert isinstance(memory, HybridSemanticMemory)
 
 
-def test_a_vector_size_mismatch_degrades_to_null_memory(
+def test_a_vector_size_mismatch_degrades_to_in_repo_memory(
     local_qdrant: AsyncQdrantClient,
 ) -> None:
     memory = asyncio.run(

@@ -28,9 +28,7 @@ def group_by_thread(messages: Sequence[EphemeralEmailEnvelope]) -> tuple[_Thread
     return tuple(tuple(thread) for thread in grouped.values())
 
 
-def batch_messages(
-    threads: Sequence[_Thread], max_emails: int
-) -> tuple[tuple[_Thread, ...], ...]:
+def batch_messages(threads: Sequence[_Thread], max_emails: int) -> tuple[tuple[_Thread, ...], ...]:
     """Group whole threads without exceeding the target email count when possible."""
     if not threads:
         return ((),)

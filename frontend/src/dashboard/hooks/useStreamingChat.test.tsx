@@ -1,362 +1,125 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useStreamingChat, validateAttachmentFile } from './useStreamingChat';
-import {
-  cancelTurn,
-  sendConversationMessage,
-  streamTurnEvents,
-} from '../../modules/work-intake/assistantApi';
-import { approvePlan, getTask, listTaskEvents } from '../../modules/work-intake/api';
-import type { TurnEvent } from '../../modules/work-intake/assistantApi';
-import type { TaskDetail } from '../../modules/work-intake/types';
-
-vi.mock('../../modules/work-intake/assistantApi', async () => {
-  const actual = await vi.importActual<
-    typeof import('../../modules/work-intake/assistantApi')
-  >('../../modules/work-intake/assistantApi');
-  return {
-    ...actual,
-    checkAssistantApi: vi.fn().mockResolvedValue(true),
-    createConversation: vi.fn().mockResolvedValue('conv-1'),
-    listConversations: vi.fn().mockResolvedValue([]),
-    listConversationMessages: vi.fn().mockResolvedValue([]),
-    sendConversationMessage: vi.fn(),
-    streamTurnEvents: vi.fn(),
-    cancelTurn: vi.fn(),
-  };
-});
-
-vi.mock('../../modules/work-intake/api', () => ({
-  getTask: vi.fn(),
-  listTaskEvents: vi.fn(),
-  approvePlan: vi.fn(),
-  revisePlan: vi.fn(),
-  retryStep: vi.fn(),
-}));
-
-function event(id: number, name: string, data: Record<string, unknown>): TurnEvent {
-  return { id, event: name, data };
-}
-
-function streamEvents(events: TurnEvent[]): void {
-  vi.mocked(streamTurnEvents).mockImplementation(async (input) => {
-    for (const item of events) input.onEvent(item);
-  });
-}
-
-function detail(overrides: Partial<TaskDetail['task']> = {}): TaskDetail {
-  return {
-    task: {
-      task_id: 'task-1',
-      status: 'AWAITING_PLAN_APPROVAL',
-      state_version: 3,
-      ...overrides,
-    },
-    run: null,
-    plan: {
-      plan_version: 1,
-      approved: false,
-      query_template_hash: 'hash-1',
-      approval_mode: 'REQUIRE_INTERACTIVE',
-      steps: [{ step_id: 'step_synthesize' }],
-    },
-    steps: [{ step_id: 'step_synthesize', state: 'PENDING' }],
-  } as unknown as TaskDetail;
-}
-
-beforeEach(() => {
-  vi.mocked(sendConversationMessage).mockResolvedValue({
-    conversation_id: 'conv-1',
-    turn_id: 'turn-1',
-    events_url: '/events',
-  });
-  streamEvents([]);
-  vi.mocked(getTask).mockResolvedValue(detail());
-  vi.mocked(listTaskEvents).mockResolvedValue({
-    events: [],
-    next_sequence: 0,
-    has_more: false,
-  });
-});
 
 afterEach(() => {
-  vi.clearAllMocks();
+  cleanup();
+  vi.unstubAllGlobals();
 });
 
-describe('useStreamingChat task workflow state', () => {
-  it('sends the model selected by the dashboard', async () => {
-    const { result } = renderHook(() => useStreamingChat('deepseek-nvidia'));
-
-    await act(async () => {
-      await result.current.sendMessage('Xin chào');
-    });
-
-    expect(sendConversationMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ modelId: 'deepseek-nvidia' })
-    );
+function json(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
   });
+}
 
-  it('resumes the clarification turn with the next message', async () => {
-    streamEvents([
-      event(1, 'assistant.delta', { delta: 'Kỳ nào?' }),
-      event(2, 'clarification.requested', {
-        question: 'Kỳ nào?',
-        quick_actions: ['Tóm tắt nội dung tài liệu'],
-      }),
-    ]);
-    const { result } = renderHook(() => useStreamingChat());
+function sse(events: unknown[]): Response {
+  return new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+  );
+}
+
+describe('useStreamingChat Project chat client', () => {
+  it('creates a Project-bound Cowork session and renders a validated citation', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ project_id: 'project-1' });
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
+      if (url.endsWith('/sessions/session-1/messages') && init?.method === 'POST') {
+        return Promise.resolve(sse([
+          { event_type: 'delta', text: 'Grounded answer' },
+          {
+            event_type: 'memory_citation',
+            source_id: 'citation-1',
+            citation_scope: 'project_document',
+            project_id: 'project-1',
+            document_id: 'document-1',
+            document_title: 'Policy.pdf',
+            page_start: 2,
+            page_end: 3,
+          },
+          { event_type: 'completed' },
+        ]));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
 
     await act(async () => {
-      await result.current.sendMessage('Tạo báo cáo');
-    });
-    expect(result.current.pendingClarificationTurnId).toBe('turn-1');
-    expect(result.current.messages.at(-1)?.quickActions).toEqual([
-      'Tóm tắt nội dung tài liệu',
-    ]);
-
-    streamEvents([]);
-    await act(async () => {
-      await result.current.sendMessage('Quý 2');
+      await result.current.sendMessage('What does the policy say?');
     });
 
-    expect(sendConversationMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ replyToTurnId: 'turn-1' })
-    );
-    expect(streamTurnEvents).toHaveBeenLastCalledWith(
-      expect.objectContaining({ turnId: 'turn-1', afterSequence: 2 })
-    );
-    expect(result.current.pendingClarificationTurnId).toBeNull();
-  });
-
-  it('releases generation while the clarification stream remains open', async () => {
-    let releaseStream: (() => void) | undefined;
-    vi.mocked(streamTurnEvents).mockImplementation(async (input) => {
-      input.onEvent(
-        event(1, 'clarification.requested', {
-          question: 'Bạn muốn tạo lịch cho kỳ World Cup nào?',
-          quick_actions: ['World Cup 2025'],
-        })
-      );
-      await new Promise<void>((resolve) => {
-        releaseStream = resolve;
-      });
-    });
-    const { result } = renderHook(() => useStreamingChat());
-    let sendPromise: Promise<void> | undefined;
-
-    act(() => {
-      sendPromise = result.current.sendMessage(
-        'Help me to create a schedule for the 2025 world cup'
-      );
-    });
-
-    await waitFor(() => {
-      expect(result.current.pendingClarificationTurnId).toBe('turn-1');
-      expect(result.current.isGenerating).toBe(false);
-    });
-
-    expect(releaseStream).toBeDefined();
-    await act(async () => {
-      releaseStream?.();
-      await sendPromise;
-    });
-  });
-
-  it('stops only the local stream when clarification is requested', async () => {
-    vi.mocked(streamTurnEvents).mockImplementation(
-      (input) =>
-        new Promise<void>((_resolve, reject) => {
-          input.signal?.addEventListener(
-            'abort',
-            () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
-            { once: true }
-          );
-          input.onEvent(
-            event(2, 'clarification.requested', {
-              question: 'Học kỳ nào?',
-              quick_actions: ['Học kỳ mùa Thu', 'Học kỳ mùa Xuân'],
-            })
-          );
-        })
-    );
-    const { result } = renderHook(() => useStreamingChat());
-
-    await act(async () => {
-      await result.current.sendMessage('Giúp tôi tạo lịch đi học Vin University');
-    });
-
-    expect(result.current.isGenerating).toBe(false);
-    expect(result.current.pendingClarificationTurnId).toBe('turn-1');
     expect(result.current.messages.at(-1)).toMatchObject({
-      isStreaming: false,
-      quickActions: ['Học kỳ mùa Thu', 'Học kỳ mùa Xuân'],
-    });
-    expect(cancelTurn).not.toHaveBeenCalled();
-  });
-
-  it('resets the stream cursor when a clarification reply becomes a new turn', async () => {
-    streamEvents([
-      event(1, 'assistant.delta', { delta: 'Bạn muốn xem trận nào?' }),
-      event(2, 'clarification.requested', {
-        question: 'Bạn muốn xem trận nào?',
-        quick_actions: ['Trận mở màn', 'Chung kết'],
-      }),
-    ]);
-    const { result } = renderHook(() => useStreamingChat());
-
-    await act(async () => {
-      await result.current.sendMessage('Tôi muốn lập lịch xem World Cup');
-    });
-
-    vi.mocked(sendConversationMessage).mockResolvedValueOnce({
-      conversation_id: 'conv-1',
-      turn_id: 'turn-2',
-      events_url: '/events',
-    });
-    streamEvents([]);
-    await act(async () => {
-      await result.current.sendMessage('Lịch học tại VinUni');
-    });
-
-    expect(sendConversationMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ replyToTurnId: 'turn-1' })
-    );
-    expect(streamTurnEvents).toHaveBeenLastCalledWith(
-      expect.objectContaining({ turnId: 'turn-2', afterSequence: 0 })
-    );
-  });
-
-  it('retries an existing failed assistant turn in-place without creating a new user message', async () => {
-    const { result } = renderHook(() => useStreamingChat());
-
-    streamEvents([
-      event(1, 'assistant.failed', {
-        user_message: 'Assistant Runtime không hoàn thành được lượt này.',
-      }),
-    ]);
-    await act(async () => {
-      await result.current.sendMessage('Tìm kiếm ngay');
-    });
-
-    expect(result.current.messages).toHaveLength(2);
-    expect(result.current.messages[0]).toMatchObject({
-      role: 'user',
-      content: 'Tìm kiếm ngay',
-    });
-    expect(result.current.messages[1]).toMatchObject({
       role: 'assistant',
-      content: '**Backend trả về lỗi**\n\nAssistant Runtime không hoàn thành được lượt này.',
+      content: 'Grounded answer',
+      citations: [{ documentTitle: 'Policy.pdf', pageStart: 2, pageEnd: 3 }],
     });
-
-    const failedAssistantId = result.current.messages[1].id;
-
-    streamEvents([
-      event(1, 'assistant.delta', { delta: 'Kết quả tìm kiếm' }),
-      event(2, 'assistant.completed', {}),
-    ]);
-    await act(async () => {
-      await result.current.retryTurn(failedAssistantId);
-    });
-
-    expect(result.current.messages).toHaveLength(2);
-    expect(result.current.messages[0]).toMatchObject({
-      role: 'user',
-      content: 'Tìm kiếm ngay',
-    });
-    expect(result.current.messages[1]).toMatchObject({
-      id: failedAssistantId,
-      role: 'assistant',
-      content: 'Kết quả tìm kiếm',
-      isStreaming: false,
-    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/v1/assistant'))).toBe(false);
   });
 
-  it('loads the authoritative task detail when the task is created', async () => {
-    streamEvents([event(1, 'task.created', { task_id: 'task-1' })]);
-    const { result } = renderHook(() => useStreamingChat());
-
-    await act(async () => {
-      await result.current.sendMessage('Tạo báo cáo quý 2');
+  it('loads only sessions and history from the active Project', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-2')) {
+        return Promise.resolve(json({ sessions: [{ session_id: 'session-2', project_id: 'project-2' }] }));
+      }
+      if (url.endsWith('/sessions/session-2/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-1',
+          user_message: 'Question',
+          assistant_message: 'Answer',
+          created_at: '2026-08-12T00:00:00Z',
+          citation_coordinates: [],
+        }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-
-    await waitFor(() =>
-      expect(result.current.workflows['task-1']?.detail?.task.task_id).toBe('task-1')
-    );
-    const workflow = result.current.workflows['task-1'];
-    expect(workflow.phase).toBe('Đang chờ bạn phê duyệt plan');
-    expect(workflow.connectionState).toBe('live');
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-2'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
+    await act(async () => result.current.loadExistingChat('session-2'));
+    expect(result.current.messages.map((item) => item.content)).toEqual(['Question', 'Answer']);
   });
 
-  it('keeps the last confirmed state when the backend stops answering', async () => {
-    streamEvents([event(1, 'task.created', { task_id: 'task-1' })]);
-    const { result } = renderHook(() => useStreamingChat());
-    await act(async () => {
-      await result.current.sendMessage('Tạo báo cáo quý 2');
+  it('uploads composer files persistently to the active Project', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/projects/project-1/documents') && init?.method === 'POST') {
+        return Promise.resolve(json({ document_id: 'document-1', status: 'received' }, 202));
+      }
+      if (url.endsWith('/projects/project-1/documents')) {
+        return Promise.resolve(json({ documents: [] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    await waitFor(() => expect(result.current.workflows['task-1']?.detail).toBeTruthy());
-
-    vi.mocked(getTask).mockRejectedValue(new Error('offline'));
-    vi.mocked(listTaskEvents).mockRejectedValue(new Error('offline'));
-    await act(async () => {
-      await result.current.refreshWorkflow('task-1');
-    });
-
-    const workflow = result.current.workflows['task-1'];
-    expect(workflow.connectionState).toBe('unavailable');
-    expect(workflow.detail?.task.status).toBe('AWAITING_PLAN_APPROVAL');
-  });
-
-  it('approves the current plan version and refreshes from the server', async () => {
-    streamEvents([event(1, 'task.created', { task_id: 'task-1' })]);
-    const { result } = renderHook(() => useStreamingChat());
-    await act(async () => {
-      await result.current.sendMessage('Tạo báo cáo quý 2');
-    });
-    await waitFor(() => expect(result.current.workflows['task-1']?.detail).toBeTruthy());
-
-    vi.mocked(getTask).mockResolvedValue(detail({ status: 'RUNNING' }));
-    await act(async () => {
-      await result.current.approveWorkflowPlan('task-1');
-    });
-
-    expect(approvePlan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-1',
-        planVersion: 1,
-        queryTemplateHash: 'hash-1',
-      })
-    );
-    await waitFor(() =>
-      expect(result.current.workflows['task-1'].phase).toBe(
-        'Đang thực hiện yêu cầu…'
-      )
-    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+    act(() => result.current.selectAttachments([
+      new File(['%PDF-test'], 'policy.pdf', { type: 'application/pdf' }),
+    ]));
+    await waitFor(() => expect(result.current.selectedAttachments[0]?.status).toBe('uploaded'));
+    expect(result.current.selectedAttachments[0]?.documentId).toBe('document-1');
   });
 });
 
-describe('chat attachment format policy', () => {
+describe('Project document upload policy', () => {
   it.each([
     ['contract.pdf', 'application/pdf'],
-    [
-      'meeting.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ],
-    ['notes.md', 'text/markdown'],
+    ['brief.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
   ])('accepts %s', (name, type) => {
     expect(validateAttachmentFile(new File(['content'], name, { type }))).toBeNull();
   });
 
-  it.each([
-    ['sales.csv', 'text/csv'],
-    [
-      'sales.xlsx',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ],
-    ['page.html', 'text/html'],
-  ])('rejects %s', (name, type) => {
-    expect(validateAttachmentFile(new File(['content'], name, { type }))).toContain(
-      'PDF, DOCX hoặc Markdown'
-    );
+  it.each(['notes.md', 'sales.csv', 'page.html'])('rejects %s', (name) => {
+    expect(validateAttachmentFile(new File(['content'], name))).toContain('PDF or DOCX');
   });
 });
-

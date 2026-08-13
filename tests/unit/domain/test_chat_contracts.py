@@ -331,9 +331,7 @@ def test_disabled_retrieval_requests_keep_the_legacy_shape_and_round_trip() -> N
     ("build", "match"),
     [
         (
-            lambda: EpisodicMemoryQuery(
-                query=" ", max_items=1, min_score=0.0, timeout_ms=1
-            ),
+            lambda: EpisodicMemoryQuery(query=" ", max_items=1, min_score=0.0, timeout_ms=1),
             "query",
         ),
         (
@@ -588,8 +586,7 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
 
     assert namespace.feature == AI_CHAT_FEATURE
     assert (
-        namespace.logical_key()
-        == "tenant-1/user@example.com/session-1/ai_chat/episodic/record-1"
+        namespace.logical_key() == "tenant-1/user@example.com/session-1/ai_chat/episodic/record-1"
     )
 
 
@@ -690,9 +687,7 @@ def test_context_response_defensively_freezes_nested_semantic_context() -> None:
 
     source["citation_ids"].append("doc-2#section-1")
 
-    assert response.to_dict()["semantic_context"] == {
-        "citation_ids": ["doc-1#section-2"]
-    }
+    assert response.to_dict()["semantic_context"] == {"citation_ids": ["doc-1#section-2"]}
 
 
 def test_context_response_rejects_non_json_semantic_context_values() -> None:
@@ -1007,7 +1002,7 @@ def test_namespace_requires_an_explicit_source_id_key_even_when_null() -> None:
     ids=["top_level", "nested"],
 )
 def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively(
-    payload: dict[str, object]
+    payload: dict[str, object],
 ) -> None:
     with pytest.raises(ValueError, match="raw email"):
         TaskEpisode.from_dict(payload)

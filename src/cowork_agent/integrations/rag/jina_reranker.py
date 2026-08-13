@@ -127,10 +127,7 @@ class JinaRerankerAdapter:
         )
         if results is None:
             return original
-        return tuple(
-            replace(original[index], rerank_score=score)
-            for index, score in results
-        )
+        return tuple(replace(original[index], rerank_score=score) for index, score in results)
 
 
 class FakeJinaReranker:
@@ -162,9 +159,7 @@ class FakeJinaReranker:
             )
             for candidate in original
         )
-        return tuple(
-            sorted(scored, key=_rerank_sort_key)
-        )[:result_count]
+        return tuple(sorted(scored, key=_rerank_sort_key))[:result_count]
 
 
 def _requested_result_count(*, top_n: int | None, candidate_count: int) -> int | None:

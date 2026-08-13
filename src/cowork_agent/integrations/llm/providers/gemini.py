@@ -208,7 +208,10 @@ class GeminiActionPlanGenerator:
         for idx, key in enumerate(keys, 1):
             _CLASSIFIER_LOGGER.info(
                 "🔑 [Generator] Calling Gemini API (Key %d/%d: %s, model: %s)",
-                idx, len(keys), _mask_api_key(key), self._settings.model
+                idx,
+                len(keys),
+                _mask_api_key(key),
+                self._settings.model,
             )
             try:
                 return await self._transport.generate(
@@ -223,7 +226,7 @@ class GeminiActionPlanGenerator:
                 last_error = exc
                 _CLASSIFIER_LOGGER.warning(
                     "⚠️ [Generator] Rate limit (429) on Gemini API Key %s, rotating to next key...",
-                    _mask_api_key(key)
+                    _mask_api_key(key),
                 )
                 if not self._settings.rotate_on_rate_limit:
                     raise
@@ -575,9 +578,7 @@ class GeminiRouteClassifier:
         batch_count = 0
         batches = batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch)
         for batch in batches:
-            batch_ids = tuple(
-                message.gmail_message_id for thread in batch for message in thread
-            )
+            batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
             if not batch_ids:
                 continue
             batch_count += 1
@@ -618,7 +619,10 @@ class GeminiRouteClassifier:
         for idx, key in enumerate(keys, 1):
             _CLASSIFIER_LOGGER.info(
                 "🔑 [Classifier] Calling Gemini API (Key %d/%d: %s, model: %s)",
-                idx, len(keys), _mask_api_key(key), self._settings.model
+                idx,
+                len(keys),
+                _mask_api_key(key),
+                self._settings.model,
             )
             try:
                 return await self._transport.generate(
@@ -632,14 +636,16 @@ class GeminiRouteClassifier:
             except GeminiRateLimitError:
                 _CLASSIFIER_LOGGER.warning(
                     "⚠️ [Classifier] Rate limit (429) on Gemini API Key %s, rotating to next key...",
-                    _mask_api_key(key)
+                    _mask_api_key(key),
                 )
                 continue
             except Exception as exc:
                 # §12.2: any transport failure (timeout, API error) maps to the
                 # per-message fallback; log metadata only, never email content.
                 _CLASSIFIER_LOGGER.warning(
-                    "Gemini classifier transport failed (%s): %s", _mask_api_key(key), type(exc).__name__
+                    "Gemini classifier transport failed (%s): %s",
+                    _mask_api_key(key),
+                    type(exc).__name__,
                 )
                 return None
         return None
@@ -921,7 +927,11 @@ class GeminiChatReply:
         prompt_parts: list[str] = [
             "Bạn là một trợ lý AI thông minh (Cowork Agent), hỗ trợ người dùng bằng tiếng Việt ngắn gọn, rõ ràng, hữu ích."
         ]
-        if hasattr(context, "semantic") and context.semantic and getattr(context.semantic, "items", None):
+        if (
+            hasattr(context, "semantic")
+            and context.semantic
+            and getattr(context.semantic, "items", None)
+        ):
             prompt_parts.append("\nNgữ cảnh tài liệu liên quan:")
             for item in context.semantic.items:
                 prompt_parts.append(f"- {getattr(item, 'text', item)}")
@@ -950,8 +960,9 @@ class GeminiChatReply:
                 if yielded_any:
                     return
             except Exception as exc:
-                _CLASSIFIER_LOGGER.warning("Gemini chat reply attempt failed (%s): %s", key[:4] + "...", exc)
+                _CLASSIFIER_LOGGER.warning(
+                    "Gemini chat reply attempt failed (%s): %s", key[:4] + "...", exc
+                )
                 continue
 
         yield f"Xin chào! Tôi đã nhận tin nhắn của bạn: '{request.user_message}'."
-

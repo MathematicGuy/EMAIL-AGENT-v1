@@ -55,7 +55,7 @@ from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailable
 from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPointer
 
 _RUN_COLUMNS = (
-    "id, user_id, mailbox_connection_id, \"trigger\", status, query,"
+    'id, user_id, mailbox_connection_id, "trigger", status, query,'
     " idempotency_key, max_emails, emails_matched, emails_processed,"
     " emails_actionable, action_items_count, ignored_emails_count,"
     " attachments_found, attachments_extracted, attachment_warnings_count,"
@@ -221,9 +221,7 @@ class PostgresTaskRepository:
                 "SELECT 1 FROM tasks WHERE mailbox_connection_id = %s AND fingerprint = %s",
                 (pointer.mailbox_connection_id, record.fingerprint),
             )
-            freshness = (
-                ActionFreshness.SEEN if await cursor.fetchone() else ActionFreshness.NEW
-            )
+            freshness = ActionFreshness.SEEN if await cursor.fetchone() else ActionFreshness.NEW
             await connection.execute(
                 """
                 INSERT INTO tasks VALUES (
@@ -318,8 +316,7 @@ class PostgresOutboxRepository:
     async def pending(self) -> tuple[DigestCompletedEvent, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                "SELECT payload FROM outbox_events"
-                " WHERE published_at IS NULL ORDER BY id"
+                "SELECT payload FROM outbox_events WHERE published_at IS NULL ORDER BY id"
             )
             rows = await cursor.fetchall()
         return tuple(_event_from_payload(row[0]) for row in rows)
@@ -552,11 +549,11 @@ class PostgresTaskEpisodeRepository:
         try:
             async with self._pool.connection() as connection:
                 cursor = await connection.execute(
-                f"""
+                    f"""
                 INSERT INTO task_episodes ({_TASK_EPISODE_WRITE_COLUMNS})
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (tenant_id, user_id, feature, chat_session_id, record_id)
                 DO UPDATE SET
@@ -579,6 +576,9 @@ class PostgresTaskEpisodeRepository:
                     AND excluded.updated_at >= task_episodes.updated_at
                     THEN excluded.missing_information
                     ELSE task_episodes.missing_information END,
+                    project_id = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.project_id ELSE task_episodes.project_id END,
                     expires_at = CASE
                     WHEN task_episodes.validation_status = 'system_generated'
                     AND excluded.updated_at >= task_episodes.updated_at
@@ -775,13 +775,13 @@ _TASK_EPISODE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, retrieval_eligible, source_type, created_at,"
-    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence"
+    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence, project_id"
 )
 _TASK_EPISODE_WRITE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, source_type, created_at, updated_at, expires_at,"
-    " pipeline_version, model_id, prompt_version, confidence"
+    " pipeline_version, model_id, prompt_version, confidence, project_id"
 )
 
 
@@ -872,6 +872,7 @@ def _task_episode_params(
         episode.model_id,
         episode.prompt_version,
         episode.confidence,
+        episode.project_id,
     )
 
 
@@ -901,6 +902,7 @@ def _task_episode_from_row(row: Sequence[object]) -> TaskEpisode:
         model_id=None if row[20] is None else str(row[20]),
         prompt_version=None if row[21] is None else str(row[21]),
         confidence=None if row[22] is None else float(cast(float, row[22])),
+        project_id=None if row[23] is None else str(row[23]),
     )
 
 

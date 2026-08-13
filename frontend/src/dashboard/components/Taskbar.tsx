@@ -355,7 +355,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                       onClick={() =>
                         setCollapsedProjects((current) => {
                           const next = new Set(current);
-                          isCollapsed ? next.delete(project.id) : next.add(project.id);
+                          if (isCollapsed) next.delete(project.id);
+                          else next.add(project.id);
                           return next;
                         })
                       }

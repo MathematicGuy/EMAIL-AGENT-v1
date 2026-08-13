@@ -46,6 +46,18 @@ export interface ChatMessage {
     language: string;
     code: string;
   }[];
+  citations?: ChatCitation[];
+}
+
+export interface ChatCitation {
+  citationId: string;
+  projectId: string;
+  documentId: string;
+  documentTitle: string;
+  section?: string;
+  pageStart: number;
+  pageEnd: number;
+  unavailable?: boolean;
 }
 
 export interface ChatComposerAttachment {
@@ -55,6 +67,7 @@ export interface ChatComposerAttachment {
   sizeBytes: number;
   status: 'ready' | 'uploading' | 'uploaded' | 'error';
   error?: string;
+  documentId?: string;
 }
 
 export interface RecentChat {

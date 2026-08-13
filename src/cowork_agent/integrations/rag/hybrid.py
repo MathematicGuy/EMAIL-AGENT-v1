@@ -77,9 +77,7 @@ class HybridSemanticMemory:
         """Build the delegated dense index once for the static local corpus."""
         await self._dense.build_index()
 
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse:
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         started = time.monotonic()
         query_str = _query_text(request)
         if not is_retrieval_query(query_str):
@@ -148,10 +146,7 @@ class HybridSemanticMemory:
                         self._min_rerank_score, top_score * self._relative_cutoff_ratio
                     )
                     for chunk in reranked:
-                        if (
-                            chunk.rerank_score is not None
-                            and chunk.rerank_score >= min_threshold
-                        ):
+                        if chunk.rerank_score is not None and chunk.rerank_score >= min_threshold:
                             filtered.append(chunk)
                 else:
                     top_rrf = reranked[0].relevance_score
@@ -168,7 +163,7 @@ class HybridSemanticMemory:
 
             # Apply MMR Diversification if enabled
             if self._enable_mmr and filtered_reranked:
-                cand_chunks = filtered_reranked[: candidate_limit]
+                cand_chunks = filtered_reranked[:candidate_limit]
                 cand_texts = tuple(c.text for c in cand_chunks)
                 cand_vecs = await self._embedder.embed(cand_texts)
                 (query_vec,) = await self._embedder.embed((query_str,))

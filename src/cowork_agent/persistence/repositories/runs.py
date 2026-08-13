@@ -84,8 +84,7 @@ class SQLiteRunRepository:
             )
             created = cursor.rowcount == 1
             row = database.execute(
-                f"SELECT {_RUN_COLUMNS} FROM digest_runs"
-                " WHERE user_id = ? AND idempotency_key = ?",
+                f"SELECT {_RUN_COLUMNS} FROM digest_runs WHERE user_id = ? AND idempotency_key = ?",
                 (run.user_id, run.idempotency_key),
             ).fetchone()
         assert row is not None
@@ -162,9 +161,7 @@ class SQLiteRunRepository:
     async def list_stuck_runs(
         self, *, running_before: datetime, queued_before: datetime
     ) -> tuple[DigestRun, ...]:
-        return await asyncio.to_thread(
-            self._list_stuck_runs_sync, running_before, queued_before
-        )
+        return await asyncio.to_thread(self._list_stuck_runs_sync, running_before, queued_before)
 
     def _list_stuck_runs_sync(
         self, running_before: datetime, queued_before: datetime

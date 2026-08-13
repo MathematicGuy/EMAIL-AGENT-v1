@@ -4,8 +4,11 @@
 |---|---|
 | Trạng thái | Draft — chờ xác nhận trước khi viết PRD |
 | Ngày | 2026-08-12 |
-| Nguồn yêu cầu | [PRD-v4](../prds/PRD-v4-chat-with-user-documents.md), `docs/references/user_preference.md` |
-| Thẩm quyền kiến trúc | [ADR-006](../adr/ADR-006-user-document-plane-and-classifier-routing.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+| Nguồn yêu cầu | [PRD-v3](../prds/PRD-v3-chat-with-user-documents.md), `docs/references/user_preference.md` |
+| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+
+> ADR-007 supersedes every user-wide/no-Project statement below: all document catalog,
+> ingestion, retrieval, session, deletion and citation operations require `project_id`.
 | Thay thế | Thiết kế Project-scoped documents trước đây ở TARGET-ARCHITECTURE §21 |
 | Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Qdrant, Mistral OCR |
 | Feature owner | AI Chat Controller (`feature: ai_chat`) |

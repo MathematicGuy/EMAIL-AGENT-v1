@@ -1,65 +1,82 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_PROJECT } from '../types/projectTypes';
+import { API_BASE_URL } from '../../lib/apiConfig';
 import type { Project } from '../types/projectTypes';
 
-const PROJECTS_KEY = 'v-assistant-projects';
 const ACTIVE_PROJECT_KEY = 'v-assistant-active-project-id';
 
-function readProjects(): Project[] {
-  try {
-    const value = window.localStorage.getItem(PROJECTS_KEY);
-    if (!value) return [DEFAULT_PROJECT];
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [DEFAULT_PROJECT];
-    const projects = parsed.filter(
-      (project): project is Project =>
-        typeof project === 'object' && project !== null &&
-        typeof (project as Project).id === 'string' &&
-        typeof (project as Project).name === 'string'
-    );
-    return projects.some((project) => project.id === DEFAULT_PROJECT.id)
-      ? projects
-      : [DEFAULT_PROJECT, ...projects];
-  } catch {
-    return [DEFAULT_PROJECT];
-  }
+interface BackendProject {
+  project_id: string;
+  name: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+function fromBackend(project: BackendProject): Project {
+  return {
+    id: project.project_id,
+    name: project.name,
+    isDefault: project.is_default,
+    icon: '📁',
+    color: project.is_default ? '#d97757' : '#8b7cf6',
+    createdAt: project.created_at,
+  };
 }
 
 export function useProjects() {
-  const [projects, setProjects] = useState<Project[]>(readProjects);
-  const [activeProjectId, setActiveProjectIdState] = useState(() => {
-    const stored = window.localStorage.getItem(ACTIVE_PROJECT_KEY);
-    return readProjects().some((project) => project.id === stored)
-      ? stored!
-      : DEFAULT_PROJECT.id;
-  });
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectIdState] = useState(
+    () => window.localStorage.getItem(ACTIVE_PROJECT_KEY) ?? ''
+  );
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
-  }, [projects]);
-
-  useEffect(() => {
-    window.localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectId);
-  }, [activeProjectId]);
-
-  const setActiveProjectId = useCallback((projectId: string) => {
-    if (projects.some((project) => project.id === projectId)) {
-      setActiveProjectIdState(projectId);
+  const refreshProjects = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json()) as { projects: BackendProject[] };
+      const next = payload.projects.map(fromBackend);
+      setProjects(next);
+      setActiveProjectIdState((current) => {
+        const selected = next.some((project) => project.id === current)
+          ? current
+          : next.find((project) => project.isDefault)?.id ?? next[0]?.id ?? '';
+        if (selected) window.localStorage.setItem(ACTIVE_PROJECT_KEY, selected);
+        return selected;
+      });
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Project API unavailable');
     }
-  }, [projects]);
-
-  const createProject = useCallback((input: Pick<Project, 'name' | 'icon' | 'color'>) => {
-    const project: Project = {
-      id: `project_${crypto.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`}`,
-      name: input.name.trim(),
-      icon: input.icon || '📁',
-      color: input.color || '#d97757',
-      createdAt: new Date().toISOString(),
-    };
-    setProjects((current) => [...current, project]);
-    setActiveProjectIdState(project.id);
-    return project;
   }, []);
 
-  return { projects, activeProjectId, setActiveProjectId, createProject };
+  useEffect(() => {
+    queueMicrotask(() => void refreshProjects());
+  }, [refreshProjects]);
+
+  const setActiveProjectId = useCallback((projectId: string) => {
+    setActiveProjectIdState(projectId);
+    window.localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+  }, []);
+
+  const createProject = useCallback(async (input: Pick<Project, 'name' | 'icon' | 'color'>) => {
+    const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: input.name.trim() }),
+    });
+    if (!response.ok) throw new Error(`Could not create project (HTTP ${response.status})`);
+    const project = fromBackend((await response.json()) as BackendProject);
+    setProjects((current) => [...current, project]);
+    setActiveProjectId(project.id);
+    return project;
+  }, [setActiveProjectId]);
+
+  return {
+    projects,
+    activeProjectId,
+    setActiveProjectId,
+    createProject,
+    refreshProjects,
+    error,
+  };
 }

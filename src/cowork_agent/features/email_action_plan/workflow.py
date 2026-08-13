@@ -4,11 +4,11 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import replace
-
-from langfuse import observe
 from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import uuid4
+
+from langfuse import observe
 
 from cowork_agent.domain import (
     DigestCompletedEvent,
@@ -173,7 +173,12 @@ class DigestWorker:
         classifier_ms: int | None = None
         persistence_ms: int | None = None
         try:
-            logger.info("🚀 [RUN %s] Starting worker scan (User: %s, Max Emails: %d)", run.id, run.user_id, run.max_emails)
+            logger.info(
+                "🚀 [RUN %s] Starting worker scan (User: %s, Max Emails: %d)",
+                run.id,
+                run.user_id,
+                run.max_emails,
+            )
             fetch_started = time.monotonic()
             threads, skipped_threads = await self._fetch_threads(run)
             email_ms = int((time.monotonic() - fetch_started) * 1000)
@@ -202,7 +207,13 @@ class DigestWorker:
                     run.attachments_found += int(message.attachments_present)
                 envelopes.extend(thread)
 
-            logger.info("📥 [RUN %s] Fetched %d thread(s) / %d email envelope(s) in %d ms", run.id, len(threads), len(envelopes), email_ms)
+            logger.info(
+                "📥 [RUN %s] Fetched %d thread(s) / %d email envelope(s) in %d ms",
+                run.id,
+                len(threads),
+                len(envelopes),
+                email_ms,
+            )
 
             self._short_term.put(run.id, envelopes)
             stored_envelopes = self._short_term.get(run.id)
@@ -214,24 +225,35 @@ class DigestWorker:
                 lambda: [envelope.to_dict() for envelope in stored_envelopes],
             )
             classify_started = time.monotonic()
-            logger.info("🤖 [RUN %s] Classifying route for %d email(s) via Gemini LLM...", run.id, len(stored_envelopes))
-            classification = await self._classifier.classify(
-                user_timezone, clock, stored_envelopes
+            logger.info(
+                "🤖 [RUN %s] Classifying route for %d email(s) via Gemini LLM...",
+                run.id,
+                len(stored_envelopes),
             )
+            classification = await self._classifier.classify(user_timezone, clock, stored_envelopes)
             classifier_ms = int((time.monotonic() - classify_started) * 1000)
             decisions = {
                 classified.gmail_message_id: classified.decision
                 for classified in classification.decisions
             }
             candidates = correlate_candidates(decisions, messages)
-            logger.info("⚡ [RUN %s] Correlated into %d Task Candidate(s) (Classifier took %d ms)", run.id, len(candidates), classifier_ms)
+            logger.info(
+                "⚡ [RUN %s] Correlated into %d Task Candidate(s) (Classifier took %d ms)",
+                run.id,
+                len(candidates),
+                classifier_ms,
+            )
             run_context = GenerationContext(
                 run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
             )
             outputs: list[_GeneratedCandidate] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
-                logger.info("  ├─ Candidate '%s' -> Route: %s", task_candidate.candidate_key, resolution.route.value.upper())
+                logger.info(
+                    "  ├─ Candidate '%s' -> Route: %s",
+                    task_candidate.candidate_key,
+                    resolution.route.value.upper(),
+                )
                 if resolution.route is Route.NO_ACTION:
                     continue
                 candidate_envelopes = tuple(
@@ -244,8 +266,14 @@ class DigestWorker:
                     retrieval_started = time.monotonic()
                     retrieval = await self._retrieve_for_candidate(run, task_candidate)
                     retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
-                    chunks_count = len(retrieval.response.chunks) if retrieval and retrieval.response else 0
-                    logger.info("  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)", chunks_count, retrieval_ms)
+                    chunks_count = (
+                        len(retrieval.response.chunks) if retrieval and retrieval.response else 0
+                    )
+                    logger.info(
+                        "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
+                        chunks_count,
+                        retrieval_ms,
+                    )
 
                 generation_started = time.monotonic()
                 logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
@@ -291,9 +319,7 @@ class DigestWorker:
                     generated.output,
                     resolution=generated.resolution,
                     retrieval=(
-                        generated.retrieval.response
-                        if generated.retrieval is not None
-                        else None
+                        generated.retrieval.response if generated.retrieval is not None else None
                     ),
                     envelopes=generated.envelopes,
                 )
@@ -309,23 +335,17 @@ class DigestWorker:
                     )
                     continue
                 task = validation.task
-                if (
-                    generated.retrieval is not None
-                    and not generated.retrieval.response.chunks
-                ):
+                if generated.retrieval is not None and not generated.retrieval.response.chunks:
                     task = replace(
                         task,
-                        missing_information=task.missing_information
-                        + (_NO_COMPANY_CONTEXT_NOTE,),
+                        missing_information=task.missing_information + (_NO_COMPANY_CONTEXT_NOTE,),
                     )
                 self._emit_candidate_trace(run, generated, task=task)
                 source = messages.get(task.gmail_message_id)
                 if source is None:
                     continue
                 actionable.update(
-                    message_id
-                    for message_id in task.source_message_ids
-                    if message_id in messages
+                    message_id for message_id in task.source_message_ids if message_id in messages
                 )
                 fingerprint = action_fingerprint(
                     run.mailbox_connection_id,
@@ -376,10 +396,15 @@ class DigestWorker:
             run.ignored_emails_count = max(0, run.emails_processed - len(actionable))
             # T5.4: a run that had to skip threads after their retry budget
             # is PARTIAL, not SUCCEEDED — degradation must stay visible.
-            run.status = (
-                RunStatus.PARTIAL if skipped_threads else RunStatus.SUCCEEDED
+            run.status = RunStatus.PARTIAL if skipped_threads else RunStatus.SUCCEEDED
+            logger.info(
+                "🎉 [RUN %s] Execution finished "
+                "(Status: %s, Action Items: %d, Actionable Emails: %d)",
+                run.id,
+                run.status.value.upper(),
+                run.action_items_count,
+                run.emails_actionable,
             )
-            logger.info("🎉 [RUN %s] Execution finished (Status: %s, Action Items: %d, Actionable Emails: %d)", run.id, run.status.value.upper(), run.action_items_count, run.emails_actionable)
         except Exception as exc:
             logger.exception("❌ [RUN %s] FAILED: %s", run.id, exc)
             run.status = RunStatus.FAILED
@@ -513,9 +538,7 @@ class DigestWorker:
         """
         gaps = tuple(
             dict.fromkeys(
-                gap
-                for _, decision in candidate.decisions
-                for gap in decision.knowledge_gaps
+                gap for _, decision in candidate.decisions for gap in decision.knowledge_gaps
             )
         )
         query = next(
@@ -537,9 +560,7 @@ class DigestWorker:
             user_id=run.user_id,
             query=query or "; ".join(gaps),
             knowledge_gaps=gaps,
-            filters=RetrievalFilters(
-                tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)
-            ),
+            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)),
             limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
         )
         for attempt in (1, 2):
@@ -567,14 +588,10 @@ class DigestWorker:
         """FR-16: one metadata-only §6.8 event per generated candidate."""
         if self._trace_sink is None:
             return
-        retrieval = (
-            generated.retrieval.response if generated.retrieval is not None else None
-        )
+        retrieval = generated.retrieval.response if generated.retrieval is not None else None
         decisions = tuple(decision for _, decision in generated.candidate.decisions)
         reason_codes = tuple(
-            dict.fromkeys(
-                code.value for decision in decisions for code in decision.reason_codes
-            )
+            dict.fromkeys(code.value for decision in decisions for code in decision.reason_codes)
         )
         classifier_confidence = (
             task.classifier_confidence

@@ -65,9 +65,7 @@ class InRepoSemanticMemory:
         norms[norms == 0] = 1.0
         self._matrix = matrix / norms
 
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse:
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         if self._matrix is None:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
@@ -94,9 +92,7 @@ class InRepoSemanticMemory:
         indices = np.asarray([index for index, _ in allowed])
         scores = self._matrix[indices] @ query
         min_score = (
-            request.limits.min_score
-            if request.limits.min_score >= 0
-            else self._min_score_default
+            request.limits.min_score if request.limits.min_score >= 0 else self._min_score_default
         )
         top_k = request.limits.top_k if request.limits.top_k > 0 else self._top_k_default
         ranked = sorted(

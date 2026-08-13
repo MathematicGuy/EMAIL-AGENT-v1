@@ -63,7 +63,9 @@ def _contains_cue(normalized_message: str, cues: frozenset[str]) -> bool:
     )
 
 
-def select_memory_reads(request: ChatMessageRequest) -> MemoryReadOptions:
+def select_memory_reads(
+    request: ChatMessageRequest, *, company_rag_enabled: bool = True
+) -> MemoryReadOptions:
     """Select optional retrieval only for deterministic, explicit user intent."""
 
     query = _normalized_query(request.user_message)
@@ -84,7 +86,7 @@ def select_memory_reads(request: ChatMessageRequest) -> MemoryReadOptions:
             min_score=SEMANTIC_RETRIEVAL_MIN_SCORE,
             timeout_ms=SEMANTIC_RETRIEVAL_TIMEOUT_MS,
         )
-        if _contains_cue(query, _SEMANTIC_CUES)
+        if company_rag_enabled and _contains_cue(query, _SEMANTIC_CUES)
         else SemanticMemoryRead(enabled=False)
     )
     return MemoryReadOptions(
@@ -92,6 +94,17 @@ def select_memory_reads(request: ChatMessageRequest) -> MemoryReadOptions:
         long_term=True,
         episodic=episodic,
         semantic=semantic,
+    )
+
+
+def clarification_memory_reads() -> MemoryReadOptions:
+    """Read conversational/profile context without retrieval-capable sources."""
+
+    return MemoryReadOptions(
+        short_term=True,
+        long_term=True,
+        episodic=EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=1),
+        semantic=SemanticMemoryRead(enabled=False),
     )
 
 
@@ -108,8 +121,7 @@ def _authorization_tokens(user_message: str) -> tuple[str, ...]:
     """Normalize the validated full message without applying retrieval's length cap."""
 
     return tuple(
-        token.strip(punctuation)
-        for token in " ".join(user_message.split()).casefold().split()
+        token.strip(punctuation) for token in " ".join(user_message.split()).casefold().split()
     )
 
 

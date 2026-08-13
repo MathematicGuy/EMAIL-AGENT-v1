@@ -65,9 +65,7 @@ class RedisRunQueue:
         self._redis = redis
         self._stream = stream
 
-    async def enqueue_digest_run(
-        self, run_id: str, *, user_id: str, tenant_id: str
-    ) -> None:
+    async def enqueue_digest_run(self, run_id: str, *, user_id: str, tenant_id: str) -> None:
         await self._redis.xadd(
             self._stream,
             {
@@ -125,9 +123,7 @@ class RedisRunConsumer:
 
     async def ensure_group(self) -> None:
         try:
-            await self._redis.xgroup_create(
-                self._stream, self._group, id="0", mkstream=True
-            )
+            await self._redis.xgroup_create(self._stream, self._group, id="0", mkstream=True)
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
@@ -165,9 +161,7 @@ class RedisRunConsumer:
                     except Exception:
                         # Independent of the sweep: durable completion
                         # events keep flowing even if Redis is degraded.
-                        logger.exception(
-                            "Lifecycle publication failed; retrying next interval"
-                        )
+                        logger.exception("Lifecycle publication failed; retrying next interval")
                 next_sweep = time.monotonic() + self._sweep_interval_seconds
             await self.deliver_once()
         logger.info("Run consumer %s stopped", self._consumer)
@@ -185,9 +179,7 @@ class RedisRunConsumer:
     async def _reenqueue(self, run: DigestRun) -> None:
         # Idempotent by design: if the original message merely arrived
         # late, the CAS claim keeps execution single.
-        await self._queue.enqueue_digest_run(
-            run.id, user_id=run.user_id, tenant_id=LOCAL_TENANT_ID
-        )
+        await self._queue.enqueue_digest_run(run.id, user_id=run.user_id, tenant_id=LOCAL_TENANT_ID)
 
     async def claim_stale(self) -> int:
         """Reclaim messages idle past the threshold; dead-letter exhausted ones."""

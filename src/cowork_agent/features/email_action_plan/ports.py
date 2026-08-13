@@ -41,9 +41,7 @@ class MailboxPort(Protocol):
         self, connection_id: str, thread_id: str
     ) -> Sequence[EphemeralEmailEnvelope]: ...
 
-    async def get_message_received_at(
-        self, connection_id: str, message_id: str
-    ) -> datetime:
+    async def get_message_received_at(self, connection_id: str, message_id: str) -> datetime:
         """Return Gmail's internal receipt time without fetching an email body."""
         ...
 
@@ -220,9 +218,7 @@ class SemanticMemoryPort(Protocol):
     retrieve-and-answer operation: generation stays in the Generator.
     """
 
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse: ...
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse: ...
 
 
 TERMINAL_STATUSES = frozenset({RunStatus.SUCCEEDED, RunStatus.PARTIAL, RunStatus.FAILED})

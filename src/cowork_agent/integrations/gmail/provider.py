@@ -236,9 +236,7 @@ class GmailMailboxAdapter:
         response = await self._call(execute)
         return tuple(_parse_message(item) for item in response.get("messages", ()))
 
-    async def get_message_received_at(
-        self, connection_id: str, message_id: str
-    ) -> datetime:
+    async def get_message_received_at(self, connection_id: str, message_id: str) -> datetime:
         """Read only the internal Gmail timestamp needed for deterministic ordering."""
         service = await self._service(connection_id)
 
@@ -324,16 +322,22 @@ class GmailMailboxAdapter:
                 raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
             except HttpError as exc:
                 status = getattr(exc.resp, "status", None)
-                logger.warning("Gmail API HttpError (status=%s, attempt=%d/%d): %s", status, attempt, _RETRY_ATTEMPTS, exc)
+                logger.warning(
+                    "Gmail API HttpError (status=%s, attempt=%d/%d): %s",
+                    status,
+                    attempt,
+                    _RETRY_ATTEMPTS,
+                    exc,
+                )
                 if status in {401, 403}:
-                    raise MailboxReauthRequiredError(
-                        "Gmail authorization must be renewed"
-                    ) from exc
+                    raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
                 if attempt >= _RETRY_ATTEMPTS or status not in _RETRYABLE_STATUSES:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))
             except TransportError as exc:
-                logger.warning("Gmail API TransportError (attempt=%d/%d): %s", attempt, _RETRY_ATTEMPTS, exc)
+                logger.warning(
+                    "Gmail API TransportError (attempt=%d/%d): %s", attempt, _RETRY_ATTEMPTS, exc
+                )
                 if attempt >= _RETRY_ATTEMPTS:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))

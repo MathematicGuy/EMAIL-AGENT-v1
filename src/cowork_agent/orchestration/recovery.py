@@ -47,9 +47,7 @@ async def sweep_stuck_runs(
     recovered = 0
     for run in stuck:
         if run.status is RunStatus.RUNNING:
-            if not await runs.reset_stuck_run(
-                run.id, started_before=now - running_timeout
-            ):
+            if not await runs.reset_stuck_run(run.id, started_before=now - running_timeout):
                 continue  # another sweeper or worker got there first
             logger.warning("Recovered stuck running run %s back to queued", run.id)
             recovered += 1

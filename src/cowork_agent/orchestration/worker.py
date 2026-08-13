@@ -18,6 +18,9 @@ from cowork_agent.config import (
     GeminiSettings,
     GmailSettings,
     GroqSettings,
+    KnowledgeIngestionSettings,
+    QdrantSettings,
+    UserDocumentsSettings,
     database_url,
     redis_url,
 )
@@ -56,6 +59,7 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 
 logger = logging.getLogger(__name__)
 
+
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
     # check in main() must run even without them installed.
@@ -73,15 +77,15 @@ async def run_worker() -> None:
     pool = AsyncConnectionPool(database_url(), min_size=1, max_size=4, open=False)
     await pool.open(wait=True)
     redis_client = AsyncRedis.from_url(redis_url(), decode_responses=True)
+    document_qdrant = None
+    retention = None
     try:
         await apply_migrations(pool)
         runs = PostgresRunRepository(pool)
         tasks = PostgresTaskRepository(pool)
         outbox = PostgresOutboxRepository(pool)
         settings = GmailSettings.from_env()
-        connection_repository = SQLiteMailboxConnectionRepository(
-            settings.connection_db_path
-        )
+        connection_repository = SQLiteMailboxConnectionRepository(settings.connection_db_path)
         await connection_repository.initialize()
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         classifier: RouteClassifierPort
@@ -128,9 +132,87 @@ async def run_worker() -> None:
             completion_outbox=outbox,
             publisher=LifecycleEventPublisher(outbox, LoggingTraceSink()),
         )
-        logger.info("Worker ready; consuming the durable run queue")
-        await consumer.run_forever()
+        consumers = [consumer.run_forever()]
+        user_documents = UserDocumentsSettings.from_env()
+        if user_documents.enabled:
+            from qdrant_client import AsyncQdrantClient
+
+            from cowork_agent.integrations.project_documents.encrypted_store import (
+                EncryptedDocumentStore,
+            )
+            from cowork_agent.integrations.project_documents.ingestion import (
+                ProjectDocumentIngestionService,
+            )
+            from cowork_agent.integrations.project_documents.mistral_ocr import MistralOcrClient
+            from cowork_agent.integrations.project_documents.qdrant_store import (
+                QdrantProjectDocumentStore,
+            )
+            from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+            from cowork_agent.orchestration.document_ingestion import (
+                RedisDocumentIngestionConsumer,
+            )
+            from cowork_agent.orchestration.document_retention import DocumentRetentionManager
+            from cowork_agent.persistence.repositories.project_documents import (
+                PostgresProjectDocumentRepository,
+                PostgresProjectRepository,
+            )
+
+            qdrant_settings = QdrantSettings.from_env()
+            if not qdrant_settings.enabled:
+                raise ValueError("Qdrant must be enabled for Project documents")
+            projects = PostgresProjectRepository(pool)
+            documents = PostgresProjectDocumentRepository(pool)
+            store = EncryptedDocumentStore(user_documents.store_path, user_documents.encryption_key)
+            document_qdrant = AsyncQdrantClient(
+                url=qdrant_settings.url, api_key=qdrant_settings.api_key or None
+            )
+            vectors = QdrantProjectDocumentStore(
+                client=document_qdrant,
+                collection_name=user_documents.collection_name,
+                embedder=GeminiEmbeddingAdapter(
+                    GeminiSettings.from_env(), model=user_documents.embedding_model
+                ),
+                projects=projects,
+                documents=documents,
+            )
+            ocr_settings = KnowledgeIngestionSettings.from_env()
+            ingestion = ProjectDocumentIngestionService(
+                documents=documents,
+                store=store,
+                vectors=vectors,
+                ocr=MistralOcrClient(
+                    api_key=ocr_settings.api_key,
+                    model=ocr_settings.model,
+                    timeout_seconds=ocr_settings.timeout_seconds,
+                    max_attempts=ocr_settings.max_attempts,
+                ),
+                max_pages=user_documents.max_pages,
+            )
+
+            async def process_document(document: object) -> object:
+                from cowork_agent.domain.project_documents import ProjectDocument
+
+                if not isinstance(document, ProjectDocument):
+                    raise TypeError("invalid Project document job")
+                return await ingestion.process(document, worker_id=f"worker-{os.getpid()}")
+
+            document_consumer = RedisDocumentIngestionConsumer(
+                redis=redis_client,
+                documents=documents,
+                process=process_document,
+                stream_name=user_documents.ingestion_stream,
+            )
+            retention = DocumentRetentionManager(documents=documents, store=store, vectors=vectors)
+            await retention.run_once()
+            retention.start()
+            consumers.append(document_consumer.run_forever())
+        logger.info("Worker ready; consuming durable queues")
+        await asyncio.gather(*consumers)
     finally:
+        if retention is not None:
+            await retention.close()
+        if document_qdrant is not None:
+            await document_qdrant.close()
         await redis_client.aclose()
         await pool.close()
 

@@ -7,7 +7,7 @@
 **Agent pattern:** Multi-turn Chat Controller with typed memory<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
-**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../../tasks/adr/ADR-004-chat-native-task-episodes.md), extended by [ADR-006 — User-document plane and classifier-gated retrieval](../../tasks/adr/ADR-006-user-document-plane-and-classifier-routing.md) (§21)<br>
+**Decision authority:** [ADR-004 — Chat-native TaskEpisodes](../../tasks/adr/ADR-004-chat-native-task-episodes.md), extended by [ADR-007 — Project-scoped classifier-gated user documents](../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md) (§21)<br>
 **Primary use case:** Sustain grounded multi-turn chat with safe, selectively retrieved memory. The standalone PRD-v1 Email Agent remains a separate, stateless, memory-free product flow.
 
 ---
@@ -899,12 +899,12 @@ target architecture below is shaped by them.
 ### 6.1.4 What the current module is missing for "chat with the PDF"
 
 The company corpus described above cannot serve the user-document feature as
-specified in [PRD-v4](../../tasks/prds/PRD-v4-chat-with-user-documents.md), the
+specified in [PRD-v3](../../tasks/prds/PRD-v3-chat-with-user-documents.md), the
 [SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md), and §21. The gap is
 not tuning; the required scope key, lifecycle, and routing authority do not exist
 in the current module.
 
-| Required by SPEC / PRD-v4 | Current state | Blocking |
+| Required by SPEC / PRD-v3 | Current state | Blocking |
 |---|---|---|
 | Scope key `tenant_id` + `user_id` + `document_id` | The Qdrant filter carries `tenant_id` and `document_status` only. There is no `user_id` field to filter on | Yes — cross-user isolation is not expressible, so no user document can be indexed safely |
 | A separate user-document collection | One company collection. Chunks would co-mingle with curated corpus content | Yes |
@@ -1972,8 +1972,12 @@ Implement the accepted target in this order:
 # 21. Accepted extension — AI Chat with user documents ("chat with the PDF")
 
 **Status:** Accepted<br>
-**Decision authority:** [ADR-006 — User-document plane and classifier-gated retrieval](../../tasks/adr/ADR-006-user-document-plane-and-classifier-routing.md)<br>
-**Product authority:** [PRD-v4](../../tasks/prds/PRD-v4-chat-with-user-documents.md), [SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md)<br>
+**Decision authority:** [ADR-007 — Project-scoped classifier-gated user documents](../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)<br>
+**Product authority:** [PRD-v3](../../tasks/prds/PRD-v3-chat-with-user-documents.md), [SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md)<br>
+
+> ADR-007 supersedes the user-wide/no-container baseline in this section. The accepted
+> hierarchy is `tenant → user → project → documents + chat sessions`; classifier-gated
+> routing and the separate company/document planes remain unchanged.
 **Extends:** §20, the accepted ADR-004 chat-native target<br>
 **Replaces:** the withdrawn project-scoped document design (Project container,
 two coexisting document planes, always-on retrieval)<br>

@@ -82,9 +82,7 @@ class DeterministicPairedScorer:
     """
 
     def __init__(self, dataset: tuple[DatasetEntry, ...] = SYNTHETIC_DATASET) -> None:
-        self._labels: dict[str, CaseLabels] = {
-            entry.case_id: entry.labels for entry in dataset
-        }
+        self._labels: dict[str, CaseLabels] = {entry.case_id: entry.labels for entry in dataset}
 
     def score(self, case_id: str, *, memory_enabled: bool) -> PairedCaseScores:
         if case_id not in _BASE_DISABLED:
@@ -98,9 +96,7 @@ class DeterministicPairedScorer:
             )
         labels = self._labels[case_id]
         continuity_bonus = (
-            0.15
-            if (labels.expects_episodic_context or labels.expects_preference_context)
-            else 0.08
+            0.15 if (labels.expects_episodic_context or labels.expects_preference_context) else 0.08
         )
         grounded_bonus = 0.12 if labels.expects_company_evidence else 0.06
         citation_bonus = 0.12 if labels.expects_company_evidence else 0.06

@@ -18,9 +18,7 @@ class TransformedQuery:
 class QueryTransformerPort(Protocol):
     """Port interface for query transformation providers."""
 
-    async def transform(
-        self, query: str, knowledge_gaps: tuple[str, ...] = ()
-    ) -> TransformedQuery:
+    async def transform(self, query: str, knowledge_gaps: tuple[str, ...] = ()) -> TransformedQuery:
         """Transform a raw query into expanded queries and hypothetical document."""
         ...
 
@@ -32,9 +30,7 @@ class RuleBasedQueryTransformer:
         self._enable_hyde = enable_hyde
         self._num_expansions = num_expansions
 
-    async def transform(
-        self, query: str, knowledge_gaps: tuple[str, ...] = ()
-    ) -> TransformedQuery:
+    async def transform(self, query: str, knowledge_gaps: tuple[str, ...] = ()) -> TransformedQuery:
         expansions = [query]
         for gap in knowledge_gaps:
             if gap and gap not in expansions:

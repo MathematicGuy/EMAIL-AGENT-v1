@@ -75,9 +75,7 @@ async def _build_qdrant_memory(
 ) -> SemanticMemoryPort:
     client = AsyncQdrantClient(url=settings.url, api_key=settings.api_key or None)
     await _ensure_corpus(client, settings, embedder)
-    logger.info(
-        "Semantic memory backed by Qdrant collection %s", settings.collection_name
-    )
+    logger.info("Semantic memory backed by Qdrant collection %s", settings.collection_name)
     return QdrantSemanticMemory(client, settings.collection_name, embedder)
 
 
