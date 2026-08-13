@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { waitForProjectDocument } from './api';
+import {
+  areProjectDocumentsEnabled,
+  uploadProjectDocument,
+  waitForProjectDocument,
+} from './api';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -52,5 +56,31 @@ describe('project document polling', () => {
     await vi.advanceTimersByTimeAsync(0);
     controller.abort();
     await rejected;
+  });
+});
+
+describe('project document availability and upload cancellation', () => {
+  it('keeps document controls fail-closed when health is degraded', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'degraded',
+      checks: { feature: 'enabled' },
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(areProjectDocumentsEnabled()).resolves.toBe(false);
+  });
+
+  it('cancels before registering an upload when the caller aborts', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(uploadProjectDocument(
+      'project-1',
+      new File(['%PDF-test'], 'policy.pdf', { type: 'application/pdf' }),
+      undefined,
+      controller.signal,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

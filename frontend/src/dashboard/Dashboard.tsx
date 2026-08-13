@@ -55,10 +55,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
   useEffect(() => {
     let active = true;
-    void areProjectDocumentsEnabled().then((enabled) => {
-      if (active) setProjectDocumentsEnabled(enabled);
-    });
-    return () => { active = false; };
+    const refreshDocumentHealth = () => {
+      void areProjectDocumentsEnabled().then((enabled) => {
+        if (active) setProjectDocumentsEnabled(enabled);
+      });
+    };
+    refreshDocumentHealth();
+    const timer = window.setInterval(refreshDocumentHealth, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const handleSelectProject = (projectId: string) => {

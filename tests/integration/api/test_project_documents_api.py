@@ -86,6 +86,10 @@ class Projects:
         project = await self.require_project(principal, project_id)
         return None if project is None else (project, None, ())
 
+    async def worker_heartbeat_is_fresh(self, *, max_age_seconds: int) -> bool:
+        assert max_age_seconds == 120
+        return True
+
 
 class Storage:
     async def create_signed_upload_url(self, object_key: str) -> str:
@@ -106,6 +110,8 @@ def test_canonical_signed_upload_status_download_and_authorization() -> None:
         app.include_router(create_project_router())
         app.state.project_repository = Projects()
         app.state.private_storage = Storage()
+        app.state.project_document_vectors = object()
+        app.state.chat_routing_service = object()
         app.state.user_documents_settings = SimpleNamespace(
             enabled=True,
             retention_days=30,

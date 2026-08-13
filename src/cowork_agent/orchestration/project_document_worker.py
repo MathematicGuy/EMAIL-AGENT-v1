@@ -38,6 +38,16 @@ class ProjectDocumentRepository(Protocol):
         self, document_id: str, *, status: str, error_code: str | None = None
     ) -> bool: ...
 
+    async def retry_job(
+        self,
+        document_id: str,
+        *,
+        from_status: str,
+        error_code: str,
+        max_attempts: int,
+        delay_seconds: int,
+    ) -> bool: ...
+
 
 class ProjectDocumentCleanupRepository(Protocol):
     async def claim_cleanup(self, document_id: str) -> ProjectDocument | None: ...
@@ -100,12 +110,18 @@ class ProjectDocumentIngestionWorker:
         vectors: ProjectVectorStore,
         *,
         max_pages: int = 100,
+        max_attempts: int = 3,
+        retry_delay_seconds: int = 30,
     ) -> None:
+        if max_attempts < 1 or retry_delay_seconds < 1:
+            raise ValueError("ingestion retry limits must be positive")
         self._repository = repository
         self._storage = storage
         self._extractor = extractor
         self._vectors = vectors
         self._max_pages = max_pages
+        self._max_attempts = max_attempts
+        self._retry_delay_seconds = retry_delay_seconds
 
     async def execute(self, document_id: str) -> None:
         document = await self._repository.claim_job(document_id)
@@ -177,23 +193,41 @@ class ProjectDocumentIngestionWorker:
                 ):
                     await self._repository.finish_job(document.id, status="completed")
                 else:
-                    await self._delete_vectors(document)
+                    await self._delete_vectors_best_effort(document)
         except ProjectDocumentExtractionError as exc:
             if vectors_written:
-                await self._delete_vectors(document)
+                await self._delete_vectors_best_effort(document)
             await self._fail(document.id, state, exc.code)
         except StorageUnavailable:
             if vectors_written:
-                await self._delete_vectors(document)
-            await self._fail(document.id, state, "source_download_failed")
+                await self._delete_vectors_best_effort(document)
+            await self._retry_or_fail(document.id, state, "source_download_failed")
         except (OSError, ValueError):
             if vectors_written:
-                await self._delete_vectors(document)
-            await self._fail(document.id, state, "ingestion_failed")
+                await self._delete_vectors_best_effort(document)
+            if state == "indexing":
+                await self._retry_or_fail(document.id, state, "index_unavailable")
+            else:
+                await self._fail(document.id, state, "ingestion_failed")
         except Exception:
             if vectors_written:
-                await self._delete_vectors(document)
-            await self._fail(document.id, state, "ingestion_dependency_failed")
+                await self._delete_vectors_best_effort(document)
+            await self._retry_or_fail(
+                document.id,
+                state,
+                "index_unavailable" if state == "indexing" else "source_download_failed",
+            )
+
+    async def _retry_or_fail(self, document_id: str, state: str, code: str) -> None:
+        if await self._repository.retry_job(
+            document_id,
+            from_status=state,
+            error_code=code,
+            max_attempts=self._max_attempts,
+            delay_seconds=self._retry_delay_seconds,
+        ):
+            return
+        await self._fail(document_id, state, code)
 
     async def _fail(self, document_id: str, state: str, code: str) -> None:
         if await self._repository.transition_document(
@@ -208,6 +242,14 @@ class ProjectDocumentIngestionWorker:
             project_id=document.project_id,
             document_id=document.id,
         )
+
+    async def _delete_vectors_best_effort(self, document: ProjectDocument) -> None:
+        try:
+            await self._delete_vectors(document)
+        except Exception:
+            # PostgreSQL readiness remains authoritative. A deterministic retry
+            # overwrites the same point IDs; durable deletion also purges them.
+            return
 
 
 class ProjectDocumentCleanupWorker:

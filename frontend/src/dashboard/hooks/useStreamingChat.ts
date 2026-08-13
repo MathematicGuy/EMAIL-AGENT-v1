@@ -232,7 +232,7 @@ export function useStreamingChat(
         setSelectedAttachments((current) => current.map((item) =>
           item.id === id ? { ...item, status } : item
         ));
-      }).then(async (document) => {
+      }, pollController.signal).then(async (document) => {
         if (pollController.signal.aborted) return;
         setSelectedAttachments((current) => current.map((item) =>
           item.id === id ? {

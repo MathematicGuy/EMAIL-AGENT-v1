@@ -488,6 +488,70 @@ class PostgresProjectRepository:
             )
             return await cursor.fetchone() is not None
 
+    async def retry_job(
+        self,
+        document_id: str,
+        *,
+        from_status: str,
+        error_code: str,
+        max_attempts: int,
+        delay_seconds: int,
+    ) -> bool:
+        """Release a transiently failed ingestion job when attempts remain."""
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                cursor = await connection.execute(
+                    """
+                    UPDATE document_ingestion_jobs
+                    SET status = 'queued', claimed_at = NULL,
+                        available_at = now() + (%s * interval '1 second'),
+                        error_code = %s, updated_at = now()
+                    WHERE document_id = %s
+                      AND status IN ('extracting', 'indexing')
+                      AND attempts < %s
+                    RETURNING document_id
+                    """,
+                    (delay_seconds, error_code, document_id, max_attempts),
+                )
+                if await cursor.fetchone() is None:
+                    return False
+                cursor = await connection.execute(
+                    """
+                    UPDATE project_documents
+                    SET status = 'received', error_code = NULL, updated_at = now()
+                    WHERE id = %s AND status = %s
+                    RETURNING id
+                    """,
+                    (document_id, from_status),
+                )
+                if await cursor.fetchone() is None:
+                    raise RuntimeError("document state changed while scheduling ingestion retry")
+                return True
+
+    async def record_document_worker_heartbeat(self) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """
+                INSERT INTO service_heartbeats (service_name, heartbeat_at)
+                VALUES ('project_document_worker', now())
+                ON CONFLICT (service_name) DO UPDATE
+                SET heartbeat_at = EXCLUDED.heartbeat_at
+                """
+            )
+
+    async def worker_heartbeat_is_fresh(self, *, max_age_seconds: int) -> bool:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT heartbeat_at > now() - (%s * interval '1 second')
+                FROM service_heartbeats
+                WHERE service_name = 'project_document_worker'
+                """,
+                (max_age_seconds,),
+            )
+            row = await cursor.fetchone()
+        return bool(row and row[0])
+
     async def begin_deletion(
         self, principal: VerifiedPrincipal, project_id: str, document_id: str
     ) -> ProjectDocument | None:

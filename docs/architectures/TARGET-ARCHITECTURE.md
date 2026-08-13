@@ -2116,12 +2116,10 @@ Rules:
 - Extraction reuses the PRD-v1 `PdfInspector` and `DocxExtractor` and their size,
   page, and encryption guards. Because `PdfInspector` shells out to local
   commands, extraction runs inside the job, never on the request path.
-- **OCR is enabled.** Pages that `PdfInspector` reports as needing OCR are sent to
-  the configured Mistral OCR provider, bounded by the existing `max_ocr_pages`,
-  `timeout_seconds`, and `max_attempts` settings. Native pages are never
-  re-processed by OCR. Exceeding the page cap fails as
-  `ocr_page_limit_exceeded`; a provider failure after bounded retries fails as
-  `ocr_failed`. Partial or empty extraction output is never indexed.
+- **OCR is deferred in the current increment.** Pages that `PdfInspector` reports
+  as needing OCR fail closed as `ocr_unavailable`; native pages from a mixed PDF
+  are not indexed alone. Mistral OCR, its page cap, timeout, and retries remain a
+  later increment.
 - The upload responds `202` and the job runs off the request path. A chat turn
   never blocks on ingestion.
 - Upload is a three-step private-storage flow: register metadata, PUT bytes through
@@ -2381,8 +2379,16 @@ Project Document panel while disabled.
 
 Client polling has a five-minute default deadline and accepts an `AbortSignal`.
 Removing an attachment, switching Project, or unmounting cancels timers and the
-in-flight fetch. The panel stops its own refresh loop at the same deadline and
-allows deletion while a document is `received`, `extracting`, or `indexing`.
+full register/PUT/complete/poll chain. The panel stops its own refresh loop at the
+same deadline and allows deletion while a document is `received`, `extracting`,
+or `indexing`.
+
+`document-health` is ready only while PostgreSQL, Storage, embeddings, Qdrant,
+classifier, and a fresh document-worker heartbeat are ready. A degraded response
+is `503`, keeps document controls fail-closed, and is rechecked periodically.
+Document-plane configuration or Qdrant initialization failure never blocks the
+core API lifespan; `/health`, chat without document selection, and email remain
+available.
 
 Canonical release defaults:
 
@@ -2401,8 +2407,8 @@ USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=3000
 |---|---|
 | Validation rejection | `failed(reason_code)` at upload; no job, no retained bytes beyond the failure record |
 | Extraction failure | `failed`; the document is never indexed and chat is unaffected |
-| OCR provider outage | bounded retries, then `failed(ocr_failed)`; native-text pages are not indexed alone |
-| Embedding provider outage | remain `indexing`, bounded retries with backoff, then `failed(embedding_unavailable)` |
+| OCR-required PDF | `failed(ocr_unavailable)` until the deferred OCR increment; native-text pages are not indexed alone |
+| Embedding or Qdrant ingestion outage | bounded durable retries with backoff, then `failed(index_unavailable)` |
 | User-document feature disabled | document API returns `503` and frontend hides its document surface; chat/email continue |
 | Browser processing poll stalls | abort at five minutes, display timeout, retain delete control for the processing document |
 | Qdrant unavailable at query time | one retry, then an empty result with `degraded: true`; the turn states that document evidence is unavailable |

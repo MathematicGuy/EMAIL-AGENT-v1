@@ -94,6 +94,7 @@ def create_project_router() -> APIRouter:
         project_id: str, payload: _DocumentUploadPayload, request: Request
     ) -> dict[str, object]:
         _require_user_documents_enabled(request)
+        await _require_user_documents_ready(request)
         principal = await _principal(request)
         if await _projects(request).require_project(principal, project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -150,6 +151,7 @@ def create_project_router() -> APIRouter:
         project_id: str, document_id: str, request: Request
     ) -> dict[str, str]:
         _require_user_documents_enabled(request)
+        await _require_user_documents_ready(request)
         principal = await _principal(request)
         document = await _projects(request).require_document(
             principal, project_id, document_id
@@ -232,6 +234,19 @@ def _require_user_documents_enabled(request: Request) -> None:
     settings = getattr(request.app.state, "user_documents_settings", None)
     if settings is None or not bool(getattr(settings, "enabled", False)):
         raise HTTPException(status_code=503, detail="User documents are disabled")
+
+
+async def _require_user_documents_ready(request: Request) -> None:
+    if (
+        getattr(request.app.state, "private_storage", None) is None
+        or getattr(request.app.state, "project_document_vectors", None) is None
+        or getattr(request.app.state, "chat_routing_service", None) is None
+    ):
+        raise HTTPException(status_code=503, detail="Project document plane unavailable")
+    repository = _projects(request)
+    heartbeat = getattr(repository, "worker_heartbeat_is_fresh", None)
+    if heartbeat is None or not await heartbeat(max_age_seconds=120):
+        raise HTTPException(status_code=503, detail="Project document worker unavailable")
 
 
 async def _owned_document(request: Request, project_id: str, document_id: str) -> ProjectDocument:

@@ -337,6 +337,23 @@ class CanonicalProjectDocumentRetriever:
         self._timeout_seconds = timeout_ms / 1000
 
     async def retrieve(self, request: ProjectDocumentQuery) -> ProjectDocumentResponse:
+        try:
+            return await asyncio.wait_for(
+                self._retrieve_with_retries(request),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError:
+            return ProjectDocumentResponse(
+                (), degraded=True, reason_code="retrieval_timeout"
+            )
+        except Exception:
+            return ProjectDocumentResponse(
+                (), degraded=True, reason_code="retrieval_unavailable"
+            )
+
+    async def _retrieve_with_retries(
+        self, request: ProjectDocumentQuery
+    ) -> ProjectDocumentResponse:
         ready = await self._repository.list_ready_for_scope(
             request.tenant_id,
             request.user_id,
@@ -350,33 +367,18 @@ class CanonicalProjectDocumentRetriever:
         if not document_ids:
             return ProjectDocumentResponse(())
         last_error: Exception | None = None
-        try:
-            query_vector = await asyncio.wait_for(
-                self._vectors.embed_query(request.query), timeout=self._timeout_seconds
-            )
-        except Exception as exc:
-            return ProjectDocumentResponse(
-                (),
-                degraded=True,
-                reason_code=(
-                    "retrieval_timeout" if isinstance(exc, TimeoutError)
-                    else "retrieval_unavailable"
-                ),
-            )
+        query_vector = await self._vectors.embed_query(request.query)
         for _attempt in range(2):
             try:
-                evidence = await asyncio.wait_for(
-                    self._vectors.retrieve_vector(
-                        vector=query_vector,
-                        workspace_id=request.tenant_id,
-                        user_id=request.user_id,
-                        project_id=request.project_id,
-                        now=datetime.now(UTC),
-                        document_ids=document_ids,
-                        limit=self._top_k,
-                        min_score=self._min_score,
-                    ),
-                    timeout=self._timeout_seconds,
+                evidence = await self._vectors.retrieve_vector(
+                    vector=query_vector,
+                    workspace_id=request.tenant_id,
+                    user_id=request.user_id,
+                    project_id=request.project_id,
+                    now=datetime.now(UTC),
+                    document_ids=document_ids,
+                    limit=self._top_k,
+                    min_score=self._min_score,
                 )
                 latest_ready = await self._repository.list_ready_for_scope(
                     request.tenant_id,
@@ -409,15 +411,8 @@ class CanonicalProjectDocumentRetriever:
                 )
             except Exception as exc:
                 last_error = exc
-        return ProjectDocumentResponse(
-            (),
-            degraded=True,
-            reason_code=(
-                "retrieval_timeout"
-                if isinstance(last_error, TimeoutError)
-                else "retrieval_unavailable"
-            ),
-        )
+        assert last_error is not None
+        raise last_error
 
 
 def _require_scope(workspace_id: str, user_id: str, project_id: str) -> None:

@@ -158,6 +158,19 @@ def create_chat_router() -> APIRouter:
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
         if message.document_ids:
+            settings = getattr(request.app.state, "user_documents_settings", None)
+            if settings is None or not bool(getattr(settings, "enabled", False)):
+                raise HTTPException(status_code=503, detail="User documents are disabled")
+            if getattr(request.app.state, "project_document_vectors", None) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Project document retrieval unavailable",
+                )
+            if getattr(request.app.state, "chat_routing_service", None) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Project document routing unavailable",
+                )
             repository = getattr(request.app.state, "project_repository", None)
             if repository is None:
                 raise HTTPException(status_code=404, detail="Document not found")

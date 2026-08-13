@@ -23,15 +23,28 @@ export const ProjectDocumentPanel: React.FC<Props> = ({ projectId, projectName }
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pollingStartedAtRef = useRef<number | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
-      setDocuments(await listProjectDocuments(projectId));
+      setDocuments(await listProjectDocuments(projectId, controller.signal));
       setError(null);
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : documentText('listUnavailable'));
+    } finally {
+      if (refreshAbortRef.current === controller) refreshAbortRef.current = null;
     }
+  }, [projectId]);
+
+  useEffect(() => () => {
+    refreshAbortRef.current?.abort();
+    uploadAbortRef.current?.abort();
   }, [projectId]);
 
   useEffect(() => {
@@ -74,14 +87,23 @@ export const ProjectDocumentPanel: React.FC<Props> = ({ projectId, projectName }
   }, [projectId]);
 
   const upload = async (files: File[]) => {
+    uploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     setUploading(true);
     try {
-      for (const file of files) await uploadProjectDocument(projectId, file);
+      for (const file of files) {
+        await uploadProjectDocument(projectId, file, undefined, controller.signal);
+      }
       await refresh();
     } catch (cause) {
+      if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : documentText('uploadFailed'));
     } finally {
-      setUploading(false);
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+      }
     }
   };
 

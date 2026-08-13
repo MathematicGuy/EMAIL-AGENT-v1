@@ -6,6 +6,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 from qdrant_client import AsyncQdrantClient
@@ -78,6 +79,20 @@ class PostgresWorkerMaintenance:
         await sweep_stuck_runs(self._runs, now=now)
         await recover_stale_document_jobs(self._documents, now=now)
         await self._publisher.publish_pending()
+
+
+class HeartbeatRepository(Protocol):
+    async def record_document_worker_heartbeat(self) -> None: ...
+
+
+class ProjectDocumentWorkerHeartbeat:
+    """Publish liveness only from a fully composed document poller."""
+
+    def __init__(self, projects: HeartbeatRepository) -> None:
+        self._projects = projects
+
+    async def run(self) -> None:
+        await self._projects.record_document_worker_heartbeat()
 
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
@@ -173,8 +188,10 @@ async def run_worker() -> None:
             from cowork_agent.integrations.rag.project_documents import ProjectDocumentVectorStore
             from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 
-            qdrant = QdrantSettings.from_env()
-            if qdrant.enabled:
+            try:
+                qdrant = QdrantSettings.from_env()
+                if not qdrant.enabled:
+                    raise ValueError("Qdrant is not configured")
                 storage = SupabaseStorageSettings.from_env()
                 embedding = GeminiEmbeddingSettings.from_env()
                 storage_client = httpx.AsyncClient(timeout=30.0)
@@ -188,7 +205,10 @@ async def run_worker() -> None:
                     GeminiEmbeddingAdapter(embedding),
                     vector_size=embedding.dimensions,
                 )
-                await document_vectors.ensure_collection()
+                await asyncio.wait_for(
+                    document_vectors.ensure_collection(),
+                    timeout=document_settings.retrieval_timeout_ms / 1000,
+                )
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
                     private_storage,
@@ -202,14 +222,15 @@ async def run_worker() -> None:
                 document_poller = PostgresPoller(
                     CallableJobSource(projects.next_claimable_job),
                     document_worker,
+                    maintenance=ProjectDocumentWorkerHeartbeat(projects),
                 )
                 cleanup_poller = PostgresPoller(
                     CallableJobSource(projects.next_claimable_cleanup),
                     cleanup_worker,
                 )
-            else:
-                logger.warning(
-                    "Project document polling is disabled because Qdrant is not configured"
+            except Exception:
+                logger.exception(
+                    "Project document polling is degraded; digest polling remains online"
                 )
         logger.info("Worker ready; polling durable Postgres jobs")
         pollers = [digest_poller.run_forever()]

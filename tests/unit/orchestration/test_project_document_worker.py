@@ -34,6 +34,9 @@ class Repository:
         self.finished.append({"document_id": document_id, **kwargs})
         return True
 
+    async def retry_job(self, document_id: str, **kwargs: object) -> bool:
+        raise AssertionError(f"unexpected retry for {document_id}: {kwargs}")
+
 
 class Storage:
     async def download_to(self, object_key: str, target: Path) -> None:
@@ -82,5 +85,38 @@ def test_worker_verifies_then_indexes_private_document_without_persisting_text()
             "project_id": "project-1",
             "document_id": "document-1",
         }]
+
+    asyncio.run(scenario())
+
+
+def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
+    class RetryRepository(Repository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.retries: list[dict[str, object]] = []
+
+        async def retry_job(self, document_id: str, **kwargs: object) -> bool:
+            self.retries.append({"document_id": document_id, **kwargs})
+            return True
+
+    class FailingVectors(Vectors):
+        async def index(self, **kwargs: object) -> int:
+            del kwargs
+            raise OSError("qdrant unavailable")
+
+    async def scenario() -> None:
+        repository = RetryRepository()
+        worker = ProjectDocumentIngestionWorker(
+            repository, Storage(), Extractor(), FailingVectors()
+        )
+        await worker.execute("document-1")
+        assert repository.retries == [{
+            "document_id": "document-1",
+            "from_status": "indexing",
+            "error_code": "index_unavailable",
+            "max_attempts": 3,
+            "delay_seconds": 30,
+        }]
+        assert repository.finished == []
 
     asyncio.run(scenario())

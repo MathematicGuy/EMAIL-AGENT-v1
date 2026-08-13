@@ -283,3 +283,32 @@ def test_retriever_drops_evidence_deleted_during_vector_query() -> None:
         assert repository.calls == 2
 
     asyncio.run(scenario())
+
+
+def test_retriever_enforces_one_deadline_across_postgres_and_vector_work() -> None:
+    class SlowRepository:
+        async def list_ready_for_scope(self, *args: object, **kwargs: object) -> tuple[object, ...]:
+            del args, kwargs
+            await asyncio.sleep(1)
+            return ()
+
+    class Vectors:
+        async def embed_query(self, query: str) -> tuple[float, ...]:
+            raise AssertionError(f"embedding must not run after PostgreSQL timeout: {query}")
+
+    async def scenario() -> None:
+        retriever = CanonicalProjectDocumentRetriever(
+            SlowRepository(), Vectors(), top_k=5, min_score=0.2, timeout_ms=10  # type: ignore[arg-type]
+        )
+        response = await retriever.retrieve(
+            ProjectDocumentQuery(
+                tenant_id="workspace-1",
+                user_id="user-1",
+                project_id="project-1",
+                query="policy",
+            )
+        )
+        assert response.degraded is True
+        assert response.reason_code == "retrieval_timeout"
+
+    asyncio.run(scenario())

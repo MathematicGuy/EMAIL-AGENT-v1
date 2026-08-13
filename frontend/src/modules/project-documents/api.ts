@@ -56,19 +56,24 @@ export async function areProjectDocumentsEnabled(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/document-health`);
     const health = (await response.json()) as DocumentHealth;
-    return health.checks?.feature === 'enabled' && health.status !== 'disabled';
+    return response.ok && health.checks?.feature === 'enabled' && health.status === 'ready';
   } catch {
     return false;
   }
 }
 
-async function sha256(file: File): Promise<string> {
+async function sha256(file: File, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  signal?.throwIfAborted();
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function listProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
-  const response = await checked(await fetch(documentUrl(projectId)));
+export async function listProjectDocuments(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<ProjectDocument[]> {
+  const response = await checked(await fetch(documentUrl(projectId), { signal }));
   return ((await response.json()) as { documents: ProjectDocument[] }).documents;
 }
 
@@ -84,10 +89,11 @@ export async function getProjectDocument(
 export async function uploadProjectDocument(
   projectId: string,
   file: File,
-  onStatus?: (status: 'hashing' | 'uploading' | 'processing') => void
+  onStatus?: (status: 'hashing' | 'uploading' | 'processing') => void,
+  signal?: AbortSignal
 ): Promise<ProjectDocument> {
   onStatus?.('hashing');
-  const contentSha256 = await sha256(file);
+  const contentSha256 = await sha256(file, signal);
   const initiatedResponse = await checked(await fetch(documentUrl(projectId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -97,6 +103,7 @@ export async function uploadProjectDocument(
       byte_size: file.size,
       content_sha256: contentSha256,
     }),
+    signal,
   }));
   const initiated = (await initiatedResponse.json()) as UploadInitiated;
   if (initiated.upload_url) {
@@ -105,13 +112,15 @@ export async function uploadProjectDocument(
       method: 'PUT',
       headers: { 'Content-Type': file.type || mediaTypeFromName(file.name) },
       body: file,
+      signal,
     }));
     await checked(await fetch(`${documentUrl(projectId, initiated.document_id)}/complete`, {
       method: 'POST',
+      signal,
     }));
   }
   onStatus?.('processing');
-  return getProjectDocument(projectId, initiated.document_id);
+  return getProjectDocument(projectId, initiated.document_id, signal);
 }
 
 export async function waitForProjectDocument(

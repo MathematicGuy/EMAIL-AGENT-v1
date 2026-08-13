@@ -1,5 +1,6 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
+import asyncio
 import logging
 import os
 import sys
@@ -375,18 +376,22 @@ def create_app() -> FastAPI:
                 TokenCipher(settings.token_encryption_key),
             )
             user_documents_settings = UserDocumentsSettings.from_env()
-            if user_documents_settings.enabled and app.state.pg_pool is None:
-                raise ValueError("DATABASE_URL is required when user documents are enabled")
+            app.state.document_embeddings_configured = False
             if user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip():
-                storage_settings = SupabaseStorageSettings.from_env()
-                storage_client = httpx.AsyncClient(timeout=30.0)
-                app.state.private_storage_client = storage_client
-                app.state.private_storage = SupabasePrivateStorage(
-                    storage_settings.url,
-                    storage_settings.secret_key,
-                    storage_settings.bucket,
-                    storage_client,
-                )
+                try:
+                    storage_settings = SupabaseStorageSettings.from_env()
+                    storage_client = httpx.AsyncClient(timeout=30.0)
+                    app.state.private_storage_client = storage_client
+                    app.state.private_storage = SupabasePrivateStorage(
+                        storage_settings.url,
+                        storage_settings.secret_key,
+                        storage_settings.bucket,
+                        storage_client,
+                    )
+                except ValueError:
+                    logger.warning("Project document storage is unavailable")
+                    app.state.private_storage_client = None
+                    app.state.private_storage = None
             else:
                 app.state.private_storage_client = None
                 app.state.private_storage = None
@@ -424,34 +429,45 @@ def create_app() -> FastAPI:
             app.state.redis_client = None
             app.state.run_queue = None
 
-            if user_documents_settings.enabled:
-                qdrant_settings = QdrantSettings.from_env()
-                if not qdrant_settings.enabled:
-                    raise ValueError(
-                        "QDRANT_URL and QDRANT_ENABLED=true are required for user documents"
-                    )
-                from qdrant_client import AsyncQdrantClient
+            if user_documents_settings.enabled and app.state.project_repository is not None:
+                document_qdrant = None
+                try:
+                    qdrant_settings = QdrantSettings.from_env()
+                    if not qdrant_settings.enabled:
+                        raise ValueError("Qdrant is not configured")
+                    from qdrant_client import AsyncQdrantClient
 
-                document_embedding_settings = GeminiEmbeddingSettings.from_env()
-                document_qdrant = AsyncQdrantClient(
-                    url=qdrant_settings.url,
-                    api_key=qdrant_settings.api_key or None,
-                )
-                vector_store = ProjectDocumentVectorStore(
-                    document_qdrant,
-                    qdrant_settings.project_collection_name,
-                    GeminiEmbeddingAdapter(document_embedding_settings),
-                    vector_size=document_embedding_settings.dimensions,
-                )
-                await vector_store.ensure_collection()
-                app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                    app.state.project_repository,
-                    vector_store,
-                    top_k=user_documents_settings.top_k,
-                    min_score=user_documents_settings.min_score,
-                    timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                )
-                app.state.project_document_qdrant_client = document_qdrant
+                    document_embedding_settings = GeminiEmbeddingSettings.from_env()
+                    app.state.document_embeddings_configured = True
+                    document_qdrant = AsyncQdrantClient(
+                        url=qdrant_settings.url,
+                        api_key=qdrant_settings.api_key or None,
+                    )
+                    vector_store = ProjectDocumentVectorStore(
+                        document_qdrant,
+                        qdrant_settings.project_collection_name,
+                        GeminiEmbeddingAdapter(document_embedding_settings),
+                        vector_size=document_embedding_settings.dimensions,
+                    )
+                    await asyncio.wait_for(
+                        vector_store.ensure_collection(),
+                        timeout=user_documents_settings.retrieval_timeout_ms / 1000,
+                    )
+                    if app.state.project_repository is not None:
+                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
+                            app.state.project_repository,
+                            vector_store,
+                            top_k=user_documents_settings.top_k,
+                            min_score=user_documents_settings.min_score,
+                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
+                        )
+                    app.state.project_document_qdrant_client = document_qdrant
+                except Exception:
+                    logger.exception(
+                        "Project document vector store is unavailable; API remains online"
+                    )
+                    if document_qdrant is not None:
+                        await document_qdrant.close()
             app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
@@ -512,14 +528,13 @@ def create_app() -> FastAPI:
                         tool_axis_enabled=intent_settings.tool_axis_enabled,
                         sink=LoggingIntentRoutingSink(),
                     )
-                    if intent_settings.enabled and user_documents_settings.enabled
+                    if (
+                        intent_settings.enabled
+                        and user_documents_settings.enabled
+                        and app.state.ready_document_catalog is not None
+                    )
                     else None
                 )
-                if user_documents_settings.enabled and not intent_settings.enabled:
-                    raise RuntimeError(
-                        "CHAT_INTENT_CLASSIFIER_ENABLED=true is required when user "
-                        "documents are enabled"
-                    )
                 app.state.semantic_memory = semantic_memory
                 try:
                     app.state.knowledge_documents = load_corpus(
@@ -586,11 +601,12 @@ def create_app() -> FastAPI:
             "gemini_embeddings": "disabled",
             "ocr": "optional_unavailable",
             "classifier": "disabled",
-            "worker_queue": "postgres_polling",
+            "worker_queue": "unavailable",
         }
         if not settings.enabled:
             return JSONResponse({"status": "disabled", "checks": checks})
-        checks["gemini_embeddings"] = "configured"
+        if app.state.document_embeddings_configured:
+            checks["gemini_embeddings"] = "configured"
         checks["classifier"] = (
             "ready" if app.state.chat_routing_service is not None else "unavailable"
         )
@@ -621,11 +637,21 @@ def create_app() -> FastAPI:
                 checks["qdrant"] = "ready"
             except Exception:
                 checks["qdrant"] = "unavailable"
+        project_repository = app.state.project_repository
+        if project_repository is not None:
+            try:
+                if await project_repository.worker_heartbeat_is_fresh(
+                    max_age_seconds=120
+                ):
+                    checks["worker_queue"] = "ready"
+            except Exception:
+                checks["worker_queue"] = "unavailable"
         required = [
             "supabase_storage",
             "qdrant",
             "gemini_embeddings",
             "classifier",
+            "worker_queue",
         ]
         if pool is not None:
             required.append("postgresql")
