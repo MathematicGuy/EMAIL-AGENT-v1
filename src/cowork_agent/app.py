@@ -468,11 +468,15 @@ def create_app() -> FastAPI:
                     documents=app.state.project_document_repository,
                     store=document_store,
                     vectors=document_vectors,
-                    ocr=MistralOcrClient(
-                        api_key=ingestion_settings.api_key,
-                        model=ingestion_settings.model,
-                        timeout_seconds=ingestion_settings.timeout_seconds,
-                        max_attempts=ingestion_settings.max_attempts,
+                    ocr=(
+                        MistralOcrClient(
+                            api_key=ingestion_settings.api_key,
+                            model=ingestion_settings.model,
+                            timeout_seconds=ingestion_settings.timeout_seconds,
+                            max_attempts=ingestion_settings.max_attempts,
+                        )
+                        if ingestion_settings.ocr_enabled
+                        else None
                     ),
                     max_pages=user_documents_settings.max_pages,
                 )
