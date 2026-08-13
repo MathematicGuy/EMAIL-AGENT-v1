@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 
+import pytest
+
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -12,7 +14,9 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalRequest,
 )
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
-from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+from cowork_agent.integrations.rag.turbovec_memory import TURBOVEC_AVAILABLE, TurbovecSemanticMemory
+
+pytestmark = pytest.mark.skipif(not TURBOVEC_AVAILABLE, reason="turbovec package not installed")
 
 
 class DummyEmbedder:

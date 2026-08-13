@@ -10,6 +10,7 @@ digest runs.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
@@ -47,7 +48,7 @@ async def build_semantic_memory(
             documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
             turbovec_memory = TurbovecSemanticMemory(
                 documents,
-                GeminiEmbeddingAdapter(settings),
+                JinaEmbeddingAdapter(settings),
                 bit_width=4,
                 index_path=TURBOVEC_SNAPSHOT_PATH,
             )
@@ -57,7 +58,6 @@ async def build_semantic_memory(
                 TURBOVEC_SNAPSHOT_PATH,
             )
             return turbovec_memory
-            return await _build_qdrant_memory(resolved, JinaEmbeddingAdapter(settings))
         except Exception as exc:
             logger.warning(
                 "Turbovec memory setup failed (%s: %s); falling back...",
@@ -67,7 +67,14 @@ async def build_semantic_memory(
 
     resolved = QdrantSettings.from_env() if qdrant_settings is None else qdrant_settings
     if resolved.enabled:
-        return await _build_qdrant_memory(resolved, GeminiEmbeddingAdapter(settings))
+        try:
+            return await _build_qdrant_memory(resolved, JinaEmbeddingAdapter(settings))
+        except Exception as exc:
+            logger.warning(
+                "Qdrant memory setup failed (%s: %s); falling back to in-repo memory",
+                type(exc).__name__,
+                exc,
+            )
 
     try:
         documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)

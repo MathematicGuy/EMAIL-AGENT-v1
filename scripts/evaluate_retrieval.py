@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "loader.py"
 DEFAULT_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "retrieval_golden.json"
 DEFAULT_CORPUS_DIR = REPO_ROOT / "data" / "extracted"
@@ -69,8 +70,10 @@ LEVELS: tuple[str, ...] = (DOCUMENT_LEVEL, SECTION_LEVEL)
 DENSE = "dense"
 BM25 = "bm25"
 HYBRID = "hybrid"
+HYBRID_TURBOVEC = "hybrid_turbovec"
 QDRANT = "qdrant"
-RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID, QDRANT)
+TURBOVEC = "turbovec"
+RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID, HYBRID_TURBOVEC, QDRANT, TURBOVEC)
 
 #: RetrievalStatus.NO_RESULTS, duplicated so the metric layer imports nothing.
 NO_RESULTS_STATUS = "no_results"
@@ -849,6 +852,21 @@ def build_retriever(
             top_k_default=top_k,
             min_score_default=min_score,
         )
+    if name == TURBOVEC:
+        from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+
+        snapshot_file = REPO_ROOT / ".data" / "eval_turbovec.tvim"
+        if snapshot_file.exists():
+            snapshot_file.unlink()
+
+        return TurbovecSemanticMemory(
+            documents,
+            embedder,
+            bit_width=4,
+            top_k_default=top_k,
+            min_score_default=min_score,
+            index_path=snapshot_file,
+        )
     if name == HYBRID:
         from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 
@@ -858,6 +876,18 @@ def build_retriever(
             reranker=reranker,
             top_k_default=top_k,
             min_score_default=min_score,
+            dense_backend="numpy",
+        )
+    if name == HYBRID_TURBOVEC:
+        from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
+
+        return HybridSemanticMemory(
+            documents,
+            embedder,
+            reranker=reranker,
+            top_k_default=top_k,
+            min_score_default=min_score,
+            dense_backend="turbovec",
         )
     from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
@@ -1199,7 +1229,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     DENSE: DENSE_COSINE_SCORE,
                     BM25: BM25_SCORE,
                     HYBRID: RRF_SCORE,
+                    HYBRID_TURBOVEC: RRF_SCORE,
                     QDRANT: DENSE_COSINE_SCORE,
+                    TURBOVEC: DENSE_COSINE_SCORE,
                 }[args.retriever]
             ),
             reranker_requested=args.rerank,

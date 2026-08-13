@@ -11,7 +11,7 @@ from uuid import uuid4
 import numpy as np
 
 try:
-    from turbovec import IdMapIndex  # type: ignore[import-untyped]
+    from turbovec import IdMapIndex  # type: ignore[import-not-found]
 
     TURBOVEC_AVAILABLE = True
 except ImportError:

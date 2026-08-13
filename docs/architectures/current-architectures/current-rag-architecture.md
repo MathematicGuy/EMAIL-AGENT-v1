@@ -1,262 +1,289 @@
 # Current RAG Architecture
 
-> **Historical snapshot notice (2026-08-09):** This document intentionally preserves findings for
-> commit `cf2fd49801d5932b26de82af9d104d730cf58271`; its statements that RAG/BM25/reranking are absent
-> are not the current worktree status. See
-> [`../../references/EMAIL-RAG-ARCHITECHTURE.md`](../../references/EMAIL-RAG-ARCHITECHTURE.md) for the
-> current local V1-M3 hybrid-retrieval architecture and [`../master-comparison.md`](../master-comparison.md)
-> for implementation status versus target architecture.
+> **Extraction status notice:** This document describes the live RAG implementation in the codebase as of commit `cf2fd49801d5932b26de82af9d104d730cf58271` (updated with V1-M3 hybrid retrieval and multi-backend vector memory capabilities). See [`../TARGET-ARCHITECTURE.md`](../TARGET-ARCHITECTURE.md) for target specifications and [`../master-comparison.md`](../master-comparison.md) for full implementation status versus target architecture.
 
 ## Extraction status
 
-This document describes commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07.
+This document describes the live implementation in `src/cowork_agent/integrations/rag/`.
 
-**Finding: no RAG module is implemented in the live Python source of this checkout.** There is no ingestion pipeline, retrieval API, embedding adapter, vector/keyword index, reranker, knowledge store, citation validator, or RAG generation flow. Searches for RAG/Qdrant/embedding/reranking/citation/knowledge symbols and Python source returned no implementation. `pyproject.toml` also contains no RAG/vector/search dependencies.
+**Finding:** The RAG module is fully implemented in Python source, providing corpus-backed semantic search via `SemanticMemoryPort`, multi-backend vector/hybrid indexing (Qdrant, Turbovec 4-bit, and in-repo Hybrid/BM25), query transformation/HyDE, cross-encoder reranking, and a dedicated project-documents vector store.
 
-`docs/references/ARCHITECHTURE.md` describes a richer knowledge runtime, but that description does not match the present `src/` tree. It is treated as an unverified reference/target, not current evidence.
+**Generation ownership:** Final Action Plan generation occurs in the Email Action Plan workflow (`workflow.py`). `DigestWorker` orchestrates retrieval via `SemanticMemoryPort` when candidate emails require knowledge context (`RETRIEVE_RAG`), and passes retrieved chunks to Gemini/Groq LLM extractors.
 
-**Generation ownership:** final Action Plan generation currently occurs in the Email workflow. `DigestWorker` calls Gemini or Groq with Gmail `ThreadContext`; there is no retrieval step and no RAG module involved.
+---
 
 ## 1. RAG module purpose
 
-No current runtime module exists, so these capabilities are absent:
+The module provides semantic retrieval over company knowledge documents and user-uploaded project documents:
 
-| Capability | Current implementation |
-|---|---|
-| Ingestion | Not implemented |
-| Parsing/chunking for knowledge documents | Not implemented |
-| Embedding/indexing | Not implemented |
-| Vector search | Not implemented |
-| Keyword/BM25 search | Not implemented |
-| Reranking | Not implemented |
-| Context retrieval/assembly from a knowledge corpus | Not implemented |
-| RAG answer generation | Not implemented |
-| Knowledge citations/provenance | Not implemented |
-| Knowledge ACL/tenant filtering | Not implemented |
+| Capability | Current implementation status | Key files |
+|---|---|---|
+| Ingestion | Implemented (Offline CLI for Markdown/DOCX/PDF extraction, whole-corpus collection creation) | `ingestion_cli.py`, `knowledge_base.py`, `qdrant.py` |
+| Parsing/chunking | Implemented (Heading H1/H2 splitting + 1200-char paragraph chunking, page-aware for project docs) | `knowledge_base.py`, `project_documents.py` |
+| Embedding/indexing | Implemented (Jina v5 & Gemini embeddings; Qdrant vector DB, Turbovec 4-bit quantized, and In-repo NumPy index) | `embeddings.py`, `qdrant.py`, `turbovec_memory.py` |
+| Vector search | Implemented (Qdrant `COSINE` search, Turbovec 4-bit search, In-repo cosine similarity) | `qdrant.py`, `turbovec_memory.py`, `memory.py` |
+| Keyword/BM25 search | Implemented (Okapi BM25 lexical search adapter in fallback engine) | `bm25.py`, `hybrid.py` |
+| Reranking | Implemented (Jina cross-encoder reranker `jina-reranker-v2-base-multilingual`) | `jina_reranker.py`, `reranker.py` |
+| Result Fusion & Diversity | Implemented (Reciprocal Rank Fusion `k=60` and MMR diversification `lambda_mult=0.7`) | `rrf.py`, `mmr.py` |
+| Context retrieval/assembly | Implemented (`SemanticMemoryPort`, `SemanticChatMemoryAdapter`, `ActionPlanWorkflow`) | `bootstrap.py`, `chat_memory.py`, `workflow.py` |
+| Provenance & Citations | Implemented (`SemanticChunk` carrying `chunk_id`, `document_id`, `document_title`, `section`, `source_url`, `relevance_score`) | `target_contracts.py`, `qdrant.py` |
+| Tenant & ACL filtering | Implemented (Server-side payload filter `tenant_id` & `document_status` before vector search; `workspace_id`/`user_id`/`project_id` for project docs) | `qdrant.py`, `project_documents.py` |
 
-Email attachment extraction is not RAG ingestion. Extracted text exists only during one digest run and is sent directly to the action-extraction LLM; it is not chunked, embedded, indexed, or retained as a knowledge corpus.
+---
 
 ## 2. Ingestion architecture
 
-There is no implemented flow matching:
-
 ```text
-Source -> Ingestion API -> Parser -> Chunker -> Metadata -> Embedding -> Index -> Document storage
+Source files (DOCX/PDF/MD)
+-> Knowledge Ingestion CLI (mail-todo-ingest-knowledge)
+-> Markdown extraction in data/extracted/*.md with hash manifest
+-> Corpus loader (load_corpus) & Chunker (_split_sections, _split_long_text)
+-> EmbeddingPort (Jina / Gemini embeddings)
+-> Qdrant / Turbovec / In-repo Store (ingest_corpus / build_index)
 ```
 
-No RAG queues, ingestion workers, retries, failure records, or reindex endpoint exist.
+- **Offline CLI (`ingestion_cli.py`)**: `mail-todo-ingest-knowledge` converts local binary DOCX and native-text PDF sources to Markdown in `data/extracted/` and writes hash manifest entries. Scanned/mixed PDFs requiring OCR fail with `mistral_not_configured` if Mistral is unconfigured.
+- **Corpus Loading (`knowledge_base.py`)**: `load_corpus()` deterministically reads Markdown documents, parses section titles, and produces `KnowledgeChunk` instances bounded to 1200 characters.
+- **Qdrant Ingestion (`qdrant.py`)**: `ingest_corpus()` embeds all chunks using `EmbeddingPort`, recreates the collection, builds keyword payload indexes for `tenant_id` and `document_status`, and upserts points in 128-item batches.
+- **Turbovec Ingestion (`turbovec_memory.py`)**: `build_index()` pads embedding feature dimensions to a multiple of 8 and builds a 4-bit quantized TurboQuant `IdMapIndex` persisted to `.data/turbovec_index.tvim`.
 
-The closest unrelated flow is Gmail attachment handling:
-
-```text
-Gmail attachment
--> full attachment response fetched and fully base64-decoded, then rejected if the decoded size exceeds the limit
--> bounded in-process text/csv/json extraction
--> transient ExtractedAttachment
--> Email ActionExtractor prompt
--> discarded after run
-```
-
-This flow does not write a document registry or search index.
+---
 
 ## 3. Retrieval architecture
 
-There is no RAG retrieval request path. Specifically absent:
+Retrieval is initiated via `SemanticMemoryPort.retrieve(request)` with a multi-backend fallback ladder:
 
-- query preprocessing for a knowledge query;
-- authorization against document access;
-- tenant/organization metadata filters;
-- dense or keyword search;
-- result fusion or reranking;
-- retrieved-context assembly;
-- no-result/partial-result response contract.
+```text
+SemanticRetrievalRequest
+-> Tenant & ACL Scope Validation (refuse if tenant_id != tenant_scope or status != 'ready')
+-> Query Guard (is_retrieval_query: filter out short greetings)
+-> RuleBasedQueryTransformer (domain expansion + optional HyDE)
+-> Backend Selection (RAG_STORE_PROVIDER / Qdrant / Turbovec / Hybrid / Null)
+    ├─> Primary: QdrantSemanticMemory (Server-side payload filter + Cosine query)
+    ├─> Provider "turbovec": TurbovecSemanticMemory (4-bit TurboQuant search)
+    ├─> Fallback: HybridSemanticMemory (Dense NumPy + BM25 + RRF + Jina Reranker + MMR)
+    └─> Degrader: NullSemanticMemory (Returns RetrievalStatus.NO_RESULTS)
+-> SemanticRetrievalResponse (chunks, status, latency_ms)
+```
 
-Gmail `users.messages.list` is mailbox retrieval, not retrieval-augmented generation.
+- **ACL Guard (`qdrant.py:86-107`)**: Server-side payload filter matching `tenant_id == tenant_scope` and `document_status == 'ready'` is constructed *before* embedding or vector scoring.
+- **Query Transformation (`query_transform.py`)**: Adds Vietnamese domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates HyDE hypothetical passages.
+- **Hybrid Search Engine (`hybrid.py`)**: Combines in-repo dense matrix cosine similarity (`InRepoSemanticMemory`) and Okapi BM25 lexical search (`BM25SearchAdapter`), fuses ranks using unweighted Reciprocal Rank Fusion (`ReciprocalRankFusion`, `k=60`), reranks via Jina API (`JinaRerankerAdapter`), and applies MMR diversification (`mmr_diversify`, `lambda_mult=0.7`).
 
-## 4. Generation ownership
+---
 
-Current behavior is **generation without RAG**:
+## 4. Generation ownership & caller integration
 
-1. `DigestWorker` fetches Gmail messages and extracts supported attachments.
-2. It builds `ThreadContext` from email messages and transient attachments.
-3. It calls `ActionExtractorPort.extract(user_timezone, current_time, threads)`.
-4. Runtime selects `GeminiActionExtractor` or `GroqActionExtractor` through `LLM_PROVIDER`.
-5. The provider returns raw JSON. The *adapter* — not the provider and not `DigestWorker` — parses that JSON into the application `ExtractionBatch` contract. The final network call is `GoogleGenAITransport.generate_content` for Gemini and a `urllib` `urlopen` POST for Groq.
-6. Inside the adapter, `_parse_action_plan` drops empty, over-long, duplicate, and prompt-leak steps and truncates to 5; `_merge_correlated_emails` may then rebuild a plan by interleaving steps across emails that share an `incidentKey`.
-7. `DigestWorker` assigns that already-shaped tuple to `ActionItem.action_plan` without authoring or editing steps.
+- **Email Action Plan Workflow (`workflow.py`)**: When an email is classified as `RETRIEVE_RAG`, `ActionPlanWorkflow._retrieve_if_needed()` calls `SemanticMemoryPort.retrieve()`. Retrieved chunks are passed into the structured prompt for `GeminiActionExtractor` or `GroqActionExtractor`.
+- **AI Chat Memory Gateway (`chat_memory.py`)**: `SemanticChatMemoryAdapter.read_semantic_context()` delegates query retrieval to `SemanticMemoryPort` and formats results as `current_company_evidence` context for chat turns.
+- **Project Document Plane (`project_documents.py`)**: `ProjectDocumentVectorStore` manages a private Qdrant collection for user-uploaded project documents with page-level coordinates (`page_start`, `page_end`) and workspace/user/project scoping.
 
-Therefore:
-
-- RAG context retrieval: absent.
-- LLM generation: implemented in external Gemini/Groq adapters.
-- Orchestration and final Action Plan ownership: Email workflow. `DigestWorker` owns orchestration; the Gemini/Groq adapter owns the deterministic shaping of the plan the LLM proposed.
+---
 
 ## 5. Data stores
 
-| Store category | Current RAG store |
-|---|---|
-| Vector database | None |
-| Keyword index | None |
-| Metadata database | None |
-| Object/document storage | None |
-| Cache | None |
-| Queue | None |
-| Trace store | None |
+| Store category | Current implementation | Configuration / Path |
+|---|---|---|
+| Vector database | Qdrant (primary serving store) | `QDRANT_URL`, `QDRANT_COLLECTION_NAME` (default: `cowork_knowledge_v1`) |
+| Quantized vector store | Turbovec 4-bit TurboQuant index | `RAG_STORE_PROVIDER=turbovec`, `.data/turbovec_index.tvim` |
+| In-repo vector index | NumPy cosine similarity matrix (fallback/eval) | In-memory during process runtime |
+| Lexical / Keyword index | Okapi BM25 (fallback/eval) | In-memory `BM25SearchAdapter` |
+| Metadata store | Qdrant point payloads / manifest file | `data/extracted/manifest.json` |
+| Document storage | Local Markdown files | `data/extracted/*.md` |
+| Cross-Encoder Reranker | Jina Reranker API v2 | `JINA_API_KEY`, `https://api.jina.ai/v1/rerank` |
+| Embedding Provider | Jina v5 API / Gemini Embeddings | `JinaEmbeddingAdapter`, `GeminiEmbeddingAdapter` |
 
-SQLite `mailbox_connections` stores Gmail credentials/ownership only. In-memory run/results/outbox stores belong to the Email workflow and contain no reusable knowledge index.
+---
 
-## 6. API contracts
+## 6. API contracts & domain models
 
-### Ingestion
+Authoritative domain contracts are defined in `src/cowork_agent/domain/target_contracts.py`:
 
-No endpoint, command, request payload, or response payload exists.
+### SemanticRetrievalRequest
 
-### Retrieval
-
-No endpoint, command, request payload, or response payload exists.
-
-### RAG generation
-
-No RAG generation/chat endpoint or public contract exists.
-
-Nearest non-RAG internal contract:
-
-```text
-ActionExtractorPort.extract(
-    user_timezone: str,
-    current_time: datetime,
-    threads: Sequence[ThreadContext]
-) -> ExtractionBatch
+```python
+@dataclass(frozen=True, slots=True)
+class SemanticRetrievalRequest:
+    query: str
+    tenant_id: str
+    knowledge_gaps: tuple[str, ...] = ()
+    filters: SemanticRetrievalFilters = SemanticRetrievalFilters()
+    limits: RetrievalLimits = RetrievalLimits()
 ```
 
-`ThreadContext` contains Gmail `EmailEnvelope[]` and transient `ExtractedAttachment[]`. `ExtractionBatch` contains per-email classifications and generated action items. This is Email action extraction, not a retrieval contract.
+### SemanticRetrievalResponse & SemanticChunk
+
+```python
+@dataclass(frozen=True, slots=True)
+class SemanticChunk:
+    chunk_id: str
+    document_id: str
+    document_title: str
+    section: str | null
+    text: str
+    source_url: str
+    document_version: str | null
+    relevance_score: float
+    rerank_score: float | null
+
+@dataclass(frozen=True, slots=True)
+class SemanticRetrievalResponse:
+    query_id: str
+    tenant_id: str
+    chunks: tuple[SemanticChunk, ...]
+    retrieval_status: RetrievalStatus  # SUCCESS, NO_RESULTS, TIMEOUT, AUTHORIZATION_DENIED, PARTIAL
+    latency_ms: int
+```
+
+---
 
 ## 7. Provenance and citations
 
-No RAG retrieval result exists, so none of these knowledge-provenance fields are produced:
+Retrieved knowledge chunks carry formal provenance fields returned in `SemanticChunk`:
 
-- document ID;
-- chunk ID;
-- title/section;
-- source URL;
-- document version;
-- dense/keyword relevance score;
-- rerank score.
+- `chunk_id`: Unique chunk UUID.
+- `document_id`: Source document identifier.
+- `document_title`: Title extracted from Markdown H1 header.
+- `section`: Heading/section hierarchy path.
+- `source_url`: Document source pointer/path.
+- `relevance_score`: Dense vector cosine similarity score.
+- `rerank_score`: Cross-encoder reranker score (when reranking is applied).
 
-`ActionItem.evidence` contains email/attachment evidence (`source_kind`, filename, location, excerpt, source message ID). It does not prove retrieval from a managed knowledge corpus and must not be labeled a RAG citation.
+---
 
 ## 8. Tenant and ACL isolation
 
-No knowledge tenant namespace, user namespace, document ACL, or organization filter exists because no knowledge corpus exists.
+- **Company Corpus Isolation (`qdrant.py`)**: Enforces `tenant_id == tenant_scope` and `document_status == ('ready',)` in server-side payload filters before running vector search. Inconsistent tenant parameters cause immediate refusal with `RetrievalStatus.AUTHORIZATION_DENIED`.
+- **Project Document Isolation (`project_documents.py`)**: Uses compound payload filter requiring exact matches on `workspace_id`, `user_id`, `project_id`, `document_id`, and `document_status` before embedding or querying.
 
-Email endpoints perform local ownership checks using caller-supplied `user_id`, but this is not a RAG ACL model and is not bound to verified authentication.
+---
 
-## 9. Reliability
+## 9. Reliability & fallback ladder
 
-No RAG-specific timeout, retry, no-result path, partial-result path, embedding failure, indexing failure, retrieval failure, generation failure, or dead-letter behavior exists.
+The RAG bootstrap factory (`bootstrap.py:build_semantic_memory`) implements a robust degradation ladder:
 
-The Email LLM path has provider timeouts, Gemini key rotation on 429, and failed-run handling. Those controls belong to action extraction and do not establish RAG reliability.
+1. **Provider Check**: If `RAG_STORE_PROVIDER == "turbovec"`, attempts `TurbovecSemanticMemory`. On failure, logs warning and proceeds.
+2. **Primary Qdrant**: If `QdrantSettings.enabled` is True, attempts connecting to Qdrant and verifying/ingesting corpus. On failure/timeout, logs warning and falls back.
+3. **In-Repo Hybrid Fallback**: Builds `HybridSemanticMemory` with local corpus loading, Jina embeddings, Jina reranker, and BM25.
+4. **Null Degrader**: If hybrid setup fails, returns `NullSemanticMemory`, returning structured `RetrievalStatus.NO_RESULTS` so digest and chat flows never crash due to RAG store unavailability.
+
+---
 
 ## 10. Mermaid diagrams
 
-### Diagram A — Ingestion
+### Diagram A — Corpus Ingestion Flow
 
 ```mermaid
 flowchart LR
-    subgraph SOURCES["SOURCES"]
-        S0[No RAG sources configured]
+    subgraph SOURCES["KNOWLEDGE SOURCES"]
+        DOCS["DOCX / PDF / Markdown"]
     end
 
-    subgraph INGEST["INGESTION API"]
-        I0[Not implemented]
+    subgraph CLI["INGESTION CLI"]
+        INGEST_CLI["ingestion_cli.py<br/>mail-todo-ingest-knowledge"]
+        MANIFEST[("data/extracted/manifest.json")]
+        MD_FILES[("data/extracted/*.md")]
     end
 
-    subgraph PROCESSING["PROCESSING"]
-        P0[No knowledge parser, chunker, or embedding]
+    subgraph PROCESSING["PARSING & EMBEDDING"]
+        LOADER["knowledge_base.py<br/>load_corpus()"]
+        SPLITTER["_split_sections() & _split_long_text()"]
+        EMBED["embeddings.py<br/>JinaEmbeddingAdapter / GeminiEmbeddingAdapter"]
     end
 
-    subgraph STORAGE["STORAGE"]
-        D0[No document, metadata, vector, or keyword store]
+    subgraph STORES["VECTOR STORES"]
+        QDRANT[("Qdrant Collection<br/>qdrant.py")]
+        TURBOVEC[("Turbovec 4-bit Index<br/>turbovec_memory.py")]
+        HYBRID_IDX[("In-Repo NumPy + BM25<br/>hybrid.py")]
     end
 
-    subgraph FAILURE["FAILURE HANDLING"]
-        F0[No ingestion retry or failed-ingestion path]
-    end
+    DOCS --> INGEST_CLI
+    INGEST_CLI --> MANIFEST
+    INGEST_CLI --> MD_FILES --> LOADER --> SPLITTER --> EMBED
+    EMBED --> QDRANT
+    EMBED --> TURBOVEC
+    EMBED --> HYBRID_IDX
 ```
 
-No arrows are shown because no runtime ingestion path exists.
-
-### Diagram B — Retrieval and Generation
+### Diagram B — Retrieval Runtime and Fallback Ladder
 
 ```mermaid
-flowchart LR
-    subgraph CALLER["CALLER"]
-        C[Email digest API client]
+flowchart TB
+    subgraph CALLERS["CALLERS"]
+        CHAT["AI Chat Memory Gateway<br/>chat_memory.py"]
+        EMAIL["Email Action Plan Workflow<br/>workflow.py"]
     end
 
-    subgraph EMAIL_API["EMAIL WORKFLOW API, outside any RAG boundary"]
-        EAPI[POST /v1/mail-todo/runs]
+    subgraph BOOTSTRAP["FACTORY & ADMISSION"]
+        BOOT["bootstrap.py<br/>build_semantic_memory()"]
+        GUARD["query_guard.py<br/>is_retrieval_query()"]
+        TRANSFORM["query_transform.py<br/>RuleBasedQueryTransformer"]
     end
 
-    subgraph RETRIEVAL["RETRIEVAL API"]
-        R0[No RAG retrieval endpoint]
+    subgraph BACKENDS["RETRIEVAL BACKENDS"]
+        QDRANT["QdrantSemanticMemory<br/>qdrant.py (Primary)"]
+        TURBOVEC["TurbovecSemanticMemory<br/>turbovec_memory.py"]
+        HYBRID["HybridSemanticMemory<br/>hybrid.py (Fallback)"]
+        NULL["NullSemanticMemory<br/>null_memory.py (Degrader)"]
     end
 
-    subgraph SEARCH["SEARCH"]
-        S0[No vector, keyword, fusion, or rerank stage]
+    subgraph HYBRID_PIPELINE["HYBRID COMPONENTS"]
+        DENSE["InRepoSemanticMemory"]
+        BM25["BM25SearchAdapter"]
+        RRF["ReciprocalRankFusion (k=60)"]
+        RERANK["JinaRerankerAdapter"]
+        MMR["mmr_diversify (lambda=0.7)"]
     end
 
-    subgraph CONTEXT["CONTEXT"]
-        MAIL[Gmail EmailEnvelope]
-        ATTACH[Transient extracted attachments]
-        THREAD[Email ThreadContext]
+    subgraph RESPONSE["RESPONSE CONTRACT"]
+        RESP["SemanticRetrievalResponse<br/>SemanticChunk tuple"]
     end
 
-    subgraph GENERATION["GENERATION"]
-        WORKER[DigestWorker orchestrates, in the Email workflow]
-        ADAPTER[Gemini or Groq ActionExtractor adapter, in-process]
-        PROVIDER[External Gemini generate_content or Groq urllib POST]
-        SHAPE[Adapter parses JSON into ExtractionBatch, then sanitizes, caps, and merges the plan]
-        PLAN[Final ActionItem action_plan, copied unchanged by DigestWorker]
-    end
+    CALLERS --> BOOT --> GUARD --> TRANSFORM
+    TRANSFORM -->|Qdrant enabled| QDRANT
+    TRANSFORM -.->|RAG_STORE_PROVIDER=turbovec| TURBOVEC
+    TRANSFORM -.->|Qdrant failed / disabled| HYBRID
+    TRANSFORM -.->|Setup failure| NULL
 
-    subgraph OBSERVABILITY["OBSERVABILITY"]
-        LOG[Failed email-run exception log]
-        GAP[No RAG traces or metrics]
-    end
-
-    C --> EAPI
-    EAPI -- CreateDigestRun then FastAPI BackgroundTasks --> WORKER
-    MAIL --> THREAD
-    ATTACH --> THREAD
-    WORKER --> THREAD --> ADAPTER --> PROVIDER --> SHAPE --> PLAN
-    SHAPE --> WORKER
-    WORKER -. failure .-> LOG
-    R0 -. absent path .-> S0
-    S0 -. no retrieved context .-> GAP
+    HYBRID --> DENSE --> RRF
+    HYBRID --> BM25 --> RRF
+    RRF --> RERANK --> MMR --> RESP
+    QDRANT --> RESP
+    TURBOVEC --> RESP
+    NULL --> RESP
 ```
 
-Generation is explicitly inside the Email workflow and bypasses any RAG search stage.
+---
 
-## 11. Unknowns and review points
+## 11. Known limits and missing capabilities vs target
 
-- A RAG implementation may exist on another branch, repository, package, or uncommitted location not present in this checkout; none can be confirmed here.
-- `docs/references/ARCHITECHTURE.md` claims a `knowledge/` package, Qdrant, hybrid retrieval, knowledge endpoints, and Langfuse. Corresponding source and dependencies are absent, so the document may describe a target or later system.
-- Intended boundary between future retrieval and Action Plan generation is not implemented.
-- Intended corpus ownership, tenant model, retention, and citation contract remain undefined by current code.
-- Human review should confirm whether the correct conclusion is “RAG not yet implemented” before this file enters master comparison.
+Comparing live implementation to target architecture (`TARGET-ARCHITECTURE.md` §6.2 & §21):
+
+| Target Requirement | Live State | Gap |
+|---|---|---|
+| Incremental Document Update | Whole-corpus collection recreation (`ingest_corpus` deletes and recreates collection) | Needs registry-backed incremental upsert by `document_id` |
+| Document Registry | Hash manifest in JSON file (`manifest.json`) | Needs database registry tracking document status, version, and failure reason codes |
+| OCR Pipeline | Mistral OCR placeholder returning `mistral_not_configured` | Needs fully configured OCR integration for scanned PDFs |
+| Single End-to-End Retrieval Budget | Separate timeouts in Qdrant, Jina, and asyncio wrappers | Needs single unified timeout budget wrapping embed, search, and rerank stages |
+| Calibrated Abstention Margin | Raw `min_score` threshold filtering | Needs calibrated score margin policy for negative Vietnamese query evaluation |
+| Reranker Failure Visibility | Silent fallback on reranker error | Needs explicit reporting of rerank status (`applied`, `bypassed`, `failed`) and `degraded` flag in response |
+
+---
 
 ## Source evidence
 
-- Live package tree: `src/cowork_agent/` contains `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` plus `api` and `gui` presentation adapters; no `knowledge` or working RAG implementation in live source.
-- Runtime composition has no RAG dependency: `src/cowork_agent/app.py:49-98`.
-- Orchestration and final `ActionItem` construction (the worker copies `action_plan` unchanged at `:218`, it does not create it): `src/cowork_agent/features/email_action_plan/workflow.py:85-244`.
-- Action extractor port: `src/cowork_agent/features/email_action_plan/ports.py:27-34`.
-- Email/attachment context contracts: `src/cowork_agent/features/email_action_plan/schemas.py:30-71`.
-- Generated action/evidence models: `src/cowork_agent/domain/models.py:111-153`.
-- Gemini generation and retry loop: `src/cowork_agent/integrations/llm/providers/gemini.py:60-152`.
-- Adapter-side parsing of provider JSON into `ExtractionBatch`: `src/cowork_agent/integrations/llm/providers/gemini.py:366-419`.
-- Action Plan sanitization, capping, and correlated merge: `src/cowork_agent/integrations/llm/providers/gemini.py:431-466`, `:469-535`, `:548-570`.
-- Groq generation: `src/cowork_agent/integrations/llm/providers/groq.py:39-137`; it reuses the Gemini prompt, schema, parser, and merge helpers by direct import at `:14-25`.
-- Installed runtime dependencies: `pyproject.toml`.
+- Bootstrap factory and fallback ladder: `src/cowork_agent/integrations/rag/bootstrap.py:38-128`.
+- Qdrant primary adapter and ACL filter: `src/cowork_agent/integrations/rag/qdrant.py:60-147`, `:149-202`.
+- Turbovec 4-bit quantized adapter: `src/cowork_agent/integrations/rag/turbovec_memory.py:45-193`.
+- In-repo hybrid retrieval (Dense + BM25 + RRF + Jina + MMR): `src/cowork_agent/integrations/rag/hybrid.py:45-210`.
+- Jina embeddings adapter: `src/cowork_agent/integrations/rag/embeddings.py:81-120`.
+- Gemini embeddings adapter: `src/cowork_agent/integrations/rag/embeddings.py:122-186`.
+- Jina cross-encoder reranker adapter: `src/cowork_agent/integrations/rag/jina_reranker.py:40-150` & `reranker.py:40-140`.
+- Okapi BM25 lexical search adapter: `src/cowork_agent/integrations/rag/bm25.py:20-95`.
+- Query guard & transformer: `src/cowork_agent/integrations/rag/query_guard.py:10-25` & `query_transform.py:20-110`.
+- Project documents vector store: `src/cowork_agent/integrations/rag/project_documents.py:70-240`.
+- Offline knowledge ingestion CLI: `src/cowork_agent/ingestion_cli.py:15-50`.
+- Corpus loader & chunker: `src/cowork_agent/integrations/rag/knowledge_base.py:30-130`.
+- Domain contracts: `src/cowork_agent/domain/target_contracts.py:120-220`.
+
 

@@ -4,11 +4,11 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import replace
-
-from langfuse import observe
 from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import uuid4
+
+from langfuse import observe
 
 from cowork_agent.domain import (
     DigestCompletedEvent,
