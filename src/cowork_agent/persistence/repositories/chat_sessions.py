@@ -28,8 +28,8 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
     async def create(
         self,
         *,
-        tenant_id: str,
         user_id: str,
+        tenant_id: str = "local",
         project_id: str = "default-project",
     ) -> ChatMemoryScope:
         session_id = self._new_id()
@@ -64,7 +64,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
     ) -> ChatMemoryScope:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
@@ -93,7 +93,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def list_for(
-        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+        self, *, user_id: str, tenant_id: str = "local", project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
         project_filter = "" if project_id is None else "AND sessions.project_id = %s"
         params: tuple[object, ...] = (
@@ -127,7 +127,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def delete_project(
-        self, *, tenant_id: str, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(

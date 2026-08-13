@@ -115,10 +115,12 @@ def create_chat_router() -> APIRouter:
         sessions = _sessions(request)
         if project_id == "default-project":
             scope = await sessions.create(
+                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
             )
         else:
             scope = await sessions.create(
+                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
                 project_id=project_id,
             )
@@ -199,10 +201,12 @@ def create_chat_router() -> APIRouter:
         principal = await _verified_principal(request)
         if project_id is None:
             scopes = await _sessions(request).list_for(
+                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
             )
         else:
             scopes = await _sessions(request).list_for(
+                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
                 project_id=project_id,
             )
@@ -428,6 +432,7 @@ def _user_namespace(principal: VerifiedPrincipal, memory_type: MemoryType) -> Me
     # so the session component is a stable placeholder, not a live chat session.
     return MemoryNamespace(
         scope=ChatMemoryScope(
+            tenant_id=principal.tenant_id,
             user_id=principal.user_id,
             session_id="memory-admin",
         ),
@@ -459,7 +464,7 @@ async def _require_session(
     request: Request, principal: VerifiedPrincipal, session_id: str
 ) -> ChatMemoryScope:
     return await _sessions(request).require(
-        session_id, user_id=principal.user_id
+        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
     )
 
 

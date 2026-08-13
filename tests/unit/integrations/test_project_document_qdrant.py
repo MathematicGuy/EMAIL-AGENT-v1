@@ -205,13 +205,21 @@ def test_project_collection_backfills_indexes_for_an_existing_collection() -> No
 
 def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
     class Repository:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, ...]] = []
+
         async def list_ready_for_scope(
             self, *args: object, **kwargs: object
         ) -> tuple[ProjectDocument, ...]:
-            del args, kwargs
+            del kwargs
+            self.calls.append(args)
             return (
                 ProjectDocument(
-                    "document-1", "project-1", "user-1", "policy.pdf",
+                    "document-1",
+                    "project-1",
+                    "9f7c3132-6bc2-4bf4-9cc7-b96662d6393c",
+                    "user-1",
+                    "policy.pdf",
                     "application/pdf", 1, "0" * 64, "private/source", "ready",
                     datetime.now(UTC) + timedelta(days=1),
                 ),
@@ -221,6 +229,7 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
         def __init__(self) -> None:
             self.embed_calls = 0
             self.query_calls = 0
+            self.workspace_ids: list[object] = []
 
         async def embed_query(self, query: str) -> tuple[float, ...]:
             assert query == "policy"
@@ -229,21 +238,24 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
 
         async def retrieve_vector(self, **kwargs: object) -> tuple[object, ...]:
             assert kwargs["vector"] == (1.0, 0.0)
+            self.workspace_ids.append(kwargs["workspace_id"])
             self.query_calls += 1
             if self.query_calls == 1:
                 raise OSError("transient qdrant error")
             return ()
 
     async def scenario() -> None:
+        repository = Repository()
         vectors = Vectors()
         retriever = CanonicalProjectDocumentRetriever(
-            Repository(), vectors, top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
+            repository, vectors, top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
         )
         response = await retriever.retrieve(
             ProjectDocumentQuery(
                 user_id="user-1",
                 project_id="project-1",
                 query="policy",
+                tenant_id="9f7c3132-6bc2-4bf4-9cc7-b96662d6393c",
                 document_ids=("document-1",),
             )
         )
@@ -251,13 +263,18 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
         assert response.degraded is False
         assert vectors.embed_calls == 1
         assert vectors.query_calls == 2
+        assert vectors.workspace_ids == ["9f7c3132-6bc2-4bf4-9cc7-b96662d6393c"] * 2
+        assert repository.calls == [
+            ("9f7c3132-6bc2-4bf4-9cc7-b96662d6393c", "user-1", "project-1"),
+            ("9f7c3132-6bc2-4bf4-9cc7-b96662d6393c", "user-1", "project-1"),
+        ]
 
     asyncio.run(scenario())
 
 
 def test_retriever_drops_evidence_deleted_during_vector_query() -> None:
     ready_document = ProjectDocument(
-        "document-1", "project-1", "user-1", "policy.pdf",
+        "document-1", "project-1", "9f7c3132-6bc2-4bf4-9cc7-b96662d6393c", "user-1", "policy.pdf",
         "application/pdf", 1, "0" * 64, "private/source", "ready",
         datetime.now(UTC) + timedelta(days=1),
     )

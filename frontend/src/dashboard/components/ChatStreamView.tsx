@@ -32,6 +32,7 @@ import type { Project } from '../types/projectTypes';
 import { ChatInputBox } from './ChatInputBox';
 import { StarburstIcon } from './HeroSection';
 import { TaskWorkflowCard } from './TaskWorkflowCard';
+import { RagEvidencePanel } from './RagEvidencePanel';
 
 interface ChatStreamViewProps {
   messages: ChatMessage[];
@@ -821,6 +822,13 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
                         </span>
                       ))}
                     </div>
+                  )}
+
+                  {!isUser && (msg.ragEvidence || msg.retrievalStatus) && (
+                    <RagEvidencePanel
+                      evidence={msg.ragEvidence ?? []}
+                      retrievalStatus={msg.retrievalStatus}
+                    />
                   )}
 
                   {!isUser && msg.quickActions && msg.quickActions.length > 0 && (

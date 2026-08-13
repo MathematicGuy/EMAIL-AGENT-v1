@@ -47,6 +47,24 @@ export interface ChatMessage {
     code: string;
   }[];
   citations?: ChatCitation[];
+  ragEvidence?: ChatRagEvidence[];
+  retrievalStatus?: ChatRetrievalStatus;
+}
+
+export type ChatRetrievalStatus = 'success' | 'no_results' | 'timeout' | 'unavailable';
+
+export interface ChatRagEvidence {
+  source: 'company_knowledge' | 'project_document';
+  retrievalStatus: 'success';
+  chunkId: string;
+  documentId: string;
+  documentTitle: string;
+  section: string | null;
+  sourceUrl: string | null;
+  relevanceScore: number;
+  rerankScore: number | null;
+  preview: string;
+  content: string;
 }
 
 export interface ChatCitation {

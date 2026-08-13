@@ -135,13 +135,14 @@ class ProjectDocumentQuery:
     user_id: str
     project_id: str
     query: str
+    tenant_id: str = "local"
     document_ids: tuple[str, ...] = ()
     top_k: int = 8
     min_score: float = 0.6
     timeout_ms: int = 3_000
 
     def __post_init__(self) -> None:
-        for name in ("user_id", "project_id", "query"):
+        for name in ("tenant_id", "user_id", "project_id", "query"):
             _required(getattr(self, name), name)
         if not 1 <= self.top_k <= 20:
             raise ValueError("top_k must be between 1 and 20")

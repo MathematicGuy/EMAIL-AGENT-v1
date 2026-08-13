@@ -109,6 +109,7 @@ class MemoryGateway:
             )
         return await self._project_documents.retrieve(
             ProjectDocumentQuery(
+                tenant_id=self._scope.tenant_id,
                 user_id=self._scope.user_id,
                 project_id=self._scope.project_id,
                 query=query,
