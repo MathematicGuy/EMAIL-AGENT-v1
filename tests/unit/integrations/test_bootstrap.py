@@ -13,6 +13,7 @@ from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
 from cowork_agent.integrations.rag import bootstrap
+from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
@@ -79,16 +80,18 @@ def test_a_populated_collection_is_not_re_ingested_on_the_next_boot(
     local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
-    ingested: list[str] = []
+    embed_calls: list[int] = []
 
-    async def _spy(client: object, collection: str, *args: object, **kwargs: object) -> int:
-        ingested.append(collection)
-        return 0
+    original_embed = JinaEmbeddingAdapter.embed
 
-    monkeypatch.setattr(bootstrap, "ingest_corpus", _spy)
+    async def _spy_embed(self: JinaEmbeddingAdapter, texts: tuple[str, ...], *args: object, **kwargs: object) -> tuple[tuple[float, ...], ...]:
+        embed_calls.append(len(texts))
+        return await original_embed(self, texts, *args, **kwargs)
+
+    monkeypatch.setattr(JinaEmbeddingAdapter, "embed", _spy_embed)
     asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
 
-    assert ingested == []
+    assert embed_calls == []
 
 
 def test_reindex_forces_ingestion_even_when_the_collection_is_populated(

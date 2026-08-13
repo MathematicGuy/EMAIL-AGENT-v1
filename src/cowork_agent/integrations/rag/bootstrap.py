@@ -95,19 +95,7 @@ async def _build_qdrant_memory(
 async def _ensure_corpus(
     client: AsyncQdrantClient, settings: QdrantSettings, embedder: EmbeddingPort
 ) -> None:
-    """Ingest only when the Qdrant collection is absent, empty, or reindex is requested."""
-    if not settings.reindex and await client.collection_exists(settings.collection_name):
-        info = await client.get_collection(settings.collection_name)
-        vectors_config = info.config.params.vectors
-        size = getattr(vectors_config, "size", None)
-        if size is not None and size != settings.vector_size:
-            raise ValueError(
-                f"Vector size mismatch: collection vector size is {size}, "
-                f"expected {settings.vector_size}"
-            )
-        if (await client.count(settings.collection_name)).count > 0:
-            return
-
+    """Ensure corpus is ingested into Qdrant (supports incremental sync)."""
     documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
     count = await ingest_corpus(
         client,
@@ -115,9 +103,10 @@ async def _ensure_corpus(
         documents,
         embedder,
         vector_size=settings.vector_size,
+        reindex=settings.reindex,
     )
     logger.info(
-        "Ingested %d knowledge chunks into Qdrant collection %s",
-        count,
+        "Corpus check complete for Qdrant collection %s (total points: %d)",
         settings.collection_name,
+        count,
     )
