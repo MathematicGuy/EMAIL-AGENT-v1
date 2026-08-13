@@ -71,3 +71,22 @@ A common concern is whether the binary `.tvim` snapshot file becomes heavy on di
 | **Local MVP & Low-RAM Edge** | **Turbovec Hybrid** (`dense_backend="turbovec"`) | Instant boot, zero startup API calls, 75% lower RAM, high recall (`88.64%`). |
 | **Production Multi-Tenant Server** | **Qdrant DB** (`QdrantSemanticMemory`) | Production server DB, payload index filtering, dynamic multi-user CRUD. |
 | **Minimal Dev Testing** | **Standard Hybrid** (`dense_backend="numpy"`) | Pure Python, no C++ binary wheel dependencies. |
+
+---
+
+## 6. Qdrant Independence & Synchronization Lifecycle
+
+### Does Turbovec Depend on Qdrant?
+**No.** Turbovec operates 100% independently from Qdrant:
+- `TurbovecSemanticMemory` generates embeddings directly from local text corpus files (`data/extracted`), quantizes vectors into 4-bit TurboQuant, and saves `.data/turbovec_index.tvim` directly to disk.
+- It does **not** fetch, pull, or mirror embeddings from Qdrant DB.
+- Using **Turbovec + BM25** allows local, edge, and single-node environments to run complete, high-recall Hybrid RAG **without running a Qdrant Docker container or managing external database infrastructure**.
+
+### When to Use Qdrant vs. Turbovec
+
+| Dimension | **Turbovec + BM25 (In-Process)** | **Qdrant DB (External Server)** |
+| :--- | :--- | :--- |
+| **Infrastructure Needed** | Zero (Pure in-process Python/C++) | Qdrant Docker Container / Managed Instance (Port 6333) |
+| **Startup Latency** | **< 5 milliseconds** (loads `.tvim` file) | Connects via HTTP/gRPC network calls |
+| **Memory Footprint** | **~3 MB RAM** | Managed by Qdrant engine |
+| **Best For** | Standalone local agents, desktop GUIs, edge nodes, single-server local MVP | Multi-tenant cloud clusters, shared microservices, dynamic ACL payload filtering |
