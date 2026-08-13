@@ -246,8 +246,8 @@ Tạo file `.env` từ `.env.example` và thiết lập các biến môi trườ
 # Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
-# Semantic Memory Store Provider (turbovec | qdrant)
-RAG_STORE_PROVIDER="turbovec"
+# Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
+RAG_STORE_PROVIDER=turbovec # turbovec | qdrant
 QDRANT_ENABLED="false"
 
 # Feature Flags

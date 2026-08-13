@@ -58,14 +58,13 @@ flowchart TB
     ACL --> TRANSFORM["Query Transformer<br/>(Domain Prefixes & HyDE Expansion)"]
     TRANSFORM --> LADDER{"Provider Selection<br/>(RAG_STORE_PROVIDER)"}
 
-    LADDER -->|turbovec| TURBO["Turbovec 4-Bit Memory<br/>(Fast Quantized Search)"]
-    LADDER -->|qdrant| QDRANT["Qdrant Vector Memory<br/>(Payload Filter + Cosine Search)"]
-    LADDER -->|hybrid / fallback| HYBRID["Hybrid Search Engine<br/>(Dense + BM25 + RRF + Jina Reranker + MMR)"]
-    LADDER -->|unconfigured| NULL_MEM["NullSemanticMemory<br/>(Safe Graceful Fallback)"]
+    LADDER -->|turbovec| TURBO["Turbovec 4-Bit Dense<br/>(.data/turbovec_index.tvim)"]
+    LADDER -->|qdrant or auto+enabled| QDRANT["Qdrant Dense<br/>(payload filter + cosine)"]
+    LADDER -->|unknown / failed / disabled| NULL_MEM["NullSemanticMemory<br/>(structured no_results)"]
 
-    TURBO --> RESP["SemanticRetrievalResponse<br/>(SemanticChunks with Citations & Scores)"]
-    QDRANT --> RESP
-    HYBRID --> RESP
+    TURBO --> HYBRID["HybridSemanticMemory<br/>(dense + BM25 + RRF)"]
+    QDRANT --> HYBRID
+    HYBRID --> RESP["SemanticRetrievalResponse<br/>(chunks, citations, scores)"]
     NULL_MEM --> RESP
 ```
 
@@ -73,12 +72,11 @@ flowchart TB
 
 1. **ACL & Security Filter:** `QdrantSemanticMemory` enforces a server-side payload filter matching `tenant_id == tenant_scope` and `document_status == 'ready'` prior to vector scoring.
 2. **Query Transformation (`query_transform.py`):** Applies domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates hypothetical passages via HyDE.
-3. **Hybrid Fallback Engine (`hybrid.py`):**
-   - Computes dense cosine similarity matrix over in-memory vectors (`InRepoSemanticMemory`).
-   - Executes lexical keyword search via `BM25SearchAdapter`.
-   - Fuses dense and lexical search scores using Reciprocal Rank Fusion (`ReciprocalRankFusion`, `k=60`).
-   - Reranks candidate chunks with Jina Cross-Encoder API (`jina-reranker-v2-base-multilingual`).
-   - Diversifies final output with Maximal Marginal Relevance (`mmr_diversify`, `lambda_mult=0.7`).
+3. **Hybrid wrapper (`hybrid.py`):**
+   - Accepts an injected dense `SemanticMemoryPort` (Turbovec or Qdrant) from `build_semantic_memory()`.
+   - Executes lexical keyword search via `BM25SearchAdapter` over the same company corpus.
+   - Fuses dense and lexical ranks with Reciprocal Rank Fusion (`ReciprocalRankFusion`, `k=60`).
+   - Optionally reranks with Jina and diversifies with MMR (eval / advanced path; factory wrap is dense + BM25 + RRF).
 4. **Graceful Degrader (`null_memory.py`):** Returns `RetrievalStatus.NO_RESULTS` if stores or upstream embedding APIs are unavailable, ensuring digest runs and chat turns never crash.
 
 ---
@@ -112,7 +110,7 @@ When an incoming email is classified as `RETRIEVE_RAG` by `routing.py`, `ActionP
 
 | Store Engine | Provider Value | Index Location / Address | Primary Use Case |
 |---|---|---|---|
-| **Qdrant Vector DB** | `qdrant` (default) | `QDRANT_URL` / collection `cowork_knowledge_v1` | Production enterprise company RAG and project document search. |
-| **Turbovec 4-bit** | `turbovec` | `.data/turbovec_index.tvim` | Local high-speed quantized vector memory search. |
+| **Turbovec 4-bit** | `turbovec` (default) | `.data/turbovec_index.tvim` | Default company RAG for Email + Chat Type 4 (Hybrid dense + BM25 + RRF). |
+| **Qdrant Vector DB** | `qdrant` | `QDRANT_URL` / collection `cowork_knowledge_v1` | Optional company RAG backend, and isolated project-document search. |
 | **Hybrid In-Repo** | `hybrid` | In-process NumPy + BM25 | Local fallback and evaluation benchmark engine. |
 | **Null Memory** | `null` | N/A | Degraded state fallback preventing application crashes. |
