@@ -16,7 +16,7 @@ from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
-from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
+from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
 
 COLLECTION = "bootstrap_company_knowledge"
 
@@ -51,7 +51,7 @@ def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     return client
 
 
-def test_disabled_qdrant_yields_hybrid_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_qdrant_yields_null_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
@@ -61,7 +61,7 @@ def test_disabled_qdrant_yields_hybrid_memory(monkeypatch: pytest.MonkeyPatch) -
         )
     )
 
-    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory, NullSemanticMemory)
 
 
 def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(
@@ -127,7 +127,7 @@ def test_an_unreachable_qdrant_degrades_to_null_memory(
         bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
     )
 
-    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory, NullSemanticMemory)
 
 
 def test_a_vector_size_mismatch_degrades_to_null_memory(
@@ -139,12 +139,17 @@ def test_a_vector_size_mismatch_degrades_to_null_memory(
         )
     )
 
-    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory, NullSemanticMemory)
 
 
 def test_a_missing_corpus_degrades_to_null_memory(
-    local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    client = AsyncQdrantClient(":memory:")
+    monkeypatch.setattr(bootstrap, "AsyncQdrantClient", lambda **kwargs: client)
+    monkeypatch.setattr(
+        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
+    )
     def _missing(*args: object, **kwargs: object) -> Sequence[object]:
         raise ValueError("Knowledge corpus directory not found")
 

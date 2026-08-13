@@ -15,16 +15,13 @@ from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
 
-from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings, RerankerSettings
+from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.rag.embeddings import EmbeddingPort, JinaEmbeddingAdapter
-from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
-from cowork_agent.integrations.rag.query_transform import RuleBasedQueryTransformer
-from cowork_agent.integrations.rag.reranker import RerankerAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +36,7 @@ async def build_semantic_memory(
     settings: JinaEmbeddingSettings,
     qdrant_settings: QdrantSettings | None = None,
 ) -> SemanticMemoryPort:
-    """Best-effort RAG store with Qdrant, Turbovec, and in-repo fallback."""
+    """Best-effort RAG store with Qdrant and Turbovec cache."""
     provider = os.getenv("RAG_STORE_PROVIDER", "").lower()
     if provider == "turbovec":
         try:
@@ -59,43 +56,29 @@ async def build_semantic_memory(
             )
             return turbovec_memory
         except Exception as exc:
-            logger.warning(
-                "Turbovec memory setup failed (%s: %s); falling back...",
+            logger.error(
+                "Turbovec memory setup failed (%s: %s); degrading to NullSemanticMemory",
                 type(exc).__name__,
                 exc,
             )
+            return NullSemanticMemory()
 
     resolved = QdrantSettings.from_env() if qdrant_settings is None else qdrant_settings
     if resolved.enabled:
         try:
             return await _build_qdrant_memory(resolved, JinaEmbeddingAdapter(settings))
         except Exception as exc:
-            logger.warning(
-                "Qdrant memory setup failed (%s: %s); falling back to in-repo memory",
+            logger.error(
+                "Qdrant memory error (%s: %s); degrading to NullSemanticMemory",
                 type(exc).__name__,
                 exc,
             )
+            return NullSemanticMemory()
 
-    try:
-        documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
-        memory = HybridSemanticMemory(
-            documents,
-            JinaEmbeddingAdapter(settings),
-            reranker=RerankerAdapter(settings=RerankerSettings.from_env()),
-            query_transformer=RuleBasedQueryTransformer(enable_hyde=True),
-            enable_mmr=True,
-            min_rerank_score=0.30,
-            relative_cutoff_ratio=0.85,
-        )
-        await memory.build_index()
-        return memory
-    except Exception as exc:
-        logger.warning(
-            "Semantic memory unavailable (%s: %s); retrieval returns structured empty results",
-            type(exc).__name__,
-            exc,
-        )
-        return NullSemanticMemory()
+    logger.warning(
+        "Qdrant is disabled (QDRANT_ENABLED=false). Returning NullSemanticMemory."
+    )
+    return NullSemanticMemory()
 
 
 async def _build_qdrant_memory(
@@ -112,10 +95,19 @@ async def _build_qdrant_memory(
 async def _ensure_corpus(
     client: AsyncQdrantClient, settings: QdrantSettings, embedder: EmbeddingPort
 ) -> None:
-    """Ingest only when the collection is absent, empty, or explicitly re-indexed."""
+    """Ingest only when the Qdrant collection is absent, empty, or reindex is requested."""
     if not settings.reindex and await client.collection_exists(settings.collection_name):
+        info = await client.get_collection(settings.collection_name)
+        vectors_config = info.config.params.vectors
+        size = getattr(vectors_config, "size", None)
+        if size is not None and size != settings.vector_size:
+            raise ValueError(
+                f"Vector size mismatch: collection vector size is {size}, "
+                f"expected {settings.vector_size}"
+            )
         if (await client.count(settings.collection_name)).count > 0:
             return
+
     documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
     count = await ingest_corpus(
         client,
@@ -124,4 +116,8 @@ async def _ensure_corpus(
         embedder,
         vector_size=settings.vector_size,
     )
-    logger.info("Ingested %d knowledge chunks into %s", count, settings.collection_name)
+    logger.info(
+        "Ingested %d knowledge chunks into Qdrant collection %s",
+        count,
+        settings.collection_name,
+    )
