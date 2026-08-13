@@ -439,3 +439,107 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
             )
 
     asyncio.run(scenario())
+
+
+class FakeStorage:
+    def __init__(self) -> None:
+        self.store: dict[str, bytes] = {}
+
+    async def upload_bytes(
+        self, object_key: str, data: bytes, content_type: str = "text/markdown"
+    ) -> None:
+        self.store[object_key] = data
+
+
+class BrokenStorage:
+    async def upload_bytes(
+        self, object_key: str, data: bytes, content_type: str = "text/markdown"
+    ) -> None:
+        raise RuntimeError("Supabase connection error")
+
+
+def test_controller_artifact_creation_success() -> None:
+    from cowork_agent.features.ai_chat.ports import ArtifactRef
+
+    storage = FakeStorage()
+    reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Here is your report",
+                artifact_refs=(
+                    ArtifactRef(filename="report.md", content="# Sample Report"),
+                ),
+            ),
+        )
+    )
+    controller, _ = _controller(reply=reply, profile=ProfileReader(_profile()))
+    controller._storage = storage
+
+    async def scenario() -> None:
+        events = [
+            event
+            async for event in controller.stream_message(
+                ChatMessageRequest(
+                    session_id="session-1",
+                    user_message="Tạo báo cáo giúp tôi",
+                    idempotency_key="key-1",
+                )
+            )
+        ]
+        assert [evt.event_type for evt in events] == [
+            ChatEventType.DELTA,
+            ChatEventType.ARTIFACT_REFS,
+            ChatEventType.COMPLETED,
+        ]
+        art_evt = events[1]
+        assert art_evt.artifact_refs is not None
+        assert len(art_evt.artifact_refs) == 1
+        ref_info = art_evt.artifact_refs[0]
+        assert ref_info["filename"] == "Sample Report.md"
+        assert len(storage.store) == 1
+
+    asyncio.run(scenario())
+
+
+def test_controller_artifact_creation_storage_unavailable_fails_closed() -> None:
+    from cowork_agent.features.ai_chat.ports import ArtifactRef
+
+    # Storage is Broken
+    storage = BrokenStorage()
+    reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Here is your report",
+                artifact_refs=(
+                    ArtifactRef(filename="report.md", content="# Sample Report"),
+                ),
+            ),
+        )
+    )
+    controller, _ = _controller(reply=reply, profile=ProfileReader(_profile()))
+    controller._storage = storage
+
+    async def scenario() -> None:
+        events = [
+            event
+            async for event in controller.stream_message(
+                ChatMessageRequest(
+                    session_id="session-1",
+                    user_message="Tạo báo cáo giúp tôi",
+                    idempotency_key="key-2",
+                )
+            )
+        ]
+        # Must fail-closed with ERROR event immediately after DELTA, no COMPLETED
+        assert [evt.event_type for evt in events] == [
+            ChatEventType.DELTA,
+            ChatEventType.ERROR,
+        ]
+        err_evt = events[1]
+        assert err_evt.code == "storage_unavailable"
+        assert "storage is unavailable" in err_evt.safe_message.lower()
+
+    asyncio.run(scenario())
+
+
+

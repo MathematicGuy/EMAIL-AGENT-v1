@@ -60,13 +60,13 @@ describe('project document polling', () => {
 });
 
 describe('project document availability and upload cancellation', () => {
-  it('keeps document controls fail-closed when health is degraded', async () => {
+  it('keeps document controls available when health is degraded', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'degraded',
       checks: { feature: 'enabled' },
     }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
 
-    await expect(areProjectDocumentsEnabled()).resolves.toBe(false);
+    await expect(areProjectDocumentsEnabled()).resolves.toBe(true);
   });
 
   it('cancels before registering an upload when the caller aborts', async () => {

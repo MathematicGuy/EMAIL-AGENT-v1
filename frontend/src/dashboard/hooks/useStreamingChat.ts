@@ -38,7 +38,13 @@ interface SseEvent {
   section?: string;
   page_start?: number;
   page_end?: number;
+  artifact_refs?: Array<{
+    ref_id: string;
+    filename: string;
+    title: string;
+  }>;
 }
+
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
@@ -334,6 +340,13 @@ export function useStreamingChat(
               ? { ...message, content: message.content + event.text }
               : message
           ));
+        } else if (event.event_type === 'artifact_refs' && Array.isArray(event.artifact_refs)) {
+          const refs = event.artifact_refs;
+          setMessages((current) => current.map((message) =>
+            message.id === assistantId
+              ? { ...message, artifactRefs: refs }
+              : message
+          ));
         } else if (event.event_type === 'memory_citation') {
           const citation = citationFromEvent(event);
           if (citation) setMessages((current) => current.map((message) =>
@@ -362,6 +375,7 @@ export function useStreamingChat(
               : message
           ));
         }
+
       });
       setMessages((current) => current.map((message) =>
         message.id === assistantId ? { ...message, isStreaming: false } : message

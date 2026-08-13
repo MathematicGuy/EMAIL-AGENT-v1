@@ -18,10 +18,14 @@ import {
 import { API_BASE_URL } from '../../lib/apiConfig';
 
 interface ReportFile {
+  ref_id?: string;
   filename: string;
-  content: string;
-  size: number;
-  updated_at: string;
+  object_key?: string;
+  content?: string;
+  size_bytes?: number;
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const ArtifactsView: React.FC = () => {
@@ -37,27 +41,43 @@ export const ArtifactsView: React.FC = () => {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const findMatchingFile = (filename: string, fileList: ReportFile[]) => {
-    // 1. Khớp chính xác
-    let found = fileList.find(f => f.filename === filename);
+    let found = fileList.find(f => f.ref_id === filename || f.filename === filename);
     if (found) return found;
 
-    // 2. Khớp không đuôi (thêm hoặc bớt .md)
     const cleanTarget = filename.replace(/\.md$/, '').toLowerCase();
-    found = fileList.find(f => f.filename.replace(/\.md$/, '').toLowerCase() === cleanTarget);
+    found = fileList.find(f => (f.ref_id || f.filename).replace(/\.md$/, '').toLowerCase() === cleanTarget);
     if (found) return found;
 
-    // 3. Khớp một phần tên
-    found = fileList.find(f => f.filename.toLowerCase().includes(cleanTarget) || cleanTarget.includes(f.filename.replace(/\.md$/, '').toLowerCase()));
+    found = fileList.find(f => (f.ref_id || f.filename).toLowerCase().includes(cleanTarget) || cleanTarget.includes((f.ref_id || f.filename).replace(/\.md$/, '').toLowerCase()));
     return found || null;
   };
 
-  const handleSelectFile = (file: ReportFile) => {
+  const handleSelectFile = async (file: ReportFile) => {
     setSelectedFile(file);
-    setEditContent(file.content);
     setEditFilename(file.filename);
     setIsEditing(false);
     setIsCreatingNew(false);
     setSaveStatus('idle');
+
+    if (file.content !== undefined) {
+      setEditContent(file.content);
+    } else {
+      setEditContent('Đang tải nội dung...');
+      try {
+        const refId = file.ref_id || file.filename;
+        const res = await fetch(`${API_BASE_URL}/api/v1/reports/${encodeURIComponent(refId)}`);
+        if (res.ok) {
+          const text = await res.text();
+          file.content = text;
+          setEditContent(text);
+          setSelectedFile({ ...file, content: text });
+        } else {
+          setEditContent('Không thể tải nội dung tài liệu.');
+        }
+      } catch {
+        setEditContent('Lỗi kết nối server.');
+      }
+    }
   };
 
   const fetchFiles = async (selectLatest = false) => {
@@ -187,21 +207,28 @@ export const ArtifactsView: React.FC = () => {
   };
 
   const filteredFiles = files.filter(f => {
+    if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
-    return f.filename.toLowerCase().includes(query) || f.content.toLowerCase().includes(query);
+    return (
+      f.filename.toLowerCase().includes(query) ||
+      (f.ref_id && f.ref_id.toLowerCase().includes(query)) ||
+      (f.content && f.content.toLowerCase().includes(query))
+    );
   });
 
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+  const formatSize = (bytes?: number) => {
+    if (!bytes || bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const formatDate = (isoStr: string) => {
+  const formatDate = (isoStr?: string) => {
+    if (!isoStr) return 'Vừa tạo';
     try {
       const date = new Date(isoStr);
+      if (isNaN(date.getTime())) return isoStr;
       return date.toLocaleString('vi-VN', {
         day: '2-digit',
         month: '2-digit',
@@ -215,20 +242,33 @@ export const ArtifactsView: React.FC = () => {
   };
 
 
+  const handleDownloadDocx = async () => {
+    if (!selectedFile) return;
+    const refId = selectedFile.ref_id || selectedFile.filename;
+    try {
+      const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(refId)}/download`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Không thể tạo file DOCX từ server');
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = (selectedFile.filename || refId).replace(/\.md$/, '.docx');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err: unknown) {
+      alert('Lỗi khi tải file DOCX: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
 
   const handleDownloadPDF = async () => {
     if (!selectedFile) return;
     const isDocx = selectedFile.filename.endsWith('.docx');
 
     if (isDocx) {
-      // Tải trực tiếp bằng link của backend để trình duyệt tự xử lý stream nhị phân chuẩn xác
-      const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/download`;
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = selectedFile.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      handleDownloadDocx();
       return;
     }
 
@@ -301,10 +341,12 @@ export const ArtifactsView: React.FC = () => {
             </div>
           ) : (
             filteredFiles.map((file) => {
-              const isSelected = selectedFile?.filename === file.filename && !isCreatingNew;
+              const fileKey = file.ref_id || file.filename;
+              const selectedKey = selectedFile?.ref_id || selectedFile?.filename;
+              const isSelected = selectedKey === fileKey && !isCreatingNew;
               return (
                 <div
-                  key={file.filename}
+                  key={fileKey}
                   onClick={() => handleSelectFile(file)}
                   className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all duration-150 ${
                     isSelected
@@ -317,14 +359,14 @@ export const ArtifactsView: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <p className="text-xs truncate">{file.filename}</p>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-500">
-                        <span>{formatSize(file.size)}</span>
+                        <span>{formatSize(file.size_bytes ?? file.size ?? 0)}</span>
                         <span>•</span>
-                        <span className="truncate">{formatDate(file.updated_at)}</span>
+                        <span className="truncate">{formatDate(file.created_at || file.updated_at)}</span>
                       </div>
                     </div>
                   </div>
                   <button
-                    onClick={(e) => handleDelete(file.filename, e)}
+                    onClick={(e) => handleDelete(fileKey, e)}
                     className="p-1 rounded opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-rose-400 hover:bg-[#2e2b27] transition-all cursor-pointer"
                     title="Xóa file"
                   >
@@ -334,6 +376,7 @@ export const ArtifactsView: React.FC = () => {
               );
             })
           )}
+
         </div>
         
         {/* FOOTER STATS */}
@@ -382,11 +425,11 @@ export const ArtifactsView: React.FC = () => {
               <div className="flex items-center gap-2 shrink-0 ml-4">
                 {selectedFile && !isEditing && !isCreatingNew && (
                   <button
-                    onClick={handleDownloadPDF}
+                    onClick={handleDownloadDocx}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>{selectedFile.filename.endsWith('.docx') ? 'Tải DOCX' : 'Tải PDF'}</span>
+                    <span>Tải DOCX</span>
                   </button>
                 )}
 
@@ -442,11 +485,12 @@ export const ArtifactsView: React.FC = () => {
                 <div className="prose prose-invert max-w-none text-xs leading-6 text-zinc-300">
                   {/* Clean custom markdown parser wrapper */}
                   <div className="bg-[#1c1b18] border border-[#2d2b27] rounded-2xl p-6 shadow-sm overflow-auto whitespace-pre-wrap font-sans">
-                    {selectedFile?.content.trim() ? (
-                      <MarkdownRenderer text={selectedFile.content} />
-                    ) : (
-                      <em className="text-zinc-500">Tài liệu trống</em>
-                    )}
+                  {(selectedFile?.content || editContent || '').trim() ? (
+                    <MarkdownRenderer text={selectedFile?.content || editContent || ''} />
+                  ) : (
+                    <em className="text-zinc-500">Tài liệu trống</em>
+                  )}
+
                   </div>
                 </div>
               )}
@@ -495,9 +539,11 @@ const parseInlineMarkdown = (text: string): React.ReactNode[] => {
 };
 
 // Extremely simple Markdown Renderer to show beautiful preview without extra packages
-/* eslint-disable react-hooks/immutability -- parser state is local to this pure render pass */
 const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
-  const lines = text.split('\n');
+  const normalizedText = (text || '').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+  const lines = normalizedText.split('\n');
+
+
   let inCodeBlock = false;
   let codeContent: string[] = [];
 

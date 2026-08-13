@@ -18,9 +18,11 @@ import type {
   SourceSnapshotRef,
 } from '../../modules/work-intake/types';
 import { CitationBadge } from '../../modules/documents/components/CitationBadge';
+import { API_BASE_URL } from '../../lib/apiConfig';
 import {
   LOCAL_ASSISTANT_SCOPE,
 } from '../../modules/work-intake/assistantApi';
+
 import { readResourceText } from '../../modules/workspace/resourceApi';
 import type {
   ChatComposerAttachment,
@@ -289,7 +291,9 @@ function FormattedMarkdownText({
     return tokens;
   };
 
-  const lines = content.split('\n');
+  const normalizedContent = (content || '').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+  const lines = normalizedContent.split('\n');
+
   const blocks: Array<{ type: 'line' | 'table'; lines: string[]; lineIdx: number }> = [];
 
   let currentTableLines: string[] = [];
@@ -490,22 +494,25 @@ function ArtifactRefCard({
     setIsLoading(true);
     setError(null);
     try {
-      setContent(
-        await readResourceText(
-          artifact.ref_id,
-          LOCAL_ASSISTANT_SCOPE
-        )
-      );
-    } catch (readError) {
-      setError(
-        readError instanceof Error
-          ? readError.message
-          : 'Không đọc được báo cáo.'
-      );
+      const res = await fetch(`${API_BASE_URL}/api/v1/reports/${encodeURIComponent(artifact.ref_id)}`);
+      if (res.ok) {
+        setContent(await res.text());
+      } else {
+        let detail = `Không đọc được báo cáo (HTTP ${res.status}).`;
+        try {
+          const payload = (await res.json()) as { detail?: string };
+          if (payload.detail) detail = payload.detail;
+        } catch { /* keep status text */ }
+        setError(detail);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Lỗi kết nối server.');
     } finally {
       setIsLoading(false);
     }
+
   };
+
 
   const handleLinkToArtifact = () => {
     const name = resourceName(artifact);

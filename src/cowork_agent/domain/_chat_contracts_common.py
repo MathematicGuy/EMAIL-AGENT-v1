@@ -25,6 +25,7 @@ class ChatEventType(StrEnum):
     DELTA = "delta"
     MEMORY_CITATION = "memory_citation"
     TASK_PROPOSAL = "task_proposal"
+    ARTIFACT_REFS = "artifact_refs"
     COMPLETED = "completed"
     ERROR = "error"
 

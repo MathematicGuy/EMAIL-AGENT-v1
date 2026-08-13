@@ -326,11 +326,22 @@ async def _sse_events(
     payload: ChatMessageRequest,
     request: Request,
 ) -> AsyncIterator[str]:
-    async for event in controller.stream_message(
-        payload,
-        is_cancelled=request.is_disconnected,
-    ):
-        yield _serialize_sse(event)
+    try:
+        async for event in controller.stream_message(
+            payload,
+            is_cancelled=request.is_disconnected,
+        ):
+            yield _serialize_sse(event)
+    except Exception:
+        error_event = ChatMessageStreamEvent.error(
+            event_id=str(uuid.uuid4()),
+            session_id=payload.session_id,
+            turn_id=str(uuid.uuid4()),
+            code="internal_error",
+            safe_message="An internal server error occurred while processing the chat stream.",
+        )
+        yield _serialize_sse(error_event)
+
 
 
 def _serialize_sse(event: ChatMessageStreamEvent) -> str:

@@ -35,7 +35,14 @@ from .generation_context import (
 )
 from .intent.service import ChatRoutingService
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
-from .ports import ChatReplyChunk, ChatReplyPort, ChatTaskProposal
+from .ports import (
+    ArtifactRef,
+    ArtifactStoragePort,
+    ChatReplyChunk,
+    ChatReplyPort,
+    ChatTaskProposal,
+    extract_stem_from_content,
+)
 from .retention import compute_expires_at
 from .retrieval_policy import (
     clarification_memory_reads,
@@ -224,6 +231,7 @@ class ChatController:
         episode_retention_seconds: int | None = None,
         routing: ChatRoutingService | None = None,
         company_rag_enabled: bool = True,
+        storage: ArtifactStoragePort | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
@@ -233,6 +241,8 @@ class ChatController:
         self._episode_retention_seconds = episode_retention_seconds
         self._routing = routing
         self._company_rag_enabled = company_rag_enabled
+        self._storage = storage
+
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
@@ -327,6 +337,7 @@ class ChatController:
             chunks: list[str] = []
             task_proposal: ChatTaskProposal | None = None
             selected_citation_ids: list[str] = []
+            collected_artifact_refs: list[object] = []
             pending_task_episode: _PendingTaskEpisode | None = None
             generation_context = assemble_generation_context(
                 request,
@@ -344,6 +355,8 @@ class ChatController:
                         for citation_id in chunk.citation_ids:
                             if citation_id not in selected_citation_ids:
                                 selected_citation_ids.append(citation_id)
+                        if chunk.artifact_refs:
+                            collected_artifact_refs.extend(chunk.artifact_refs)
                         text = chunk.text
                     else:
                         text = chunk
@@ -365,6 +378,68 @@ class ChatController:
                     safe_message="The chat response provider is unavailable.",
                 )
                 return
+
+            if collected_artifact_refs:
+                storage = self._storage
+                if storage is None:
+                    error_evt = self._error(
+                        turn_id=turn_id,
+                        code="storage_unavailable",
+                        safe_message=(
+                            "Private storage is unavailable. Artifact could not be saved."
+                        ),
+                    )
+                    emitted.append(error_evt)
+                    yield error_evt
+                    return
+
+                saved_refs: list[dict[str, object]] = []
+                for art_ref in collected_artifact_refs:
+                    raw_filename = (
+                        art_ref.filename if isinstance(art_ref, ArtifactRef) else "report.md"
+                    )
+                    content_str = (
+                        art_ref.content if isinstance(art_ref, ArtifactRef) else ""
+                    )
+                    stem = extract_stem_from_content(content_str, raw_filename)
+                    ref_id = f"{stem}.md"
+                    object_key = f"reports/{self._scope.user_id}/{ref_id}"
+
+                    try:
+                        await storage.upload_bytes(
+                            object_key,
+                            content_str.encode("utf-8"),
+                            content_type="text/markdown",
+                        )
+                    except Exception:
+                        error_evt = self._error(
+                            turn_id=turn_id,
+                            code="storage_unavailable",
+                            safe_message=(
+                                "Private storage is unavailable. Artifact could not be saved."
+                            ),
+                        )
+                        emitted.append(error_evt)
+                        yield error_evt
+                        return
+
+                    saved_refs.append(
+                        {
+                            "ref_id": ref_id,
+                            "filename": ref_id,
+                            "title": stem,
+                        }
+                    )
+
+                art_event = ChatMessageStreamEvent.artifact_refs_event(
+                    event_id=self._new_id(),
+                    session_id=self._scope.session_id,
+                    turn_id=turn_id,
+                    artifact_refs=tuple(saved_refs),
+                )
+                emitted.append(art_event)
+                yield art_event
+
 
             if await is_cancelled():
                 return

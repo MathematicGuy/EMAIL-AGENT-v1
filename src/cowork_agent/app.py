@@ -148,6 +148,7 @@ from cowork_agent.runtime import configure_windows_event_loop_policy
 from .api.chat import create_chat_router
 from .api.handlers import _jsonable
 from .api.projects import create_project_router
+from .api.reports import LocalReportStorage
 
 # ``uvicorn cowork_agent.app:create_app --factory`` bypasses ``main()``. Set
 # the policy during module import as well, before Uvicorn creates its loop.
@@ -231,7 +232,9 @@ def _chat_controller_factory(
                 "episode_retention_seconds",
                 None,
             ),
+            storage=getattr(app.state, "report_storage", None),
         )
+
 
     return factory
 
@@ -282,8 +285,8 @@ def create_app() -> FastAPI:
                         spec.loader.exec_module(mod)
                         if hasattr(mod, "main"):
                             mod.main()
-            except Exception as exc:
-                logger.warning("Corpus skill tree auto-update skipped: %s", exc)
+            except Exception:
+                pass
 
             settings = GmailSettings.from_env()
             session_settings = SessionSettings.from_env()
@@ -422,6 +425,7 @@ def create_app() -> FastAPI:
             app.state.project_document_vectors = None
             app.state.project_document_qdrant_client = None
             app.state.chat_principal_resolver = _resolve_chat_principal
+            app.state.report_storage = LocalReportStorage("workspace/reports")
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
             app.state.run_repository = run_repository
@@ -587,6 +591,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
     app.include_router(create_project_router())
+    from cowork_agent.api.reports import router as reports_router
+    app.include_router(reports_router)
 
     @app.get("/health")
     @app.get("/api/v1/health")

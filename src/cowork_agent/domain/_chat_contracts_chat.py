@@ -158,6 +158,7 @@ class ChatMessageStreamEvent:
     code: str | None = None
     safe_message: str | None = None
     proposal: Mapping[str, object] | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] | None = None
     citation_scope: str | None = None
     project_id: str | None = None
     document_id: str | None = None
@@ -182,6 +183,7 @@ class ChatMessageStreamEvent:
             "code": self.code,
             "safe_message": self.safe_message,
             "proposal": self.proposal,
+            "artifact_refs": self.artifact_refs,
             "citation_scope": self.citation_scope,
             "project_id": self.project_id,
             "document_id": self.document_id,
@@ -194,6 +196,7 @@ class ChatMessageStreamEvent:
             ChatEventType.DELTA: ("text",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
             ChatEventType.TASK_PROPOSAL: ("proposal",),
+            ChatEventType.ARTIFACT_REFS: ("artifact_refs",),
             ChatEventType.COMPLETED: (),
             ChatEventType.ERROR: ("code", "safe_message"),
         }
@@ -299,6 +302,23 @@ class ChatMessageStreamEvent:
         )
 
     @classmethod
+    def artifact_refs_event(
+        cls,
+        *,
+        event_id: str,
+        session_id: str,
+        turn_id: str,
+        artifact_refs: tuple[Mapping[str, object], ...],
+    ) -> Self:
+        return cls(
+            event_id,
+            session_id,
+            turn_id,
+            ChatEventType.ARTIFACT_REFS,
+            artifact_refs=artifact_refs,
+        )
+
+    @classmethod
     def error(
         cls,
         *,
@@ -335,6 +355,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "code",
         "safe_message",
         "proposal",
+        "artifact_refs",
         "citation_scope",
         "project_id",
         "document_id",
@@ -354,6 +375,15 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
     raw_code = data.get("code")
     raw_safe_message = data.get("safe_message")
     raw_proposal = data.get("proposal")
+    raw_artifact_refs = data.get("artifact_refs")
+    artifact_refs_tuple = (
+        tuple(
+            _as_mapping(item, "artifact_refs item")
+            for item in _as_sequence(raw_artifact_refs, "artifact_refs")
+        )
+        if raw_artifact_refs is not None
+        else None
+    )
     return ChatMessageStreamEvent(
         event_id=_require_string(data["event_id"], "event_id"),
         session_id=_require_string(data["session_id"], "session_id"),
@@ -369,6 +399,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         code=raw_code if isinstance(raw_code, str) else None,
         safe_message=raw_safe_message if isinstance(raw_safe_message, str) else None,
         proposal=(_as_mapping(raw_proposal, "proposal") if raw_proposal is not None else None),
+        artifact_refs=artifact_refs_tuple,
         citation_scope=(
             str(data["citation_scope"]) if data.get("citation_scope") is not None else None
         ),
@@ -381,6 +412,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         page_start=_optional_int(data.get("page_start"), "page_start"),
         page_end=_optional_int(data.get("page_end"), "page_end"),
     )
+
 
 
 def _optional_int(value: object, name: str) -> int | None:
