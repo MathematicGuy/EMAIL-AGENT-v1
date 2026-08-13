@@ -93,6 +93,21 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
             queued = await projects.mark_upload_completed(owner, default.id, document.id)
             assert queued is not None
             assert queued.status == "queued"
+            async with pool.connection() as connection:
+                await connection.execute(
+                    "UPDATE document_ingestion_jobs "
+                    "SET available_at = now() + interval '30 seconds' "
+                    "WHERE document_id = %s",
+                    (document.id,),
+                )
+            assert await projects.next_claimable_job() is None
+            assert await projects.claim_job(document.id) is None
+            async with pool.connection() as connection:
+                await connection.execute(
+                    "UPDATE document_ingestion_jobs SET available_at = now() "
+                    "WHERE document_id = %s",
+                    (document.id,),
+                )
             assert await projects.next_claimable_job() == document.id
             claimed = await projects.claim_job(document.id)
             assert claimed is not None
