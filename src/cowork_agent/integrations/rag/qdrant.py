@@ -145,53 +145,101 @@ async def ingest_corpus(
     embedder: EmbeddingPort,
     *,
     vector_size: int | None = None,
+    reindex: bool = False,
 ) -> int:
-    """(Re)create ``collection_name`` and upsert every chunk; returns the count.
+    """(Re)create ``collection_name`` and upsert chunks; returns total count.
 
-    ``vector_size`` is validated against the embedder's actual output rather
-    than trusted: a configured 768 with a 64-dim embedder would otherwise fail
-    later, at query time, as an opaque dimension error.
+    Supports incremental ingestion: when ``reindex=False`` and the collection
+    exists, only new/missing documents are embedded and upserted.
     """
-    chunks = tuple(chunk for document in documents for chunk in document.chunks)
-    if not chunks:
+    if not documents:
         raise ValueError("Qdrant ingestion requires a non-empty corpus")
 
-    vectors = await embedder.embed(
-        tuple(chunk.text for chunk in chunks), task="retrieval.passage"
-    )
-    observed_size = len(vectors[0])
-    if vector_size is not None and vector_size != observed_size:
-        raise ValueError(
-            f"Configured vector size {vector_size} does not match the "
-            f"embedder output dimension {observed_size}"
-        )
+    all_chunks = tuple(chunk for document in documents for chunk in document.chunks)
+    if not all_chunks:
+        raise ValueError("Qdrant ingestion requires a non-empty corpus")
 
-    if await client.collection_exists(collection_name):
-        await client.delete_collection(collection_name)
-    await client.create_collection(
-        collection_name=collection_name,
-        vectors_config=VectorParams(size=observed_size, distance=Distance.COSINE),
-    )
-    for field_name in (TENANT_PAYLOAD_KEY, DOCUMENT_STATUS_PAYLOAD_KEY):
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name=field_name,
-            field_schema=PayloadSchemaType.KEYWORD,
-        )
+    new_documents: list[KnowledgeDocument] = []
+    if not reindex and await client.collection_exists(collection_name):
+        info = await client.get_collection(collection_name)
+        vectors_config = info.config.params.vectors
+        size = getattr(vectors_config, "size", None)
+        if size is not None and vector_size is not None and size != vector_size:
+            raise ValueError(
+                f"Configured vector size {vector_size} does not match the "
+                f"embedder output dimension {size}"
+            )
 
-    points = [
-        PointStruct(
-            id=str(uuid5(_POINT_NAMESPACE, chunk.chunk_id)),
-            vector=list(vector),
-            payload=_payload(chunk),
+        existing_doc_ids: set[str] = set()
+        offset = None
+        while True:
+            res = await client.scroll(
+                collection_name=collection_name,
+                limit=250,
+                offset=offset,
+                with_payload=["document_id", "doc_id", "source_url"],
+                with_vectors=False,
+            )
+            points_list = res[0] if isinstance(res, tuple) else res
+            offset = res[1] if isinstance(res, tuple) and len(res) > 1 else None
+            for point in points_list:
+                payload = getattr(point, "payload", None)
+                if isinstance(payload, dict):
+                    doc_id = payload.get("document_id") or payload.get("doc_id")
+                    if doc_id:
+                        existing_doc_ids.add(str(doc_id))
+            if offset is None:
+                break
+
+        for doc in documents:
+            if doc.document_id not in existing_doc_ids:
+                new_documents.append(doc)
+    else:
+        new_documents = list(documents)
+
+    if not new_documents and await client.collection_exists(collection_name):
+        return len(all_chunks)
+
+    chunks_to_embed = tuple(chunk for doc in new_documents for chunk in doc.chunks)
+    if chunks_to_embed:
+        vectors = await embedder.embed(
+            tuple(chunk.text for chunk in chunks_to_embed), task="retrieval.passage"
         )
-        for chunk, vector in zip(chunks, vectors, strict=True)
-    ]
-    for start in range(0, len(points), _UPSERT_BATCH):
-        await client.upsert(
-            collection_name=collection_name, points=points[start : start + _UPSERT_BATCH]
-        )
-    return len(points)
+        observed_size = len(vectors[0])
+        if vector_size is not None and vector_size != observed_size:
+            raise ValueError(
+                f"Configured vector size {vector_size} does not match the "
+                f"embedder output dimension {observed_size}"
+            )
+
+        if reindex or not await client.collection_exists(collection_name):
+            if await client.collection_exists(collection_name):
+                await client.delete_collection(collection_name)
+            await client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=observed_size, distance=Distance.COSINE),
+            )
+            for field_name in (TENANT_PAYLOAD_KEY, DOCUMENT_STATUS_PAYLOAD_KEY):
+                await client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field_name,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+
+        points = [
+            PointStruct(
+                id=str(uuid5(_POINT_NAMESPACE, chunk.chunk_id)),
+                vector=list(vector),
+                payload=_payload(chunk),
+            )
+            for chunk, vector in zip(chunks_to_embed, vectors, strict=True)
+        ]
+        for start in range(0, len(points), _UPSERT_BATCH):
+            await client.upsert(
+                collection_name=collection_name, points=points[start : start + _UPSERT_BATCH]
+            )
+
+    return len(all_chunks)
 
 
 def _payload(chunk: KnowledgeChunk) -> dict[str, object]:

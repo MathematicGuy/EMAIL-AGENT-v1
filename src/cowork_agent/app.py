@@ -267,6 +267,20 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
+            try:
+                import importlib.util
+
+                script_path = Path(__file__).resolve().parents[2] / "scripts" / "update_corpus2skill.py"
+                if script_path.exists():
+                    spec = importlib.util.spec_from_file_location("update_corpus2skill", script_path)
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        if hasattr(mod, "main"):
+                            mod.main()
+            except Exception as exc:
+                logger.warning("Corpus skill tree auto-update skipped: %s", exc)
+
             settings = GmailSettings.from_env()
             session_settings = SessionSettings.from_env()
             repository: MailboxConnectionRepository = SQLiteMailboxConnectionRepository(

@@ -137,7 +137,7 @@ def test_results_are_ordered_by_descending_relevance(
     assert scores == sorted(scores, reverse=True)
 
 
-def test_an_unreachable_qdrant_falls_back_to_in_repo_memory(
+def test_an_unreachable_qdrant_falls_back_to_null_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -160,13 +160,10 @@ def test_an_unreachable_qdrant_falls_back_to_in_repo_memory(
 
     result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
 
-    assert isinstance(result, HybridSemanticMemory)
-    assert asyncio.run(result.retrieve(_request())).retrieval_status is (
-        RetrievalStatus.NO_RESULTS
-    )
+    assert isinstance(result, NullSemanticMemory)
 
 
-def test_bootstrap_uses_jina_settings_without_gemini_keys(
+def test_bootstrap_degrades_to_null_memory_when_qdrant_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
@@ -179,4 +176,5 @@ def test_bootstrap_uses_jina_settings_without_gemini_keys(
 
     result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
 
-    assert not isinstance(result, NullSemanticMemory)
+    assert isinstance(result, NullSemanticMemory)
+

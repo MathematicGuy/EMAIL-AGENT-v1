@@ -98,25 +98,43 @@ class JinaEmbeddingAdapter:
     ) -> tuple[tuple[float, ...], ...]:
         if not texts:
             return ()
-        response = await self._transport.post_json(
-            url=JINA_EMBEDDING_ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {self._settings.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            payload={
-                "model": self._settings.model,
-                "input": list(texts),
-                "task": task,
-                "dimensions": self._settings.dimensions,
-                "embedding_type": "float",
-            },
-            timeout_seconds=float(self._settings.timeout_seconds),
-        )
-        return _validated_jina_vectors(
-            response, expected_count=len(texts), dimensions=self._settings.dimensions
-        )
+        batch_size = 20
+        all_vectors: list[tuple[float, ...]] = []
+        for start in range(0, len(texts), batch_size):
+            batch_texts = list(texts[start : start + batch_size])
+            response = None
+            for attempt in range(5):
+                try:
+                    response = await self._transport.post_json(
+                        url=JINA_EMBEDDING_ENDPOINT,
+                        headers={
+                            "Authorization": f"Bearer {self._settings.api_key}",
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                        },
+                        payload={
+                            "model": self._settings.model,
+                            "input": batch_texts,
+                            "task": task,
+                            "dimensions": self._settings.dimensions,
+                            "embedding_type": "float",
+                        },
+                        timeout_seconds=float(self._settings.timeout_seconds),
+                    )
+                    break
+                except Exception as exc:
+                    if attempt < 4:
+                        await asyncio.sleep(2 * (attempt + 1))
+                    else:
+                        raise
+            if response is None:
+                raise ValueError("Embedding request failed after retries")
+            batch_vectors = _validated_jina_vectors(
+                response, expected_count=len(batch_texts), dimensions=self._settings.dimensions
+            )
+            all_vectors.extend(batch_vectors)
+            await asyncio.sleep(0.2)
+        return tuple(all_vectors)
 
 
 class GeminiEmbeddingAdapter:
