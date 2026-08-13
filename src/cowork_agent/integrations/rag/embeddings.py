@@ -138,7 +138,7 @@ class JinaEmbeddingAdapter:
 
 
 class GeminiEmbeddingAdapter:
-    """Production embeddings via the Gemini API (one batch call)."""
+    """Production embeddings via the Gemini API with model-safe batching."""
 
     def __init__(
         self,
@@ -176,16 +176,28 @@ class GeminiEmbeddingAdapter:
         embeddings: list[tuple[float, ...]] = []
         for start in range(0, len(texts), self._batch_size):
             batch = list(texts[start : start + self._batch_size])
-            response = await self._embed_content(batch, task=task)
-            for item in response.embeddings or ():
-                if item.values is None:
-                    raise ValueError("Embedding response contained an empty vector")
-                vector = tuple(float(value) for value in item.values)
-                if self._dimensions is not None and len(vector) != self._dimensions:
-                    raise ValueError("Gemini embedding response has an invalid vector dimension")
-                if any(not math.isfinite(value) for value in vector):
-                    raise ValueError("Gemini embedding response contains a non-finite value")
-                embeddings.append(vector)
+            # Gemini Embedding 2 combines a list of contents into one
+            # multimodal input and deliberately returns one vector. Send each
+            # text separately so every project-document chunk receives its own
+            # embedding. Earlier text models retain their supported batching.
+            requests = (
+                ([text] for text in batch)
+                if "gemini-embedding-2" in self._model
+                else (batch,)
+            )
+            for contents in requests:
+                response = await self._embed_content(contents, task=task)
+                for item in response.embeddings or ():
+                    if item.values is None:
+                        raise ValueError("Embedding response contained an empty vector")
+                    vector = tuple(float(value) for value in item.values)
+                    if self._dimensions is not None and len(vector) != self._dimensions:
+                        raise ValueError(
+                            "Gemini embedding response has an invalid vector dimension"
+                        )
+                    if any(not math.isfinite(value) for value in vector):
+                        raise ValueError("Gemini embedding response contains a non-finite value")
+                    embeddings.append(vector)
         if len(embeddings) != len(texts):
             raise ValueError("Embedding response count does not match request count")
         return tuple(embeddings)
@@ -211,7 +223,7 @@ class GeminiEmbeddingAdapter:
         async def request(client: genai.Client) -> types.EmbedContentResponse:
             call = client.aio.models.embed_content(
                 model=self._model,
-                contents=contents,  # type: ignore[arg-type]
+                contents=contents,
                 **({"config": config} if config is not None else {}),
             )
             if self._timeout_seconds is None:
@@ -219,8 +231,6 @@ class GeminiEmbeddingAdapter:
             return await asyncio.wait_for(call, timeout=self._timeout_seconds)
 
         if self._client is not None:
-            # list[str] is not assignable to the SDK's invariant union
-            # list[str | Image | File | Part]; the values are plain strings.
             return await request(self._client)
         last_error: GeminiRateLimitError | None = None
         for key in await self._rotator.candidates(self._max_attempts):

@@ -3,12 +3,12 @@
 import asyncio
 import logging
 import os
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 import httpx
+from dotenv import load_dotenv
 from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import (
@@ -57,6 +57,7 @@ from cowork_agent.orchestration.document_recovery import (
 )
 from cowork_agent.orchestration.recovery import sweep_stuck_runs
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
+from cowork_agent.runtime import configure_windows_event_loop_policy
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ async def run_worker() -> None:
                 )
                 await asyncio.wait_for(
                     document_vectors.ensure_collection(),
-                    timeout=document_settings.retrieval_timeout_ms / 1000,
+                    timeout=document_settings.startup_timeout_ms / 1000,
                 )
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
@@ -248,6 +249,7 @@ async def run_worker() -> None:
 
 
 def main() -> None:
+    load_dotenv(Path.cwd() / ".env", override=False)
     # See app.main(): INFO records are dropped without a root handler, and the
     # trace sink plus lifecycle publication are INFO-only.
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -263,11 +265,7 @@ def main() -> None:
         handlers=handlers,
         force=True,
     )
-    if sys.platform == "win32":
-        # psycopg async cannot run on Windows' ProactorEventLoop.
-        from asyncio import windows_events
-
-        asyncio.set_event_loop_policy(windows_events.WindowsSelectorEventLoopPolicy())
+    configure_windows_event_loop_policy()
     if not database_url():
         raise SystemExit("mail-todo-worker requires DATABASE_URL")
     asyncio.run(run_worker())

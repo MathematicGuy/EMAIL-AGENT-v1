@@ -352,6 +352,7 @@ class PostgresProjectRepository:
                     WHERE jobs.document_id = documents.id
                       AND jobs.document_id = %s
                       AND jobs.status IN ('queued', 'failed')
+                      AND jobs.available_at <= now()
                       AND documents.status = 'received'
                     RETURNING documents.id, documents.project_id, documents.workspace_id,
                         documents.user_id, documents.filename, documents.media_type,
@@ -389,6 +390,7 @@ class PostgresProjectRepository:
                 WHERE jobs.status IN ('queued', 'failed')
                   AND documents.status = 'received'
                   AND documents.expires_at > now()
+                  AND jobs.available_at <= now()
                 ORDER BY jobs.available_at, jobs.created_at, jobs.id
                 LIMIT 1
                 """

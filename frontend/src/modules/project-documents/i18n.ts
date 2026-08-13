@@ -7,6 +7,7 @@ const errors: Record<string, [string, string]> = {
   source_media_type_mismatch: ['Định dạng thực của tệp không đúng.', 'The file contents do not match the declared type.'],
   unsupported_media_type: ['Chỉ hỗ trợ tệp PDF và DOCX.', 'Only PDF and DOCX files are supported.'],
   empty_extraction: ['Không tìm thấy nội dung chữ trong tài liệu.', 'No readable text was found in the document.'],
+  native_extraction_failed: ['Không thể đọc nội dung trong PDF. Hãy thử một PDF khác hoặc PDF có văn bản chọn được.', 'The PDF text could not be extracted. Try another PDF or one with selectable text.'],
   page_limit_exceeded: ['Tài liệu vượt quá giới hạn số trang.', 'The document exceeds the page limit.'],
   ingestion_failed: ['Không thể xử lý tài liệu.', 'The document could not be processed.'],
 };

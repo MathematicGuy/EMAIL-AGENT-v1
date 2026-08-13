@@ -34,7 +34,19 @@ def test_project_documents_share_the_canonical_qdrant_collection_setting() -> No
 
 
 def test_project_documents_are_enabled_by_default() -> None:
-    assert UserDocumentsSettings.from_env({}, load_env_file=False).enabled is True
+    settings = UserDocumentsSettings.from_env({}, load_env_file=False)
+
+    assert settings.enabled is True
+    assert settings.retrieval_timeout_ms == 10_000
+    assert settings.startup_timeout_ms == 30_000
+
+
+def test_project_documents_allow_a_longer_qdrant_startup_timeout() -> None:
+    settings = UserDocumentsSettings.from_env(
+        {"USER_DOCUMENTS_STARTUP_TIMEOUT_MS": "60000"}, load_env_file=False
+    )
+
+    assert settings.startup_timeout_ms == 60_000
 
 
 def test_session_settings_load_cookie_contract() -> None:

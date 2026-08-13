@@ -178,6 +178,31 @@ def test_project_collection_rejects_a_wrong_dimension_at_startup() -> None:
     asyncio.run(scenario())
 
 
+def test_project_collection_backfills_indexes_for_an_existing_collection() -> None:
+    async def scenario() -> None:
+        from qdrant_client import AsyncQdrantClient
+
+        client = AsyncQdrantClient(":memory:")
+        await client.create_collection(
+            collection_name="project_documents",
+            vectors_config=VectorParams(size=64, distance=Distance.COSINE),
+        )
+        store = ProjectDocumentVectorStore(
+            client, "project_documents", HashingEmbedder(), vector_size=64
+        )
+
+        await store.ensure_collection()
+        await client.count(
+            collection_name="project_documents",
+            count_filter=Filter(must=[
+                FieldCondition(key="workspace_id", match=MatchValue(value="workspace-1"))
+            ]),
+            exact=True,
+        )
+
+    asyncio.run(scenario())
+
+
 def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
     class Repository:
         async def list_ready_for_scope(

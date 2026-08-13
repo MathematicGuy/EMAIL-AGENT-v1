@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import tempfile
 import zipfile
 from datetime import datetime
@@ -17,6 +18,8 @@ from cowork_agent.integrations.knowledge_ingestion.project_documents import (
 from cowork_agent.integrations.rag.project_documents import ProjectDocumentChunk
 from cowork_agent.integrations.storage.supabase import StorageUnavailable
 from cowork_agent.persistence.repositories.projects import ProjectDocument
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectDocumentRepository(Protocol):
@@ -195,21 +198,42 @@ class ProjectDocumentIngestionWorker:
                 else:
                     await self._delete_vectors_best_effort(document)
         except ProjectDocumentExtractionError as exc:
+            logger.warning(
+                "Project document extraction failed; document_id=%s error_code=%s",
+                document.id,
+                exc.code,
+            )
             if vectors_written:
                 await self._delete_vectors_best_effort(document)
             await self._fail(document.id, state, exc.code)
-        except StorageUnavailable:
+        except StorageUnavailable as exc:
+            logger.warning(
+                "Project document storage operation failed; document_id=%s error_type=%s",
+                document.id,
+                type(exc).__name__,
+            )
             if vectors_written:
                 await self._delete_vectors_best_effort(document)
             await self._retry_or_fail(document.id, state, "source_download_failed")
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Project document indexing failed; document_id=%s error_type=%s",
+                document.id,
+                type(exc).__name__,
+            )
             if vectors_written:
                 await self._delete_vectors_best_effort(document)
             if state == "indexing":
                 await self._retry_or_fail(document.id, state, "index_unavailable")
             else:
                 await self._fail(document.id, state, "ingestion_failed")
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Project document processing failed; document_id=%s state=%s error_type=%s",
+                document.id,
+                state,
+                type(exc).__name__,
+            )
             if vectors_written:
                 await self._delete_vectors_best_effort(document)
             await self._retry_or_fail(

@@ -143,10 +143,15 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
+from cowork_agent.runtime import configure_windows_event_loop_policy
 
 from .api.chat import create_chat_router
 from .api.handlers import _jsonable
 from .api.projects import create_project_router
+
+# ``uvicorn cowork_agent.app:create_app --factory`` bypasses ``main()``. Set
+# the policy during module import as well, before Uvicorn creates its loop.
+configure_windows_event_loop_policy()
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +456,7 @@ def create_app() -> FastAPI:
                     )
                     await asyncio.wait_for(
                         vector_store.ensure_collection(),
-                        timeout=user_documents_settings.retrieval_timeout_ms / 1000,
+                        timeout=user_documents_settings.startup_timeout_ms / 1000,
                     )
                     if app.state.project_repository is not None:
                         app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
@@ -1175,6 +1180,9 @@ def main() -> None:
     # .upper() because basicConfig rejects "debug" with a ValueError, which would
     # kill the process at startup over a lowercase env var.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+    api_workers = int(os.getenv("APP_API_WORKERS", "1"))
+    if api_workers < 1:
+        raise ValueError("APP_API_WORKERS must be positive")
     loop = "auto"
     if database_url() and sys.platform == "win32":
         # psycopg async cannot run on Windows' ProactorEventLoop. uvicorn builds
@@ -1187,6 +1195,7 @@ def main() -> None:
         host=os.getenv("APP_HOST", "127.0.0.1"),
         port=int(os.getenv("APP_PORT", "8000")),
         loop=loop,
+        workers=api_workers,
     )
 
 
