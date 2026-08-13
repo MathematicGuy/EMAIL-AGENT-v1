@@ -36,7 +36,7 @@ from cowork_agent.integrations.llm.chat_intent import (
     GroqIntentClassifier,
 )
 
-DEFAULT_OUTPUT_DIR = Path(".cowork/evaluations")
+DEFAULT_OUTPUT_DIR = Path("docs/evaluations/CHAT")
 FIXTURE_LOADER = (
     Path(__file__).resolve().parents[1]
     / "tests"

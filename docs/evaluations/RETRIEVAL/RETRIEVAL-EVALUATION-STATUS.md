@@ -2,7 +2,7 @@
 
 > **Document status:** current snapshot as of 2026-08-13, revised after the golden-set
 > and evaluation-harness work landed (C4, C5, C6 are implemented — see
-> [SPEC](./SPEC-rag-golden-set-and-eval.md) / [PLAN](./PLAN-rag-golden-set-and-eval.md)).  
+> [SPEC](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) / [PLAN](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
 > `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
 > **17 documents / 1,066 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
@@ -99,7 +99,7 @@ flowchart TD
 | **Scope** | All labeled fixture cases under `tests/fixtures/routing/` |
 | **Mode** | `--dry-run` (deterministic fake, perfect by construction) or live LLM provider |
 | **Metrics** | Actionability accuracy, per-Route precision & recall, **False-Negative Retrieval Rate** |
-| **Output** | JSON report written to `docs/baselines/routing-eval-<date>.json` |
+| **Output** | JSON report written to `docs/evaluations/baselines/routing-eval-<date>.json` |
 | **PRD ref** | PRD-v1 §16 Milestone 2 exit obligation (task T2.6) |
 
 The **False-Negative Retrieval Rate** (`false_negative_retrieval.rate`) is the primary quality gate: it tracks how often emails labeled `RETRIEVE_RAG` were incorrectly routed to `DIRECT_PLAN` or `NO_ACTION`. This is PRD-v1 §14's highest-risk error class.
@@ -221,7 +221,7 @@ No test verifies that a plan step referencing `cit_X` is actually discussing the
 
 #### D5 — Plan Faithfulness / Grounding Score
 
-No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The target architecture references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](./EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet.
+No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The target architecture references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet for email action plans. The Chat-RAG area has an opt-in `--ragas` path (see [CHAT-RAG](../CHAT-RAG/README.md)) that has never been run.
 
 **Metrics to add:** RAGAS Faithfulness, RAGAS Answer Relevance, or a custom LLM-as-judge check.
 
@@ -300,11 +300,10 @@ Items 1 and 2 of the previous revision (golden set, end-to-end fixture) are **do
 ---
 
 *Related documents:*
-- [EMAIL-RAG-ARCHITECHTURE.md](./EMAIL-RAG-ARCHITECHTURE.md) — full system architecture including target retrieval pipeline
-- [agent-experience-registry.md](./agent-experience-registry.md) — known patterns and gotchas
-- [SPEC-rag-golden-set-and-eval.md](./SPEC-rag-golden-set-and-eval.md) — golden-set schema, probe taxonomy, acceptance gates
-- [PLAN-rag-golden-set-and-eval.md](./PLAN-rag-golden-set-and-eval.md) — task breakdown and the T-6 comparison procedure
-- [HYBRID-SEARCH-IMPLEMENTATION-REPORT.md](./HYBRID-SEARCH-IMPLEMENTATION-REPORT.md) — the hybrid implementation this benchmark evaluates
+- [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) — full system architecture including target retrieval pipeline
+- [agent-experience-registry.md](../../references/agent-experience-registry.md) — known patterns and gotchas
+- [SPEC-rag-golden-set-and-eval.md](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) — golden-set schema, probe taxonomy, acceptance gates
+- [PLAN-rag-golden-set-and-eval.md](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md) — task breakdown and the T-6 comparison procedure
 - `tests/unit/integrations/rag/test_rag.py` — current retrieval unit tests
 - `tests/fixtures/rag/` — golden set, loader, and schema README
 - `scripts/evaluate_retrieval.py` — retrieval benchmark harness

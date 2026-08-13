@@ -29,6 +29,12 @@ def load_module() -> types.ModuleType:
     spec.loader.exec_module(module)
     return module
 
+def test_default_output_path_stays_under_documented_evaluations_store() -> None:
+    module = load_module()
+
+    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "docs" / "evaluations" / "baselines"
+    assert module.default_output_path("hashing", "dense").parent == module.DEFAULT_OUTPUT_DIR
+
 
 def _result(
     module: types.ModuleType,

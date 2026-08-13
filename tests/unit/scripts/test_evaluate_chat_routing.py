@@ -8,6 +8,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts/evaluate_chat_routing.py"
 
+def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
+    spec = importlib.util.spec_from_file_location("chat_eval_defaults", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    assert module.DEFAULT_OUTPUT_DIR == Path("docs/evaluations/CHAT")
+
 
 def test_chat_routing_dry_run_passes_and_report_is_metadata_only() -> None:
     output = Path(tempfile.mkdtemp(prefix="chat-routing-eval-"))

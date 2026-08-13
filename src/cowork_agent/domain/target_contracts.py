@@ -1,7 +1,7 @@
 """Versioned target contracts for the Email Action Plan workflow.
 
 Pure-stdlib domain contracts implementing Step 6 of
-``docs/master-comparison.md``:
+``docs/architectures/TARGET-ARCHITECTURE.md``:
 
 - §6.1 ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
 - §6.2 ``EmailRouteDecision`` — the Classifier's Route Decision

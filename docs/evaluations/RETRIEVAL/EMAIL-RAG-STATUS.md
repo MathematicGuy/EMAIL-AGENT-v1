@@ -120,5 +120,5 @@ Native-text PDFs and DOCX files are supported. PDFs that need OCR fail with
 downloads Gmail attachments, has no upload API, and does not write to Qdrant;
 after a successful ingestion, operators choose when to restart the local
 retriever or set `QDRANT_REINDEX=true` for a corpus replacement.
-- [RAG-EVALUATION-STATUS.md](./RAG-EVALUATION-STATUS.md) — evaluation & test coverage map
-- [master-comparison.md](../../architectures/master-comparison.md) — current vs target gap analysis and milestones
+- [RETRIEVAL-EVALUATION-STATUS.md](./RETRIEVAL-EVALUATION-STATUS.md) — evaluation & test coverage map
+- [TARGET-ARCHITECTURE.md](../../architectures/TARGET-ARCHITECTURE.md) — target design and milestone gap analysis
