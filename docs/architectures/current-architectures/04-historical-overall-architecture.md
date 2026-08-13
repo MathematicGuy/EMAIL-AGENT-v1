@@ -1,8 +1,17 @@
-# Current Overall Architecture
+# Current Overall Architecture (Historical Pre-RAG Extraction)
+
+> [!WARNING]
+> **SUPERSEDED DOCUMENTATION NOTICE**  
+> This document describes an early snapshot (commit `cf2fd498`, dated 2026-08-06) prior to the implementation of Email RAG, AI Chat, 4-Type Memory Gateway, and User Documents.
+> For the authoritative, up-to-date **Level 1 System Architecture Dashboard** and live module status tracking, see **[README.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/README.md)** and the sub-module architecture documents:
+> - **[01-email-action-plan-and-rag.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/01-email-action-plan-and-rag.md)**
+> - **[02-ai-chat-and-typed-memory.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md)**
+> - **[03-control-plane-persistence-and-uis.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md)**
 
 ## Extraction status
 
-This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
+This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07.
+ Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
 
 **Current architecture in one sentence:** a caller starts and polls an in-process FastAPI email-digest run; the application reads Gmail, extracts bounded attachment text, calls Gemini or Groq directly for structured action extraction, stores the run and results in memory, and returns Action Items whose Action Plans were generated inside the Email workflow.
 
