@@ -44,6 +44,7 @@ CONNECTION_ID = "mbx-compat"
 @pytest.fixture()
 def compat_env(monkeypatch: pytest.MonkeyPatch) -> None:
     work_dir = Path(tempfile.mkdtemp(prefix="compat-"))
+    monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("GMAIL_CLIENT_ID", "compat.apps.googleusercontent.com")
     monkeypatch.setenv("GMAIL_CLIENT_SECRET", "compat-secret")
     monkeypatch.setenv(
@@ -66,7 +67,6 @@ def make_email(
     stamp = received_at or datetime(2026, 8, 3, 8, tzinfo=UTC)
     return EphemeralEmailEnvelope(
         run_id="",
-        tenant_id="",
         user_id="",
         gmail_message_id=message_id,
         gmail_thread_id=thread_id,

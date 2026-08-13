@@ -76,7 +76,7 @@ class PostgresProjectRepository:
                     ON CONFLICT (workspace_id, owner_user_id)
                         WHERE is_default AND deleted_at IS NULL DO NOTHING
                     """,
-                    (project_id, principal.workspace_id, principal.user_id),
+                    (project_id, "local", principal.user_id),
                 )
         project = await self._one_project(principal, is_default=True)
         if project is None:
@@ -93,7 +93,7 @@ class PostgresProjectRepository:
                 WHERE workspace_id = %s AND owner_user_id = %s AND deleted_at IS NULL
                 ORDER BY is_default DESC, created_at, id
                 """,
-                (principal.workspace_id, principal.user_id),
+                ("local", principal.user_id),
             )
             rows = await cursor.fetchall()
         return tuple(_project(row) for row in rows)
@@ -111,7 +111,7 @@ class PostgresProjectRepository:
                 RETURNING id, workspace_id, owner_user_id, name, is_default,
                     deleted_at, created_at
                 """,
-                (str(uuid4()), normalized_name, principal.workspace_id, principal.user_id),
+                (str(uuid4()), normalized_name, "local", principal.user_id),
             )
             row = await cursor.fetchone()
         if row is None:
@@ -130,7 +130,7 @@ class PostgresProjectRepository:
                 WHERE id = %s AND workspace_id = %s AND owner_user_id = %s
                   AND deleted_at IS NULL
                 """,
-                (project_id, principal.workspace_id, principal.user_id),
+                (project_id, "local", principal.user_id),
             )
             row = await cursor.fetchone()
         return None if row is None else _project(row)
@@ -286,7 +286,7 @@ class PostgresProjectRepository:
                 FROM project_documents
                 WHERE id = %s AND project_id = %s AND workspace_id = %s AND user_id = %s
                 """,
-                (document_id, project_id, principal.workspace_id, principal.user_id),
+                (document_id, project_id, "local", principal.user_id),
             )
             row = await cursor.fetchone()
         return None if row is None else _document(row)
@@ -307,7 +307,7 @@ class PostgresProjectRepository:
                   AND status <> 'deleted'
                 ORDER BY created_at DESC, id
                 """,
-                (project_id, principal.workspace_id, principal.user_id),
+                (project_id, "local", principal.user_id),
             )
             rows = await cursor.fetchall()
         return tuple(_document(row) for row in rows)
@@ -572,7 +572,7 @@ class PostgresProjectRepository:
                         byte_size, content_sha256, storage_key, status, expires_at, page_count,
                         ocr_page_count, chunk_count, error_code, deleted_at, created_at, updated_at
                     """,
-                    (document_id, project_id, principal.workspace_id, principal.user_id),
+                    (document_id, project_id, "local", principal.user_id),
                 )
                 row = await cursor.fetchone()
                 if row is not None:
@@ -614,7 +614,7 @@ class PostgresProjectRepository:
                 FROM projects
                 WHERE id = %s AND workspace_id = %s AND owner_user_id = %s
                 """,
-                (project_id, principal.workspace_id, principal.user_id),
+                (project_id, "local", principal.user_id),
             )
             row = await cursor.fetchone()
         project = None if row is None else _project(row)
@@ -632,7 +632,7 @@ class PostgresProjectRepository:
                       AND deleted_at IS NULL
                     RETURNING id
                     """,
-                    (project_id, principal.workspace_id, principal.user_id),
+                    (project_id, "local", principal.user_id),
                 )
                 if await cursor.fetchone() is None:
                     return None
@@ -644,7 +644,7 @@ class PostgresProjectRepository:
                       AND status <> 'deleted'
                     RETURNING id
                     """,
-                    (project_id, principal.workspace_id, principal.user_id),
+                    (project_id, "local", principal.user_id),
                 )
                 document_ids = tuple(str(row[0]) for row in await cursor.fetchall())
                 for document_id in document_ids:
@@ -654,7 +654,7 @@ class PostgresProjectRepository:
                     DELETE FROM chat_sessions
                     WHERE workspace_id = %s AND user_id = %s AND project_id = %s
                     """,
-                    (principal.workspace_id, principal.user_id, project_id),
+                    ("local", principal.user_id, project_id),
                 )
                 if project.is_default:
                     replacement_id = str(uuid4())
@@ -666,7 +666,7 @@ class PostgresProjectRepository:
                         RETURNING id, workspace_id, owner_user_id, name, is_default,
                             deleted_at, created_at
                         """,
-                        (replacement_id, principal.workspace_id, principal.user_id),
+                        (replacement_id, "local", principal.user_id),
                     )
                     replacement_row = await cursor.fetchone()
                     assert replacement_row is not None
@@ -817,7 +817,7 @@ class PostgresProjectRepository:
                 WHERE workspace_id = %s AND owner_user_id = %s AND is_default = %s
                   AND deleted_at IS NULL
                 """,
-                (principal.workspace_id, principal.user_id, is_default),
+                ("local", principal.user_id, is_default),
             )
             row = await cursor.fetchone()
         return None if row is None else _project(row)

@@ -923,7 +923,6 @@ def _task_episode_from_row(row: Sequence[object]) -> TaskEpisode:
     return TaskEpisode(
         episode_id=str(row[5]),
         record_id=str(row[4]),
-        tenant_id=str(row[0]),
         user_id=str(row[1]),
         chat_session_id=str(row[3]),
         chat_turn_id=str(row[6]),
@@ -954,7 +953,6 @@ def _profile_from_row(row: Sequence[object]) -> DeclarativeProfile:
 
     return DeclarativeProfile(
         profile_id=str(row[0]),
-        tenant_id=str(row[1]),
         user_id=str(row[2]),
         language=optional(4),
         timezone=optional(5),
@@ -974,7 +972,6 @@ def _chat_summary_from_row(row: Sequence[object]) -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id=str(row[0]),
         record_id=str(row[1]),
-        tenant_id=str(row[2]),
         user_id=str(row[3]),
         chat_session_id=str(row[5]),
         chat_turn_id=str(row[6]),

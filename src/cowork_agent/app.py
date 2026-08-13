@@ -966,11 +966,10 @@ def create_app() -> FastAPI:
         )
         retrieval_request = SemanticRetrievalRequest(
             run_id="knowledge-adhoc",
-            tenant_id=LOCAL_TENANT_ID,
             user_id="demo-gui",
             query=body.query,
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)),
+            filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=body.top_k, min_score=-1.0, timeout_ms=8_000),
         )
         response = await memory.retrieve(retrieval_request)

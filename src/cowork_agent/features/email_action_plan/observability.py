@@ -25,7 +25,6 @@ from cowork_agent.domain.target_contracts import (
     TraceLatency,
     TraceStatus,
 )
-from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.auth import TokenCipher
 
 from .ports import CompletionOutboxPort
@@ -102,7 +101,6 @@ class LifecycleEventPublisher:
                 self._trace_sink.record(
                     TraceEvent(
                         run_id=event.run_id,
-                        tenant_id=LOCAL_TENANT_ID,
                         user_id=event.user_id,
                         gmail_message_id=None,
                         event_name=self.EVENT_NAME,

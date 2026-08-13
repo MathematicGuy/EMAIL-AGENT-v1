@@ -11,7 +11,7 @@ import asyncio
 import json
 import math
 from collections.abc import Mapping, Sequence
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from urllib.request import Request, urlopen
 
 from google import genai
@@ -223,7 +223,7 @@ class GeminiEmbeddingAdapter:
         async def request(client: genai.Client) -> types.EmbedContentResponse:
             call = client.aio.models.embed_content(
                 model=self._model,
-                contents=contents,
+                contents=cast(Any, contents),
                 **({"config": config} if config is not None else {}),
             )
             if self._timeout_seconds is None:

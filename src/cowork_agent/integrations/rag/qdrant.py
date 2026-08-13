@@ -28,7 +28,6 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchAny,
-    MatchValue,
     PayloadSchemaType,
     PointStruct,
     VectorParams,

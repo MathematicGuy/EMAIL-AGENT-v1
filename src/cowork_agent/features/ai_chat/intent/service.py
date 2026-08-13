@@ -183,7 +183,6 @@ class ChatRoutingService:
         self._sink.emit(
             IntentRoutingEvent(
                 name=name,
-                tenant_id=scope.tenant_id,
                 user_id=scope.user_id,
                 session_id=scope.session_id,
                 route=outcome.route if outcome is not None else None,

@@ -211,9 +211,17 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
             del args, kwargs
             return (
                 ProjectDocument(
-                    "document-1", "project-1", "user-1", "policy.pdf",
-                    "application/pdf", 1, "0" * 64, "private/source", "ready",
-                    datetime.now(UTC) + timedelta(days=1),
+                    id="document-1",
+                    project_id="project-1",
+                    workspace_id="workspace-1",
+                    user_id="user-1",
+                    filename="policy.pdf",
+                    media_type="application/pdf",
+                    byte_size=1,
+                    content_sha256="0" * 64,
+                    storage_key="private/source",
+                    status="ready",
+                    expires_at=datetime.now(UTC) + timedelta(days=1),
                 ),
             )
 
@@ -257,9 +265,17 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
 
 def test_retriever_drops_evidence_deleted_during_vector_query() -> None:
     ready_document = ProjectDocument(
-        "document-1", "project-1", "user-1", "policy.pdf",
-        "application/pdf", 1, "0" * 64, "private/source", "ready",
-        datetime.now(UTC) + timedelta(days=1),
+        id="document-1",
+        project_id="project-1",
+        workspace_id="workspace-1",
+        user_id="user-1",
+        filename="policy.pdf",
+        media_type="application/pdf",
+        byte_size=1,
+        content_sha256="0" * 64,
+        storage_key="private/source",
+        status="ready",
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
 
     class Repository:

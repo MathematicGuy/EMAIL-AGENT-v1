@@ -12,7 +12,6 @@ from cowork_agent.domain.chat_contracts import ChatRoute, IntentReasonCode
 @dataclass(frozen=True, slots=True)
 class IntentRoutingEvent:
     name: str
-    tenant_id: str
     user_id: str
     session_id: str
     route: ChatRoute | None = None
@@ -25,7 +24,6 @@ class IntentRoutingEvent:
     def to_dict(self) -> dict[str, object]:
         return {
             "event": self.name,
-            "tenant_id": self.tenant_id,
             "user_id": self.user_id,
             "session_id": self.session_id,
             "route": self.route.value if self.route is not None else None,
