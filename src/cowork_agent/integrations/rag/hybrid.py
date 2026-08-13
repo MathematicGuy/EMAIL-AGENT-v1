@@ -15,7 +15,6 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
 )
-from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 
 from .bm25 import BM25SearchAdapter
 from .embeddings import EmbeddingPort
