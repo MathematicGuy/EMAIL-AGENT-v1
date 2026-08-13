@@ -11,6 +11,10 @@ from fastapi import FastAPI, Request
 
 from cowork_agent.api.chat import create_chat_router
 from cowork_agent.api.projects import create_project_router
+from cowork_agent.domain.project_documents import (
+    ProjectDocumentFailureReason,
+    ProjectDocumentStatus,
+)
 from cowork_agent.features.ai_chat.controller import InMemoryChatSessionRegistry
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.integrations.project_documents.encrypted_store import EncryptedDocumentStore
@@ -91,6 +95,24 @@ def test_project_session_and_upload_contracts_are_backend_scoped(tmp_path: Path)
             assert duplicate.status_code == 200
             assert duplicate.json()["document_id"] == first.json()["document_id"]
             assert len(dispatcher.document_ids) == 1
+
+            document_repository = app.state.project_document_repository
+            await document_repository.transition(
+                first.json()["document_id"],
+                from_statuses=(ProjectDocumentStatus.RECEIVED,),
+                to_status=ProjectDocumentStatus.FAILED,
+                at=datetime.now(UTC),
+                reason_code=ProjectDocumentFailureReason.INVALID_PDF,
+            )
+            retried = await client.post(
+                f"/v1/cowork/chat/projects/{project_id}/documents", files=pdf
+            )
+            assert retried.status_code == 202
+            assert retried.json()["document_id"] != first.json()["document_id"]
+            assert dispatcher.document_ids == [
+                first.json()["document_id"],
+                retried.json()["document_id"],
+            ]
 
             over_quota = await client.post(
                 f"/v1/cowork/chat/projects/{project_id}/documents",

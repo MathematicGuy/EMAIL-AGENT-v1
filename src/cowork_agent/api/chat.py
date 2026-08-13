@@ -287,7 +287,15 @@ def create_chat_router() -> APIRouter:
         )
         duplicate = next((item for item in existing if item.sha256 == digest), None)
         if duplicate is not None:
-            return JSONResponse(duplicate.to_dict(), status_code=200)
+            if duplicate.status is not ProjectDocumentStatus.FAILED:
+                return JSONResponse(duplicate.to_dict(), status_code=200)
+            await _document_repository(request).transition(
+                duplicate.document_id,
+                from_statuses=(ProjectDocumentStatus.FAILED,),
+                to_status=ProjectDocumentStatus.DELETED,
+                at=datetime.now(UTC),
+            )
+            existing = tuple(item for item in existing if item.document_id != duplicate.document_id)
         if len(existing) >= settings.max_documents_per_project:
             raise HTTPException(status_code=422, detail="Project document quota exceeded")
         if sum(item.size_bytes for item in existing) + size_bytes > settings.max_project_bytes:
