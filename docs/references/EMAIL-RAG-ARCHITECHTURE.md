@@ -15,7 +15,7 @@ Hệ thống hiện thực các khả năng chính:
 - Dùng Gemini hoặc Groq để phân loại email và trích xuất action item có cấu trúc.
 - Chuẩn hóa ưu tiên, deadline, bằng chứng và chống trùng lặp trong phạm vi dữ liệu kết quả hiện có.
 - Truy hồi quy trình nội bộ bằng hybrid search cục bộ (dense in-memory + BM25 + RRF), với Jina reranking tùy chọn, rồi cung cấp context/citation cho final generator.
-- Cung cấp REST API và giao diện kiểm thử Streamlit.
+- Cung cấp REST API cho React web frontend.
 
 Ngoài phạm vi hiện tại:
 
@@ -29,7 +29,7 @@ Ngoài phạm vi hiện tại:
 
 ```mermaid
 flowchart LR
-    User[Người dùng] --> UI[Streamlit UI]
+    User[Người dùng] --> UI[React/Vite web UI]
     UI --> API[Module Mail FastAPI]
     Client[API client / scheduler tương lai] --> API
 
@@ -156,9 +156,9 @@ Là bounded context cho Company Knowledge RAG:
 
 Qdrant, document upload/ingestion API, registry ghi động, OCR và knowledge chat là **định hướng production**, không phải module đang được nối vào runtime hiện tại.
 
-### 4.6 `gui/`
+### 4.6 `frontend/`
 
-Streamlit là giao diện kiểm thử, không chứa business logic. UI gọi REST API để:
+React/Vite là giao diện web độc lập, không chứa business logic. UI gọi REST API để:
 
 - Kết nối/chọn tài khoản Gmail và Outlook.
 - Tạo combined run và poll trạng thái.
@@ -399,7 +399,6 @@ src/cowork_agent/
 ├── api/                 # HTTP handlers và serializers
 ├── domain/              # Entity/value object/policy thuần
 ├── features/            # Feature workflows và ports (email_action_plan)
-├── gui/                 # Streamlit testing interface
 ├── integrations/        # External integration adapters (gmail, llm, rag)
 ├── orchestration/       # Task execution, queue management, worker
 ├── persistence/         # Repositories, migrations (SQLite, Postgres)
@@ -411,6 +410,7 @@ src/cowork_agent/
 docs/adr/                # Quyết định kiến trúc
 tests/                   # Unit, component, integration
 scripts/                 # Launcher/utility scripts
+frontend/                # React/Vite web application
 ```
 
 ## 14. Tài liệu liên quan

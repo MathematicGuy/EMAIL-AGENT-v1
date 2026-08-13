@@ -56,7 +56,11 @@ export async function areProjectDocumentsEnabled(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/document-health`);
     const health = (await response.json()) as DocumentHealth;
-    return response.ok && health.checks?.feature === 'enabled' && health.status === 'ready';
+    // The health endpoint returns 503 while optional document-processing
+    // dependencies are warming up. That must not remove the upload controls:
+    // the feature flag is the capability gate, while individual requests can
+    // still surface an actionable error if a dependency remains unavailable.
+    return health.checks?.feature === 'enabled';
   } catch {
     return false;
   }

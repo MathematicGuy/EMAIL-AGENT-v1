@@ -1,6 +1,10 @@
-# Current RAG Architecture
+# Current RAG Architecture (Historical Snapshot)
 
-> **Extraction status notice:** This document describes the live RAG implementation in the codebase as of commit `cf2fd49801d5932b26de82af9d104d730cf58271` (updated with V1-M3 hybrid retrieval and multi-backend vector memory capabilities). See [`../TARGET-ARCHITECTURE.md`](../TARGET-ARCHITECTURE.md) for target specifications and [`../master-comparison.md`](../master-comparison.md) for full implementation status versus target architecture.
+> [!WARNING]
+> **SUPERSEDED DOCUMENTATION NOTICE**  
+> For the up-to-date Level 1 System Architecture Dashboard and live module status tracking, see **[README.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/README.md)** and sub-module documents 01–03.
+
+> **Extraction status notice:** This document describes the live RAG implementation in the codebase as of commit `cf2fd49801d5932b26de82af9d104d730cf58271` (updated with V1-M3 hybrid retrieval and multi-backend vector memory capabilities). See [`../TARGET-ARCHITECTURE.md`](../TARGET-ARCHITECTURE.md) for target specifications.
 
 ## Extraction status
 

@@ -1,8 +1,17 @@
-# Current Overall Architecture
+# Current Overall Architecture (Historical Pre-RAG Extraction)
+
+> [!WARNING]
+> **SUPERSEDED DOCUMENTATION NOTICE**  
+> This document describes an early snapshot (commit `cf2fd498`, dated 2026-08-06) prior to the implementation of Email RAG, AI Chat, 4-Type Memory Gateway, and User Documents.
+> For the authoritative, up-to-date **Level 1 System Architecture Dashboard** and live module status tracking, see **[README.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/README.md)** and the sub-module architecture documents:
+> - **[01-email-action-plan-and-rag.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/01-email-action-plan-and-rag.md)**
+> - **[02-ai-chat-and-typed-memory.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md)**
+> - **[03-control-plane-persistence-and-uis.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md)**
 
 ## Extraction status
 
-This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07. Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
+This document describes the implementation in commit `cf2fd49801d5932b26de82af9d104d730cf58271` on branch `main`. It was extracted on 2026-08-06 and corrected against live source during an adversarial review on 2026-08-07.
+ Runtime source and composition are authoritative here. `docs/references/ARCHITECHTURE.md` and the PostgreSQL tables in `src/cowork_agent/persistence/migrations/001_mail_todo.sql` describe capabilities or storage not wired by the current application.
 
 **Current architecture in one sentence:** a caller starts and polls an in-process FastAPI email-digest run; the application reads Gmail, extracts bounded attachment text, calls Gemini or Groq directly for structured action extraction, stores the run and results in memory, and returns Action Items whose Action Plans were generated inside the Email workflow.
 
@@ -15,7 +24,7 @@ This document describes the implementation in commit `cf2fd49801d5932b26de82af9d
 | Category | Implemented component | Runtime responsibility |
 |---|---|---|
 | API service | FastAPI app in `cowork_agent.app` | Gmail OAuth/connection endpoints, unread preview, run creation, polling, and result delivery. |
-| Test UI | Streamlit app launched by `scripts/run_gui.py` | Human-facing client for exercising the API; not a separate backend. |
+| Web UI | React/Vite app in `frontend/` | Human-facing client for exercising the API; runs independently from the FastAPI backend. |
 | Application services | `GmailConnectionService`, `CreateDigestRun`, `DigestWorker`, `GetDigestResult` | Connection lifecycle, run creation, digest orchestration, and result assembly. |
 | Email adapter | `GmailMailboxAdapter` | Builds a Gmail v1 client, searches unread inbox messages, fetches threads and attachments, and normalizes messages. |
 | Attachment adapter | `SafeTextAttachmentExtractor` | Extracts bounded UTF-8 text from text, CSV, and JSON attachments in process. |
@@ -23,7 +32,7 @@ This document describes the implementation in commit `cf2fd49801d5932b26de82af9d
 | Domain policy | `cowork_agent.features.email_action_plan.policies` | Normalizes Gmail queries, validates limits, fingerprints/deduplicates actions, and calculates priority. |
 | RAG module | **Absent** | No ingestion, retrieval, knowledge context, or RAG generation is composed. |
 
-The source package has `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` areas, plus retained `api` and `gui` presentation adapters. It has no independently deployed internal service boundary; these components run in the API process except for calls to external providers.
+The source package has `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` areas, plus the `api` presentation adapter. The React application is maintained separately under `frontend/`; backend components run in the API process except for calls to external providers.
 
 ### 1.2 State, queues, workers, and scheduling
 
@@ -166,7 +175,7 @@ Additional owned state:
 flowchart TB
     subgraph CALLERS["CALLERS"]
         CLIENT["API client"]
-        UI["Streamlit test UI"]
+        UI["React/Vite web UI"]
         POLL["Poll run and result APIs"]
     end
 

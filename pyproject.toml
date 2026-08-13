@@ -36,10 +36,6 @@ dev = [
   "pytest-xdist>=3.5",
   "ruff>=0.9",
 ]
-gui = [
-  "streamlit>=1.30.0",
-  "httpx>=0.27.0",
-]
 postgres = [
   "psycopg[binary,pool]>=3.2,<4",
 ]
@@ -50,6 +46,7 @@ redis = [
 [project.scripts]
 mail-todo-api = "cowork_agent.app:main"
 mail-todo-worker = "cowork_agent.orchestration.worker:main"
+mail-todo-dev = "cowork_agent.orchestration.dev:main"
 mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 
 [tool.setuptools.packages.find]
