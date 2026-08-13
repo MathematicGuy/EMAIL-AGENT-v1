@@ -1,12 +1,10 @@
 """FastAPI adapter for V2-M4A chat sessions and typed SSE events."""
 
-from __future__ import annotations
-
 import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -117,12 +115,10 @@ def create_chat_router() -> APIRouter:
         sessions = _sessions(request)
         if project_id == "default-project":
             scope = await sessions.create(
-                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
             )
         else:
             scope = await sessions.create(
-                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
                 project_id=project_id,
             )
@@ -136,13 +132,13 @@ def create_chat_router() -> APIRouter:
             response["project_id"] = scope.project_id
         return response
 
-    @router.post("/sessions/{session_id}/messages")
+    @router.post("/sessions/{session_id}/messages", response_class=StreamingResponse)
     @observe(name="api_chat_create_message")
     async def create_message(
         session_id: str,
         payload: _ChatMessagePayload,
         request: Request,
-    ) -> StreamingResponse:
+    ) -> Any:
         if payload.session_id != session_id:
             raise HTTPException(
                 status_code=422,
@@ -203,12 +199,10 @@ def create_chat_router() -> APIRouter:
         principal = await _verified_principal(request)
         if project_id is None:
             scopes = await _sessions(request).list_for(
-                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
             )
         else:
             scopes = await _sessions(request).list_for(
-                tenant_id=principal.tenant_id,
                 user_id=principal.user_id,
                 project_id=project_id,
             )
@@ -402,7 +396,6 @@ async def _write_profile(payload: _ChatProfilePayload, request: Request) -> dict
     now = datetime.now(UTC)
     profile = DeclarativeProfile(
         profile_id=existing.profile_id if existing else f"prof_{uuid.uuid4().hex}",
-        tenant_id=principal.tenant_id,
         user_id=principal.user_id,
         language=payload.language,
         timezone=payload.timezone,
@@ -431,11 +424,10 @@ async def _write_profile(payload: _ChatProfilePayload, request: Request) -> dict
 
 
 def _user_namespace(principal: VerifiedPrincipal, memory_type: MemoryType) -> MemoryNamespace:
-    # User-level administration namespace: storage keys are tenant/user/feature,
+    # User-level administration namespace: storage keys are user/session/feature,
     # so the session component is a stable placeholder, not a live chat session.
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id=principal.tenant_id,
             user_id=principal.user_id,
             session_id="memory-admin",
         ),
@@ -467,7 +459,7 @@ async def _require_session(
     request: Request, principal: VerifiedPrincipal, session_id: str
 ) -> ChatMemoryScope:
     return await _sessions(request).require(
-        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+        session_id, user_id=principal.user_id
     )
 
 

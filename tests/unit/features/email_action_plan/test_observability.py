@@ -87,7 +87,6 @@ def test_in_memory_trace_sink_records_json_safe_events() -> None:
     sink = InMemoryTraceSink()
     event = TraceEvent(
         run_id="run-1",
-        tenant_id="local",
         user_id="u1",
         gmail_message_id=None,
         event_name="digest_run",

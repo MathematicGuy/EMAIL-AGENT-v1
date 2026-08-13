@@ -29,7 +29,6 @@ from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 def _namespace(*, memory_type: MemoryType = MemoryType.SEMANTIC) -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1",
             user_id="user@example.com",
             session_id="session-1",
         ),
@@ -63,7 +62,7 @@ def _chunk(chunk_id: str) -> SemanticChunk:
 
 
 def _run_id_name() -> str:
-    return "cowork-agent/chat-semantic/tenant-1/user@example.com/session-1"
+    return "cowork-agent/chat-semantic/user@example.com/session-1"
 
 
 class RecordingSemanticMemory:
@@ -81,12 +80,10 @@ class RecordingSemanticMemory:
 def _response(
     *,
     status: RetrievalStatus = RetrievalStatus.SUCCESS,
-    tenant_id: str = "tenant-1",
     chunks: tuple[SemanticChunk, ...] = (_chunk("chunk-1"),),
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id="provider-query-id",
-        tenant_id=tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=9,
@@ -105,11 +102,10 @@ def test_adapter_derives_exact_retrieval_request_and_serializes_current_company_
                 "chat-semantic-"
                 f"{uuid5(NAMESPACE_URL, _run_id_name()).hex}"
             ),
-            tenant_id="tenant-1",
             user_id="user@example.com",
             query="What is the current travel expense policy?",
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope="tenant-1", document_status=("ready",)),
+            filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=2, min_score=0.7, timeout_ms=750),
         )
     ]
@@ -193,13 +189,6 @@ def test_adapter_fails_closed_on_wrong_namespace_or_provider_authorization_denia
 
     with pytest.raises(NamespaceAccessDenied, match="semantic"):
         asyncio.run(adapter.read_semantic_context(_namespace(), _query()))
-
-
-def test_adapter_fails_closed_when_an_untrusted_response_names_a_foreign_tenant() -> None:
-    memory = RecordingSemanticMemory(_response(tenant_id="tenant-2"))
-
-    with pytest.raises(NamespaceAccessDenied, match="tenant"):
-        asyncio.run(SemanticChatMemoryAdapter(memory).read_semantic_context(_namespace(), _query()))
 
 
 def test_adapter_translates_malformed_chunk_shape_to_safe_unavailability() -> None:

@@ -30,7 +30,6 @@ def _episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="chat-summary-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -53,7 +52,6 @@ def _task_episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="task-episode-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -85,7 +83,6 @@ def _task_episode() -> TaskEpisode:
 def _task_namespace(episode: TaskEpisode) -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id=episode.tenant_id,
             user_id=episode.user_id,
             session_id=episode.chat_session_id,
         ),
@@ -99,7 +96,6 @@ def test_policy_rejects_a_namespace_that_does_not_match_summary_provenance() -> 
     episode = _episode()
     namespace = MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id=episode.tenant_id,
             user_id=episode.user_id,
             session_id=episode.chat_session_id,
         ),
@@ -125,11 +121,10 @@ def test_task_episode_policy_accepts_a_bounded_initial_write_with_optional_expir
 @pytest.mark.parametrize(
     "scope",
     [
-        ChatMemoryScope("tenant-2", "user@example.com", "session-1"),
-        ChatMemoryScope("tenant-1", "other@example.com", "session-1"),
-        ChatMemoryScope("tenant-1", "user@example.com", "session-2"),
+        ChatMemoryScope(user_id="other@example.com", session_id="session-1"),
+        ChatMemoryScope(user_id="user@example.com", session_id="session-2"),
     ],
-    ids=["tenant", "user", "session"],
+    ids=["user", "session"],
 )
 def test_task_episode_policy_rejects_foreign_scope(scope: ChatMemoryScope) -> None:
     episode = _task_episode()
@@ -153,7 +148,7 @@ def test_task_episode_policy_rejects_a_mismatched_identity(
 ) -> None:
     episode = _task_episode()
     namespace = MemoryNamespace(
-        scope=ChatMemoryScope("tenant-1", "user@example.com", "session-1"),
+        scope=ChatMemoryScope(user_id="user@example.com", session_id="session-1"),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
         source_id=source_id,

@@ -28,13 +28,13 @@ for another.
 
 ## 2. The Harnesses
 
-| Script | Layer | Input | Default report location |
-|---|---|---|---|
-| `scripts/evaluate_routing.py` | Email routing | `tests/fixtures/routing/` | `docs/evaluations/baselines/` |
-| `scripts/evaluate_chat_routing.py` | Chat intent routing | `tests/fixtures/chat_routing/` | `docs/evaluations/CHAT/` |
-| `scripts/evaluate_retrieval.py` | Retrieval | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `docs/evaluations/baselines/` |
-| `scripts/evaluate_chat_rag.py` | Chat grounding | a local-only, uncommitted JSON file | `docs/evaluations/CHAT-RAG/baselines/` |
-| `scripts/build_evaluation_dashboard.py` | — | `docs/evaluations/baselines/` | `docs/evaluations/dashboard.md` |
+| Script                                  | Layer               | Input                                                          | Default report location                |
+| --------------------------------------- | ------------------- | -------------------------------------------------------------- | -------------------------------------- |
+| `scripts/evaluate_routing.py`           | Email routing       | `tests/fixtures/routing/`                                      | `docs/evaluations/baselines/`          |
+| `scripts/evaluate_chat_routing.py`      | Chat intent routing | `tests/fixtures/chat_routing/`                                 | `docs/evaluations/CHAT/`               |
+| `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `docs/evaluations/baselines/`          |
+| `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `docs/evaluations/CHAT-RAG/baselines/` |
+| `scripts/build_evaluation_dashboard.py` | —                   | `docs/evaluations/baselines/`                                  | `docs/evaluations/dashboard.md`        |
 
 Each has a focused test under `tests/unit/scripts/`.
 
@@ -121,7 +121,7 @@ example 1,043 vs 1,066 chunks) are not a valid A/B.
 happened. Whether it supports a decision depends on the embedder, corpus, and
 slice breakdown inside it.
 
-## 4. Running Them Without Melting the Machine
+## 4. Running Them Without Melting the Machine (`OPENBLAS_NUM_THREADS` Disable by Default, only run when run out of memory)
 
 - Run one Python process at a time. Running a benchmark next to `pytest` or
   `mypy` has caused out-of-memory process failures on this machine.
@@ -151,5 +151,5 @@ python scripts/evaluate_retrieval.py --dry-run
   as unknown. Do not infer it.
 - The dashboard generator reads retrieval reports only; CHAT and CHAT-RAG areas
   are not aggregated yet.
-- No Chat-RAG report has been recorded, and `--ragas` has never been run.
+- No Chat-RAG report has been recorded, and `--ragas` has never been run. VERIFIED to be not Implemented.
 - No harness scores email action-plan grounding.

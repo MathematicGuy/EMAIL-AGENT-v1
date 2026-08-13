@@ -42,7 +42,6 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
             section=None,
             text="dense exclusive",
             source_url="a.md",
-            tenant_id="local",
         ),
         KnowledgeChunk(
             chunk_id="b",
@@ -51,7 +50,6 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
             section=None,
             text="lexical alpha",
             source_url="b.md",
-            tenant_id="local",
         ),
         KnowledgeChunk(
             chunk_id="c",
@@ -60,7 +58,6 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
             section=None,
             text="lexical alpha",
             source_url="c.md",
-            tenant_id="local",
         ),
     )
     embedder = FixedEmbedder()
@@ -74,14 +71,13 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
     return memory, embedder
 
 
-def _request(*, tenant_scope: str = "local", top_k: int = 5) -> SemanticRetrievalRequest:
+def _request(*, top_k: int = 5) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
-        tenant_id="local",
         user_id="user@example.com",
         query="alpha",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope=tenant_scope, document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=top_k, min_score=0.0, timeout_ms=1500),
     )
 
@@ -95,17 +91,6 @@ def test_hybrid_fuses_dense_and_bm25_candidate_union() -> None:
     assert [chunk.chunk_id for chunk in response.chunks] == ["b", "c", "a"]
     assert response.chunks[0].relevance_score > response.chunks[1].relevance_score
     assert response.chunks[1].relevance_score > response.chunks[2].relevance_score
-
-
-def test_hybrid_acl_denial_skips_query_embedding() -> None:
-    memory, embedder = _memory()
-    assert len(embedder.calls) == 1
-
-    response = asyncio.run(memory.retrieve(_request(tenant_scope="other-tenant")))
-
-    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
-    assert response.chunks == ()
-    assert len(embedder.calls) == 1
 
 
 def test_hybrid_applies_reranker_after_rrf_and_keeps_fused_scores() -> None:

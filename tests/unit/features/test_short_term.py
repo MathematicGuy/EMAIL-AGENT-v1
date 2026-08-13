@@ -24,7 +24,6 @@ class FakeClock:
 def envelope(message_id: str) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run_test",
-        tenant_id="local",
         user_id="u1",
         gmail_message_id=message_id,
         gmail_thread_id=f"thread-{message_id}",

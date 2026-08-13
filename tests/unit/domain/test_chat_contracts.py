@@ -59,7 +59,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 def _namespace(*, record_id: str | None = "record-1") -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            user_id="user@example.com", session_id="session-1"
         ),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
@@ -71,7 +71,6 @@ def _episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="episode-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -118,7 +117,6 @@ def _chat_summary_episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="chat-summary-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -140,7 +138,7 @@ def _context_request() -> MemoryContextRequest:
     return MemoryContextRequest(
         session_id="session-1",
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            user_id="user@example.com", session_id="session-1"
         ),
         reads=MemoryReadOptions(
             short_term=True,
@@ -185,7 +183,6 @@ def _chat_turn() -> ChatTurn:
 def _profile() -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         language="en",
         timezone="Asia/Bangkok",
@@ -586,7 +583,7 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
 
     assert namespace.feature == AI_CHAT_FEATURE
     assert (
-        namespace.logical_key() == "tenant-1/user@example.com/session-1/ai_chat/episodic/record-1"
+        namespace.logical_key() == "user@example.com/session-1/ai_chat/episodic/record-1"
     )
 
 
@@ -595,15 +592,6 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
     [
         {
             "scope": {
-                "tenant_id": "",
-                "user_id": "user@example.com",
-                "session_id": "session-1",
-                "feature": "ai_chat",
-            }
-        },
-        {
-            "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "   ",
                 "session_id": "session-1",
                 "feature": "ai_chat",
@@ -611,7 +599,6 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
         },
         {
             "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "user@example.com",
                 "session_id": "",
                 "feature": "ai_chat",
@@ -619,14 +606,13 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
         },
         {
             "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "user@example.com",
                 "session_id": "session-1",
                 "feature": "email_action_plan",
             }
         },
     ],
-    ids=["missing_tenant", "missing_user", "missing_session", "wrong_feature"],
+    ids=["missing_user", "missing_session", "wrong_feature"],
 )
 def test_namespace_fails_closed_for_missing_or_inconsistent_scope(changes: dict[str, str]) -> None:
     payload = _namespace().to_dict()
@@ -652,7 +638,7 @@ def test_context_request_requires_its_session_to_match_the_namespace() -> None:
 def test_context_request_uses_a_memory_type_free_chat_scope() -> None:
     payload = _context_request().to_dict()
 
-    assert set(payload["scope"]) == {"tenant_id", "user_id", "session_id", "feature"}
+    assert set(payload["scope"]) == {"user_id", "session_id", "feature"}
 
 
 def test_context_response_requires_degraded_sources_to_match_degraded_flag() -> None:
@@ -973,7 +959,7 @@ def test_task_episode_from_dict_rejects_removed_email_shaped_fields(removed_fiel
 
 def test_namespace_rejects_slash_in_logical_key_components() -> None:
     with pytest.raises(ValueError, match="must not contain"):
-        ChatMemoryScope(tenant_id="tenant/one", user_id="user@example.com", session_id="session-1")
+        ChatMemoryScope(user_id="user/one", session_id="session-1")
 
 
 def test_namespace_requires_an_explicit_source_id_key_even_when_null() -> None:
@@ -1011,7 +997,7 @@ def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively(
 def test_contracts_are_frozen() -> None:
     with pytest.raises(FrozenInstanceError):
         _namespace().scope = ChatMemoryScope(  # type: ignore[misc]
-            tenant_id="other-tenant", user_id="user@example.com", session_id="session-1"
+            user_id="other-user", session_id="session-1"
         )
 
 

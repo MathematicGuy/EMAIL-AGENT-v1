@@ -33,7 +33,7 @@ def authorize_profile_write(
 
     if namespace.memory_type is not MemoryType.LONG_TERM:
         raise ProfileWriteRejected("profile writes require a long-term namespace")
-    if namespace.tenant_id != profile.tenant_id or namespace.user_id != profile.user_id:
+    if namespace.user_id != profile.user_id:
         raise ProfileWriteRejected("profile scope does not match the write namespace")
     if provenance.source_type is not MemoryProvenanceSource.EXPLICIT_USER_CONFIG:
         raise ProfileWriteRejected("long-term writes require explicit_user_config provenance")

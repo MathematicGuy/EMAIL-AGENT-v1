@@ -110,7 +110,6 @@ class RetryableEpisodeWriter(EpisodeWriter):
 
 def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
     return ChatMemoryScope(
-        tenant_id="tenant-1",
         user_id="user@example.com",
         session_id=session_id,
     )
@@ -119,7 +118,6 @@ def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
 def _profile() -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         language="en",
         timezone=None,
@@ -428,14 +426,14 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
     registry = InMemoryChatSessionRegistry(new_id=lambda: next(ids))
 
     async def scenario() -> None:
-        scope = await registry.create(tenant_id="tenant-1", user_id="user@example.com")
+        scope = await registry.create(user_id="user@example.com")
 
         assert await registry.require(
-            scope.session_id, tenant_id="tenant-1", user_id="user@example.com"
+            scope.session_id, user_id="user@example.com"
         ) == scope
         with pytest.raises(ChatSessionAccessDenied):
             await registry.require(
-                scope.session_id, tenant_id="tenant-1", user_id="other@example.com"
+                scope.session_id, user_id="other@example.com"
             )
 
     asyncio.run(scenario())

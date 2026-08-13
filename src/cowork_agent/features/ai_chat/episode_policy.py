@@ -35,8 +35,7 @@ def authorize_chat_summary_write(namespace: MemoryNamespace, episode: ChatSummar
     if namespace.memory_type is not MemoryType.EPISODIC:
         raise ChatSummaryWriteRejected("chat summaries require an episodic namespace")
     if (
-        namespace.tenant_id != episode.tenant_id
-        or namespace.user_id != episode.user_id
+        namespace.user_id != episode.user_id
         or namespace.session_id != episode.chat_session_id
     ):
         raise ChatSummaryWriteRejected("summary scope does not match the write namespace")
@@ -67,8 +66,7 @@ def authorize_task_episode_write(
     if namespace.memory_type is not MemoryType.EPISODIC:
         raise TaskEpisodeWriteRejected("task episodes require an episodic namespace")
     if (
-        namespace.tenant_id != trusted_episode.tenant_id
-        or namespace.user_id != trusted_episode.user_id
+        namespace.user_id != trusted_episode.user_id
         or namespace.session_id != trusted_episode.chat_session_id
     ):
         raise TaskEpisodeWriteRejected("task episode scope does not match the write namespace")

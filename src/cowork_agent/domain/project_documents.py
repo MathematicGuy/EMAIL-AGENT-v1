@@ -41,7 +41,6 @@ class ProjectDocumentMediaType(StrEnum):
 @dataclass(frozen=True, slots=True)
 class ChatProject:
     project_id: str
-    tenant_id: str
     user_id: str
     name: str
     is_default: bool
@@ -50,7 +49,6 @@ class ChatProject:
 
     def __post_init__(self) -> None:
         _required(self.project_id, "project_id")
-        _required(self.tenant_id, "tenant_id")
         _required(self.user_id, "user_id")
         _bounded(self.name, "name", MAX_PROJECT_NAME_LENGTH)
 
@@ -68,7 +66,6 @@ class ChatProject:
 class ProjectDocument:
     document_id: str
     project_id: str
-    tenant_id: str
     user_id: str
     title: str
     media_type: ProjectDocumentMediaType
@@ -84,7 +81,7 @@ class ProjectDocument:
     expires_at: datetime
 
     def __post_init__(self) -> None:
-        for name in ("document_id", "project_id", "tenant_id", "user_id", "sha256"):
+        for name in ("document_id", "project_id", "user_id", "sha256"):
             _required(getattr(self, name), name)
         _bounded(self.title, "title", MAX_DOCUMENT_TITLE_LENGTH)
         if self.size_bytes < 1:
@@ -120,7 +117,6 @@ class ProjectDocumentChunk:
     chunk_id: str
     document_id: str
     project_id: str
-    tenant_id: str
     user_id: str
     text: str
     page_start: int
@@ -128,7 +124,7 @@ class ProjectDocumentChunk:
     section: str | None = None
 
     def __post_init__(self) -> None:
-        for name in ("chunk_id", "document_id", "project_id", "tenant_id", "user_id", "text"):
+        for name in ("chunk_id", "document_id", "project_id", "user_id", "text"):
             _required(getattr(self, name), name)
         if self.page_start < 1 or self.page_end < self.page_start:
             raise ValueError("invalid page range")
@@ -136,7 +132,6 @@ class ProjectDocumentChunk:
 
 @dataclass(frozen=True, slots=True)
 class ProjectDocumentQuery:
-    tenant_id: str
     user_id: str
     project_id: str
     query: str
@@ -146,7 +141,7 @@ class ProjectDocumentQuery:
     timeout_ms: int = 3_000
 
     def __post_init__(self) -> None:
-        for name in ("tenant_id", "user_id", "project_id", "query"):
+        for name in ("user_id", "project_id", "query"):
             _required(getattr(self, name), name)
         if not 1 <= self.top_k <= 20:
             raise ValueError("top_k must be between 1 and 20")
@@ -179,13 +174,12 @@ class ProjectDocumentResponse:
     reason_code: str | None = None
 
 
-def deterministic_default_project_id(tenant_id: str, user_id: str) -> str:
+def deterministic_default_project_id(user_id: str) -> str:
     """Stable opaque default ID without exposing principal values."""
     from uuid import NAMESPACE_URL, uuid5
 
-    _required(tenant_id, "tenant_id")
     _required(user_id, "user_id")
-    return f"project_{uuid5(NAMESPACE_URL, f'cowork/default/{tenant_id}/{user_id}').hex}"
+    return f"project_{uuid5(NAMESPACE_URL, f'cowork/default/{user_id}').hex}"
 
 
 def can_transition_document(current: ProjectDocumentStatus, target: ProjectDocumentStatus) -> bool:

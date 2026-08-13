@@ -17,7 +17,7 @@ _H1_PATTERN = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeChunk:
-    """One chunked slice of a knowledge document, stamped for ACL."""
+    """One chunked slice of a knowledge document."""
 
     chunk_id: str
     document_id: str
@@ -25,7 +25,6 @@ class KnowledgeChunk:
     section: str | None
     text: str
     source_url: str
-    tenant_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +37,7 @@ class KnowledgeDocument:
     chunks: tuple[KnowledgeChunk, ...]
 
 
-def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument, ...]:
+def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[KnowledgeDocument, ...]:
     """Load every ``*.md`` document under ``corpus_dir`` into chunked form.
 
     Documents are read sorted by filename for determinism; ``document_id``
@@ -78,7 +77,6 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument,
                     section=part.section,
                     text=part.text,
                     source_url=source_url,
-                    tenant_id=tenant_id,
                 )
             )
         documents.append(

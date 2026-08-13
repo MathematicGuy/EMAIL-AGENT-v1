@@ -83,7 +83,7 @@ class CanonicalReadyDocumentCatalog:
         self, scope: ChatMemoryScope, *, at: datetime
     ) -> tuple[ReadyDocumentRef, ...]:
         documents = await self._repository.list_ready_for_scope(
-            scope.tenant_id, scope.user_id, scope.project_id, at=at
+            "local", scope.user_id, scope.project_id, at=at
         )
         return tuple(
             ReadyDocumentRef(document_id=document.id, title=document.filename)

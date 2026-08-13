@@ -73,7 +73,7 @@ def _outcome(route: ChatRoute) -> RoutingOutcome:
 
 
 def _controller(route: ChatRoute, chunks: tuple[str, ...] = ("Could you clarify?",)):
-    scope = ChatMemoryScope("tenant-1", "user-1", "session-1")
+    scope = ChatMemoryScope(user_id="user-1", session_id="session-1")
     buffer = InMemoryChatSessionBuffer(max_turns=8, ttl_seconds=60)
     reply = Reply(chunks)
     routing = Routing(_outcome(route))

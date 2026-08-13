@@ -46,8 +46,6 @@ from .knowledge_base import KnowledgeChunk, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
 
-#: Payload key carrying the ACL scope; also the indexed filter field.
-TENANT_PAYLOAD_KEY = "tenant_id"
 DOCUMENT_STATUS_PAYLOAD_KEY = "document_status"
 APPROVED_DOCUMENT_STATUS = "ready"
 
@@ -78,23 +76,11 @@ class QdrantSemanticMemory:
     @observe(as_type="retriever", name="qdrant_semantic_retriever")
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         started = time.monotonic()
-        tenant_id = request.tenant_id
-        tenant_scope = request.filters.tenant_scope
         document_status = request.filters.document_status
-        if (
-            not tenant_id.strip()
-            or not tenant_scope.strip()
-            or tenant_id != tenant_scope
-            or document_status != (APPROVED_DOCUMENT_STATUS,)
-        ):
-            # No exact tenant scope or approved status allowlist: refuse before
-            # spending an embedding call or touching the vector store.
+        if document_status != (APPROVED_DOCUMENT_STATUS,):
             return _response(request, (), RetrievalStatus.AUTHORIZATION_DENIED, started)
-        # ACL first: the filter exists before the query text is embedded, so
-        # scoring can only ever run over this tenant's points.
         query_filter = Filter(
             must=[
-                FieldCondition(key=TENANT_PAYLOAD_KEY, match=MatchValue(value=tenant_scope)),
                 FieldCondition(
                     key=DOCUMENT_STATUS_PAYLOAD_KEY,
                     match=MatchAny(any=list(document_status)),
@@ -219,7 +205,7 @@ async def ingest_corpus(
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=observed_size, distance=Distance.COSINE),
             )
-            for field_name in (TENANT_PAYLOAD_KEY, DOCUMENT_STATUS_PAYLOAD_KEY):
+            for field_name in (DOCUMENT_STATUS_PAYLOAD_KEY,):
                 await client.create_payload_index(
                     collection_name=collection_name,
                     field_name=field_name,
@@ -244,7 +230,6 @@ async def ingest_corpus(
 
 def _payload(chunk: KnowledgeChunk) -> dict[str, object]:
     return {
-        TENANT_PAYLOAD_KEY: chunk.tenant_id,
         DOCUMENT_STATUS_PAYLOAD_KEY: APPROVED_DOCUMENT_STATUS,
         "chunk_id": chunk.chunk_id,
         "document_id": chunk.document_id,
@@ -299,7 +284,6 @@ def _response(
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=request.tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=max(0, int((time.monotonic() - started) * 1000)),

@@ -96,8 +96,7 @@ class HybridSemanticMemory:
         if not is_retrieval_query(query_str):
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
-        if not any(chunk.tenant_id == request.filters.tenant_scope for chunk in self._chunks):
-            return _response(request, (), RetrievalStatus.NO_RESULTS, started)
+
 
         final_top_k = _final_top_k(request, self._top_k_default)
         candidate_limit = _candidate_limit(final_top_k)
@@ -127,7 +126,6 @@ class HybridSemanticMemory:
                 dense_response = await self._dense.retrieve(q_request)
                 lexical = self._bm25.search(
                     q_text,
-                    tenant_id=request.filters.tenant_scope,
                     top_k=candidate_limit,
                 )
                 all_dense_results.extend(
@@ -237,7 +235,6 @@ def _response(
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=request.tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=max(0, int((time.monotonic() - started) * 1000)),

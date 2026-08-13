@@ -849,11 +849,10 @@ def test_bm25_shim_synthesises_a_retrieval_response() -> None:
     def _retrieve(query: str, tenant: str = "local"):
         request = SemanticRetrievalRequest(
             run_id="t",
-            tenant_id=tenant,
             user_id="t",
             query=query,
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope=tenant, document_status=()),
+            filters=RetrievalFilters(document_status=()),
             limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
         )
         return asyncio.run(retriever.retrieve(request))
@@ -864,9 +863,8 @@ def test_bm25_shim_synthesises_a_retrieval_response() -> None:
     assert response.chunks[0].section == "Hộ chiếu"
     assert response.chunks[0].relevance_score > 0
 
-    # No lexical overlap at all, and a foreign tenant, both abstain.
+    # No lexical overlap at all abstains.
     assert _retrieve("zzzzz").retrieval_status is RetrievalStatus.NO_RESULTS
-    assert _retrieve("hộ chiếu", tenant="other").chunks == ()
 
 
 def test_build_retriever_returns_the_requested_stack() -> None:
@@ -904,11 +902,10 @@ def test_qdrant_evaluation_retriever_builds_in_memory_index_and_delegates() -> N
     assert isinstance(retriever, module.QdrantEvaluationRetriever)
     request = SemanticRetrievalRequest(
         run_id="t",
-        tenant_id="local",
         user_id="t",
         query="hộ chiếu",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
     )
 
@@ -985,11 +982,10 @@ def test_qdrant_evaluation_retriever_constructs_once_with_defaults_and_forwards_
     )
     request = SemanticRetrievalRequest(
         run_id="t",
-        tenant_id="local",
         user_id="t",
         query="passport",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=()),
+        filters=RetrievalFilters(document_status=()),
         limits=RetrievalLimits(top_k=7, min_score=0.35, timeout_ms=1000),
     )
 
@@ -1042,11 +1038,10 @@ def test_qdrant_evaluator_raises_when_adapter_converts_query_failure_to_no_resul
     )
     request = SemanticRetrievalRequest(
         run_id="t",
-        tenant_id="local",
         user_id="t",
         query="passport",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1000),
     )
     asyncio.run(retriever.build_index())
@@ -1327,7 +1322,6 @@ def _tiny_corpus():
                     section=section,
                     text=text,
                     source_url=f"{document_id}.md",
-                    tenant_id="local",
                 ),
             ),
         )
@@ -1352,7 +1346,7 @@ def _corpus_sections() -> dict[str, list[str]]:
                 chunk.section for chunk in document.chunks if chunk.section is not None
             )
         )
-        for document in load_corpus(CORPUS_DIR, tenant_id="local")
+        for document in load_corpus(CORPUS_DIR)
     }
 
 

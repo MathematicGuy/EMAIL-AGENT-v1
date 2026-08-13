@@ -52,11 +52,10 @@ NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 def _scope(
     *,
-    tenant_id: str = "tenant-1",
     user_id: str = "user@example.com",
     session_id: str = "session-1",
 ) -> ChatMemoryScope:
-    return ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id=session_id)
+    return ChatMemoryScope(user_id=user_id, session_id=session_id)
 
 
 def _request(scope: ChatMemoryScope, *, all_sources: bool = True) -> MemoryContextRequest:
@@ -105,7 +104,6 @@ def _turn() -> ChatTurn:
 def _profile() -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         language="en",
         timezone="Asia/Bangkok",
@@ -122,7 +120,6 @@ def _episode(
     return TaskEpisode(
         episode_id=episode_id,
         record_id=episode_id,
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id=session_id,
         chat_turn_id="turn-1",
@@ -152,12 +149,11 @@ def _episode(
 
 
 def _chat_summary(
-    *, tenant_id: str = "tenant-1", session_id: str = "session-1"
+    *, session_id: str = "session-1"
 ) -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="chat-summary-1",
         record_id="record-1",
-        tenant_id=tenant_id,
         user_id="user@example.com",
         chat_session_id=session_id,
         chat_turn_id="turn-1",
@@ -374,11 +370,10 @@ def test_gateway_fails_closed_on_lifecycle_and_truncates_an_overreturn() -> None
 @pytest.mark.parametrize(
     "foreign_scope",
     [
-        _scope(tenant_id="tenant-2"),
         _scope(user_id="other@example.com"),
         _scope(session_id="session-2"),
     ],
-    ids=["tenant", "user", "session"],
+    ids=["user", "session"],
 )
 def test_gateway_rejects_foreign_scope_before_calling_adapters(
     foreign_scope: ChatMemoryScope,
@@ -521,8 +516,7 @@ def test_gateway_refuses_a_foreign_scope_profile_write() -> None:
     profiles = ProfileReader(None)
     foreign = DeclarativeProfile(
         profile_id="profile-2",
-        tenant_id="tenant-2",
-        user_id="user@example.com",
+        user_id="other@example.com",
         language="en",
         timezone=None,
         assistant_persona=None,
@@ -556,7 +550,6 @@ def test_delete_all_memory_is_exact_scope_retryable_and_never_calls_semantic() -
             self.calls = 0
 
         async def delete_profile(self, namespace: MemoryNamespace) -> bool:
-            assert namespace.tenant_id == "tenant-1"
             self.calls += 1
             return self.calls == 1
 
@@ -565,7 +558,6 @@ def test_delete_all_memory_is_exact_scope_retryable_and_never_calls_semantic() -
             self.calls = 0
 
         async def delete_all_for_user(self, namespace: MemoryNamespace) -> int:
-            assert namespace.tenant_id == "tenant-1"
             assert namespace.user_id == "user@example.com"
             assert namespace.feature == "ai_chat"
             self.calls += 1
@@ -805,11 +797,9 @@ def test_gateway_writes_a_system_generated_chat_summary_to_its_exact_namespace()
 @pytest.mark.parametrize(
     "episode",
     [
-        _chat_summary(tenant_id="tenant-2"),
         ChatSummaryEpisode(
             episode_id="chat-summary-user-2",
             record_id="record-1",
-            tenant_id="tenant-1",
             user_id="other@example.com",
             chat_session_id="session-1",
             chat_turn_id="turn-1",
@@ -827,7 +817,7 @@ def test_gateway_writes_a_system_generated_chat_summary_to_its_exact_namespace()
         ),
         _chat_summary(session_id="session-2"),
     ],
-    ids=["foreign_tenant", "foreign_user", "foreign_session"],
+    ids=["foreign_user", "foreign_session"],
 )
 def test_gateway_rejects_foreign_chat_summary_before_adapter_write(
     episode: ChatSummaryEpisode,
@@ -946,11 +936,10 @@ def test_gateway_dispatches_the_reconstructed_task_episode_not_a_disguised_subcl
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("tenant_id", "tenant-2"),
         ("user_id", "other@example.com"),
         ("chat_session_id", "session-2"),
     ],
-    ids=["tenant", "user", "session"],
+    ids=["user", "session"],
 )
 def test_gateway_rejects_foreign_task_episode_before_adapter_write(
     field: str, value: str

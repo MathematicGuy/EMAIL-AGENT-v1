@@ -1,4 +1,4 @@
-# Agent Experience Registry
+E:\VIN-INTERNSHIP\Other-Coding-Project\waku-agent\Waku-Agent-System-Design.md# Agent Experience Registry
 
 This document stores durable reasoning lessons, not session history. It is grounded in the **MindSeeds Epistemic Compression Protocol**: distilling operational wisdom into high-density, load-bearing **Seeds (<12 words)** that give agents a coherent epistemic identity rather than relying on brittle, verbose rulebooks.
 

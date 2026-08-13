@@ -219,7 +219,6 @@ class EphemeralEmailEnvelope:
     """
 
     run_id: str
-    tenant_id: str
     user_id: str
     gmail_message_id: str
     gmail_thread_id: str
@@ -249,7 +248,6 @@ class EphemeralEmailEnvelope:
             )
         return cls(
             run_id=_as_str(data["run_id"]),
-            tenant_id=_as_str(data["tenant_id"]),
             user_id=_as_str(data["user_id"]),
             gmail_message_id=_as_str(data["gmail_message_id"]),
             gmail_thread_id=_as_str(data["gmail_thread_id"]),
@@ -469,7 +467,6 @@ class TraceEvent:
     """
 
     run_id: str
-    tenant_id: str
     user_id: str
     gmail_message_id: str | None
     event_name: str
@@ -490,7 +487,6 @@ class TraceEvent:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             run_id=_as_str(data["run_id"]),
-            tenant_id=_as_str(data["tenant_id"]),
             user_id=_as_str(data["user_id"]),
             gmail_message_id=_optional(data["gmail_message_id"], _as_str),
             event_name=_as_str(data["event_name"]),
@@ -540,10 +536,9 @@ class SemanticChunk:
 
 @dataclass(frozen=True, slots=True)
 class RetrievalFilters:
-    """Namespace/status filters applied to a semantic retrieval (§6.4)."""
+    """Status filters applied to a semantic retrieval (§6.4)."""
 
-    tenant_scope: str
-    document_status: tuple[str, ...]
+    document_status: tuple[str, ...] = ("ready",)
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -551,8 +546,7 @@ class RetrievalFilters:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
-            tenant_scope=_as_str(data["tenant_scope"]),
-            document_status=_as_str_tuple(data["document_status"]),
+            document_status=_as_str_tuple(data.get("document_status", ("ready",))),
         )
 
 
@@ -585,7 +579,6 @@ class SemanticRetrievalRequest:
     """
 
     run_id: str
-    tenant_id: str
     user_id: str
     query: str
     knowledge_gaps: tuple[str, ...]
@@ -599,7 +592,6 @@ class SemanticRetrievalRequest:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             run_id=_as_str(data["run_id"]),
-            tenant_id=_as_str(data["tenant_id"]),
             user_id=_as_str(data["user_id"]),
             query=_as_str(data["query"]),
             knowledge_gaps=_as_str_tuple(data["knowledge_gaps"]),
@@ -613,7 +605,6 @@ class SemanticRetrievalResponse:
     """Structured semantic retrieval result (§6.5)."""
 
     query_id: str
-    tenant_id: str
     chunks: tuple[SemanticChunk, ...]
     retrieval_status: RetrievalStatus
     latency_ms: int
@@ -625,7 +616,6 @@ class SemanticRetrievalResponse:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             query_id=_as_str(data["query_id"]),
-            tenant_id=_as_str(data["tenant_id"]),
             chunks=tuple(
                 SemanticChunk.from_dict(_as_mapping(item)) for item in _as_sequence(data["chunks"])
             ),

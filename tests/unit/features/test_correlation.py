@@ -26,7 +26,6 @@ _RECEIVED_AT = datetime(2026, 8, 7, 9, 0, tzinfo=UTC)
 def _envelope(message_id: str, thread_id: str) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run-1",
-        tenant_id="tenant-1",
         user_id="user-1",
         gmail_message_id=message_id,
         gmail_thread_id=thread_id,

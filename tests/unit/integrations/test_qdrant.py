@@ -67,8 +67,6 @@ class _RecordingQdrantClient:
 
 def _request(
     *,
-    tenant_id: str = "local",
-    tenant_scope: str = "local",
     query: str = "đăng ký tạm trú",
     top_k: int = 5,
     min_score: float = 0.0,
@@ -76,11 +74,10 @@ def _request(
 ) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
-        tenant_id=tenant_id,
         user_id="user@example.com",
         query=query,
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope=tenant_scope, document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=top_k, min_score=min_score, timeout_ms=timeout_ms),
     )
 
@@ -88,10 +85,9 @@ def _request(
 async def _memory(
     client: AsyncQdrantClient,
     *,
-    tenant_id: str = "local",
     embedder: HashingEmbedder | SlowEmbedder | None = None,
 ) -> QdrantSemanticMemory:
-    documents = load_corpus(CORPUS_DIR, tenant_id=tenant_id)
+    documents = load_corpus(CORPUS_DIR)
     await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
     return QdrantSemanticMemory(client, COLLECTION, embedder or HashingEmbedder())
 
@@ -99,7 +95,7 @@ async def _memory(
 def test_ingest_corpus_creates_the_collection_and_upserts_every_chunk() -> None:
     async def scenario() -> None:
         client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR, tenant_id="local")
+        documents = load_corpus(CORPUS_DIR)
         expected = sum(len(document.chunks) for document in documents)
 
         count = await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
@@ -114,7 +110,7 @@ def test_ingest_corpus_creates_the_collection_and_upserts_every_chunk() -> None:
 def test_ingest_corpus_is_idempotent_for_the_same_corpus() -> None:
     async def scenario() -> None:
         client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR, tenant_id="local")
+        documents = load_corpus(CORPUS_DIR)
 
         first = await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
         second = await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
@@ -128,7 +124,7 @@ def test_ingest_corpus_is_idempotent_for_the_same_corpus() -> None:
 def test_ingest_corpus_rejects_a_vector_size_the_embedder_cannot_produce() -> None:
     async def scenario() -> None:
         client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR, tenant_id="local")
+        documents = load_corpus(CORPUS_DIR)
 
         with pytest.raises(ValueError, match="does not match the embedder"):
             await ingest_corpus(
@@ -156,53 +152,10 @@ def test_retrieve_returns_grounded_chunks_for_the_owning_tenant() -> None:
 
         assert response.retrieval_status is RetrievalStatus.SUCCESS
         assert response.chunks
-        assert response.tenant_id == "local"
         for chunk in response.chunks:
             assert chunk.chunk_id and chunk.document_id and chunk.text
             assert chunk.source_url.startswith("data/extracted/")
             assert chunk.rerank_score is None
-
-    asyncio.run(scenario())
-
-
-def test_retrieve_isolates_tenants_via_the_payload_filter() -> None:
-    async def scenario() -> None:
-        memory = await _memory(AsyncQdrantClient(":memory:"), tenant_id="tenant-a")
-
-        response = await memory.retrieve(
-            _request(tenant_id="tenant-b", tenant_scope="tenant-b")
-        )
-
-        assert response.retrieval_status is RetrievalStatus.NO_RESULTS
-        assert response.chunks == ()
-
-    asyncio.run(scenario())
-
-
-def test_retrieve_denies_an_empty_tenant_scope_without_embedding() -> None:
-    async def scenario() -> None:
-        # SlowEmbedder raises on any call, so reaching it would fail the test.
-        memory = await _memory(AsyncQdrantClient(":memory:"), embedder=SlowEmbedder())
-
-        response = await memory.retrieve(_request(tenant_scope=""))
-
-        assert response.retrieval_status is RetrievalStatus.AUTHORIZATION_DENIED
-        assert response.chunks == ()
-
-    asyncio.run(scenario())
-
-
-def test_retrieve_denies_a_mismatched_tenant_before_embedding() -> None:
-    async def scenario() -> None:
-        embedder = _RecordingEmbedder()
-        client = _RecordingQdrantClient()
-        memory = QdrantSemanticMemory(client, COLLECTION, embedder)  # type: ignore[arg-type]
-
-        response = await memory.retrieve(_request(tenant_scope="foreign"))
-
-        assert response.retrieval_status is RetrievalStatus.AUTHORIZATION_DENIED
-        assert embedder.calls == []
-        assert client.query_calls == []
 
     asyncio.run(scenario())
 
@@ -214,11 +167,10 @@ def test_retrieve_denies_an_empty_status_allowlist_before_embedding() -> None:
         memory = QdrantSemanticMemory(client, COLLECTION, embedder)  # type: ignore[arg-type]
         request = SemanticRetrievalRequest(
             run_id="run-1",
-            tenant_id="local",
             user_id="user@example.com",
             query="approved policy",
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope="local", document_status=()),
+            filters=RetrievalFilters(document_status=()),
             limits=RetrievalLimits(top_k=5, min_score=0.0, timeout_ms=1500),
         )
 
@@ -242,11 +194,10 @@ def test_retrieve_denies_nonapproved_status_allowlists_before_embedding(
         request = _request()
         request = SemanticRetrievalRequest(
             run_id=request.run_id,
-            tenant_id=request.tenant_id,
             user_id=request.user_id,
             query=request.query,
             knowledge_gaps=request.knowledge_gaps,
-            filters=RetrievalFilters(tenant_scope="local", document_status=statuses),
+            filters=RetrievalFilters(document_status=statuses),
             limits=request.limits,
         )
 
@@ -259,22 +210,7 @@ def test_retrieve_denies_nonapproved_status_allowlists_before_embedding(
     asyncio.run(scenario())
 
 
-def test_retrieve_denies_a_blank_tenant_id_before_embedding() -> None:
-    async def scenario() -> None:
-        embedder = _RecordingEmbedder()
-        client = _RecordingQdrantClient()
-        memory = QdrantSemanticMemory(client, COLLECTION, embedder)  # type: ignore[arg-type]
-
-        response = await memory.retrieve(_request(tenant_id=" "))
-
-        assert response.retrieval_status is RetrievalStatus.AUTHORIZATION_DENIED
-        assert embedder.calls == []
-        assert client.query_calls == []
-
-    asyncio.run(scenario())
-
-
-def test_retrieve_builds_tenant_and_status_filter_and_propagates_limits() -> None:
+def test_retrieve_builds_status_filter_and_propagates_limits() -> None:
     async def scenario() -> None:
         embedder = _RecordingEmbedder()
         client = _RecordingQdrantClient()
@@ -282,12 +218,10 @@ def test_retrieve_builds_tenant_and_status_filter_and_propagates_limits() -> Non
         request = _request(top_k=3, min_score=0.7)
         request = SemanticRetrievalRequest(
             run_id=request.run_id,
-            tenant_id=request.tenant_id,
             user_id=request.user_id,
             query=request.query,
             knowledge_gaps=request.knowledge_gaps,
             filters=RetrievalFilters(
-                tenant_scope=request.filters.tenant_scope,
                 document_status=("ready",),
             ),
             limits=request.limits,
@@ -301,10 +235,8 @@ def test_retrieve_builds_tenant_and_status_filter_and_propagates_limits() -> Non
         assert call["timeout"] == 1
         query_filter = call["query_filter"]
         assert query_filter.must is not None
-        assert len(query_filter.must) == 2
-        tenant_condition, status_condition = query_filter.must
-        assert tenant_condition.key == "tenant_id"
-        assert tenant_condition.match.value == "local"
+        assert len(query_filter.must) == 1
+        (status_condition,) = query_filter.must
         assert status_condition.key == "document_status"
         assert status_condition.match.any == ["ready"]
 
@@ -314,13 +246,12 @@ def test_retrieve_builds_tenant_and_status_filter_and_propagates_limits() -> Non
 def test_ingest_stamps_ready_status_indexes_filters_and_allowlisted_payload() -> None:
     async def scenario() -> None:
         client = _RecordingQdrantClient()
-        documents = load_corpus(CORPUS_DIR, tenant_id="local")
+        documents = load_corpus(CORPUS_DIR)
 
         count = await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
 
         assert count == len(client.upserted_points)
         assert {call["field_name"] for call in client.created_indexes} == {
-            "tenant_id",
             "document_status",
         }
         assert all(
@@ -330,7 +261,6 @@ def test_ingest_stamps_ready_status_indexes_filters_and_allowlisted_payload() ->
         assert client.upserted_points
         for point in client.upserted_points:
             assert set(point.payload) == {
-                "tenant_id",
                 "document_status",
                 "chunk_id",
                 "document_id",
@@ -340,7 +270,6 @@ def test_ingest_stamps_ready_status_indexes_filters_and_allowlisted_payload() ->
                 "source_url",
             }
             assert point.payload["document_status"] == "ready"
-            assert point.payload["tenant_id"] == "local"
 
     asyncio.run(scenario())
 

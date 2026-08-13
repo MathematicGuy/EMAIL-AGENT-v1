@@ -47,7 +47,6 @@ def test_hybrid_filters_out_greeting_query() -> None:
             section=None,
             text="chủ đề bảo hiểm xã hội",
             source_url="d1.md",
-            tenant_id="local",
         ),
     )
     memory = HybridSemanticMemory(
@@ -59,11 +58,10 @@ def test_hybrid_filters_out_greeting_query() -> None:
 
     request = SemanticRetrievalRequest(
         run_id="r1",
-        tenant_id="local",
         user_id="u1",
         query="hê lô",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.0, timeout_ms=1000),
     )
 
@@ -81,7 +79,6 @@ def test_hybrid_filters_out_low_rerank_score_chunks() -> None:
             section=None,
             text="thủ tục hành chính thuế",
             source_url="d1.md",
-            tenant_id="local",
         ),
     )
     # Low score candidate (0.083 < 0.25 min_rerank_score)
@@ -98,11 +95,10 @@ def test_hybrid_filters_out_low_rerank_score_chunks() -> None:
 
     request = SemanticRetrievalRequest(
         run_id="r1",
-        tenant_id="local",
         user_id="u1",
         query="quy trình đóng thuế",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.0, timeout_ms=1000),
     )
 

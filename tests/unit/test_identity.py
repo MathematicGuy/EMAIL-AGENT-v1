@@ -3,11 +3,11 @@ import asyncio
 from cowork_agent.identity import VerifiedPrincipal, principal_from_opaque_session
 
 
-def test_verified_principal_exposes_workspace_as_the_authorization_scope() -> None:
-    principal = VerifiedPrincipal(tenant_id="workspace-1", user_id="internal-user-1")
+def test_verified_principal_has_user_id_and_no_tenant_id() -> None:
+    principal = VerifiedPrincipal(user_id="user_123")
 
-    assert principal.workspace_id == "workspace-1"
-    assert principal.tenant_id == "workspace-1"
+    assert principal.user_id == "user_123"
+    assert not hasattr(principal, "tenant_id")
 
 
 def test_opaque_session_resolver_returns_none_without_a_cookie() -> None:

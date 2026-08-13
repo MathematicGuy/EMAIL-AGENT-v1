@@ -27,20 +27,14 @@ class OpaqueSessionResolver(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class VerifiedPrincipal:
-    """Authenticated workspace + user identity scoping every operation."""
+    """Authenticated user identity scoping every operation."""
 
-    tenant_id: str
-    user_id: str
-
-    @property
-    def workspace_id(self) -> str:
-        """Workspace authorization scope; ``tenant_id`` remains a transition alias."""
-        return self.tenant_id
+    user_id: str = "default_user"
 
 
 def principal_for_connection(connection: MailboxConnection) -> VerifiedPrincipal:
     """Derive the Verified Principal from the connection's verified OAuth identity."""
-    return VerifiedPrincipal(tenant_id=LOCAL_TENANT_ID, user_id=connection.email_address)
+    return VerifiedPrincipal(user_id=connection.email_address)
 
 
 def ensure_principal_owns_connection(

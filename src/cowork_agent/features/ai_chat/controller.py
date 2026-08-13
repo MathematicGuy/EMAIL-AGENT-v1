@@ -74,25 +74,23 @@ class ChatSessionRegistryPort(Protocol):
     async def create(
         self,
         *,
-        tenant_id: str,
         user_id: str,
         project_id: str = "default-project",
     ) -> ChatMemoryScope: ...
 
     async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
+        self, session_id: str, *, user_id: str
     ) -> ChatMemoryScope: ...
 
     async def list_for(
         self,
         *,
-        tenant_id: str,
         user_id: str,
         project_id: str | None = None,
     ) -> tuple[ChatMemoryScope, ...]: ...
 
     async def delete_project(
-        self, *, tenant_id: str, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str
     ) -> tuple[str, ...]: ...
 
 
@@ -144,14 +142,13 @@ class InMemoryChatSessionRegistry:
         self._lock = threading.Lock()
 
     async def create(
-        self, *, tenant_id: str, user_id: str, project_id: str = "default-project"
+        self, *, user_id: str, project_id: str = "default-project"
     ) -> ChatMemoryScope:
         with self._lock:
             session_id = self._new_id()
             while session_id in self._sessions:
                 session_id = self._new_id()
             scope = ChatMemoryScope(
-                tenant_id=tenant_id,
                 user_id=user_id,
                 session_id=session_id,
                 project_id=project_id,
@@ -163,12 +160,11 @@ class InMemoryChatSessionRegistry:
         self,
         session_id: str,
         *,
-        tenant_id: str,
         user_id: str,
     ) -> ChatMemoryScope:
         with self._lock:
             scope = self._sessions.get(session_id)
-        if scope is None or scope.tenant_id != tenant_id or scope.user_id != user_id:
+        if scope is None or scope.user_id != user_id:
             raise ChatSessionAccessDenied(session_id)
         return scope
 
@@ -182,27 +178,25 @@ class InMemoryChatSessionRegistry:
         return scope
 
     async def list_for(
-        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+        self, *, user_id: str, project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
         """Owned scopes in creation order (GET /sessions read contract)."""
         with self._lock:
             return tuple(
                 scope
                 for scope in self._sessions.values()
-                if scope.tenant_id == tenant_id
-                and scope.user_id == user_id
+                if scope.user_id == user_id
                 and (project_id is None or scope.project_id == project_id)
             )
 
     async def delete_project(
-        self, *, tenant_id: str, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str
     ) -> tuple[str, ...]:
         with self._lock:
             removed = tuple(
                 session_id
                 for session_id, scope in self._sessions.items()
-                if scope.tenant_id == tenant_id
-                and scope.user_id == user_id
+                if scope.user_id == user_id
                 and scope.project_id == project_id
             )
             for session_id in removed:
@@ -603,12 +597,11 @@ class ChatController:
 
         created_at = self._clock()
         record_input = "\x1f".join(
-            (self._scope.tenant_id, self._scope.user_id, self._scope.session_id, turn_id)
+            (self._scope.user_id, self._scope.session_id, turn_id)
         )
         return TaskEpisode(
             episode_id=self._new_id(),
             record_id=hashlib.sha256(record_input.encode("utf-8")).hexdigest(),
-            tenant_id=self._scope.tenant_id,
             user_id=self._scope.user_id,
             chat_session_id=self._scope.session_id,
             chat_turn_id=turn_id,

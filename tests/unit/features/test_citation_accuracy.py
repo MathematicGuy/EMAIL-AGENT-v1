@@ -34,7 +34,6 @@ def _chunk(chunk_id: str, text: str) -> SemanticChunk:
 def _retrieval(*chunks: SemanticChunk) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id="query_1",
-        tenant_id="tenant_1",
         chunks=chunks,
         retrieval_status=RetrievalStatus.SUCCESS,
         latency_ms=12,

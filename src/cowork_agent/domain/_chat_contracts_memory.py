@@ -48,14 +48,12 @@ MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
 class ChatMemoryScope:
     """Aggregate fail-closed chat scope used before selecting one memory type."""
 
-    tenant_id: str
     user_id: str
     session_id: str
     feature: str = AI_CHAT_FEATURE
     project_id: str = "default-project"
 
     def __post_init__(self) -> None:
-        _require_key_component(self.tenant_id, "tenant_id")
         _require_key_component(self.user_id, "user_id")
         _require_key_component(self.session_id, "session_id")
         _require_key_component(self.project_id, "project_id")
@@ -73,7 +71,6 @@ class ChatMemoryScope:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
-            tenant_id=_require_key_component(data["tenant_id"], "tenant_id"),
             user_id=_require_key_component(data["user_id"], "user_id"),
             session_id=_require_key_component(data["session_id"], "session_id"),
             feature=_require_string(data["feature"], "feature"),
@@ -99,10 +96,6 @@ class MemoryNamespace:
             _require_string(self.source_id, "source_id")
 
     @property
-    def tenant_id(self) -> str:
-        return self.scope.tenant_id
-
-    @property
     def user_id(self) -> str:
         return self.scope.user_id
 
@@ -121,7 +114,6 @@ class MemoryNamespace:
             raise ValueError("record_id is required to construct a logical key")
         return "/".join(
             (
-                self.tenant_id,
                 self.user_id,
                 self.session_id,
                 self.feature,
@@ -460,7 +452,6 @@ class TaskEpisode:
 
     episode_id: str
     record_id: str
-    tenant_id: str
     user_id: str
     chat_session_id: str
     chat_turn_id: str
@@ -485,7 +476,6 @@ class TaskEpisode:
         for name in (
             "episode_id",
             "record_id",
-            "tenant_id",
             "user_id",
             "chat_session_id",
             "chat_turn_id",
@@ -582,7 +572,6 @@ class TaskEpisode:
         expected_fields = {
             "episode_id",
             "record_id",
-            "tenant_id",
             "user_id",
             "chat_session_id",
             "chat_turn_id",
@@ -631,7 +620,6 @@ class TaskEpisode:
         return cls(
             episode_id=_require_string(data["episode_id"], "episode_id"),
             record_id=_require_string(data["record_id"], "record_id"),
-            tenant_id=_require_string(data["tenant_id"], "tenant_id"),
             user_id=_require_string(data["user_id"], "user_id"),
             chat_session_id=_require_string(data["chat_session_id"], "chat_session_id"),
             chat_turn_id=_require_string(data["chat_turn_id"], "chat_turn_id"),
@@ -679,7 +667,6 @@ class ChatSummaryEpisode:
 
     episode_id: str
     record_id: str
-    tenant_id: str
     user_id: str
     chat_session_id: str
     chat_turn_id: str
@@ -699,7 +686,6 @@ class ChatSummaryEpisode:
         for name in (
             "episode_id",
             "record_id",
-            "tenant_id",
             "user_id",
             "chat_session_id",
             "chat_turn_id",
@@ -753,7 +739,6 @@ class ChatSummaryEpisode:
         return cls(
             episode_id=_require_string(data["episode_id"], "episode_id"),
             record_id=_require_string(data["record_id"], "record_id"),
-            tenant_id=_require_string(data["tenant_id"], "tenant_id"),
             user_id=_require_string(data["user_id"], "user_id"),
             chat_session_id=_require_string(data["chat_session_id"], "chat_session_id"),
             chat_turn_id=_require_string(data["chat_turn_id"], "chat_turn_id"),
@@ -846,7 +831,6 @@ class DeclarativeProfile:
     """Explicit-only profile DTO (PRD-v2 FR-03), narrowed to the first UI slice."""
 
     profile_id: str
-    tenant_id: str
     user_id: str
     language: str | None
     timezone: str | None
@@ -859,7 +843,6 @@ class DeclarativeProfile:
 
     def __post_init__(self) -> None:
         _require_string(self.profile_id, "profile_id")
-        _require_string(self.tenant_id, "tenant_id")
         _require_string(self.user_id, "user_id")
         for name in PROFILE_PREFERENCE_FIELDS:
             value = getattr(self, name)
@@ -878,7 +861,6 @@ class DeclarativeProfile:
         expires_at = data.get("expires_at")
         return cls(
             profile_id=_require_string(data["profile_id"], "profile_id"),
-            tenant_id=_require_string(data["tenant_id"], "tenant_id"),
             user_id=_require_string(data["user_id"], "user_id"),
             language=(
                 _require_string(nullable_strings["language"], "language")

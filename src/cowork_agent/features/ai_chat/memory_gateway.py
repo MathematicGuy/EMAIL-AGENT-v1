@@ -109,7 +109,6 @@ class MemoryGateway:
             )
         return await self._project_documents.retrieve(
             ProjectDocumentQuery(
-                tenant_id=self._scope.tenant_id,
                 user_id=self._scope.user_id,
                 project_id=self._scope.project_id,
                 query=query,
@@ -173,8 +172,7 @@ class MemoryGateway:
                     )
                 else:
                     if profile is not None and (
-                        profile.tenant_id != self._scope.tenant_id
-                        or profile.user_id != self._scope.user_id
+                        profile.user_id != self._scope.user_id
                     ):
                         self._emit(
                             MemoryType.LONG_TERM,
@@ -229,7 +227,6 @@ class MemoryGateway:
                         if episode.retrieval_eligible
                         and episode.validation_status
                         in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED}
-                        and episode.tenant_id == self._scope.tenant_id
                         and episode.user_id == self._scope.user_id
                     )[: request.reads.episodic.max_items]
                     self._emit(
@@ -297,7 +294,7 @@ class MemoryGateway:
 
         adapter = self._require_declarative_memory()
         namespace = self._namespace(MemoryType.LONG_TERM)
-        if profile.tenant_id != self._scope.tenant_id or profile.user_id != self._scope.user_id:
+        if profile.user_id != self._scope.user_id:
             raise NamespaceAccessDenied("profile scope does not match the verified chat scope")
         authorize_profile_write(namespace, profile, provenance)
         result = await adapter.write_profile(namespace, profile)
@@ -323,8 +320,7 @@ class MemoryGateway:
         """Persist only a bounded, system-generated, retrieval-ineligible chat summary."""
 
         if (
-            episode.tenant_id != self._scope.tenant_id
-            or episode.user_id != self._scope.user_id
+            episode.user_id != self._scope.user_id
             or episode.chat_session_id != self._scope.session_id
         ):
             raise NamespaceAccessDenied("summary scope does not match the verified chat scope")
@@ -345,8 +341,7 @@ class MemoryGateway:
         """Persist an authorized initial task episode at its supplied identity."""
 
         if (
-            episode.tenant_id != self._scope.tenant_id
-            or episode.user_id != self._scope.user_id
+            episode.user_id != self._scope.user_id
             or episode.chat_session_id != self._scope.session_id
         ):
             raise NamespaceAccessDenied("task episode scope does not match the verified chat scope")
@@ -371,8 +366,7 @@ class MemoryGateway:
             namespace, episode_id=episode_id
         )
         if result is not None and (
-            result.tenant_id != self._scope.tenant_id
-            or result.user_id != self._scope.user_id
+            result.user_id != self._scope.user_id
             or result.chat_session_id != self._scope.session_id
         ):
             raise NamespaceAccessDenied("task episode scope does not match the verified scope")

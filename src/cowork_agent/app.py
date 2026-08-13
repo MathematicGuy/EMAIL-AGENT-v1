@@ -838,7 +838,7 @@ def create_app() -> FastAPI:
         run_queue = getattr(request.app.state, "run_queue", None)
         if run_queue is not None:
             await run_queue.enqueue_digest_run(
-                run.id, user_id=principal.user_id, tenant_id=principal.tenant_id
+                run.id, user_id=principal.user_id
             )
         else:
             background_tasks.add_task(worker.execute, run.id)

@@ -53,17 +53,23 @@ def fresh_schema() -> Iterator[None]:
     yield
 
 
-def _server_available() -> None:
+def _server_available() -> bool:
     try:
         with psycopg.connect(DATABASE_URL, connect_timeout=3):
-            pass
-    except psycopg.OperationalError as error:  # pragma: no cover - environment prerequisite
-        pytest.fail(f"PostgreSQL unavailable at {DATABASE_URL}; start cowork-pg ({error})")
+            return True
+    except psycopg.Error:
+        return False
+
+
+if not _server_available():
+    pytest.skip(
+        f"no PostgreSQL server at {DATABASE_URL} (set PG_TEST_URL or start cowork-pg)",
+        allow_module_level=True,
+    )
 
 
 async def _repository() -> tuple[PostgresTaskEpisodeRepository, AsyncConnectionPool]:
-    _server_available()
-    pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=4)
+    pool = AsyncConnectionPool(DATABASE_URL, min_size=1, max_size=4, open=False)
     await pool.open(wait=True)
     await apply_migrations(pool)
     return PostgresTaskEpisodeRepository(pool), pool
