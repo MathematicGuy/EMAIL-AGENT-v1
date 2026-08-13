@@ -66,12 +66,6 @@ $env:QDRANT_REINDEX = "false"
 `QDRANT_REINDEX=true` recreates the entire collection from the committed
 Markdown corpus; it is not an incremental update. See
 [`docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`](docs/evaluations/email-rag/EMAIL-RAG-STATUS.md)
-for the current RAG runtime and known ingestion limitations.
-
-Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế hoạch Hành động (Action Plan) có cấu trúc. Runtime hiện tại tích hợp classifier/router riêng và Company Knowledge RAG truy hồi-only cục bộ. Hệ thống bộ nhớ bốn loại (Working, Profile, Episodic, Semantic RAG) thuộc sở hữu của **AI Chat Assistant** và hoàn toàn phân tách khỏi Email Agent đơn lượt độc lập (tính năng `@Email` trong chat đã được bãi bỏ theo ADR-004).
-
-
-> **Trạng thái tài liệu — đọc trước khi dùng:** README này phân biệt **runtime hiện tại** và **kiến trúc mục tiêu**. Local V1-M3 đã hoàn thành khung Email RAG độc lập với classifier/router, `SemanticMemoryPort` và `HybridSemanticMemory` (in-memory dense search, BM25, RRF trên `data/extracted/*.md`, cùng Jina reranking tùy chọn). Qdrant và hệ thống bộ nhớ bốn loại được căn chỉnh làm nền tảng cho **AI Chat Assistant** để quản lý hội thoại đa lượt và các tác vụ sinh trực tiếp từ chat (chat-native tasks). Phân tích chi tiết: [`docs/architectures/master-comparison.md`](docs/architectures/master-comparison.md).
 
 ---
 
@@ -79,7 +73,7 @@ Hệ thống tự động chuyển đổi Email Gmail chưa đọc thành Kế h
 
 Kiến trúc hệ thống phân tách thành **2 quy trình độc lập (2 separate workflows)**:
 
-### 1.1 Workflow 1: AI Chat Assistant & Hệ thống Bộ nhớ 4 Loại (Multi-Turn Conversational) — KIẾN TRÚC MỤC TIÊU
+### 1.1 Workflow 1: AI Chat Assistant & Hệ thống Bộ nhớ 4 Loại (Multi-Turn Conversational)
 
 Quy trình trò chuyện đa lượt (multi-turn AI Chat) do **Chat Controller** làm chủ, kết nối trực tiếp với hệ thống bộ nhớ 4 loại để duy trì ngữ cảnh, sở thích người dùng và lịch sử tác vụ sinh từ chat (chat-native tasks) qua các phiên hội thoại:
 
@@ -142,13 +136,18 @@ email-agent-v1/
 │   └── cowork_agent/
 │       ├── __init__.py
 │       ├── app.py                      # FastAPI composition root; entry point `mail-todo-api`
-│       ├── config.py                   # Environment settings loaders (Gmail, Gemini, Groq)
+│       ├── config.py                   # Environment settings loaders
 │       ├── identity.py                 # Tenant & User identity context management
-│       ├── api/                        # HTTP handlers / response serialization
-│       │   └── handlers.py
-│       ├── domain/                     # Pure business domain models & target contracts
+│       ├── ingestion_cli.py            # Knowledge ingestion CLI entry point `mail-todo-ingest-knowledge`
+│       ├── api/                        # HTTP handlers & API endpoints
+│       │   ├── handlers.py             # Mail-todo endpoints
+│       │   ├── chat.py                 # Multi-turn chat & SSE streaming endpoints
+│       │   └── projects.py             # Project & document management endpoints
+│       ├── domain/                     # Pure business domain models & contracts
 │       │   ├── models.py               # Domain entities (Task, ActionPlan, EmailEnvelope)
-│       │   └── target_contracts.py     # Target V2 contracts (Memory, Chat, TaskEpisode)
+│       │   ├── target_contracts.py     # Target V2 contracts (Memory, TaskEpisode)
+│       │   ├── chat_contracts.py       # Chat memory scope & SSE stream contracts
+│       │   └── project_documents.py    # User/project document domain models
 │       ├── features/                   # Core business features
 │       │   └── email_action_plan/      # Classifier, routing, RAG retrieval & plan workflow
 │       │       ├── workflow.py         # Main pipeline orchestrator
@@ -166,33 +165,33 @@ email-agent-v1/
 │       ├── integrations/               # External service boundaries & adapters
 │       │   ├── gmail/                  # OAuth flow, Gmail API adapter, deterministic fakes
 │       │   ├── llm/                    # Gemini, Groq, Faucet LLM providers & fakes
-│       │   └── rag/                    # Dense + BM25 + RRF + optional Jina reranker
-│       │       ├── hybrid.py           # HybridSemanticMemory implementation
-│       │       ├── bm25.py             # Lexical BM25 keyword indexer
-│       │       ├── embeddings.py       # Dense vector embedding generator
-│       │       ├── jina_reranker.py    # Jina AI reranking API client
-│       │       ├── knowledge_base.py   # Corpus document loader & chunker
-│       │       ├── rrf.py              # Reciprocal Rank Fusion algorithm
-│       │       └── bootstrap.py        # Local RAG bootstrap loader
-│       ├── orchestration/              # Local dispatchers & workers
-│       │   └── local.py                # In-process local execution dispatcher
-│       └── persistence/                # Database repositories & storage adapters
-│           ├── repositories/           # SQLite mailbox-connection & task repos
-│           └── migrations/             # SQL schema migration scripts
+│       │   ├── rag/                    # Dense + BM25 + Turbovec / Qdrant semantic memory
+│       │   ├── knowledge_ingestion/    # Knowledge extraction pipeline (PDF/DOCX)
+│       │   ├── project_documents/      # Encrypted document store & media sniffing
+│       │   ├── storage/                # Supabase private storage adapter
+│       │   └── key_rotation.py         # API key rotation manager
+│       ├── orchestration/              # Dispatchers & background workers
+│       │   ├── local.py                # In-process local execution dispatcher
+│       │   └── worker.py               # Background worker process entry point `mail-todo-worker`
+│       ├── persistence/                # Database repositories & storage adapters
+│       │   ├── repositories/           # SQLite & Supabase Postgres repositories
+│       │   └── migrations/             # SQL schema migration scripts
+│       └── security/                   # Auth & security utilities
+│
+├── frontend/                           # React 19 + Vite + Tailwind 4 frontend (pnpm)
 │
 ├── frontend/                            # React/Vite web application
 │
 ├── tests/
 │   ├── unit/                           # Unit tests (policies, providers, RAG)
-│   └── integration/                    # Integration tests (server, full workflow)
+│   ├── integration/                    # Integration tests (server, full workflow)
+│   └── compatibility/                  # Contract & DTO compatibility tests
 │
 └── docs/                               # Documentation & Specifications
-    ├── architectures/                  # TARGET-ARCHITECTURE.md + master-comparison.md (gap analysis)
+    ├── architectures/                  # Target architecture & comparison docs
     ├── PRD-v1-Core-Email-and-RAG.md    # Product requirements for V1 Email RAG
     ├── PRD-v2-Memory-Extension.md      # Product requirements for V2 Chat Memory System
     └── references/                     # Detailed technical specs & experience registry
-        ├── memory-system-and-chat-demo-analysis.md # Detailed analysis doc
-        └── EMAIL-RAG-ARCHITECHTURE.md  # Detailed RAG architecture spec
 ```
 
 **Tóm tắt trạng thái triển khai:**
@@ -244,6 +243,16 @@ pip install -e ".[dev]"
 Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự.
 
 ```env
+# Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
+DATABASE_URL="postgresql://user:pass@host:5432/dbname"
+
+# Semantic Memory Store Provider (turbovec | qdrant)
+RAG_STORE_PROVIDER="turbovec"
+QDRANT_ENABLED="false"
+
+# Feature Flags
+USER_DOCUMENTS_ENABLED="false"
+
 # Key xoay vòng Gemini (hoặc Groq)
 GEMINI_API_KEY_1="your_key_1"
 GEMINI_API_KEY_2="your_key_2"
@@ -298,17 +307,23 @@ Jina. Set it back to `false` after that startup. Set
 Chạy bộ công cụ kiểm tra chất lượng mã nguồn:
 
 ```bash
-# Kiểm tra linter & code style
-ruff check .
+# Kiểm tra linter & code style (Backend)
+python -m ruff check .
 
-# Kiểm tra kiểu tĩnh (Static Type Check)
-mypy src
+# Kiểm tra kiểu tĩnh (Static Type Check - Backend)
+python -m mypy src
 
 # Chạy toàn bộ Unit, Integration và Contract tests
-pytest -q
+python -m pytest -q
 
 # Chạy E2E Frontend-API Integration tests (Linux / Ubuntu & Windows)
-pytest tests/integration/api/test_e2e_frontend_api.py -v
+python -m pytest tests/integration/api/test_e2e_frontend_api.py -v
+
+# Kiểm tra linter, typecheck & unit test cho Frontend (folder frontend/)
+cd frontend
+pnpm test
+pnpm check-types
+pnpm lint
 ```
 
 ---
