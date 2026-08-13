@@ -15,7 +15,7 @@ This document describes the implementation in commit `cf2fd49801d5932b26de82af9d
 | Category | Implemented component | Runtime responsibility |
 |---|---|---|
 | API service | FastAPI app in `cowork_agent.app` | Gmail OAuth/connection endpoints, unread preview, run creation, polling, and result delivery. |
-| Test UI | Streamlit app launched by `scripts/run_gui.py` | Human-facing client for exercising the API; not a separate backend. |
+| Web UI | React/Vite app in `frontend/` | Human-facing client for exercising the API; runs independently from the FastAPI backend. |
 | Application services | `GmailConnectionService`, `CreateDigestRun`, `DigestWorker`, `GetDigestResult` | Connection lifecycle, run creation, digest orchestration, and result assembly. |
 | Email adapter | `GmailMailboxAdapter` | Builds a Gmail v1 client, searches unread inbox messages, fetches threads and attachments, and normalizes messages. |
 | Attachment adapter | `SafeTextAttachmentExtractor` | Extracts bounded UTF-8 text from text, CSV, and JSON attachments in process. |
@@ -23,7 +23,7 @@ This document describes the implementation in commit `cf2fd49801d5932b26de82af9d
 | Domain policy | `cowork_agent.features.email_action_plan.policies` | Normalizes Gmail queries, validates limits, fingerprints/deduplicates actions, and calculates priority. |
 | RAG module | **Absent** | No ingestion, retrieval, knowledge context, or RAG generation is composed. |
 
-The source package has `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` areas, plus retained `api` and `gui` presentation adapters. It has no independently deployed internal service boundary; these components run in the API process except for calls to external providers.
+The source package has `domain`, `features`, `runtime`, `integrations`, `memory`, `rag`, `persistence`, `orchestration`, and `ops` areas, plus the `api` presentation adapter. The React application is maintained separately under `frontend/`; backend components run in the API process except for calls to external providers.
 
 ### 1.2 State, queues, workers, and scheduling
 
@@ -166,7 +166,7 @@ Additional owned state:
 flowchart TB
     subgraph CALLERS["CALLERS"]
         CLIENT["API client"]
-        UI["Streamlit test UI"]
+        UI["React/Vite web UI"]
         POLL["Poll run and result APIs"]
     end
 

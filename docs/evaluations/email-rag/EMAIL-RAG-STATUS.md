@@ -44,7 +44,7 @@ flowchart LR
 | Email workflow wiring | Implemented | `DigestWorker` invokes retrieval for `RETRIEVE_RAG`, skips it for `DIRECT_PLAN`, forwards chunks to the generator, and records missing information when retrieval is empty or unavailable. |
 | Citation boundary | Implemented | Validation removes generated citation IDs that are not present in the retrieval response for the current request. |
 | Knowledge HTTP API | Implemented | `app.py` exposes readiness, document-list, and `/v1/mail-todo/knowledge/chat` endpoints. The chat endpoint returns the port's chunks, status, and latency; it does not generate an answer. |
-| Streamlit presentation | Implemented | The GUI renders `retrieval_status=no_results` as “Không tìm thấy kết quả phù hợp.” A client transport timeout/error is separately rendered as a fetch error (`mã 0`). |
+| React presentation | Implemented | The React client renders `retrieval_status=no_results` as a no-match state. A client transport timeout/error remains distinct from an API no-result response. |
 
 ## Runtime behavior and degradation
 
@@ -59,7 +59,7 @@ flowchart LR
    succeeds as an API operation with `no_results`, rather than failing the
    digest workflow.
 5. A healthy retriever returning no matching chunks also returns `no_results`.
-   This is distinct from a Streamlit-to-backend network/timeout failure.
+   This is distinct from a React-client-to-backend network/timeout failure.
 
 `QDRANT_ENABLED=false` is therefore a deliberate local fallback mode, not an
 absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
@@ -93,7 +93,7 @@ absence of RAG. Groq and Faucet currently use `NullSemanticMemory`.
 |---|---|
 | `GET /v1/mail-todo/knowledge/ready` | `ready` when a non-null store and corpus are available; `degraded` for `NullSemanticMemory`; `unavailable` when the corpus cannot load. |
 | `POST /v1/mail-todo/knowledge/chat` with no matching chunk | HTTP 200 with `retrieval_status: "no_results"` and an empty `chunks` list. |
-| Streamlit search for the same response | “Không tìm thấy kết quả phù hợp.” |
+| React query for the same response | A no-match state. |
 | Qdrant unavailable at boot | Warning in backend log, then hybrid fallback; only a subsequent hybrid failure yields null memory. |
 
 ## Source of truth

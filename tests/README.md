@@ -55,7 +55,6 @@ Token-efficient, high-density reference for running tests, linter, type-checker,
 | `orchestration/` | `python -m pytest tests/unit/orchestration -q` |
 | `persistence/` | `python -m pytest tests/unit/persistence tests/integration/persistence -q` |
 | `api/` or `app.py` | `python -m pytest tests/integration/api -q` |
-| `gui/` | `python -m pytest tests/unit/gui -q` |
 
 ---
 

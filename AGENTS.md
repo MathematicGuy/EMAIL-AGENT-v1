@@ -18,7 +18,6 @@ src/cowork_agent/
 ├── api/                         # HTTP handlers / response serialization
 ├── domain/models.py             # pure domain models (no framework imports)
 ├── features/email_action_plan/  # workflow, policies, ports, schemas
-├── gui/app.py                   # Streamlit test GUI
 ├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
 ├── integrations/llm/            # Gemini/Groq providers, fakes
 ├── integrations/rag/            # local hybrid semantic retrieval (V1-M3)
@@ -32,12 +31,12 @@ Dependency direction: `domain` ← `features` ← `integrations` / `orchestratio
 
 ## Commands
 
-- Install: `python -m pip install -e ".[dev,gui]"`
+- Install: `python -m pip install -e ".[dev]"`
 - Test: `python -m pytest -q` (pythonpath/testpaths preconfigured)
 - Lint: `python -m ruff check .`
 - Types: `python -m mypy src` (strict)
 - Run API: `mail-todo-api` (host/port via `APP_HOST` / `APP_PORT`)
-- GUI: `python scripts/run_gui.py`
+- React frontend: `cd frontend; pnpm install; pnpm dev`
 
 ## Verification rule
 

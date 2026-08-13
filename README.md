@@ -13,7 +13,7 @@ Install the Python project, then install the local Rust PDF utility. The
 ingestion adapter calls its `detect-pdf` and `pdf2md` commands.
 
 ```powershell
-python -m pip install -e ".[dev,gui]"
+python -m pip install -e ".[dev]"
 cargo install pdf-inspector
 
 # Optional verification: both commands must be on PATH.
@@ -84,7 +84,7 @@ Kiến trúc hệ thống phân tách thành **2 quy trình độc lập (2 sepa
 Quy trình trò chuyện đa lượt (multi-turn AI Chat) do **Chat Controller** làm chủ, kết nối trực tiếp với hệ thống bộ nhớ 4 loại để duy trì ngữ cảnh, sở thích người dùng và lịch sử tác vụ sinh từ chat (chat-native tasks) qua các phiên hội thoại:
 
 ```text
-User Message (Web UI / Streamlit)
+User Message (React web UI)
 └── Chat Controller (Session Management & SSE Streaming)
     └── Memory Gateway (Namespace: tenant_id / user_id / session_id / feature: ai_chat)
         ├── 1. Short-Term Working Memory (Chat Session Buffer - Ephemeral TTL)
@@ -163,8 +163,6 @@ email-agent-v1/
 │       │       ├── observability.py    # Execution trace logging & latency metrics
 │       │       ├── short_term.py       # Transient run-state memory buffer
 │       │       └── compat_mapper.py    # V1 ↔ V2 DTO compatibility adapters
-│       ├── gui/                        # Streamlit testing GUI
-│       │   └── app.py                  # Multi-tab Streamlit dashboard
 │       ├── integrations/               # External service boundaries & adapters
 │       │   ├── gmail/                  # OAuth flow, Gmail API adapter, deterministic fakes
 │       │   ├── llm/                    # Gemini, Groq, Faucet LLM providers & fakes
@@ -182,8 +180,7 @@ email-agent-v1/
 │           ├── repositories/           # SQLite mailbox-connection & task repos
 │           └── migrations/             # SQL schema migration scripts
 │
-├── scripts/
-│   └── run_gui.py                      # Streamlit testing GUI launcher script
+├── frontend/                            # React/Vite web application
 │
 ├── tests/
 │   ├── unit/                           # Unit tests (policies, providers, RAG)
@@ -193,14 +190,13 @@ email-agent-v1/
     ├── architectures/                  # TARGET-ARCHITECTURE.md + master-comparison.md (gap analysis)
     ├── PRD-v1-Core-Email-and-RAG.md    # Product requirements for V1 Email RAG
     ├── PRD-v2-Memory-Extension.md      # Product requirements for V2 Chat Memory System
-    ├── SPEC-Demo-Frontend.md           # Streamlit Frontend Spec & UI requirements
     └── references/                     # Detailed technical specs & experience registry
         ├── memory-system-and-chat-demo-analysis.md # Detailed analysis doc
         └── EMAIL-RAG-ARCHITECHTURE.md  # Detailed RAG architecture spec
 ```
 
 **Tóm tắt trạng thái triển khai:**
-- **Đã hoàn thành trong Runtime Local V1-M3:** Email RAG pipeline (`features/email_action_plan/`), Hybrid RAG (`integrations/rag/`), Gmail OAuth, Gemini/Groq providers, SQLite persistence, và Streamlit GUI (`gui/app.py`).
+- **Đã hoàn thành trong Runtime Local V1-M3:** Email RAG pipeline (`features/email_action_plan/`), Hybrid RAG (`integrations/rag/`), Gmail OAuth, Gemini/Groq providers, SQLite persistence, và React frontend (`frontend/`).
 - **Kiến trúc mục tiêu đang di cư (Target Roadmap):** Khung Chat API Controller, SSE token streaming handler, Logical Memory Gateway cho AI Chat (`feature: ai_chat`, `session_id`), và giao diện AI Chat UI tập trung hỗ trợ các tác vụ sinh trực tiếp từ chat (chat-native tasks).
 
 ---
@@ -239,8 +235,8 @@ source .venv/bin/activate
 # Kích hoạt môi trường ảo (Windows PowerShell)
 # .\.venv\Scripts\activate
 
-# Cài đặt package ở chế độ editable cùng dev & gui dependencies
-pip install -e ".[dev,gui]"
+# Cài đặt package ở chế độ editable cùng dev dependencies
+pip install -e ".[dev]"
 ```
 
 ### 4.2 Cấu hình môi trường (`.env`)
@@ -285,16 +281,15 @@ Jina. Set it back to `false` after that startup. Set
     .\.venv\Scripts\mail-todo-api.exe
     ```
 
-- **Chạy Giao diện Kiểm thử Streamlit GUI:**
-  - *Linux / Ubuntu:*
-    ```bash
-    .venv/bin/python scripts/run_gui.py
-    ```
-  - *Windows PowerShell:*
-    ```powershell
-    python scripts/run_gui.py
-    ```
-  Giao diện sẽ khởi chạy tại `http://localhost:8501`.
+- **Chạy React frontend:**
+  ```powershell
+  cd frontend
+  corepack enable
+  pnpm install
+  Copy-Item .env.example .env.local
+  pnpm dev
+  ```
+  Giao diện sẽ khởi chạy tại `http://localhost:5173`.
 
 ---
 

@@ -31,7 +31,7 @@ It does not send, modify, label, archive, or mark Gmail messages as read.
 | Type | Entry point | Current behavior |
 |---|---|---|
 | CLI | `mail-todo-api` -> `cowork_agent.app:main` | Starts Uvicorn and the FastAPI app. |
-| Script | `python scripts/run_gui.py` | Starts the Streamlit test UI. |
+| Web UI | `cd frontend && pnpm dev` | Starts the React/Vite web UI. |
 | API | `GET /health` | Liveness response only. |
 | API | `GET /v1/mail-todo/oauth/gmail/connect` | Starts Gmail OAuth for query-string `user_id`. |
 | API | `GET /v1/mail-todo/oauth/gmail/callback` | Exchanges OAuth code and persists the connection. |
@@ -268,7 +268,7 @@ Not implemented:
 ```mermaid
 flowchart LR
     subgraph CALLER
-        UI[API client or Streamlit UI]
+        UI[API client or React web UI]
         POLL[Poll run and result endpoints]
     end
 

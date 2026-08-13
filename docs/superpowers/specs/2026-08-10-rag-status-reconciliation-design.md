@@ -16,9 +16,9 @@ setup fails, the process attempts the deprecated in-repo hybrid retriever
 and MMR). If that fallback cannot be built, it uses `NullSemanticMemory`,
 which returns a structured `no_results` response.
 
-The FastAPI knowledge endpoint returns the port response unchanged. Streamlit
-renders `no_results` as a no-match message; a transport failure remains a
-distinct UI error.
+The FastAPI knowledge endpoint returns the port response unchanged. The React
+frontend renders `no_results` as a no-match message; a transport failure
+remains a distinct UI error.
 
 ## Evidence model
 
@@ -31,4 +31,4 @@ evaluation, binary ingestion pipeline, or document-level authorization exists.
 ## Scope
 
 Only `EMAIL-RAG-STATUS.md` and `RAG-EVALUATION-STATUS.md` are rewritten.
-Existing user changes in `src/cowork_agent/gui/app.py` are out of scope.
+Existing user changes in `frontend/` are out of scope.

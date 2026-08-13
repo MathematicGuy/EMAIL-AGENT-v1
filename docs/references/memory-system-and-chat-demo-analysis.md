@@ -1,6 +1,6 @@
 # Comprehensive Analysis: Memory System Features, Frontend Demo Specs, & AI Chat Compatibility
 
-> Updated 2026-08-11: reflects completed V2-M1..V2-M6 backend memory system; frontend demo separate.
+> Updated 2026-08-13: the legacy Python demo was removed; the React/Vite app in `frontend/` is the only frontend.
 
 > [!CAUTION]
 > **DOCUMENT REALIGNMENT — COMPLETED**:
@@ -14,9 +14,9 @@
 > **YES.** The 4-Type Memory System architecture (Working, Declarative Profile, Episodic, Semantic RAG) has been decoupled from Email and is implemented as the foundation for the AI Chat Assistant. ADR-004 supersedes earlier PRD-v2 decisions that bound memory to `@Email` Action Plans.
 >
 > **Codebase Implementation Status Summary (2026-08-11)**:
-> - <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span>: Stateless Email RAG Pipeline (`/v1/mail-todo/runs`, `/v1/tasks`), Local Hybrid RAG Corpus Inspection (`/v1/mail-todo/knowledge/*`), 5-Screen Streamlit Frontend (Connect, Run, Tasks, Knowledge, Audit), **and** the full AI Chat memory stack: `MemoryGateway` facade, `InMemoryChatSessionBuffer`, PostgreSQL `chat_profiles` / `task_episodes` / `chat_summary_episodes`, SSE `ChatController` + typed stream events, deterministic retrwieval policy, `MemoryPurgeCoordinator`, paired evaluation runner with launch gate, `LoggingMemoryOperationSink` + `MemoryOperationMetrics`.
+> - <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span>: Stateless Email RAG Pipeline (`/v1/mail-todo/runs`, `/v1/tasks`), Local Hybrid RAG Corpus Inspection (`/v1/mail-todo/knowledge/*`), React/Vite frontend (`frontend/`), **and** the full AI Chat memory stack: `MemoryGateway` facade, `InMemoryChatSessionBuffer`, PostgreSQL `chat_profiles` / `task_episodes` / `chat_summary_episodes`, SSE `ChatController` + typed stream events, deterministic retrwieval policy, `MemoryPurgeCoordinator`, paired evaluation runner with launch gate, `LoggingMemoryOperationSink` + `MemoryOperationMetrics`.
 > - <span style="color: #cb2431; font-weight: bold;">[NOT IMPLEMENTED — BY DESIGN]</span>: In-chat `@Email` executable tool (retired by ADR-004; chat-native `TaskEpisode` replaces it), automatic chat-facts extraction (explicit-only writes are a deliberate policy, not a gap), Redis-backed working memory (in-memory buffer is the accepted MVP tier).
-> - <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — SEPARATE WORKSTREAM]</span>: Streamlit `Memory` and `AI Chat Assistant` demo screens. The backend chat APIs they will consume are implemented.
+> - <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — SEPARATE WORKSTREAM]</span>: Further React UI coverage for backend memory capabilities.
 
 ---
 
@@ -93,33 +93,31 @@ V2-M6 (completed 2026-08-11) adds a cross-cutting governance layer over the four
 
 ---
 
-## 3. How Memory Features are Demoed in the Frontend ([SPEC-Demo-Frontend.md](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/SPEC-Demo-Frontend.md))
+## 3. React frontend integration
 
 > [!NOTE]
-> **Backend readiness**: The backend chat APIs (`/v1/cowork/chat/sessions`, `/v1/cowork/chat/sessions/{session_id}/messages`, task-episode lifecycle endpoints) that a Streamlit chat/memory demo will consume are **implemented** (see [chat.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/api/chat.py)). The Streamlit `Memory` and `AI Chat Assistant` demo screens remain a **separate in-progress workstream**, out of scope of the backend V2-M1..V2-M6 milestones.
+> **Backend readiness**: The React/Vite frontend consumes the FastAPI contracts. The chat APIs (`/v1/cowork/chat/sessions`, `/v1/cowork/chat/sessions/{session_id}/messages`, and task-episode lifecycle endpoints) are implemented in [chat.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/api/chat.py).
 
-The existing Streamlit demo ([gui/app.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui/app.py)) covers:
+The React frontend is the sole UI surface. It lives in `frontend/` and communicates with FastAPI through its browser API modules.
 
 ```text
-Streamlit Navigation Structure (gui/app.py):
-├── 1. Connect        (Gmail OAuth & Mailbox Status) [IMPLEMENTED]
-├── 2. Run            (@Email invocation & live pipeline execution) [IMPLEMENTED]
-├── 3. Tasks          (Task List → Detail Cards with Citations) [IMPLEMENTED]
-├── 4. Knowledge      [Increment A]: RAG Corpus Status, Chunk Search & Ad-hoc Grounded Query [IMPLEMENTED]
-├── 5. Memory         [Increment B]: User Preferences Editor | Episode Provenance | Deletion UI [IN PROGRESS — separate workstream]
-└── 6. Run audit      (Route & Telemetry Summary, Dev-Gated Traces) [IMPLEMENTED]
+React/Vite frontend (frontend/):
+├── Dashboard and mail workflow
+├── Work intake and streaming chat
+├── Project-document management
+└── Settings and connected integrations
 ```
 
 ### Key Memory Inspector & UI Components
 
-1. **Knowledge Screen (`4. Knowledge`) — Semantic RAG Inspection**: <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span>
+1. **Knowledge API — Semantic RAG Inspection**: <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span>
    * **Corpus Readiness Indicator**: Real-time health badge. <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED — /v1/mail-todo/knowledge/ready]</span>
    * **Loaded Document List**: Shows ingested files, titles, chunk counts, and source links. <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED — /v1/mail-todo/knowledge/documents]</span>
    * **Ad-hoc Grounded RAG Query Input (`POST /v1/mail-todo/knowledge/chat`)**: A single-turn query panel to test document retrieval with relevance scores, reranker status, and citation chips. <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span>
    > [!CAUTION]
    > `POST /v1/mail-todo/knowledge/chat` is an **ad-hoc RAG corpus testing panel**, NOT a multi-turn conversational AI chatbot.
 
-2. **Memory Screen (`5. Memory`) — Declarative & Episodic Inspection**: <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — separate workstream]</span>
+2. **Memory UI — Declarative & Episodic Inspection**: <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — separate workstream]</span>
    * **Preferences Profile Editor**: Editable form for explicit user preferences. Backend: `MemoryGateway.write_profile` + PostgreSQL `chat_profiles`. <span style="color: #d97706; font-weight: bold;">[Backend IMPLEMENTED; UI IN PROGRESS]</span>
    * **Task Validation Badges & Lifecycle Controls**: Per-episode `Approve`, `Complete`, `Reject` transitions via `/v1/cowork/chat/sessions/{session_id}/task-episodes/{episode_id}/{approve|complete|reject}`. <span style="color: #d97706; font-weight: bold;">[Backend IMPLEMENTED; UI IN PROGRESS]</span>
    * **Episode Provenance Inspector**: Metadata panel (model ID, prompt version, pipeline version, chat session/turn provenance). <span style="color: #d97706; font-weight: bold;">[Backend IMPLEMENTED; UI IN PROGRESS]</span>
@@ -171,7 +169,7 @@ flowchart LR
 | **Chat REST API** | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> | `POST /v1/cowork/chat/sessions`, `POST /v1/cowork/chat/sessions/{session_id}/messages` (SSE), task-episode lifecycle endpoints, episode GET/DELETE — see [chat.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/api/chat.py). Verified principal; typed events; explicit bounded task proposals. |
 | **MemoryGateway namespace** | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> | Fail-closed namespace (`tenant_id/user_id/session_id/feature:ai_chat`); cross-scope access raises `NamespaceAccessDenied`. |
 | **In-chat `@Email` tool** | <span style="color: #cb2431; font-weight: bold;">[NOT IMPLEMENTED — BY DESIGN]</span> | Retired by ADR-004. AC-18: no in-chat tool surface, no scheduler, no recurring email processing, no autonomous Gmail action. Gmail scopes remain `gmail.readonly`. Retired `tool_choices` rejected 422 by strict deserialization. |
-| **Frontend Chat Screen** | <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — separate workstream]</span> | Streamlit `AI Chat Assistant` screen; backend APIs it consumes are implemented. |
+| **Frontend Chat Screen** | <span style="color: #d97706; font-weight: bold;">[IN PROGRESS — separate workstream]</span> | React `AI Chat Assistant` screen; backend APIs it consumes are implemented. |
 
 ---
 
