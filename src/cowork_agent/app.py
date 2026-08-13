@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -18,18 +19,23 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from cowork_agent.config import (
+    ChatIntentSettings,
     ChatMemorySettings,
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
+    KnowledgeIngestionSettings,
+    QdrantSettings,
     SessionSettings,
     SupabaseStorageSettings,
+    UserDocumentsSettings,
     database_url,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
+from cowork_agent.domain.project_documents import ProjectDocument
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -41,6 +47,11 @@ from cowork_agent.features.ai_chat.controller import (
     InMemoryChatSessionRegistry,
     UnavailableChatReply,
 )
+from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
+from cowork_agent.features.ai_chat.intent.service import (
+    ChatRoutingService,
+    RepositoryReadyDocumentCatalog,
+)
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.memory_observability import (
     LoggingMemoryOperationSink,
@@ -50,6 +61,7 @@ from cowork_agent.features.ai_chat.ports import (
     ChatReplyPort,
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
+    IntentClassifierPort,
 )
 from cowork_agent.features.ai_chat.session_buffer import (
     InMemoryChatSessionBuffer,
@@ -90,6 +102,11 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxNotConnectedError,
     MailboxReauthRequiredError,
 )
+from cowork_agent.integrations.llm.chat_intent import (
+    FaucetIntentClassifier,
+    GeminiIntentClassifier,
+    GroqIntentClassifier,
+)
 from cowork_agent.integrations.llm.chat_reply import (
     FaucetChatReply,
     GeminiChatReply,
@@ -107,18 +124,29 @@ from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
 )
+from cowork_agent.integrations.project_documents.encrypted_store import EncryptedDocumentStore
+from cowork_agent.integrations.project_documents.ingestion import ProjectDocumentIngestionService
+from cowork_agent.integrations.project_documents.mistral_ocr import MistralOcrClient
+from cowork_agent.integrations.project_documents.qdrant_store import QdrantProjectDocumentStore
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_semantic_memory,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
+from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
+from cowork_agent.orchestration.document_ingestion import DocumentIngestionDispatcher
+from cowork_agent.orchestration.document_retention import DocumentRetentionManager
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
+)
+from cowork_agent.persistence.repositories.project_documents import (
+    InMemoryProjectDocumentRepository,
+    InMemoryProjectRepository,
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
@@ -140,9 +168,7 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 
     repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
     candidates = tuple(
-        connection
-        for connection in await repository.list_all()
-        if connection.status == "active"
+        connection for connection in await repository.list_all() if connection.status == "active"
     )
     if len(candidates) != 1:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
@@ -189,9 +215,19 @@ def _chat_controller_factory(
                     app.state.chat_task_episode_repository,
                 ),
                 semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
+                project_documents=getattr(app.state, "project_document_vectors", None),
                 memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
             ),
             reply=cast(ChatReplyPort, app.state.chat_reply),
+            routing=cast(
+                ChatRoutingService | None,
+                getattr(app.state, "chat_routing_service", None),
+            ),
+            company_rag_enabled=getattr(
+                getattr(app.state, "chat_intent_settings", None),
+                "company_rag_enabled",
+                True,
+            ),
             episode_retention_seconds=getattr(
                 getattr(app.state, "chat_memory_settings", None),
                 "episode_retention_seconds",
@@ -211,7 +247,6 @@ def create_chat_session_buffer(
         max_turns=settings.max_turns,
         ttl_seconds=settings.ttl_seconds,
     )
-
 
 def create_app() -> FastAPI:
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
@@ -268,9 +303,6 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
-                from cowork_agent.persistence.repositories.chat_sessions import (
-                    PostgresChatSessionRegistry,
-                )
                 from cowork_agent.persistence.repositories.identity import (
                     PostgresIdentityRepository,
                     PostgresMailboxConnectionRepository,
@@ -282,6 +314,15 @@ def create_app() -> FastAPI:
                     PostgresRunRepository,
                     PostgresTaskEpisodeRepository,
                     PostgresTaskRepository,
+                )
+                from cowork_agent.persistence.repositories.project_documents import (
+                    PostgresChatSessionRepository,
+                )
+                from cowork_agent.persistence.repositories.project_documents import (
+                    PostgresProjectDocumentRepository as LegacyProjectDocumentRepository,
+                )
+                from cowork_agent.persistence.repositories.project_documents import (
+                    PostgresProjectRepository as LegacyProjectRepository,
                 )
                 from cowork_agent.persistence.repositories.projects import (
                     PostgresProjectRepository,
@@ -297,11 +338,14 @@ def create_app() -> FastAPI:
                 app.state.outbox_repository = PostgresOutboxRepository(pool)
                 app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
                 app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
+                app.state.chat_project_repository = LegacyProjectRepository(pool)
+                app.state.project_document_repository = LegacyProjectDocumentRepository(pool)
+                chat_session_registry = PostgresChatSessionRepository(pool)
+                app.state.chat_session_repository = chat_session_registry
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
                 app.state.session_repository = PostgresSessionRepository(pool)
                 app.state.project_repository = PostgresProjectRepository(pool)
-                chat_session_registry = PostgresChatSessionRegistry(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
                 task_repository = SQLiteTaskRepository(
@@ -316,6 +360,9 @@ def create_app() -> FastAPI:
                 app.state.outbox_repository = InMemoryOutbox()
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
+                app.state.chat_project_repository = InMemoryProjectRepository()
+                app.state.project_document_repository = InMemoryProjectDocumentRepository()
+                app.state.chat_session_repository = None
                 app.state.pg_pool = None
                 app.state.project_repository = None
                 chat_session_registry = InMemoryChatSessionRegistry()
@@ -363,6 +410,19 @@ def create_app() -> FastAPI:
                 metrics=app.state.memory_metrics
             )
             app.state.chat_reply = UnavailableChatReply()
+            app.state.chat_routing_service = None
+            user_documents_settings = UserDocumentsSettings.from_env()
+            if user_documents_settings.enabled and app.state.pg_pool is None:
+                raise ValueError("DATABASE_URL is required when user documents are enabled")
+            app.state.user_documents_settings = user_documents_settings
+            app.state.ready_document_catalog = RepositoryReadyDocumentCatalog(
+                app.state.project_document_repository
+            )
+            app.state.project_document_store = None
+            app.state.project_document_vectors = None
+            app.state.document_ingestion_dispatcher = None
+            app.state.project_document_qdrant_client = None
+            app.state.document_retention_manager = None
             app.state.chat_principal_resolver = _resolve_chat_principal
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
@@ -373,7 +433,72 @@ def create_app() -> FastAPI:
             )
             app.state.result_repository = result_repository
             app.state.task_repository = task_repository
+            app.state.redis_client = None
             app.state.run_queue = None
+
+            if user_documents_settings.enabled:
+                qdrant_settings = QdrantSettings.from_env()
+                if not qdrant_settings.enabled:
+                    raise ValueError(
+                        "QDRANT_URL and QDRANT_ENABLED=true are required for user documents"
+                    )
+                from qdrant_client import AsyncQdrantClient
+
+                document_gemini_settings = GeminiSettings.from_env()
+                ingestion_settings = KnowledgeIngestionSettings.from_env()
+                document_store = EncryptedDocumentStore(
+                    user_documents_settings.store_path,
+                    user_documents_settings.encryption_key,
+                )
+                document_qdrant = AsyncQdrantClient(
+                    url=qdrant_settings.url,
+                    api_key=qdrant_settings.api_key or None,
+                )
+                document_vectors = QdrantProjectDocumentStore(
+                    client=document_qdrant,
+                    collection_name=user_documents_settings.collection_name,
+                    embedder=GeminiEmbeddingAdapter(
+                        document_gemini_settings,
+                        model=user_documents_settings.embedding_model,
+                    ),
+                    projects=app.state.chat_project_repository,
+                    documents=app.state.project_document_repository,
+                )
+                ingestion = ProjectDocumentIngestionService(
+                    documents=app.state.project_document_repository,
+                    store=document_store,
+                    vectors=document_vectors,
+                    ocr=MistralOcrClient(
+                        api_key=ingestion_settings.api_key,
+                        model=ingestion_settings.model,
+                        timeout_seconds=ingestion_settings.timeout_seconds,
+                        max_attempts=ingestion_settings.max_attempts,
+                    ),
+                    max_pages=user_documents_settings.max_pages,
+                )
+
+                async def process_document(document: ProjectDocument) -> object:
+                    return await ingestion.process(document, worker_id=f"api-{os.getpid()}")
+
+                dispatcher = DocumentIngestionDispatcher(
+                    documents=app.state.project_document_repository,
+                    process=process_document,
+                    stream_name=user_documents_settings.ingestion_stream,
+                    redis=None,
+                )
+                app.state.project_document_store = document_store
+                app.state.project_document_vectors = document_vectors
+                app.state.document_ingestion_dispatcher = dispatcher
+                app.state.project_document_qdrant_client = document_qdrant
+                retention = DocumentRetentionManager(
+                    documents=app.state.project_document_repository,
+                    store=document_store,
+                    vectors=document_vectors,
+                )
+                app.state.document_retention_manager = retention
+                await dispatcher.recover()
+                await retention.run_once()
+                retention.start()
             app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
@@ -384,8 +509,15 @@ def create_app() -> FastAPI:
                 }.get(provider, "LLM provider")
                 classifier: RouteClassifierPort
                 generator: ActionPlanGeneratorPort
+                intent_classifier: IntentClassifierPort
                 if provider == "gemini":
                     gemini_settings = GeminiSettings.from_env()
+                    intent_settings = ChatIntentSettings.from_env(
+                        default_model=gemini_settings.model
+                    )
+                    intent_classifier = GeminiIntentClassifier.from_settings(
+                        gemini_settings, intent_settings
+                    )
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
                     semantic_memory = await build_semantic_memory(
@@ -394,18 +526,42 @@ def create_app() -> FastAPI:
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
+                    intent_settings = ChatIntentSettings.from_env(default_model=groq_settings.model)
+                    intent_classifier = GroqIntentClassifier.from_settings(
+                        groq_settings, intent_settings
+                    )
                     classifier = GroqRouteClassifier(groq_settings)
                     generator = GroqActionPlanGenerator(groq_settings)
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
                 elif provider == "faucet":
                     faucet_settings = FaucetSettings.from_env()
+                    intent_settings = ChatIntentSettings.from_env(
+                        default_model=faucet_settings.model
+                    )
+                    intent_classifier = FaucetIntentClassifier.from_settings(
+                        faucet_settings, intent_settings
+                    )
                     classifier = FaucetRouteClassifier(faucet_settings)
                     generator = FaucetActionPlanGenerator(faucet_settings)
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
                 else:
                     raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
+                app.state.chat_intent_settings = intent_settings
+                app.state.chat_routing_service = (
+                    ChatRoutingService(
+                        classifier=intent_classifier,
+                        catalog=app.state.ready_document_catalog,
+                        model_id=intent_settings.model,
+                        timeout_ms=intent_settings.timeout_ms,
+                        max_attempts=intent_settings.max_attempts,
+                        tool_axis_enabled=intent_settings.tool_axis_enabled,
+                        sink=LoggingIntentRoutingSink(),
+                    )
+                    if intent_settings.enabled and user_documents_settings.enabled
+                    else None
+                )
                 app.state.semantic_memory = semantic_memory
                 try:
                     app.state.knowledge_documents = load_corpus(
@@ -440,6 +596,15 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise RuntimeError(f"Invalid Gmail configuration: {exc}") from exc
         yield
+        document_dispatcher = getattr(app.state, "document_ingestion_dispatcher", None)
+        if document_dispatcher is not None:
+            await document_dispatcher.close()
+        retention_manager = getattr(app.state, "document_retention_manager", None)
+        if retention_manager is not None:
+            await retention_manager.close()
+        document_qdrant_to_close = getattr(app.state, "project_document_qdrant_client", None)
+        if document_qdrant_to_close is not None:
+            await document_qdrant_to_close.close()
         pg_pool = getattr(app.state, "pg_pool", None)
         if pg_pool is not None:
             await pg_pool.close()
@@ -455,6 +620,67 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/cowork/chat/document-health", response_model=None)
+    async def document_health() -> JSONResponse:
+        settings = app.state.user_documents_settings
+        checks: dict[str, str] = {
+            "feature": "enabled" if settings.enabled else "disabled",
+            "postgresql": "disabled",
+            "encrypted_store": "disabled",
+            "redis": "disabled",
+            "redis_mode": "redis" if app.state.redis_client is not None else "local",
+            "qdrant": "disabled",
+            "gemini_embeddings": "disabled",
+            "mistral_ocr": "disabled",
+            "local_pdf_tools": "ready"
+            if shutil.which("detect-pdf") and shutil.which("pdf2md")
+            else "unavailable",
+        }
+        if not settings.enabled:
+            return JSONResponse({"status": "disabled", "checks": checks})
+        checks["gemini_embeddings"] = "configured"
+        checks["mistral_ocr"] = "configured"
+        pool = app.state.pg_pool
+        if pool is not None:
+            try:
+                async with pool.connection() as connection:
+                    await connection.execute("SELECT 1")
+                checks["postgresql"] = "ready"
+            except Exception:
+                checks["postgresql"] = "unavailable"
+        store = app.state.project_document_store
+        checks["encrypted_store"] = "ready" if store and store.healthy() else "unavailable"
+        redis_client = app.state.redis_client
+        if redis_client is not None:
+            try:
+                await redis_client.ping()
+                checks["redis"] = "ready"
+            except Exception:
+                checks["redis"] = "unavailable"
+        else:
+            checks["redis"] = "local_fallback"
+        qdrant = app.state.project_document_qdrant_client
+        if qdrant is not None:
+            try:
+                await qdrant.get_collections()
+                checks["qdrant"] = "ready"
+            except Exception:
+                checks["qdrant"] = "unavailable"
+        required = [
+            "encrypted_store",
+            "qdrant",
+            "gemini_embeddings",
+            "mistral_ocr",
+            "local_pdf_tools",
+        ]
+        if pool is not None:
+            required.append("postgresql")
+        ready = all(checks[name] in {"ready", "configured"} for name in required)
+        return JSONResponse(
+            {"status": "ready" if ready else "degraded", "checks": checks},
+            status_code=200 if ready else 503,
+        )
 
     @app.get("/v1/conversations")
     async def legacy_list_conversations() -> dict[str, list[object]]:
@@ -542,9 +768,7 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         await _owned_connection(request, connection_id, "Gmail connection not found")
         try:
-            page = await _gmail_mailbox(request).search_unread(
-                connection_id, DEFAULT_QUERY, limit
-            )
+            page = await _gmail_mailbox(request).search_unread(connection_id, DEFAULT_QUERY, limit)
             messages = []
             seen_threads: set[str] = set()
             for reference in page.messages:
@@ -751,9 +975,7 @@ def create_app() -> FastAPI:
         return {"documents": items}
 
     @app.post("/v1/mail-todo/knowledge/chat")
-    async def knowledge_chat(
-        body: KnowledgeChatRequest, request: Request
-    ) -> dict[str, Any]:
+    async def knowledge_chat(body: KnowledgeChatRequest, request: Request) -> dict[str, Any]:
         memory = cast(
             SemanticMemoryPort,
             getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
@@ -764,12 +986,8 @@ def create_app() -> FastAPI:
             user_id="demo-gui",
             query=body.query,
             knowledge_gaps=(),
-            filters=RetrievalFilters(
-                tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)
-            ),
-            limits=RetrievalLimits(
-                top_k=body.top_k, min_score=-1.0, timeout_ms=8_000
-            ),
+            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)),
+            limits=RetrievalLimits(top_k=body.top_k, min_score=-1.0, timeout_ms=8_000),
         )
         response = await memory.retrieve(retrieval_request)
         return response.to_dict()
@@ -791,18 +1009,19 @@ def create_app() -> FastAPI:
                     and item.name != "ingestion-manifest.json"
                     and item.name not in seen
                 ):
-
                     try:
                         seen.add(item.name)
                         stat = item.stat()
                         content = item.read_text(encoding="utf-8", errors="replace")
                         mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-                        reports.append({
-                            "filename": item.name,
-                            "content": content,
-                            "size": stat.st_size,
-                            "updated_at": mtime,
-                        })
+                        reports.append(
+                            {
+                                "filename": item.name,
+                                "content": content,
+                                "size": stat.st_size,
+                                "updated_at": mtime,
+                            }
+                        )
                     except Exception as exc:
                         logger.warning("Failed to read report file %s: %s", item.name, exc)
         return reports
@@ -954,9 +1173,7 @@ def _run_history_item(run: DigestRun) -> dict[str, Any]:
             "actionItemsCount": run.action_items_count,
         },
         "error": (
-            {"code": run.error_code, "message": run.error_message_safe}
-            if run.error_code
-            else None
+            {"code": run.error_code, "message": run.error_message_safe} if run.error_code else None
         ),
     }
 
@@ -972,7 +1189,7 @@ def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse
 
 
 def main() -> None:
-    load_dotenv(override=False)
+    load_dotenv(Path.cwd() / ".env", override=False)
     # Without a root handler the stdlib drops every INFO record, which silently
     # discards the whole trace-sink stream (§13) — the observability surface is
     # log lines, so an unconfigured logger means no observability at all.

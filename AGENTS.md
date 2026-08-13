@@ -1,7 +1,7 @@
 # Coding Agent Guidelines
 
 Operating guide for EMAIL-AGENT-v1. Keep this file under ~80 lines; anything
-that is not an always-needed constraint belongs in a linked doc.
+that is not an always-needed constraint belongs in a linked doc. Always installing dependencies into a virtual environment (venv)
 
 ## Project
 

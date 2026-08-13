@@ -84,9 +84,7 @@ class LifecycleEventPublisher:
 
     EVENT_NAME = "digest_run_completed"
 
-    def __init__(
-        self, outbox: CompletionOutboxPort, trace_sink: TraceSink | None
-    ) -> None:
+    def __init__(self, outbox: CompletionOutboxPort, trace_sink: TraceSink | None) -> None:
         self._outbox = outbox
         self._trace_sink = trace_sink
 

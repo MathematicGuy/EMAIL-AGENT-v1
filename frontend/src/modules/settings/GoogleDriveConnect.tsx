@@ -125,7 +125,7 @@ export function GoogleDriveConnect() {
   }, []);
 
   useEffect(() => {
-    void loadStatus();
+    queueMicrotask(() => void loadStatus());
   }, [loadStatus]);
 
   // -------------------------------------------------------------------------

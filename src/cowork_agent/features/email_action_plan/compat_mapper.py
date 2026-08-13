@@ -43,10 +43,7 @@ def legacy_result_shape(
 ) -> dict[str, object]:
     """Rebuild the frozen legacy run-result shape from persisted Tasks."""
     items = sorted(
-        (
-            action_item_from_task(record, run_id=run.id, clock=clock)
-            for record in persisted
-        ),
+        (action_item_from_task(record, run_id=run.id, clock=clock) for record in persisted),
         key=lambda item: action_item_sort_key(item, clock),
     )
     return {
@@ -59,9 +56,7 @@ def legacy_result_shape(
     }
 
 
-def action_item_from_task(
-    record: PersistedTask, *, run_id: str, clock: datetime
-) -> ActionItem:
+def action_item_from_task(record: PersistedTask, *, run_id: str, clock: datetime) -> ActionItem:
     """Map one persisted §6.6 Task onto the legacy ActionItem surface.
 
     The Task owns content and priority; the stored pointer supplies the

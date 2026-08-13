@@ -40,9 +40,7 @@ class FakeMailbox:
         del connection_id
         return tuple(item for item in self.messages if item.gmail_thread_id == thread_id)
 
-    async def get_message_received_at(
-        self, connection_id: str, message_id: str
-    ) -> datetime:
+    async def get_message_received_at(self, connection_id: str, message_id: str) -> datetime:
         del connection_id
         return next(
             item.received_at for item in self.messages if item.gmail_message_id == message_id

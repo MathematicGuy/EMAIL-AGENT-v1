@@ -145,9 +145,7 @@ def _freeze_value(value: object) -> object:
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise TypeError("nested context mappings must have JSON-compatible string keys")
-        return MappingProxyType(
-            {key: _freeze_value(item) for key, item in value.items()}
-        )
+        return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
     if isinstance(value, tuple | list):
         return tuple(_freeze_value(item) for item in value)
     if value is None or isinstance(value, str | int | float | bool | Enum | datetime):

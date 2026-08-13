@@ -47,8 +47,7 @@ class MemoryOperationEvent:
             if not isinstance(value, int) or value < 0 or value > _MAX_COUNT:
                 raise ValueError(f"{name} must be a bounded nonnegative integer")
         if self.reason_code is not None and (
-            not self.reason_code.replace("_", "").isalnum()
-            or len(self.reason_code) > 64
+            not self.reason_code.replace("_", "").isalnum() or len(self.reason_code) > 64
         ):
             raise ValueError("reason_code must be a short safe identifier")
 

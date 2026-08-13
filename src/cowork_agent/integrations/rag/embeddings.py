@@ -182,14 +182,16 @@ class GeminiEmbeddingAdapter:
             # list[str] is not assignable to the SDK's invariant union
             # list[str | Image | File | Part]; the values are plain strings.
             return await self._client.aio.models.embed_content(
-                model=self._model, contents=contents  # type: ignore[arg-type]
+                model=self._model,
+                contents=contents,  # type: ignore[arg-type]
             )
         last_error: GeminiRateLimitError | None = None
         for key in await self._rotator.candidates(self._settings.max_attempts):
             client = genai.Client(api_key=key)
             try:
                 return await client.aio.models.embed_content(
-                    model=self._model, contents=contents  # type: ignore[arg-type]
+                    model=self._model,
+                    contents=contents,  # type: ignore[arg-type]
                 )
             except errors.APIError as exc:
                 if exc.code != 429:

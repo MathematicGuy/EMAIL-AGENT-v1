@@ -1,0 +1,1037 @@
+[
+  {
+    "id": "cr-001",
+    "group": "obvious_rag",
+    "current_message": "Trong tài liệu hướng dẫn của tôi, quy trình phê duyệt gồm những bước nào?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-002",
+    "group": "obvious_rag",
+    "current_message": "Tóm tắt hợp đồng lao động tôi đã tải lên.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-003",
+    "group": "obvious_rag",
+    "current_message": "Trang nói về thời hạn chấm dứt hợp đồng quy định gì?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-004",
+    "group": "obvious_rag",
+    "current_message": "So sánh điều khoản bảo mật trong hai tài liệu của tôi.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-005",
+    "group": "obvious_rag",
+    "current_message": "Tài liệu kiến trúc đề xuất cách checkpoint như thế nào?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-006",
+    "group": "obvious_rag",
+    "current_message": "Trích các yêu cầu bảo mật từ PDF đã tải.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-007",
+    "group": "obvious_rag",
+    "current_message": "Theo sổ tay của tôi, nhân viên được nghỉ bao nhiêu ngày?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-008",
+    "group": "obvious_rag",
+    "current_message": "What does my uploaded handbook say about remote work?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-009",
+    "group": "obvious_rag",
+    "current_message": "Summarize the deployment guide I uploaded.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-010",
+    "group": "obvious_rag",
+    "current_message": "Compare the retry policies across my two documents.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-011",
+    "group": "obvious_rag",
+    "current_message": "Which page of my contract defines the notice period?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-012",
+    "group": "obvious_rag",
+    "current_message": "Extract the acceptance criteria from my specification.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-013",
+    "group": "obvious_rag",
+    "current_message": "Does my document allow automatic renewal?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-014",
+    "group": "obvious_rag",
+    "current_message": "List the prerequisites stated in the uploaded runbook.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-015",
+    "group": "obvious_rag",
+    "current_message": "What evidence does my report provide for the conclusion?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-016",
+    "group": "obvious_chat",
+    "current_message": "Giải thích decorator trong Python.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-017",
+    "group": "obvious_chat",
+    "current_message": "Chào bạn, hôm nay thế nào?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-018",
+    "group": "obvious_chat",
+    "current_message": "Viết một ví dụ ngắn về dependency injection.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-019",
+    "group": "obvious_chat",
+    "current_message": "2 cộng 2 bằng bao nhiêu?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-020",
+    "group": "obvious_chat",
+    "current_message": "Giải thích sự khác nhau giữa list và tuple.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-021",
+    "group": "obvious_chat",
+    "current_message": "Cho tôi ba ý tưởng đặt tên biến dễ đọc.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-022",
+    "group": "obvious_chat",
+    "current_message": "What is a context manager in Python?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-023",
+    "group": "obvious_chat",
+    "current_message": "Explain eventual consistency.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-024",
+    "group": "obvious_chat",
+    "current_message": "Give me a short breathing exercise.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-025",
+    "group": "obvious_chat",
+    "current_message": "How does binary search work?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-026",
+    "group": "obvious_chat",
+    "current_message": "Translate hello into Vietnamese.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-027",
+    "group": "obvious_chat",
+    "current_message": "What is the capital of Japan?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-028",
+    "group": "obvious_chat",
+    "current_message": "Help me brainstorm a team name.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-029",
+    "group": "obvious_chat",
+    "current_message": "Explain REST in simple terms.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-030",
+    "group": "obvious_chat",
+    "current_message": "Write a friendly greeting.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-031",
+    "group": "ambiguous",
+    "current_message": "Yêu cầu lúc nãy là gì ấy nhỉ?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-032",
+    "group": "ambiguous",
+    "current_message": "Nhắc lại các ràng buộc cho tôi.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-033",
+    "group": "ambiguous",
+    "current_message": "Nó nói gì về checkpointing?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-034",
+    "group": "ambiguous",
+    "current_message": "Các điều kiện chính là gì nhỉ?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-035",
+    "group": "ambiguous",
+    "current_message": "Phần đó yêu cầu thời hạn bao lâu?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-036",
+    "group": "ambiguous",
+    "current_message": "Tóm lại nội dung quan trọng khi nãy là gì?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-037",
+    "group": "ambiguous",
+    "current_message": "What were the requirements again?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-038",
+    "group": "ambiguous",
+    "current_message": "What did it say about retries?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-039",
+    "group": "ambiguous",
+    "current_message": "Remind me of the key constraints.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-040",
+    "group": "ambiguous",
+    "current_message": "Which conditions applied there?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-041",
+    "group": "ambiguous",
+    "current_message": "What was the deadline mentioned?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-042",
+    "group": "ambiguous",
+    "current_message": "Can you restate the important part?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-043",
+    "group": "ambiguous",
+    "current_message": "How was that process supposed to work?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-044",
+    "group": "ambiguous",
+    "current_message": "What evidence supported that point?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-045",
+    "group": "ambiguous",
+    "current_message": "Which exceptions were listed?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  },
+  {
+    "id": "cr-046",
+    "group": "distractor",
+    "current_message": "Tôi đã tải một PDF hôm qua; nhân tiện, giải thích decorator.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-047",
+    "group": "distractor",
+    "current_message": "Hợp đồng của tôi khá dài. À mà, 2 cộng 2 bằng bao nhiêu?",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-048",
+    "group": "distractor",
+    "current_message": "Tôi vừa đọc tài liệu; chuyển sang nói về REST nhé.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-049",
+    "group": "distractor",
+    "current_message": "PDF có nhiều trang, nhưng giờ hãy viết lời chào thân thiện.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-050",
+    "group": "distractor",
+    "current_message": "Tài liệu đã sẵn sàng. Nhân tiện cho tôi ý tưởng tên nhóm.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-051",
+    "group": "distractor",
+    "current_message": "Tôi có một sổ tay; quay lại giải thích binary search.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-052",
+    "group": "distractor",
+    "current_message": "I uploaded a contract yesterday. Anyway, explain dependency injection.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-053",
+    "group": "distractor",
+    "current_message": "My PDF is long; by the way, what is eventual consistency?",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-054",
+    "group": "distractor",
+    "current_message": "The document is ready. Now translate hello into Vietnamese.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-055",
+    "group": "distractor",
+    "current_message": "I reviewed the handbook; anyway, help me brainstorm.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-056",
+    "group": "distractor",
+    "current_message": "There are two uploaded files. Switching topics: explain REST.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-057",
+    "group": "distractor",
+    "current_message": "My report has charts, but tell me how binary search works.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-058",
+    "group": "distractor",
+    "current_message": "I mentioned the guide earlier; now write a greeting.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-059",
+    "group": "distractor",
+    "current_message": "The contract has many clauses. Btw, what is a tuple?",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-060",
+    "group": "distractor",
+    "current_message": "My notes are uploaded; changing topic, suggest a variable name.",
+    "recent_turns": [
+      {
+        "user": "Earlier document discussion",
+        "assistant": "Acknowledged."
+      }
+    ],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  }
+]

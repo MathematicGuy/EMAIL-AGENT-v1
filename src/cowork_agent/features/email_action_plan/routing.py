@@ -35,9 +35,7 @@ GUARD_REASON_BY_DOCUMENT_TYPE: Mapping[ExpectedDocumentType, ReasonCode] = {
     ExpectedDocumentType.PRODUCT_DOCUMENTATION: ReasonCode.DOMAIN_KNOWLEDGE_REQUIRED,
 }
 
-_NO_ACTION_ACTIONABILITY = frozenset(
-    {Actionability.INFORMATIONAL, Actionability.IRRELEVANT}
-)
+_NO_ACTION_ACTIONABILITY = frozenset({Actionability.INFORMATIONAL, Actionability.IRRELEVANT})
 _GUARD_ACTIONABILITY = frozenset(
     {Actionability.ACTION_REQUIRED, Actionability.ACTION_SUGGESTED, Actionability.UNCLEAR}
 )
@@ -141,10 +139,7 @@ def resolve_route(
             forced_by_guard=True,
             mode="full",
         )
-    if (
-        decision.email_is_sufficient
-        and decision.confidence >= confidence_floor
-    ):
+    if decision.email_is_sufficient and decision.confidence >= confidence_floor:
         return RouteResolution(
             route=Route.DIRECT_PLAN,
             reason_codes=decision.reason_codes,
@@ -201,9 +196,7 @@ def resolve_candidate_route(
         (resolution.route for resolution in resolutions),
         key=lambda route: _ROUTE_PRECEDENCE[route],
     )
-    winners = tuple(
-        resolution for resolution in resolutions if resolution.route is winning_route
-    )
+    winners = tuple(resolution for resolution in resolutions if resolution.route is winning_route)
     return RouteResolution(
         route=winning_route,
         reason_codes=tuple(

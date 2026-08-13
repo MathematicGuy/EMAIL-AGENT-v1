@@ -124,4 +124,3 @@ class LLMQueryTransformer:
             )
         except Exception:
             return await self._fallback.transform(query, knowledge_gaps)
-

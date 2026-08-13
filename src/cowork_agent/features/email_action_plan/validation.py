@@ -148,8 +148,7 @@ def _sanitize_citations(
             ),
         )
         detail = (
-            "Công việc DIRECT_PLAN không kèm truy xuất tri thức; "
-            "toàn bộ trích dẫn đã bị loại bỏ."
+            "Công việc DIRECT_PLAN không kèm truy xuất tri thức; toàn bộ trích dẫn đã bị loại bỏ."
         )
         return stripped, (_violation(DIRECT_PLAN_WITH_CITATIONS, detail, SEVERITY_REPAIRABLE),)
     known_ids = (
@@ -179,9 +178,7 @@ def _sanitize_citations(
     sanitized = replace(
         task,
         supporting_documents=tuple(
-            document
-            for document in task.supporting_documents
-            if document.citation_id in known_ids
+            document for document in task.supporting_documents if document.citation_id in known_ids
         ),
         action_plan=tuple(
             replace(
@@ -205,10 +202,7 @@ def _sanitize_citations(
 
 
 def _missing_citation_note(citation_id: str) -> str:
-    return (
-        f'Tài liệu tham chiếu "{citation_id}" không khả dụng; '
-        "nội dung liên quan đã bị loại bỏ."
-    )
+    return f'Tài liệu tham chiếu "{citation_id}" không khả dụng; nội dung liên quan đã bị loại bỏ.'
 
 
 def validate_action_plan(
@@ -255,11 +249,7 @@ def validate_action_plan(
         )
     fields = _privacy_sensitive_fields(task)
     collapsed_bodies = tuple(_collapse(envelope.normalized_body) for envelope in envelopes)
-    if any(
-        _fragment_in(_collapse(field), body)
-        for body in collapsed_bodies
-        for field in fields
-    ):
+    if any(_fragment_in(_collapse(field), body) for body in collapsed_bodies for field in fields):
         violations.append(
             _violation(
                 RAW_BODY_LEAK,

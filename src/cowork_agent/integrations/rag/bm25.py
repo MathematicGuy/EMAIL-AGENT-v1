@@ -24,16 +24,12 @@ class BM25SearchAdapter:
 
     def __init__(self, chunks: Sequence[KnowledgeChunk]) -> None:
         self._chunks = tuple(chunks)
-        self._term_frequencies = tuple(
-            Counter(_tokenize(chunk.text)) for chunk in self._chunks
-        )
+        self._term_frequencies = tuple(Counter(_tokenize(chunk.text)) for chunk in self._chunks)
         self._document_lengths = tuple(
             sum(term_frequencies.values()) for term_frequencies in self._term_frequencies
         )
 
-    def search(
-        self, query: str, *, tenant_id: str, top_k: int
-    ) -> tuple[tuple[str, float], ...]:
+    def search(self, query: str, *, tenant_id: str, top_k: int) -> tuple[tuple[str, float], ...]:
         """Return positive-score chunks ranked by BM25 score then chunk ID."""
         query_terms = tuple(dict.fromkeys(_tokenize(query)))
         if not query_terms or top_k <= 0:

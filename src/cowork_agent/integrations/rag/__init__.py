@@ -21,4 +21,3 @@ __all__ = [
     "is_retrieval_query",
     "mmr_diversify",
 ]
-

@@ -1,0 +1,6 @@
+ALTER TABLE user_project_documents
+    ADD COLUMN IF NOT EXISTS cleanup_completed_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS ix_project_documents_cleanup_pending
+    ON user_project_documents (deleted_at, document_id)
+    WHERE status = 'deleted' AND cleanup_completed_at IS NULL;

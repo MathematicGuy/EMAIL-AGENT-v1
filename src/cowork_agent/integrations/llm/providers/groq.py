@@ -167,12 +167,8 @@ class GroqRouteClassifier:
     ) -> ClassificationResult:
         classified: list[ClassifiedMessage] = []
         batch_count = 0
-        for batch in batch_messages(
-            group_by_thread(messages), self._settings.max_emails_per_batch
-        ):
-            batch_ids = tuple(
-                message.gmail_message_id for thread in batch for message in thread
-            )
+        for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
+            batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
             if not batch_ids:
                 continue
             batch_count += 1

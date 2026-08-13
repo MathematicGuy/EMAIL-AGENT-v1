@@ -1,6 +1,6 @@
 # ADR-006 — A single user-document plane with classifier-gated retrieval
 
-- Status: Accepted
+- Status: Superseded by [ADR-007](./ADR-007-project-scoped-classifier-gated-user-documents.md)
 - Date: 2026-08-12
 - Decision makers: Product/Engineering team
 - Supersedes: the withdrawn project-scoped chat-document design — a `Project`
@@ -148,7 +148,7 @@ already bound the cost.
 ## Consequences
 
 - The withdrawn project-scoped design is not implemented; §21 of the target
-  architecture is rewritten around this decision, and PRD-v4 plus the
+  architecture was rewritten around this decision, and PRD-v3 plus the
   chat-with-user-documents SPEC become the product and technical authorities.
 - `retrieval_policy` cue-phrase gating is replaced by the classifier for chat
   turns. This changes chat behaviour, so it lands only after the labeled fixture
@@ -187,7 +187,7 @@ already bound the cost.
 
 ## Links
 
-- `../prds/PRD-v4-chat-with-user-documents.md`
+- `../prds/PRD-v3-chat-with-user-documents.md`
 - `../specs/SPEC-chat-with-user-documents.md`
 - `../../docs/architectures/TARGET-ARCHITECTURE.md`
 - `./ADR-003-defer-attachment-processing.md`

@@ -6,12 +6,12 @@
 |---|---|
 | Sản phẩm | Cowork Agent — AI Chat Assistant |
 | Trạng thái tài liệu | Draft — chờ phê duyệt |
-| Phiên bản | 4.0 |
+| Phiên bản | 3.0 |
 | Ngày | 2026-08-12 |
 | Phụ thuộc | PRD-v1 (Email + RAG) và PRD-v2 (Memory Extension) đã hoàn thành |
 | Nguồn yêu cầu | `docs/references/user_preference.md` |
 | Thiết kế kỹ thuật | [SPEC-chat-with-user-documents](../specs/SPEC-chat-with-user-documents.md) |
-| Thẩm quyền kiến trúc | [ADR-006](../adr/ADR-006-user-document-plane-and-classifier-routing.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
 | Chủ sở hữu tính năng | AI Chat Controller (`feature: ai_chat`) |
 | Vector store | Qdrant (bắt buộc cho plane này) |
 | OCR | Bật, dùng Mistral OCR |
@@ -22,7 +22,8 @@
 
 ## 1. Tóm tắt điều hành
 
-PRD-v4 cho phép người dùng tải tài liệu của chính mình lên, hỏi trong AI Chat, và
+PRD-v3 cho phép người dùng tải tài liệu vào một Project do backend quản lý, hỏi trong
+AI Chat gắn với đúng Project đó, và
 nhận câu trả lời có trích dẫn tới từng trang.
 
 Hai thay đổi sản phẩm:

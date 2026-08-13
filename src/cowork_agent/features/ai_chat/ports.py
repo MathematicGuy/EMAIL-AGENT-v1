@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from cowork_agent.domain.chat_contracts import (
+    ChatMemoryScope,
     ChatMessageRequest,
     ChatSummaryEpisode,
     ChatTurn,
@@ -15,7 +16,10 @@ from cowork_agent.domain.chat_contracts import (
     EpisodeCitation,
     EpisodeTransition,
     EpisodicMemoryQuery,
+    IntentClassifierInput,
+    IntentDecision,
     MemoryNamespace,
+    ReadyDocumentRef,
     SemanticMemoryQuery,
     TaskEpisode,
 )
@@ -44,6 +48,7 @@ class ChatReplyChunk:
 
     text: str
     task_proposal: ChatTaskProposal | None = None
+    citation_ids: tuple[str, ...] = ()
 
 
 class ChatReplyPort(Protocol):
@@ -56,6 +61,20 @@ class ChatReplyPort(Protocol):
     ) -> AsyncIterator[str | ChatReplyChunk]: ...
 
 
+class IntentClassifierPort(Protocol):
+    """Return one structured routing decision for one bounded chat turn."""
+
+    async def classify(self, classifier_input: IntentClassifierInput) -> IntentDecision: ...
+
+
+class ReadyDocumentCatalogPort(Protocol):
+    """Expose ready document metadata only; never bytes, page text, or chunks."""
+
+    async def list_ready(
+        self, scope: ChatMemoryScope, *, at: datetime
+    ) -> tuple[ReadyDocumentRef, ...]: ...
+
+
 class ChatSessionBufferPort(Protocol):
     def append(self, namespace: MemoryNamespace, turn: ChatTurn) -> None: ...
     def read(self, namespace: MemoryNamespace) -> tuple[ChatTurn, ...]: ...
@@ -63,9 +82,7 @@ class ChatSessionBufferPort(Protocol):
 
 
 class DeclarativeMemoryPort(Protocol):
-    async def read_profile(
-        self, namespace: MemoryNamespace
-    ) -> DeclarativeProfile | None: ...
+    async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None: ...
 
     async def write_profile(
         self, namespace: MemoryNamespace, profile: DeclarativeProfile
@@ -103,9 +120,7 @@ class EpisodicMemoryPort(Protocol):
         self, transition: EpisodeTransition
     ) -> TaskEpisode | None: ...
 
-    async def delete_task_episode(
-        self, namespace: MemoryNamespace, *, episode_id: str
-    ) -> bool: ...
+    async def delete_task_episode(self, namespace: MemoryNamespace, *, episode_id: str) -> bool: ...
 
     async def delete_chat_summary(self, namespace: MemoryNamespace) -> bool: ...
 

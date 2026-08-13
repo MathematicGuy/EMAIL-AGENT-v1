@@ -57,6 +57,15 @@ def test_explicit_company_policy_cue_enables_only_semantic_retrieval() -> None:
     assert isinstance(reads.semantic, SemanticMemoryQuery)
 
 
+def test_company_semantic_cues_are_disabled_behind_the_chat_flag() -> None:
+    reads = select_memory_reads(
+        _request("What does the company policy say about travel?"),
+        company_rag_enabled=False,
+    )
+
+    assert isinstance(reads.semantic, SemanticMemoryRead)
+
+
 def test_independent_cues_enable_both_retrieval_types() -> None:
     reads = select_memory_reads(
         _request("Compare my prior task with the current company procedure.")

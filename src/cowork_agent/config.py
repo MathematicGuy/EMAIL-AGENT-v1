@@ -106,9 +106,7 @@ class KnowledgeIngestionSettings:
         return cls(
             api_key=api_key,
             ocr_enabled=ocr_enabled,
-            model=_non_empty_value(
-                environ, "KNOWLEDGE_INGEST_MODEL", "mistral-ocr-latest"
-            ),
+            model=_non_empty_value(environ, "KNOWLEDGE_INGEST_MODEL", "mistral-ocr-latest"),
             timeout_seconds=_positive_int(environ, "KNOWLEDGE_INGEST_TIMEOUT_SECONDS", 60),
             max_attempts=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_ATTEMPTS", 3),
             max_bytes=_positive_int(environ, "KNOWLEDGE_INGEST_MAX_BYTES", 26_214_400),
@@ -145,6 +143,116 @@ class ChatMemorySettings:
             ),
             episode_retention_seconds=_optional_retention_seconds(
                 environ, "CHAT_EPISODE_RETENTION_SECONDS"
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatIntentSettings:
+    """Classifier routing policy for user-document-aware AI Chat turns."""
+
+    enabled: bool
+    model: str
+    timeout_ms: int
+    max_attempts: int
+    tool_axis_enabled: bool
+    company_rag_enabled: bool
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        default_model: str,
+        load_env_file: bool = True,
+    ) -> "ChatIntentSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        model = environ.get("CHAT_INTENT_CLASSIFIER_MODEL", "").strip() or default_model
+        if not model or model.startswith("replace-with-"):
+            raise ValueError("CHAT_INTENT_CLASSIFIER_MODEL must be a real model name")
+        timeout_ms = _positive_int(environ, "CHAT_INTENT_CLASSIFIER_TIMEOUT_MS", 10_000)
+        if timeout_ms > 120_000:
+            raise ValueError("CHAT_INTENT_CLASSIFIER_TIMEOUT_MS must not exceed 120000")
+        return cls(
+            enabled=_boolean(environ, "CHAT_INTENT_CLASSIFIER_ENABLED", False),
+            model=model,
+            timeout_ms=timeout_ms,
+            max_attempts=2,
+            tool_axis_enabled=_boolean(environ, "USER_DOCUMENTS_TOOL_AXIS_ENABLED", False),
+            company_rag_enabled=_boolean(environ, "CHAT_COMPANY_RAG_ENABLED", False),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class UserDocumentsSettings:
+    """Project-document plane limits and dependency configuration."""
+
+    enabled: bool
+    store_path: Path
+    encryption_key: str = field(repr=False)
+    collection_name: str
+    embedding_model: str
+    max_file_bytes: int
+    max_pages: int
+    max_documents_per_project: int
+    max_project_bytes: int
+    retention_days: int
+    top_k: int
+    min_score: float
+    retrieval_timeout_ms: int
+    ingestion_stream: str
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "UserDocumentsSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        enabled = _boolean(environ, "USER_DOCUMENTS_ENABLED", False)
+        encryption_key = environ.get("DOCUMENT_ENCRYPTION_KEY", "").strip()
+        if enabled and (not encryption_key or encryption_key.startswith("replace-with-")):
+            raise ValueError(
+                "DOCUMENT_ENCRYPTION_KEY must be configured when user documents are enabled"
+            )
+        min_score = float(environ.get("USER_DOCUMENTS_MIN_SCORE", "0.6"))
+        if not 0 <= min_score <= 1:
+            raise ValueError("USER_DOCUMENTS_MIN_SCORE must be between 0 and 1")
+        return cls(
+            enabled=enabled,
+            store_path=Path(environ.get("USER_DOCUMENTS_STORE_PATH", ".data/project_documents")),
+            encryption_key=encryption_key,
+            collection_name=_non_empty_value(
+                environ, "USER_DOCUMENTS_QDRANT_COLLECTION", "project_documents"
+            ),
+            embedding_model=_non_empty_value(
+                environ, "USER_DOCUMENTS_EMBEDDING_MODEL", "gemini-embedding-001"
+            ),
+            max_file_bytes=_positive_int(
+                environ, "USER_DOCUMENTS_MAX_FILE_BYTES", 25 * 1024 * 1024
+            ),
+            max_pages=_positive_int(environ, "USER_DOCUMENTS_MAX_PAGES", 100),
+            max_documents_per_project=_positive_int(
+                environ, "USER_DOCUMENTS_MAX_DOCUMENTS_PER_PROJECT", 50
+            ),
+            max_project_bytes=_positive_int(
+                environ, "USER_DOCUMENTS_MAX_PROJECT_BYTES", 500 * 1024 * 1024
+            ),
+            retention_days=_positive_int(environ, "USER_DOCUMENTS_RETENTION_DAYS", 30),
+            top_k=_bounded_positive_int(environ, "USER_DOCUMENTS_TOP_K", 8, maximum=20),
+            min_score=min_score,
+            retrieval_timeout_ms=_bounded_positive_int(
+                environ, "USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS", 3_000, maximum=10_000
+            ),
+            ingestion_stream=_non_empty_value(
+                environ, "USER_DOCUMENTS_INGESTION_STREAM", "cowork:project-document-ingestion"
             ),
         )
 
@@ -232,9 +340,7 @@ class GmailSettings:
         frontend_url = environ.get("FRONTEND_URL", "").strip().rstrip("/") or None
         if frontend_url is not None:
             frontend_parts = urlsplit(frontend_url)
-            secure_remote = frontend_parts.scheme == "https" and bool(
-                frontend_parts.hostname
-            )
+            secure_remote = frontend_parts.scheme == "https" and bool(frontend_parts.hostname)
             local_http = frontend_parts.scheme == "http" and frontend_parts.hostname in {
                 "localhost",
                 "127.0.0.1",
@@ -289,7 +395,6 @@ class GeminiSettings:
             value.strip()
             for _, value in numbered_keys
             if value.strip() and not value.strip().startswith("replace-with-")
-
         )
         if not keys:
             raise ValueError("At least one numbered GEMINI_API_KEY must be configured")
@@ -313,9 +418,7 @@ class GeminiSettings:
             model=model,
             rotate_on_rate_limit=rotate_on_rate_limit,
             max_attempts=min(max_attempts, len(keys)),
-            max_emails_per_batch=_positive_int(
-                environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5
-            ),
+            max_emails_per_batch=_positive_int(environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5),
             max_input_tokens=_positive_int(environ, "GEMINI_MAX_INPUT_TOKENS", 40_000),
             timeout_seconds=_positive_int(environ, "GEMINI_TIMEOUT_SECONDS", 60),
         )

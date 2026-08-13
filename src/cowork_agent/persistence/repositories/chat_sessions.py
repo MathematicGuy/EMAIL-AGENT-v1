@@ -25,27 +25,43 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         self._pool = pool
         self._new_id = new_id
 
-    async def create(self, *, tenant_id: str, user_id: str) -> ChatMemoryScope:
-        scope = ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id=self._new_id())
+    async def create(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        project_id: str = "default-project",
+    ) -> ChatMemoryScope:
+        session_id = self._new_id()
+        project_filter = "AND projects.is_default = TRUE"
+        params: tuple[object, ...] = (session_id, "ai_chat", tenant_id, user_id)
+        if project_id != "default-project":
+            project_filter = "AND projects.id = %s"
+            params = (*params, project_id)
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """
+                f"""
                 INSERT INTO chat_sessions (id, workspace_id, user_id, project_id, feature)
                 SELECT %s, members.workspace_id, members.user_id, projects.id, %s
                 FROM workspace_members AS members
                 JOIN projects
                   ON projects.workspace_id = members.workspace_id
-                 AND projects.user_id = members.user_id
-                 AND projects.is_default = TRUE
+                 AND projects.owner_user_id = members.user_id
                 WHERE members.workspace_id = %s AND members.user_id = %s
-                RETURNING id
+                  {project_filter}
+                RETURNING id, project_id
                 """,
-                (scope.session_id, scope.feature, tenant_id, user_id),
+                params,
             )
             row = await cursor.fetchone()
         if row is None:
-            raise ChatSessionAccessDenied(scope.session_id)
-        return scope
+            raise ChatSessionAccessDenied(session_id)
+        return ChatMemoryScope(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            session_id=str(row[0]),
+            project_id=str(row[1]),
+        )
 
     async def require(
         self, session_id: str, *, tenant_id: str, user_id: str
@@ -53,7 +69,8 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """
-                SELECT sessions.workspace_id, sessions.user_id, sessions.id, sessions.feature
+                SELECT sessions.workspace_id, sessions.user_id, sessions.id,
+                       sessions.feature, sessions.project_id
                 FROM chat_sessions AS sessions
                 JOIN workspace_members AS members
                   ON members.workspace_id = sessions.workspace_id
@@ -68,22 +85,34 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         if row is None:
             raise ChatSessionAccessDenied(session_id)
         return ChatMemoryScope(
-            tenant_id=str(row[0]), user_id=str(row[1]), session_id=str(row[2]), feature=str(row[3])
+            tenant_id=str(row[0]),
+            user_id=str(row[1]),
+            session_id=str(row[2]),
+            feature=str(row[3]),
+            project_id=str(row[4]),
         )
 
-    async def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
+    async def list_for(
+        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+    ) -> tuple[ChatMemoryScope, ...]:
+        project_filter = "" if project_id is None else "AND sessions.project_id = %s"
+        params: tuple[object, ...] = (
+            (tenant_id, user_id) if project_id is None else (tenant_id, user_id, project_id)
+        )
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                """
-                SELECT sessions.workspace_id, sessions.user_id, sessions.id, sessions.feature
+                f"""
+                SELECT sessions.workspace_id, sessions.user_id, sessions.id,
+                       sessions.feature, sessions.project_id
                 FROM chat_sessions AS sessions
                 JOIN workspace_members AS members
                   ON members.workspace_id = sessions.workspace_id
                  AND members.user_id = sessions.user_id
                 WHERE sessions.workspace_id = %s AND sessions.user_id = %s
+                  {project_filter}
                 ORDER BY sessions.created_at, sessions.id
                 """,
-                (tenant_id, user_id),
+                params,
             )
             rows = await cursor.fetchall()
         return tuple(
@@ -92,6 +121,21 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
                 user_id=str(row[1]),
                 session_id=str(row[2]),
                 feature=str(row[3]),
+                project_id=str(row[4]),
             )
             for row in rows
         )
+
+    async def delete_project(
+        self, *, tenant_id: str, user_id: str, project_id: str
+    ) -> tuple[str, ...]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM chat_sessions
+                WHERE workspace_id = %s AND user_id = %s AND project_id = %s
+                RETURNING id
+                """,
+                (tenant_id, user_id, project_id),
+            )
+            return tuple(str(row[0]) for row in await cursor.fetchall())

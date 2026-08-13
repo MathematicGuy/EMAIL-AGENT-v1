@@ -408,13 +408,13 @@ export async function streamTurnEvents(input: {
   if (finalEvent) {
     if (finalEvent.event === 'delta') {
       input.onEvent({
-        id: ++eventSeq,
+        id: eventSeq + 1,
         event: 'assistant.delta',
         data: { delta: finalEvent.data.text ?? '' },
       });
     } else if (finalEvent.event === 'completed') {
       input.onEvent({
-        id: ++eventSeq,
+        id: eventSeq + 1,
         event: 'assistant.completed',
         data: {},
       });

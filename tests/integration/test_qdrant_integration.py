@@ -22,6 +22,7 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
+from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
@@ -165,9 +166,7 @@ def test_an_unreachable_qdrant_falls_back_to_null_memory(
 def test_bootstrap_degrades_to_null_memory_when_qdrant_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
-    )
+    monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
     jina = JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "test-key"}, load_env_file=False
     )

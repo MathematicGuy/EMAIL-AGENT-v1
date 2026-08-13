@@ -70,9 +70,7 @@ class ShortTermStore:
     def _sweep_locked(self) -> int:
         now = self._clock()
         expired = [
-            entry_run_id
-            for entry_run_id, entry in self._entries.items()
-            if entry.expires_at <= now
+            entry_run_id for entry_run_id, entry in self._entries.items() if entry.expires_at <= now
         ]
         for entry_run_id in expired:
             del self._entries[entry_run_id]

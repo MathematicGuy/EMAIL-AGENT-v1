@@ -24,9 +24,7 @@ import httpx
 CHAT_SESSIONS_PATH = "/v1/cowork/chat/sessions"
 
 #: Typed SSE variants the demo is allowed to render (SPEC §7.1).
-KNOWN_EVENT_TYPES = frozenset(
-    {"delta", "memory_citation", "task_proposal", "completed", "error"}
-)
+KNOWN_EVENT_TYPES = frozenset({"delta", "memory_citation", "task_proposal", "completed", "error"})
 
 #: Memory citation kinds the backend may cite (`MemoryCitationType`).
 KNOWN_MEMORY_TYPES = frozenset({"declarative", "episodic", "semantic"})

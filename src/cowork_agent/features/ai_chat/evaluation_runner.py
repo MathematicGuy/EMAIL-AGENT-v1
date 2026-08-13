@@ -93,9 +93,7 @@ def thresholds_from_env(
     for env_name, field_name in zip(_ENV_VAR_NAMES, _THRESHOLD_FIELD_NAMES, strict=True):
         raw = environ.get(env_name)
         if raw is None:
-            raise ValueError(
-                "launch thresholds require explicit product-approved configuration"
-            )
+            raise ValueError("launch thresholds require explicit product-approved configuration")
         try:
             values[field_name] = float(raw)
         except (TypeError, ValueError):

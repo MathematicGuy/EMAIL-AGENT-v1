@@ -402,8 +402,7 @@ class Task:
             priority=_optional(data["priority"], lambda value: _as_enum(value, Priority)),
             deadline=_optional(data["deadline"], _as_datetime),
             action_plan=tuple(
-                PlanStep.from_dict(_as_mapping(item))
-                for item in _as_sequence(data["action_plan"])
+                PlanStep.from_dict(_as_mapping(item)) for item in _as_sequence(data["action_plan"])
             ),
             supporting_documents=tuple(
                 SupportingDocument.from_dict(_as_mapping(item))
@@ -628,8 +627,7 @@ class SemanticRetrievalResponse:
             query_id=_as_str(data["query_id"]),
             tenant_id=_as_str(data["tenant_id"]),
             chunks=tuple(
-                SemanticChunk.from_dict(_as_mapping(item))
-                for item in _as_sequence(data["chunks"])
+                SemanticChunk.from_dict(_as_mapping(item)) for item in _as_sequence(data["chunks"])
             ),
             retrieval_status=_as_enum(data["retrieval_status"], RetrievalStatus),
             latency_ms=_as_int(data["latency_ms"]),

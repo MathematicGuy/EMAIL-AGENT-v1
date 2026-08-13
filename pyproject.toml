@@ -9,15 +9,19 @@ description = "Convert unread emails into structured action items."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "aiohttp>=3.12,<4",
   "cryptography>=44,<51",
   "fastapi>=0.115,<1",
   "google-api-python-client>=2.160,<3",
   "google-auth-oauthlib>=1.2,<2",
   "google-genai>=1.0,<2",
+  "langfuse>=3,<4",
+  "langgraph>=0.6,<2",
   "httpx>=0.27,<1",
   "mistralai>=1,<2",
   "python-docx>=1,<2",
   "python-dotenv>=1.0,<2",
+  "python-multipart>=0.0.20,<1",
   "qdrant-client>=1.9,<2",
   "turbovec>=0.8.0",
   "uvicorn[standard]>=0.34,<1",
@@ -27,6 +31,7 @@ dependencies = [
 dev = [
   "mypy>=1.14",
   "pytest>=8",
+  "pytest-asyncio>=0.24",
   "pytest-xdist>=3.5",
   "ruff>=0.9",
 ]
@@ -36,6 +41,9 @@ gui = [
 ]
 postgres = [
   "psycopg[binary,pool]>=3.2,<4",
+]
+redis = [
+  "redis>=5,<7",
 ]
 
 [project.scripts]

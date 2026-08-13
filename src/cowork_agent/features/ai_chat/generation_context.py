@@ -15,6 +15,10 @@ from cowork_agent.domain.chat_contracts import (
     MemoryContextResponse,
     TaskEpisode,
 )
+from cowork_agent.domain.project_documents import (
+    ProjectDocumentEvidence,
+    ProjectDocumentResponse,
+)
 from cowork_agent.domain.target_contracts import ValidationStatus
 
 _T = TypeVar("_T")
@@ -25,8 +29,14 @@ class ContextSource(StrEnum):
     CURRENT_INSTRUCTION = "current_instruction"
     ACTIVE_SESSION_TURNS = "active_session_turns"
     CURRENT_COMPANY_EVIDENCE = "current_company_evidence"
+    CURRENT_PROJECT_EVIDENCE = "current_project_evidence"
     STORED_PREFERENCE = "stored_preference"
     ADVISORY_EPISODE = "advisory_episode"
+
+
+class ChatResponseMode(StrEnum):
+    NORMAL = "normal"
+    CLARIFY = "clarify"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +63,8 @@ class GenerationContext:
     stored_preference: LabeledSection[DeclarativeProfile] | None
     advisory_episodes: LabeledSection[tuple[TaskEpisode, ...]] | None
     conflict_precedence: tuple[ContextSource, ...]
+    current_project_evidence: LabeledSection[tuple[ProjectDocumentEvidence, ...]] | None = None
+    response_mode: ChatResponseMode = ChatResponseMode.NORMAL
 
 
 _CONFLICT_PRECEDENCE = (
@@ -62,16 +74,27 @@ _CONFLICT_PRECEDENCE = (
     ContextSource.ADVISORY_EPISODE,
 )
 
+_PROJECT_CONFLICT_PRECEDENCE = (
+    ContextSource.CURRENT_INSTRUCTION,
+    ContextSource.CURRENT_PROJECT_EVIDENCE,
+    ContextSource.CURRENT_COMPANY_EVIDENCE,
+    ContextSource.STORED_PREFERENCE,
+    ContextSource.ADVISORY_EPISODE,
+)
+
 
 def assemble_generation_context(
     request: ChatMessageRequest,
     memory: MemoryContextResponse,
+    *,
+    response_mode: ChatResponseMode = ChatResponseMode.NORMAL,
+    project_documents: ProjectDocumentResponse | None = None,
 ) -> GenerationContext:
     """Assemble only present, typed memory into explicitly-labeled reply context."""
 
-    turns = tuple(
-        turn for turn in memory.turns if turn.session_id == request.session_id
-    )[-_MAX_ACTIVE_SESSION_TURNS:]
+    turns = tuple(turn for turn in memory.turns if turn.session_id == request.session_id)[
+        -_MAX_ACTIVE_SESSION_TURNS:
+    ]
     episodes = tuple(
         episode
         for episode in memory.episodes
@@ -81,9 +104,7 @@ def assemble_generation_context(
     )
     company_evidence = _company_evidence(memory.semantic_context)
     return GenerationContext(
-        current_instruction=LabeledSection(
-            ContextSource.CURRENT_INSTRUCTION, request.user_message
-        ),
+        current_instruction=LabeledSection(ContextSource.CURRENT_INSTRUCTION, request.user_message),
         active_session_turns=(
             LabeledSection(ContextSource.ACTIVE_SESSION_TURNS, turns) if turns else None
         ),
@@ -102,7 +123,20 @@ def assemble_generation_context(
             if episodes
             else None
         ),
-        conflict_precedence=_CONFLICT_PRECEDENCE,
+        conflict_precedence=(
+            _PROJECT_CONFLICT_PRECEDENCE
+            if project_documents is not None and project_documents.evidence
+            else _CONFLICT_PRECEDENCE
+        ),
+        current_project_evidence=(
+            LabeledSection(
+                ContextSource.CURRENT_PROJECT_EVIDENCE,
+                project_documents.evidence,
+            )
+            if project_documents is not None and project_documents.evidence
+            else None
+        ),
+        response_mode=response_mode,
     )
 
 

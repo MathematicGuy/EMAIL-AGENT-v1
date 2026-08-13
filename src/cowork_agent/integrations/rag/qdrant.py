@@ -76,9 +76,7 @@ class QdrantSemanticMemory:
         self._min_score_default = min_score_default
 
     @observe(as_type="retriever", name="qdrant_semantic_retriever")
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse:
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         started = time.monotonic()
         tenant_id = request.tenant_id
         tenant_scope = request.filters.tenant_scope
@@ -96,9 +94,7 @@ class QdrantSemanticMemory:
         # scoring can only ever run over this tenant's points.
         query_filter = Filter(
             must=[
-                FieldCondition(
-                    key=TENANT_PAYLOAD_KEY, match=MatchValue(value=tenant_scope)
-                ),
+                FieldCondition(key=TENANT_PAYLOAD_KEY, match=MatchValue(value=tenant_scope)),
                 FieldCondition(
                     key=DOCUMENT_STATUS_PAYLOAD_KEY,
                     match=MatchAny(any=list(document_status)),
@@ -116,11 +112,7 @@ class QdrantSemanticMemory:
                     if request.limits.min_score >= 0
                     else self._min_score_default
                 )
-                top_k = (
-                    request.limits.top_k
-                    if request.limits.top_k > 0
-                    else self._top_k_default
-                )
+                top_k = request.limits.top_k if request.limits.top_k > 0 else self._top_k_default
                 result = await self._client.query_points(
                     collection_name=self._collection_name,
                     query=list(query_vector),

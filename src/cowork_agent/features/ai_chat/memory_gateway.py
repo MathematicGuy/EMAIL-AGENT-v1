@@ -21,7 +21,12 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryQuery,
     TaskEpisode,
 )
+from cowork_agent.domain.project_documents import (
+    ProjectDocumentQuery,
+    ProjectDocumentResponse,
+)
 from cowork_agent.domain.target_contracts import ValidationStatus
+from cowork_agent.features.user_documents.ports import ProjectDocumentRetrievalPort
 
 from .deletion import MemoryDeletionReport
 from .episode_policy import (
@@ -65,6 +70,7 @@ class MemoryGateway:
         declarative_memory: DeclarativeMemoryPort | None = None,
         episodic_memory: EpisodicMemoryPort | None = None,
         semantic_memory: SemanticChatMemoryPort | None = None,
+        project_documents: ProjectDocumentRetrievalPort | None = None,
         memory_operation_sink: MemoryOperationSink | None = None,
         monotonic_clock: Callable[[], float] = monotonic,
     ) -> None:
@@ -73,6 +79,7 @@ class MemoryGateway:
         self._declarative_memory = declarative_memory
         self._episodic_memory = episodic_memory
         self._semantic_memory = semantic_memory
+        self._project_documents = project_documents
         self._memory_operation_sink = memory_operation_sink or NullMemoryOperationSink()
         self._monotonic_clock = monotonic_clock
 
@@ -81,6 +88,37 @@ class MemoryGateway:
             raise NamespaceAccessDenied("turn scope does not match the verified chat scope")
         self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
         return True
+
+    def _read_active_turns(self) -> tuple[ChatTurn, ...]:
+        """Read the verified session buffer for bounded classifier evidence."""
+
+        return self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
+
+    async def _read_project_documents(
+        self,
+        *,
+        query: str,
+        document_ids: tuple[str, ...] = (),
+        top_k: int = 8,
+        min_score: float = 0.6,
+        timeout_ms: int = 3_000,
+    ) -> ProjectDocumentResponse:
+        if self._project_documents is None:
+            return ProjectDocumentResponse(
+                (), degraded=True, reason_code="project_document_store_not_configured"
+            )
+        return await self._project_documents.retrieve(
+            ProjectDocumentQuery(
+                tenant_id=self._scope.tenant_id,
+                user_id=self._scope.user_id,
+                project_id=self._scope.project_id,
+                query=query,
+                document_ids=document_ids,
+                top_k=top_k,
+                min_score=min_score,
+                timeout_ms=timeout_ms,
+            )
+        )
 
     @observe(as_type="retriever", name="chat_memory_read_context")
     async def read_context(self, request: MemoryContextRequest) -> MemoryContextResponse:
@@ -113,8 +151,11 @@ class MemoryGateway:
             if self._declarative_memory is None:
                 degraded.append(DegradedMemorySource.LONG_TERM)
                 self._emit(
-                    MemoryType.LONG_TERM, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                    "not_configured", started=started,
+                    MemoryType.LONG_TERM,
+                    MemoryOperation.READ,
+                    MemoryOutcome.DEGRADED,
+                    "not_configured",
+                    started=started,
                 )
             else:
                 try:
@@ -124,8 +165,11 @@ class MemoryGateway:
                 except MemorySourceUnavailableError:
                     degraded.append(DegradedMemorySource.LONG_TERM)
                     self._emit(
-                        MemoryType.LONG_TERM, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                        "unavailable", started=started,
+                        MemoryType.LONG_TERM,
+                        MemoryOperation.READ,
+                        MemoryOutcome.DEGRADED,
+                        "unavailable",
+                        started=started,
                     )
                 else:
                     if profile is not None and (
@@ -157,8 +201,11 @@ class MemoryGateway:
             if self._episodic_memory is None:
                 degraded.append(DegradedMemorySource.EPISODIC)
                 self._emit(
-                    MemoryType.EPISODIC, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                    "not_configured", started=started,
+                    MemoryType.EPISODIC,
+                    MemoryOperation.READ,
+                    MemoryOutcome.DEGRADED,
+                    "not_configured",
+                    started=started,
                 )
             else:
                 try:
@@ -169,8 +216,11 @@ class MemoryGateway:
                 except MemorySourceUnavailableError:
                     degraded.append(DegradedMemorySource.EPISODIC)
                     self._emit(
-                        MemoryType.EPISODIC, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                        "unavailable", started=started,
+                        MemoryType.EPISODIC,
+                        MemoryOperation.READ,
+                        MemoryOutcome.DEGRADED,
+                        "unavailable",
+                        started=started,
                     )
                 else:
                     episodes = tuple(
@@ -183,7 +233,9 @@ class MemoryGateway:
                         and episode.user_id == self._scope.user_id
                     )[: request.reads.episodic.max_items]
                     self._emit(
-                        MemoryType.EPISODIC, MemoryOperation.READ, MemoryOutcome.SUCCESS,
+                        MemoryType.EPISODIC,
+                        MemoryOperation.READ,
+                        MemoryOutcome.SUCCESS,
                         result_count=len(episodes),
                         filtered_count=max(0, len(candidates) - len(episodes)),
                         started=started,
@@ -196,8 +248,11 @@ class MemoryGateway:
             if self._semantic_memory is None:
                 degraded.append(DegradedMemorySource.SEMANTIC)
                 self._emit(
-                    MemoryType.SEMANTIC, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                    "not_configured", started=started,
+                    MemoryType.SEMANTIC,
+                    MemoryOperation.READ,
+                    MemoryOutcome.DEGRADED,
+                    "not_configured",
+                    started=started,
                 )
             else:
                 try:
@@ -207,13 +262,19 @@ class MemoryGateway:
                 except MemorySourceUnavailableError:
                     degraded.append(DegradedMemorySource.SEMANTIC)
                     self._emit(
-                        MemoryType.SEMANTIC, MemoryOperation.READ, MemoryOutcome.DEGRADED,
-                        "unavailable", started=started,
+                        MemoryType.SEMANTIC,
+                        MemoryOperation.READ,
+                        MemoryOutcome.DEGRADED,
+                        "unavailable",
+                        started=started,
                     )
                 else:
                     self._emit(
-                        MemoryType.SEMANTIC, MemoryOperation.READ, MemoryOutcome.SUCCESS,
-                        result_count=int(semantic_context is not None), started=started,
+                        MemoryType.SEMANTIC,
+                        MemoryOperation.READ,
+                        MemoryOutcome.SUCCESS,
+                        result_count=int(semantic_context is not None),
+                        started=started,
                     )
 
         return MemoryContextResponse(
@@ -251,7 +312,9 @@ class MemoryGateway:
             self._namespace(MemoryType.LONG_TERM)
         )
         self._emit(
-            MemoryType.LONG_TERM, MemoryOperation.DELETE, MemoryOutcome.SUCCESS,
+            MemoryType.LONG_TERM,
+            MemoryOperation.DELETE,
+            MemoryOutcome.SUCCESS,
             result_count=int(result),
         )
         return result
@@ -293,9 +356,7 @@ class MemoryGateway:
             record_id=episode.record_id,
             source_id=episode.chat_turn_id,
         )
-        trusted_episode = authorize_task_episode_write(
-            namespace, episode, expires_at=expires_at
-        )
+        trusted_episode = authorize_task_episode_write(namespace, episode, expires_at=expires_at)
         result = await self._require_episodic_memory().write_task_episode(
             namespace, trusted_episode, expires_at=expires_at
         )
@@ -389,7 +450,9 @@ class MemoryGateway:
         self._emit(MemoryType.EPISODIC, MemoryOperation.DELETE, MemoryOutcome.REQUESTED)
         result = await self._require_episodic_memory().delete_chat_summary(namespace)
         self._emit(
-            MemoryType.EPISODIC, MemoryOperation.DELETE, MemoryOutcome.SUCCESS,
+            MemoryType.EPISODIC,
+            MemoryOperation.DELETE,
+            MemoryOutcome.SUCCESS,
             result_count=int(result),
         )
         return result
@@ -407,11 +470,15 @@ class MemoryGateway:
         episodic_deleted_count = await episodic.delete_all_for_user(episodic_namespace)
         self._session_buffer.clear(self._namespace(MemoryType.SHORT_TERM))
         self._emit(
-            MemoryType.LONG_TERM, MemoryOperation.DELETE, MemoryOutcome.SUCCESS,
+            MemoryType.LONG_TERM,
+            MemoryOperation.DELETE,
+            MemoryOutcome.SUCCESS,
             result_count=int(profile_deleted),
         )
         self._emit(
-            MemoryType.EPISODIC, MemoryOperation.DELETE, MemoryOutcome.SUCCESS,
+            MemoryType.EPISODIC,
+            MemoryOperation.DELETE,
+            MemoryOutcome.SUCCESS,
             result_count=episodic_deleted_count,
         )
         return MemoryDeletionReport(True, profile_deleted, episodic_deleted_count, True)
@@ -429,9 +496,7 @@ class MemoryGateway:
     ) -> None:
         try:
             latency_ms = (
-                int((self._monotonic_clock() - started) * 1000)
-                if started is not None
-                else 0
+                int((self._monotonic_clock() - started) * 1000) if started is not None else 0
             )
             self._memory_operation_sink.emit(
                 MemoryOperationEvent(

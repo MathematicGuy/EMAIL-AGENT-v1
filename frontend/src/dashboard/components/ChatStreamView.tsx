@@ -805,6 +805,23 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
                     </div>
                   )}
 
+                  {!isUser && msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2" aria-label="Document citations">
+                      {msg.citations.map((citation) => (
+                        <span
+                          key={citation.citationId}
+                          title={citation.section}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-[11px] text-zinc-200"
+                        >
+                          <FileText className="h-3 w-3 text-[#d97757]" />
+                          {citation.unavailable
+                            ? `${citation.documentTitle} · unavailable`
+                            : `${citation.documentTitle} · page ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   {!isUser && msg.quickActions && msg.quickActions.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {msg.quickActions.map((action) => (

@@ -198,8 +198,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "nhưng có thể kém cá nhân hóa hơn."
         ),
         "chat_session_renewed": (
-            "♻️ Phiên chat cũ đã hết hạn trên server; đã tự động tạo phiên mới để "
-            "tiếp tục."
+            "♻️ Phiên chat cũ đã hết hạn trên server; đã tự động tạo phiên mới để tiếp tục."
         ),
         "chat_proposal_title": "📋 Đề xuất task trong chat",
         "chat_proposal_plan": "Kế hoạch hành động",
@@ -232,8 +231,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "memory_episode_deleted": "Đã xóa episode.",
         "memory_episode_delete_failed": "Xóa episode thất bại (mã {code}).",
         "memory_store_unavailable": (
-            "Backend chưa bật kho nhớ PostgreSQL (DATABASE_URL); màn hình Bộ nhớ "
-            "tạm khóa."
+            "Backend chưa bật kho nhớ PostgreSQL (DATABASE_URL); màn hình Bộ nhớ tạm khóa."
         ),
         "chat_retry": "↻ Thử lại lượt vừa rồi",
         "chat_retry_hint": ("Thử lại dùng lại đúng khóa idempotency nên sẽ không tạo lượt trùng."),
@@ -788,9 +786,7 @@ def build_task_card_html(task: Mapping[str, Any], index: int, lang: str) -> str:
 def build_proposal_card_html(proposal: Mapping[str, Any], lang: str) -> str:
     """Safe HTML for the structured chat-native task proposal (SPEC §6.11)."""
     title = html.escape(str(proposal.get("task_title") or ""), quote=True)
-    paraphrase = html.escape(
-        str(proposal.get("minimal_request_paraphrase") or ""), quote=True
-    )
+    paraphrase = html.escape(str(proposal.get("minimal_request_paraphrase") or ""), quote=True)
     status = str(proposal.get("validation_status") or "system_generated")
     status_text = html.escape(enum_label("validation_status", status, lang), quote=True)
     missing = [str(item) for item in _as_list(proposal.get("missing_information"))]
@@ -807,22 +803,18 @@ def build_proposal_card_html(proposal: Mapping[str, Any], lang: str) -> str:
     ]
     plan = [str(item) for item in _as_list(proposal.get("action_plan"))]
     if plan:
-        items = "".join(
-            f"<li>{html.escape(step, quote=True)}</li>" for step in plan
-        )
+        items = "".join(f"<li>{html.escape(step, quote=True)}</li>" for step in plan)
         sections.append(
-            f"<div style=\"font-size: 0.85rem; color: #334155; margin-bottom: 8px;\">"
+            f'<div style="font-size: 0.85rem; color: #334155; margin-bottom: 8px;">'
             f"<strong>{html.escape(tr(lang, 'chat_proposal_plan'), quote=True)}:"
-            f"</strong><ol style=\"margin: 4px 0 0 18px;\">{items}</ol></div>"
+            f'</strong><ol style="margin: 4px 0 0 18px;">{items}</ol></div>'
         )
     if missing:
-        items = "".join(
-            f"<li>{html.escape(entry, quote=True)}</li>" for entry in missing
-        )
+        items = "".join(f"<li>{html.escape(entry, quote=True)}</li>" for entry in missing)
         sections.append(
-            f"<div style=\"font-size: 0.85rem; color: #92400E; margin-bottom: 8px;\">"
+            f'<div style="font-size: 0.85rem; color: #92400E; margin-bottom: 8px;">'
             f"<strong>{html.escape(tr(lang, 'chat_proposal_missing'), quote=True)}:"
-            f"</strong><ul style=\"margin: 4px 0 0 18px;\">{items}</ul></div>"
+            f'</strong><ul style="margin: 4px 0 0 18px;">{items}</ul></div>'
         )
     citations = [item for item in _as_list(proposal.get("rag_citations"))]
     chips = []
@@ -835,8 +827,8 @@ def build_proposal_card_html(proposal: Mapping[str, Any], lang: str) -> str:
         chips.append(citation_chip_html(label, citation.get("source_url")))
     if chips:
         sections.append(
-            f"<div style=\"margin-bottom: 4px;\"><strong style=\"font-size: 0.85rem; "
-            f"color: #334155;\">"
+            f'<div style="margin-bottom: 4px;"><strong style="font-size: 0.85rem; '
+            f'color: #334155;">'
             f"{html.escape(tr(lang, 'chat_proposal_citations'), quote=True)}:"
             f"</strong><br/>{''.join(chips)}</div>"
         )
@@ -1113,9 +1105,7 @@ def _render_session_history(base_url: str, lang: str, session_id: str) -> None:
     if not sessions:
         return
     labels = [f"{sid[:8]}…" for sid in sessions]
-    current_index = next(
-        (i for i, sid in enumerate(sessions) if sid == session_id), 0
-    )
+    current_index = next((i for i, sid in enumerate(sessions) if sid == session_id), 0)
     chosen_label = st.sidebar.selectbox(
         tr(lang, "chat_history_label"),
         labels,
@@ -1139,12 +1129,8 @@ def _render_session_history(base_url: str, lang: str, session_id: str) -> None:
         for turn in _as_list(history.get("turns")):
             if not isinstance(turn, Mapping):
                 continue
-            reloaded.append(
-                {"role": "user", "text": str(turn.get("user_message") or "")}
-            )
-            reloaded.append(
-                {"role": "assistant", "text": str(turn.get("assistant_message") or "")}
-            )
+            reloaded.append({"role": "user", "text": str(turn.get("user_message") or "")})
+            reloaded.append({"role": "assistant", "text": str(turn.get("assistant_message") or "")})
         st.session_state["chat_session_id"] = chosen
         st.session_state["chat_messages"] = reloaded
         st.session_state.pop("chat_pending_turn", None)
@@ -1201,9 +1187,7 @@ def _render_chat_message(
             st.markdown(memory_badges_html(citations, lang), unsafe_allow_html=True)
         proposal = message.get("proposal")
         if isinstance(proposal, Mapping):
-            st.markdown(
-                build_proposal_card_html(proposal, lang), unsafe_allow_html=True
-            )
+            st.markdown(build_proposal_card_html(proposal, lang), unsafe_allow_html=True)
             if base_url is not None and session_id is not None:
                 _render_proposal_controls(message, proposal, lang, base_url, session_id)
         advisory_code = message.get("advisory_code")
@@ -1349,9 +1333,7 @@ def _run_chat_turn(
 
 def _dead_session(accumulator: chat_client.ChatTurnAccumulator) -> bool:
     return (
-        accumulator.error_code == "http_404"
-        and not accumulator.text
-        and not accumulator.completed
+        accumulator.error_code == "http_404" and not accumulator.text and not accumulator.completed
     )
 
 
@@ -1458,9 +1440,7 @@ def _render_preferences(base_url: str, lang: str) -> None:
             st.rerun()
 
 
-def _render_episode_row(
-    base_url: str, lang: str, episode: Mapping[str, Any]
-) -> None:
+def _render_episode_row(base_url: str, lang: str, episode: Mapping[str, Any]) -> None:
     import streamlit as st
 
     episode_id = str(episode.get("episode_id") or "")

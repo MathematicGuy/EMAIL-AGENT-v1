@@ -52,16 +52,23 @@ class ChatMemoryScope:
     user_id: str
     session_id: str
     feature: str = AI_CHAT_FEATURE
+    project_id: str = "default-project"
 
     def __post_init__(self) -> None:
         _require_key_component(self.tenant_id, "tenant_id")
         _require_key_component(self.user_id, "user_id")
         _require_key_component(self.session_id, "session_id")
+        _require_key_component(self.project_id, "project_id")
         if self.feature != AI_CHAT_FEATURE:
             raise ValueError(f"feature must be {AI_CHAT_FEATURE!r}")
 
     def to_dict(self) -> dict[str, object]:
-        return _to_dict(self)
+        payload = _to_dict(self)
+        # Preserve the V2 wire shape for legacy callers while every real V3
+        # session uses an explicit, backend-owned project identifier.
+        if self.project_id == "default-project":
+            payload.pop("project_id", None)
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
@@ -70,6 +77,9 @@ class ChatMemoryScope:
             user_id=_require_key_component(data["user_id"], "user_id"),
             session_id=_require_key_component(data["session_id"], "session_id"),
             feature=_require_string(data["feature"], "feature"),
+            project_id=_require_key_component(
+                data.get("project_id", "default-project"), "project_id"
+            ),
         )
 
 
@@ -284,9 +294,7 @@ class _QueryScopedMemoryRead:
         elif fixed_value != cls._fixed_filter_value:
             raise ValueError(f"{cls._fixed_filter_name} is fixed by the contract")
         return cls(
-            query=_require_bounded_string(
-                data["query"], "query", MAX_RETRIEVAL_QUERY_LENGTH
-            ),
+            query=_require_bounded_string(data["query"], "query", MAX_RETRIEVAL_QUERY_LENGTH),
             max_items=_require_retrieval_max_items(data["max_items"], cls._max_items),
             min_score=_require_retrieval_score(data["min_score"]),
             timeout_ms=_require_retrieval_timeout(data["timeout_ms"]),
@@ -471,6 +479,7 @@ class TaskEpisode:
     model_id: str | None
     prompt_version: str | None
     confidence: float | None
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -503,9 +512,7 @@ class TaskEpisode:
             self,
             "action_plan",
             tuple(
-                _require_bounded_string(
-                    item, "action_plan item", MAX_TASK_ACTION_PLAN_ITEM_LENGTH
-                )
+                _require_bounded_string(item, "action_plan item", MAX_TASK_ACTION_PLAN_ITEM_LENGTH)
                 for item in action_plan
             ),
         )
@@ -563,6 +570,8 @@ class TaskEpisode:
             isinstance(self.confidence, bool) or not isinstance(self.confidence, int | float)
         ):
             raise TypeError("confidence must be a number or None")
+        if self.project_id is not None:
+            _require_string(self.project_id, "project_id")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -592,6 +601,7 @@ class TaskEpisode:
             "model_id",
             "prompt_version",
             "confidence",
+            "project_id",
         }
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
@@ -655,6 +665,11 @@ class TaskEpisode:
                 else None
             ),
             confidence=float(confidence) if confidence is not None else None,
+            project_id=(
+                _require_string(data["project_id"], "project_id")
+                if data.get("project_id") is not None
+                else None
+            ),
         )
 
 
@@ -771,6 +786,7 @@ class ChatTurn:
     user_message: str
     assistant_message: str | None
     created_at: datetime
+    citation_coordinates: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -778,6 +794,16 @@ class ChatTurn:
         _require_string(self.user_message, "user_message")
         if self.assistant_message is not None:
             _require_string(self.assistant_message, "assistant_message")
+        coordinates = _as_sequence(self.citation_coordinates, "citation_coordinates")
+        if len(coordinates) > 20:
+            raise ValueError("citation_coordinates must not exceed 20 items")
+        for coordinate in coordinates:
+            _reject_raw_email_shaped_keys(coordinate)
+        object.__setattr__(
+            self,
+            "citation_coordinates",
+            tuple(_frozen_mapping(item, "citation coordinate") for item in coordinates),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -795,6 +821,12 @@ class ChatTurn:
                 else None
             ),
             created_at=_as_datetime(data["created_at"], "created_at"),
+            citation_coordinates=tuple(
+                _as_mapping(item, "citation coordinate")
+                for item in _as_sequence(
+                    data.get("citation_coordinates", ()), "citation_coordinates"
+                )
+            ),
         )
 
 
@@ -875,9 +907,7 @@ class DeclarativeProfile:
                 MemoryProvenanceSource,
                 "source_type",
             ),
-            expires_at=(
-                _as_datetime(expires_at, "expires_at") if expires_at is not None else None
-            ),
+            expires_at=(_as_datetime(expires_at, "expires_at") if expires_at is not None else None),
         )
 
 

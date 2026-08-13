@@ -51,24 +51,14 @@ export const ArtifactsView: React.FC = () => {
     return found || null;
   };
 
-  useEffect(() => {
-    fetchFiles();
-  }, []);
-
-  useEffect(() => {
-    const handleSelectFromStorage = () => {
-      const targetFilename = localStorage.getItem('selected_artifact_filename');
-      if (targetFilename && files.length > 0) {
-        const fileToSelect = findMatchingFile(targetFilename, files);
-        if (fileToSelect) {
-          handleSelectFile(fileToSelect);
-          localStorage.removeItem('selected_artifact_filename');
-        }
-      }
-    };
-    window.addEventListener('navigate-to-artifacts', handleSelectFromStorage);
-    return () => window.removeEventListener('navigate-to-artifacts', handleSelectFromStorage);
-  }, [files]);
+  const handleSelectFile = (file: ReportFile) => {
+    setSelectedFile(file);
+    setEditContent(file.content);
+    setEditFilename(file.filename);
+    setIsEditing(false);
+    setIsCreatingNew(false);
+    setSaveStatus('idle');
+  };
 
   const fetchFiles = async (selectLatest = false) => {
     setIsLoading(true);
@@ -105,21 +95,33 @@ export const ArtifactsView: React.FC = () => {
       } else {
         setSelectedFile(null);
       }
-    } catch (err: any) {
-      setError(err.message || 'Lỗi kết nối server');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Lỗi kết nối server');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSelectFile = (file: ReportFile) => {
-    setSelectedFile(file);
-    setEditContent(file.content);
-    setEditFilename(file.filename);
-    setIsEditing(false);
-    setIsCreatingNew(false);
-    setSaveStatus('idle');
-  };
+  useEffect(() => {
+    queueMicrotask(() => void fetchFiles());
+    // Initial load only; later refreshes are explicit events.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const handleSelectFromStorage = () => {
+      const targetFilename = localStorage.getItem('selected_artifact_filename');
+      if (targetFilename && files.length > 0) {
+        const fileToSelect = findMatchingFile(targetFilename, files);
+        if (fileToSelect) {
+          handleSelectFile(fileToSelect);
+          localStorage.removeItem('selected_artifact_filename');
+        }
+      }
+    };
+    window.addEventListener('navigate-to-artifacts', handleSelectFromStorage);
+    return () => window.removeEventListener('navigate-to-artifacts', handleSelectFromStorage);
+  }, [files]);
 
   const handleCreateNew = () => {
     setIsCreatingNew(true);
@@ -156,8 +158,8 @@ export const ArtifactsView: React.FC = () => {
       setSelectedFile(saved);
       setIsCreatingNew(false);
       setIsEditing(false);
-    } catch (err: any) {
-      alert(err.message || 'Lỗi khi lưu file');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Lỗi khi lưu file');
       setSaveStatus('idle');
     }
   };
@@ -179,8 +181,8 @@ export const ArtifactsView: React.FC = () => {
       
       // Refresh file list
       await fetchFiles();
-    } catch (err: any) {
-      alert(err.message || 'Lỗi khi xóa file');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Lỗi khi xóa file');
     }
   };
 
@@ -244,9 +246,12 @@ export const ArtifactsView: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(downloadUrl);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Lỗi khi xuất file PDF:', err);
-      alert('Không thể tải file PDF từ server: ' + (err.message || err));
+      alert(
+        'Không thể tải file PDF từ server: ' +
+        (err instanceof Error ? err.message : String(err))
+      );
     }
   };
 
@@ -490,6 +495,7 @@ const parseInlineMarkdown = (text: string): React.ReactNode[] => {
 };
 
 // Extremely simple Markdown Renderer to show beautiful preview without extra packages
+/* eslint-disable react-hooks/immutability -- parser state is local to this pure render pass */
 const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
   const lines = text.split('\n');
   let inCodeBlock = false;
@@ -573,3 +579,4 @@ const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
     </div>
   );
 };
+/* eslint-enable react-hooks/immutability */

@@ -129,12 +129,8 @@ class FaucetRouteClassifier:
     ) -> ClassificationResult:
         classified: list[ClassifiedMessage] = []
         batch_count = 0
-        for batch in batch_messages(
-            group_by_thread(messages), self._settings.max_emails_per_batch
-        ):
-            batch_ids = tuple(
-                message.gmail_message_id for thread in batch for message in thread
-            )
+        for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
+            batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
             if not batch_ids:
                 continue
             batch_count += 1
@@ -247,16 +243,14 @@ def _post_json(
         raise FaucetAPIError(
             f"Faucet API returned HTTP {exc.code}",
             safe_message=(
-                f"Faucet từ chối yêu cầu (HTTP {exc.code}). "
-                "Vui lòng kiểm tra model rồi thử lại."
+                f"Faucet từ chối yêu cầu (HTTP {exc.code}). Vui lòng kiểm tra model rồi thử lại."
             ),
         ) from exc
     except (TimeoutError, URLError) as exc:
         raise FaucetAPIError(
             "Faucet API request failed",
             safe_message=(
-                "Không thể kết nối tới Faucet hoặc yêu cầu đã hết thời gian chờ. "
-                "Vui lòng thử lại."
+                "Không thể kết nối tới Faucet hoặc yêu cầu đã hết thời gian chờ. Vui lòng thử lại."
             ),
         ) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:

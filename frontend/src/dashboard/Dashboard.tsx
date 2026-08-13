@@ -18,6 +18,7 @@ import { MemoryPanel } from '../modules/memory/MemoryPanel';
 import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
+import { ProjectDocumentPanel } from '../modules/project-documents/ProjectDocumentPanel';
 
 interface DashboardProps {
   onNavigateHome?: () => void;
@@ -255,6 +256,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           onClose={() => setIsWorkIntakePanelOpen(false)}
         />
       )}
+      <ProjectDocumentPanel
+        projectId={activeProjectId}
+        projectName={activeProject?.name}
+      />
     </div>
   );
 };

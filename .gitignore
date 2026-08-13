@@ -35,6 +35,7 @@ tmp_pytest/
 **/tmp_pytest/**
 
 .runlogs/
+.cowork/evaluations/
 .playwright-cli/
 node_modules/
 

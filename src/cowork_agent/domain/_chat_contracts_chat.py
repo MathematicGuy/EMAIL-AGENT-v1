@@ -52,9 +52,7 @@ def _validated_task_proposal(value: object) -> Mapping[str, object]:
         raise ValueError("proposal must contain exactly the frontend-safe fields")
 
     _require_string(proposal["episode_id"], "proposal.episode_id")
-    _require_bounded_string(
-        proposal["task_title"], "proposal.task_title", MAX_TASK_TITLE_LENGTH
-    )
+    _require_bounded_string(proposal["task_title"], "proposal.task_title", MAX_TASK_TITLE_LENGTH)
     _require_bounded_string(
         proposal["minimal_request_paraphrase"],
         "proposal.minimal_request_paraphrase",
@@ -82,8 +80,7 @@ def _validated_task_proposal(value: object) -> Mapping[str, object]:
     citations = _as_sequence(proposal["rag_citations"], "proposal.rag_citations")
     if len(citations) > MAX_TASK_RAG_CITATIONS:
         raise ValueError(
-            "proposal.rag_citations must not contain more than "
-            f"{MAX_TASK_RAG_CITATIONS} items"
+            f"proposal.rag_citations must not contain more than {MAX_TASK_RAG_CITATIONS} items"
         )
     for citation in citations:
         EpisodeCitation.from_dict(_as_mapping(citation, "proposal.rag_citations item"))
@@ -112,18 +109,23 @@ class ChatMessageRequest:
     session_id: str
     user_message: str
     idempotency_key: str
+    document_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.session_id, "session_id")
         _require_bounded_string(self.user_message, "user_message", MAX_CHAT_MESSAGE_LENGTH)
         _require_string(self.idempotency_key, "idempotency_key")
+        if len(self.document_ids) > 50 or len(set(self.document_ids)) != len(self.document_ids):
+            raise ValueError("document_ids must contain at most 50 unique identifiers")
+        for document_id in self.document_ids:
+            _require_string(document_id, "document_ids item")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
-        expected_fields = {"session_id", "user_message", "idempotency_key"}
+        expected_fields = {"session_id", "user_message", "idempotency_key", "document_ids"}
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
             raise ValueError(
@@ -135,6 +137,10 @@ class ChatMessageRequest:
                 data["user_message"], "user_message", MAX_CHAT_MESSAGE_LENGTH
             ),
             idempotency_key=_require_string(data["idempotency_key"], "idempotency_key"),
+            document_ids=tuple(
+                _require_string(item, "document_ids item")
+                for item in _as_sequence(data.get("document_ids", ()), "document_ids")
+            ),
         )
 
 
@@ -152,6 +158,13 @@ class ChatMessageStreamEvent:
     code: str | None = None
     safe_message: str | None = None
     proposal: Mapping[str, object] | None = None
+    citation_scope: str | None = None
+    project_id: str | None = None
+    document_id: str | None = None
+    document_title: str | None = None
+    section: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
@@ -169,6 +182,13 @@ class ChatMessageStreamEvent:
             "code": self.code,
             "safe_message": self.safe_message,
             "proposal": self.proposal,
+            "citation_scope": self.citation_scope,
+            "project_id": self.project_id,
+            "document_id": self.document_id,
+            "document_title": self.document_title,
+            "section": self.section,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.DELTA: ("text",),
@@ -178,7 +198,18 @@ class ChatMessageStreamEvent:
             ChatEventType.ERROR: ("code", "safe_message"),
         }
         expected = required[self.event_type]
+        citation_fields = {
+            "citation_scope",
+            "project_id",
+            "document_id",
+            "document_title",
+            "section",
+            "page_start",
+            "page_end",
+        }
         for name, value in payloads.items():
+            if name in citation_fields and self.event_type is ChatEventType.MEMORY_CITATION:
+                continue
             if (name in expected) != (value is not None):
                 raise ValueError(
                     f"{self.event_type.value} events require only {', '.join(expected)}"
@@ -187,6 +218,27 @@ class ChatMessageStreamEvent:
             value = payloads[name]
             if isinstance(value, str):
                 _require_string(value, name)
+        coordinate_values = (
+            self.project_id,
+            self.document_id,
+            self.document_title,
+            self.section,
+            self.page_start,
+            self.page_end,
+        )
+        if self.citation_scope is None and any(value is not None for value in coordinate_values):
+            raise ValueError("citation coordinates require citation_scope")
+        if self.citation_scope is not None:
+            if self.event_type is not ChatEventType.MEMORY_CITATION:
+                raise ValueError("citation coordinates require a memory_citation event")
+            if self.citation_scope != "project_document":
+                raise ValueError("unsupported citation_scope")
+            for name in ("project_id", "document_id", "document_title"):
+                _require_string(getattr(self, name), name)
+            if self.page_start is None or self.page_end is None:
+                raise ValueError("project citations require a page range")
+            if self.page_start < 1 or self.page_end < self.page_start:
+                raise ValueError("project citation page range is invalid")
 
     @classmethod
     def delta(cls, *, event_id: str, session_id: str, turn_id: str, text: str) -> Self:
@@ -201,6 +253,13 @@ class ChatMessageStreamEvent:
         turn_id: str,
         memory_type: MemoryCitationType,
         source_id: str,
+        citation_scope: str | None = None,
+        project_id: str | None = None,
+        document_id: str | None = None,
+        document_title: str | None = None,
+        section: str | None = None,
+        page_start: int | None = None,
+        page_end: int | None = None,
     ) -> Self:
         return cls(
             event_id,
@@ -209,6 +268,13 @@ class ChatMessageStreamEvent:
             ChatEventType.MEMORY_CITATION,
             memory_type=memory_type,
             source_id=source_id,
+            citation_scope=citation_scope,
+            project_id=project_id,
+            document_id=document_id,
+            document_title=document_title,
+            section=section,
+            page_start=page_start,
+            page_end=page_end,
         )
 
     @classmethod
@@ -269,6 +335,13 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "code",
         "safe_message",
         "proposal",
+        "citation_scope",
+        "project_id",
+        "document_id",
+        "document_title",
+        "section",
+        "page_start",
+        "page_end",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -295,8 +368,24 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         source_id=raw_source_id if isinstance(raw_source_id, str) else None,
         code=raw_code if isinstance(raw_code, str) else None,
         safe_message=raw_safe_message if isinstance(raw_safe_message, str) else None,
-        proposal=(
-            _as_mapping(raw_proposal, "proposal") if raw_proposal is not None else None
+        proposal=(_as_mapping(raw_proposal, "proposal") if raw_proposal is not None else None),
+        citation_scope=(
+            str(data["citation_scope"]) if data.get("citation_scope") is not None else None
         ),
+        project_id=(str(data["project_id"]) if data.get("project_id") is not None else None),
+        document_id=(str(data["document_id"]) if data.get("document_id") is not None else None),
+        document_title=(
+            str(data["document_title"]) if data.get("document_title") is not None else None
+        ),
+        section=(str(data["section"]) if data.get("section") is not None else None),
+        page_start=_optional_int(data.get("page_start"), "page_start"),
+        page_end=_optional_int(data.get("page_end"), "page_end"),
     )
 
+
+def _optional_int(value: object, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer or null")
+    return value

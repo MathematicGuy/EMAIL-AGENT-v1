@@ -8,8 +8,10 @@ from math import isfinite
 
 def _score(value: float, name: str) -> None:
     if (
-        isinstance(value, bool) or not isinstance(value, (int, float))
-        or not isfinite(value) or not 0 <= value <= 1
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(value)
+        or not 0 <= value <= 1
     ):
         raise ValueError(f"{name} must be a finite score in [0, 1]")
 
@@ -26,13 +28,18 @@ class PairedEvaluationCase:
 
     def __post_init__(self) -> None:
         if (
-            not self.case_id or len(self.case_id) > 64
+            not self.case_id
+            or len(self.case_id) > 64
             or not self.case_id.replace("_", "").isalnum()
         ):
             raise ValueError("case_id must be a safe opaque identifier")
         for name in (
-            "memory_disabled", "memory_enabled", "grounded_disabled", "grounded_enabled",
-            "citation_disabled", "citation_enabled",
+            "memory_disabled",
+            "memory_enabled",
+            "grounded_disabled",
+            "grounded_enabled",
+            "citation_disabled",
+            "citation_enabled",
         ):
             _score(getattr(self, name), name)
 
@@ -70,7 +77,8 @@ class PairedEvaluationReport:
 
     def __post_init__(self) -> None:
         if (
-            not self.case_ids or tuple(sorted(self.case_ids)) != self.case_ids
+            not self.case_ids
+            or tuple(sorted(self.case_ids)) != self.case_ids
             or len(set(self.case_ids)) != len(self.case_ids)
         ):
             raise ValueError("case_ids must be nonempty, sorted, and unique")
@@ -78,22 +86,26 @@ class PairedEvaluationReport:
             if not case_id or len(case_id) > 64 or not case_id.replace("_", "").isalnum():
                 raise ValueError("case_id must be a safe opaque identifier")
         for name in (
-            "mean_continuity_enabled", "mean_grounded_enabled",
-            "mean_citation_enabled", "degradation_rate",
+            "mean_continuity_enabled",
+            "mean_grounded_enabled",
+            "mean_citation_enabled",
+            "degradation_rate",
         ):
             _score(getattr(self, name), name)
-        for name in (
-            "mean_continuity_delta", "mean_grounded_delta", "mean_citation_delta"
-        ):
+        for name in ("mean_continuity_delta", "mean_grounded_delta", "mean_citation_delta"):
             value = getattr(self, name)
             if (
-                isinstance(value, bool) or not isinstance(value, (int, float))
-                or not isfinite(value) or not -1 <= value <= 1
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or not -1 <= value <= 1
             ):
                 raise ValueError(f"{name} must be a finite delta in [-1, 1]")
         for name in (
-            "unvalidated_retrievals", "cross_tenant_incidents",
-            "raw_email_memory_violations", "expired_record_retrievals",
+            "unvalidated_retrievals",
+            "cross_tenant_incidents",
+            "raw_email_memory_violations",
+            "expired_record_retrievals",
             "rejected_retrievals",
         ):
             value = getattr(self, name)
@@ -110,15 +122,20 @@ class PairedEvaluationReport:
         if len({case.case_id for case in ordered}) != len(ordered):
             raise ValueError("duplicate case_id")
         allowed_safety = {
-            "unvalidated_retrievals", "cross_tenant_incidents",
-            "raw_email_memory_violations", "expired_record_retrievals", "rejected_retrievals",
+            "unvalidated_retrievals",
+            "cross_tenant_incidents",
+            "raw_email_memory_violations",
+            "expired_record_retrievals",
+            "rejected_retrievals",
         }
         for name, value in safety.items():
             if name not in allowed_safety or not isinstance(value, int) or value < 0:
                 raise ValueError("invalid metadata-only safety count")
         count = len(ordered)
+
         def mean(values: list[float]) -> float:
             return sum(values) / count
+
         return cls(
             tuple(case.case_id for case in ordered),
             mean([case.memory_enabled - case.memory_disabled for case in ordered]),
@@ -132,7 +149,8 @@ class PairedEvaluationReport:
                 or case.grounded_enabled < case.grounded_disabled
                 or case.citation_enabled < case.citation_disabled
                 for case in ordered
-            ) / count,
+            )
+            / count,
             **safety,
         )
 
