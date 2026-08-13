@@ -2,12 +2,15 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
+from cowork_agent.integrations.knowledge_ingestion.project_documents import (
+    ExtractedProjectDocument,
+    ExtractedProjectDocumentChunk,
+)
 from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
 from cowork_agent.persistence.repositories.projects import ProjectDocument
 
-SOURCE = b"private project source"
+SOURCE = b"%PDF-1.7\nprivate project source"
 
 
 class Repository:
@@ -39,18 +42,28 @@ class Storage:
 
 
 class Extractor:
-    def extract(self, path: Path, media_type: str) -> SimpleNamespace:
+    def extract(self, path: Path, media_type: str) -> ExtractedProjectDocument:
         assert path.suffix == ".pdf" and media_type == "application/pdf"
-        return SimpleNamespace(page_count=2, chunks=(("first page", 1, 1), ("second page", 2, 2)))
+        return ExtractedProjectDocument(
+            page_count=2,
+            chunks=(
+                ExtractedProjectDocumentChunk("first page", 1, 1, None),
+                ExtractedProjectDocumentChunk("second page", 2, 2, None),
+            ),
+        )
 
 
 class Vectors:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.ready_calls: list[dict[str, object]] = []
 
     async def index(self, **kwargs: object) -> int:
         self.calls.append(kwargs)
         return len(kwargs["chunks"])  # type: ignore[arg-type]
+
+    async def mark_document_ready(self, **kwargs: object) -> None:
+        self.ready_calls.append(kwargs)
 
 
 def test_worker_verifies_then_indexes_private_document_without_persisting_text() -> None:
@@ -63,5 +76,11 @@ def test_worker_verifies_then_indexes_private_document_without_persisting_text()
         assert [item["to_status"] for item in repository.transitions] == ["indexing", "ready"]
         assert repository.finished == [{"document_id": "document-1", "status": "completed"}]
         assert len(vectors.calls[0]["chunks"]) == 2  # type: ignore[arg-type]
+        assert vectors.ready_calls == [{
+            "workspace_id": "workspace-1",
+            "user_id": "user-1",
+            "project_id": "project-1",
+            "document_id": "document-1",
+        }]
 
     asyncio.run(scenario())

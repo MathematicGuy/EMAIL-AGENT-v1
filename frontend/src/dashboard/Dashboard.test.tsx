@@ -30,6 +30,9 @@ function projectFetch(extra?: (url: string, init?: RequestInit) => Response | un
     if (url.includes('/v1/cowork/chat/sessions?project_id=')) {
       return Promise.resolve(response({ sessions: [] }));
     }
+    if (url.endsWith('/v1/cowork/chat/document-health')) {
+      return Promise.resolve(response({ status: 'ready', checks: { feature: 'enabled' } }));
+    }
     if (url.endsWith('/api/v1/health') || url.endsWith('/health')) {
       return Promise.resolve(response({ status: 'ok' }));
     }
@@ -110,5 +113,25 @@ describe('Dashboard Project chat', () => {
         (init as RequestInit | undefined)?.method === 'POST'
       )
     ).toBe(true));
+  });
+
+  it('hides document upload and the panel when user documents are disabled', async () => {
+    const fetchMock = projectFetch((url) => {
+      if (url.endsWith('/v1/cowork/chat/document-health')) {
+        return response({ status: 'disabled', checks: { feature: 'disabled' } });
+      }
+      return undefined;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Dashboard />);
+
+    await screen.findAllByText('Default Project');
+    await waitFor(() => expect(
+      screen.queryByLabelText('Chá»n tÃ i liá»‡u tá»« mÃ¡y')
+    ).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Project documents' })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes('/projects/project-default/documents')
+    )).toBe(false);
   });
 });

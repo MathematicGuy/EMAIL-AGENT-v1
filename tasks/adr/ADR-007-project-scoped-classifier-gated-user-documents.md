@@ -24,23 +24,28 @@ handle deictic or ambiguous turns better than phrase matching.
 4. Project documents use a separate Qdrant collection and an ACL filter containing tenant,
    user, Project, ready status, expiry, and optional document IDs. Ownership and the filter
    are established before embedding I/O. Company evidence is never a fallback.
-5. Source bytes and extracted Markdown are Fernet-encrypted in an opaque-path local store.
-   PostgreSQL leases ingestion jobs; Redis Streams is the primary notification transport and
-   an in-process dispatcher plus startup recovery is the local fallback.
+5. Source bytes live in a private Supabase Storage bucket and are uploaded through short-lived
+   signed URLs. PostgreSQL owns durable ingestion and cleanup jobs; Redis may notify workers,
+   while PostgreSQL polling remains the durable fallback. Extracted text is retained only in
+   the Project Qdrant collection.
 6. Profile and eligible episodic retrieval remain user-wide. Sessions, short-term history,
    and document retrieval are Project-scoped. TaskEpisodes record `project_id` only for
    provenance and never store document text.
 7. Document citations are server-validated coordinates. The model may return only citation
    IDs from evidence supplied for the current turn; the API maps them to Project/document,
    title, section, and page range.
-8. `USER_DOCUMENTS_ENABLED=false` is the release default until ingestion, classifier,
-   grounded-answer, isolation, and React E2E gates pass.
+8. `USER_DOCUMENTS_ENABLED=true` and `CHAT_INTENT_CLASSIFIER_ENABLED=true` are the
+   release defaults; operators may explicitly disable either feature as a kill switch.
+9. Project documents reuse the Email/Knowledge Markdown chunker: H1/H2 sections, paragraph
+   packing, 1,200-character soft cap, no overlap, deterministic IDs, and page coordinates.
+   They use Gemini `gemini-embedding-2` with 3,072-dimensional retrieval document/query
+   vectors. Company/Email RAG embedding configuration remains unchanged.
 
 ## Consequences
 
-- Deleting a Project first makes its documents and sessions retrieval-ineligible, then
-  repeatedly removes Qdrant points and encrypted objects. Deleting the default Project creates
-  an empty deterministic replacement.
+- Deleting a Project first makes its documents and sessions retrieval-ineligible, then durable
+  cleanup jobs repeatedly remove Qdrant points and Supabase objects. Deleting the default
+  Project creates an empty UUID replacement.
 - No Project sharing, Gmail attachment ingestion, corpus promotion, or executable chat tools
   are part of this decision.
 - The standalone Email Agent and its company RAG lifecycle are unchanged.

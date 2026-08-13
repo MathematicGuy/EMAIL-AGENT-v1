@@ -177,7 +177,7 @@ class ChatIntentSettings:
         if timeout_ms > 120_000:
             raise ValueError("CHAT_INTENT_CLASSIFIER_TIMEOUT_MS must not exceed 120000")
         return cls(
-            enabled=_boolean(environ, "CHAT_INTENT_CLASSIFIER_ENABLED", False),
+            enabled=_boolean(environ, "CHAT_INTENT_CLASSIFIER_ENABLED", True),
             model=model,
             timeout_ms=timeout_ms,
             max_attempts=2,
@@ -191,10 +191,7 @@ class UserDocumentsSettings:
     """Project-document plane limits and dependency configuration."""
 
     enabled: bool
-    store_path: Path
-    encryption_key: str = field(repr=False)
     collection_name: str
-    embedding_model: str
     max_file_bytes: int
     max_pages: int
     max_documents_per_project: int
@@ -216,24 +213,14 @@ class UserDocumentsSettings:
             if load_env_file:
                 load_dotenv(override=False)
             environ = os.environ
-        enabled = _boolean(environ, "USER_DOCUMENTS_ENABLED", False)
-        encryption_key = environ.get("DOCUMENT_ENCRYPTION_KEY", "").strip()
-        if enabled and (not encryption_key or encryption_key.startswith("replace-with-")):
-            raise ValueError(
-                "DOCUMENT_ENCRYPTION_KEY must be configured when user documents are enabled"
-            )
+        enabled = _boolean(environ, "USER_DOCUMENTS_ENABLED", True)
         min_score = float(environ.get("USER_DOCUMENTS_MIN_SCORE", "0.6"))
         if not 0 <= min_score <= 1:
             raise ValueError("USER_DOCUMENTS_MIN_SCORE must be between 0 and 1")
         return cls(
             enabled=enabled,
-            store_path=Path(environ.get("USER_DOCUMENTS_STORE_PATH", ".data/project_documents")),
-            encryption_key=encryption_key,
             collection_name=_non_empty_value(
-                environ, "USER_DOCUMENTS_QDRANT_COLLECTION", "project_documents"
-            ),
-            embedding_model=_non_empty_value(
-                environ, "USER_DOCUMENTS_EMBEDDING_MODEL", "gemini-embedding-001"
+                environ, "QDRANT_PROJECT_COLLECTION", "project_documents"
             ),
             max_file_bytes=_positive_int(
                 environ, "USER_DOCUMENTS_MAX_FILE_BYTES", 25 * 1024 * 1024
@@ -421,6 +408,48 @@ class GeminiSettings:
             max_emails_per_batch=_positive_int(environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5),
             max_input_tokens=_positive_int(environ, "GEMINI_MAX_INPUT_TOKENS", 40_000),
             timeout_seconds=_positive_int(environ, "GEMINI_TIMEOUT_SECONDS", 60),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GeminiEmbeddingSettings:
+    """Gemini configuration dedicated to project-document embeddings."""
+
+    api_keys: tuple[str, ...] = field(repr=False)
+    model: str
+    dimensions: int
+    timeout_seconds: int
+    batch_size: int
+    rotate_on_rate_limit: bool
+    max_attempts: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "GeminiEmbeddingSettings":
+        if environ is None:
+            if load_env_file:
+                load_dotenv(override=False)
+            environ = os.environ
+        generation = GeminiSettings.from_env(environ, load_env_file=False)
+        dimensions = _bounded_positive_int(
+            environ, "GEMINI_EMBEDDING_DIMENSIONS", 3072, maximum=3072
+        )
+        if dimensions < 128:
+            raise ValueError("GEMINI_EMBEDDING_DIMENSIONS must be at least 128")
+        return cls(
+            api_keys=generation.api_keys,
+            model=_non_empty_value(environ, "GEMINI_EMBEDDING_MODEL", "gemini-embedding-2"),
+            dimensions=dimensions,
+            timeout_seconds=_positive_int(environ, "GEMINI_EMBEDDING_TIMEOUT_SECONDS", 30),
+            batch_size=_bounded_positive_int(
+                environ, "GEMINI_EMBEDDING_BATCH_SIZE", 100, maximum=100
+            ),
+            rotate_on_rate_limit=generation.rotate_on_rate_limit,
+            max_attempts=generation.max_attempts,
         )
 
 

@@ -45,5 +45,6 @@ frontend/dist/
 frontend/.env
 !frontend/.env.example
 .playwright-mcp
-.claude 
-.agents/skills/corpus2skill
+# Skill corpus and generator script
+*corpus2skill*
+**/update_corpus2skill.py

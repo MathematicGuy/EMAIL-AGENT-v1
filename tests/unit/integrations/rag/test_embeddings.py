@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from google.genai import errors
 
-from cowork_agent.config import GeminiSettings, JinaEmbeddingSettings
+from cowork_agent.config import GeminiEmbeddingSettings, GeminiSettings, JinaEmbeddingSettings
 from cowork_agent.integrations.rag.embeddings import (
     GeminiEmbeddingAdapter,
     JinaEmbeddingAdapter,
@@ -126,6 +126,57 @@ def test_embed_splits_more_than_one_hundred_contents_and_preserves_order() -> No
 
     assert [len(batch) for batch in client.batches] == [100, 1]
     assert vectors == tuple((float(index),) for index in range(101))
+
+
+class _ProjectEmbeddingClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    @property
+    def aio(self) -> _ProjectEmbeddingClient:
+        return self
+
+    @property
+    def models(self) -> _ProjectEmbeddingClient:
+        return self
+
+    async def embed_content(self, **kwargs: object) -> Any:
+        self.calls.append(kwargs)
+        contents = kwargs["contents"]
+        assert isinstance(contents, list)
+        return type(
+            "Resp",
+            (),
+            {
+                "embeddings": [
+                    type("E", (), {"values": [0.1] * 3072})() for _ in contents
+                ]
+            },
+        )()
+
+
+def test_project_embedding_uses_gemini_2_dimensions_and_document_task() -> None:
+    settings = GeminiEmbeddingSettings(
+        api_keys=("key-1",),
+        model="gemini-embedding-2",
+        dimensions=3072,
+        timeout_seconds=30,
+        batch_size=100,
+        rotate_on_rate_limit=True,
+        max_attempts=1,
+    )
+    client = _ProjectEmbeddingClient()
+    vectors = asyncio.run(
+        GeminiEmbeddingAdapter(settings, client=client).embed(
+            ["document text"], task="retrieval.passage"
+        )
+    )
+
+    assert len(vectors[0]) == 3072
+    assert client.calls[0]["model"] == "gemini-embedding-2"
+    config = client.calls[0]["config"]
+    assert config.output_dimensionality == 3072
+    assert str(config.task_type).endswith("RETRIEVAL_DOCUMENT")
 
 
 def test_jina_embedding_settings_default_to_v5_omni_small() -> None:

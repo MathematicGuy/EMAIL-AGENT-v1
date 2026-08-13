@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from cowork_agent.integrations.rag.markdown_chunking import MarkdownPage, chunk_markdown_pages
 
 from .docx_extractor import DocxExtractor
 from .pdf_inspector import PdfInspector
 
-_CHUNK_CHARS = 1_600
 _DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
@@ -24,7 +24,15 @@ class ProjectDocumentExtractionError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ExtractedProjectDocument:
     page_count: int
-    chunks: tuple[tuple[str, int, int], ...]
+    chunks: tuple[ExtractedProjectDocumentChunk, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedProjectDocumentChunk:
+    text: str
+    page_start: int
+    page_end: int
+    section: str | None
 
 
 class ProjectDocumentExtractor:
@@ -47,7 +55,7 @@ class ProjectDocumentExtractor:
             elif media_type == "application/pdf":
                 inspection = self._pdf_inspector.inspect(path)
                 if inspection.pages_needing_ocr:
-                    raise ProjectDocumentExtractionError("ocr_not_configured")
+                    raise ProjectDocumentExtractionError("ocr_unavailable")
                 pages = tuple(
                     (number, inspection.native_markdown_by_page.get(number, ""))
                     for number in range(1, inspection.page_count + 1)
@@ -58,21 +66,18 @@ class ProjectDocumentExtractor:
             raise
         except Exception as exc:
             raise ProjectDocumentExtractionError("native_extraction_failed") from exc
+        shared_chunks = chunk_markdown_pages(
+            MarkdownPage(markdown=markdown, page_number=page) for page, markdown in pages
+        )
         chunks = tuple(
-            (text, page, page)
-            for page, markdown in pages
-            for text in _chunk_page(markdown)
+            ExtractedProjectDocumentChunk(
+                text=chunk.text,
+                page_start=chunk.page_start or 1,
+                page_end=chunk.page_end or 1,
+                section=chunk.section,
+            )
+            for chunk in shared_chunks
         )
         if not chunks:
             raise ProjectDocumentExtractionError("empty_extraction")
         return ExtractedProjectDocument(page_count=len(pages), chunks=chunks)
-
-
-def _chunk_page(markdown: str) -> tuple[str, ...]:
-    normalized = re.sub(r"\s+", " ", markdown).strip()
-    if not normalized:
-        return ()
-    return tuple(
-        normalized[index : index + _CHUNK_CHARS]
-        for index in range(0, len(normalized), _CHUNK_CHARS)
-    )

@@ -41,6 +41,20 @@ class SupabasePrivateStorage:
         except httpx.HTTPError as exc:
             raise StorageUnavailable("private storage unavailable") from exc
 
+    async def object_exists(self, object_key: str) -> bool:
+        path = quote(object_key, safe="/")
+        try:
+            response = await self._client.head(
+                f"{self._url}/storage/v1/object/{self._bucket}/{path}",
+                headers=self._headers(),
+            )
+            if response.status_code == 404:
+                return False
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError as exc:
+            raise StorageUnavailable("private storage unavailable") from exc
+
     async def download_to(self, object_key: str, target: Path) -> None:
         """Stream a private source into a caller-owned secure temporary path."""
         path = quote(object_key, safe="/")

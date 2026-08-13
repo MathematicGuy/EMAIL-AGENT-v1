@@ -5,15 +5,15 @@
 | Trường | Giá trị |
 |---|---|
 | Sản phẩm | Cowork Agent — AI Chat Assistant |
-| Trạng thái tài liệu | Draft — chờ phê duyệt |
-| Phiên bản | 3.0 |
-| Ngày | 2026-08-12 |
+| Trạng thái tài liệu | Accepted — implementation-aligned |
+| Phiên bản | 3.1 |
+| Ngày | 2026-08-13 |
 | Phụ thuộc | PRD-v1 (Email + RAG) và PRD-v2 (Memory Extension) đã hoàn thành |
 | Nguồn yêu cầu | `docs/references/user_preference.md` |
 | Thiết kế kỹ thuật | [SPEC-chat-with-user-documents](../specs/SPEC-chat-with-user-documents.md) |
 | Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
 | Chủ sở hữu tính năng | AI Chat Controller (`feature: ai_chat`) |
-| Vector store | Qdrant (bắt buộc cho plane này) |
+| Vector store | Qdrant collection riêng cho Project documents; Gemini 3.072 chiều |
 | OCR | Bật, dùng Mistral OCR |
 | Retention mặc định | 30 ngày |
 | Reflexion / Tool thực thi / Scheduling | Ngoài phạm vi |
@@ -98,6 +98,11 @@ tài liệu ở câu trước.
    người khác, không lẫn vào tri thức công ty, không xuất hiện trong log.
 6. **Suy giảm phải nói ra.** Khi kho vector không khả dụng, trợ lý nói rằng bằng
    chứng tài liệu đang không dùng được — không lặng lẽ trả lời như thường.
+7. **Kill switch phải khóa toàn bộ document surface.** `USER_DOCUMENTS_ENABLED=false`
+   làm mọi document endpoint trả `503`, ẩn upload/panel ở frontend và không ảnh hưởng
+   Project, chat, Email Agent hay health cơ bản.
+8. **Chỉ `ready` mới được phục vụ.** PostgreSQL và Qdrant đều phải xác nhận trạng thái
+   `ready`; evidence được tái kiểm tra sau vector query để loại race với deletion.
 
 ## 5. Phạm vi
 
@@ -125,6 +130,11 @@ Chọn file (PDF/DOCX)
 
 Người dùng không phải chờ để tiếp tục chat. Trong lúc tài liệu chưa `ready`, các
 lượt chat vẫn chạy bình thường và tài liệu đó chưa được truy hồi.
+
+Frontend poll trạng thái tối đa 5 phút cho mỗi lần theo dõi, hỗ trợ huỷ khi người
+dùng gỡ attachment, đổi Project hoặc rời màn hình. Hết deadline phải hiện trạng thái
+timeout và cho phép người dùng xoá tài liệu đang `received`, `extracting` hoặc
+`indexing`; không có vòng poll vô hạn.
 
 Khi thất bại, người dùng thấy lý do bằng ngôn ngữ người đọc được, ánh xạ 1–1 từ
 `reason_code`:
@@ -175,7 +185,7 @@ là "không còn khả dụng", không làm hỏng episode.
 | FR-04 | Trích xuất trang scan bằng OCR | Trang cần OCR được gửi tới Mistral OCR trong giới hạn cấu hình; trang có văn bản gốc không bao giờ OCR lại |
 | FR-05 | Không index kết quả trích xuất rỗng hoặc một phần | Tài liệu chuyển `failed` với `reason_code` tương ứng; không có chunk nào được ghi |
 | FR-06 | Theo dõi trạng thái | Endpoint trạng thái trả `status`, `reason_code`, số trang, số chunk |
-| FR-07 | Xoá tài liệu | Xoá byte gốc, văn bản trích xuất và điểm vector; lặp lại được cho tới khi mọi kho xác nhận |
+| FR-07 | Xoá tài liệu | Cho phép bắt đầu xoá cả khi `received`, `extracting`, `indexing`, `ready` hoặc `failed`; chuyển `deleting`, xoá byte gốc và điểm vector bằng durable cleanup, lặp lại được cho tới khi mọi kho xác nhận `deleted` |
 | FR-08 | Hết hạn tự động | Mặc định 30 ngày kể từ khi tải lên; tài liệu hết hạn bị loại **trước** khi xếp hạng và được dọn nền |
 
 ### Nhóm B — Định tuyến
@@ -195,7 +205,7 @@ là "không còn khả dụng", không làm hỏng episode.
 
 | ID | Yêu cầu | Tiêu chí chấp nhận |
 |---|---|---|
-| FR-17 | Cách ly theo chủ sở hữu | Điều kiện `tenant_id`, `user_id`, trạng thái `ready`, còn hạn được dựng **trước** khi truy vấn được embed; chunk của người khác không bao giờ được chấm điểm |
+| FR-17 | Cách ly và readiness hai lớp | Filter Qdrant gồm `workspace_id`, `user_id`, `project_id`, optional `document_ids`, `document_status=ready`, còn hạn và được dựng **trước** embedding; sau query phải kiểm tra lại catalog PostgreSQL để không trả evidence vừa bị xoá |
 | FR-18 | Trích dẫn theo trang | Mỗi chunk mang `page_start`/`page_end`; câu trả lời hiển thị tên tài liệu và khoảng trang |
 | FR-19 | Không đủ bằng chứng thì nói ra | Không chunk nào vượt ngưỡng ⇒ câu trả lời nêu rõ tài liệu không đề cập và liệt kê phần còn thiếu |
 | FR-20 | Xung đột được nêu, không bị che | Khi tài liệu người dùng mâu thuẫn với tri thức công ty đang bật, cả hai được nêu kèm trích dẫn |
@@ -222,6 +232,8 @@ là "không còn khả dụng", không làm hỏng episode.
 | Thời gian xử lý tài liệu | Tài liệu 20 trang native ≤ 60 s tới `ready`; có OCR ≤ 5 phút |
 | Giới hạn mặc định | ≤ 25 MB/file, ≤ 100 trang, ≤ 50 tài liệu/người dùng |
 | Khả dụng | Ingestion hỏng không làm hỏng chat; chat hỏng không mất tài liệu đã index |
+| Polling frontend | deadline mặc định 5 phút; request đang treo bị abort; đổi Project/unmount/gỡ attachment phải cancel |
+| Kill switch | mặc định `USER_DOCUMENTS_ENABLED=true`; khi tắt, document API/UI fail closed nhưng Project/chat/email vẫn hoạt động |
 
 ## 9. Chỉ số thành công và ngưỡng ra mắt
 
@@ -260,7 +272,7 @@ không được trùng nhau.
 - Công cụ `pdf-inspector` cục bộ có trên PATH của tiến trình chạy job.
 - Company RAG trong chat **tắt** ở bản này (đứng sau cờ cấu hình); tri thức công
   ty vẫn phục vụ Email Agent PRD-v1 như cũ.
-- Một tài liệu thuộc về một người dùng. Không có chia sẻ ở bản này.
+- Một tài liệu thuộc đúng một Project của một người dùng. Không có chia sẻ ở bản này.
 
 ## 12. Mốc triển khai và điều kiện hoàn thành
 
@@ -279,7 +291,7 @@ M1–M3 không thay đổi hành vi chat hiện tại. Hành vi chat chỉ đổ
 
 - Chia sẻ tài liệu giữa người dùng hoặc ở mức workspace.
 - Đưa tài liệu người dùng vào kho tri thức công ty (cấm vĩnh viễn).
-- Container project để nhóm tài liệu.
+- Chia sẻ Project hoặc tài liệu giữa người dùng/workspace.
 - Hiểu ảnh, biểu đồ, cấu trúc bảng vượt quá văn bản OCR.
 - Sửa, chú thích, tái sinh tài liệu; tái ingest theo lịch.
 - Ingest attachment Gmail (vẫn ngoài phạm vi theo ADR-003).

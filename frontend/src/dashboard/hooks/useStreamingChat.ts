@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from '../../lib/apiConfig';
+import {
+  uploadProjectDocument,
+  waitForProjectDocument,
+} from '../../modules/project-documents/api';
 import type {
   ChatCitation,
   ChatComposerAttachment,
@@ -93,6 +97,7 @@ function citationFromCoordinate(value: Record<string, unknown>): ChatCitation | 
     section: typeof value.section === 'string' ? value.section : undefined,
     pageStart: value.page_start,
     pageEnd: value.page_end,
+    unavailable: value.unavailable === true,
   };
 }
 
@@ -142,6 +147,7 @@ export function useStreamingChat(
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [workflows] = useState<Record<string, TaskWorkflow>>({});
   const abortRef = useRef<AbortController | null>(null);
+  const attachmentPollsRef = useRef(new Map<string, AbortController>());
 
   const refreshHistory = useCallback(async () => {
     if (!projectId) {
@@ -180,6 +186,11 @@ export function useStreamingChat(
     });
   }, [projectId, refreshHistory]);
 
+  useEffect(() => () => {
+    for (const controller of attachmentPollsRef.current.values()) controller.abort();
+    attachmentPollsRef.current.clear();
+  }, [projectId]);
+
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeConversationId) return activeConversationId;
     if (!projectId) throw new Error('Select a Project before starting chat.');
@@ -207,45 +218,77 @@ export function useStreamingChat(
         setAttachmentError(validation);
         continue;
       }
+      const pollController = new AbortController();
+      attachmentPollsRef.current.set(id, pollController);
       setSelectedAttachments((current) => [...current, {
         id,
         name: file.name,
         mediaType: file.type,
         sizeBytes: file.size,
-        status: 'uploading',
+        status: 'hashing',
       }]);
-      const form = new FormData();
-      form.append('file', file);
-      void fetch(
-        `${API_BASE_URL}/v1/cowork/chat/projects/${encodeURIComponent(projectId)}/documents`,
-        { method: 'POST', body: form }
-      ).then(async (response) => {
-        if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status}).`);
-        const document = (await response.json()) as { document_id: string; status: string };
+      void uploadProjectDocument(projectId, file, (status) => {
+        if (pollController.signal.aborted) return;
         setSelectedAttachments((current) => current.map((item) =>
-          item.id === id
-            ? { ...item, documentId: document.document_id, status: 'uploaded' }
-            : item
+          item.id === id ? { ...item, status } : item
+        ));
+      }).then(async (document) => {
+        if (pollController.signal.aborted) return;
+        setSelectedAttachments((current) => current.map((item) =>
+          item.id === id ? {
+            ...item,
+            documentId: document.document_id,
+            status: document.status === 'ready' ? 'ready' : 'processing',
+          } : item
+        ));
+        const finished = document.status === 'ready' || document.status === 'failed'
+          ? document
+          : await waitForProjectDocument(projectId, document.document_id, {
+            signal: pollController.signal,
+          });
+        setSelectedAttachments((current) => current.map((item) =>
+          item.id === id ? {
+            ...item,
+            status: finished.status === 'ready' ? 'ready' : 'error',
+            error: finished.status === 'failed'
+              ? (finished.error_code ?? 'Document processing failed.')
+              : undefined,
+          } : item
         ));
         setAttachmentError(null);
         window.dispatchEvent(new CustomEvent('project-documents-updated'));
       }).catch((cause) => {
+        if (pollController.signal.aborted) return;
         const message = cause instanceof Error ? cause.message : 'Upload failed.';
         setSelectedAttachments((current) => current.map((item) =>
           item.id === id ? { ...item, status: 'error', error: message } : item
         ));
         setAttachmentError(message);
+      }).finally(() => {
+        if (attachmentPollsRef.current.get(id) === pollController) {
+          attachmentPollsRef.current.delete(id);
+        }
       });
     }
   }, [projectId]);
 
   const removeAttachment = useCallback((attachmentId: string) => {
+    attachmentPollsRef.current.get(attachmentId)?.abort();
+    attachmentPollsRef.current.delete(attachmentId);
     setSelectedAttachments((current) => current.filter((item) => item.id !== attachmentId));
   }, []);
 
   const sendMessage = useCallback(async (override?: string) => {
     const text = (override ?? inputText).trim();
     if (!text || isGenerating) return;
+    if (selectedAttachments.some((item) => item.status !== 'ready')) {
+      setAttachmentError(
+        navigator.language.toLowerCase().startsWith('vi')
+          ? 'Tài liệu đang được xử lý. Hãy chờ hoặc gỡ tài liệu để gửi tin nhắn.'
+          : 'A selected document is still processing. Wait or remove it before sending.'
+      );
+      return;
+    }
     setInputText('');
     setIsGenerating(true);
     const now = Date.now();
@@ -277,6 +320,7 @@ export function useStreamingChat(
             user_message: text,
             idempotency_key: `turn_${crypto.randomUUID?.() ?? now}`,
             document_ids: selectedAttachments
+              .filter((item) => item.status === 'ready')
               .map((item) => item.documentId)
               .filter((documentId): documentId is string => Boolean(documentId)),
           }),
@@ -297,10 +341,24 @@ export function useStreamingChat(
               ? { ...message, citations: [...(message.citations ?? []), citation] }
               : message
           ));
+        } else if (event.event_type === 'warning' && event.safe_message) {
+          setMessages((current) => current.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  content: [message.content, `⚠ ${event.safe_message}`]
+                    .filter(Boolean)
+                    .join('\n\n'),
+                }
+              : message
+          ));
         } else if (event.event_type === 'error' && event.safe_message) {
           setMessages((current) => current.map((message) =>
-            message.id === assistantId && !message.content
-              ? { ...message, content: event.safe_message ?? '' }
+            message.id === assistantId
+              ? {
+                  ...message,
+                  content: [message.content, event.safe_message].filter(Boolean).join('\n\n'),
+                }
               : message
           ));
         }
@@ -309,6 +367,8 @@ export function useStreamingChat(
         message.id === assistantId ? { ...message, isStreaming: false } : message
       ));
       setApiStatus('online');
+      setSelectedAttachments([]);
+      setAttachmentError(null);
       void refreshHistory();
     } catch (cause) {
       if ((cause as { name?: string }).name !== 'AbortError') {

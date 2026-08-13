@@ -16,6 +16,7 @@ class ProjectDocumentStatus(StrEnum):
     INDEXING = "indexing"
     READY = "ready"
     FAILED = "failed"
+    DELETING = "deleting"
     DELETED = "deleted"
 
 
@@ -194,20 +195,21 @@ def can_transition_document(current: ProjectDocumentStatus, target: ProjectDocum
         ProjectDocumentStatus.RECEIVED: {
             ProjectDocumentStatus.EXTRACTING,
             ProjectDocumentStatus.FAILED,
-            ProjectDocumentStatus.DELETED,
+            ProjectDocumentStatus.DELETING,
         },
         ProjectDocumentStatus.EXTRACTING: {
             ProjectDocumentStatus.INDEXING,
             ProjectDocumentStatus.FAILED,
-            ProjectDocumentStatus.DELETED,
+            ProjectDocumentStatus.DELETING,
         },
         ProjectDocumentStatus.INDEXING: {
             ProjectDocumentStatus.READY,
             ProjectDocumentStatus.FAILED,
-            ProjectDocumentStatus.DELETED,
+            ProjectDocumentStatus.DELETING,
         },
-        ProjectDocumentStatus.READY: {ProjectDocumentStatus.DELETED},
-        ProjectDocumentStatus.FAILED: {ProjectDocumentStatus.DELETED},
+        ProjectDocumentStatus.READY: {ProjectDocumentStatus.DELETING},
+        ProjectDocumentStatus.FAILED: {ProjectDocumentStatus.DELETING},
+        ProjectDocumentStatus.DELETING: {ProjectDocumentStatus.DELETED},
         ProjectDocumentStatus.DELETED: set(),
     }
     return target in allowed[current]

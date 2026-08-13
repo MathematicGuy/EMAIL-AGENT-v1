@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from cowork_agent.integrations.knowledge_ingestion.project_documents import (
     ExtractedProjectDocument,
@@ -37,8 +39,18 @@ class ProjectDocumentRepository(Protocol):
     ) -> bool: ...
 
 
+class ProjectDocumentCleanupRepository(Protocol):
+    async def claim_cleanup(self, document_id: str) -> ProjectDocument | None: ...
+
+    async def finish_cleanup(
+        self, document_id: str, *, error_code: str | None = None
+    ) -> bool: ...
+
+
 class PrivateSourceStorage(Protocol):
     async def download_to(self, object_key: str, target: Path) -> None: ...
+
+    async def delete(self, object_key: str) -> None: ...
 
 
 class DocumentExtractor(Protocol):
@@ -58,6 +70,24 @@ class ProjectVectorStore(Protocol):
         chunks: tuple[ProjectDocumentChunk, ...],
     ) -> int: ...
 
+    async def mark_document_ready(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        project_id: str,
+        document_id: str,
+    ) -> None: ...
+
+    async def delete_document(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        project_id: str,
+        document_id: str,
+    ) -> bool: ...
+
 
 class ProjectDocumentIngestionWorker:
     """Stateful source handling; private bytes live only in a temporary file."""
@@ -68,26 +98,52 @@ class ProjectDocumentIngestionWorker:
         storage: PrivateSourceStorage,
         extractor: DocumentExtractor,
         vectors: ProjectVectorStore,
+        *,
+        max_pages: int = 100,
     ) -> None:
         self._repository = repository
         self._storage = storage
         self._extractor = extractor
         self._vectors = vectors
+        self._max_pages = max_pages
 
     async def execute(self, document_id: str) -> None:
         document = await self._repository.claim_job(document_id)
         if document is None:
             return
         state = "extracting"
+        vectors_written = False
         try:
             with tempfile.TemporaryDirectory(prefix="cowork-project-doc-") as directory:
                 source = Path(directory) / _source_name(document.media_type)
                 await self._storage.download_to(document.storage_key, source)
                 _verify_source(source, document)
                 extracted = self._extractor.extract(source, document.media_type)
+                if extracted.page_count > self._max_pages:
+                    raise ProjectDocumentExtractionError("page_limit_exceeded")
                 chunks = tuple(
-                    ProjectDocumentChunk(f"{index + 1}", text, start, end)
-                    for index, (text, start, end) in enumerate(extracted.chunks)
+                    ProjectDocumentChunk(
+                        chunk_id=str(
+                            uuid5(
+                                NAMESPACE_URL,
+                                ":".join(
+                                    (
+                                        document.id,
+                                        str(index),
+                                        chunk.section or "",
+                                        str(chunk.page_start),
+                                        str(chunk.page_end),
+                                        chunk.text,
+                                    )
+                                ),
+                            )
+                        ),
+                        text=chunk.text,
+                        page_start=chunk.page_start,
+                        page_end=chunk.page_end,
+                        section=chunk.section,
+                    )
+                    for index, chunk in enumerate(extracted.chunks)
                 )
                 if not chunks:
                     raise ProjectDocumentExtractionError("empty_extraction")
@@ -105,6 +161,13 @@ class ProjectDocumentIngestionWorker:
                     expires_at=document.expires_at,
                     chunks=chunks,
                 )
+                vectors_written = True
+                await self._vectors.mark_document_ready(
+                    workspace_id=document.workspace_id,
+                    user_id=document.user_id,
+                    project_id=document.project_id,
+                    document_id=document.id,
+                )
                 if await self._repository.transition_document(
                     document.id,
                     from_status="indexing",
@@ -113,18 +176,71 @@ class ProjectDocumentIngestionWorker:
                     chunk_count=count,
                 ):
                     await self._repository.finish_job(document.id, status="completed")
+                else:
+                    await self._delete_vectors(document)
         except ProjectDocumentExtractionError as exc:
+            if vectors_written:
+                await self._delete_vectors(document)
             await self._fail(document.id, state, exc.code)
         except StorageUnavailable:
+            if vectors_written:
+                await self._delete_vectors(document)
             await self._fail(document.id, state, "source_download_failed")
         except (OSError, ValueError):
+            if vectors_written:
+                await self._delete_vectors(document)
             await self._fail(document.id, state, "ingestion_failed")
+        except Exception:
+            if vectors_written:
+                await self._delete_vectors(document)
+            await self._fail(document.id, state, "ingestion_dependency_failed")
 
     async def _fail(self, document_id: str, state: str, code: str) -> None:
         if await self._repository.transition_document(
             document_id, from_status=state, to_status="failed", error_code=code
         ):
             await self._repository.finish_job(document_id, status="failed", error_code=code)
+
+    async def _delete_vectors(self, document: ProjectDocument) -> None:
+        await self._vectors.delete_document(
+            workspace_id=document.workspace_id,
+            user_id=document.user_id,
+            project_id=document.project_id,
+            document_id=document.id,
+        )
+
+
+class ProjectDocumentCleanupWorker:
+    """Durably purge a retrieval-ineligible document from both private stores."""
+
+    def __init__(
+        self,
+        repository: ProjectDocumentCleanupRepository,
+        storage: PrivateSourceStorage,
+        vectors: ProjectVectorStore,
+    ) -> None:
+        self._repository = repository
+        self._storage = storage
+        self._vectors = vectors
+
+    async def execute(self, document_id: str) -> None:
+        document = await self._repository.claim_cleanup(document_id)
+        if document is None:
+            return
+        try:
+            await self._vectors.delete_document(
+                workspace_id=document.workspace_id,
+                user_id=document.user_id,
+                project_id=document.project_id,
+                document_id=document.id,
+            )
+            await self._storage.delete(document.storage_key)
+        except Exception:
+            await self._repository.finish_cleanup(
+                document.id, error_code="cleanup_dependency_failed"
+            )
+            return
+        await self._repository.finish_cleanup(document.id)
 
 
 def _source_name(media_type: str) -> str:
@@ -145,3 +261,28 @@ def _verify_source(path: Path, document: ProjectDocument) -> None:
         raise ProjectDocumentExtractionError("source_download_failed") from exc
     if digest != document.content_sha256:
         raise ProjectDocumentExtractionError("source_metadata_mismatch")
+    _verify_media_type(path, document.media_type)
+
+
+def _verify_media_type(path: Path, declared_media_type: str) -> None:
+    try:
+        if declared_media_type == "application/pdf":
+            with path.open("rb") as source:
+                if source.read(5) != b"%PDF-":
+                    raise ProjectDocumentExtractionError("source_media_type_mismatch")
+            return
+        if declared_media_type == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
+            if not zipfile.is_zipfile(path):
+                raise ProjectDocumentExtractionError("source_media_type_mismatch")
+            with zipfile.ZipFile(path) as archive:
+                names = set(archive.namelist())
+            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+                raise ProjectDocumentExtractionError("source_media_type_mismatch")
+            return
+    except ProjectDocumentExtractionError:
+        raise
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ProjectDocumentExtractionError("source_media_type_mismatch") from exc
+    raise ProjectDocumentExtractionError("unsupported_media_type")

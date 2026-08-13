@@ -22,7 +22,6 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
-from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
@@ -137,7 +136,7 @@ def test_results_are_ordered_by_descending_relevance(
     assert scores == sorted(scores, reverse=True)
 
 
-def test_an_unreachable_qdrant_falls_back_to_in_repo_memory(
+def test_an_unreachable_qdrant_falls_back_to_null_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -160,13 +159,10 @@ def test_an_unreachable_qdrant_falls_back_to_in_repo_memory(
 
     result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
 
-    assert isinstance(result, HybridSemanticMemory)
-    assert asyncio.run(result.retrieve(_request())).retrieval_status is (
-        RetrievalStatus.NO_RESULTS
-    )
+    assert isinstance(result, NullSemanticMemory)
 
 
-def test_bootstrap_uses_jina_settings_without_gemini_keys(
+def test_bootstrap_degrades_to_null_memory_when_qdrant_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
@@ -179,4 +175,5 @@ def test_bootstrap_uses_jina_settings_without_gemini_keys(
 
     result = asyncio.run(bootstrap.build_semantic_memory(jina, qdrant))
 
-    assert not isinstance(result, NullSemanticMemory)
+    assert isinstance(result, NullSemanticMemory)
+

@@ -299,6 +299,10 @@ class ChatController:
                     query=routing_outcome.retrieval_query or request.user_message,
                     document_ids=request.document_ids,
                 )
+                if project_documents.degraded:
+                    response_mode = ChatResponseMode.EVIDENCE_UNAVAILABLE
+                elif not project_documents.evidence:
+                    response_mode = ChatResponseMode.INSUFFICIENT_EVIDENCE
             context = await self._memory.read_context(
                 self._context_request(request, routing_outcome)
             )

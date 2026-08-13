@@ -1,101 +1,64 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from cowork_agent.integrations.knowledge_ingestion.models import PdfKind
-from cowork_agent.integrations.knowledge_ingestion.pdf_inspector import (
-    PdfInspector,
-    _parse_markdown_pages,
-    _run_command,
-)
-
-
-class FakeRunner:
-    def __init__(self, responses: dict[tuple[str, ...], str]) -> None:
-        self.responses = responses
-        self.commands: list[tuple[str, ...]] = []
-
-    def __call__(self, command: Sequence[str]) -> str:
-        key = tuple(command)
-        self.commands.append(key)
-        return self.responses[key]
+from cowork_agent.integrations.knowledge_ingestion.pdf_inspector import PdfInspector
 
 
 def test_inspector_maps_mixed_pages_and_native_markdown(tmp_path: Path) -> None:
-    """Dropping the classifier's OCR page list would OCR the wrong PDF pages."""
     path = tmp_path / "policy.pdf"
-    runner = FakeRunner(
-        {
-            ("detect-pdf", str(path), "--json"): (
-                '{"pdf_type":"mixed","page_count":3,"pages_needing_ocr":[2]}'
-            ),
-        ("pdf2md", str(path), "--json", "--pages", "--select-pages", "1,3"): (
-                '{"markdown":"<!-- Page 1 -->\\n# One\\n<!-- Page 3 -->\\n# Three"}'
-            ),
-        }
-    )
+    inspected_paths: list[str] = []
+    extracted_pages: list[list[int] | None] = []
 
-    inspection = PdfInspector(runner).inspect(path)
+    def detector(value: str) -> SimpleNamespace:
+        inspected_paths.append(value)
+        return SimpleNamespace(pdf_type="mixed", page_count=3, pages_needing_ocr=[2])
+
+    def extractor(value: str, pages: list[int] | None) -> SimpleNamespace:
+        assert value == str(path)
+        extracted_pages.append(pages)
+        return SimpleNamespace(
+            pages=[
+                SimpleNamespace(page=0, markdown="# One", needs_ocr=False),
+                SimpleNamespace(page=2, markdown="# Three", needs_ocr=False),
+            ]
+        )
+
+    inspection = PdfInspector(detector, extractor).inspect(path)
 
     assert inspection.kind is PdfKind.MIXED
     assert inspection.page_count == 3
     assert inspection.pages_needing_ocr == (2,)
     assert dict(inspection.native_markdown_by_page) == {1: "# One", 3: "# Three"}
-    assert runner.commands == [
-        ("detect-pdf", str(path), "--json"),
-        ("pdf2md", str(path), "--json", "--pages", "--select-pages", "1,3"),
-    ]
+    assert inspected_paths == [str(path)]
+    assert extracted_pages == [[0, 2]]
 
 
 @pytest.mark.parametrize(
-    "detect_output",
+    "detection",
     [
-        "not-json",
-        '{"pdf_type":"mixed","page_count":2,"pages_needing_ocr":[3]}',
-        '{"pdf_type":"text_based","page_count":0,"pages_needing_ocr":[]}',
+        SimpleNamespace(pdf_type="unknown", page_count=2, pages_needing_ocr=[]),
+        SimpleNamespace(pdf_type="mixed", page_count=0, pages_needing_ocr=[]),
+        SimpleNamespace(pdf_type="mixed", page_count=2, pages_needing_ocr=[3]),
     ],
 )
-def test_inspector_rejects_invalid_detection_without_leaking_command_output(
-    tmp_path: Path, detect_output: str
-) -> None:
-    """Including tool output in failures could expose document content in logs."""
-    path = tmp_path / "policy.pdf"
-    runner = FakeRunner({("detect-pdf", str(path), "--json"): f"secret: {detect_output}"})
-
-    with pytest.raises(ValueError) as error:
-        PdfInspector(runner).inspect(path)
-
-    assert "secret:" not in str(error.value)
+def test_inspector_rejects_invalid_detection(tmp_path: Path, detection: object) -> None:
+    with pytest.raises(ValueError, match="PDF inspection output is invalid"):
+        PdfInspector(lambda _path: detection, lambda _path, _pages: None).inspect(
+            tmp_path / "policy.pdf"
+        )
 
 
-def test_command_runner_decodes_pdf_inspector_output_as_utf8(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed: dict[str, object] = {}
+def test_inspector_rejects_invalid_markdown_response(tmp_path: Path) -> None:
+    def detector(_path: str) -> SimpleNamespace:
+        return SimpleNamespace(pdf_type="text_based", page_count=1, pages_needing_ocr=[])
 
-    def fake_run(*args: object, **kwargs: object) -> SimpleNamespace:
-        observed.update(kwargs)
-        return SimpleNamespace(stdout='{"markdown":"Tiếng Việt"}')
+    def extractor(_path: str, _pages: list[int] | None) -> SimpleNamespace:
+        return SimpleNamespace(pages=[SimpleNamespace(page=0, markdown="", needs_ocr=False)])
 
-    monkeypatch.setattr(
-        "cowork_agent.integrations.knowledge_ingestion.pdf_inspector.subprocess.run",
-        fake_run,
-    )
-
-    assert _run_command(("detect-pdf", "file.pdf", "--json"))
-    assert observed["encoding"] == "utf-8"
-
-
-def test_parser_keeps_output_when_pdf_inspector_omits_page_markers() -> None:
-    pages = _parse_markdown_pages(
-        {"markdown": "<!-- Page 1 -->\nOne\n<!-- Page 3 -->\nThree"},
-        (1, 2, 3),
-    )
-
-    assert pages[1] == "One"
-    assert pages[3] == "Three"
-    assert "no standalone marker" in pages[2]
+    with pytest.raises(ValueError, match="PDF Markdown output is invalid"):
+        PdfInspector(detector, extractor).inspect(tmp_path / "policy.pdf")

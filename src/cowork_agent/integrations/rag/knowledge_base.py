@@ -10,11 +10,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Soft per-chunk size cap; splits happen on paragraph boundaries.
-_MAX_CHUNK_CHARS = 1200
+from .markdown_chunking import chunk_markdown
 
 _H1_PATTERN = re.compile(r"^#\s+(.+)$", re.MULTILINE)
-_SECTION_PATTERN = re.compile(r"^#{1,2}\s+(.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,21 +68,19 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument,
             source_url = path.resolve().relative_to(repo_root).as_posix()
         else:
             source_url = path.name
-        sections = _split_sections(raw_text)
         chunks: list[KnowledgeChunk] = []
-        for section, section_text in sections:
-            for part in _split_long_text(section_text):
-                chunks.append(
-                    KnowledgeChunk(
-                        chunk_id=f"{document_id}#{len(chunks)}",
-                        document_id=document_id,
-                        document_title=title,
-                        section=section,
-                        text=part,
-                        source_url=source_url,
-                        tenant_id=tenant_id,
-                    )
+        for part in chunk_markdown(raw_text):
+            chunks.append(
+                KnowledgeChunk(
+                    chunk_id=f"{document_id}#{len(chunks)}",
+                    document_id=document_id,
+                    document_title=title,
+                    section=part.section,
+                    text=part.text,
+                    source_url=source_url,
+                    tenant_id=tenant_id,
                 )
+            )
         documents.append(
             KnowledgeDocument(
                 document_id=document_id,
@@ -94,39 +90,3 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str) -> tuple[KnowledgeDocument,
             )
         )
     return tuple(documents)
-
-
-def _split_sections(raw_text: str) -> list[tuple[str | None, str]]:
-    """Split a document into (section title, body) pairs by H1/H2 headings."""
-    matches = list(_SECTION_PATTERN.finditer(raw_text))
-    if not matches:
-        body = raw_text.strip()
-        return [(None, body)] if body else []
-    sections: list[tuple[str | None, str]] = []
-    preamble = raw_text[: matches[0].start()].strip()
-    if preamble:
-        sections.append((None, preamble))
-    for position, match in enumerate(matches):
-        end = matches[position + 1].start() if position + 1 < len(matches) else len(raw_text)
-        body = raw_text[match.end() : end].strip()
-        if body:
-            sections.append((match.group(1).strip(), body))
-    return sections
-
-
-def _split_long_text(text: str) -> list[str]:
-    """Split oversize section text on paragraph boundaries."""
-    if len(text) <= _MAX_CHUNK_CHARS:
-        return [text]
-    paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
-    parts: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        if current and len(current) + len(paragraph) + 2 > _MAX_CHUNK_CHARS:
-            parts.append(current)
-            current = paragraph
-        else:
-            current = f"{current}\n\n{paragraph}" if current else paragraph
-    if current:
-        parts.append(current)
-    return parts

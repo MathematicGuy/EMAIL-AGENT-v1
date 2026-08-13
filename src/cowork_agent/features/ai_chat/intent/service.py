@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from time import monotonic
+from typing import Protocol
 
 from cowork_agent.domain.chat_contracts import (
     MAX_CLASSIFIER_TURNS,
@@ -24,7 +25,7 @@ from cowork_agent.features.ai_chat.ports import (
     IntentClassifierPort,
     ReadyDocumentCatalogPort,
 )
-from cowork_agent.features.user_documents.ports import ProjectDocumentRepositoryPort
+from cowork_agent.persistence.repositories.projects import ProjectDocument
 
 from .observability import (
     IntentRoutingEvent,
@@ -61,20 +62,31 @@ class EmptyReadyDocumentCatalog:
         return ()
 
 
-class RepositoryReadyDocumentCatalog:
-    """Project-filtered metadata catalog backed by the document registry."""
+class CanonicalReadyDocumentRepository(Protocol):
+    async def list_ready_for_scope(
+        self,
+        workspace_id: str,
+        user_id: str,
+        project_id: str,
+        *,
+        at: datetime,
+    ) -> tuple[ProjectDocument, ...]: ...
 
-    def __init__(self, repository: ProjectDocumentRepositoryPort) -> None:
+
+class CanonicalReadyDocumentCatalog:
+    """Ready-document metadata sourced from the canonical Postgres plane."""
+
+    def __init__(self, repository: CanonicalReadyDocumentRepository) -> None:
         self._repository = repository
 
     async def list_ready(
         self, scope: ChatMemoryScope, *, at: datetime
     ) -> tuple[ReadyDocumentRef, ...]:
-        documents = await self._repository.list_ready(
+        documents = await self._repository.list_ready_for_scope(
             scope.tenant_id, scope.user_id, scope.project_id, at=at
         )
         return tuple(
-            ReadyDocumentRef(document_id=document.document_id, title=document.title)
+            ReadyDocumentRef(document_id=document.id, title=document.filename)
             for document in documents
         )
 
