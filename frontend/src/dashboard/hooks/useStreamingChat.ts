@@ -8,6 +8,8 @@ import type {
   ChatCitation,
   ChatComposerAttachment,
   ChatMessage,
+  ChatRagEvidence,
+  ChatRetrievalStatus,
   RecentChat,
   TaskWorkflow,
 } from '../types';
@@ -23,6 +25,8 @@ interface ChatTurn {
   assistant_message: string | null;
   created_at: string;
   citation_coordinates?: Array<Record<string, unknown>>;
+  rag_evidence?: Array<Record<string, unknown>>;
+  retrieval_status?: string;
 }
 
 interface SseEvent {
@@ -38,6 +42,8 @@ interface SseEvent {
   section?: string;
   page_start?: number;
   page_end?: number;
+  rag_evidence?: Array<Record<string, unknown>>;
+  retrieval_status?: string;
 }
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -99,6 +105,43 @@ function citationFromCoordinate(value: Record<string, unknown>): ChatCitation | 
     pageEnd: value.page_end,
     unavailable: value.unavailable === true,
   };
+}
+
+function retrievalStatus(value: unknown): ChatRetrievalStatus | undefined {
+  return value === 'success' || value === 'no_results' || value === 'timeout' || value === 'unavailable'
+    ? value
+    : undefined;
+}
+
+function ragEvidenceFromPayload(value: unknown): ChatRagEvidence[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (
+      !item || typeof item !== 'object' ||
+      !['company_knowledge', 'project_document'].includes((item as Record<string, unknown>).source as string) ||
+      (item as Record<string, unknown>).retrieval_status !== 'success' ||
+      typeof (item as Record<string, unknown>).chunk_id !== 'string' ||
+      typeof (item as Record<string, unknown>).document_id !== 'string' ||
+      typeof (item as Record<string, unknown>).document_title !== 'string' ||
+      typeof (item as Record<string, unknown>).relevance_score !== 'number' ||
+      typeof (item as Record<string, unknown>).preview !== 'string' ||
+      typeof (item as Record<string, unknown>).content !== 'string'
+    ) return [];
+    const evidence = item as Record<string, unknown>;
+    return [{
+      source: evidence.source as ChatRagEvidence['source'],
+      retrievalStatus: 'success' as const,
+      chunkId: evidence.chunk_id as string,
+      documentId: evidence.document_id as string,
+      documentTitle: evidence.document_title as string,
+      section: typeof evidence.section === 'string' ? evidence.section : null,
+      sourceUrl: typeof evidence.source_url === 'string' ? evidence.source_url : null,
+      relevanceScore: evidence.relevance_score as number,
+      rerankScore: typeof evidence.rerank_score === 'number' ? evidence.rerank_score : null,
+      preview: evidence.preview as string,
+      content: evidence.content as string,
+    }];
+  }).slice(0, 5);
 }
 
 async function parseSse(
@@ -341,6 +384,19 @@ export function useStreamingChat(
               ? { ...message, citations: [...(message.citations ?? []), citation] }
               : message
           ));
+        } else if (event.event_type === 'completed') {
+          const status = retrievalStatus(event.retrieval_status);
+          if (status || Array.isArray(event.rag_evidence)) {
+            setMessages((current) => current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    ragEvidence: ragEvidenceFromPayload(event.rag_evidence),
+                    retrievalStatus: status,
+                  }
+                : message
+            ));
+          }
         } else if (event.event_type === 'warning' && event.safe_message) {
           setMessages((current) => current.map((message) =>
             message.id === assistantId
@@ -397,9 +453,16 @@ export function useStreamingChat(
         const citations = (turn.citation_coordinates ?? [])
           .map(citationFromCoordinate)
           .filter((item): item is ChatCitation => item !== null);
+        const hasStoredEvidence = Array.isArray(turn.rag_evidence);
+        const ragEvidence = hasStoredEvidence ? ragEvidenceFromPayload(turn.rag_evidence) : undefined;
+        const status = retrievalStatus(turn.retrieval_status);
         return [
           { id: `${turn.turn_id}-user`, role: 'user' as const, content: turn.user_message, timestamp: timestamp(turn.created_at) },
-          { id: `${turn.turn_id}-assistant`, role: 'assistant' as const, content: turn.assistant_message ?? '', timestamp: timestamp(turn.created_at), citations },
+          {
+            id: `${turn.turn_id}-assistant`, role: 'assistant' as const,
+            content: turn.assistant_message ?? '', timestamp: timestamp(turn.created_at), citations,
+            ragEvidence, retrievalStatus: status,
+          },
         ];
       }));
       setActiveConversationId(sessionId);

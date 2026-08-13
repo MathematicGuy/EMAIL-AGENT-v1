@@ -29,11 +29,13 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         self,
         *,
         user_id: str,
+        tenant_id: str = "local",
         project_id: str = "default-project",
     ) -> ChatMemoryScope:
+        del tenant_id
         session_id = self._new_id()
         project_filter = "AND projects.is_default = TRUE"
-        params: tuple[object, ...] = (session_id, "ai_chat", "local", user_id)
+        params: tuple[object, ...] = (session_id, "ai_chat", user_id)
         if project_id != "default-project":
             project_filter = "AND projects.id = %s"
             params = (*params, project_id)
@@ -46,7 +48,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
                 JOIN projects
                   ON projects.workspace_id = members.workspace_id
                  AND projects.owner_user_id = members.user_id
-                WHERE members.workspace_id = %s AND members.user_id = %s
+                WHERE members.user_id = %s
                   {project_filter}
                 RETURNING id, project_id
                 """,
@@ -62,8 +64,9 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def require(
-        self, session_id: str, *, user_id: str
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
     ) -> ChatMemoryScope:
+        del tenant_id
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """
@@ -89,8 +92,9 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def list_for(
-        self, *, user_id: str, project_id: str | None = None
+        self, *, user_id: str, tenant_id: str = "local", project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
+        del tenant_id
         project_filter = "" if project_id is None else "AND sessions.project_id = %s"
         params: tuple[object, ...] = (
             (user_id,) if project_id is None else (user_id, project_id)
@@ -122,8 +126,9 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def delete_project(
-        self, *, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]:
+        del tenant_id
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """

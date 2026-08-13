@@ -12,6 +12,7 @@ from cowork_agent.domain.chat_contracts import (
 )
 from cowork_agent.features.ai_chat.intent.observability import RecordingIntentRoutingSink
 from cowork_agent.features.ai_chat.intent.service import (
+    CanonicalReadyDocumentCatalog,
     ChatRoutingService,
     IntentClassifierInvalidOutput,
 )
@@ -38,6 +39,18 @@ class Classifier:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+class ReadyDocumentRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def list_ready_for_scope(
+        self, workspace_id: str, user_id: str, project_id: str, *, at: object
+    ) -> tuple[object, ...]:
+        del at
+        self.calls.append((workspace_id, user_id, project_id))
+        return ()
 
 
 def _scope() -> ChatMemoryScope:
@@ -111,3 +124,19 @@ def test_failure_without_ready_documents_falls_back_to_chat() -> None:
     assert outcome.route is ChatRoute.CHAT
     assert outcome.retrieval_query is None
     assert IntentReasonCode.NO_READY_DOCUMENTS in outcome.reason_codes
+
+
+def test_canonical_catalog_uses_the_scope_tenant_for_project_document_lookup() -> None:
+    repository = ReadyDocumentRepository()
+    catalog = CanonicalReadyDocumentCatalog(repository)  # type: ignore[arg-type]
+    scope = ChatMemoryScope(
+        user_id="user-1",
+        session_id="session-1",
+        project_id="project-1",
+        tenant_id="b60a66cb-44fb-4bea-b6c8-53fd9d04e4e1",
+    )
+
+    assert asyncio.run(catalog.list_ready(scope, at=datetime(2026, 8, 13, tzinfo=UTC))) == ()
+    assert repository.calls == [
+        ("b60a66cb-44fb-4bea-b6c8-53fd9d04e4e1", "user-1", "project-1")
+    ]

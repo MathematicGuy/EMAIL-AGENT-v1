@@ -205,10 +205,14 @@ def test_project_collection_backfills_indexes_for_an_existing_collection() -> No
 
 def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
     class Repository:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, ...]] = []
+
         async def list_ready_for_scope(
             self, *args: object, **kwargs: object
         ) -> tuple[ProjectDocument, ...]:
-            del args, kwargs
+            del kwargs
+            self.calls.append(args)
             return (
                 ProjectDocument(
                     id="document-1",
@@ -243,9 +247,10 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
             return ()
 
     async def scenario() -> None:
+        repository = Repository()
         vectors = Vectors()
         retriever = CanonicalProjectDocumentRetriever(
-            Repository(), vectors, top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
+            repository, vectors, top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
         )
         response = await retriever.retrieve(
             ProjectDocumentQuery(
@@ -259,6 +264,10 @@ def test_qdrant_retry_reuses_the_authorized_query_vector() -> None:
         assert response.degraded is False
         assert vectors.embed_calls == 1
         assert vectors.query_calls == 2
+        assert repository.calls == [
+            ("local", "user-1", "project-1"),
+            ("local", "user-1", "project-1"),
+        ]
 
     asyncio.run(scenario())
 

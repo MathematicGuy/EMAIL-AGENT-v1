@@ -355,7 +355,7 @@ class CanonicalProjectDocumentRetriever:
         self, request: ProjectDocumentQuery
     ) -> ProjectDocumentResponse:
         ready = await self._repository.list_ready_for_scope(
-            "local",
+            request.tenant_id,
             request.user_id,
             request.project_id,
             at=datetime.now(UTC),
@@ -372,7 +372,7 @@ class CanonicalProjectDocumentRetriever:
             try:
                 evidence = await self._vectors.retrieve_vector(
                     vector=query_vector,
-                    workspace_id="local",
+                    workspace_id=request.tenant_id,
                     user_id=request.user_id,
                     project_id=request.project_id,
                     now=datetime.now(UTC),
@@ -381,7 +381,7 @@ class CanonicalProjectDocumentRetriever:
                     min_score=self._min_score,
                 )
                 latest_ready = await self._repository.list_ready_for_scope(
-                    "local",
+                    request.tenant_id,
                     request.user_id,
                     request.project_id,
                     at=datetime.now(UTC),

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 import cowork_agent.domain.chat_contracts as chat_contracts
+from cowork_agent.domain._chat_contracts_memory import ChatRagEvidence
 from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
@@ -178,6 +179,113 @@ def _chat_turn() -> ChatTurn:
         assistant_message="I can help you prioritize the request.",
         created_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
     )
+
+
+def _rag_evidence():
+    return ChatRagEvidence(
+        source="company_knowledge",
+        retrieval_status="success",
+        chunk_id="chunk-27",
+        document_id="citizen-id-law-2023",
+        document_title="Luật Căn cước 2023",
+        section="Điều 27",
+        source_url="https://example.gov.vn/luat-can-cuoc-2023",
+        relevance_score=0.842,
+        rerank_score=0.913,
+        preview="Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước.",
+        content=(
+            "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước "
+            "tại cơ quan quản lý căn cước theo Điều 27."
+        ),
+    )
+
+
+def test_chat_turn_round_trips_bounded_rag_evidence_with_scores_and_content() -> None:
+    turn = ChatTurn(
+        turn_id="turn-1",
+        session_id="session-1",
+        user_message="Làm thẻ Căn cước từ ngày 01/07/2026 ở đâu?",
+        assistant_message="Bạn có thể làm thủ tục tại cơ quan quản lý căn cước.",
+        created_at=datetime(2026, 8, 13, 14, 0, tzinfo=UTC),
+        rag_evidence=(_rag_evidence(),),
+        retrieval_status="success",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["rag_evidence"] == [
+        {
+            "source": "company_knowledge",
+            "retrieval_status": "success",
+            "chunk_id": "chunk-27",
+            "document_id": "citizen-id-law-2023",
+            "document_title": "Luật Căn cước 2023",
+            "section": "Điều 27",
+            "source_url": "https://example.gov.vn/luat-can-cuoc-2023",
+            "relevance_score": 0.842,
+            "rerank_score": 0.913,
+            "preview": "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước.",
+            "content": (
+                "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước "
+                "tại cơ quan quản lý căn cước theo Điều 27."
+            ),
+        }
+    ]
+
+
+def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status() -> None:
+    event = ChatMessageStreamEvent.completed(
+        event_id="event-4",
+        session_id="session-1",
+        turn_id="turn-1",
+        rag_evidence=(_rag_evidence(),),
+        retrieval_status="success",
+    )
+
+    assert stream_event_from_dict(json.loads(json.dumps(event.to_dict()))) == event
+    assert event.to_dict()["retrieval_status"] == "success"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        ChatMessageStreamEvent.delta(
+            event_id="event-1", session_id="session-1", turn_id="turn-1", text="Hello"
+        ),
+        ChatMessageStreamEvent.memory_citation(
+            event_id="event-2",
+            session_id="session-1",
+            turn_id="turn-1",
+            memory_type=MemoryCitationType.SEMANTIC,
+            source_id="doc-1",
+        ),
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-3",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=_task_proposal_payload(),
+        ),
+        ChatMessageStreamEvent.error(
+            event_id="event-5",
+            session_id="session-1",
+            turn_id="turn-1",
+            code="memory_degraded",
+            safe_message="Some optional context was unavailable.",
+        ),
+    ],
+)
+def test_non_completed_stream_events_reject_rag_evidence(event: ChatMessageStreamEvent) -> None:
+    with pytest.raises(ValueError, match="completed"):
+        replace(event, rag_evidence=(_rag_evidence(),), retrieval_status="success")
+
+
+def test_rag_evidence_rejects_scores_outside_the_unit_interval() -> None:
+    with pytest.raises(ValueError, match="relevance_score"):
+        replace(_rag_evidence(), relevance_score=1.001)
+
+
+def test_chat_turn_rejects_more_than_five_rag_evidence_records() -> None:
+    with pytest.raises(ValueError, match="rag_evidence"):
+        replace(_chat_turn(), rag_evidence=(_rag_evidence(),) * 6, retrieval_status="success")
 
 
 def _profile() -> DeclarativeProfile:
@@ -638,7 +746,7 @@ def test_context_request_requires_its_session_to_match_the_namespace() -> None:
 def test_context_request_uses_a_memory_type_free_chat_scope() -> None:
     payload = _context_request().to_dict()
 
-    assert set(payload["scope"]) == {"user_id", "session_id", "feature"}
+    assert set(payload["scope"]) == {"tenant_id", "user_id", "session_id", "feature"}
 
 
 def test_context_response_requires_degraded_sources_to_match_degraded_flag() -> None:

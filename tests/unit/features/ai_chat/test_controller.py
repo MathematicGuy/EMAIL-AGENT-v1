@@ -13,6 +13,7 @@ from cowork_agent.domain.chat_contracts import (
     MemoryType,
     TaskEpisode,
 )
+from cowork_agent.domain.project_documents import ProjectDocumentEvidence, ProjectDocumentResponse
 from cowork_agent.domain.target_contracts import ValidationStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
@@ -20,8 +21,13 @@ from cowork_agent.features.ai_chat.controller import (
     ChatScopeMismatch,
     ChatSessionAccessDenied,
     InMemoryChatSessionRegistry,
+    _rag_evidence,
 )
-from cowork_agent.features.ai_chat.generation_context import GenerationContext
+from cowork_agent.features.ai_chat.generation_context import (
+    ContextSource,
+    GenerationContext,
+    LabeledSection,
+)
 from cowork_agent.features.ai_chat.memory_gateway import (
     MemoryGateway,
     MemorySourceUnavailableError,
@@ -108,6 +114,17 @@ class RetryableEpisodeWriter(EpisodeWriter):
         return episode
 
 
+class SemanticReader:
+    def __init__(self, context: dict[str, object]) -> None:
+        self.context = context
+
+    async def read_semantic_context(
+        self, namespace: MemoryNamespace, query: object
+    ) -> dict[str, object]:
+        del namespace, query
+        return self.context
+
+
 def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
     return ChatMemoryScope(
         user_id="user@example.com",
@@ -146,6 +163,7 @@ def _controller(
     reply: FakeReply | BrokenReply,
     profile: ProfileReader | None,
     episodes: EpisodeWriter | None = None,
+    semantic: SemanticReader | None = None,
 ) -> tuple[ChatController, InMemoryChatSessionBuffer]:
     ids = iter(f"id-{number}" for number in range(1, 30))
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
@@ -154,6 +172,7 @@ def _controller(
         session_buffer=buffer,
         declarative_memory=profile,
         episodic_memory=episodes,
+        semantic_memory=semantic,
     )
     return (
         ChatController(
@@ -200,6 +219,134 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     assert len(stored) == 1
     assert stored[0].assistant_message == "Hello there"
     assert len(profile.reads) == 1
+
+
+def test_controller_persists_and_completes_with_ranked_company_rag_evidence() -> None:
+    first_content = "  First\ncompany evidence  " + "x" * 410
+    semantic = SemanticReader(
+        {
+            "source_label": "current_company_evidence",
+            "retrieval_status": "success",
+            "chunks": (
+                {
+                    "chunk_id": "chunk-2",
+                    "document_id": "policy-2",
+                    "document_title": "Second Policy",
+                    "section": "Section 2",
+                    "text": "Second company evidence",
+                    "source_url": "https://example.test/2",
+                    "relevance_score": 0.82,
+                    "rerank_score": 0.79,
+                },
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": "policy-1",
+                    "document_title": "First Policy",
+                    "section": "Section 1",
+                    "text": first_content,
+                    "source_url": "https://example.test/1",
+                    "relevance_score": 0.91,
+                    "rerank_score": 0.88,
+                },
+            ),
+            "citations": (),
+            "scores": (),
+        }
+    )
+    controller, buffer = _controller(
+        reply=FakeReply(("Company answer",)),
+        profile=ProfileReader(_profile()),
+        semantic=semantic,
+    )
+
+    events = asyncio.run(
+        _collect(controller, _request(user_message="What does the company policy say?"))
+    )
+
+    completed = events[-1]
+    stored = buffer.read(
+        MemoryNamespace(
+            scope=_scope(), memory_type=MemoryType.SHORT_TERM, record_id="session-1", source_id=None
+        )
+    )[0]
+    assert [event.event_type for event in events] == [
+        ChatEventType.DELTA,
+        ChatEventType.COMPLETED,
+    ]
+    assert completed.retrieval_status == stored.retrieval_status == "success"
+    assert [item.chunk_id for item in completed.rag_evidence] == ["chunk-2", "chunk-1"]
+    assert completed.rag_evidence == stored.rag_evidence
+    assert completed.rag_evidence[0].relevance_score == 0.82
+    assert completed.rag_evidence[0].rerank_score == 0.79
+    assert completed.rag_evidence[1].content == first_content
+    assert completed.rag_evidence[1].preview == ("First company evidence " + "x" * 377)
+    assert len(completed.rag_evidence[1].preview) == 400
+
+
+def test_controller_records_no_results_status_without_rag_evidence() -> None:
+    semantic = SemanticReader(
+        {
+            "source_label": "current_company_evidence",
+            "retrieval_status": "no_results",
+            "chunks": (),
+            "citations": (),
+            "scores": (),
+        }
+    )
+    controller, buffer = _controller(
+        reply=FakeReply(("No company evidence found.",)),
+        profile=ProfileReader(_profile()),
+        semantic=semantic,
+    )
+
+    events = asyncio.run(
+        _collect(controller, _request(user_message="What does the company policy say?"))
+    )
+
+    stored = buffer.read(
+        MemoryNamespace(
+            scope=_scope(), memory_type=MemoryType.SHORT_TERM, record_id="session-1", source_id=None
+        )
+    )[0]
+    assert events[-1].retrieval_status == stored.retrieval_status == "no_results"
+    assert events[-1].rag_evidence == stored.rag_evidence == ()
+
+
+def test_project_retrieval_evidence_is_emitted_to_the_rag_panel_with_its_score() -> None:
+    project_documents = ProjectDocumentResponse(
+        evidence=(
+            ProjectDocumentEvidence(
+                citation_id="project:document-1:chunk-1",
+                chunk_id="chunk-1",
+                document_id="document-1",
+                project_id="project-1",
+                title="dang_ky_xe.pdf",
+                text="Quy trình đăng ký xe gồm bước nộp hồ sơ và nhận biển số.",
+                page_start=1,
+                page_end=1,
+                section="Quy trình thực hiện",
+                score=0.93,
+            ),
+        )
+    )
+
+    evidence, status = _rag_evidence(
+        GenerationContext(
+            current_instruction=LabeledSection(ContextSource.CURRENT_INSTRUCTION, "question"),
+            active_session_turns=None,
+            current_company_evidence=None,
+            stored_preference=None,
+            advisory_episodes=None,
+            conflict_precedence=(),
+        ),
+        project_documents,
+    )
+
+    assert status == "success"
+    assert evidence[0].source == "project_document"
+    assert evidence[0].document_title == "dang_ky_xe.pdf"
+    assert evidence[0].relevance_score == 0.93
+    assert evidence[0].preview == "Quy trình đăng ký xe gồm bước nộp hồ sơ và nhận biển số."
 
 
 def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_request() -> None:

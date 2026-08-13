@@ -29,7 +29,14 @@ class OpaqueSessionResolver(Protocol):
 class VerifiedPrincipal:
     """Authenticated user identity scoping every operation."""
 
+    tenant_id: str = LOCAL_TENANT_ID
     user_id: str = "default_user"
+
+    @property
+    def workspace_id(self) -> str:
+        """Postgres control-plane name for the verified tenant scope."""
+
+        return self.tenant_id
 
 
 def principal_for_connection(connection: MailboxConnection) -> VerifiedPrincipal:

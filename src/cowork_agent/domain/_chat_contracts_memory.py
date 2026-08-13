@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from math import isfinite
 from typing import ClassVar, Literal, Self, cast
 
 from ._chat_contracts_common import (
@@ -42,18 +43,177 @@ MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH = 256
 MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH = 300
 MAX_EPISODE_CITATION_SECTION_LENGTH = 300
 MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
+MAX_CHAT_RAG_EVIDENCE_ITEMS = 5
+MAX_CHAT_RAG_CHUNK_ID_LENGTH = 256
+MAX_CHAT_RAG_DOCUMENT_ID_LENGTH = 256
+MAX_CHAT_RAG_DOCUMENT_TITLE_LENGTH = 300
+MAX_CHAT_RAG_SECTION_LENGTH = 300
+MAX_CHAT_RAG_SOURCE_URL_LENGTH = 2_048
+MAX_CHAT_RAG_PREVIEW_LENGTH = 400
+MAX_CHAT_RAG_CONTENT_LENGTH = 16_000
+
+ChatRagSource = Literal["company_knowledge", "project_document"]
+ChatRetrievalStatus = Literal["success", "no_results", "timeout", "unavailable"]
+
+
+def _require_rag_score(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"{name} must be a number")
+    score = float(value)
+    if not isfinite(score) or not 0.0 <= score <= 1.0:
+        raise ValueError(f"{name} must be a finite number between 0 and 1")
+    return score
+
+
+def _require_retrieval_status(value: object, name: str) -> ChatRetrievalStatus:
+    if value not in {"success", "no_results", "timeout", "unavailable"}:
+        raise ValueError(f"{name} must be a supported retrieval status")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
+class ChatRagEvidence:
+    """One bounded, server-derived chunk used for a completed chat response."""
+
+    source: ChatRagSource
+    retrieval_status: ChatRetrievalStatus
+    chunk_id: str
+    document_id: str
+    document_title: str
+    section: str | None
+    source_url: str | None
+    relevance_score: float
+    rerank_score: float | None
+    preview: str
+    content: str
+
+    def __post_init__(self) -> None:
+        if self.source not in {"company_knowledge", "project_document"}:
+            raise ValueError("source must be a supported RAG source")
+        if _require_retrieval_status(self.retrieval_status, "retrieval_status") != "success":
+            raise ValueError("rag evidence requires a successful retrieval status")
+        _require_bounded_string(self.chunk_id, "chunk_id", MAX_CHAT_RAG_CHUNK_ID_LENGTH)
+        _require_bounded_string(self.document_id, "document_id", MAX_CHAT_RAG_DOCUMENT_ID_LENGTH)
+        _require_bounded_string(
+            self.document_title, "document_title", MAX_CHAT_RAG_DOCUMENT_TITLE_LENGTH
+        )
+        if self.section is not None:
+            _require_bounded_string(self.section, "section", MAX_CHAT_RAG_SECTION_LENGTH)
+        if self.source_url is not None:
+            _require_bounded_string(self.source_url, "source_url", MAX_CHAT_RAG_SOURCE_URL_LENGTH)
+        _require_rag_score(self.relevance_score, "relevance_score")
+        if self.rerank_score is not None:
+            _require_rag_score(self.rerank_score, "rerank_score")
+        _require_bounded_string(self.preview, "preview", MAX_CHAT_RAG_PREVIEW_LENGTH)
+        _require_bounded_string(self.content, "content", MAX_CHAT_RAG_CONTENT_LENGTH)
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        _reject_raw_email_shaped_keys(data)
+        expected_fields = {
+            "source",
+            "retrieval_status",
+            "chunk_id",
+            "document_id",
+            "document_title",
+            "section",
+            "source_url",
+            "relevance_score",
+            "rerank_score",
+            "preview",
+            "content",
+        }
+        if set(data) != expected_fields:
+            raise ValueError("ChatRagEvidence must contain exactly the evidence fields")
+        section = data["section"]
+        source_url = data["source_url"]
+        rerank_score = data["rerank_score"]
+        return cls(
+            source=cast(ChatRagSource, _require_string(data["source"], "source")),
+            retrieval_status=_require_retrieval_status(
+                data["retrieval_status"], "retrieval_status"
+            ),
+            chunk_id=_require_bounded_string(
+                data["chunk_id"], "chunk_id", MAX_CHAT_RAG_CHUNK_ID_LENGTH
+            ),
+            document_id=_require_bounded_string(
+                data["document_id"], "document_id", MAX_CHAT_RAG_DOCUMENT_ID_LENGTH
+            ),
+            document_title=_require_bounded_string(
+                data["document_title"], "document_title", MAX_CHAT_RAG_DOCUMENT_TITLE_LENGTH
+            ),
+            section=(
+                _require_bounded_string(section, "section", MAX_CHAT_RAG_SECTION_LENGTH)
+                if section is not None
+                else None
+            ),
+            source_url=(
+                _require_bounded_string(source_url, "source_url", MAX_CHAT_RAG_SOURCE_URL_LENGTH)
+                if source_url is not None
+                else None
+            ),
+            relevance_score=_require_rag_score(data["relevance_score"], "relevance_score"),
+            rerank_score=(
+                _require_rag_score(rerank_score, "rerank_score")
+                if rerank_score is not None
+                else None
+            ),
+            preview=_require_bounded_string(
+                data["preview"], "preview", MAX_CHAT_RAG_PREVIEW_LENGTH
+            ),
+            content=_require_bounded_string(
+                data["content"], "content", MAX_CHAT_RAG_CONTENT_LENGTH
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class ChatMemoryScope:
     """Aggregate fail-closed chat scope used before selecting one memory type."""
 
+    tenant_id: str
     user_id: str
     session_id: str
     feature: str = AI_CHAT_FEATURE
     project_id: str = "default-project"
 
+    def __init__(
+        self,
+        *args: str,
+        tenant_id: str = "local",
+        user_id: str | None = None,
+        session_id: str | None = None,
+        feature: str = AI_CHAT_FEATURE,
+        project_id: str = "default-project",
+    ) -> None:
+        """Create a tenant-scoped session, accepting V2 positional scopes.
+
+        Existing V2 callers provide ``(user_id, session_id)``; V3 callers may
+        provide ``(tenant_id, user_id, session_id)`` or keyword arguments.
+        """
+        if args:
+            if user_id is not None or session_id is not None:
+                raise TypeError("positional scope values cannot be mixed with user_id/session_id")
+            if len(args) == 2:
+                user_id, session_id = args
+            elif len(args) == 3:
+                tenant_id, user_id, session_id = args
+            else:
+                raise TypeError("ChatMemoryScope expects two or three positional values")
+        if user_id is None or session_id is None:
+            raise TypeError("user_id and session_id are required")
+        object.__setattr__(self, "tenant_id", tenant_id)
+        object.__setattr__(self, "user_id", user_id)
+        object.__setattr__(self, "session_id", session_id)
+        object.__setattr__(self, "feature", feature)
+        object.__setattr__(self, "project_id", project_id)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
+        _require_key_component(self.tenant_id, "tenant_id")
         _require_key_component(self.user_id, "user_id")
         _require_key_component(self.session_id, "session_id")
         _require_key_component(self.project_id, "project_id")
@@ -77,6 +237,7 @@ class ChatMemoryScope:
             project_id=_require_key_component(
                 data.get("project_id", "default-project"), "project_id"
             ),
+            tenant_id=_require_key_component(data.get("tenant_id", "local"), "tenant_id"),
         )
 
 
@@ -772,6 +933,8 @@ class ChatTurn:
     assistant_message: str | None
     created_at: datetime
     citation_coordinates: tuple[Mapping[str, object], ...] = ()
+    rag_evidence: tuple[ChatRagEvidence, ...] = ()
+    retrieval_status: ChatRetrievalStatus | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -789,6 +952,20 @@ class ChatTurn:
             "citation_coordinates",
             tuple(_frozen_mapping(item, "citation coordinate") for item in coordinates),
         )
+        evidence = tuple(self.rag_evidence)
+        if len(evidence) > MAX_CHAT_RAG_EVIDENCE_ITEMS:
+            raise ValueError("rag_evidence must not exceed 5 items")
+        if not all(isinstance(item, ChatRagEvidence) for item in evidence):
+            raise TypeError("rag_evidence items must be ChatRagEvidence")
+        if self.retrieval_status is not None:
+            object.__setattr__(
+                self,
+                "retrieval_status",
+                _require_retrieval_status(self.retrieval_status, "retrieval_status"),
+            )
+        if evidence and self.retrieval_status != "success":
+            raise ValueError("rag_evidence requires a successful retrieval_status")
+        object.__setattr__(self, "rag_evidence", evidence)
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -811,6 +988,15 @@ class ChatTurn:
                 for item in _as_sequence(
                     data.get("citation_coordinates", ()), "citation_coordinates"
                 )
+            ),
+            rag_evidence=tuple(
+                ChatRagEvidence.from_dict(_as_mapping(item, "rag evidence"))
+                for item in _as_sequence(data.get("rag_evidence", ()), "rag_evidence")
+            ),
+            retrieval_status=(
+                _require_retrieval_status(data["retrieval_status"], "retrieval_status")
+                if data.get("retrieval_status") is not None
+                else None
             ),
         )
 
