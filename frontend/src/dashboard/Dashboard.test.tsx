@@ -134,4 +134,18 @@ describe('Dashboard Project chat', () => {
       String(url).includes('/projects/project-default/documents')
     )).toBe(false);
   });
+
+  it('keeps document upload available while document processing is degraded', async () => {
+    const fetchMock = projectFetch((url) => {
+      if (url.endsWith('/v1/cowork/chat/document-health')) {
+        return response({ status: 'degraded', checks: { feature: 'enabled' } }, 503);
+      }
+      return undefined;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Dashboard />);
+
+    await waitFor(() => expect(document.querySelector('input[type="file"]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'Project documents' })).toBeTruthy();
+  });
 });

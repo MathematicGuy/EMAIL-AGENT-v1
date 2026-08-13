@@ -46,6 +46,7 @@ redis = [
 [project.scripts]
 mail-todo-api = "cowork_agent.app:main"
 mail-todo-worker = "cowork_agent.orchestration.worker:main"
+mail-todo-dev = "cowork_agent.orchestration.dev:main"
 mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 
 [tool.setuptools.packages.find]
