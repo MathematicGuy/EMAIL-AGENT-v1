@@ -3,7 +3,7 @@
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/app.py`, `persistence/`, `orchestration/`, `frontend/`, `gui/`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §20](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) (Dual storage modes & presentation layers)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1, §2 & §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) (Dual storage modes & presentation layers)
 
 ---
 
@@ -44,12 +44,12 @@ flowchart TB
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **FastAPI App** | `src/cowork_agent/app.py` | Configures dependency injection, lifespan resource setup (DB pools, LLM clients, vector indices), and mounts REST/SSE routes. |
-| **Identity Service** | `src/cowork_agent/identity.py` | Resolves `VerifiedPrincipal`, handles tenant boundaries (`LOCAL_TENANT_ID`), and validates opaque session tokens. |
-| **Persistence Repositories** | `src/cowork_agent/persistence/repositories/` | Provides repository implementations: `local.py` (In-Memory fallback) and `postgres.py` (PostgreSQL / Supabase connection pool). |
-| **Orchestration Workers** | `src/cowork_agent/orchestration/` | Background workers (`worker.py`, `project_document_worker.py`) processing Email digests and user document parsing asynchronously. |
-| **React 19 Web SPA** | `frontend/` | Production React 19 + Vite + Tailwind 4 frontend application for end-user Chat and Email Action Plan management. |
-| **Streamlit Developer GUI** | `src/cowork_agent/gui/` | Streamlit developer dashboard (`scripts/run_gui.py`) for rapid interactive API testing and inspection. |
+| **FastAPI App** | [app.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/app.py) | Configures dependency injection, lifespan resource setup (DB pools, LLM clients, vector indices), and mounts REST/SSE routes. |
+| **Identity Service** | [identity.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/identity.py) | Resolves `VerifiedPrincipal`, handles tenant boundaries (`LOCAL_TENANT_ID`), and validates opaque session tokens. |
+| **Persistence Repositories** | [repositories](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories) | Provides repository implementations: [local.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/local.py) (In-Memory fallback) and [postgres.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/postgres.py) / [projects.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/projects.py) (PostgreSQL / Supabase connection pool). |
+| **Orchestration Workers** | [orchestration](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/orchestration) | Background workers ([worker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/orchestration/worker.py), [project_document_worker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/orchestration/project_document_worker.py)) processing Email digests and user document parsing asynchronously. |
+| **React 19 Web SPA** | [frontend/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/frontend) | Production React 19 + Vite + Tailwind 4 frontend application for end-user Chat and Email Action Plan management. |
+| **Streamlit Developer GUI** | [gui/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui) | Streamlit developer dashboard ([run_gui.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/scripts/run_gui.py)) for rapid interactive API testing and inspection. |
 
 ---
 
@@ -58,7 +58,7 @@ flowchart TB
 The application dynamically selects storage backends based on environment configuration:
 
 - **Local Fallback Mode (`DATABASE_URL` absent):** Uses SQLite at `.data/mail_todo.db` for OAuth credentials and process-local memory dictionaries for runs, results, and chat session buffers.
-- **Production Mode (`DATABASE_URL` present):** Uses a PostgreSQL connection pool (`psycopg_pool`) connecting to Supabase Postgres. Executes database schemas defined in `src/cowork_agent/persistence/migrations/001_mail_todo.sql`.
+- **Production Mode (`DATABASE_URL` present):** Uses a PostgreSQL connection pool (`psycopg_pool`) connecting to Supabase Postgres. Executes database schemas defined in [migrations](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/migrations) (`001_mail_todo.sql` through `009_canonical_project_documents.sql`).
 
 ---
 
@@ -66,3 +66,4 @@ The application dynamically selects storage backends based on environment config
 
 - **Clean Decoupling:** Presentation layers consume pure REST/SSE APIs without importing domain or database internals.
 - **Security Boundaries:** Gmail OAuth refresh tokens are stored encrypted via AES-GCM (`TokenCipher`). Session tokens are passed via secure headers/cookies.
+

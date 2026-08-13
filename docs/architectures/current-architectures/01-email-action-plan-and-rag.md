@@ -3,7 +3,7 @@
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/features/email_action_plan` & `src/cowork_agent/integrations/rag`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §20](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) (Stateless, standalone Email Agent)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §2](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) (Stateless, standalone Email Agent)
 
 ---
 
@@ -16,11 +16,11 @@ flowchart LR
     GMAIL["Google Gmail API<br/>(gmail.readonly)"] --> READ["Gmail Mailbox Adapter"]
     READ --> ENV["Ephemeral Email Envelope<br/>(Transient / Non-persisted)"]
     ENV --> ROUTE{"Classifier Route"}
-    
+
     ROUTE -->|NO_ACTION| NOACT["No Action Result"]
     ROUTE -->|DIRECT_PLAN| GEN["Action Plan Generator"]
     ROUTE -->|RETRIEVE_RAG| RAG["Company RAG Retrieval<br/>(data/extracted/*.md)"]
-    
+
     RAG --> GEN
     GEN --> VAL["Output Validator"]
     VAL --> TASKDB["Task / Result Persistence"]
@@ -32,19 +32,19 @@ flowchart LR
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **Mailbox Adapter** | `src/cowork_agent/integrations/gmail/provider.py` | Connects via OAuth `gmail.readonly`, searches unread inbox messages, and normalizes metadata & body text. |
-| **Attachment Extractor** | `src/cowork_agent/integrations/gmail/fakes.py` | Extracts bounded UTF-8 text from `.txt`, `.csv`, `.json` attachments without persisting raw binaries. |
-| **Route Classifier** | `src/cowork_agent/features/email_action_plan/routing.py` | Classifies email intent into `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG`. |
-| **Semantic RAG Store** | `src/cowork_agent/integrations/rag/` | Provides zero-or-one vector/hybrid retrieval from `data/extracted/*.md` (Turbovec, Qdrant, or BM25/Hybrid). |
-| **Action Plan Generator** | `src/cowork_agent/features/email_action_plan/workflow.py` | Calls structured LLM provider (Gemini / Groq / Faucet) to construct actionable steps and next actions. |
-| **Output Validator** | `src/cowork_agent/features/email_action_plan/validation.py` | Enforces strict schema, citation grounding, and priority rules before result persistence. |
+| **Mailbox Adapter** | [provider.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/gmail/provider.py) | Connects via OAuth `gmail.readonly`, searches unread inbox messages, and normalizes metadata & body text. |
+| **Attachment Extractor** | [fakes.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/gmail/fakes.py) | Extracts bounded UTF-8 text from `.txt`, `.csv`, `.json` attachments without persisting raw binaries. |
+| **Route Classifier** | [routing.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/routing.py) | Classifies email intent into `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG`. |
+| **Semantic RAG Store** | [integrations/rag](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag) | Provides zero-or-one vector/hybrid retrieval from `data/extracted/*.md` (Turbovec, Qdrant, or BM25/Hybrid). |
+| **Action Plan Generator** | [workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py) | Calls structured LLM provider (Gemini / Groq / Faucet) to construct actionable steps and next actions. |
+| **Output Validator** | [validation.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/validation.py) | Enforces strict schema, citation grounding, and priority rules before result persistence. |
 
 ---
 
 ## 3. Storage & Memory Boundaries
 
 1. **Transient Email Data:** Raw email contents and attachments exist only in memory during the execution turn (`EphemeralEmailEnvelope`). They are **never** stored in vector indices or long-term databases.
-2. **Company RAG Corpus:** Standardized company Markdown documentation committed in `data/extracted/*.md`. Indexed via `mail-todo-ingest-knowledge` into Turbovec (`turbovec_memory.py`) or Qdrant (`qdrant.py`).
+2. **Company RAG Corpus:** Standardized company Markdown documentation committed in `data/extracted/*.md`. Indexed via `mail-todo-ingest-knowledge` into Turbovec ([turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py)) or Qdrant ([qdrant.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py)).
 3. **Durable Output:** Minimal task summaries, title, priority, and citation metadata stored in SQLite/Postgres.
 
 ---
@@ -53,3 +53,4 @@ flowchart LR
 
 - **Alignment:** 100% aligned with target principles. The Email Agent operates in complete isolation from multi-turn AI Chat session memory.
 - **Decoupled Architecture:** Adheres strictly to [ADR-004](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md); the Email Action Plan workflow is a standalone product flow operating independently of AI Chat context.
+
