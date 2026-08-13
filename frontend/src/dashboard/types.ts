@@ -65,7 +65,7 @@ export interface ChatComposerAttachment {
   name: string;
   mediaType: string;
   sizeBytes: number;
-  status: 'ready' | 'uploading' | 'uploaded' | 'error';
+  status: 'hashing' | 'uploading' | 'processing' | 'ready' | 'error' | 'deleting';
   error?: string;
   documentId?: string;
 }

@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from google import genai
 from google.genai import errors, types
 
-from cowork_agent.config import GeminiSettings, JinaEmbeddingSettings
+from cowork_agent.config import GeminiEmbeddingSettings, GeminiSettings, JinaEmbeddingSettings
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiKeyRotator,
     GeminiRateLimitError,
@@ -122,7 +122,7 @@ class JinaEmbeddingAdapter:
                         timeout_seconds=float(self._settings.timeout_seconds),
                     )
                     break
-                except Exception as exc:
+                except Exception:
                     if attempt < 4:
                         await asyncio.sleep(2 * (attempt + 1))
                     else:
@@ -142,7 +142,7 @@ class GeminiEmbeddingAdapter:
 
     def __init__(
         self,
-        settings: GeminiSettings,
+        settings: GeminiSettings | GeminiEmbeddingSettings,
         *,
         model: str = DEFAULT_EMBEDDING_MODEL,
         client: genai.Client | None = None,
@@ -152,6 +152,17 @@ class GeminiEmbeddingAdapter:
         self._settings = settings
         self._rotator = GeminiKeyRotator(settings.api_keys)
         self._model = model
+        if isinstance(settings, GeminiEmbeddingSettings):
+            self._model = settings.model
+            self._dimensions: int | None = settings.dimensions
+            self._batch_size = settings.batch_size
+            self._timeout_seconds: float | None = float(settings.timeout_seconds)
+            self._max_attempts = min(settings.max_attempts, 2)
+        else:
+            self._dimensions = None
+            self._batch_size = _MAX_BATCH_CONTENTS
+            self._timeout_seconds = None
+            self._max_attempts = settings.max_attempts
         self._client = client
 
     async def embed(
@@ -160,39 +171,62 @@ class GeminiEmbeddingAdapter:
         *,
         task: EmbeddingTask = "retrieval.query",
     ) -> tuple[tuple[float, ...], ...]:
-        del task
         if not texts:
             return ()
         embeddings: list[tuple[float, ...]] = []
-        for start in range(0, len(texts), _MAX_BATCH_CONTENTS):
-            batch = list(texts[start : start + _MAX_BATCH_CONTENTS])
-            response = await self._embed_content(batch)
+        for start in range(0, len(texts), self._batch_size):
+            batch = list(texts[start : start + self._batch_size])
+            response = await self._embed_content(batch, task=task)
             for item in response.embeddings or ():
                 if item.values is None:
                     raise ValueError("Embedding response contained an empty vector")
-                embeddings.append(tuple(float(value) for value in item.values))
+                vector = tuple(float(value) for value in item.values)
+                if self._dimensions is not None and len(vector) != self._dimensions:
+                    raise ValueError("Gemini embedding response has an invalid vector dimension")
+                if any(not math.isfinite(value) for value in vector):
+                    raise ValueError("Gemini embedding response contains a non-finite value")
+                embeddings.append(vector)
         if len(embeddings) != len(texts):
             raise ValueError("Embedding response count does not match request count")
         return tuple(embeddings)
 
-    async def _embed_content(self, contents: list[str]) -> types.EmbedContentResponse:
+    async def _embed_content(
+        self, contents: list[str], *, task: EmbeddingTask
+    ) -> types.EmbedContentResponse:
         """Same key rotation the generator uses: one exhausted key must not
         take the whole RAG index down while sibling keys still have quota."""
+        config = (
+            types.EmbedContentConfig(
+                task_type=(
+                    "RETRIEVAL_DOCUMENT"
+                    if task == "retrieval.passage"
+                    else "RETRIEVAL_QUERY"
+                ),
+                output_dimensionality=self._dimensions,
+            )
+            if self._dimensions is not None
+            else None
+        )
+
+        async def request(client: genai.Client) -> types.EmbedContentResponse:
+            call = client.aio.models.embed_content(
+                model=self._model,
+                contents=contents,  # type: ignore[arg-type]
+                **({"config": config} if config is not None else {}),
+            )
+            if self._timeout_seconds is None:
+                return await call
+            return await asyncio.wait_for(call, timeout=self._timeout_seconds)
+
         if self._client is not None:
             # list[str] is not assignable to the SDK's invariant union
             # list[str | Image | File | Part]; the values are plain strings.
-            return await self._client.aio.models.embed_content(
-                model=self._model,
-                contents=contents,  # type: ignore[arg-type]
-            )
+            return await request(self._client)
         last_error: GeminiRateLimitError | None = None
-        for key in await self._rotator.candidates(self._settings.max_attempts):
+        for key in await self._rotator.candidates(self._max_attempts):
             client = genai.Client(api_key=key)
             try:
-                return await client.aio.models.embed_content(
-                    model=self._model,
-                    contents=contents,  # type: ignore[arg-type]
-                )
+                return await request(client)
             except errors.APIError as exc:
                 if exc.code != 429:
                     raise

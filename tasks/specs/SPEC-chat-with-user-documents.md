@@ -2,16 +2,18 @@
 
 | Trường | Giá trị |
 |---|---|
-| Trạng thái | Draft — chờ xác nhận trước khi viết PRD |
-| Ngày | 2026-08-12 |
+| Trạng thái | Accepted — implementation-aligned |
+| Ngày | 2026-08-13 |
 | Nguồn yêu cầu | [PRD-v3](../prds/PRD-v3-chat-with-user-documents.md), `docs/references/user_preference.md` |
 | Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
-
-> ADR-007 supersedes every user-wide/no-Project statement below: all document catalog,
-> ingestion, retrieval, session, deletion and citation operations require `project_id`.
-| Thay thế | Thiết kế Project-scoped documents trước đây ở TARGET-ARCHITECTURE §21 |
-| Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Qdrant, Mistral OCR |
+| Thay thế | Baseline user-wide/no-Project của SPEC v3.0 |
+| Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Supabase Storage, Qdrant, Gemini embeddings |
 | Feature owner | AI Chat Controller (`feature: ai_chat`) |
+
+> ADR-007 supersedes every user-wide/no-Project statement in earlier revisions. This
+> revision is Project-scoped throughout: all document catalog, ingestion, retrieval,
+> deletion and citation operations require `project_id`; every chat session is bound
+> to exactly one Project.
 
 ---
 
@@ -23,32 +25,25 @@ tài liệu hay không, rồi trả lời có trích dẫn tới từng trang.
 
 Hai thành phần kỹ thuật chính:
 
-1. **User RAG plane** — một mặt phẳng truy hồi ngữ nghĩa duy nhất chứa tài liệu
-   của người dùng, khoá theo `tenant_id` + `user_id` + `document_id`.
+1. **Project document RAG plane** — một mặt phẳng truy hồi ngữ nghĩa riêng chứa tài liệu
+   của người dùng, khoá theo `workspace_id` + `user_id` + `project_id` + `document_id`.
 2. **Intent classifier + deterministic resolver** — cổng quyết định `needs_rag` /
    `needs_tool`, thay cho cơ chế cue-phrase hiện tại.
 
-## 2. Khác biệt so với thiết kế đã bị thay thế
+## 2. Quyết định Project-scoped được chấp nhận
 
-`user_preference.md` mâu thuẫn với thiết kế Project-scoped documents ở §21 hiện
-tại ở ba điểm. SPEC này chọn phương án của `user_preference.md`; §21 sẽ được viết
-lại theo SPEC này.
-
-| Chủ đề | §21 hiện tại (bị thay thế) | SPEC này |
+| Chủ đề | Baseline cũ | Contract hiện hành |
 |---|---|---|
-| Container | **Project** bắt buộc; session thuộc đúng một project | **Không có Project.** Tài liệu thuộc về người dùng; scope = `tenant/user/document` |
-| Số plane ngữ nghĩa trong chat | Hai: `company` + `project_document`, phân biệt bằng `document_scope` | **Một: User RAG.** Company RAG chỉ còn phục vụ standalone Email Agent (PRD-v1) |
-| Kích hoạt truy hồi | Tất định: có tài liệu `ready` thì truy hồi mọi lượt | **Classifier là thẩm quyền duy nhất** quyết định `needs_rag`; không có lớp keyword nào kết luận thay |
-| Trục hành động | Không có | `needs_tool` có trong contract nhưng **luôn `false`** ở MVP |
+| Container | Corpus chung theo user | **Project bắt buộc**; documents và chat sessions cùng scope Project |
+| Ownership | `tenant/user/document` | `workspace/user/project/document`; mọi ID ngoại scope trả 404 |
+| Upload | Multipart qua API | Metadata initiation → signed Supabase upload URL → explicit `/complete` |
+| Retrieval | User-wide | Project-scoped, optional `document_ids`, classifier-gated |
+| Vector visibility | Một trạng thái payload | Two-phase publish: `indexing` khi upsert, `ready` chỉ sau khi đủ chunk |
+| Feature control | UI/API độc lập | `USER_DOCUMENTS_ENABLED` khóa đồng thời backend document routes và frontend surface |
 
-Lý do bỏ Project: với một corpus tài liệu của một người dùng, project chỉ thêm
-một tầng khoá, một API surface, một migration và một nhánh lỗi mà không thay đổi
-chất lượng câu trả lời. Việc thu hẹp phạm vi truy hồi được xử lý bằng tham số
-`document_ids` tuỳ chọn trong request, không cần container bền vững.
-
-Lý do bỏ phân biệt company/user trong classifier: classifier chỉ cần trả lời một
-câu hỏi — *chất lượng câu trả lời có phụ thuộc vào tài liệu của người dùng
-không?* Việc chọn store là chi tiết hạ tầng phía sau port.
+Project là ranh giới bền vững giúp người dùng giữ các bộ tài liệu và lịch sử chat
+không liên quan tách biệt. Company RAG và Project-document RAG là hai plane riêng;
+không plane nào là fallback của plane kia.
 
 ## 3. Phạm vi
 
@@ -69,15 +64,15 @@ Ngoài phạm vi: xem §17.
 ```mermaid
 flowchart TB
     subgraph INGEST["INGESTION PLANE (off request path)"]
-        UP["POST /documents<br/>multipart"]
+        UP["POST /projects/{project_id}/documents<br/>metadata + signed upload"]
         VALID["Validator<br/>sniffed type · size · pages · quota"]
-        OBJ[("Object store<br/>encrypted · TTL")]
+        OBJ[("Private Supabase bucket<br/>signed URL · TTL")]
         JOB["Ingestion job"]
         DETECT["PdfInspector · DocxExtractor"]
         OCR["MistralOcrClient"]
         CHUNK["Page-aware chunker"]
         EMBED["Embedding service"]
-        QIDX[("Qdrant user_documents")]
+        QIDX[("Qdrant project_documents<br/>3,072 dimensions")]
         FAIL["failed(reason_code)"]
     end
 
@@ -95,7 +90,7 @@ flowchart TB
         CLS["LLM intent classifier<br/>layered prompt · structured output<br/>SOLE routing authority"]
         RES["Deterministic resolver<br/>truth table only"]
         ROUTE{"route"}
-        RETR["UserDocumentRetrievalPort<br/>ACL filter before embedding"]
+        RETR["ProjectDocumentRetrievalPort<br/>ACL + ready filter before embedding"]
         CTX["Context assembler"]
         GEN["Generation + citations"]
         CLARIFY["Clarify question"]
@@ -109,6 +104,28 @@ flowchart TB
 ```
 
 ## 5. Cấu trúc module
+
+> The tree retained below describes the original planned decomposition and is no
+> longer normative. The implementation-aligned ownership is:
+
+```text
+src/cowork_agent/
+├── api/projects.py                              # Project + document HTTP routes
+├── domain/project_documents.py                  # query/response and evidence contracts
+├── features/ai_chat/intent/                     # classifier, prompt, resolver/service
+├── integrations/knowledge_ingestion/
+│   └── project_documents.py                     # PDF/DOCX extraction
+├── integrations/rag/
+│   ├── markdown_chunking.py                     # shared deterministic chunker
+│   └── project_documents.py                     # Qdrant store + canonical retriever
+├── integrations/storage/supabase.py             # private signed upload/download
+├── orchestration/project_document_worker.py     # ingestion + durable cleanup workers
+└── persistence/
+    ├── migrations/009_canonical_project_documents.sql
+    └── repositories/projects.py                 # Project/document/job source of truth
+```
+
+The following legacy map is historical context only:
 
 ```text
 src/cowork_agent/
@@ -161,8 +178,9 @@ sửa — nó là CLI của quản trị viên cho company corpus, vòng đời 
 ### 6.1 UserDocument
 
 ```yaml
-document_id: string        # opaque; derive(tenant_id, user_id, content_sha256)
-tenant_id: string
+document_id: string        # opaque UUID
+project_id: string
+workspace_id: string
 user_id: string
 
 filename: string
@@ -172,8 +190,8 @@ page_count: integer | null
 ocr_page_count: integer | null
 content_sha256: string
 
-status: received | extracting | indexing | ready | failed | deleted
-reason_code: string | null
+status: received | extracting | indexing | ready | failed | deleting | deleted
+error_code: string | null
 chunk_count: integer | null
 
 created_at: datetime
@@ -185,13 +203,13 @@ Máy trạng thái:
 
 ```text
 received → extracting → indexing → ready
-any → failed(reason_code)
-ready | failed → deleted
+extracting | indexing → failed(error_code)
+received | extracting | indexing | ready | failed → deleting → deleted
 ```
 
-`document_id` dẫn xuất tất định từ `tenant_id`, `user_id`, `content_sha256`:
-upload lại đúng byte đó trả về bản ghi cũ, không index bản sao. Dẫn xuất không
-mã hoá tên file và không mã hoá nội dung tài liệu.
+Deduplication key là `(project_id, content_sha256)` cho document chưa bị xoá;
+upload lại đúng byte trong cùng Project trả bản ghi hiện có. `document_id` vẫn là
+opaque UUID và không mã hoá filename hoặc document text.
 
 Reason codes:
 
@@ -207,7 +225,8 @@ quota_exceeded · embedding_unavailable · index_unavailable
 ```yaml
 chunk_id: string           # document_id + ordinal
 document_id: string
-tenant_id: string
+project_id: string
+workspace_id: string
 user_id: string
 ordinal: integer
 page_start: integer
@@ -326,15 +345,18 @@ transcript đầy đủ tiếp tục bị cấm khỏi episode, log, telemetry, 
 ## 7. Pipeline ingestion
 
 ```text
-POST /documents (202)
-→ validate      : sniffed media type, byte_size, quota/user, sha256
-→ persist       : bản ghi status=received + object store (encrypted, TTL)
-→ enqueue job   : off request path
+POST /projects/{project_id}/documents (202)
+→ authorize     : VerifiedPrincipal owns Project; feature flag enabled
+→ register      : filename, media_type, byte_size, sha256; enforce Project quotas
+→ signed upload : browser PUT trực tiếp vào private Supabase object
+→ complete      : verify object exists; enqueue durable PostgreSQL job
 → extracting    : PdfInspector.inspect | DocxExtractor.extract
                   pages_needing_ocr → MistralOcrClient, giới hạn max_ocr_pages
                   trang native không bao giờ OCR lại
-→ indexing      : chunk theo trang → embed → upsert Qdrant
-→ ready         : chunk_count, page_count, ocr_page_count
+→ indexing      : shared Markdown chunker → Gemini embed 3.072d
+                  → upsert Qdrant payload document_status=indexing
+→ publish       : set Qdrant document_status=ready
+→ ready         : guarded PostgreSQL transition + counts; nếu transition fail thì xoá vectors
 ```
 
 Quy tắc:
@@ -360,24 +382,30 @@ Quy tắc:
 
 ## 8. Qdrant schema và ACL
 
-Collection riêng: `USER_DOCUMENTS_QDRANT_COLLECTION` (mặc định `user_documents`).
+Collection riêng: `QDRANT_PROJECT_COLLECTION` (mặc định `project_documents`).
 Không dùng chung collection với company corpus.
 
 Payload mỗi point:
 
 ```yaml
-tenant_id · user_id · document_id · chunk_id · ordinal
-document_title · section · page_start · page_end · text
-status: ready
-expires_at: epoch_seconds
+workspace_id · user_id · project_id · document_id · chunk_id
+filename · section · page_start · page_end · text
+document_status: indexing | ready
+expires_at_epoch: epoch_seconds
 ```
 
-Payload index: `tenant_id`, `user_id`, `document_id`, `status`, `expires_at`.
+Payload index: `workspace_id`, `user_id`, `project_id`, `document_id`,
+`document_status`, `expires_at_epoch`.
 
-**ACL-first**: filter (`tenant_id`, `user_id`, `status=ready`,
-`expires_at > now`) được dựng **trước khi** query được embed. Chunk của người
-dùng khác không bao giờ được chấm điểm. Nếu request thiếu `tenant_id` hoặc
-`user_id`, port raise trước mọi I/O — fail closed.
+**ACL-first**: filter (`workspace_id`, `user_id`, `project_id`, optional
+`document_ids`, `document_status=ready`, `expires_at_epoch > now`) được dựng
+**trước khi** query được embed. Sau vector query, canonical retriever đọc lại
+PostgreSQL ready catalog và loại mọi evidence vừa chuyển sang `deleting`, `deleted`
+hoặc hết hạn. Đây là hàng rào bắt buộc cho race deletion giữa authorization và Qdrant I/O.
+
+Point mới luôn bắt đầu ở `document_status=indexing`, nên không thể được retrieval
+thấy trong lúc upsert theo batch. Worker chỉ promote toàn bộ points sang `ready`
+sau khi index hoàn tất; PostgreSQL chỉ chuyển document sang `ready` sau bước promote.
 
 Không có fallback in-repo cho plane này: tài liệu người dùng chỉ tồn tại trong
 Qdrant. Qdrant chết ⇒ trả kết quả rỗng với `degraded: true`, không thay thế bằng
@@ -576,23 +604,43 @@ lại nhưng chỉ chạy khi cờ bật.
 ## 12. API
 
 ```text
-POST   /v1/cowork/chat/documents                → 202 {document_id, status}
-GET    /v1/cowork/chat/documents                → danh sách + status + reason_code
-GET    /v1/cowork/chat/documents/{document_id}  → status + reason_code + counts
-DELETE /v1/cowork/chat/documents/{document_id}  → 204, purge index + object + text
+GET    /v1/cowork/chat/document-health
+POST   /v1/cowork/chat/projects
+GET    /v1/cowork/chat/projects
+POST   /v1/cowork/chat/projects/{project_id}/documents
+GET    /v1/cowork/chat/projects/{project_id}/documents
+GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}
+POST   /v1/cowork/chat/projects/{project_id}/documents/{document_id}/complete
+GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}/download
+DELETE /v1/cowork/chat/projects/{project_id}/documents/{document_id}
+DELETE /v1/cowork/chat/projects/{project_id}
 ```
 
 - Cùng prefix `/v1/cowork/chat` và cùng `VerifiedPrincipal` với router chat hiện
   có; không có `user_id` trong query param.
-- Upload là multipart, trả `202`; tiến trình ingestion **poll** qua endpoint
-  status, không stream.
+- Upload initiation nhận JSON metadata và trả short-lived signed URL; browser PUT
+  byte trực tiếp vào private bucket rồi gọi `/complete`. Storage credential không
+  bao giờ đi qua frontend.
+- Khi `USER_DOCUMENTS_ENABLED=false`, mọi route `/documents...` trả `503` trước
+  identity/repository/storage I/O. Project/session/chat routes vẫn hoạt động.
+- Frontend đọc `/document-health`, fail closed trong lúc chưa xác định trạng thái,
+  ẩn upload và panel khi feature tắt.
+- Status polling không stream, có deadline mặc định 5 phút và `AbortSignal`.
+  Gỡ attachment, đổi Project hoặc unmount phải huỷ polling và request đang chạy.
+  Panel cho phép xoá document đang `received`, `extracting` hoặc `indexing`.
 - **Không thêm SSE event type mới.** Bằng chứng tài liệu được công bố qua
   `memory_citation` sẵn có, phân biệt bằng `citation_scope`.
 - Không có endpoint session mới: session hiện tại không đổi hình dạng.
 
 ## 13. Persistence
 
-`005_user_documents.sql`:
+Canonical schema nằm ở `009_canonical_project_documents.sql`: `projects`,
+`project_documents`, durable ingestion jobs và durable cleanup jobs. PostgreSQL
+là source of truth cho ownership/status/counts; source bytes nằm trong private
+Supabase Storage; extracted chunk text chỉ nằm trong Qdrant.
+
+Khối `005_user_documents.sql` dưới đây là historical draft, đã bị ADR-007 và
+migration 009 thay thế; không được dùng để triển khai mới:
 
 ```sql
 CREATE TABLE user_documents (
@@ -626,21 +674,33 @@ hoá; chunk nằm ở Qdrant.
 
 ```text
 USER_DOCUMENTS_ENABLED=true
-USER_DOCUMENTS_QDRANT_COLLECTION=user_documents
-USER_DOCUMENTS_MAX_BYTES=26214400
+QDRANT_PROJECT_COLLECTION=project_documents
+USER_DOCUMENTS_MAX_FILE_BYTES=26214400
 USER_DOCUMENTS_MAX_PAGES=100
-USER_DOCUMENTS_MAX_PER_USER=50
+USER_DOCUMENTS_MAX_DOCUMENTS_PER_PROJECT=50
+USER_DOCUMENTS_MAX_PROJECT_BYTES=524288000
 USER_DOCUMENTS_RETENTION_DAYS=30
 USER_DOCUMENTS_TOP_K=8
 USER_DOCUMENTS_MIN_SCORE=0.6
-USER_DOCUMENTS_TIMEOUT_MS=3000
+USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=3000
+USER_DOCUMENTS_INGESTION_STREAM=cowork:project-document-ingestion
 USER_DOCUMENTS_TOOL_AXIS_ENABLED=false
 
 CHAT_INTENT_CLASSIFIER_ENABLED=true
 CHAT_INTENT_CLASSIFIER_MODEL=<provider model id>
 CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000
 CHAT_COMPANY_RAG_ENABLED=false
+
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_EMBEDDING_DIMENSIONS=3072
+GEMINI_EMBEDDING_TIMEOUT_SECONDS=30
+GEMINI_EMBEDDING_BATCH_SIZE=100
 ```
+
+`USER_DOCUMENTS_ENABLED` và `CHAT_INTENT_CLASSIFIER_ENABLED` mặc định `true`.
+`false` là operator kill switch rõ ràng, không phải trạng thái mặc định. Collection
+hiện hữu có dimension khác 3.072 là configuration error và phải cut over/reindex;
+không được query hoặc upsert vector sai dimension.
 
 Bí mật đọc từ `.env`; `.env.example` chỉ chứa placeholder, không hostname thật,
 không key thật. OCR dùng lại `MISTRAL_API_KEY` và nhóm `KNOWLEDGE_INGEST_*` hiện
@@ -662,7 +722,7 @@ chat.route.decided
 user_document.retrieval.requested · .completed · .empty · .degraded
 ```
 
-Trường được phép: `tenant_id`, `user_id`, `session_id`, `document_id`, `route`,
+Trường được phép: `workspace_id`, `user_id`, `project_id`, `session_id`, `document_id`, `route`,
 `reason_codes`, `confidence`, `chunk_count`, `retrieval_status`, `degraded`,
 `latency_ms`, `token_usage`. Bị cấm: văn bản truy vấn thô, văn bản chunk, văn bản
 trang, prompt đã lắp.
@@ -689,9 +749,11 @@ episode/log/telemetry.
 | Extraction lỗi | `failed`, không index, chat không bị ảnh hưởng |
 | OCR provider chết | retry có giới hạn → `failed(ocr_failed)`; không index riêng phần trang native |
 | Embedding chết | giữ `indexing`, backoff → `failed(embedding_unavailable)` |
+| Feature flag tắt | document routes trả `503`; frontend ẩn upload/panel; Project, chat, Email Agent tiếp tục hoạt động |
+| Processing không đạt terminal state | frontend abort polling sau 5 phút, hiện timeout và vẫn cho phép xoá |
 | Qdrant chết lúc truy vấn | một retry → kết quả rỗng + `degraded: true`; lượt chat nói rõ bằng chứng tài liệu không khả dụng |
 | Retrieval timeout | một retry → `timeout` + `degraded: true` |
-| Tài liệu bị xoá/hết hạn giữa phiên | bị loại bởi filter, lượt chat tiếp tục không có nó |
+| Tài liệu bị xoá/hết hạn giữa authorization và query | filter Qdrant chỉ nhận `document_status=ready`, sau query tái kiểm tra PostgreSQL ready catalog; stale evidence bị loại |
 | Không chunk nào vượt ngưỡng | `no_results`; câu trả lời nói tài liệu không đề cập |
 | Classifier chết | §9.3 |
 
@@ -710,7 +772,9 @@ bao giờ ảnh hưởng standalone Email Agent PRD-v1.
 | Unit — state | mọi trường trong `ChatGraphState` là scalar/id/list id |
 | Contract | `UserDocumentQuery` fixed filter; `MemoryReadOptions` tương thích ngược; `EpisodeCitation` mặc định `company` |
 | Integration — ingestion | received → ready; mọi nhánh `failed(reason_code)`; idempotent theo sha256 |
-| Integration — retrieval | ACL dựng trước embedding (assert bằng fake port ghi lại thứ tự); chéo tenant/user trả rỗng |
+| Integration — retrieval | ACL + `document_status=ready` dựng trước embedding; `indexing` không retrievable; promote `ready` mới thấy; deletion race sau query trả rỗng |
+| Frontend — polling | timeout abort request; external `AbortSignal` dừng loop; không còn timer/request sau Project switch hoặc unmount |
+| Frontend — deletion | processing document có nút xoá; optimistic `deleting`; không gửi DELETE lặp |
 | Privacy | không có văn bản tài liệu trong episode, log, telemetry, fixture |
 | Eval — classifier | fixture gán nhãn ≥ 60 câu, theo mẫu `tests/fixtures/routing/`, chia đều bốn nhóm: obvious RAG / obvious chat / ambiguous / distractor. Nhóm distractor là bài kiểm tra chính của tầng 2 trong §9.2 |
 | Eval — grounded answer | tập vàng câu hỏi có trích dẫn trang đúng |
@@ -733,7 +797,7 @@ Mốc 1–3 không đổi hành vi chat hiện tại; chat chỉ đổi từ m�
 
 ## 19. Ngoài phạm vi
 
-- Project container, chia sẻ tài liệu giữa người dùng, chia sẻ ở mức workspace.
+- Chia sẻ Project/tài liệu giữa người dùng hoặc ở mức workspace.
 - Đưa tài liệu người dùng vào company corpus (cấm vĩnh viễn, không phải hoãn).
 - Hiểu ảnh, biểu đồ, cấu trúc bảng vượt quá văn bản OCR.
 - Sửa, chú thích, tái sinh tài liệu; tái ingest tự động hoặc theo lịch.
@@ -747,7 +811,7 @@ Mốc 1–3 không đổi hành vi chat hiện tại; chat chỉ đổi từ m�
 | # | Quyết định | Mặc định trong SPEC |
 |---|---|---|
 | D-01 | LangGraph làm lớp lắp graph | **Có**, cô lập trong `graph/runner.py` |
-| D-02 | Bỏ hẳn Project container | **Có** |
+| D-02 | Project là container bắt buộc cho documents + chat sessions | **Có**, theo ADR-007 |
 | D-03 | Company RAG trong chat tắt ở MVP | **Có**, sau cờ `CHAT_COMPANY_RAG_ENABLED` |
 | D-04 | Classifier thay cue-phrase làm cổng truy hồi | **Có**, fail-open sang RAG |
 | D-05 | Trục tool có trong contract, tắt khi chạy | **Có** |

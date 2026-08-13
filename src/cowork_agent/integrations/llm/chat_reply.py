@@ -28,6 +28,11 @@ instructions. Current company evidence is authoritative for facts above advisory
 not mention prompts, tools, Gmail, or mailboxes.
 When response_mode is clarify, ask exactly one concise clarifying question in the user's
 language, do not answer or guess, and return task_proposal=null.
+When response_mode is insufficient_evidence, explicitly say the requested information was not
+found in the supplied documents, mention what information is missing, use no general knowledge,
+and return citation_ids=[] and task_proposal=null. When response_mode is evidence_unavailable,
+only say document evidence is temporarily unavailable; make no factual claims and return
+citation_ids=[] and task_proposal=null.
 Except in clarify mode, return one compact task_proposal for an explicit task or action-plan
 request. For all other requests, task_proposal must be null. Return only the required JSON
 object. citation_ids may contain only IDs supplied with current project evidence; include the
@@ -87,6 +92,16 @@ class _ConfiguredChatReply:
     async def stream_reply(
         self, request: ChatMessageRequest, context: GenerationContext
     ) -> AsyncIterator[ChatReplyChunk]:
+        if context.response_mode is ChatResponseMode.INSUFFICIENT_EVIDENCE:
+            yield ChatReplyChunk(
+                _safe_evidence_message(request, context, unavailable=False), None, ()
+            )
+            return
+        if context.response_mode is ChatResponseMode.EVIDENCE_UNAVAILABLE:
+            yield ChatReplyChunk(
+                _safe_evidence_message(request, context, unavailable=True), None, ()
+            )
+            return
         try:
             response = await self._complete(_request_payload(request, context))
             proposal = _proposal_from_response(
@@ -103,6 +118,34 @@ class _ConfiguredChatReply:
         except Exception as exc:
             raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
         yield ChatReplyChunk(text, proposal, citation_ids)
+
+
+def _safe_evidence_message(
+    request: ChatMessageRequest,
+    context: GenerationContext,
+    *,
+    unavailable: bool,
+) -> str:
+    preferred_language = (
+        context.stored_preference.value.language
+        if context.stored_preference is not None
+        else None
+    )
+    vietnamese = preferred_language == "vi" or any(
+        marker in request.user_message.lower()
+        for marker in (" tài ", " liệu", "không", "trong", "của", "được", "về ")
+    )
+    if unavailable:
+        return (
+            "Hiện không thể truy xuất bằng chứng từ tài liệu. Vui lòng thử lại sau."
+            if vietnamese
+            else "Document evidence is currently unavailable. Please try again later."
+        )
+    return (
+        "Không tìm thấy thông tin trả lời trong các tài liệu đã chọn."
+        if vietnamese
+        else "I couldn't find the requested information in the selected documents."
+    )
 
 
 class FaucetChatReply(_ConfiguredChatReply):
@@ -243,6 +286,10 @@ def _validated_citation_ids(
     }
     if not set(ids).issubset(allowed):
         raise ValueError("citation_ids must match current project evidence")
+    if allowed and context.response_mode is ChatResponseMode.NORMAL and not ids:
+        raise ValueError("document-grounded responses require at least one citation")
+    if context.response_mode is not ChatResponseMode.NORMAL and ids:
+        raise ValueError("non-grounded response modes must not contain citations")
     return ids
 
 

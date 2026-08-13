@@ -4,6 +4,7 @@
 
 **Architecture level:** Level 2 — Production Engineer<br>
 **Status:** Baseline target architecture<br>
+**Last aligned with implementation:** 2026-08-13<br>
 **Agent pattern:** Multi-turn Chat Controller with typed memory<br>
 **Memory model:** Short-term, Long-term Declarative, Episodic, Semantic<br>
 **Reflexion:** Not included in this baseline<br>
@@ -896,20 +897,22 @@ target architecture below is shaped by them.
 | Qdrant adapter mechanics are tested, but retrieval quality is benchmarked only on the in-repo variants | EMAIL-RAG-STATUS known gaps | The target treats the Qdrant quality benchmark as a launch gate, not an optional extra |
 | Ingestion is whole-corpus replacement with no registry or version history | `ingest_corpus()` recreates the collection | The target introduces a document registry with incremental, versioned upsert |
 
-### 6.1.4 What the current module is missing for "chat with the PDF"
+### 6.1.4 Historical gap analysis for "chat with the PDF" (closed)
 
-The company corpus described above cannot serve the user-document feature as
+The company corpus described above cannot serve the Project-document feature as
 specified in [PRD-v3](../../tasks/prds/PRD-v3-chat-with-user-documents.md), the
-[SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md), and §21. The gap is
-not tuning; the required scope key, lifecycle, and routing authority do not exist
-in the current module.
+[SPEC](../../tasks/specs/SPEC-chat-with-user-documents.md), and §21. The table below
+records the pre-ADR-007 gap that justified a separate plane. Those blockers are
+closed by the canonical Project repository, private Supabase source store, durable
+workers, `project_documents` Qdrant collection, and classifier-gated retriever; the
+company module itself intentionally remains unchanged.
 
-| Required by SPEC / PRD-v3 | Current state | Blocking |
+| Required by SPEC / PRD-v3 | Pre-ADR-007 state | Blocking at that snapshot |
 |---|---|---|
-| Scope key `tenant_id` + `user_id` + `document_id` | The Qdrant filter carries `tenant_id` and `document_status` only. There is no `user_id` field to filter on | Yes — cross-user isolation is not expressible, so no user document can be indexed safely |
+| Scope key `workspace_id` + `user_id` + `project_id` + `document_id` | Company Qdrant remains tenant-scoped; the separate Project collection implements the full filter | Closed in Project plane |
 | A separate user-document collection | One company collection. Chunks would co-mingle with curated corpus content | Yes |
-| Runtime upload path (`POST /v1/cowork/chat/documents`, `202`, off the request path) | Administrator CLI only; ingestion runs at application boot | Yes |
-| Document status machine `received → extracting → indexing → ready → failed → deleted` with `reason_code` | No registry, no per-document status, no failure record | Yes — status polling and the failure table in §21.11 have nothing to read |
+| Runtime signed-upload path under `/v1/cowork/chat/projects/{project_id}/documents` | Company corpus remains administrator CLI only | Closed in Project plane |
+| Document status machine including `deleting → deleted` with `error_code` | Company corpus has no per-document runtime registry | Closed in Project plane |
 | Page-aware chunking with `page_start` / `page_end` | `_split_sections()` / `_split_long_text()` produce section and paragraph chunks with no page coordinates | Yes — page-level citation is impossible as chunked today |
 | OCR for scanned and mixed PDFs | Fails with `mistral_not_configured`; no partial output | Yes for scanned uploads, which are an ordinary case |
 | Validation and quota at upload: sniffed media type, byte size, page cap, per-user quota, with the §21.4 reason codes | The CLI validates local files it was pointed at; there is no untrusted-upload guard | Yes |
@@ -1978,14 +1981,15 @@ Implement the accepted target in this order:
 > ADR-007 supersedes the user-wide/no-container baseline in this section. The accepted
 > hierarchy is `tenant → user → project → documents + chat sessions`; classifier-gated
 > routing and the separate company/document planes remain unchanged.
+
 **Extends:** §20, the accepted ADR-004 chat-native target<br>
-**Replaces:** the withdrawn project-scoped document design (Project container,
-two coexisting document planes, always-on retrieval)<br>
+**Replaces:** the withdrawn user-wide/no-Project document design and the earlier
+always-on Project retrieval design<br>
 **Does not change:** the standalone PRD-v1 Email Agent, the company RAG corpus,
 the declarative profile, or the TaskEpisode trust boundary
 
-This extension lets a user upload documents, ask grounded questions about them in
-any of their chat sessions, and receive page-level citations. It adds one
+This extension lets a user upload documents to a Project, ask grounded questions in
+chat sessions bound to that Project, and receive page-level citations. It adds one
 semantic retrieval **plane** — not a fifth memory type — and moves per-turn
 routing from cue phrases to a single intent classifier.
 
@@ -1993,14 +1997,15 @@ routing from cue phrases to a single intent classifier.
 
 | Concern | Withdrawn design | Accepted here |
 |---|---|---|
-| Container | `Project`; every session bound to one | None. Documents belong to the user: `tenant -> user -> document` |
-| Document planes in chat | Two: company and project, split by `document_scope` | One: user documents. Company RAG serves the standalone Email Agent and is disabled in chat behind a flag |
+| Container | User-wide corpus or optional Project | **Project required**; every session and document belongs to exactly one Project |
+| Scope | `tenant -> user -> document` | `workspace -> user -> project -> document`; optional `document_ids` only narrows within the Project |
+| Document planes in chat | Ambiguous shared serving path | Company and Project-document planes are separate; neither is a fallback for the other |
 | Retrieval trigger | Deterministic: retrieve on every turn when ready documents exist | The intent classifier decides per turn |
 | Routing authority | Cue phrases in `retrieval_policy` | One structured LLM call per turn |
 
-A project container adds a key, an API surface, a migration, and a failure branch
-without improving answer quality for a single user's corpus. Narrowing the search
-is served by an optional `document_ids` filter on the request instead.
+A Project is the durable isolation boundary for unrelated document sets and chat
+history. PostgreSQL owns Project membership and document readiness; browser state
+may remember only the active Project ID. Foreign Project/document IDs fail closed.
 
 ## 21.2 Source classes and the boundary between them
 
@@ -2010,7 +2015,7 @@ is served by an optional `document_ids` filter on the request instead.
 | Provenance | Curated, approved, `document_status: ready` | Self-service upload, unreviewed |
 | Ingestion | Offline CLI into `data/extracted/` | Runtime ingestion job |
 | Durability | Rebuildable from the repo corpus | User data; not rebuildable |
-| Scope key | `tenant_id` | `tenant_id` + `user_id` + `document_id` |
+| Scope key | `tenant_id` | `workspace_id` + `user_id` + `project_id` + `document_id` |
 | Store | Company Qdrant collection or in-repo hybrid index | Separate user-document Qdrant collection |
 | Deletion | Corpus re-index | Explicit deletion plus 30-day TTL purge |
 | Consumer | Standalone PRD-v1 Email Agent; AI Chat behind `CHAT_COMPANY_RAG_ENABLED` | AI Chat |
@@ -2026,16 +2031,16 @@ attachment processing remains out of scope under ADR-003.
 ```mermaid
 flowchart TB
     subgraph INGEST["USER DOCUMENT INGESTION PLANE"]
-        UP["Document API<br/>multipart upload"]
+        UP["Project Document API<br/>metadata initiation"]
         VALID["Validator<br/>sniffed type · size · pages · quota"]
-        OBJ[("Document object store<br/>encrypted · TTL")]
+        OBJ[("Private Supabase Storage<br/>signed upload · TTL")]
         JOB["Ingestion job<br/>off the request path"]
         DETECT["PdfInspector · DocxExtractor<br/>native text per page"]
         OCR["Mistral OCR<br/>scanned and mixed pages"]
         PCHUNK["Page-aware chunker"]
         UEMBED["Embedding service"]
-        UINDEX[("Qdrant user-document collection<br/>tenant · user · document filters")]
-        UFAIL["failed(reason_code)"]
+        UINDEX[("Qdrant project_documents<br/>3,072d · indexing/ready payload")]
+        UFAIL["failed(error_code)"]
     end
 
     UP --> VALID --> OBJ --> JOB --> DETECT
@@ -2053,8 +2058,8 @@ flowchart TB
         RES["Deterministic Resolver<br/>truth table only"]
         GATE["Precondition gate<br/>no ready documents ⇒ RAG downgrades to CHAT"]
         GW["Memory Gateway"]
-        DOCPORT["UserDocumentRetrievalPort<br/>retrieval-only"]
-        DACL["ACL filter built before embedding<br/>tenant · user · ready · unexpired"]
+        DOCPORT["ProjectDocumentRetrievalPort<br/>retrieval-only"]
+        DACL["ACL filter built before embedding<br/>workspace · user · project · ready · unexpired"]
         CTX["Context assembler<br/>labeled sections"]
     end
 
@@ -2067,13 +2072,14 @@ flowchart TB
 
 ```text
 received -> extracting -> indexing -> ready
-any state -> failed(reason_code)
-ready | failed -> deleted
+extracting | indexing -> failed(error_code)
+received | extracting | indexing | ready | failed -> deleting -> deleted
 ```
 
 ```yaml
-document_id: string          # opaque; derived from tenant, user, content sha256
-tenant_id: string
+document_id: string          # opaque UUID; deduplicated per Project by content sha256
+project_id: string
+workspace_id: string
 user_id: string
 
 filename: string
@@ -2083,8 +2089,8 @@ page_count: integer | null
 ocr_page_count: integer | null
 content_sha256: string
 
-status: received | extracting | indexing | ready | failed | deleted
-reason_code: string | null
+status: received | extracting | indexing | ready | failed | deleting | deleted
+error_code: string | null
 chunk_count: integer | null
 
 created_at: datetime
@@ -2104,9 +2110,9 @@ quota_exceeded · embedding_unavailable · index_unavailable
 Rules:
 
 - Validation runs on sniffed content type, not on the filename extension.
-- `document_id` is derived from `tenant_id`, `user_id`, and the content digest,
-  so re-uploading identical bytes returns the existing record instead of indexing
-  a second copy. The derivation never encodes filename or document text.
+- Deduplication uses `project_id` plus the content digest for non-deleted records,
+  so re-uploading identical bytes within a Project returns the existing record.
+  The opaque document UUID never encodes filename or document text.
 - Extraction reuses the PRD-v1 `PdfInspector` and `DocxExtractor` and their size,
   page, and encryption guards. Because `PdfInspector` shells out to local
   commands, extraction runs inside the job, never on the request path.
@@ -2118,11 +2124,19 @@ Rules:
   `ocr_failed`. Partial or empty extraction output is never indexed.
 - The upload responds `202` and the job runs off the request path. A chat turn
   never blocks on ingestion.
+- Upload is a three-step private-storage flow: register metadata, PUT bytes through
+  a short-lived signed Supabase URL, then call `/complete` after the backend confirms
+  the object exists. Storage credentials never reach the browser.
 - Chunking is page-aware: every chunk carries `page_start` and `page_end` derived
   from the extractor's `<!-- Page N -->` markers, then splits on paragraph
   boundaries under the existing size cap.
 - The administrator-operated `KnowledgeIngestionService` CLI is not modified; the
   two ingestion lifecycles stay separate.
+- Project-document chunks use `gemini-embedding-2` at 3,072 dimensions. Existing
+  collections with another vector size require explicit cutover/reindex.
+- Qdrant points are upserted with `document_status=indexing`, promoted together to
+  `ready` only after all batches succeed, and removed if the guarded PostgreSQL
+  `indexing -> ready` transition loses a race with deletion.
 
 ## 21.5 Routing
 
@@ -2221,11 +2235,12 @@ other evidence.
 
 ```yaml
 # request
-tenant_id: string
+workspace_id: string
 user_id: string
+project_id: string
 session_id: string
 feature: ai_chat
-document_scope: user_document
+document_scope: project_document
 
 query: string
 document_ids:                 # optional narrowing; default is every ready document
@@ -2255,10 +2270,12 @@ degraded: boolean
 latency_ms: integer
 ```
 
-ACL is applied first: the `tenant_id`, `user_id`, `ready`-status, and unexpired
-conditions are assembled **before** the query is embedded, so a chunk belonging to
-another user is never scored. A missing or inconsistent scope fails closed before
-any I/O.
+ACL is applied first: `workspace_id`, `user_id`, `project_id`, optional
+`document_ids`, `document_status=ready`, and `expires_at_epoch > now` are assembled
+**before** the query is embedded, so out-of-scope or non-ready points are never
+scored. After Qdrant returns, the canonical retriever reads the PostgreSQL ready
+catalog again and drops evidence deleted or expired during vector I/O. A missing
+or inconsistent scope fails closed before any I/O.
 
 ## 21.7 Turn orchestration and durable state
 
@@ -2338,16 +2355,45 @@ delete episodes that cite it; such a citation renders as unavailable.
 ## 21.10 Internal API surface
 
 ```text
-POST   /v1/cowork/chat/documents                 multipart -> 202 {document_id, status}
-GET    /v1/cowork/chat/documents                 list with status
-GET    /v1/cowork/chat/documents/{document_id}   status, reason_code, counts
-DELETE /v1/cowork/chat/documents/{document_id}   204; purges index, object, text
+GET    /v1/cowork/chat/document-health
+POST   /v1/cowork/chat/projects
+GET    /v1/cowork/chat/projects
+POST   /v1/cowork/chat/projects/{project_id}/documents
+GET    /v1/cowork/chat/projects/{project_id}/documents
+GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}
+POST   /v1/cowork/chat/projects/{project_id}/documents/{document_id}/complete
+GET    /v1/cowork/chat/projects/{project_id}/documents/{document_id}/download
+DELETE /v1/cowork/chat/projects/{project_id}/documents/{document_id}
+DELETE /v1/cowork/chat/projects/{project_id}
 ```
 
 Chat session and message endpoints are unchanged. No new SSE event type is
 introduced: document evidence is disclosed through the existing `memory_citation`
 event, discriminated by `citation_scope`. Ingestion progress is polled through the
 document status endpoint, not streamed.
+
+`USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED` default to `true`.
+When user documents are explicitly disabled, every document-specific route returns
+`503` before identity, PostgreSQL, or storage I/O. Project/session/chat and the
+standalone Email Agent remain available. The React client derives visibility from
+`document-health`, starts fail-closed, and does not mount upload controls or the
+Project Document panel while disabled.
+
+Client polling has a five-minute default deadline and accepts an `AbortSignal`.
+Removing an attachment, switching Project, or unmounting cancels timers and the
+in-flight fetch. The panel stops its own refresh loop at the same deadline and
+allows deletion while a document is `received`, `extracting`, or `indexing`.
+
+Canonical release defaults:
+
+```text
+USER_DOCUMENTS_ENABLED=true
+CHAT_INTENT_CLASSIFIER_ENABLED=true
+QDRANT_PROJECT_COLLECTION=project_documents
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_EMBEDDING_DIMENSIONS=3072
+USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=3000
+```
 
 ## 21.11 Failure and fallback paths
 
@@ -2357,9 +2403,11 @@ document status endpoint, not streamed.
 | Extraction failure | `failed`; the document is never indexed and chat is unaffected |
 | OCR provider outage | bounded retries, then `failed(ocr_failed)`; native-text pages are not indexed alone |
 | Embedding provider outage | remain `indexing`, bounded retries with backoff, then `failed(embedding_unavailable)` |
+| User-document feature disabled | document API returns `503` and frontend hides its document surface; chat/email continue |
+| Browser processing poll stalls | abort at five minutes, display timeout, retain delete control for the processing document |
 | Qdrant unavailable at query time | one retry, then an empty result with `degraded: true`; the turn states that document evidence is unavailable |
 | Retrieval timeout | one retry, then `timeout` with `degraded: true` |
-| Document deleted or expired mid-session | excluded by the retrieval filter; the turn proceeds without it |
+| Document deleted or expired during retrieval | excluded by Qdrant `ready`/expiry filter and the post-query PostgreSQL readiness check |
 | No chunk above threshold | `no_results`; the answer states the documents do not cover the question |
 | Classifier unavailable | retry once, then fail open to retrieval; see §21.5 |
 
@@ -2379,9 +2427,10 @@ affects the standalone PRD-v1 Email Agent.
 - **Retention defaults to 30 days** from upload, configurable per tenant. Expired
   documents are excluded from retrieval before ranking and purged by the existing
   background purge mechanism.
-- Deletion is supported per document, per user, and feature-wide. It purges the
-  object store, the extracted text, and the Qdrant points, and is repeatable until
-  every store confirms.
+- Deletion is supported per document and per Project, including documents still
+  processing. PostgreSQL first marks them `deleting` and enqueues durable cleanup;
+  cleanup repeatedly purges the Supabase object and Qdrant points before marking
+  `deleted`.
 
 ## 21.13 Observability and evaluation gates
 
@@ -2428,7 +2477,8 @@ field.
    query and response, and the citation-scope extension.
 2. Ingestion job: validation, extraction, Mistral OCR, page-aware chunking, and
    the status machine — no retrieval yet.
-3. Qdrant user-document collection with ACL-first filtering and deletion
+3. Qdrant Project-document collection with ACL-first filtering, two-phase
+   `indexing -> ready` publication, and deletion
    propagation.
 4. Classifier, layered prompt, resolver, labeled fixture set, and the §21.13
    metrics.
@@ -2442,7 +2492,6 @@ Steps 1 to 3 do not change chat behaviour; chat behaviour changes at step 4.
 
 - sharing a document with another user or at workspace level;
 - promoting a user document into the company corpus;
-- a project or folder container for grouping documents;
 - image, chart, and table-structure understanding beyond OCR text;
 - document editing, annotation, or re-generation;
 - scheduled or automatic re-ingestion;

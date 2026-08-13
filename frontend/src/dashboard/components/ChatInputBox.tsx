@@ -63,6 +63,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const hasPendingAttachment = attachments.some((item) => item.status !== 'ready');
 
   // Auto resize textarea
   useEffect(() => {
@@ -97,16 +98,22 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                   key={attachment.id}
                   className="flex max-w-full items-center gap-2 rounded-xl border border-[#413d37] bg-[#2b2925] px-2.5 py-2 text-xs text-zinc-200"
                 >
-                  {attachment.status === 'uploading' ? (
+                  {['hashing', 'uploading', 'processing', 'deleting'].includes(attachment.status) ? (
                     <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[#d97757]" />
                   ) : (
                     <FileText className="h-3.5 w-3.5 shrink-0 text-[#d97757]" />
                   )}
                   <span className="max-w-48 truncate">{attachment.name}</span>
                   <span className="shrink-0 text-[10px] text-zinc-500">
-                    {attachment.status === 'uploading'
-                      ? 'Đang tải'
-                      : formatFileSize(attachment.sizeBytes)}
+                    {attachment.status === 'hashing'
+                      ? 'Hashing'
+                      : attachment.status === 'uploading'
+                        ? 'Uploading'
+                        : attachment.status === 'processing'
+                          ? 'Processing'
+                          : attachment.status === 'error'
+                            ? 'Error'
+                            : formatFileSize(attachment.sizeBytes)}
                   </span>
                   {onRemoveAttachment && (
                     <button
@@ -144,28 +151,32 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
           <div className="flex items-center justify-between pt-1.5 text-xs">
             {/* Left: Plus & Segmented Mode Switcher */}
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                title="Đính kèm tài liệu"
-                aria-label="Đính kèm tài liệu"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isGenerating}
-                className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#32302c] rounded-md transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.docx"
-                aria-label="Chọn tài liệu từ máy"
-                className="sr-only"
-                onChange={(event) => {
-                  onSelectFiles?.(Array.from(event.target.files ?? []));
-                  event.target.value = '';
-                }}
-              />
+              {onSelectFiles && (
+                <>
+                  <button
+                    type="button"
+                    title="Đính kèm tài liệu"
+                    aria-label="Đính kèm tài liệu"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isGenerating}
+                    className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#32302c] rounded-md transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx"
+                    aria-label="Chọn tài liệu từ máy"
+                    className="sr-only"
+                    onChange={(event) => {
+                      onSelectFiles(Array.from(event.target.files ?? []));
+                      event.target.value = '';
+                    }}
+                  />
+                </>
+              )}
 
 
             </div>
@@ -196,7 +207,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               {(inputText.trim().length > 0 || attachments.length > 0) && (
                 <button
                   onClick={() => onSend()}
-                  disabled={isGenerating || inputText.trim().length === 0}
+                  disabled={isGenerating || inputText.trim().length === 0 || hasPendingAttachment}
                   title="Send message"
                   className="w-7 h-7 ml-1 flex items-center justify-center bg-zinc-200 hover:bg-white text-zinc-900 rounded-md transition-all shadow-sm cursor-pointer disabled:opacity-50"
                 >

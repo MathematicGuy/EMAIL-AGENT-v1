@@ -15,9 +15,8 @@ from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
-from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
-from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
+from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 
 COLLECTION = "bootstrap_company_knowledge"
 
@@ -84,7 +83,12 @@ def test_a_populated_collection_is_not_re_ingested_on_the_next_boot(
 
     original_embed = JinaEmbeddingAdapter.embed
 
-    async def _spy_embed(self: JinaEmbeddingAdapter, texts: tuple[str, ...], *args: object, **kwargs: object) -> tuple[tuple[float, ...], ...]:
+    async def _spy_embed(
+        self: JinaEmbeddingAdapter,
+        texts: tuple[str, ...],
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[tuple[float, ...], ...]:
         embed_calls.append(len(texts))
         return await original_embed(self, texts, *args, **kwargs)
 

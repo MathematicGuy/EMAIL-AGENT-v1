@@ -90,13 +90,10 @@ def api_server() -> Generator[subprocess.Popen[bytes], None, None]:
     env["APP_PORT"] = str(_PORT)
     env["APP_HOST"] = "127.0.0.1"
 
+    # Use the application entrypoint so Windows selects SelectorEventLoop for
+    # psycopg instead of uvicorn's default Proactor loop.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn",
-         "cowork_agent.app:create_app",
-         "--factory",
-         "--host", "127.0.0.1",
-         "--port", str(_PORT),
-         "--log-level", "warning"],
+        [sys.executable, "-m", "cowork_agent.app"],
         cwd=str(_REPO_ROOT),
         env=env,
         stdout=subprocess.PIPE,

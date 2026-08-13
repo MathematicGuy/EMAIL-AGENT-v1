@@ -1,13 +1,40 @@
 import pytest
 
 from cowork_agent.config import (
+    GeminiEmbeddingSettings,
     QdrantSettings,
     RerankerSettings,
     SessionSettings,
     SupabaseStorageSettings,
+    UserDocumentsSettings,
 )
 
 CLOUD_URL = "https://example.us-west-1-0.aws.cloud.qdrant.io"
+
+
+def test_project_gemini_embedding_settings_default_to_3072() -> None:
+    settings = GeminiEmbeddingSettings.from_env(
+        {"GEMINI_API_KEY_1": "key-1"}, load_env_file=False
+    )
+
+    assert settings.model == "gemini-embedding-2"
+    assert settings.dimensions == 3072
+    assert settings.batch_size == 100
+
+
+def test_project_documents_share_the_canonical_qdrant_collection_setting() -> None:
+    environ = {"QDRANT_PROJECT_COLLECTION": "private-project-documents"}
+
+    assert UserDocumentsSettings.from_env(
+        environ, load_env_file=False
+    ).collection_name == "private-project-documents"
+    assert QdrantSettings.from_env(
+        environ, load_env_file=False
+    ).project_collection_name == "private-project-documents"
+
+
+def test_project_documents_are_enabled_by_default() -> None:
+    assert UserDocumentsSettings.from_env({}, load_env_file=False).enabled is True
 
 
 def test_session_settings_load_cookie_contract() -> None:

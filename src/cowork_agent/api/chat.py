@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import tempfile
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Annotated, cast
+from datetime import UTC, datetime
+from typing import Protocol, cast
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from langfuse import observe
 from pydantic import BaseModel, ConfigDict
 
@@ -27,7 +24,6 @@ from cowork_agent.domain.chat_contracts import (
     MemoryType,
     TaskEpisode,
 )
-from cowork_agent.domain.project_documents import ProjectDocumentStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionAccessDenied,
@@ -43,13 +39,8 @@ from cowork_agent.features.ai_chat.profile_policy import (
     ProfileWriteRejected,
     authorize_profile_write,
 )
-from cowork_agent.features.user_documents.ports import (
-    ProjectDocumentRepositoryPort,
-    ProjectRepositoryPort,
-)
 from cowork_agent.identity import VerifiedPrincipal
-from cowork_agent.integrations.project_documents.encrypted_store import EncryptedDocumentStore
-from cowork_agent.integrations.project_documents.sniffing import sniff_media_type
+from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
 
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
@@ -72,10 +63,16 @@ class _CreateSessionPayload(BaseModel):
     project_id: str | None = None
 
 
-class _CreateProjectPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class CanonicalProjectRepository(Protocol):
+    async def default_project(self, principal: VerifiedPrincipal) -> Project: ...
 
-    name: str
+    async def require_project(
+        self, principal: VerifiedPrincipal, project_id: str
+    ) -> Project | None: ...
+
+    async def require_document(
+        self, principal: VerifiedPrincipal, project_id: str, document_id: str
+    ) -> ProjectDocument | None: ...
 
 
 class _ChatProfilePayload(BaseModel):
@@ -94,82 +91,29 @@ def create_chat_router() -> APIRouter:
 
     router = APIRouter(prefix="/v1/cowork/chat", tags=["chat"])
 
-    @router.post("/projects", status_code=201)
-    async def create_project(payload: _CreateProjectPayload, request: Request) -> dict[str, object]:
-        principal = await _verified_principal(request)
-        name = payload.name.strip()
-        if not 1 <= len(name) <= 200:
-            raise HTTPException(
-                status_code=422, detail="Project name must contain 1-200 characters"
-            )
-        project = await _project_repository(request).create(
-            principal.tenant_id, principal.user_id, name
-        )
-        return project.to_dict()
-
-    @router.get("/projects")
-    async def list_projects(request: Request) -> dict[str, object]:
-        principal = await _verified_principal(request)
-        repository = _project_repository(request)
-        await repository.resolve_default(principal.tenant_id, principal.user_id)
-        projects = await repository.list_owned(principal.tenant_id, principal.user_id)
-        return {"projects": [project.to_dict() for project in projects]}
-
-    @router.delete("/projects/{project_id}", status_code=204, response_model=None)
-    async def delete_project(project_id: str, request: Request) -> None:
-        principal = await _verified_principal(request)
-        projects = _project_repository(request)
-        project = await projects.get_owned(
-            principal.tenant_id,
-            principal.user_id,
-            project_id,
-            include_deleted=True,
-        )
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        if await projects.get_owned(principal.tenant_id, principal.user_id, project_id) is None:
-            return
-        at = datetime.now(UTC)
-        document_ids = await _document_repository(request).mark_project_deleted(
-            principal.tenant_id, principal.user_id, project_id, at=at
-        )
-        await _purge_document_objects(request, document_ids)
-        removed_sessions = await _sessions(request).delete_project(
-            tenant_id=principal.tenant_id,
-            user_id=principal.user_id,
-            project_id=project_id,
-        )
-        for session_id in removed_sessions:
-            _controllers(request).pop(session_id, None)
-        deleted, _replacement = await projects.delete_owned(
-            principal.tenant_id, principal.user_id, project_id, at=at
-        )
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Project not found")
-
     @router.post("/sessions", status_code=201)
     async def create_session(
         request: Request, payload: _CreateSessionPayload | None = None
     ) -> dict[str, str]:
         principal = await _verified_principal(request)
         requested_project_id = payload.project_id if payload else None
-        project_repository = getattr(request.app.state, "chat_project_repository", None)
+        project_repository = getattr(request.app.state, "project_repository", None)
         if project_repository is None and requested_project_id is None:
             project_id = "default-project"
         elif project_repository is None:
             raise HTTPException(status_code=404, detail="Project not found")
         elif requested_project_id is None:
-            project = await cast(ProjectRepositoryPort, project_repository).resolve_default(
-                principal.tenant_id, principal.user_id
+            project = await cast(CanonicalProjectRepository, project_repository).default_project(
+                principal
             )
-            project_id = project.project_id
+            project_id = project.id
         else:
-            owned_project = await cast(ProjectRepositoryPort, project_repository).get_owned(
-                principal.tenant_id, principal.user_id, requested_project_id
-            )
+            owned_project = await cast(
+                CanonicalProjectRepository, project_repository
+            ).require_project(principal, requested_project_id)
             if owned_project is None:
                 raise HTTPException(status_code=404, detail="Project not found")
-            project_id = owned_project.project_id
+            project_id = owned_project.id
         sessions = _sessions(request)
         if project_id == "default-project":
             scope = await sessions.create(
@@ -214,20 +158,18 @@ def create_chat_router() -> APIRouter:
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
         if message.document_ids:
-            repository = getattr(request.app.state, "project_document_repository", None)
+            repository = getattr(request.app.state, "project_repository", None)
             if repository is None:
                 raise HTTPException(status_code=404, detail="Document not found")
             for document_id in message.document_ids:
                 if (
-                    await cast(ProjectDocumentRepositoryPort, repository).get_owned(
-                        principal.tenant_id,
-                        principal.user_id,
-                        scope.project_id,
-                        document_id,
-                    )
-                    is None
-                ):
+                    document := await cast(
+                        CanonicalProjectRepository, repository
+                    ).require_document(principal, scope.project_id, document_id)
+                ) is None:
                     raise HTTPException(status_code=404, detail="Document not found")
+                if document.status != "ready":
+                    raise HTTPException(status_code=409, detail="document_not_ready")
         controller = _controllers(request).get(session_id)
         if controller is None:
             controller = _controller_factory(request)(scope)
@@ -259,129 +201,6 @@ def create_chat_router() -> APIRouter:
             )
         return {"sessions": [_session_response(scope) for scope in scopes]}
 
-    @router.post("/projects/{project_id}/documents")
-    async def upload_project_document(
-        project_id: str,
-        request: Request,
-        file: Annotated[UploadFile, File()],
-    ) -> JSONResponse:
-        principal = await _verified_principal(request)
-        _require_documents_enabled(request)
-        if (
-            await _project_repository(request).get_owned(
-                principal.tenant_id, principal.user_id, project_id
-            )
-            is None
-        ):
-            raise HTTPException(status_code=404, detail="Project not found")
-        settings = request.app.state.user_documents_settings
-        data, size_bytes, digest = await _read_bounded_upload(file, settings.max_file_bytes)
-        try:
-            media_type = sniff_media_type(data)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=415, detail="Only valid PDF and DOCX files are supported"
-            ) from exc
-        existing = await _document_repository(request).list_owned(
-            principal.tenant_id, principal.user_id, project_id
-        )
-        duplicate = next((item for item in existing if item.sha256 == digest), None)
-        if duplicate is not None:
-            if duplicate.status is not ProjectDocumentStatus.FAILED:
-                return JSONResponse(duplicate.to_dict(), status_code=200)
-            await _document_repository(request).transition(
-                duplicate.document_id,
-                from_statuses=(ProjectDocumentStatus.FAILED,),
-                to_status=ProjectDocumentStatus.DELETED,
-                at=datetime.now(UTC),
-            )
-            existing = tuple(item for item in existing if item.document_id != duplicate.document_id)
-        if len(existing) >= settings.max_documents_per_project:
-            raise HTTPException(status_code=422, detail="Project document quota exceeded")
-        if sum(item.size_bytes for item in existing) + size_bytes > settings.max_project_bytes:
-            raise HTTPException(status_code=422, detail="Project storage quota exceeded")
-        now = datetime.now(UTC)
-        title = (file.filename or "Document")[:300].strip() or "Document"
-        document, created = await _document_repository(request).create_or_get(
-            document_id=f"document_{uuid.uuid4().hex}",
-            project_id=project_id,
-            tenant_id=principal.tenant_id,
-            user_id=principal.user_id,
-            title=title,
-            media_type=media_type,
-            size_bytes=size_bytes,
-            sha256=digest,
-            created_at=now,
-            expires_at=now + timedelta(days=settings.retention_days),
-        )
-        if created:
-            _document_store(request).put_source(document.document_id, data)
-            try:
-                await request.app.state.document_ingestion_dispatcher.dispatch(document)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503, detail="Document ingestion queue unavailable"
-                ) from exc
-        return JSONResponse(document.to_dict(), status_code=202 if created else 200)
-
-    @router.get("/projects/{project_id}/documents")
-    async def list_project_documents(project_id: str, request: Request) -> dict[str, object]:
-        principal = await _verified_principal(request)
-        await _require_owned_project(request, principal, project_id)
-        documents = await _document_repository(request).list_owned(
-            principal.tenant_id, principal.user_id, project_id
-        )
-        return {"documents": [document.to_dict() for document in documents]}
-
-    @router.get("/projects/{project_id}/documents/{document_id}")
-    async def get_project_document(
-        project_id: str, document_id: str, request: Request
-    ) -> dict[str, object]:
-        principal = await _verified_principal(request)
-        document = await _document_repository(request).get_owned(
-            principal.tenant_id, principal.user_id, project_id, document_id
-        )
-        if document is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        return document.to_dict()
-
-    @router.delete(
-        "/projects/{project_id}/documents/{document_id}", status_code=204, response_model=None
-    )
-    async def delete_project_document(project_id: str, document_id: str, request: Request) -> None:
-        principal = await _verified_principal(request)
-        repository = _document_repository(request)
-        document = await repository.get_owned(
-            principal.tenant_id, principal.user_id, project_id, document_id
-        )
-        if document is None:
-            document = next(
-                (
-                    item
-                    for item in await repository.list_owned(
-                        principal.tenant_id,
-                        principal.user_id,
-                        project_id,
-                        include_deleted=True,
-                    )
-                    if item.document_id == document_id
-                ),
-                None,
-            )
-            if document is None:
-                raise HTTPException(status_code=404, detail="Document not found")
-            await _purge_document_objects(request, (document_id,))
-            return
-        deleted = await repository.transition(
-            document_id,
-            from_statuses=(document.status,),
-            to_status=ProjectDocumentStatus.DELETED,
-            at=datetime.now(UTC),
-        )
-        if deleted is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        await _purge_document_objects(request, (document_id,))
-
     @router.get("/sessions/{session_id}/messages")
     async def list_messages(session_id: str, request: Request) -> dict[str, object]:
         principal = await _verified_principal(request)
@@ -396,7 +215,24 @@ def create_chat_router() -> APIRouter:
             source_id=None,
         )
         turns = _buffer(request).read(namespace)
-        return {"session_id": session_id, "turns": [turn.to_dict() for turn in turns]}
+        serialized: list[dict[str, object]] = []
+        repository = getattr(request.app.state, "project_repository", None)
+        for turn in turns:
+            payload = turn.to_dict()
+            coordinates = payload.get("citation_coordinates")
+            if isinstance(coordinates, list) and repository is not None:
+                for coordinate in coordinates:
+                    if not isinstance(coordinate, dict):
+                        continue
+                    document_id = coordinate.get("document_id")
+                    if not isinstance(document_id, str):
+                        continue
+                    document = await cast(
+                        CanonicalProjectRepository, repository
+                    ).require_document(principal, scope.project_id, document_id)
+                    coordinate["unavailable"] = document is None or document.status != "ready"
+            serialized.append(payload)
+        return {"session_id": session_id, "turns": serialized}
 
     @router.get("/episodes")
     async def list_episodes(request: Request) -> dict[str, object]:
@@ -643,83 +479,6 @@ def _session_response(scope: ChatMemoryScope) -> dict[str, str]:
     if scope.project_id != "default-project":
         payload["project_id"] = scope.project_id
     return payload
-
-
-def _project_repository(request: Request) -> ProjectRepositoryPort:
-    repository = getattr(request.app.state, "chat_project_repository", None)
-    if repository is None:
-        raise HTTPException(status_code=503, detail="Project store unavailable")
-    return cast(ProjectRepositoryPort, repository)
-
-
-def _document_repository(request: Request) -> ProjectDocumentRepositoryPort:
-    repository = getattr(request.app.state, "project_document_repository", None)
-    if repository is None:
-        raise HTTPException(status_code=503, detail="Document store unavailable")
-    return cast(ProjectDocumentRepositoryPort, repository)
-
-
-def _document_store(request: Request) -> EncryptedDocumentStore:
-    store = getattr(request.app.state, "project_document_store", None)
-    if store is None:
-        raise HTTPException(status_code=503, detail="Encrypted document store unavailable")
-    return cast(EncryptedDocumentStore, store)
-
-
-def _require_documents_enabled(request: Request) -> None:
-    settings = getattr(request.app.state, "user_documents_settings", None)
-    if settings is None or not settings.enabled:
-        raise HTTPException(status_code=503, detail="Project documents are disabled")
-
-
-async def _require_owned_project(
-    request: Request, principal: VerifiedPrincipal, project_id: str
-) -> None:
-    if (
-        await _project_repository(request).get_owned(
-            principal.tenant_id, principal.user_id, project_id
-        )
-        is None
-    ):
-        raise HTTPException(status_code=404, detail="Project not found")
-
-
-async def _read_bounded_upload(upload: UploadFile, maximum_bytes: int) -> tuple[bytes, int, str]:
-    digest = hashlib.sha256()
-    size = 0
-    path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False) as handle:
-            path = Path(handle.name)
-            while chunk := await upload.read(1024 * 1024):
-                size += len(chunk)
-                if size > maximum_bytes:
-                    raise HTTPException(status_code=413, detail="Document exceeds size limit")
-                digest.update(chunk)
-                handle.write(chunk)
-        if size == 0:
-            raise HTTPException(status_code=422, detail="Document is empty")
-        return path.read_bytes(), size, digest.hexdigest()
-    finally:
-        await upload.close()
-        if path is not None:
-            path.unlink(missing_ok=True)
-
-
-async def _purge_document_objects(request: Request, document_ids: tuple[str, ...]) -> None:
-    vectors = getattr(request.app.state, "project_document_vectors", None)
-    store = getattr(request.app.state, "project_document_store", None)
-    try:
-        for document_id in document_ids:
-            if vectors is not None:
-                await vectors.delete_document(document_id)
-            if store is not None:
-                store.delete(document_id)
-            await _document_repository(request).confirm_cleanup(document_id, at=datetime.now(UTC))
-    except Exception as exc:
-        # Metadata is already retrieval-ineligible. A later retention/recovery
-        # pass repeats physical cleanup rather than making deletion visible again.
-        raise HTTPException(status_code=503, detail="Document cleanup is pending") from exc
 
 
 __all__ = ["create_chat_router"]
