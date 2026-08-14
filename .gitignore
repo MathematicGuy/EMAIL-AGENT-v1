@@ -49,3 +49,6 @@ frontend/.env
 *corpus2skill*
 **/update_corpus2skill.py
 .superpowers
+
+# Agent session artifacts (tracked skills under .claude/ stay tracked)
+.claude/.headroom_wrap_marker.json
