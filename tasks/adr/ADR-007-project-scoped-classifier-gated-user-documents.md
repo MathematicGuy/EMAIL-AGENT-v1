@@ -1,6 +1,7 @@
 # ADR-007 — Project-scoped, classifier-gated user documents
 
-- Status: Accepted
+- Status: Accepted (clauses 4 and 5 superseded by
+  [ADR-008](ADR-008-turbovec-project-document-plane.md))
 - Date: 2026-08-12
 - Supersedes: ADR-006 and the withdrawn always-retrieve Project design
 

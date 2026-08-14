@@ -51,7 +51,8 @@ class HybridSemanticMemory:
     ) -> None:
         if dense is None:
             warnings.warn(
-                "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
+                "HybridSemanticMemory without an injected dense store is "
+                "deprecated; pass dense=TurbovecSemanticMemory(...)",
                 DeprecationWarning,
                 stacklevel=2,
             )

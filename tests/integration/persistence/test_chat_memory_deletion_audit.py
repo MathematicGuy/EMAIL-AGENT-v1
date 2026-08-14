@@ -296,7 +296,7 @@ def test_user_wide_deletion_removes_all_owned_rows_and_preserves_other_users() -
                 ),
                 query,
             )
-            # Qdrant is not in this deletion path; no semantic RAG call is made.
+            # Company RAG is not in this deletion path; no semantic RAG call is made.
             assert len(other_found) == 0 or other_found[0].episode_id == "ep-other"
             async with pool.connection() as connection:
                 cursor = await connection.execute(

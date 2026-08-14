@@ -97,7 +97,7 @@ def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
     class FailingVectors(Vectors):
         async def index(self, **kwargs: object) -> int:
             del kwargs
-            raise OSError("qdrant unavailable")
+            raise OSError("index unavailable")
 
     async def scenario() -> None:
         repository = RetryRepository()

@@ -2,7 +2,7 @@
 
 Index-propagation N/A evidence (FR-16): user memory (chat_profiles,
 chat_summary_episodes, task_episodes) lives exclusively in PostgreSQL.
-Qdrant indexes company knowledge only; there is no derived user-memory
+Company knowledge is a Turbovec snapshot; there is no derived user-memory
 search index anywhere in integrations/ or scripts/. Therefore FR-16
 index propagation is N/A by design, and semantic RAG content is never
 affected by user-memory deletion, purge, or table-level backup/restore.

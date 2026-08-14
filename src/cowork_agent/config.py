@@ -228,7 +228,6 @@ class UserDocumentsSettings:
     top_k: int
     min_score: float
     retrieval_timeout_ms: int
-    startup_timeout_ms: int
     ingestion_stream: str
 
     @classmethod
@@ -270,53 +269,9 @@ class UserDocumentsSettings:
             retrieval_timeout_ms=_bounded_positive_int(
                 environ, "USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS", 10_000, maximum=10_000
             ),
-            startup_timeout_ms=_bounded_positive_int(
-                environ, "USER_DOCUMENTS_STARTUP_TIMEOUT_MS", 30_000, maximum=120_000
-            ),
             ingestion_stream=_non_empty_value(
                 environ, "USER_DOCUMENTS_INGESTION_STREAM", "cowork:project-document-ingestion"
             ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class QdrantSettings:
-    """Qdrant vector store configuration for Semantic Memory retrieval.
-
-    Absent configuration is not an error: ``enabled`` is false when
-    ``QDRANT_URL`` is empty, and the RAG bootstrap degrades to
-    ``NullSemanticMemory`` rather than blocking a digest run (invariant 4).
-    """
-
-    url: str
-    api_key: str = field(repr=False)
-    collection_name: str
-    enabled: bool
-    vector_size: int
-    reindex: bool
-
-    @classmethod
-    def from_env(
-        cls,
-        environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
-    ) -> "QdrantSettings":
-        if environ is None:
-            if load_env_file:
-                load_runtime_environment()
-            environ = os.environ
-        url = environ.get("QDRANT_URL", "").strip()
-        if url.startswith("replace-with-"):
-            url = ""
-        return cls(
-            url=url,
-            api_key=environ.get("QDRANT_API_KEY", "").strip(),
-            collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
-            or "company_knowledge",
-            enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
-            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 1024),
-            reindex=_boolean(environ, "QDRANT_REINDEX", False),
         )
 
 

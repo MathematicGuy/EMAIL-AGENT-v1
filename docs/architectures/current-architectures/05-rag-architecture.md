@@ -16,7 +16,7 @@ The Enterprise RAG & Vector Memory Subsystem provides high-precision, low-latenc
 | **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) |
 | **Parsing & Chunking** | Heading-aware section splitting bounded to 1200 characters; page-aware chunking for user documents. | [markdown_chunking.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/markdown_chunking.py) |
 | **Embedding Adapters** | Dual embedding support for Jina AI Embeddings (`v5`) and Gemini Embeddings API. | [embeddings.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) |
-| **Primary Vector Database** | Server-side payload filtering (`document_status == 'ready'`) with cosine vector search in Qdrant. | [qdrant.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) |
+| **Primary Vector Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) wrapped with BM25 + RRF. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
 | **Quantized Memory Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) for low-footprint local vector search. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
 | **Hybrid & Lexical Search** | Dense matrix cosine search + Okapi BM25 lexical search adapter fused via Reciprocal Rank Fusion (`k=60`). | [hybrid.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py) & [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) |
 | **Cross-Encoder Reranking** | Jina Cross-Encoder Reranker (`jina-reranker-v2-base-multilingual`) for precision candidate reranking. | [jina_reranker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/jina_reranker.py) |
@@ -35,13 +35,11 @@ flowchart LR
     MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / 1200-char max)"]
     LOADER --> EMBED["Embedding Adapter<br/>(Jina v5 / Gemini Embeddings)"]
     
-    EMBED --> STORE_QDRANT["Qdrant Vector Collection<br/>(cowork_knowledge_v1)"]
     EMBED --> STORE_TURBO["Turbovec 4-Bit Index<br/>(.data/turbovec_index.tvim)"]
 ```
 
 1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, parses section headings (H1/H2), and emits `KnowledgeChunk` instances bounded to 1200 characters.
-2. **Qdrant Vector Indexing (`qdrant.py`):** Embeds chunks via `EmbeddingPort`, verifies payload index for `document_status`, and upserts points in 128-item batches.
-3. **Turbovec Quantized Indexing (`turbovec_memory.py`):** When `RAG_STORE_PROVIDER=turbovec`, pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
+2. **Turbovec Quantized Indexing (`turbovec_memory.py`):** Pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 
 ---
@@ -59,21 +57,19 @@ flowchart TB
     TRANSFORM --> LADDER{"Provider Selection<br/>(RAG_STORE_PROVIDER)"}
 
     LADDER -->|turbovec| TURBO["Turbovec 4-Bit Dense<br/>(.data/turbovec_index.tvim)"]
-    LADDER -->|qdrant or auto+enabled| QDRANT["Qdrant Dense<br/>(payload filter + cosine)"]
-    LADDER -->|unknown / failed / disabled| NULL_MEM["NullSemanticMemory<br/>(structured no_results)"]
+    LADDER -->|unknown / qdrant / failed / disabled| NULL_MEM["NullSemanticMemory<br/>(structured no_results)"]
 
     TURBO --> HYBRID["HybridSemanticMemory<br/>(dense + BM25 + RRF)"]
-    QDRANT --> HYBRID
     HYBRID --> RESP["SemanticRetrievalResponse<br/>(chunks, citations, scores)"]
     NULL_MEM --> RESP
 ```
 
 ### Retrieval Execution Ladder:
 
-1. **ACL & Status Filter:** `QdrantSemanticMemory` enforces a server-side payload filter matching `document_status == 'ready'` prior to vector scoring (returning `RetrievalStatus.AUTHORIZATION_DENIED` if unapproved status is requested).
+1. **Status filter:** in-process retrievers honor `document_status` on the request before scoring.
 2. **Query Transformation (`query_transform.py`):** Applies domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates hypothetical passages via HyDE.
 3. **Hybrid wrapper (`hybrid.py`):**
-   - Accepts an injected dense `SemanticMemoryPort` (Turbovec or Qdrant) from `build_semantic_memory()`.
+   - Accepts an injected dense `SemanticMemoryPort` (Turbovec) from `build_semantic_memory()`.
    - Executes lexical keyword search via `BM25SearchAdapter` over the same company corpus.
    - Fuses dense and lexical ranks with Reciprocal Rank Fusion (`ReciprocalRankFusion`, `k=60`).
    - Optionally reranks with Jina and diversifies with MMR (eval / advanced path; factory wrap is dense + BM25 + RRF).
@@ -89,7 +85,7 @@ In addition to enterprise company knowledge, the project provides a dedicated ve
 |---|---|
 | **Authoritative File** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py) |
 | **Storage & Extraction** | Private Supabase Storage bucket + page-aware chunking (`page_start`, `page_end`) for PDF/DOCX documents. |
-| **Vector Isolation** | Dedicated Qdrant collection (`cowork_project_documents_v1`) filtered strictly by `workspace_id`, `user_id`, and `project_id`. |
+| **Vector Isolation** | Per-project Turbovec `.tvim` plus a six-condition Postgres allowlist (`workspace_id`, `user_id`, `project_id`, selected ids, ready, unexpired). |
 | **Classifier Gating** | Access is gated behind `USER_DOCUMENTS_ENABLED=true` and evaluated by `ChatRoutingService` intent classification prior to search execution. |
 
 ---
@@ -110,7 +106,6 @@ When an incoming email is classified as `RETRIEVE_RAG` by `routing.py`, `ActionP
 
 | Store Engine | Provider Value | Index Location / Address | Primary Use Case |
 |---|---|---|---|
-| **Turbovec 4-bit** | `turbovec` (default) | `.data/turbovec_index.tvim` | Default company RAG for Email + Chat Type 4 (Hybrid dense + BM25 + RRF). |
-| **Qdrant Vector DB** | `qdrant` | `QDRANT_URL` / collection `cowork_knowledge_v1` | Optional company RAG backend, and isolated project-document search. |
-| **Hybrid In-Repo** | `hybrid` | In-process NumPy + BM25 | Local fallback and evaluation benchmark engine. |
-| **Null Memory** | `null` | N/A | Degraded state fallback preventing application crashes. |
+| **Turbovec 4-bit** | `turbovec` (default) | `.data/turbovec_index.tvim` | Company RAG for Email + Chat Type 4 (Hybrid dense + BM25 + RRF). |
+| **Project hybrid** | n/a (ADR-008) | Postgres `project_document_chunks` + `var/project-indexes/{id}.tvim` | User-uploaded project documents. |
+| **Null Memory** | `none` / retired `qdrant` | N/A | Degraded state fallback preventing application crashes. |

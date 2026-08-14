@@ -11,7 +11,7 @@
 
 The Knowledge & Document Ingestion Pipeline is an independent, deterministic processing subsystem. It converts administrator-supplied source documents (`.docx`, `.pdf`) and user-uploaded project files into standardized, safe Markdown files with SHA-256 manifest tracking, atomic writes, and page-aware metadata.
 
-The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative ground-truth source for enterprise RAG vector stores (Qdrant and Turbovec).
+The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative ground-truth source for enterprise RAG (Turbovec).
 
 ---
 
@@ -102,7 +102,7 @@ flowchart TB
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
 - **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx`, `pdf_native`, or `mistral_ocr`), and ISO-8601 processing timestamp.
-- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Qdrant/Turbovec.
+- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec.
 
 ---
 
@@ -122,8 +122,8 @@ flowchart TB
 flowchart LR
     INGEST["Document Ingestion Pipeline<br/>(KnowledgeIngestionService)"] --> CORPUS["Committed Markdown Corpus<br/>(data/extracted/*.md)"]
     CORPUS --> LOADER["Corpus Loader<br/>(load_corpus in knowledge_base.py)"]
-    LOADER --> VECTOR_QDRANT["Qdrant Vector DB<br/>(qdrant.py)"]
+    LOADER --> VECTOR_QDRANT["Turbovec Index<br/>(turbovec_memory.py)"]
     LOADER --> VECTOR_TURBO["Turbovec 4-Bit Store<br/>(turbovec_memory.py)"]
 ```
 
-The output of the ingestion pipeline (`data/extracted/*.md`) is read by `load_corpus()` in `knowledge_base.py`. The resulting `KnowledgeChunk` records are indexed into Qdrant (`qdrant.py`) or Turbovec (`turbovec_memory.py`), establishing the complete ground-truth knowledge base for semantic RAG queries.
+The output of the ingestion pipeline (`data/extracted/*.md`) is read by `load_corpus()` in `knowledge_base.py`. The resulting `KnowledgeChunk` records are indexed into Turbovec (`turbovec_memory.py`), establishing the complete ground-truth knowledge base for semantic RAG queries.

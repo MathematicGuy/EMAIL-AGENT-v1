@@ -85,7 +85,7 @@ Incoming Chat Message Request
 | **2. Long-Term Declarative Memory** | 🟢 **READ BY DEFAULT** | **Every Turn** (Bound to `user_id`) | Explicit user preferences (e.g., tone, language, brevity, priority formatting). |
 | **3. Long-Term Episodic Task Memory** | 🟡 **SELECTIVE READ** | Cue phrase match (`_EPISODIC_CUES`: "task", "plan", "previous", "status", "action") | Body-free `TaskEpisode` metadata (only if `retrieval_eligible == True` AND status $\in$ `{USER_APPROVED, COMPLETED}`). |
 | **4. Semantic Company RAG** | 🟡 **SELECTIVE READ** | Keyword/Cue phrase match (`_SEMANTIC_CUES`: "policy", "procedure", "SOP", "rules") | Relevant text chunks from enterprise domain knowledge base (BM25 + Dense RRF ranked). |
-| **5. Project Document RAG** | 🔵 **DETERMINISTIC** | Project has active `ready` documents | Page-aware document chunks from project Qdrant collection. |
+| **5. Project Document RAG** | 🔵 **DETERMINISTIC** | Project has active `ready` documents | Page-aware chunks from Postgres FTS + per-project Turbovec `.tvim` (ADR-008). |
 
 ---
 
@@ -124,7 +124,7 @@ flowchart TD
     GW --> WM["1. Short-Term Working Memory<br/>(InMemoryChatSessionBuffer)"]:::green
     GW --> DM["2. Long-Term Declarative Memory<br/>(PostgreSQL chat_profiles)"]:::green
     GW --> EM["3. Long-Term Episodic Memory<br/>(PostgreSQL task_episodes)"]:::green
-    GW --> SM["4. Semantic Memory<br/>(Company RAG — Local Hybrid / Qdrant)"]:::green
+    GW --> SM["4. Semantic Memory<br/>(Company RAG — Turbovec hybrid)"]:::green
 ```
 
 1.  **Short-Term Working Memory**: Active conversation history stored in-memory ([`session_buffer.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/.worktree/demo-frontend/src/cowork_agent/features/ai_chat/session_buffer.py)). Automatically bound by max turns (`CHAT_MEMORY_MAX_TURNS=20`) and TTL (`CHAT_MEMORY_TTL_SECONDS=1800`).

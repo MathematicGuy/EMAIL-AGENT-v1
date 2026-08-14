@@ -12,7 +12,7 @@ saturates for any retriever, so an aggregate alone cannot tell dense, BM25
 and hybrid apart. An aggregate that improves while `semantic` regresses is a
 failure, and only the sliced report can see it.
 
-All four retrievers — dense, bm25, hybrid and qdrant — flow through one measurement
+Dense, BM25, hybrid, hybrid_turbovec and turbovec flow through one measurement
 path, so their reports are directly comparable.
 
 Runs offline and deterministically with the HashingEmbedder; skips
@@ -49,7 +49,6 @@ if TYPE_CHECKING:
     from cowork_agent.integrations.rag.embeddings import EmbeddingPort
     from cowork_agent.integrations.rag.jina_reranker import RerankerPort
     from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
-    from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -71,9 +70,8 @@ DENSE = "dense"
 BM25 = "bm25"
 HYBRID = "hybrid"
 HYBRID_TURBOVEC = "hybrid_turbovec"
-QDRANT = "qdrant"
 TURBOVEC = "turbovec"
-RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID, HYBRID_TURBOVEC, QDRANT, TURBOVEC)
+RETRIEVERS: tuple[str, ...] = (DENSE, BM25, HYBRID, HYBRID_TURBOVEC, TURBOVEC)
 
 #: RetrievalStatus.NO_RESULTS, duplicated so the metric layer imports nothing.
 NO_RESULTS_STATUS = "no_results"
@@ -745,83 +743,6 @@ class Bm25OnlyRetriever:
         )
 
 
-class QdrantEvaluationError(RuntimeError):
-    """Raised when Qdrant failed instead of returning a quality outcome."""
-
-
-class _ErrorTrackingQdrantClient:
-    """Forward a Qdrant client while retaining query errors the adapter degrades."""
-
-    def __init__(self, client: Any) -> None:
-        self._client = client
-        self.query_error: Exception | None = None
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._client, name)
-
-    async def query_points(self, *args: Any, **kwargs: Any) -> Any:
-        self.query_error = None
-        try:
-            return await self._client.query_points(*args, **kwargs)
-        except Exception as exc:
-            self.query_error = exc
-            raise
-
-
-class QdrantEvaluationRetriever:
-    """In-memory production Qdrant adapter for retrieval evaluation."""
-
-    _COLLECTION_NAME = "retrieval-eval"
-
-    def __init__(
-        self,
-        documents: Sequence[KnowledgeDocument],
-        embedder: EmbeddingPort,
-        *,
-        top_k_default: int,
-        min_score_default: float,
-    ) -> None:
-        self._documents = documents
-        self._embedder = embedder
-        self._top_k_default = top_k_default
-        self._min_score_default = min_score_default
-        self._memory: QdrantSemanticMemory | None = None
-        self._client: _ErrorTrackingQdrantClient | None = None
-
-    async def build_index(self) -> None:
-        """Ingest the corpus once into an ephemeral Qdrant collection."""
-        if self._memory is not None:
-            return
-
-        from qdrant_client import AsyncQdrantClient
-
-        from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
-
-        client = _ErrorTrackingQdrantClient(AsyncQdrantClient(":memory:"))
-        await ingest_corpus(client, self._COLLECTION_NAME, self._documents, self._embedder)
-        self._memory = QdrantSemanticMemory(
-            client,
-            self._COLLECTION_NAME,
-            self._embedder,
-            top_k_default=self._top_k_default,
-            min_score_default=self._min_score_default,
-        )
-        self._client = client
-
-    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
-        if self._memory is None or self._client is None:
-            raise RuntimeError(
-                "QdrantEvaluationRetriever.build_index() must be called before retrieve()"
-            )
-        self._client.query_error = None
-        response = await self._memory.retrieve(request)
-        if self._client.query_error is not None:
-            raise QdrantEvaluationError(
-                "Qdrant query failed during retrieval evaluation"
-            ) from self._client.query_error
-        return response
-
-
 class Retriever(Protocol):
     """The slice of SemanticMemoryPort this harness drives."""
 
@@ -842,13 +763,6 @@ def build_retriever(
     """Construct the named retrieval stack behind a single interface."""
     if name == BM25:
         return Bm25OnlyRetriever(documents, top_k_default=top_k)
-    if name == QDRANT:
-        return QdrantEvaluationRetriever(
-            documents,
-            embedder,
-            top_k_default=top_k,
-            min_score_default=min_score,
-        )
     if name == TURBOVEC:
         from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 
@@ -1226,7 +1140,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     BM25: BM25_SCORE,
                     HYBRID: RRF_SCORE,
                     HYBRID_TURBOVEC: RRF_SCORE,
-                    QDRANT: DENSE_COSINE_SCORE,
                     TURBOVEC: DENSE_COSINE_SCORE,
                 }[args.retriever]
             ),

@@ -29,9 +29,9 @@ from .knowledge_base import KnowledgeChunk, KnowledgeDocument
 class InRepoSemanticMemory:
     """SemanticMemoryPort over an in-memory, ACL-filtered vector index.
 
-    Deprecated: ``QdrantSemanticMemory`` is the production store. This one
-    re-embeds the whole corpus in every process at startup and keeps the
-    index in local heap, so it stays only for offline evaluation harnesses.
+    Deprecated: production company RAG is ``TurbovecSemanticMemory`` via
+    ``build_semantic_memory()``. This index re-embeds the whole corpus in
+    every process at startup and stays only for offline evaluation harnesses.
     """
 
     def __init__(
@@ -43,7 +43,7 @@ class InRepoSemanticMemory:
         min_score_default: float = 0.2,
     ) -> None:
         warnings.warn(
-            "InRepoSemanticMemory is deprecated; use QdrantSemanticMemory",
+            "InRepoSemanticMemory is deprecated; use TurbovecSemanticMemory",
             DeprecationWarning,
             stacklevel=2,
         )

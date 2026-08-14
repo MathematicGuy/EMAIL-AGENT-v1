@@ -49,7 +49,7 @@ Metadata is saved in **two distinct layers** across the system:
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ STAGE 2: RAG INDEXING TIME (Saved into Vector Store Payload)             │
 └──────────────────────────────────────────────────────────────────────────┘
-  Vector Store: Qdrant / Turbovec (.tvim)
+  Vector Store: Turbovec (.tvim)
   
   Point / Chunk ID: "01-2021-nd-cp-283247#3"
   Vector: [0.024, -0.118, 0.452, ...] (1024-dim embedding)

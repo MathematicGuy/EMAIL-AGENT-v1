@@ -35,7 +35,7 @@ flowchart TD
     GW --> WM["1. Short-Term Working Memory<br/>(InMemoryChatSessionBuffer)"]:::green
     GW --> DM["2. Long-Term Declarative Memory<br/>(PostgreSQL chat_profiles)"]:::green
     GW --> EM["3. Long-Term Episodic Memory<br/>(PostgreSQL task_episodes / chat_summary_episodes)"]:::green
-    GW --> SM["4. Semantic Memory<br/>(Company RAG — local hybrid / optional Qdrant)"]:::green
+    GW --> SM["4. Semantic Memory<br/>(Company RAG — Turbovec hybrid)"]:::green
 
     subgraph Boundaries["Strict Privacy Boundaries"]
         WM ---|"Bounded turns + TTL"| WM_POLICY["CHAT_MEMORY_MAX_TURNS / CHAT_MEMORY_TTL_SECONDS"]:::green
@@ -52,7 +52,7 @@ flowchart TD
 | **1. Short-Term Working Memory** | Active chat session turn history (`session_id`). Bounded by `CHAT_MEMORY_MAX_TURNS` (default 20) and `CHAT_MEMORY_TTL_SECONDS` (default 1800) via `ChatMemorySettings`. | In-memory `InMemoryChatSessionBuffer` ([session_buffer.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/session_buffer.py)) | **Strict Ephemerality**: Raw email bodies and full prompt contexts are never held here. Buffer is bound to verified session scope. | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> |
 | **2. Long-Term Declarative Memory** | Explicit, durable user preferences (language, timezone, formatting style, priority rules). Expiry-aware reads with default-profile fallback on outage. | PostgreSQL `chat_profiles` via `PostgresChatProfileRepository` ([postgres.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/postgres.py)) | **Explicit-Only Writes**: Populated *only* via `MemoryGateway.write_profile`. Auto-inference from raw emails or chat is forbidden. | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> |
 | **3. Long-Term Episodic Memory** | Chat-native `TaskEpisode` created **only** after an explicit user task request (finite deterministic grammar). Initial status `system_generated` + `retrieval_eligible=false`. Stable opaque `record_id` derived from `(tenant, user, session, turn)` for retry-safe idempotency. Originating-session approve/complete/reject transitions atomically derive eligibility. Also: `chat_summary_episodes` for bounded chat summaries. Raw email/transcript/tool fields structurally excluded. | PostgreSQL `task_episodes` and `chat_summary_episodes` via `PostgresTaskEpisodeRepository` ([postgres.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories/postgres.py)); ADR-004 | **Human-Gated Eligibility**: Approval/completion sets `retrieval_eligible = true`; rejection keeps it false. Eligible-only retrieval (approved/completed, unexpired, same tenant/user/feature). | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> |
-| **4. Semantic Memory (Company RAG)** | Enterprise-wide declarative domain knowledge (SOPs, governance, technical guides, templates). **Never stores user memory.** Citation allowlisting enforced. | Local hybrid BM25 + dense + RRF + optional Jina reranker ([hybrid.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py)); optional Qdrant | **Read-Only Company Knowledge**: Accessed only when relevant per retrieval policy. Raw emails are never ingested into company RAG. | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> |
+| **4. Semantic Memory (Company RAG)** | Enterprise-wide declarative domain knowledge (SOPs, governance, technical guides, templates). **Never stores user memory.** Citation allowlisting enforced. | Turbovec 4-bit + BM25 + RRF ([bootstrap.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bootstrap.py)) | **Read-Only Company Knowledge**: Accessed only when relevant per retrieval policy. Raw emails are never ingested into company RAG. | <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED]</span> |
 
 > [!NOTE]
 > **Note on Procedural Memory**: Standard cognitive architecture includes "Procedural Memory" (how-to rules & skills). In PRD-v2, procedural rules are enforced deterministically via hard policy guards and backend schemas rather than a dynamic, user-writeable memory store. <span style="color: #2ea44f; font-weight: bold;">[IMPLEMENTED via Code Policies]</span>
@@ -89,7 +89,7 @@ V2-M6 (completed 2026-08-11) adds a cross-cutting governance layer over the four
 | **Deletion** | Exact-scope user-wide deletion (profile + episodes, same tenant/user/feature only). Live PostgreSQL audit proves deleted/expired/rejected memory unretrievable, other users untouched, semantic company RAG never deleted. | [deletion.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/deletion.py) |
 | **Backup / Restore** | `scripts/backup_restore_chat_memory.py` (pg_dump/pg_restore of the three chat-memory tables, host or docker-exec mode). Live test proves namespace/lifecycle/eligibility/expiry survive backup/restore. | [backup_restore_chat_memory.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/scripts/backup_restore_chat_memory.py) |
 | **Evaluation** | `evaluation_runner.py` + `evaluation_dataset.py` (8 synthetic labeled cases, opaque IDs, no sensitive content, deterministic MVP scorer) + `scripts/run_paired_chat_evaluation.py` CLI. Fail-closed launch gate (`evaluate_launch_gate`). Product-approved Moderate-MVP thresholds in `.env.example` (min deltas 0.05, min scores 0.6, max degradation 0.25). Gate passes with all five safety counters at zero. | [evaluation_runner.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/evaluation_runner.py), [evaluation_dataset.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/evaluation_dataset.py), [evaluation.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/evaluation.py), [run_paired_chat_evaluation.py](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/scripts/run_paired_chat_evaluation.py) |
-| **Index propagation** | N/A — no derived user-memory search index exists; Qdrant/local hybrid indexes company knowledge only. | — |
+| **Index propagation** | N/A — no derived user-memory search index exists; Turbovec hybrid indexes company knowledge only. | — |
 
 ---
 
@@ -156,7 +156,7 @@ flowchart LR
         WM2["1. Short-Term Working Memory<br/>InMemoryChatSessionBuffer (bounded turns + TTL)"]:::green
         DM2["2. Long-Term Declarative Memory<br/>PostgreSQL chat_profiles<br/>Explicit-only writes, expiry-aware"]:::green
         EM2["3. Long-Term Episodic Memory<br/>PostgreSQL task_episodes + chat_summary_episodes<br/>Chat-native, human-gated (ADR-004)"]:::green
-        SM2["4. Semantic Memory<br/>Company RAG only (local hybrid / optional Qdrant)<br/>Never stores user memory"]:::green
+        SM2["4. Semantic Memory<br/>Company RAG only (Turbovec hybrid)<br/>Never stores user memory"]:::green
         PM2["+ Procedural Memory<br/>Enforced via code policies & schemas<br/>(no user-writeable store)"]:::green
     end
 ```

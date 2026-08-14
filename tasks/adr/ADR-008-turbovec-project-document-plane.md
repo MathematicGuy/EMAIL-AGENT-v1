@@ -4,8 +4,9 @@
 - Date: 2026-08-14
 - Supersedes: ADR-007 clause 4 (Qdrant collection + payload ACL filter) and clause 5's
   "extracted text is retained only in the Project Qdrant collection"
-- Relates to: PRD-v4 (pluggable RAG providers), ADR-006, ADR-009 (company knowledge plane, not
-  yet written)
+- Relates to: PRD-v4 (superseded as a switchable-provider PRD), ADR-006, ADR-007,
+  [ADR-009](ADR-009-qdrant-backend-retired.md)
+- Amended by: ADR-009 (company-plane Qdrant backend later deleted)
 - Follow-ups: [ISSUES-qdrant-retirement.md](../ISSUES-qdrant-retirement.md)
 
 ## Context
@@ -53,10 +54,12 @@ query.
 7. **`.tvim` snapshots are owned by `mail-todo-worker` and synced through Supabase Storage** so
    `mail-todo-api` can read them across process and host boundaries. Writes are tmp-file plus
    atomic rename. The API invalidates its per-project index cache on `projects.updated_at`.
-8. **Qdrant is quarantined, not deleted.** It stays in the tree solely as the float32 control
-   group for the recall gate, marked `RETAINED, NOT WIRED` in its docstring, dropped from
-   `rag/__init__.py` exports, and released from the `ProjectVectorStore` protocol so the protocol
-   can evolve without dragging dead code. Deletion is tracked as Q-1 with a stated expiry.
+8. **The project-plane Qdrant store is deleted.** `project_documents_qdrant.py`, its unit
+   tests, the cutover script, and `QDRANT_PROJECT_COLLECTION` are gone. Decision 8 originally
+   named `rag/qdrant.py` as the quarantine target — that file is the **company knowledge
+   plane** (`QdrantSemanticMemory`), still live via `integrations/rag/bootstrap.py` at the
+   time of this ADR, and is *not* retired **here**. **ADR-009 later deleted that backend.**
+   The project-plane store never had an eval arm.
 9. **Chunk rows are hard-deleted, never soft-flagged.** Deleting a document removes its
    `project_document_chunks` rows in the same transaction as its metadata, and
    `document_deletion_audits` gains a `chunks_outcome` column alongside the renamed
@@ -90,10 +93,9 @@ query.
 ### Delete the whole `.tvim` on document deletion
 - Rejected: `remove(id)` is O(1) by external ID, so per-chunk deletion is available.
 
-### Delete Qdrant now
-- Rejected for sequencing only, not on merit. `scripts/evaluate_retrieval.py` is the instrument
-  that proves this migration did not regress, and Qdrant is its float32 reference. Deleting the
-  control group before running the experiment leaves the change unverifiable.
+### Delete the company-plane Qdrant store (`rag/qdrant.py`) now
+- Rejected **by this ADR** so the float32 eval control group could stay. **ADR-009
+  later accepted that deletion.** The project-plane store never had an eval arm.
 
 ## Consequences
 
@@ -106,11 +108,10 @@ query.
 - `HybridSemanticMemory` is not reusable here: corpus-fixed at construction, consumes
   `KnowledgeDocument`, returns `SemanticChunk` which has no page range or filename. The project
   path needs its own composition to keep citations intact.
-- The company knowledge plane is untouched by this ADR. Its retirement is three separable
-  decisions — endpoints, chat evidence source, email action plan grounding — deferred to ADR-009
-  and blocked on the recall gate, since its corpus is what the gate measures. Q-5.
-- PRD-v4's premise (switchable Qdrant/Turbovec providers) is contradicted by the intent to delete
-  Qdrant. It must be marked Superseded or rescoped. Q-8.
+- The company knowledge *plane* (endpoints, chat evidence, email grounding) is
+  untouched by this ADR. ADR-009 later deleted only the Qdrant *backend* and
+  kept that plane on Turbovec.
+- PRD-v4's switchable-provider premise is superseded (done in ADR-009 / Q-8).
 
 ## Links
 

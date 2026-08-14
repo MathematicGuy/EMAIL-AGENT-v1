@@ -265,7 +265,7 @@ def _bottleneck_readout(
 ) -> str:
     lines = [
         "- **Current bottleneck:** not identifiable from the stored reports. Per-component timing is not emitted; they measure only end-to-end retrieval latency.",
-        "- **Current strength signal:** the report set exercises dense, Qdrant, Turbovec, and hybrid paths on the 100-case / 17-document corpus.",
+        "- **Current strength signal:** the report set exercises dense, Turbovec, and hybrid paths on the 100-case / 17-document corpus.",
     ]
     if current and not any(report.semantic_evidence for report in current):
         lines.append(

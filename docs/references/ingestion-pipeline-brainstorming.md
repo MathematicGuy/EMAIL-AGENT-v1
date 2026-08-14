@@ -162,8 +162,8 @@ sequenceDiagram
 Document Loading is the foundational Phase 1 ETL gateway in enterprise RAG systems ([Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1). It governs how raw unstructured assets (`.docx`, `.pdf`, `.txt`, `.md`) are discovered, layout-parsed, sanitized, enriched with metadata, and converted into canonical ground-truth artifacts.
 
 In this architecture, Document Loading is split across two strictly decoupled planes:
-1. **Company Knowledge Ingestion Plane (Offline / Batch):** Curated administrative documents processed into `data/extracted/*.md` and indexed into the shared semantic vector store (Turbovec or Qdrant) for both Email RAG and AI Chat.
-2. **Project-Scoped User Document Ingestion Plane (Runtime / Async):** User-uploaded workspace documents processed on-the-fly into isolated Qdrant collections for AI Chat with user documents (ADR-007).
+1. **Company Knowledge Ingestion Plane (Offline / Batch):** Curated administrative documents processed into `data/extracted/*.md` and indexed into Turbovec hybrid for both Email RAG and AI Chat.
+2. **Project-Scoped User Document Ingestion Plane (Runtime / Async):** User-uploaded workspace documents processed on-the-fly into Postgres `project_document_chunks` plus a per-project Turbovec `.tvim` (ADR-007 / ADR-008).
 
 ---
 
