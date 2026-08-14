@@ -612,3 +612,18 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
             )
 
     asyncio.run(scenario())
+
+
+def test_session_registry_deletes_only_the_verified_principals_session() -> None:
+    registry = InMemoryChatSessionRegistry(new_id=lambda: "session-1")
+
+    async def scenario() -> None:
+        scope = await registry.create(user_id="user@example.com")
+
+        assert not await registry.delete(scope.session_id, user_id="other@example.com")
+        assert await registry.require(scope.session_id, user_id="user@example.com") == scope
+        assert await registry.delete(scope.session_id, user_id="user@example.com")
+        with pytest.raises(ChatSessionAccessDenied):
+            await registry.require(scope.session_id, user_id="user@example.com")
+
+    asyncio.run(scenario())

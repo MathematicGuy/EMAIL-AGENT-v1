@@ -257,6 +257,28 @@ def create_chat_router() -> APIRouter:
             serialized.append(payload)
         return {"session_id": session_id, "turns": serialized}
 
+    @router.delete("/sessions/{session_id}", status_code=204, response_model=None)
+    async def delete_session(session_id: str, request: Request) -> None:
+        principal = await _verified_principal(request)
+        try:
+            scope = await _require_session(request, principal, session_id)
+        except ChatSessionAccessDenied as exc:
+            raise HTTPException(status_code=404, detail="Chat session not found") from exc
+        deleted = await _sessions(request).delete(
+            session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        _buffer(request).clear(
+            MemoryNamespace(
+                scope=scope,
+                memory_type=MemoryType.SHORT_TERM,
+                record_id=session_id,
+                source_id=None,
+            )
+        )
+        _controllers(request).pop(session_id, None)
+
     @router.get("/episodes")
     async def list_episodes(request: Request) -> dict[str, object]:
         principal = await _verified_principal(request)

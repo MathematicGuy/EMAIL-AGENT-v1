@@ -15,7 +15,8 @@ import {
   FlaskConical,
   LayoutGrid,
   Mail,
-  LoaderCircle
+  LoaderCircle,
+  Trash2
 } from 'lucide-react';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import type { SidebarState, RecentChat } from '../types';
@@ -31,6 +32,7 @@ interface TaskbarProps {
   activeProjectId: string;
   onSelectProject: (projectId: string) => void;
   onSelectRecent: (chat: RecentChat) => void;
+  onDeleteChat: (chat: RecentChat) => void;
   recentChats: RecentChat[];
   isHistoryLoading?: boolean;
   activeChatId?: string;
@@ -67,6 +69,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   activeProjectId,
   onSelectProject,
   onSelectRecent,
+  onDeleteChat,
   recentChats,
   isHistoryLoading = false,
   activeChatId,
@@ -390,26 +393,36 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   {!isCollapsed && (
                     <div className="ml-5 border-l border-zinc-700/50 pl-1.5 mt-0.5 space-y-0.5">
                       {chats.map((chat) => (
-                        <button
-                          key={chat.id}
-                          onClick={() => {
-                            onChangeView?.('chat');
-                            onSelectRecent(chat);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors cursor-pointer ${
-                            activeChatId === chat.id
-                              ? 'bg-[#2f2d29] text-white font-medium'
-                              : 'text-[#949089] hover:bg-[#24221f] hover:text-zinc-200'
-                          }`}
-                          title={chat.title}
-                        >
-                          {isGenerating && activeChatId === chat.id ? (
-                            <LoaderCircle className="h-3 w-3 shrink-0 text-[#d97757] animate-spin" />
-                          ) : (
-                            <MessageSquare className="h-3 w-3 shrink-0 text-[#d97757]" />
-                          )}
-                          <span className="truncate">{chat.title}</span>
-                        </button>
+                        <div key={chat.id} className="group flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              onChangeView?.('chat');
+                              onSelectRecent(chat);
+                            }}
+                            className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors cursor-pointer ${
+                              activeChatId === chat.id
+                                ? 'bg-[#2f2d29] text-white font-medium'
+                                : 'text-[#949089] hover:bg-[#24221f] hover:text-zinc-200'
+                            }`}
+                            title={chat.title}
+                          >
+                            {isGenerating && activeChatId === chat.id ? (
+                              <LoaderCircle className="h-3 w-3 shrink-0 text-[#d97757] animate-spin" />
+                            ) : (
+                              <MessageSquare className="h-3 w-3 shrink-0 text-[#d97757]" />
+                            )}
+                            <span className="truncate">{chat.title}</span>
+                          </button>
+                          <button
+                            onClick={() => onDeleteChat(chat)}
+                            disabled={isGenerating && activeChatId === chat.id}
+                            className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                            title={`Delete ${chat.title}`}
+                            aria-label={`Delete ${chat.title}`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
                       ))}
                       {chats.length === 0 && (
                         <p className="px-2 py-1 text-[11px] text-zinc-500 italic">No chats yet</p>
@@ -444,26 +457,36 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             {recentChats.slice(0, 10).map((chat) => {
               const isActive = activeChatId === chat.id;
               return (
-                <button
-                  key={chat.id}
-                  onClick={() => {
-                    onChangeView?.('chat');
-                    onSelectRecent(chat);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-md truncate transition-colors flex items-center gap-2 cursor-pointer ${
-                    isActive
-                      ? 'bg-[#2a2825] text-white font-medium'
-                      : 'text-[#949089] hover:text-zinc-200 hover:bg-[#24221f]'
-                  }`}
-                  title={chat.title}
-                >
-                  {isGenerating && isActive ? (
-                    <LoaderCircle className="w-3 h-3 text-[#d97757] shrink-0 animate-spin" />
-                  ) : (
-                    <MessageSquare className="w-3 h-3 text-[#d97757] shrink-0" />
-                  )}
-                  <span className="truncate">{chat.title}</span>
-                </button>
+                <div key={chat.id} className="group flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      onChangeView?.('chat');
+                      onSelectRecent(chat);
+                    }}
+                    className={`min-w-0 flex-1 text-left px-2.5 py-1.5 rounded-md truncate transition-colors flex items-center gap-2 cursor-pointer ${
+                      isActive
+                        ? 'bg-[#2a2825] text-white font-medium'
+                        : 'text-[#949089] hover:text-zinc-200 hover:bg-[#24221f]'
+                    }`}
+                    title={chat.title}
+                  >
+                    {isGenerating && isActive ? (
+                      <LoaderCircle className="w-3 h-3 text-[#d97757] shrink-0 animate-spin" />
+                    ) : (
+                      <MessageSquare className="w-3 h-3 text-[#d97757] shrink-0" />
+                    )}
+                    <span className="truncate">{chat.title}</span>
+                  </button>
+                  <button
+                    onClick={() => onDeleteChat(chat)}
+                    disabled={isGenerating && isActive}
+                    className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                    title={`Delete ${chat.title}`}
+                    aria-label={`Delete ${chat.title}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
               );
             })}
           </div>

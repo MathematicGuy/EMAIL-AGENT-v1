@@ -94,6 +94,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     sendMessage,
     stopGeneration,
     resetChat,
+    deleteChat,
     loadExistingChat,
     apiStatus,
     recentChats,
@@ -131,6 +132,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     setActiveView('chat');
   };
 
+  const handleDeleteChat = (chat: RecentChat) => {
+    if (!window.confirm(`Delete “${chat.title}”? This cannot be undone.`)) return;
+    void deleteChat(chat.id).catch(() => {
+      window.alert('Could not delete this chat. Please try again.');
+    });
+  };
+
   return (
     <div className="h-screen w-screen flex bg-[#1b1a17] text-[#f3f2ef] overflow-hidden">
       <Taskbar
@@ -143,6 +151,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onSelectRecent={handleSelectRecent}
+        onDeleteChat={handleDeleteChat}
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}

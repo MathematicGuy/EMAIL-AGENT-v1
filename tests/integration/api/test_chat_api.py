@@ -458,6 +458,35 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
     asyncio.run(scenario())
 
 
+def test_delete_session_removes_its_history_and_rejects_future_reads() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            await client.post(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                json={
+                    "session_id": "session-1",
+                    "user_message": "Hello",
+                    "idempotency_key": "delete-1",
+                },
+            )
+
+            deleted = await client.delete("/v1/cowork/chat/sessions/session-1")
+            listed = await client.get("/v1/cowork/chat/sessions")
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+            repeated_delete = await client.delete("/v1/cowork/chat/sessions/session-1")
+
+        assert deleted.status_code == 204
+        assert listed.json() == {"sessions": []}
+        assert history.status_code == 404
+        assert repeated_delete.status_code == 404
+
+    asyncio.run(scenario())
+
+
 def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> None:
     async def scenario() -> None:
         app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))

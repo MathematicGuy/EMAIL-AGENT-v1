@@ -213,6 +213,10 @@ class ChatSessionRegistryPort(Protocol):
         project_id: str | None = None,
     ) -> tuple[ChatMemoryScope, ...]: ...
 
+    async def delete(
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
+    ) -> bool: ...
+
     async def delete_project(
         self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]: ...
@@ -330,6 +334,16 @@ class InMemoryChatSessionRegistry:
             for session_id in removed:
                 del self._sessions[session_id]
         return removed
+
+    async def delete(
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
+    ) -> bool:
+        with self._lock:
+            scope = self._sessions.get(session_id)
+            if scope is None or scope.tenant_id != tenant_id or scope.user_id != user_id:
+                return False
+            del self._sessions[session_id]
+        return True
 
 
 class ChatController:

@@ -592,6 +592,24 @@ export function useStreamingChat(
     setIsGenerating(false);
   }, []);
 
+  const deleteChat = useCallback(async (sessionId: string) => {
+    if (isGenerating && activeConversationId === sessionId) return false;
+    const response = await fetch(
+      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE' }
+    );
+    if (!response.ok) {
+      throw new Error(`Could not delete chat (HTTP ${response.status}).`);
+    }
+    if (activeConversationId === sessionId) {
+      setMessages([]);
+      setActiveConversationId(null);
+      setSelectedAttachments([]);
+    }
+    await refreshHistory();
+    return true;
+  }, [activeConversationId, isGenerating, refreshHistory]);
+
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort();
     setIsGenerating(false);
@@ -636,6 +654,7 @@ export function useStreamingChat(
     sendMessage,
     stopGeneration,
     resetChat,
+    deleteChat,
     loadExistingChat,
     apiStatus,
   };

@@ -197,6 +197,45 @@ describe('useStreamingChat Project chat client', () => {
     });
   });
 
+  it('deletes a saved chat and clears it from the active view', async () => {
+    let sessions = [{
+      session_id: 'session-1', project_id: 'project-1', title: 'Delete me',
+    }];
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions }));
+      }
+      if (url.endsWith('/sessions/session-1/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-1', user_message: 'Question', assistant_message: 'Answer',
+          created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          retrieval_status: null,
+        }] }));
+      }
+      if (url.endsWith('/sessions/session-1') && init?.method === 'DELETE') {
+        sessions = [];
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
+    await act(async () => result.current.loadExistingChat('session-1'));
+
+    await act(async () => {
+      await result.current.deleteChat('session-1');
+    });
+
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/sessions/session-1') && (init as RequestInit | undefined)?.method === 'DELETE'
+    )).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.activeConversationId).toBeNull();
+    expect(result.current.recentChats).toEqual([]);
+  });
+
   it('uploads composer files persistently to the active Project', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

@@ -130,6 +130,20 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
             for row in rows
         )
 
+    async def delete(
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
+    ) -> bool:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM chat_sessions
+                WHERE id = %s AND workspace_id = %s AND user_id = %s
+                RETURNING id
+                """,
+                (session_id, tenant_id, user_id),
+            )
+            return await cursor.fetchone() is not None
+
     async def delete_project(
         self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]:
