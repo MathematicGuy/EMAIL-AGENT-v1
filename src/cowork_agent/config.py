@@ -86,7 +86,7 @@ class KnowledgeIngestionSettings:
     max_bytes: int
     max_pdf_pages: int
     max_ocr_pages: int
-    extraction_mode: str = "basic"
+    extraction_mode: str = "adaptive"
 
     @classmethod
     def from_env(
@@ -104,15 +104,18 @@ class KnowledgeIngestionSettings:
         if extraction_mode_env in ("advance", "advanced"):
             ocr_enabled = True
             extraction_mode = "advance"
-        elif extraction_mode_env in ("basic", "simple"):
+        elif extraction_mode_env in ("adaptive", "basic", "simple"):
             ocr_enabled = False
-            extraction_mode = "basic"
+            extraction_mode = "adaptive"
         elif extraction_mode_env:
-            msg = f"Invalid EXTRACTION_MODE: {extraction_mode_env}. Must be 'basic' or 'advance'."
+            msg = (
+                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. "
+                "Must be 'adaptive' or 'advance'."
+            )
             raise ValueError(msg)
         else:
             ocr_enabled = _boolean(environ, "KNOWLEDGE_INGEST_OCR_ENABLED", True)
-            extraction_mode = "advance" if ocr_enabled else "basic"
+            extraction_mode = "advance" if ocr_enabled else "adaptive"
 
         api_key = environ.get("MISTRAL_API_KEY", "").strip()
         if ocr_enabled and (not api_key or api_key.startswith("replace-with-")):

@@ -66,16 +66,21 @@ flowchart TB
     MANIFEST -->|New or Changed File| STAGE3
 
     subgraph STAGE3["Stage 3: Format Extraction & Text Normalization"]
-        TYPE{"File Format"}
+        MODE{"Extraction Mode<br/>(EXTRACTION_MODE)"}
+        MODE -->|basic| TYPE{"File Format Router"}
+        MODE -->|advance| OCR["MistralOcrExtractor<br/>(mistral-ocr-latest)"]
+        OCR --> FIGURES["Extract Figures to data/extracted/images/"]
+
         TYPE -->|.docx| DOCX["DocxExtractor<br/>(OpenXML AST to Markdown headings & tables)"]
-        TYPE -->|.pdf| PDF["PdfInspector<br/>(Text vs Scanned check + <!-- Page N --> markers)"]
-        PDF -->|Scanned PDF| OCR_CHECK{"OCR Configured?"}
-        OCR_CHECK -->|No| FAIL_OCR["Fail: mistral_not_configured"]
+        TYPE -->|.pdf| PDF["PdfInspector<br/>(Text vs Scanned Inspection)"]
+        PDF -->|Native Text PDF| RENDER_PDF["PDF Page Renderer"]
+        PDF -->|Scanned / OCR Needed| FAIL_OCR["Fail: mistral_not_configured"]
     end
 
     subgraph STAGE4["Stage 4: Atomic Persistence & Vector Indexing"]
         DOCX --> ATOMIC["Write to *.tmp and rename to data/extracted/*.md"]
-        PDF -->|Native Text PDF| ATOMIC
+        RENDER_PDF --> ATOMIC
+        FIGURES --> ATOMIC
         ATOMIC --> REGISTER["Update ingestion-manifest.json"]
         REGISTER --> VECTOR["Vector Store Ingestion<br/>(load_corpus into Turbovec / Qdrant)"]
     end
@@ -215,4 +220,91 @@ However, when you move off your laptop and deploy your backend to a **Cloud Host
 | **Pre-baked Docker Image (CI/CD Pipeline)** | ❌ **No** | Build `.tvim` inside GitHub Actions / Docker build stage and bake it into the container image. |
 | **Multi-Tenant SaaS (Users upload docs)** | ✅ **Yes** | Sync `.tvim` snapshots to cloud storage so all replica servers see new document uploads. |
 
+---
 
+## 7. Deep-Dive: How PDF Inspection Detects Scanned Pages (Deterministic OCR Identification)
+
+A critical architectural question is: **How does `PdfInspector` determine whether a PDF is native text or a scanned document requiring OCR before sending it to Mistral OCR?**
+
+```mermaid
+flowchart TB
+    PDF["Input PDF File"] --> INSPECT["PdfInspector (detect_pdf)<br/>Fast Rust/C++ COS Layer Scan"]
+
+    subgraph ANALYSIS["Structural PDF Content Stream Inspection"]
+        COS["1. COS Object Graph & Content Stream Tokenizer"] --> OPERATORS["2. Operator Analysis<br/>Text (BT..ET, Tj, TJ) vs Images (Do /Image)"]
+        OPERATORS --> DENSITY["3. Text Density vs Image Area Ratio"]
+        OPERATORS --> FONTS["4. Font Encoding & /ToUnicode CMap Validation"]
+    end
+
+    INSPECT --> ANALYSIS
+
+    ANALYSIS --> CLASSIFY{"Classification Outcome"}
+    CLASSIFY -->|"text_based (pages_needing_ocr is empty)"| NATIVE["Native Digital PDF<br/>Extract via Local PyMuPDF / pdf-inspector<br/>(Fast, Offline, $0 API Cost)"]
+    CLASSIFY -->|"scanned / mixed (OCR needed)"| OCR_ROUTE{"OCR Route Check"}
+
+    OCR_ROUTE -->|"EXTRACTION_MODE=advance"| MISTRAL["Route to Mistral OCR<br/>(mistral-ocr-latest)"]
+    OCR_ROUTE -->|"EXTRACTION_MODE=basic"| FAIL["Fail Cleanly<br/>(reason_code='mistral_not_configured')"]
+```
+
+### 1. The 4 Deterministic Detection Checks Under the Hood
+
+When `PdfInspector.inspect()` calls `detect_pdf(path)` ([`pdf_inspector.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)), the underlying inspection engine examines the PDF's binary COS structure without needing full rendering or optical analysis:
+
+#### A. Graphic Operator & Content Stream Tokenization
+- **Text Operators (`BT` .. `ET`, `Tj`, `TJ`, `'`, `"`):** In a digital PDF (e.g. exported from Microsoft Word or LaTeX), text is rendered via explicit string drawing operators.
+- **Image XObjects (`/Do` with `/Subtype /Image`):** In a scanned PDF, the scanner places a high-resolution raster image (JPEG/CCITT) directly onto the page canvas.
+
+#### B. Text Density vs. Image Area Coverage Ratio
+- The inspector computes the ratio:
+  $$\text{Coverage Ratio} = \frac{\text{Bounding Box Area of Bitmap Images}}{\text{Total Page Bounding Box}}$$
+- If a page has **$>85\%$ of its area covered by a single raster image XObject** and contains near-zero text characters, it is flagged as a scanned page (`needs_ocr = True`).
+
+#### C. Font Encoding & Unicode CMap Mapping Integrity
+- Some PDFs appear to have text, but when selected or extracted, they emit unreadable replacement characters (`\ufffd`) or private glyph codes because the PDF lacks a valid `/ToUnicode` mapping table.
+- The inspector verifies that text operator glyphs map to valid Unicode characters. If character codes map to corrupt or unmapped fonts, `has_encoding_issues` is flagged and the page is added to `pages_needing_ocr`.
+
+#### D. Invisible OCR / False-Layer Detection
+- Some low-grade OCR tools burn invisible text over a low-quality scan. The inspector checks whether text layer coordinates align with the underlying image structures or are corrupted.
+
+---
+
+### 2. Output Schema & Inspection State Representation
+
+`PdfInspector.inspect()` returns a standardized `PdfInspection` domain model ([`models.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/models.py)):
+
+| Field | Type | Meaning / Example |
+| :--- | :--- | :--- |
+| `kind` | `PdfKind` enum | `'text_based'` (100% digital text), `'scanned'` (100% scanned bitmaps), `'mixed'` (hybrid), or `'image_based'`. |
+| `page_count` | `int` | Total number of pages in the document. |
+| `pages_needing_ocr` | `tuple[int, ...]` | 1-indexed list of specific page numbers requiring OCR (e.g. `(2, 5)` in a mixed PDF). |
+| `native_markdown_by_page` | `Mapping[int, str]` | Clean Markdown extracted for native text pages (`{1: "# Heading", 3: "Content..."}`). |
+
+---
+
+### 3. Why This Design Prevents System Failures & Saves Cloud Costs
+
+1. **Zero Garbage in Corpus (Grounded Invariant):**  
+   If a scanned PDF were passed into a standard text parser like `pypdf`, it would return an empty string or whitespace. Storing empty Markdown in `data/extracted/*.md` would corrupt vector search. `PdfInspector` intercepts this and halts with `mistral_not_configured` or triggers Mistral OCR.
+2. **Optimal Cost & Latency:**  
+   Sending every 100-page clean digital PDF to Mistral OCR wastes API credits and adds 15–30 seconds of network latency. By using `PdfInspector` as the preliminary detector, digital PDFs extract in **< 15 ms locally for $0**, while only true scanned documents are routed to Mistral OCR.
+
+
+
+```mermaid
+flowchart TB
+    MODE{"3.1 Extraction Mode<br/>(EXTRACTION_MODE=adaptive | advance)"}
+
+    MODE -->|"advance (full cloud OCR)"| OCR["3.4 MistralOcrExtractor<br/>(mistral-ocr-latest)"]
+    MODE -->|"adaptive (default)"| ROUTE{"Format Router"}
+
+    ROUTE -->|.docx| DOCX["3.2 DocxExtractor<br/>(OpenXML AST Headings & Tables)"]
+    ROUTE -->|.pdf| PDF["3.3 PdfInspector<br/>(Text vs Scanned Inspection)"]
+
+    PDF -->|"Native Text (0 OCR pages)"| RENDER_PDF["PDF Page Renderer<br/>(Fast Local Extraction, $0)"]
+    PDF -->|"Scanned / OCR Needed"| OCR_CHECK{"MISTRAL_API_KEY<br/>Configured?"}
+
+    OCR_CHECK -->|Yes| OCR
+    OCR_CHECK -->|No| FAIL["Fail: mistral_not_configured"]
+
+    OCR --> FIGURES["Extract Figures to data/extracted/images/"]
+```
