@@ -54,6 +54,7 @@ MAX_CHAT_RAG_CONTENT_LENGTH = 16_000
 
 ChatRagSource = Literal["company_knowledge", "project_document"]
 ChatRetrievalStatus = Literal["success", "no_results", "timeout", "unavailable"]
+MailScanStatus = Literal["connecting", "queued", "running", "succeeded", "partial", "failed"]
 
 
 def _require_rag_score(value: object, name: str) -> float:
@@ -68,6 +69,18 @@ def _require_rag_score(value: object, name: str) -> float:
 def _require_retrieval_status(value: object, name: str) -> ChatRetrievalStatus:
     if value not in {"success", "no_results", "timeout", "unavailable"}:
         raise ValueError(f"{name} must be a supported retrieval status")
+    return value
+
+
+def _require_mail_scan_status(value: object, name: str) -> MailScanStatus:
+    if value not in {"connecting", "queued", "running", "succeeded", "partial", "failed"}:
+        raise ValueError(f"{name} must be a supported mail scan status")
+    return value
+
+
+def _require_nonnegative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
     return value
 
 
@@ -924,6 +937,47 @@ class ChatSummaryEpisode:
 
 
 @dataclass(frozen=True, slots=True)
+class MailScanSummary:
+    """Safe aggregate metrics for an @mail chat turn; never email content."""
+
+    status: MailScanStatus
+    emails_matched: int
+    emails_processed: int
+    emails_to_process: int
+    action_items_count: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "status", _require_mail_scan_status(self.status, "status"))
+        for name in ("emails_matched", "emails_processed", "emails_to_process"):
+            object.__setattr__(self, name, _require_nonnegative_int(getattr(self, name), name))
+        if self.action_items_count is not None:
+            object.__setattr__(
+                self,
+                "action_items_count",
+                _require_nonnegative_int(self.action_items_count, "action_items_count"),
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            status=_require_mail_scan_status(data["status"], "status"),
+            emails_matched=_require_nonnegative_int(data["emails_matched"], "emails_matched"),
+            emails_processed=_require_nonnegative_int(data["emails_processed"], "emails_processed"),
+            emails_to_process=_require_nonnegative_int(
+                data["emails_to_process"], "emails_to_process"
+            ),
+            action_items_count=(
+                _require_nonnegative_int(data["action_items_count"], "action_items_count")
+                if data.get("action_items_count") is not None
+                else None
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ChatTurn:
     """Transient, bounded session-turn value for the later working-memory buffer."""
 
@@ -935,6 +989,7 @@ class ChatTurn:
     citation_coordinates: tuple[Mapping[str, object], ...] = ()
     rag_evidence: tuple[ChatRagEvidence, ...] = ()
     retrieval_status: ChatRetrievalStatus | None = None
+    mail_scan: MailScanSummary | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -966,6 +1021,8 @@ class ChatTurn:
         if evidence and self.retrieval_status != "success":
             raise ValueError("rag_evidence requires a successful retrieval_status")
         object.__setattr__(self, "rag_evidence", evidence)
+        if self.mail_scan is not None and not isinstance(self.mail_scan, MailScanSummary):
+            raise TypeError("mail_scan must be a MailScanSummary")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -996,6 +1053,11 @@ class ChatTurn:
             retrieval_status=(
                 _require_retrieval_status(data["retrieval_status"], "retrieval_status")
                 if data.get("retrieval_status") is not None
+                else None
+            ),
+            mail_scan=(
+                MailScanSummary.from_dict(_as_mapping(data["mail_scan"], "mail_scan"))
+                if data.get("mail_scan") is not None
                 else None
             ),
         )

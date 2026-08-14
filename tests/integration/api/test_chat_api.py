@@ -458,6 +458,38 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
     asyncio.run(scenario())
 
 
+def test_mail_scan_turn_is_saved_without_calling_the_llm_and_reloads_with_its_card_data() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            saved = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    "turn_id": "mail-turn-1",
+                    "user_message": "@mail",
+                    "assistant_message": "Đã quét xong: đã quét 10 email và tạo 5 action item.",
+                    "mail_scan": {
+                        "status": "succeeded",
+                        "emails_matched": 201,
+                        "emails_processed": 10,
+                        "emails_to_process": 10,
+                        "action_items_count": 5,
+                    },
+                },
+            )
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+
+        assert saved.status_code == 201
+        assert app.state.chat_test_reply.calls == 0
+        assert history.status_code == 200
+        assert history.json()["turns"] == [saved.json()]
+
+    asyncio.run(scenario())
+
+
 def test_delete_session_removes_its_history_and_rejects_future_reads() -> None:
     async def scenario() -> None:
         app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))

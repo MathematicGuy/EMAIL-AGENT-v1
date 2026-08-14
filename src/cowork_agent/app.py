@@ -339,6 +339,9 @@ def create_app() -> FastAPI:
                     min_size=1,
                     max_size=8,
                     open=False,
+                    check=AsyncConnectionPool.check_connection,
+                    max_idle=60.0,
+                    max_lifetime=300.0,
                     kwargs={"prepare_threshold": None},
                 )
                 await pool.open(wait=True)
@@ -877,6 +880,7 @@ def create_app() -> FastAPI:
                 "emailsProcessed": run.emails_processed,
                 "emailsToProcess": min(run.emails_matched, run.max_emails),
                 "maxEmails": run.max_emails,
+                "filteredSummary": run.filtered_summary,
             },
             "error": (
                 {"code": run.error_code, "message": run.error_message_safe}

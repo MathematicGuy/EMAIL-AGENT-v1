@@ -37,13 +37,14 @@ afterEach(() => {
 });
 
 describe('MailInboxView', () => {
-  it('shows the compact scan controls without the unread-email preview', async () => {
+  it('opens directly to the latest action items without scan controls', async () => {
     const fetchMock = vi.fn(baseFetch);
     vi.stubGlobal('fetch', fetchMock);
     render(<MailInboxView />);
 
     expect(await screen.findByText('owner@example.com')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Quét mail mới' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Quét mail mới' })).toBeNull();
+    expect(screen.queryByText('Chọn lịch sử quét')).toBeNull();
     expect(screen.getByText('Danh mục hành động (0)')).toBeTruthy();
     expect(screen.queryByText('Báo cáo tháng')).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/unread-preview'))).toBe(false);
@@ -57,28 +58,13 @@ describe('MailInboxView', () => {
     expect(connect.getAttribute('href')).toContain('/v1/mail-todo/oauth/gmail/connect');
   });
 
-  it('shows the selected Action Item plan below and switches it on click', async () => {
+  it('shows the latest Action Item plan and switches it on click', async () => {
     const fetchMock = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      async (input: string | URL | Request): Promise<Response> => {
         const url = String(input);
-        const method = init?.method ?? 'GET';
-        if (method === 'POST' && url.endsWith('/v1/mail-todo/runs')) {
-          return response(
-            { id: 'run-1', status: 'queued', statusUrl: '/v1/mail-todo/runs/run-1' },
-            202
-          );
-        }
-        if (url.endsWith('/v1/mail-todo/runs/run-1')) {
+        if (url.includes('/v1/mail-todo/runs?')) {
           return response({
-            id: 'run-1',
-            status: 'succeeded',
-            progress: {
-              emailsMatched: 2,
-              emailsProcessed: 2,
-              emailsToProcess: 2,
-              maxEmails: 20,
-            },
-            error: null,
+            runs: [{ id: 'run-1', status: 'succeeded', createdAt: '2026-08-10T00:00:00Z' }],
           });
         }
         if (url.endsWith('/v1/mail-todo/runs/run-1/result')) {
@@ -149,8 +135,6 @@ describe('MailInboxView', () => {
     render(<MailInboxView />);
     await screen.findByText('owner@example.com');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Quét mail mới' }));
-
     expect(await screen.findByText('Gửi báo cáo')).toBeTruthy();
     expect(
       screen.getByRole('button', { name: /Gửi báo cáo/ }).getAttribute('aria-expanded')
@@ -167,12 +151,6 @@ describe('MailInboxView', () => {
     expect(screen.queryByText('Kiểm tra số liệu')).toBeNull();
     expect(screen.getByText('Quy trình nội bộ')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Hoàn thành' })).toBeNull();
-    const postCall = fetchMock.mock.calls.find(
-      ([url, init]) => String(url).endsWith('/v1/mail-todo/runs') && init?.method === 'POST'
-    );
-    expect(postCall?.[1]?.headers).toMatchObject({
-      'Idempotency-Key': expect.stringMatching(/^mail_/),
-    });
   });
 
   it('shows OAuth outcome and removes the transient marker from the URL', async () => {

@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -15,7 +15,9 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatTurn,
     DeclarativeProfile,
+    MailScanSummary,
     MemoryNamespace,
     MemoryProvenance,
     MemoryProvenanceSource,
@@ -60,6 +62,27 @@ class _CreateSessionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str | None = None
+
+
+class _MailScanPayload(BaseModel):
+    """Aggregate-only @mail result; it deliberately accepts no email content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["connecting", "queued", "running", "succeeded", "partial", "failed"]
+    emails_matched: int
+    emails_processed: int
+    emails_to_process: int
+    action_items_count: int | None = None
+
+
+class _PersistMailScanPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    user_message: str
+    assistant_message: str
+    mail_scan: _MailScanPayload
 
 
 class CanonicalProjectRepository(Protocol):
@@ -194,6 +217,44 @@ def create_chat_router() -> APIRouter:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @router.post("/sessions/{session_id}/mail-scans", status_code=201)
+    async def persist_mail_scan(
+        session_id: str, payload: _PersistMailScanPayload, request: Request
+    ) -> dict[str, object]:
+        """Save a completed @mail card without routing it through the LLM workflow."""
+
+        principal = await _verified_principal(request)
+        try:
+            scope = await _require_session(request, principal, session_id)
+        except ChatSessionAccessDenied as exc:
+            raise HTTPException(status_code=404, detail="Chat session not found") from exc
+        try:
+            mail_scan = MailScanSummary.from_dict(payload.mail_scan.model_dump())
+            turn = ChatTurn(
+                turn_id=payload.turn_id,
+                session_id=session_id,
+                user_message=payload.user_message,
+                assistant_message=payload.assistant_message,
+                created_at=datetime.now(UTC),
+                mail_scan=mail_scan,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid mail scan result") from exc
+        history = _history_repository(request)
+        if history is not None:
+            await history.write_turn(scope, turn, title="@mail")
+        else:
+            _buffer(request).append(
+                MemoryNamespace(
+                    scope=scope,
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id=session_id,
+                    source_id=None,
+                ),
+                turn,
+            )
+        return turn.to_dict()
 
     @router.get("/sessions")
     async def list_sessions(

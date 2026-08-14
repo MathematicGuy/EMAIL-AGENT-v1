@@ -57,7 +57,7 @@ from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPoi
 _RUN_COLUMNS = (
     'id, user_id, mailbox_connection_id, "trigger", status, query,'
     " idempotency_key, max_emails, emails_matched, emails_processed,"
-    " emails_actionable, action_items_count, ignored_emails_count,"
+    " emails_actionable, action_items_count, ignored_emails_count, filtered_summary,"
     " attachments_found, attachments_extracted, attachment_warnings_count,"
     " truncated, next_cursor, error_code, error_message_safe,"
     " started_at, completed_at, created_at"
@@ -73,7 +73,7 @@ class PostgresRunRepository:
         # the statement return exactly one row in both outcomes (a true
         # INSERT, or the conflicting row locked and re-read), and
         # ``xmax = 0`` distinguishes the fresh insert from the conflict path.
-        placeholders = ", ".join(["%s"] * 22 + ["COALESCE(%s, now())"])
+        placeholders = ", ".join(["%s"] * 23 + ["COALESCE(%s, now())"])
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 f"""
@@ -152,7 +152,7 @@ class PostgresRunRepository:
                     query = %s, idempotency_key = %s, max_emails = %s,
                     emails_matched = %s, emails_processed = %s,
                     emails_actionable = %s, action_items_count = %s,
-                    ignored_emails_count = %s, attachments_found = %s,
+                    ignored_emails_count = %s, filtered_summary = %s, attachments_found = %s,
                     attachments_extracted = %s, attachment_warnings_count = %s,
                     truncated = %s, next_cursor = %s, error_code = %s,
                     error_message_safe = %s, started_at = %s, completed_at = %s
@@ -170,6 +170,7 @@ class PostgresRunRepository:
                     run.emails_actionable,
                     run.action_items_count,
                     run.ignored_emails_count,
+                    run.filtered_summary,
                     run.attachments_found,
                     run.attachments_extracted,
                     run.attachment_warnings_count,
@@ -1004,6 +1005,7 @@ def _run_params(run: DigestRun) -> tuple[object, ...]:
         run.emails_actionable,
         run.action_items_count,
         run.ignored_emails_count,
+        run.filtered_summary,
         run.attachments_found,
         run.attachments_extracted,
         run.attachment_warnings_count,
@@ -1035,16 +1037,17 @@ def _run_from_row(row: Sequence[object]) -> DigestRun:
         emails_actionable=integer(10),
         action_items_count=integer(11),
         ignored_emails_count=integer(12),
-        attachments_found=integer(13),
-        attachments_extracted=integer(14),
-        attachment_warnings_count=integer(15),
-        truncated=bool(row[16]),
-        next_cursor=None if row[17] is None else str(row[17]),
-        error_code=None if row[18] is None else str(row[18]),
-        error_message_safe=None if row[19] is None else str(row[19]),
-        started_at=_as_datetime(row[20]),
-        completed_at=_as_datetime(row[21]),
-        created_at=_as_datetime(row[22]),
+        filtered_summary=None if row[13] is None else str(row[13]),
+        attachments_found=integer(14),
+        attachments_extracted=integer(15),
+        attachment_warnings_count=integer(16),
+        truncated=bool(row[17]),
+        next_cursor=None if row[18] is None else str(row[18]),
+        error_code=None if row[19] is None else str(row[19]),
+        error_message_safe=None if row[20] is None else str(row[20]),
+        started_at=_as_datetime(row[21]),
+        completed_at=_as_datetime(row[22]),
+        created_at=_as_datetime(row[23]),
     )
 
 
