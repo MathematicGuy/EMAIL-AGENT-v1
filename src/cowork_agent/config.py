@@ -459,12 +459,14 @@ class GeminiEmbeddingSettings:
 
 @dataclass(frozen=True, slots=True)
 class JinaEmbeddingSettings:
-    """Jina embedding API configuration for the RAG retrieval path."""
+    """Jina embedding API configuration with rate-limit key rotation."""
 
-    api_key: str = field(repr=False)
+    rotator: APIKeyRotator = field(repr=False)
     model: str
     dimensions: int
     timeout_seconds: int
+    rotate_on_rate_limit: bool = True
+    max_attempts: int = 3
 
     @classmethod
     def from_env(
@@ -477,13 +479,20 @@ class JinaEmbeddingSettings:
             if load_env_file:
                 load_dotenv(override=False)
             environ = os.environ
+        rotator = APIKeyRotator.from_env(
+            "JINA_API_KEY", environ=environ, provider_name="Jina"
+        )
         return cls(
-            api_key=_required_secret(environ, "JINA_API_KEY"),
+            rotator=rotator,
             model=_non_empty_value(
                 environ, "JINA_EMBEDDING_MODEL", "jina-embeddings-v5-omni-small"
             ),
             dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
             timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
+            rotate_on_rate_limit=_boolean(
+                environ, "JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT", True
+            ),
+            max_attempts=len(rotator.keys),
         )
 
 
