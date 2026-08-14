@@ -191,6 +191,8 @@ def test_jina_embedding_settings_default_to_v5_omni_small() -> None:
 
     assert settings.model == "jina-embeddings-v5-omni-small"
     assert settings.dimensions == 1024
+    assert settings.rotator.keys == ("test-key",)
+    assert settings.rotate_on_rate_limit is True
 
 
 def test_hashing_embedder_accepts_retrieval_task() -> None:
@@ -224,6 +226,25 @@ class _RecordingJinaTransport:
         return self.response
 
 
+class _RotatingJinaTransport:
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def post_json(
+        self,
+        *,
+        url: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> Mapping[str, object]:
+        del url, payload, timeout_seconds
+        self.keys.append(headers["Authorization"])
+        if len(self.keys) == 1:
+            raise RuntimeError("HTTP 429: rate limit exceeded")
+        return {"data": [{"index": 0, "embedding": [0.1] * 1024}]}
+
+
 def _jina_settings() -> JinaEmbeddingSettings:
     return JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "test-key"}, load_env_file=False
@@ -248,6 +269,18 @@ def test_jina_adapter_posts_v5_model_and_passage_task() -> None:
         "dimensions": 1024,
         "embedding_type": "float",
     }
+
+
+def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit() -> None:
+    settings = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+    )
+    transport = _RotatingJinaTransport()
+
+    vectors = asyncio.run(JinaEmbeddingAdapter(settings, transport=transport).embed(["policy"]))
+
+    assert vectors == ((0.1,) * 1024,)
+    assert transport.keys == ["Bearer key-1", "Bearer key-2"]
 
 
 def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
