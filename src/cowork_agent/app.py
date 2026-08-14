@@ -1179,7 +1179,12 @@ def main() -> None:
     # .upper() because basicConfig rejects "debug" with a ValueError, which would
     # kill the process at startup over a lowercase env var.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
-    api_workers = int(os.getenv("APP_API_WORKERS", "1"))
+    reload = "--reload" in sys.argv or os.getenv("APP_RELOAD", "false").strip().lower() in {
+        "true",
+        "1",
+        "yes",
+    }
+    api_workers = 1 if reload else int(os.getenv("APP_API_WORKERS", "1"))
     if api_workers < 1:
         raise ValueError("APP_API_WORKERS must be positive")
     loop = "auto"
@@ -1195,6 +1200,8 @@ def main() -> None:
         port=int(os.getenv("APP_PORT", "8000")),
         loop=loop,
         workers=api_workers,
+        reload=reload,
+        reload_dirs=["src"] if reload else None,
     )
 
 
