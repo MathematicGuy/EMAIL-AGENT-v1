@@ -29,7 +29,6 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import CreateDigestRun, DigestWorker
-from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.llm.fakes import FakePlanGenerator, FakeRouteClassifier
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
@@ -100,7 +99,7 @@ def semantic_memory() -> InRepoSemanticMemory:
     """One built index shared by every case; the corpus is static."""
     documents = tuple(
         document
-        for document in load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
+        for document in load_corpus(CORPUS_DIR)
         if document.document_id in LEGACY_EMAIL_DOCUMENT_IDS
     )
     memory = InRepoSemanticMemory(documents, HashingEmbedder())

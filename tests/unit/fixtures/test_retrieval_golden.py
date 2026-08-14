@@ -74,7 +74,7 @@ def _corpus_sections() -> dict[str, list[str]]:
                 chunk.section for chunk in document.chunks if chunk.section is not None
             )
         )
-        for document in load_corpus(CORPUS_DIR, tenant_id="local")
+        for document in load_corpus(CORPUS_DIR)
     }
 
 

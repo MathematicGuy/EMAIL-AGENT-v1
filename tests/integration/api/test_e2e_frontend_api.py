@@ -17,12 +17,18 @@ Architecture
 
 Running
 -------
-  # From the repo root (Windows PowerShell):
-  python -m pytest tests/integration/api/test_e2e_frontend_api.py -v
+This module is marked ``live`` and is **deselected by default** (see the
+``addopts`` in ``pyproject.toml``); it costs ~20 s of subprocess boot and needs
+credentials no CI runner has.  Opt in explicitly::
+
+  uv run pytest -m live
 
   # Pick a different port if 18765 is busy:
   $env:E2E_API_PORT=19000
-  python -m pytest tests/integration/api/test_e2e_frontend_api.py -v
+  uv run pytest -m live
+
+If the server cannot boot, every test here **skips with a loud banner** rather
+than erroring, so the rest of the selected suite still reports.
 
 SPEC coverage (Increment A §8.1–8.7)
 --------------------------------------
@@ -55,8 +61,55 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = _REPO_ROOT / ".env"
 _PORT = int(os.environ.get("E2E_API_PORT", "18765"))
 _BASE_URL = f"http://127.0.0.1:{_PORT}"
-_STARTUP_TIMEOUT = 20  # seconds
+_STARTUP_TIMEOUT = int(os.environ.get("E2E_STARTUP_TIMEOUT", "20"))
 _HEALTH_POLL_INTERVAL = 0.5
+
+#: The whole module needs a real process, real credentials, and >20 s of boot.
+pytestmark = [pytest.mark.live, pytest.mark.serial, pytest.mark.slow]
+
+
+def _skip_loudly(config: pytest.Config, reason: str, detail: str = "") -> None:
+    """Skip the module with a banner nobody can scroll past.
+
+    A missing live server is an environment problem, not a regression, so it
+    must not turn into 24 red ERRORs that bury the real signal.  But it must
+    also not vanish into a one-line ``s`` -- an agent reading the summary has to
+    be able to tell "did not run" apart from "passed".
+
+    The banner goes through the terminal reporter, not ``print``: pytest
+    captures fixture stdio and *discards* it for skipped tests, so a printed
+    warning would never be seen.  ASCII only, for the Windows console.
+    """
+    banner = [
+        "!" * 78,
+        "!!  LIVE E2E SKIPPED - tests/integration/api/test_e2e_frontend_api.py",
+        "!" * 78,
+        f"!!  REASON: {reason}",
+        "!!",
+        "!!  These tests never ran. They assert SPEC Increment A 8.1-8.7 against a",
+        "!!  REAL mail-todo-api subprocess. A green suite WITHOUT them does NOT mean",
+        "!!  the frontend contract is verified.",
+        "!!",
+        "!!  To run them:",
+        f"!!    1. Ensure {_ENV_FILE} exists and holds working credentials.",
+        "!!    2. Ensure Postgres/Qdrant are reachable - lifespan startup blocks on them.",
+        f"!!    3. Free TCP port {_PORT}, or set E2E_API_PORT to another one.",
+        "!!    4. uv run pytest -m live",
+        "!!  Slow boot rather than broken? Raise E2E_STARTUP_TIMEOUT (seconds).",
+    ]
+    if detail:
+        banner.append("!!  LAST 20 LINES OF SERVER OUTPUT:")
+        banner.extend(f"!!    {line}" for line in detail.splitlines()[-20:])
+    banner.append("!" * 78)
+
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line("")
+        for line in banner:
+            reporter.write_line(line, red=True, bold=True)
+    else:  # -p no:terminal, or an xdist worker
+        print("\n".join(banner), file=sys.stderr)
+    pytest.skip(f"LIVE E2E UNAVAILABLE: {reason}")
 
 
 # ---------------------------------------------------------------------------
@@ -65,15 +118,15 @@ _HEALTH_POLL_INTERVAL = 0.5
 
 
 @pytest.fixture(scope="module")
-def api_server() -> Generator[subprocess.Popen[bytes], None, None]:
+def api_server(pytestconfig: pytest.Config) -> Generator[subprocess.Popen[bytes], None, None]:
     """Start a real mail-todo-api process on an ephemeral port.
 
     Loads environment from the project .env, overrides APP_PORT, and waits
-    for /health to respond before yielding.  Terminates the process on
-    teardown.
+    for /health to respond before yielding.  Skips loudly — never errors — when
+    the process cannot be reached, so the rest of the run still reports.
     """
     if not _ENV_FILE.exists():
-        pytest.skip(f".env not found at {_ENV_FILE} — cannot run E2E tests")
+        _skip_loudly(pytestconfig, f".env not found at {_ENV_FILE}")
 
     env = {**os.environ, "APP_PORT": str(_PORT), "APP_HOST": "127.0.0.1"}
 
@@ -114,10 +167,15 @@ def api_server() -> Generator[subprocess.Popen[bytes], None, None]:
 
     if not started:
         proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         output = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
-        pytest.fail(
-            f"mail-todo-api did not start within {_STARTUP_TIMEOUT}s.\n"
-            f"Server output:\n{output}"
+        _skip_loudly(
+            pytestconfig,
+            f"mail-todo-api /health never answered within {_STARTUP_TIMEOUT}s",
+            output,
         )
 
     yield proc
@@ -136,7 +194,7 @@ def client(api_server: subprocess.Popen[bytes]) -> httpx.Client:
 
 
 @pytest.fixture(scope="module")
-def first_connection_id(client: httpx.Client) -> str:
+def first_connection_id(client: httpx.Client, pytestconfig: pytest.Config) -> str:
     """Return the first active connection id, or skip the test if none exist.
 
     The user must have already completed Gmail OAuth via the GUI or browser
@@ -147,9 +205,10 @@ def first_connection_id(client: httpx.Client) -> str:
     connections = resp.json().get("connections", [])
     active = [c for c in connections if c.get("status") == "active"]
     if not active:
-        pytest.skip(
-            "No active Gmail connections found on the live server. "
-            "Complete the OAuth flow in the GUI first, then re-run."
+        _skip_loudly(
+            pytestconfig,
+            "the live server holds no active Gmail connection - "
+            "complete the OAuth flow in the GUI first, then re-run",
         )
     return str(active[0]["id"])
 

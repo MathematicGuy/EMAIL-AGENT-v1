@@ -1,32 +1,22 @@
-import importlib.util
+"""Chat routing evaluation: default output location, metric math, dry-run report."""
+
 import json
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT = REPO_ROOT / "scripts/evaluate_chat_routing.py"
+from tests.unit.scripts.cli_harness import load_script, run_cli
+
+
+def _module():
+    return load_script("evaluate_chat_routing")
+
 
 def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
-    spec = importlib.util.spec_from_file_location("chat_eval_defaults", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-
-    assert module.DEFAULT_OUTPUT_DIR == Path("docs/evaluations/CHAT")
+    assert _module().DEFAULT_OUTPUT_DIR == Path("docs/evaluations/CHAT")
 
 
-def test_chat_routing_dry_run_passes_and_report_is_metadata_only() -> None:
-    output = Path(tempfile.mkdtemp(prefix="chat-routing-eval-"))
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--dry-run", "--output-dir", str(output)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def test_chat_routing_dry_run_passes_and_report_is_metadata_only(tmp_path: Path) -> None:
+    output = tmp_path / "chat-routing-eval"
+    result = run_cli("evaluate_chat_routing", "--dry-run", "--output-dir", str(output))
 
     assert result.returncode == 0, result.stderr
     reports = list(output.glob("chat-routing-eval-*.json"))
@@ -41,11 +31,7 @@ def test_chat_routing_dry_run_passes_and_report_is_metadata_only() -> None:
 
 
 def test_chat_routing_metric_math_counts_missed_rag() -> None:
-    spec = importlib.util.spec_from_file_location("chat_eval", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    module = _module()
     results = (
         module.ChatRoutingEvalResult("a", True, True, "rag", "rag", 100),
         module.ChatRoutingEvalResult("b", True, False, "rag", "chat", 200),

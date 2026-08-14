@@ -153,15 +153,11 @@ def test_oauth_completion_encrypts_and_persists_refresh_token(tmp_path: Path) ->
 
 
 def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Path) -> None:
-    class WorkspaceRepository:
+    class RecordingRepository:
         def __init__(self) -> None:
-            self.workspace_id = ""
             self.connection: MailboxConnection | None = None
 
-        async def upsert_for_workspace(
-            self, connection: MailboxConnection, *, workspace_id: str
-        ) -> MailboxConnection:
-            self.workspace_id = workspace_id
+        async def upsert(self, connection: MailboxConnection) -> MailboxConnection:
             self.connection = connection
             return connection
 
@@ -171,7 +167,7 @@ def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Pat
 
     async def scenario() -> None:
         settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
-        repository = WorkspaceRepository()
+        repository = RecordingRepository()
         driver = FakeOAuthDriver()
         service = GmailConnectionService(
             settings,
@@ -187,8 +183,11 @@ def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Pat
             f"{settings.redirect_uri}?state={driver.state}&code=test-code",
         )
 
+        # The resolver, not the Google grant, decides who owns the connection:
+        # email_address stays the mailbox, user_id becomes the internal principal.
         assert connection.user_id == "internal-user-1"
-        assert repository.workspace_id == "workspace-1"
+        assert connection.email_address == "owner@example.com"
+        assert repository.connection == connection
 
     asyncio.run(scenario())
 

@@ -1,25 +1,21 @@
 """Smoke tests: routing evaluation metrics and dry-run plumbing (T2.6)."""
 
 import asyncio
-import importlib.util
 import json
-import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+import pytest
+
+from tests.unit.scripts.cli_harness import load_script, run_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "evaluate_routing.py"
 
 
 def load_module():
-    spec = importlib.util.spec_from_file_location("evaluate_routing_under_test", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses resolve annotations via sys.modules
-    spec.loader.exec_module(module)
-    return module
+    return load_script("evaluate_routing")
 
 def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
     module = load_module()
@@ -147,18 +143,16 @@ def test_dry_run_flow_reports_perfect_scores_and_no_content() -> None:
         assert case.body not in serialized
 
 
-def test_dry_run_writes_report_without_provider_keys() -> None:
-    output_dir = Path(tempfile.mkdtemp(prefix="routing-eval-smoke-"))
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-    env["LLM_PROVIDER"] = "gemini"
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--dry-run", "--output-dir", str(output_dir)],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
+def test_dry_run_writes_report_without_provider_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    # No GEMINI_API_KEY: --dry-run must never reach a provider. Deleting the key
+    # in-process is a stricter check than the subprocess this replaced, which
+    # inherited whatever the developer's shell had exported.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    output_dir = tmp_path / "routing-eval-smoke"
+    result = run_cli("evaluate_routing", "--dry-run", "--output-dir", str(output_dir))
     assert result.returncode == 0, result.stderr
     reports = list(output_dir.glob("routing-eval-*.json"))
     assert len(reports) == 1

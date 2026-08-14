@@ -86,7 +86,6 @@ def build_envelopes(cases):
     for case in cases:
         envelopes[case.id] = EphemeralEmailEnvelope(
             run_id="",
-            tenant_id="",
             user_id="",
             gmail_message_id=case.id,
             gmail_thread_id=case.thread_id or case.id,

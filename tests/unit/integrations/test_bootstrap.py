@@ -198,21 +198,19 @@ def _tiny_corpus() -> tuple[KnowledgeDocument, ...]:
                     None,
                     "alpha travel policy",
                     "doc.md",
-                    "local",
                 ),
             ),
         ),
     )
 
 
-def _retrieval_request(*, tenant_scope: str = "local") -> SemanticRetrievalRequest:
+def _retrieval_request() -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
-        tenant_id="local",
         user_id="user@example.com",
         query="alpha travel policy",
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope=tenant_scope, document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=3, min_score=0.0, timeout_ms=1500),
     )
 
@@ -342,4 +340,3 @@ def test_qdrant_factory_retrieve_returns_the_same_response_shape(
     assert isinstance(response.chunks, tuple)
     assert isinstance(response.query_id, str)
     assert response.latency_ms >= 0
-    assert response.tenant_id == "local"

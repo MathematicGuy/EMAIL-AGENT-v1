@@ -271,6 +271,46 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
     asyncio.run(scenario())
 
 
+def test_processed_emails_are_development_only(
+    principal_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dev-only debug metadata must not reach a production response.
+
+    ``processedEmails`` carries per-message subjects and senders. app.py gates
+    it on ``_is_development()`` in two places (run status and run result); this
+    pins both, since a regression leaks mailbox metadata to any caller.
+    """
+
+    async def scenario() -> None:
+        async with running_app() as (app, client):
+            await app.state.connection_repository.upsert(
+                _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
+            )
+            created = await client.post(
+                "/v1/mail-todo/runs",
+                json={"mailboxConnectionId": CONNECTION_ID},
+                headers={"Idempotency-Key": "dev-metadata"},
+            )
+            run_id = created.json()["id"]
+
+            assert "processedEmails" in (await client.get(f"/v1/mail-todo/runs/{run_id}")).json()
+            assert (
+                "processedEmails"
+                in (await client.get(f"/v1/mail-todo/runs/{run_id}/result")).json()
+            )
+
+            monkeypatch.setenv("APP_ENV", "production")
+            assert (
+                "processedEmails" not in (await client.get(f"/v1/mail-todo/runs/{run_id}")).json()
+            )
+            assert (
+                "processedEmails"
+                not in (await client.get(f"/v1/mail-todo/runs/{run_id}/result")).json()
+            )
+
+    asyncio.run(scenario())
+
+
 def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):

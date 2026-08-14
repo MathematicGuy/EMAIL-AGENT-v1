@@ -76,7 +76,6 @@ def email(
 ) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="",
-        tenant_id="",
         user_id="",
         gmail_message_id=message_id,
         gmail_thread_id=thread_id,
@@ -598,7 +597,6 @@ def test_envelopes_reaching_extraction_carry_stamped_run_identity() -> None:
         for envelope in classifier.received_envelopes:
             assert envelope.run_id == run.id
             assert envelope.run_id != ""
-            assert envelope.tenant_id == LOCAL_TENANT_ID
             assert envelope.user_id == "u1"
             assert envelope.attachments_processed is False
 
@@ -760,7 +758,6 @@ class RecordingMemory:
         self.fail_times = fail_times
         self.response = SemanticRetrievalResponse(
             query_id="q_test",
-            tenant_id=LOCAL_TENANT_ID,
             chunks=(),
             retrieval_status=RetrievalStatus.NO_RESULTS,
             latency_ms=1,
@@ -779,7 +776,6 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
         memory = RecordingMemory()
         memory.response = SemanticRetrievalResponse(
             query_id="q_test",
-            tenant_id=LOCAL_TENANT_ID,
             chunks=(
                 SemanticChunk(
                     chunk_id="cit_hr_1",
@@ -821,12 +817,10 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
         assert len(memory.requests) == 1
         request = memory.requests[0]
         assert request.run_id == run.id
-        assert request.tenant_id == LOCAL_TENANT_ID
         assert request.user_id == "u1"
         assert request.query == "quy trình nghỉ phép"
         assert request.filters.document_status == ("ready",)
         assert request.knowledge_gaps == ("quy trình nghỉ phép",)
-        assert request.filters.tenant_scope == LOCAL_TENANT_ID
         assert generator.received_retrievals == (memory.response,)
         # FR-11 boundary: retrieval returned chunks, so no missing-context
         # note may be injected.
@@ -1474,7 +1468,7 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_qdrant() -> None:
 
     async def scenario() -> None:
         client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
+        documents = load_corpus(CORPUS_DIR)
         await ingest_corpus(client, QDRANT_DEMO_COLLECTION, documents, HashingEmbedder())
         memory = QdrantSemanticMemory(
             client, QDRANT_DEMO_COLLECTION, HashingEmbedder(), min_score_default=0.0
@@ -1507,7 +1501,6 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_qdrant() -> None:
         assert completed.action_items_count == 1
         (retrieval,) = generator.received_retrievals
         assert retrieval.retrieval_status is RetrievalStatus.SUCCESS
-        assert retrieval.tenant_id == LOCAL_TENANT_ID
         assert retrieval.chunks
         for chunk in retrieval.chunks:
             assert chunk.chunk_id in corpus_chunk_ids

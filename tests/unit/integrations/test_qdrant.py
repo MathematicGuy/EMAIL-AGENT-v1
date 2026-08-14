@@ -144,7 +144,7 @@ def test_ingest_corpus_rejects_an_empty_corpus() -> None:
     asyncio.run(scenario())
 
 
-def test_retrieve_returns_grounded_chunks_for_the_owning_tenant() -> None:
+def test_retrieve_returns_chunks_grounded_in_the_ingested_corpus() -> None:
     async def scenario() -> None:
         memory = await _memory(AsyncQdrantClient(":memory:"))
 

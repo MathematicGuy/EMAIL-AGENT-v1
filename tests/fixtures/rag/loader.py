@@ -20,9 +20,6 @@ from typing import Any, TypeVar
 
 TEnum = TypeVar("TEnum", bound=Enum)
 
-#: Tenant stamp used only while validating labels against the corpus.
-VALIDATION_TENANT_ID = "local"
-
 _CASE_ID_PATTERN = re.compile(r"^q-\d{3}$")
 
 
@@ -159,7 +156,7 @@ def _validate_against_corpus(
         document.document_id: {
             chunk.section for chunk in document.chunks if chunk.section is not None
         }
-        for document in load_corpus(corpus_dir, tenant_id=VALIDATION_TENANT_ID)
+        for document in load_corpus(corpus_dir)
     }
     for index, case in enumerate(cases):
         where = f"{source}[{index}]"

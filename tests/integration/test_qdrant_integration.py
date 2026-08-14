@@ -3,8 +3,8 @@
 Runs against ``AsyncQdrantClient(":memory:")`` — the real Qdrant query engine,
 no server and no credentials. The offline embedder is ``HashingEmbedder``,
 which buckets tokens by hash and carries no semantics, so nothing here asserts
-*which* document ranks first; the claims are about the ACL boundary, the score
-threshold, the limit, and the degrade path.
+*which* document ranks first; the claims are about the score threshold, the
+limit, the ordering, and the degrade path.
 """
 
 import asyncio
@@ -29,25 +29,20 @@ from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_co
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 COLLECTION = "integration_company_knowledge"
-OWNER_TENANT = "tenant-owner"
-FOREIGN_TENANT = "tenant-intruder"
 
 
 def _request(
     *,
-    tenant_id: str = OWNER_TENANT,
-    tenant_scope: str = OWNER_TENANT,
     query: str = "hồ sơ đăng ký kết hôn cần giấy tờ gì",
     top_k: int = 5,
     min_score: float = 0.0,
 ) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-integration",
-        tenant_id=tenant_id,
         user_id="user@example.com",
         query=query,
         knowledge_gaps=(),
-        filters=RetrievalFilters(tenant_scope=tenant_scope, document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=top_k, min_score=min_score, timeout_ms=1500),
     )
 
@@ -58,7 +53,7 @@ def memory() -> QdrantSemanticMemory:
 
     async def build() -> QdrantSemanticMemory:
         client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR, tenant_id=OWNER_TENANT)
+        documents = load_corpus(CORPUS_DIR)
         await ingest_corpus(client, COLLECTION, documents, HashingEmbedder())
         return QdrantSemanticMemory(client, COLLECTION, HashingEmbedder())
 
@@ -72,28 +67,12 @@ def test_retrieval_returns_citable_chunks_from_the_committed_corpus(
 
     assert response.retrieval_status is RetrievalStatus.SUCCESS
     assert response.chunks
-    known_documents = {
-        document.document_id
-        for document in load_corpus(CORPUS_DIR, tenant_id=OWNER_TENANT)
-    }
+    known_documents = {document.document_id for document in load_corpus(CORPUS_DIR)}
     for chunk in response.chunks:
         assert chunk.document_id in known_documents
         assert chunk.chunk_id.startswith(chunk.document_id)
         assert chunk.source_url.startswith("data/extracted/")
         assert chunk.text.strip()
-
-
-def test_a_foreign_tenant_retrieves_nothing_from_the_same_collection(
-    memory: QdrantSemanticMemory,
-) -> None:
-    response = asyncio.run(
-        memory.retrieve(
-            _request(tenant_id=FOREIGN_TENANT, tenant_scope=FOREIGN_TENANT)
-        )
-    )
-
-    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
-    assert response.chunks == ()
 
 
 def test_min_score_excludes_everything_below_the_threshold(
