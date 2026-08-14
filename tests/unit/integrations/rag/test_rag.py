@@ -115,7 +115,7 @@ def test_null_semantic_memory_returns_structured_no_results() -> None:
 
 
 def test_timeout_status_when_embedder_times_out() -> None:
-    documents = load_corpus(CORPUS_DIR, tenant_id="local")
+    documents = load_corpus(CORPUS_DIR)
     memory = InRepoSemanticMemory(documents, HashingEmbedder())
     asyncio.run(memory.build_index())
     memory._embedder = SlowEmbedder()

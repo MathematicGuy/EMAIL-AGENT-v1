@@ -40,14 +40,18 @@ src/cowork_agent/
 
 Dependency direction: `domain` ← `features` ← `integrations` /
 `orchestration` / `persistence` ← `app`. Tests: `tests/unit`,
-`tests/integration`, `tests/compatibility`. Providers ship fakes.
+`tests/integration`. Providers ship fakes.
 
 ## Commands
 
-- Install: `python -m pip install -e ".[dev]"`
-- Test: `python -m pytest -q` (pythonpath/testpaths preconfigured)
-- Lint: `python -m ruff check .`
-- Types: `python -m mypy src` (strict)
+Always `uv run` — plain `python -m` picks up the Anaconda interpreter on this
+machine and fails with unrelated `ssl` errors.
+
+- Install: `uv sync --extra dev --extra postgres` (drop `postgres` and the
+  `tests/integration/persistence` route skips)
+- Test: `uv run pytest -q` (~19 s, 977 tests; defaults in `pyproject.toml`)
+- Lint: `uv run ruff check .`
+- Types: `uv run mypy src` (strict)
 - Run API: `mail-todo-api` (host/port via `APP_HOST` / `APP_PORT`)
 - React frontend: `cd frontend; pnpm install; pnpm dev`
 
@@ -64,10 +68,21 @@ Frontend (`frontend/`): `pnpm install` · `pnpm dev` · `pnpm test` ·
 
 ## Verification
 
-Run the smallest pytest scope covering the edit (`tests/README.md`). When
-`src/` changes, also run `ruff` and `mypy`. When `frontend/` changes, run
-`pnpm test` and `pnpm check-types` there. Expand to the full suite only on
-failure or when a shared contract (ports, schemas, migrations) changed.
+`tests/README.md` is the harness, not prose. Read it before running or writing
+any test: **§1** maps each `src/` path to the narrowest route (R1–R16) with its
+measured cost; **§3** names the one file that owns each cross-cutting invariant
+— check it before writing a test, because re-asserting an owned invariant at
+another layer is a deletion candidate, not coverage; **§4** has the pruning
+checklist.
+
+Widen a level only when the narrow route is green. Run the full suite once at
+the end, or immediately when a shared contract (ports, schemas, migrations)
+changed. When `src/` changes, also run `ruff` and `mypy`. When `frontend/`
+changes, run `pnpm test` and `pnpm check-types` there.
+
+A yellow `DESELECTED - NOT VERIFIED BY THIS RUN` banner ends every run, naming
+what `-m 'not live'` dropped. Green above that banner is not a verified suite.
+
 Read [experience registry](docs/references/agent-experience-registry.md)
 before review-heavy work.
 

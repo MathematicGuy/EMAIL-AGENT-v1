@@ -1,10 +1,9 @@
-import importlib.util
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests.unit.scripts.cli_harness import load_script, run_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts/evaluate_chat_rag.py"
@@ -22,12 +21,9 @@ def _assert_no_local_only_fields(node: object) -> None:
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("chat_rag_eval", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_script("evaluate_chat_rag")
+
+
 
 
 def test_metadata_only_report_calculates_retrieval_linkage_abstention_and_latency() -> None:
@@ -103,13 +99,7 @@ def test_cli_writes_a_metadata_only_report(tmp_path: Path) -> None:
         },
     )
 
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--input", str(source), "--output", str(output)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_cli("evaluate_chat_rag", "--input", str(source), "--output", str(output))
 
     assert result.returncode == 0, result.stderr
     report = json.loads(output.read_text(encoding="utf-8"))
@@ -151,20 +141,13 @@ def test_ragas_fails_clearly_when_the_optional_dependency_is_absent(tmp_path: Pa
         },
     )
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "--input",
-            str(source),
-            "--output",
-            str(tmp_path / "report.json"),
-            "--ragas",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    result = run_cli(
+        "evaluate_chat_rag",
+        "--input",
+        str(source),
+        "--output",
+        str(tmp_path / "report.json"),
+        "--ragas",
     )
 
     if result.returncode == 0:

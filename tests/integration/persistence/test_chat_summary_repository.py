@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from tests.integration.persistence.pg_probe import server_available
+
 DATABASE_URL = os.getenv(
     "PG_TEST_URL",
     "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_mail_todo",
@@ -52,11 +54,7 @@ def fresh_schema() -> Iterator[None]:
 
 
 def _server_available() -> bool:
-    try:
-        with psycopg.connect(DATABASE_URL, connect_timeout=3):
-            return True
-    except psycopg.Error:
-        return False
+    return server_available(DATABASE_URL)
 
 
 if not _server_available():

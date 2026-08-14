@@ -184,7 +184,7 @@ def test_generator_rotates_to_next_key_after_rate_limit() -> None:
         output = await generator.generate(
             user_timezone="Asia/Ho_Chi_Minh",
             current_time=datetime.now(UTC),
-            run_context=GenerationContext("run-1", "tenant-1", "user-1"),
+            run_context=GenerationContext("run-1", "user-1"),
             candidate=candidate("msg-1"),
             envelopes=(envelope("msg-1"),),
             resolution=RouteResolution(

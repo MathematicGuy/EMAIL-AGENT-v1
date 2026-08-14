@@ -16,18 +16,13 @@ except ImportError:  # pragma: no cover - environment-dependent
 from cowork_agent.persistence.migrate import apply_migrations
 from cowork_agent.persistence.repositories.identity import PostgresIdentityRepository
 from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
+from tests.integration.persistence.pg_probe import server_available
 
 DATABASE_URL = os.getenv("PG_TEST_URL", "")
 
 
 def _server_available() -> bool:
-    if not DATABASE_URL:
-        return False
-    try:
-        with psycopg.connect(DATABASE_URL, connect_timeout=3):
-            return True
-    except psycopg.Error:
-        return False
+    return server_available(DATABASE_URL)
 
 
 if not _server_available():

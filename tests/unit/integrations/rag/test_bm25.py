@@ -1,4 +1,4 @@
-"""Unit tests for the tenant-scoped BM25 lexical search adapter."""
+"""Unit tests for the BM25 lexical search adapter."""
 
 from cowork_agent.integrations.rag.bm25 import BM25SearchAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk

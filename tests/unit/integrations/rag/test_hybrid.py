@@ -135,7 +135,6 @@ class RecordingDense:
         del request
         return SemanticRetrievalResponse(
             query_id="q_dense",
-            tenant_id="local",
             chunks=(
                 SemanticChunk(
                     chunk_id="a",
@@ -156,9 +155,9 @@ class RecordingDense:
 
 def test_hybrid_uses_injected_dense_port_and_still_fuses_bm25() -> None:
     chunks = (
-        KnowledgeChunk("a", "a", "A", None, "dense exclusive", "a.md", "local"),
-        KnowledgeChunk("b", "b", "B", None, "lexical alpha", "b.md", "local"),
-        KnowledgeChunk("c", "c", "C", None, "lexical alpha", "c.md", "local"),
+        KnowledgeChunk("a", "a", "A", None, "dense exclusive", "a.md"),
+        KnowledgeChunk("b", "b", "B", None, "lexical alpha", "b.md"),
+        KnowledgeChunk("c", "c", "C", None, "lexical alpha", "c.md"),
     )
     documents = (KnowledgeDocument("knowledge", "Knowledge", "knowledge.md", chunks),)
     dense = RecordingDense()

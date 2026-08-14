@@ -1,107 +1,204 @@
-# Test Execution Guide for Coding Agents
+# Test Routing Index
 
-Token-efficient, high-density reference for running tests, linter, type-checker, and performance optimization tools in `EMAIL-AGENT-v1`. Always prefer `uv run pytest` over plain `python -m pytest` for fast, efficient test execution.
+A map for picking the **smallest** test route that covers a change, and a
+registry of which file owns which invariant so no one writes a test that
+already exists.
 
----
+Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
+interpreter on this machine and fails with unrelated `ssl` errors.
 
-## 1. Quick Command Cheat Sheet
-
-| Purpose | Command | Description |
-|---|---|---|
-| **Smallest Unit Test** | `uv run pytest tests/unit/<subpath> -q` | Fast feedback loop for local module edits |
-| **All Unit Tests** | `uv run pytest tests/unit -q` | Run full unit test suite |
-| **Integration Tests** | `uv run pytest tests/integration -q` | Persistence, API, and retrieval tests |
-| **Compatibility Tests** | `uv run pytest tests/compatibility -q` | Contract, privacy, and dedupe checks |
-| **Full Suite** | `uv run pytest -q` | Standard full test suite run |
-| **Parallel Suite (`pytest-xdist`)** | `uv run pytest -n auto -q` | 3x–8x faster multi-core parallel execution |
-| **Fast Venv Execution (`uv`)** | `uv run pytest -q` | Rust-based runner; reduces Python startup overhead |
-| **Full Verification Gate** | `uv run pytest -q && python -m ruff check . && python -m mypy src` | Complete test + lint + type check gate |
-| **Linter** | `python -m ruff check .` | Ruff linter & style check |
-| **Type Checker** | `python -m mypy src` | Strict static type checking |
+**Whole suite: `uv run pytest -q` -> ~19 s, 977 passed.** Defaults live in
+`pyproject.toml`: `-n 4 --dist loadfile -m 'not live' --strict-markers`.
 
 ---
 
-## 2. Performance Optimization & Profiling Tools
+## 1. Route Index
 
-| Tool / Strategy | Command / Setting | Purpose & Impact |
-|---|---|---|
-| **`uv` Runner** | `uv run pytest` | **Fast Startup**: Bypasses venv activation overhead using Rust-based runner (Default) |
-| **`pytest-xdist`** | `uv run pytest -n auto` | **3x–8x Acceleration**: Parallelizes tests across CPU cores |
-| **Slow Test Profiler** | `uv run pytest --durations=10` | **Bottleneck Tracking**: Identifies top 10 slowest tests |
-| **SQLite `:memory:` DB** | In-Memory Connection | **Disk I/O Bypass**: Runs persistence/DB tests entirely in RAM |
-| **Collection Scoping** | `pyproject.toml` (`testpaths = ["tests"]`) | **Fast Discovery**: Restricts discovery scope, skipping non-test trees |
+Pick the narrowest row that contains your change. Times are **serial** (`-n0`),
+which is what one route costs; the full suite is parallel.
 
----
+| # | Route | Tests | Serial | Covers |
+|---|---|---|---|---|
+| R1 | `tests/unit/domain` | 162 | 1.0 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 362 | 2.3 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 45 | 4.6 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 43 | 2.8 s | Prompt assembly, parsing, key rotation, classifiers. |
+| R5 | `tests/unit/integrations/gmail` | 19 | 0.9 s | OAuth/PKCE, token cipher, mailbox adapter. |
+| R6 | `tests/unit/integrations` | 189 | 17.0 s | R3+R4+R5 plus Qdrant, bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 17 | 1.2 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 12 | 2.7 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 69 | 13.3 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
+| R10 | `tests/unit/fixtures` | 33 | 3.5 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 22 | 7.1 s | FastAPI via in-process ASGI transport. |
+| R12 | `tests/integration/persistence` | 9 | 4.2 s | Real PostgreSQL. **Skips wholesale without a server.** |
+| R13 | `tests/integration/email_action_plan` | 45 | 4.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 82 | 15.6 s | R11+R12+R13 plus Qdrant-over-corpus. |
+| R15 | `tests/unit` | 904 | 27.4 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 835 | 20.2 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
+| — | *(everything)* | 977 | **19 s parallel** | `uv run pytest -q` |
 
-## 3. Verification Protocol for Coding Agents
+### Source -> route
 
-1. **Scope Selection**: Run the *smallest pytest scope* covering edited code (e.g. `uv run pytest tests/unit/features -q`).
-2. **Lint & Type Check**: When `src/` is modified, run `python -m ruff check .` and `python -m mypy src`.
-3. **Full Suite Escalation**: Prior to running the full test suite, always run the **Core Subsystem Pre-Verification Suite** first. **If any core test fails, stop immediately and report the failure back to the user before running the main test suite.**
-
-### Core Subsystem Pre-Verification Suite
-
-Before running the full test suite (`uv run pytest -q`), execute the core feature smoke tests covering key application subsystems. **Accelerate test execution using `uv run pytest` or `uv run pytest -n auto` (or `addopts = "-n 4"` in `pyproject.toml`).**
-
-| Core Feature / Subsystem | Test Scope Files | Latency / Execution Time (ms) |
-|---|---|---|
-| **1. Qdrant Vector Store** | `tests/unit/integrations/test_qdrant.py`, `tests/unit/integrations/test_project_document_qdrant.py` | **8,720 ms** (~8.72s) |
-| **2. Supabase & Postgres Storage** | `tests/unit/integrations/test_supabase_storage.py`, `tests/unit/test_postgres_only_runtime.py` | **5,660 ms** (~5.66s) |
-| **3. Email Auth & Identity** | `tests/unit/test_identity.py`, `tests/unit/test_session_cookie.py`, `tests/integration/api/test_principal_boundary.py` | **5,920 ms** (~5.92s) |
-| **4. Email / Document Read API** | `tests/unit/test_app_document_routes.py`, `tests/integration/api/test_server.py`, `tests/integration/api/test_project_documents_api.py` | **6,310 ms** (~6.31s) |
-
-#### Recommended Accelerated Command (`uv` runner):
-```bash
-uv run pytest tests/unit/integrations/test_qdrant.py tests/unit/integrations/test_project_document_qdrant.py tests/unit/integrations/test_supabase_storage.py tests/unit/test_postgres_only_runtime.py tests/unit/test_identity.py tests/unit/test_session_cookie.py tests/integration/api/test_principal_boundary.py tests/unit/test_app_document_routes.py tests/integration/api/test_server.py tests/integration/api/test_project_documents_api.py -q
-```
-
----
-
-## 4. Source-to-Test Mapping
-
-| Edited Path in `src/cowork_agent/` | Recommended Test Scope |
+| Edited under `src/cowork_agent/` | Run |
 |---|---|
-| `domain/` | `uv run pytest tests/unit/domain -q` |
-| `features/email_action_plan/` | `uv run pytest tests/unit/features -q` |
-| `integrations/gmail/` | `uv run pytest tests/unit/integrations/test_gmail*.py -q` |
-| `integrations/llm/` | `uv run pytest tests/unit/integrations/test_llm*.py -q` |
-| `integrations/rag/` | `uv run pytest tests/unit/integrations/test_rag*.py -q` |
-| `orchestration/` | `uv run pytest tests/unit/orchestration -q` |
-| `persistence/` | `uv run pytest tests/unit/persistence tests/integration/persistence -q` |
-| `api/` or `app.py` | `uv run pytest tests/integration/api -q` |
+| `domain/` | R1, then R2 |
+| `features/ai_chat/` | R2 |
+| `features/email_action_plan/` | R2 + R13 |
+| `integrations/rag/` | R3 (+ R6 if `qdrant.py` or `bootstrap.py`) |
+| `integrations/llm/` | R4 |
+| `integrations/gmail/` | R5 + R13 |
+| `persistence/` | R7 + R12 |
+| `orchestration/` | R8 |
+| `app.py`, API routes | R11 |
+| `identity.py`, session/cookie | R11 + `tests/unit/test_identity.py` |
+| `scripts/*.py` | R9 |
+| `data/extracted/*.md` (corpus) | R10 + R3 |
 
 ---
 
-## 5. Useful Pytest Flags for Agent Sessions
+## 2. Markers
 
-- **`-q` (Quiet)**: Reduces output token footprint (recommended default).
-- **`-n auto`**: Uses `pytest-xdist` to parallelize test runs across CPU cores.
-- **`--durations=10`**: Surfaces top 10 slowest tests for bottleneck analysis.
-- **`-x` / `--maxfail=1`**: Stop immediately on first failure.
-- **`--tb=short` / `--tb=line`**: Short tracebacks (saves context window budget).
-- **`-k "pattern"`**: Filter tests by function or class name expression.
-- **`--lf` (Last Failed)**: Re-run only tests that failed in the previous run.
-- **`-s`**: Disable output capture (show `print`/logger outputs).
+Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 
-### Examples
+| Marker | Meaning | Default |
+|---|---|---|
+| `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
+| `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
+| `serial` | Must not run under xdist — spawns processes or binds a fixed port. | Selected; keep it on one worker. |
+
+Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
+naming what the filter dropped. A green summary with that banner above it is
+*not* a fully verified suite.
+
+`tests/integration/api/test_e2e_frontend_api.py` is the only `live` module (24
+tests). It needs a real `mail-todo-api` subprocess plus completed Gmail OAuth.
+When the server will not boot it **skips behind a wall of `!!!!` explaining why**
+— it never errors, so it can never mask a real failure.
+
+---
+
+## 3. Invariant Ownership
+
+**Before writing a test, find its invariant here.** If a row already exists, add
+a case to the owning file instead of starting a new one. If the invariant is
+absent, add the row when you add the test.
+
+| Invariant | Owned by | Do not re-assert in |
+|---|---|---|
+| Legacy `/result` JSON key set, `nextActions` slice, empty-state message, item ordering | `unit/features/email_action_plan/test_compat_mapper.py` | any API-level test |
+| `processedEmails` is development-only | `integration/api/test_principal_boundary.py` | — |
+| Run creation is idempotent per `(user, Idempotency-Key)` | `integration/email_action_plan/test_workflow.py` | API tests (they get it transitively) |
+| Persisted tasks survive a replayed run without duplicating | `integration/email_action_plan/test_workflow.py` | — |
+| Postgres migrations apply once and are idempotent | `integration/persistence/test_postgres_repositories.py` | — |
+| No raw email body reaches any API response | `integration/api/test_principal_boundary.py` | workflow/repository tests |
+| No raw email body reaches chat memory | `unit/domain/test_chat_contracts.py` | gateway tests |
+| Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/test_qdrant.py` (Qdrant) | integration tests |
+| Retrieval over the *committed corpus* + degrade-to-null path | `integration/test_qdrant_integration.py` | — |
+| Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
+| OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
+| Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
+
+### Two facts that break tests if you forget them
+
+- **`HashingEmbedder` carries no semantics.** It buckets tokens by hash. Never
+  assert *which* document ranks first under it — only counts, ordering by score,
+  thresholds, and status codes.
+- **`tenant_id` is gone from the retrieval/email contracts** (single-user app).
+  It still exists on `VerifiedPrincipal` and the chat-memory schema. Do not add
+  it to `KnowledgeChunk`, `SemanticRetrievalRequest/Response`,
+  `EphemeralEmailEnvelope`, `GenerationContext`, or `load_corpus`.
+
+---
+
+## 4. Rules for Adding Tests
+
+1. **One invariant, one owner.** Check §3 first. A second assertion of the same
+   fact at a different layer is a deletion candidate, not coverage.
+2. **Test at the lowest layer that can observe the behaviour.** The retired
+   `tests/compatibility/` suite booted a FastAPI app across 627 lines to exercise
+   three pure functions; `test_compat_mapper.py` does it in 15 tests and 0.8 s.
+3. **No subprocess for CLI assertions.** Use
+   `tests/unit/scripts/cli_harness.py::run_cli`, which calls `main(argv)`
+   in-process with stdio captured. Keep exactly **one** subprocess test per
+   script (`test_help_runs_without_provider_keys`) to prove the entry point is
+   executable. This alone took `unit/scripts` from 40 s to 13 s.
+4. **Probe an external service once.** See
+   `tests/integration/persistence/pg_probe.py`. Nine modules each opening their
+   own 3 s connection cost 19 s per run to learn the same thing.
+5. **A missing dependency skips loudly; it never errors.** Errors are for
+   regressions. Print a banner that says what did not run and how to run it.
+6. **Name the behaviour, not the mechanism.**
+   `test_min_score_excludes_everything_below_the_threshold`, not
+   `test_min_score_2`.
+7. **New external dependency? Mark it `live` and `serial`.**
+
+### Pruning checklist
+
+Delete a test when any of these holds:
+
+- Its invariant already has an owner in §3 and this is not the owner.
+- It asserts a field that no longer exists on the contract (grep `src/` first —
+  a stale *kwarg* means fix the call, a stale *purpose* means delete the test).
+- It re-tests framework behaviour (pydantic validation, FastAPI routing).
+- It only passes because a broad `except Exception` swallowed the real error.
+
+---
+
+## 5. Route Optimization
+
+Do **not** open with the full suite. The sequence:
 
 ```bash
-# Debug single failing function with short traceback
-uv run pytest tests/unit/features -k "test_router_decides_retrieve_rag" --tb=short
+# 1. Narrowest route from §1 (seconds).
+uv run pytest tests/unit/integrations/rag -q
 
-# Profile top 10 slowest tests in parallel mode
-uv run pytest -n auto --durations=10 -q
+# 2. Widen one level only if step 1 passes.
+uv run pytest tests/unit/integrations -q
 
-# Fast re-run of last failed tests with uv
-uv run pytest -q --lf -x
+# 3. Full suite once, at the end.
+uv run pytest -q
 ```
+
+### Avoiding repeated work
+
+| Goal | Flag |
+|---|---|
+| Re-run only what failed last time | `--lf` |
+| Failed first, then the rest | `--ff` |
+| See what a route *would* run, without running it | `--collect-only -q` |
+| Count only | `--collect-only -q \| tail -1` |
+| Find the next thing worth optimizing | `--durations=15` |
+| Stop at the first failure | `-x` |
+| Keep tracebacks cheap in context | `--tb=line` or `--tb=short` |
+
+`--lf` and `--ff` read `.pytest_cache`. If you see
+`PytestCacheWarning: cache could not write path`, the cache is stale-locked and
+those flags silently degrade to running everything — clear `.pytest_cache/` or
+add `-p no:cacheprovider` and select explicitly instead.
+
+### Token-cheap defaults
+
+`-q --tb=line --no-header`. A green route prints one line. Add `-x` when you
+expect a failure so only the first traceback lands in context.
 
 ---
 
-## 6. Test Directory Layout & Infrastructure
+## 6. Layout
 
-- **`tests/unit/`**: Pure domain models, features, orchestration, and unit logic (zero external I/O).
-- **`tests/integration/`**: SQLite persistence (`:memory:` / temporary isolated DB), FastAPI endpoints, Qdrant/RAG integrations.
-- **`tests/compatibility/`**: API contract stability, privacy boundaries, ordering & deduplication rules.
-- **`tests/fixtures/`**: Shared test fixtures, mock data, and deterministic fakes (`src/cowork_agent/integrations/*/fakes.py`).
-- **Pythonpath & Collection Config**: `pyproject.toml` configures `pythonpath = ["src", "."]` and `testpaths = ["tests"]`. Always invoke pytest via `uv run pytest`.
+```
+tests/
+  conftest.py                       suite guards: broken SSL_CERT_FILE, deselect banner
+  fixtures/                         shared builders and golden-fixture loaders
+  unit/                             no I/O, no app boot, fakes only
+    scripts/cli_harness.py          in-process runner for scripts/*.py
+  integration/
+    api/                            FastAPI over in-process ASGI transport
+    api/test_e2e_frontend_api.py    the only `live` module (real subprocess)
+    persistence/pg_probe.py         one cached Postgres reachability check
+```
+
+Gate before handing work back:
+
+```bash
+uv run pytest -q && uv run ruff check . && uv run mypy src
+```

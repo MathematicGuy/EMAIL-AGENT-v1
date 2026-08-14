@@ -5,7 +5,6 @@ filesystem. Only the two subprocess tests touch the real corpus.
 """
 
 import asyncio
-import importlib.util
 import json
 import math
 import os
@@ -16,18 +15,20 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.scripts.cli_harness import CliResult, load_script
+from tests.unit.scripts.cli_harness import run_cli as harness_run_cli
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "evaluate_retrieval.py"
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 
 
 def load_module() -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location("evaluate_retrieval_under_test", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses resolve annotations via sys.modules
-    spec.loader.exec_module(module)
-    return module
+    return load_script("evaluate_retrieval")
+
+
+def run_cli(*argv: str) -> CliResult:
+    return harness_run_cli("evaluate_retrieval", *argv)
 
 def test_default_output_path_stays_under_documented_evaluations_store() -> None:
     module = load_module()
@@ -1060,13 +1061,7 @@ def test_rerank_is_inert_unless_the_flag_is_passed() -> None:
 
 def test_rerank_without_hybrid_exits_two() -> None:
     for retriever in ("dense", "bm25"):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--dry-run", "--rerank", "--retriever", retriever],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=_subprocess_env(),
-        )
+        result = run_cli("--dry-run", "--rerank", "--retriever", retriever)
         assert result.returncode == 2, result.stdout
         assert "--rerank only applies to --retriever hybrid" in result.stderr
 
@@ -1075,22 +1070,14 @@ def test_every_retriever_runs_through_one_measurement_path(tmp_path: Path) -> No
     fixture = _write_covering_fixture(tmp_path)
     for retriever in ("dense", "bm25", "hybrid", "qdrant"):
         output = tmp_path / f"{retriever}.json"
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "--dry-run",
-                "--retriever",
-                retriever,
-                "--fixture",
-                str(fixture),
-                "--output",
-                str(output),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=_subprocess_env(),
+        result = run_cli(
+            "--dry-run",
+            "--retriever",
+            retriever,
+            "--fixture",
+            str(fixture),
+            "--output",
+            str(output),
         )
         assert result.returncode == 0, result.stderr
         report = json.loads(output.read_text(encoding="utf-8"))
@@ -1110,21 +1097,7 @@ def test_every_retriever_runs_through_one_measurement_path(tmp_path: Path) -> No
 def test_dry_run_writes_report_without_provider_keys(tmp_path: Path) -> None:
     fixture = _write_covering_fixture(tmp_path)
     output = tmp_path / "retrieval-eval.json"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "--dry-run",
-            "--fixture",
-            str(fixture),
-            "--output",
-            str(output),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_subprocess_env(),
-    )
+    result = run_cli("--dry-run", "--fixture", str(fixture), "--output", str(output))
     assert result.returncode == 0, result.stderr
     serialized = output.read_text(encoding="utf-8")
     report = json.loads(serialized)
@@ -1165,13 +1138,7 @@ def test_dry_run_real_fixture_report_has_one_hundred_cases_and_seventeen_documen
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "retrieval-eval-real-fixture.json"
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--dry-run", "--output", str(output)],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_subprocess_env(),
-    )
+    result = run_cli("--dry-run", "--output", str(output))
     assert result.returncode == 0, result.stderr
 
     report = json.loads(output.read_text(encoding="utf-8"))
@@ -1179,23 +1146,15 @@ def test_dry_run_real_fixture_report_has_one_hundred_cases_and_seventeen_documen
     assert report["corpus"]["document_count"] == 17
 
 
-def _run_gated_eval(tmp_path: Path, *gate_flags: str) -> subprocess.CompletedProcess[str]:
+def _run_gated_eval(tmp_path: Path, *gate_flags: str) -> CliResult:
     fixture = _write_covering_fixture(tmp_path)
-    return subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "--dry-run",
-            "--fixture",
-            str(fixture),
-            "--output",
-            str(tmp_path / "gated.json"),
-            *gate_flags,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_subprocess_env(),
+    return run_cli(
+        "--dry-run",
+        "--fixture",
+        str(fixture),
+        "--output",
+        str(tmp_path / "gated.json"),
+        *gate_flags,
     )
 
 

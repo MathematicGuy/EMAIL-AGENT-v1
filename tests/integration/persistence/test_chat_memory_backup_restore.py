@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.persistence.pg_probe import server_available
+
 DATABASE_URL = os.getenv(
     "PG_TEST_URL",
     "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_mail_todo",
@@ -66,11 +68,7 @@ DOCKER_CONTAINER = "cowork-pg"
 
 
 def _server_available() -> bool:
-    try:
-        with psycopg.connect(DATABASE_URL, connect_timeout=3):
-            return True
-    except psycopg.Error:
-        return False
+    return server_available(DATABASE_URL)
 
 
 def _resolve_pg_dump_mode() -> str | None:
@@ -361,7 +359,6 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
             # ---- Assert: profile preserved ----
             restored_profile = await profiles_repo.read_profile(_profile_namespace())
             assert restored_profile is not None
-            assert restored_profile.tenant_id == "tenant-bak"
             assert restored_profile.user_id == "bak-user@example.com"
             assert restored_profile.response_tone == "direct"
             assert restored_profile.expires_at is not None
