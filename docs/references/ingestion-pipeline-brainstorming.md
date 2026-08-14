@@ -49,7 +49,7 @@ The central Document Ingestion Pipeline ([`KnowledgeIngestionService`](file:///e
 ```mermaid
 flowchart TB
     CLI["CLI Entrypoint<br/>(mail-todo-ingest-knowledge)"] --> STAGE1
-    
+
     subgraph STAGE1["Stage 1: Discovery & Security Validation"]
         DIR["Directory & Path Guard"] --> SYM{"Check Symlinks"}
         SYM -->|Symlink Found| REJECT1["Fail: symlink_not_allowed"]
@@ -68,17 +68,17 @@ flowchart TB
 
     subgraph STAGE3["Stage 3: Format Extraction, Text Sanitization & Metadata Harvesting"]
         MODE{"Extraction Mode<br/>(EXTRACTION_MODE)"}
-        MODE -->|adaptive (default)| TYPE{"File Format Router"}
-        MODE -->|advance| OCR["MistralOcrExtractor<br/>(mistral-ocr-latest)"]
+        MODE -->|"adaptive (default)"| TYPE{"File Format Router"}
+        MODE -->|"advance"| OCR["MistralOcrExtractor<br/>(mistral-ocr-latest)"]
         OCR --> FIGURES["Extract Figures to data/extracted/images/"]
 
-        TYPE -->|.docx| DOCX["DocxExtractor<br/>(OpenXML AST to Markdown headings & tables)"]
-        TYPE -->|.pdf| PDF["PdfInspector<br/>(Text vs Scanned Inspection)"]
-        TYPE -->|.txt / .md| TXT["TextExtractor<br/>(Direct Read & Encoding Validation)"]
-        PDF -->|Native Text PDF| RENDER_PDF["PDF Page Renderer"]
-        PDF -->|Scanned / OCR Needed| OCR_CHECK{"MISTRAL_API_KEY?"}
-        OCR_CHECK -->|Configured| OCR
-        OCR_CHECK -->|Missing| FAIL_OCR["Fail: mistral_not_configured"]
+        TYPE -->|".docx"| DOCX["DocxExtractor<br/>(OpenXML AST to Markdown headings & tables)"]
+        TYPE -->|".pdf"| PDF["PdfInspector<br/>(Text vs Scanned Inspection)"]
+        TYPE -->|".txt / .md"| TXT["TextExtractor<br/>(Direct Read & Encoding Validation)"]
+        PDF -->|"Native Text PDF"| RENDER_PDF["PDF Page Renderer"]
+        PDF -->|"Scanned / OCR Needed"| OCR_CHECK{"MISTRAL_API_KEY?"}
+        OCR_CHECK -->|"Configured"| OCR
+        OCR_CHECK -->|"Missing"| FAIL_OCR["Fail: mistral_not_configured"]
 
         DOCX --> CLEAN["Text Sanitization Engine<br/>(Unicode NFC, Whitespace, Control Char Strip)"]
         RENDER_PDF --> CLEAN
@@ -339,7 +339,7 @@ When implementing the Document Loading optimizations, the following files and mo
 
 ## 9. Actionable Evolution Roadmap
 
-```
+```md
 [Phase 1: Ingestion Sanitization & Metadata Engine]
   1.1 Create text_sanitizer utility (Unicode NFC, control char stripping, whitespace collapse).
   1.2 Integrate sanitizer into DocxExtractor, PdfInspector, ProjectDocumentExtractor.
