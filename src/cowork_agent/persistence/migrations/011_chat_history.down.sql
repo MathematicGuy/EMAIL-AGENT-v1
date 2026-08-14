@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS chat_turns;
+ALTER TABLE chat_sessions DROP COLUMN IF EXISTS title;

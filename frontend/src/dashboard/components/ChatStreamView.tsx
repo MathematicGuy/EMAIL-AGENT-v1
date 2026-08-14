@@ -11,7 +11,9 @@ import {
   Sparkles,
   FileText,
   LoaderCircle,
-  ChevronDown
+  ChevronDown,
+  Mail,
+  ExternalLink,
 } from 'lucide-react';
 import type {
   GroundingSummary,
@@ -57,7 +59,58 @@ interface ChatStreamViewProps {
   activeProject?: Project;
   projects?: Project[];
   onSelectProject?: (projectId: string) => void;
+  onOpenMailInbox?: () => void;
 }
+
+const MailScanCard: React.FC<{
+  scan: NonNullable<ChatMessage['mailScan']>;
+  onOpenMailInbox?: () => void;
+}> = ({ scan, onOpenMailInbox }) => {
+  const isFinished = ['succeeded', 'partial', 'failed'].includes(scan.status);
+  const denominator = Math.max(scan.emailsToProcess, 1);
+  const percentage = Math.min(100, Math.round((scan.emailsProcessed / denominator) * 100));
+  const label = {
+    connecting: 'Đang kết nối Gmail',
+    queued: 'Đang chờ quét',
+    running: 'Đang quét email',
+    succeeded: 'Quét hoàn tất',
+    partial: 'Quét hoàn tất một phần',
+    failed: 'Quét không thành công',
+  }[scan.status];
+  return (
+    <section className="rounded-xl border border-[#4d4035] bg-[#25211d] p-4" aria-label="Tiến độ quét mail">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-2 font-medium text-zinc-100">
+          <Mail className="h-4 w-4 text-[#e8a78f]" /> {label}
+        </span>
+        {!isFinished && <LoaderCircle className="h-4 w-4 animate-spin text-[#e8a78f]" />}
+      </div>
+      <div className="mt-3 flex justify-between text-xs text-zinc-400">
+        <span>{scan.emailsProcessed}/{scan.emailsToProcess || scan.emailsMatched} email</span>
+        {scan.actionItemsCount !== undefined && <span>{scan.actionItemsCount} action item</span>}
+      </div>
+      {scan.emailsMatched > scan.emailsToProcess && (
+        <p className="mt-1 text-xs text-amber-200">Có {scan.emailsMatched} email phù hợp.</p>
+      )}
+      <div className="mt-2 h-1.5 overflow-hidden rounded bg-zinc-800">
+        <div className="h-full bg-[#d97757] transition-all duration-300" style={{ width: `${percentage}%` }} />
+      </div>
+      {isFinished && (
+        <a
+          href="?view=mail"
+          onClick={(event) => {
+            if (!onOpenMailInbox) return;
+            event.preventDefault();
+            onOpenMailInbox();
+          }}
+          className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#e8a78f] hover:text-[#f2b9a4]"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> Mở Mail Inbox
+        </a>
+      )}
+    </section>
+  );
+};
 
 interface ContentPart {
   type: 'text' | 'code';
@@ -614,6 +667,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   activeProject,
   projects,
   onSelectProject,
+  onOpenMailInbox,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -787,6 +841,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
                       );
                     }
                   })}
+                  {msg.mailScan && <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />}
 
                   {/* Caret fallback if message is streaming and content is empty */}
                   {msg.isStreaming && parts.length === 0 && (

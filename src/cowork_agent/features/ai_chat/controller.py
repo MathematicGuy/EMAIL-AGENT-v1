@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ from .generation_context import (
 )
 from .intent.service import ChatRoutingService
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
-from .ports import ChatReplyChunk, ChatReplyPort, ChatTaskProposal
+from .ports import ChatHistoryPort, ChatReplyChunk, ChatReplyPort, ChatTaskProposal
 from .retention import compute_expires_at
 from .retrieval_policy import (
     clarification_memory_reads,
@@ -47,6 +48,7 @@ from .retrieval_policy import (
 IdFactory = Callable[[], str]
 Clock = Callable[[], datetime]
 CancellationCheck = Callable[[], Awaitable[bool]]
+logger = logging.getLogger(__name__)
 
 
 def _new_id() -> str:
@@ -59,6 +61,13 @@ def _utc_now() -> datetime:
 
 async def _never_cancelled() -> bool:
     return False
+
+
+def _fallback_conversation_title(message: str) -> str:
+    """Keep the sidebar useful if a configured title-capable LLM is unavailable."""
+
+    normalized = " ".join(message.split())
+    return normalized[:120] or "New chat"
 
 
 def _rag_evidence(
@@ -337,6 +346,7 @@ class ChatController:
         episode_retention_seconds: int | None = None,
         routing: ChatRoutingService | None = None,
         company_rag_enabled: bool = True,
+        history: ChatHistoryPort | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
@@ -346,6 +356,7 @@ class ChatController:
         self._episode_retention_seconds = episode_retention_seconds
         self._routing = routing
         self._company_rag_enabled = company_rag_enabled
+        self._history = history
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
@@ -439,6 +450,7 @@ class ChatController:
 
             chunks: list[str] = []
             task_proposal: ChatTaskProposal | None = None
+            conversation_title: str | None = None
             selected_citation_ids: list[str] = []
             pending_task_episode: _PendingTaskEpisode | None = None
             generation_context = assemble_generation_context(
@@ -454,6 +466,8 @@ class ChatController:
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
                             task_proposal = chunk.task_proposal
+                        if chunk.conversation_title is not None:
+                            conversation_title = chunk.conversation_title
                         for citation_id in chunk.citation_ids:
                             if citation_id not in selected_citation_ids:
                                 selected_citation_ids.append(citation_id)
@@ -493,8 +507,7 @@ class ChatController:
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
             )
-            self._memory.append_turn(
-                ChatTurn(
+            turn = ChatTurn(
                     turn_id=turn_id,
                     session_id=self._scope.session_id,
                     user_message=request.user_message,
@@ -517,8 +530,20 @@ class ChatController:
                     ),
                     rag_evidence=rag_evidence,
                     retrieval_status=retrieval_status,
-                )
             )
+            self._memory.append_turn(turn)
+            if self._history is not None:
+                try:
+                    await self._history.write_turn(
+                        self._scope,
+                        turn,
+                        title=(
+                            conversation_title
+                            or _fallback_conversation_title(request.user_message)
+                        ),
+                    )
+                except Exception:
+                    logger.exception("Unable to persist completed chat turn")
             if project_documents is not None:
                 evidence_by_id = {item.citation_id: item for item in project_documents.evidence}
                 for citation_id in selected_citation_ids:

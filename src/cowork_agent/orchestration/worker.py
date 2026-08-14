@@ -116,7 +116,13 @@ async def run_worker() -> None:
     )
     from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 
-    pool = AsyncConnectionPool(database_url(), min_size=1, max_size=4, open=False)
+    pool = AsyncConnectionPool(
+        database_url(),
+        min_size=1,
+        max_size=4,
+        open=False,
+        kwargs={"prepare_threshold": None},
+    )
     await pool.open(wait=True)
     storage_client: httpx.AsyncClient | None = None
     qdrant_client: AsyncQdrantClient | None = None

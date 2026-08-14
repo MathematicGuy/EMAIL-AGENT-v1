@@ -35,7 +35,7 @@ describe('Mail API client', () => {
     );
   });
 
-  it('sends the selected mailbox, limit, and stable idempotency key', async () => {
+  it('sends the selected mailbox, query, limit, and stable idempotency key', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       response({ id: 'run-1', status: 'queued', statusUrl: '/v1/mail-todo/runs/run-1' }, 202)
     );
@@ -45,6 +45,7 @@ describe('Mail API client', () => {
       mailboxConnectionId: 'mbx-1',
       maxEmails: 20,
       idempotencyKey: 'mail-idem-1',
+      query: 'newer_than:3d is:unread in:inbox',
     });
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;
@@ -52,6 +53,7 @@ describe('Mail API client', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       mailboxConnectionId: 'mbx-1',
       maxEmails: 20,
+      query: 'newer_than:3d is:unread in:inbox',
     });
   });
 

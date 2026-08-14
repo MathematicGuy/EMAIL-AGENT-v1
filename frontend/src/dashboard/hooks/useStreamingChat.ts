@@ -4,12 +4,21 @@ import {
   uploadProjectDocument,
   waitForProjectDocument,
 } from '../../modules/project-documents/api';
+import {
+  createDigestRun,
+  getDigestRun,
+  getDigestTasks,
+  listConnections,
+  newIdempotencyKey,
+  type DigestRunView,
+} from '../../modules/mail/api';
 import type {
   ChatCitation,
   ChatComposerAttachment,
   ChatMessage,
   ChatRagEvidence,
   ChatRetrievalStatus,
+  MailScanProgress,
   RecentChat,
   TaskWorkflow,
 } from '../types';
@@ -17,6 +26,7 @@ import type {
 interface ChatSession {
   session_id: string;
   project_id: string;
+  title?: string;
 }
 
 interface ChatTurn {
@@ -48,6 +58,11 @@ interface SseEvent {
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
+const MAIL_COMMAND = /(?:^|\s)@mail\b/i;
+const MAIL_UNREAD_QUERY = 'is:unread in:inbox';
+const MAIL_SCAN_MAX_EMAILS = 10;
+const MAIL_POLL_INTERVAL_MS = 1_500;
+const MAIL_TERMINAL_STATUSES = new Set(['succeeded', 'partial', 'failed']);
 
 export function validateAttachmentFile(file: File): string | null {
   if (file.size > MAX_ATTACHMENT_BYTES) return `${file.name} exceeds the 25 MiB limit.`;
@@ -62,6 +77,29 @@ function timestamp(value?: string): string {
   return new Date(value ?? Date.now()).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+function isMailCommand(value: string): boolean {
+  return MAIL_COMMAND.test(value);
+}
+
+function mailScanProgress(run: DigestRunView): MailScanProgress {
+  return {
+    status: run.status,
+    emailsMatched: run.progress.emailsMatched,
+    emailsProcessed: run.progress.emailsProcessed,
+    emailsToProcess: run.progress.emailsToProcess,
+  };
+}
+
+function waitForMailPoll(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, MAIL_POLL_INTERVAL_MS);
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timer);
+      reject(new DOMException('Mail scan polling aborted', 'AbortError'));
+    }, { once: true });
   });
 }
 
@@ -207,7 +245,7 @@ export function useStreamingChat(
       const payload = (await response.json()) as { sessions: ChatSession[] };
       setRecentChats(payload.sessions.map((session, index) => ({
         id: session.session_id,
-        title: `Chat ${payload.sessions.length - index}`,
+        title: session.title ?? `Chat ${payload.sessions.length - index}`,
         projectId: session.project_id,
         category: 'recent',
       })));
@@ -321,6 +359,62 @@ export function useStreamingChat(
     setSelectedAttachments((current) => current.filter((item) => item.id !== attachmentId));
   }, []);
 
+  const runMailScan = useCallback(async (
+    assistantId: string,
+    abort: AbortController,
+  ) => {
+    const updateAssistant = (
+      content: string,
+      mailScan: MailScanProgress,
+      isStreaming = true,
+    ) => {
+      setMessages((current) => current.map((message) =>
+        message.id === assistantId ? { ...message, content, mailScan, isStreaming } : message
+      ));
+    };
+    const activeConnections = (await listConnections(abort.signal))
+      .filter((connection) => connection.status === 'active');
+    if (!activeConnections[0]) {
+      throw new Error('Chưa có tài khoản Gmail đang kết nối. Hãy mở Mail Inbox để kết nối Gmail.');
+    }
+    updateAssistant('Đã kết nối Gmail. Đang tạo lượt quét 10 email unread mới nhất…', {
+      status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0,
+    });
+    const accepted = await createDigestRun({
+      mailboxConnectionId: activeConnections[0].id,
+      maxEmails: MAIL_SCAN_MAX_EMAILS,
+      query: MAIL_UNREAD_QUERY,
+      idempotencyKey: newIdempotencyKey(),
+      signal: abort.signal,
+    });
+    while (!abort.signal.aborted) {
+      const run = await getDigestRun(accepted.id, abort.signal);
+      const progress = mailScanProgress(run);
+      if (!MAIL_TERMINAL_STATUSES.has(run.status)) {
+        updateAssistant('Đang quét 10 email unread mới nhất…', progress);
+        await waitForMailPoll(abort.signal);
+        continue;
+      }
+      if (run.status === 'failed') {
+        const message = run.error?.message ?? 'Không thể hoàn tất lượt quét email.';
+        updateAssistant(message, progress, false);
+        return;
+      }
+      const tasks = await getDigestTasks(run.id, abort.signal);
+      const completedProgress = { ...progress, actionItemsCount: tasks.length };
+      const resultLabel = run.status === 'partial' ? 'Hoàn tất một phần' : 'Đã quét xong';
+      const scannedSummary = run.progress.emailsMatched > run.progress.emailsProcessed
+        ? `đã xử lý ${run.progress.emailsProcessed}/${run.progress.emailsMatched} email phù hợp`
+        : `đã quét ${run.progress.emailsProcessed} email`;
+      updateAssistant(
+        `${resultLabel}: ${scannedSummary} và tạo ${tasks.length} action item.`,
+        completedProgress,
+        false,
+      );
+      return;
+    }
+  }, []);
+
   const sendMessage = useCallback(async (override?: string) => {
     const text = (override ?? inputText).trim();
     if (!text || isGenerating) return;
@@ -352,6 +446,11 @@ export function useStreamingChat(
     const abort = new AbortController();
     abortRef.current = abort;
     try {
+      if (isMailCommand(text)) {
+        await runMailScan(assistantId, abort);
+        setApiStatus('online');
+        return;
+      }
       const sessionId = await ensureSession();
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -429,8 +528,23 @@ export function useStreamingChat(
     } catch (cause) {
       if ((cause as { name?: string }).name !== 'AbortError') {
         const error = cause instanceof Error ? cause.message : 'Chat backend unavailable.';
+        const failedMailScan = isMailCommand(text);
         setMessages((current) => current.map((message) =>
-          message.id === assistantId ? { ...message, content: error, isStreaming: false } : message
+          message.id === assistantId
+            ? {
+                ...message,
+                content: error,
+                isStreaming: false,
+                mailScan: failedMailScan
+                  ? {
+                      status: 'failed',
+                      emailsMatched: message.mailScan?.emailsMatched ?? 0,
+                      emailsProcessed: message.mailScan?.emailsProcessed ?? 0,
+                      emailsToProcess: message.mailScan?.emailsToProcess ?? 0,
+                    }
+                  : message.mailScan,
+              }
+            : message
         ));
         setApiStatus('offline');
       }
@@ -438,7 +552,7 @@ export function useStreamingChat(
       abortRef.current = null;
       setIsGenerating(false);
     }
-  }, [ensureSession, inputText, isGenerating, refreshHistory, selectedAttachments]);
+  }, [ensureSession, inputText, isGenerating, refreshHistory, runMailScan, selectedAttachments]);
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {
     void loadedProjectId;

@@ -219,6 +219,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               activeProject={activeProject}
               projects={projects}
               onSelectProject={handleSelectProject}
+              onOpenMailInbox={() => setActiveView('mail')}
             />
           )}
         </div>
