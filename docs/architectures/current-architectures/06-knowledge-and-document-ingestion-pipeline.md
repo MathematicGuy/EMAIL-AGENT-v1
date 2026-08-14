@@ -23,6 +23,7 @@ The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative g
 | **Ingestion Service Orchestrator** | [service.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) | `KnowledgeIngestionService`: Discovers files, checks symlinks, detects filename collisions, and manages extraction outcomes. |
 | **DOCX Extractor** | [docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py) | `DocxExtractor`: Converts `.docx` headings, paragraphs, and tables into structured Markdown formatting. |
 | **PDF Inspector & Extractor** | [pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py) | `PdfInspector`: Inspects PDF pages, extracts native text, detects scanned image pages, and enforces page bounds. |
+| **Mistral OCR Extractor** | [ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py) | `MistralOcrExtractor`: Advanced mode extractor using Mistral OCR API (`mistral-ocr-latest`), normalizing OOXML archives and extracting figure assets. |
 | **Manifest & Atomic Store** | [manifest.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/manifest.py) | `ManifestStore`: Tracks SHA-256 hashes in `ingestion-manifest.json`; performs atomic `.tmp` file writes. |
 | **Project Document Extractor** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) | `ProjectDocumentExtractor`: Extracts user project upload files into page-bounded chunks (`page_start`, `page_end`). |
 | **Ingestion Models** | [models.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/models.py) | Standardized domain models: `IngestionOutcome`, `ManifestEntry`, `PdfInspection`. |
@@ -54,17 +55,22 @@ flowchart TB
     MANIFEST_CHECK -->|New or Modified File| STAGE3
 
     subgraph STAGE3["★ Core Stage 3: Format Extraction & Text Normalization"]
-        ROUTE{"3.1 Format Router"}
+        MODE{"3.1 Extraction Mode<br/>(EXTRACTION_MODE)"}
+        MODE -->|basic| ROUTE{"Format Router"}
+        MODE -->|advance| OCR["3.4 Mistral OCR Extractor<br/>(MistralOcrExtractor: mistral-ocr-latest)"]
+        OCR --> FIGURES["Extract Figures to data/extracted/images/"]
+
         ROUTE -->|.docx| DOCX["3.2 DOCX Extraction<br/>(DocxExtractor: Headings & Tables)"]
         ROUTE -->|.pdf| PDF["3.3 PDF Inspection<br/>(PdfInspector: Text vs Scanned)"]
 
-        PDF -->|Native Text PDF| RENDER_PDF["3.4 PDF Page Renderer<br/>(Insert <!-- Page N --> comments)"]
+        PDF -->|Native Text PDF| RENDER_PDF["PDF Page Renderer<br/>(Insert <!-- Page N --> comments)"]
         PDF -->|Scanned / OCR Needed| FAIL_OCR["Fail: mistral_not_configured"]
     end
 
     subgraph STAGE4["★ Core Stage 4: Atomic Persistence & Corpus Commit"]
         DOCX --> ATOMIC["4.1 Atomic Disk Write<br/>(write_markdown_atomically -> *.tmp -> *.md)"]
         RENDER_PDF --> ATOMIC
+        FIGURES --> ATOMIC
         ATOMIC --> RECORD["4.2 Manifest Registration<br/>(Write entry to ingestion-manifest.json)"]
         RECORD --> SUCCESS["4.3 Emit Corpus Markdown<br/>(Outcome: succeeded)"]
     end
@@ -84,12 +90,15 @@ flowchart TB
 - **Skip Evaluation:** Queries `ManifestStore` (`ingestion-manifest.json`). If the SHA-256 matches a previous run and `--force` is not set, processing is skipped (`outcome="skipped"`), avoiding redundant LLM/extraction calls.
 
 #### 3. ★ Core Stage 3: Format Extraction & Text Normalization
-- **DOCX AST Parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)):** Extracts Word OpenXML elements into structured Markdown `#` headings, bullet lists, and pipes-formatted Markdown tables.
-- **PDF Layout Inspection ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)):** Scans page structures to distinguish native text from scanned images. Inspects page counts against `max_pdf_pages`. Native pages are rendered with explicit page markers (`<!-- Page N -->`). Scanned pages requiring OCR fail gracefully with `mistral_not_configured`.
+- **Dual Extraction Modes (`EXTRACTION_MODE=basic|advance`):**
+  - **Basic Mode (`basic`, default):** Runs 100% locally.
+    - DOCX: AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown.
+    - PDF: Native text extraction ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)). Scanned pages fail safely with `mistral_not_configured`.
+  - **Advance Mode (`advance`):** Routes PDF and DOCX files through Mistral OCR ([ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
 
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
-- **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx` or `pdf_native`), and ISO-8601 processing timestamp.
+- **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx`, `pdf_native`, or `mistral_ocr`), and ISO-8601 processing timestamp.
 - **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Qdrant/Turbovec.
 
 ---
@@ -100,7 +109,7 @@ flowchart TB
 2. **Output Slug Normalization:** Source file paths are slugified into safe ASCII filenames (`_output_name`). If two input paths map to the same slug, both are blocked with `output_name_collision`.
 3. **Incremental SHA-256 Skipping:** Before processing, source files are hashed (`sha256_file`). If `ingestion-manifest.json` contains a matching entry and `--force` is not set, extraction is skipped cleanly.
 4. **Atomic Write Guarantee:** Markdown content is written to a `.tmp` file before being atomically renamed to the target filename, preventing partial reads by vector indexers.
-5. **OCR Deferral:** Scanned PDF pages requiring OCR are halted with `mistral_not_configured` when OCR credentials are unconfigured, ensuring incomplete text is never written to the corpus.
+5. **OCR Guard:** When `EXTRACTION_MODE=basic`, scanned PDF pages requiring OCR are halted with `mistral_not_configured` without emitting incomplete text to the corpus. When `EXTRACTION_MODE=advance`, Mistral OCR performs complete cloud extraction.
 
 ---
 

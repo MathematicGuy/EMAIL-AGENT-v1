@@ -13,6 +13,7 @@ from cowork_agent.config import KnowledgeIngestionSettings
 from .docx_extractor import DocxExtractor
 from .manifest import ManifestStore, sha256_file, write_markdown_atomically
 from .models import IngestionOutcome, ManifestEntry, PdfInspection
+from .ocr import MistralOcrExtractor
 from .pdf_inspector import PdfInspector
 
 _SUPPORTED_SUFFIXES = {".docx", ".pdf"}
@@ -27,10 +28,12 @@ class KnowledgeIngestionService:
         settings: KnowledgeIngestionSettings,
         docx_extractor: DocxExtractor | None = None,
         pdf_inspector: PdfInspector | None = None,
+        ocr_extractor: MistralOcrExtractor | None = None,
     ) -> None:
         self._settings = settings
         self._docx_extractor = docx_extractor or DocxExtractor()
         self._pdf_inspector = pdf_inspector or PdfInspector()
+        self._ocr_extractor = ocr_extractor
 
     def ingest(
         self,
@@ -89,7 +92,7 @@ class KnowledgeIngestionService:
         if not force and manifest.should_skip(relative, digest):
             return IngestionOutcome(relative, "skipped", output=output_name)
         try:
-            markdown, extractor, page_count = self._extract(path)
+            markdown, extractor, page_count = self._extract(path, output_dir)
         except _IngestionError as error:
             return IngestionOutcome(relative, "failed", reason_code=error.reason_code)
         if dry_run:
@@ -111,7 +114,25 @@ class KnowledgeIngestionService:
             return IngestionOutcome(relative, "failed", reason_code="output_write_failed")
         return IngestionOutcome(relative, "succeeded", output=output_name)
 
-    def _extract(self, path: Path) -> tuple[str, str, int]:
+    def _extract(self, path: Path, output_dir: Path) -> tuple[str, str, int]:
+        if self._settings.ocr_enabled:
+            ocr = self._ocr_extractor
+            if ocr is None:
+                ocr = MistralOcrExtractor(
+                    api_key=self._settings.api_key,
+                    model=self._settings.model,
+                    timeout_seconds=self._settings.timeout_seconds,
+                    image_dir=output_dir / "images",
+                )
+            try:
+                content = path.read_bytes()
+                markdown = ocr.extract(path.name, content)
+            except Exception as error:
+                raise _IngestionError("ocr_extraction_failed") from error
+            if not markdown.strip():
+                raise _IngestionError("empty_extraction")
+            return markdown, "mistral_ocr", 1
+
         if path.suffix.lower() == ".docx":
             try:
                 result = self._docx_extractor.extract(path)
@@ -127,7 +148,6 @@ class KnowledgeIngestionService:
         if inspection.page_count > self._settings.max_pdf_pages:
             raise _IngestionError("pdf_page_limit_exceeded")
         if inspection.pages_needing_ocr:
-            # OCR is deliberately deferred: do not make a network request or emit partial output.
             raise _IngestionError("mistral_not_configured")
         return _render_pdf(inspection), "pdf_native", inspection.page_count
 

@@ -124,3 +124,65 @@ def test_pdf_over_page_limit_is_rejected_before_markdown_is_written(tmp_path: Pa
 
 def _native_pdf() -> PdfInspection:
     return PdfInspection(PdfKind.TEXT_BASED, 1, (), {1: "native"})
+
+
+class _StubOcrExtractor:
+    def __init__(self, output: str = "# OCR Result") -> None:
+        self.output = output
+        self.extracted_files: list[str] = []
+
+    def extract(self, filename: str, content: bytes) -> str:
+        self.extracted_files.append(filename)
+        return self.output
+
+
+def test_service_extracts_via_ocr_when_enabled(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "scanned_doc.pdf").write_bytes(b"scanned-pdf-bytes")
+    settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"},
+        load_env_file=False,
+    )
+    stub_ocr = _StubOcrExtractor("# Scanned Content")
+    service = KnowledgeIngestionService(
+        settings,
+        DocxExtractor(),
+        StubPdfInspector(_native_pdf()),
+        ocr_extractor=stub_ocr,
+    )
+
+    outcome, = service.ingest(raw, tmp_path / "extracted", force=False)
+
+    assert outcome.status == "succeeded"
+    assert outcome.output == "scanned-doc.md"
+    assert stub_ocr.extracted_files == ["scanned_doc.pdf"]
+    output_md = (tmp_path / "extracted" / "scanned-doc.md").read_text(encoding="utf-8")
+    assert output_md == "# Scanned Content"
+
+
+def test_service_handles_ocr_failure_cleanly(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "broken.pdf").write_bytes(b"bytes")
+    settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"},
+        load_env_file=False,
+    )
+
+    class _FailingOcr:
+        def extract(self, filename: str, content: bytes) -> str:
+            raise RuntimeError("API Timeout")
+
+    service = KnowledgeIngestionService(
+        settings,
+        DocxExtractor(),
+        StubPdfInspector(_native_pdf()),
+        ocr_extractor=_FailingOcr(),
+    )
+
+    outcome, = service.ingest(raw, tmp_path / "extracted", force=False)
+
+    assert outcome.status == "failed"
+    assert outcome.reason_code == "ocr_extraction_failed"
+
