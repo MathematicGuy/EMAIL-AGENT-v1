@@ -55,7 +55,6 @@ class RecordingReply:
 
 def _scope() -> ChatMemoryScope:
     return ChatMemoryScope(
-        tenant_id="tenant-1",
         user_id="user@example.com",
         session_id="session-1",
     )
@@ -72,7 +71,6 @@ def _request(message: str, *, key: str) -> ChatMessageRequest:
 def _response() -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id="provider-query-id",
-        tenant_id="tenant-1",
         chunks=(
             SemanticChunk(
                 chunk_id="chunk-1",
@@ -100,7 +98,7 @@ class RecordingEpisodes:
         self.reads.append(query)
         return (
             TaskEpisode(
-                episode_id="episode-1", record_id="record-1", tenant_id="tenant-1",
+                episode_id="episode-1", record_id="record-1",
                 user_id="user@example.com", chat_session_id="earlier-session",
                 chat_turn_id="turn-1", creation_reason="explicit_user_task_request",
                 task_title="Submit travel report",

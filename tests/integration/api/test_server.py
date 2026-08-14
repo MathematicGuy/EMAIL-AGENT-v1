@@ -12,6 +12,7 @@ from cowork_agent.domain import MailboxConnection
 
 def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch: object) -> None:
     values = {
+        "DATABASE_URL": "",
         "GMAIL_CLIENT_ID": "test.apps.googleusercontent.com",
         "GMAIL_CLIENT_SECRET": "test-secret",
         "GMAIL_REDIRECT_URI": "http://localhost:8000/v1/mail-todo/oauth/gmail/callback",
@@ -44,6 +45,7 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
 
 def test_server_starts_with_faucet_provider(tmp_path: Path, monkeypatch: object) -> None:
     values = {
+        "DATABASE_URL": "",
         "LLM_PROVIDER": "faucet",
         "FAUCET_API_KEY": "test-key",
         "FAUCET_MODEL": "test-model",
@@ -72,6 +74,7 @@ def test_invalid_faucet_configuration_returns_provider_accurate_safe_503(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     values = {
+        "DATABASE_URL": "",
         "LLM_PROVIDER": "faucet",
         "FAUCET_API_KEY": "must-not-appear-in-error",
         "FAUCET_MODEL": "replace-with-faucet-model",

@@ -58,6 +58,7 @@ where = ["src"]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
+addopts = "-n 4"
 
 [tool.ruff]
 target-version = "py311"

@@ -139,7 +139,9 @@ class DurableSessionRegistry:
         self, session_id: str, *, tenant_id: str, user_id: str
     ) -> ChatMemoryScope:
         self.required.append((session_id, tenant_id, user_id))
-        if self.scope != ChatMemoryScope(tenant_id, user_id, session_id):
+        if self.scope != ChatMemoryScope(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id
+        ):
             from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
 
             raise ChatSessionAccessDenied(session_id)

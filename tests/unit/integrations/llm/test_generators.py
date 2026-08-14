@@ -34,13 +34,12 @@ from cowork_agent.integrations.llm.providers.gemini import (
 from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator, GroqAPIError
 
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
-RUN_CONTEXT = GenerationContext(run_id="run-9", tenant_id="tenant-1", user_id="user-1")
+RUN_CONTEXT = GenerationContext(run_id="run-9", user_id="user-1")
 
 
 def envelope(message_id: str) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run-9",
-        tenant_id="tenant-1",
         user_id="user-1",
         gmail_message_id=message_id,
         gmail_thread_id=f"thread-{message_id}",

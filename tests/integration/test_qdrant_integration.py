@@ -139,6 +139,7 @@ def test_results_are_ordered_by_descending_relevance(
 def test_an_unreachable_qdrant_falls_back_to_null_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
@@ -165,6 +166,7 @@ def test_an_unreachable_qdrant_falls_back_to_null_memory(
 def test_bootstrap_degrades_to_null_memory_when_qdrant_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
     jina = JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "test-key"}, load_env_file=False

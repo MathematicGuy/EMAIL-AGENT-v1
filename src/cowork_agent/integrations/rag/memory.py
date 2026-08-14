@@ -71,12 +71,7 @@ class InRepoSemanticMemory:
         if self._matrix is None:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
-        # ACL first: namespace filtering precedes any scoring or embedding.
-        allowed = [
-            (index, chunk)
-            for index, chunk in enumerate(self._chunks)
-            if chunk.tenant_id == request.filters.tenant_scope
-        ]
+        allowed = list(enumerate(self._chunks))
         if not allowed:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
         query_text = _query_text(request)
@@ -138,7 +133,6 @@ def _response(
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=request.tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=max(0, int((time.monotonic() - started) * 1000)),

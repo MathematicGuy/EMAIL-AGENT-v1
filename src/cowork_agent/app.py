@@ -844,7 +844,7 @@ def create_app() -> FastAPI:
         run_queue = getattr(request.app.state, "run_queue", None)
         if run_queue is not None:
             await run_queue.enqueue_digest_run(
-                run.id, user_id=principal.user_id, tenant_id=principal.tenant_id
+                run.id, user_id=principal.user_id
             )
         else:
             background_tasks.add_task(worker.execute, run.id)
@@ -972,11 +972,10 @@ def create_app() -> FastAPI:
         )
         retrieval_request = SemanticRetrievalRequest(
             run_id="knowledge-adhoc",
-            tenant_id=LOCAL_TENANT_ID,
             user_id="demo-gui",
             query=body.query,
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)),
+            filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=body.top_k, min_score=-1.0, timeout_ms=8_000),
         )
         response = await memory.retrieve(retrieval_request)

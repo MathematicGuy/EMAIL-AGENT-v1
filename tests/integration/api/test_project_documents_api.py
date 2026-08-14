@@ -23,7 +23,7 @@ class Projects:
         self.document: ProjectDocument | None = None
 
     async def create(self, principal: VerifiedPrincipal, name: str) -> Project:
-        assert principal.workspace_id == "workspace-1"
+        assert principal.user_id == "user-1"
         return Project("project-2", "workspace-1", "user-1", name, False)
 
     async def default_project(self, principal: VerifiedPrincipal) -> Project:
@@ -122,7 +122,7 @@ def test_canonical_signed_upload_status_download_and_authorization() -> None:
 
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
-            return VerifiedPrincipal("workspace-1", "user-1")
+            return VerifiedPrincipal(user_id="user-1")
 
         app.state.chat_principal_resolver = principal
         async with httpx.AsyncClient(
@@ -180,15 +180,13 @@ def test_document_routes_are_unavailable_when_feature_is_disabled() -> None:
 
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
-            return VerifiedPrincipal("workspace-1", "user-1")
+            return VerifiedPrincipal(user_id="user-1")
 
         app.state.chat_principal_resolver = principal
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            project = await client.post(
-                "/v1/cowork/chat/projects", json={"name": "Finance"}
-            )
+            created = await client.post("/v1/cowork/chat/projects", json={"name": "Finance"})
             upload = await client.post(
                 "/v1/cowork/chat/projects/project-1/documents",
                 json={
@@ -209,7 +207,7 @@ def test_document_routes_are_unavailable_when_feature_is_disabled() -> None:
                 await client.get(f"{document_path}/download"),
             ]
 
-        assert project.status_code == 201
+        assert created.status_code == 201
         assert upload.status_code == 503
         assert upload.json() == {"detail": "User documents are disabled"}
         assert documents.status_code == 503

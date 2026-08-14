@@ -107,12 +107,7 @@ class TurbovecSemanticMemory:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
 
-        # ACL Filtering: Filter by tenant scope BEFORE scoring
-        allowed_indices = [
-            idx
-            for idx, chunk in enumerate(self._chunks)
-            if chunk.tenant_id == request.filters.tenant_scope
-        ]
+        allowed_indices = list(range(len(self._chunks)))
         if not allowed_indices:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
@@ -185,7 +180,6 @@ def _response(
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=request.tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=max(0, int((time.monotonic() - started) * 1000)),

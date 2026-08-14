@@ -29,19 +29,16 @@ class BM25SearchAdapter:
             sum(term_frequencies.values()) for term_frequencies in self._term_frequencies
         )
 
-    def search(self, query: str, *, tenant_id: str, top_k: int) -> tuple[tuple[str, float], ...]:
+    def search(
+        self, query: str, *, tenant_id: str | None = None, top_k: int = 5
+    ) -> tuple[tuple[str, float], ...]:
         """Return positive-score chunks ranked by BM25 score then chunk ID."""
         query_terms = tuple(dict.fromkeys(_tokenize(query)))
         if not query_terms or top_k <= 0:
             return ()
 
-        # ACL first: only tenant-visible chunks contribute to any statistics.
         allowed = tuple(
-            (chunk, term_frequencies, document_length)
-            for chunk, term_frequencies, document_length in zip(
-                self._chunks, self._term_frequencies, self._document_lengths, strict=True
-            )
-            if chunk.tenant_id == tenant_id
+            zip(self._chunks, self._term_frequencies, self._document_lengths, strict=True)
         )
         if not allowed:
             return ()

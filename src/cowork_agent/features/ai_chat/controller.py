@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol, cast
 from uuid import uuid4
 
 from langfuse import observe
@@ -17,6 +17,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatRagEvidence,
     ChatRoute,
     ChatTurn,
     EpisodeSourceType,
@@ -25,7 +26,7 @@ from cowork_agent.domain.chat_contracts import (
     RoutingOutcome,
     TaskEpisode,
 )
-from cowork_agent.domain.project_documents import ProjectDocumentResponse
+from cowork_agent.domain.project_documents import ProjectDocumentEvidence, ProjectDocumentResponse
 from cowork_agent.domain.target_contracts import ValidationStatus
 
 from .generation_context import (
@@ -67,6 +68,118 @@ async def _never_cancelled() -> bool:
     return False
 
 
+def _rag_evidence(
+    context: GenerationContext, project_documents: ProjectDocumentResponse | None
+) -> tuple[
+    tuple[ChatRagEvidence, ...],
+    Literal["success", "no_results", "timeout", "unavailable"] | None,
+]:
+    """Project the exact retrieval payload into persisted chat evidence."""
+
+    if project_documents is not None:
+        if project_documents.degraded:
+            return (), "unavailable"
+        if not project_documents.evidence:
+            return (), "no_results"
+        return (
+            tuple(
+                _project_evidence_to_rag_evidence(item)
+                for item in project_documents.evidence[:5]
+            ),
+            "success",
+        )
+
+    labeled_evidence = context.current_company_evidence
+    if labeled_evidence is None:
+        return (), None
+
+    company_evidence = labeled_evidence.value
+    raw_retrieval_status = company_evidence.retrieval_status
+    if raw_retrieval_status not in {"success", "no_results", "timeout", "unavailable"}:
+        return (), None
+    retrieval_status = cast(
+        Literal["success", "no_results", "timeout", "unavailable"], raw_retrieval_status
+    )
+    if retrieval_status != "success":
+        return (), retrieval_status
+
+    evidence: list[ChatRagEvidence] = []
+    for chunk in company_evidence.chunks[:5]:
+        item = _company_chunk_to_rag_evidence(chunk)
+        if item is not None:
+            evidence.append(item)
+    return tuple(evidence), retrieval_status
+
+
+def _project_evidence_to_rag_evidence(evidence: ProjectDocumentEvidence) -> ChatRagEvidence:
+    """Map the returned project chunk without changing its retrieval score or rank."""
+
+    content = evidence.text[:16_000]
+    preview = " ".join(content.split())[:400]
+    return ChatRagEvidence(
+        source="project_document",
+        retrieval_status="success",
+        chunk_id=evidence.chunk_id,
+        document_id=evidence.document_id,
+        document_title=evidence.title,
+        section=evidence.section,
+        source_url=None,
+        relevance_score=evidence.score,
+        rerank_score=None,
+        preview=preview,
+        content=content,
+    )
+
+
+def _company_chunk_to_rag_evidence(chunk: Mapping[str, object]) -> ChatRagEvidence | None:
+    """Create display evidence without re-querying or altering retrieval rank."""
+
+    chunk_id = chunk.get("chunk_id")
+    document_id = chunk.get("document_id")
+    document_title = chunk.get("document_title")
+    section = chunk.get("section")
+    text = chunk.get("text")
+    source_url = chunk.get("source_url")
+    relevance_score = chunk.get("relevance_score")
+    rerank_score = chunk.get("rerank_score")
+    if not isinstance(chunk_id, str):
+        return None
+    if not isinstance(document_id, str):
+        return None
+    if not isinstance(document_title, str):
+        return None
+    if not isinstance(text, str):
+        return None
+    if not isinstance(source_url, str):
+        return None
+    if section is not None and not isinstance(section, str):
+        return None
+    if isinstance(relevance_score, bool) or not isinstance(relevance_score, int | float):
+        return None
+    if rerank_score is not None and (
+        isinstance(rerank_score, bool) or not isinstance(rerank_score, int | float)
+    ):
+        return None
+
+    content = text[:16_000]
+    preview = " ".join(content.split())[:400]
+    if not content or not preview:
+        return None
+    return ChatRagEvidence(
+        source="company_knowledge",
+        retrieval_status="success",
+        chunk_id=chunk_id,
+        document_id=document_id,
+        document_title=document_title,
+        section=section,
+        source_url=source_url,
+        relevance_score=float(relevance_score),
+        rerank_score=float(rerank_score) if rerank_score is not None else None,
+        preview=preview,
+        content=content,
+    )
+
+
 class ChatScopeMismatch(ValueError):
     """The message does not belong to the controller's verified session."""
 
@@ -81,25 +194,25 @@ class ChatSessionRegistryPort(Protocol):
     async def create(
         self,
         *,
-        tenant_id: str,
         user_id: str,
+        tenant_id: str = "local",
         project_id: str = "default-project",
     ) -> ChatMemoryScope: ...
 
     async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
+        self, session_id: str, *, user_id: str, tenant_id: str = "local"
     ) -> ChatMemoryScope: ...
 
     async def list_for(
         self,
         *,
-        tenant_id: str,
         user_id: str,
+        tenant_id: str = "local",
         project_id: str | None = None,
     ) -> tuple[ChatMemoryScope, ...]: ...
 
     async def delete_project(
-        self, *, tenant_id: str, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]: ...
 
 
@@ -151,7 +264,7 @@ class InMemoryChatSessionRegistry:
         self._lock = threading.Lock()
 
     async def create(
-        self, *, tenant_id: str, user_id: str, project_id: str = "default-project"
+        self, *, user_id: str, tenant_id: str = "local", project_id: str = "default-project"
     ) -> ChatMemoryScope:
         with self._lock:
             session_id = self._new_id()
@@ -170,8 +283,8 @@ class InMemoryChatSessionRegistry:
         self,
         session_id: str,
         *,
-        tenant_id: str,
         user_id: str,
+        tenant_id: str = "local",
     ) -> ChatMemoryScope:
         with self._lock:
             scope = self._sessions.get(session_id)
@@ -189,7 +302,7 @@ class InMemoryChatSessionRegistry:
         return scope
 
     async def list_for(
-        self, *, tenant_id: str, user_id: str, project_id: str | None = None
+        self, *, user_id: str, tenant_id: str = "local", project_id: str | None = None
     ) -> tuple[ChatMemoryScope, ...]:
         """Owned scopes in creation order (GET /sessions read contract)."""
         with self._lock:
@@ -202,7 +315,7 @@ class InMemoryChatSessionRegistry:
             )
 
     async def delete_project(
-        self, *, tenant_id: str, user_id: str, project_id: str
+        self, *, user_id: str, project_id: str, tenant_id: str = "local"
     ) -> tuple[str, ...]:
         with self._lock:
             removed = tuple(
@@ -452,6 +565,9 @@ class ChatController:
                 )
                 return
 
+            rag_evidence, retrieval_status = _rag_evidence(
+                generation_context, project_documents
+            )
             self._memory.append_turn(
                 ChatTurn(
                     turn_id=turn_id,
@@ -474,6 +590,8 @@ class ChatController:
                         )
                         if item.citation_id in selected_citation_ids
                     ),
+                    rag_evidence=rag_evidence,
+                    retrieval_status=retrieval_status,
                 )
             )
             if project_documents is not None:
@@ -559,6 +677,8 @@ class ChatController:
                 event_id=self._new_id(),
                 session_id=self._scope.session_id,
                 turn_id=turn_id,
+                rag_evidence=rag_evidence,
+                retrieval_status=retrieval_status,
             )
             emitted.append(completed)
             completed_stream = tuple(emitted)
@@ -678,12 +798,11 @@ class ChatController:
 
         created_at = self._clock()
         record_input = "\x1f".join(
-            (self._scope.tenant_id, self._scope.user_id, self._scope.session_id, turn_id)
+            (self._scope.user_id, self._scope.session_id, turn_id)
         )
         return TaskEpisode(
             episode_id=self._new_id(),
             record_id=hashlib.sha256(record_input.encode("utf-8")).hexdigest(),
-            tenant_id=self._scope.tenant_id,
             user_id=self._scope.user_id,
             chat_session_id=self._scope.session_id,
             chat_turn_id=turn_id,

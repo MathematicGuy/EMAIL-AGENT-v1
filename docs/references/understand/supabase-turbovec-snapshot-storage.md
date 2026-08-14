@@ -15,7 +15,7 @@ Rebuilding a vector index from scratch on every process boot requires re-embeddi
 
 ### Core Objectives:
 1. **Decouple Vector State from Local Disk**: Host all `.tvim` vector index snapshots on **Supabase Cloud**.
-2. **Sub-50ms Cold-Start Boot**: Enable `TurbovecSemanticMemory` to download pre-computed `.tvim` binary snapshots from Supabase Storage during process initialization in **< 50 ms** (or **< 5 ms** if cached locally with matching ETag/SHA-256).
+  2. **Sub-50ms Cold-Start Boot**: Enable `TurbovecSemanticMemory` to download pre-computed `.tvim` binary snapshots from Supabase Storage during process initialization in **< 50 ms** (or **< 5 ms** if cached locally with matching ETag/SHA-256).
 3. **Cloud-Synchronized Dynamic Updates**: Ensure dynamic updates, re-indexing, or new email ingestion automatically upload refreshed `.tvim` snapshots back to Supabase Storage with optimistic concurrency protection.
 
 ---

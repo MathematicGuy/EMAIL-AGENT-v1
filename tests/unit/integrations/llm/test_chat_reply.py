@@ -312,7 +312,6 @@ class _SemanticMemory:
         del request
         return SemanticRetrievalResponse(
             query_id="query-1",
-            tenant_id="tenant-1",
             chunks=(
                 SemanticChunk(
                     chunk_id="chunk-1",
@@ -336,7 +335,6 @@ def _eligible_episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="episode-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user-1",
         chat_session_id="earlier-session",
         chat_turn_id="turn-1",

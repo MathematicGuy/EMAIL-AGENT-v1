@@ -188,11 +188,6 @@ class GmailConnectionService:
             created_at=now,
             updated_at=now,
         )
-        if principal is not None:
-            workspace_repository = cast(WorkspaceMailboxConnectionRepository, self._repository)
-            return await workspace_repository.upsert_for_workspace(
-                connection, workspace_id=principal.workspace_id
-            )
         return await self._repository.upsert(connection)
 
     async def disconnect(self, connection_id: str, user_id: str) -> bool:
@@ -395,7 +390,6 @@ def _parse_message(raw: Mapping[str, Any]) -> EphemeralEmailEnvelope:
     normalized_body, body_format = _extract_text(payload)
     return EphemeralEmailEnvelope(
         run_id="",
-        tenant_id="",
         user_id="",
         gmail_message_id=message_id,
         gmail_thread_id=thread_id,

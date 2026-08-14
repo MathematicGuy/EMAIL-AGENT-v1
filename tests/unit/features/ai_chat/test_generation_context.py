@@ -26,7 +26,7 @@ def _request() -> ChatMessageRequest:
 
 def _episode() -> TaskEpisode:
     return TaskEpisode(
-        episode_id="episode-1", record_id="record-1", tenant_id="tenant-1",
+        episode_id="episode-1", record_id="record-1",
         user_id="user@example.com", chat_session_id="session-1",
         chat_turn_id="turn-1", creation_reason="explicit_user_task_request",
         task_title="Submit report",
@@ -44,15 +44,14 @@ def _context(*, semantic_context: object = None) -> MemoryContextResponse:
     return MemoryContextResponse(
         turns=(ChatTurn("turn-1", "session-1", "Earlier", "Earlier reply", NOW),),
         profile=DeclarativeProfile(
-            "profile-1",
-            "tenant-1",
-            "user@example.com",
-            "en",
-            None,
-            "Concise",
-            None,
-            NOW,
-            NOW,
+            profile_id="profile-1",
+            user_id="user@example.com",
+            language="en",
+            timezone=None,
+            assistant_persona="Concise",
+            response_tone=None,
+            created_at=NOW,
+            updated_at=NOW,
         ),
         episodes=(_episode(),), semantic_context=semantic_context, degraded=False,
         degraded_sources=(),

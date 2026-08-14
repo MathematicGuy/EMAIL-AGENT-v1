@@ -244,7 +244,7 @@ class DigestWorker:
                 classifier_ms,
             )
             run_context = GenerationContext(
-                run_id=run.id, tenant_id=LOCAL_TENANT_ID, user_id=run.user_id
+                run_id=run.id, user_id=run.user_id
             )
             outputs: list[_GeneratedCandidate] = []
             for task_candidate in candidates:
@@ -510,7 +510,6 @@ class DigestWorker:
                 replace(
                     message,
                     run_id=run.id,
-                    tenant_id=LOCAL_TENANT_ID,
                     user_id=run.user_id,
                 )
                 for message in thread
@@ -556,11 +555,10 @@ class DigestWorker:
             return _RetrievalOutcome(_empty_retrieval(), skipped=True, degraded=False)
         request = SemanticRetrievalRequest(
             run_id=run.id,
-            tenant_id=LOCAL_TENANT_ID,
             user_id=run.user_id,
             query=query or "; ".join(gaps),
             knowledge_gaps=gaps,
-            filters=RetrievalFilters(tenant_scope=LOCAL_TENANT_ID, document_status=("ready",)),
+            filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
         )
         for attempt in (1, 2):
@@ -614,7 +612,6 @@ class DigestWorker:
         self._trace_sink.record(
             TraceEvent(
                 run_id=run.id,
-                tenant_id=LOCAL_TENANT_ID,
                 user_id=run.user_id,
                 gmail_message_id=generated.output.task.gmail_message_id,
                 event_name="task_candidate",
@@ -645,7 +642,6 @@ class DigestWorker:
         self._trace_sink.record(
             TraceEvent(
                 run_id=run.id,
-                tenant_id=LOCAL_TENANT_ID,
                 user_id=run.user_id,
                 gmail_message_id=None,
                 event_name="digest_run",
@@ -684,7 +680,6 @@ def _empty_retrieval() -> SemanticRetrievalResponse:
     """Structured empty retrieval result (§12.3 degraded path)."""
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=LOCAL_TENANT_ID,
         chunks=(),
         retrieval_status=RetrievalStatus.NO_RESULTS,
         latency_ms=0,

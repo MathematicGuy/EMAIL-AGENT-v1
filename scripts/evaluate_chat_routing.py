@@ -36,7 +36,7 @@ from cowork_agent.integrations.llm.chat_intent import (
     GroqIntentClassifier,
 )
 
-DEFAULT_OUTPUT_DIR = Path(".cowork/evaluations")
+DEFAULT_OUTPUT_DIR = Path("docs/evaluations/CHAT")
 FIXTURE_LOADER = (
     Path(__file__).resolve().parents[1]
     / "tests"
@@ -107,7 +107,7 @@ async def evaluate(
             catalog=FixtureCatalog(case.ready_document_titles),
             model_id=model_id,
         )
-        scope = ChatMemoryScope("fixture-tenant", "fixture-user", f"session-{case.id}")
+        scope = ChatMemoryScope(user_id="fixture-user", session_id=f"session-{case.id}")
         turns = tuple(
             ChatTurn(
                 f"{case.id}-turn-{index}",

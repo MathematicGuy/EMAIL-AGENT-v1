@@ -19,7 +19,6 @@ def test_batch_messages_splits_threads_into_small_batches() -> None:
     threads = tuple(
         EphemeralEmailEnvelope(
             run_id="",
-            tenant_id="",
             user_id="",
             gmail_message_id=f"message-{index}",
             gmail_thread_id=f"thread-{index}",

@@ -124,7 +124,6 @@ def test_hybrid_with_multi_query_and_mmr() -> None:
             section=None,
             text="alpha quy trình xin nghỉ phép",
             source_url="d1.md",
-            tenant_id="local",
         ),
         KnowledgeChunk(
             chunk_id="c2",
@@ -133,7 +132,6 @@ def test_hybrid_with_multi_query_and_mmr() -> None:
             section=None,
             text="beta quy trình bàn giao công việc",
             source_url="d2.md",
-            tenant_id="local",
         ),
     )
     embedder = FakeEmbedder()
@@ -150,11 +148,10 @@ def test_hybrid_with_multi_query_and_mmr() -> None:
 
     request = SemanticRetrievalRequest(
         run_id="r1",
-        tenant_id="local",
         user_id="u1",
         query="nghỉ phép",
         knowledge_gaps=("quy trình",),
-        filters=RetrievalFilters(tenant_scope="local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=2, min_score=0.0, timeout_ms=1000),
     )
 

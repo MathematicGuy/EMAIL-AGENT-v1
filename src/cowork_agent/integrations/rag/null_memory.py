@@ -20,7 +20,6 @@ class NullSemanticMemory:
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         return SemanticRetrievalResponse(
             query_id=f"q_{uuid4().hex}",
-            tenant_id=request.tenant_id,
             chunks=(),
             retrieval_status=RetrievalStatus.NO_RESULTS,
             latency_ms=0,

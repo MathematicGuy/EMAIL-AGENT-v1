@@ -46,12 +46,10 @@ class SemanticChatMemoryAdapter:
 
         request = SemanticRetrievalRequest(
             run_id=_ephemeral_run_id(namespace),
-            tenant_id=namespace.tenant_id,
             user_id=namespace.user_id,
             query=query.query,
             knowledge_gaps=(),
             filters=RetrievalFilters(
-                tenant_scope=namespace.tenant_id,
                 document_status=_APPROVED_DOCUMENT_STATUSES,
             ),
             limits=RetrievalLimits(
@@ -62,8 +60,6 @@ class SemanticChatMemoryAdapter:
         )
         response = await self._retrieve(request)
 
-        if response.tenant_id != namespace.tenant_id:
-            raise NamespaceAccessDenied("semantic response tenant does not match the namespace")
         if response.retrieval_status is RetrievalStatus.AUTHORIZATION_DENIED:
             raise NamespaceAccessDenied("semantic retrieval authorization was denied")
         if response.retrieval_status not in {RetrievalStatus.SUCCESS, RetrievalStatus.NO_RESULTS}:
@@ -94,7 +90,7 @@ def _ephemeral_run_id(namespace: MemoryNamespace) -> str:
     identifier = uuid5(
         NAMESPACE_URL,
         "cowork-agent/chat-semantic/"
-        f"{namespace.tenant_id}/{namespace.user_id}/{namespace.session_id}",
+        f"{namespace.user_id}/{namespace.session_id}",
     )
     return f"chat-semantic-{identifier.hex}"
 

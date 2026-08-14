@@ -14,8 +14,9 @@ control plane is Supabase Postgres (runs, tasks, chat memory, identity).
 Two decoupled workflows — do not merge them:
 - **Email RAG** (single-turn): classify → `NO_ACTION` | `DIRECT_PLAN` |
   `RETRIEVE_RAG`. Company corpus is committed `data/extracted/*.md` only.
-  Semantic store: `RAG_STORE_PROVIDER=turbovec`, else Qdrant when
-  `QDRANT_ENABLED=true`, else deprecated in-repo hybrid, else null memory.
+  Semantic store: default `RAG_STORE_PROVIDER=turbovec` (Hybrid of dense +
+  BM25 + RRF for Email RAG and Chat Type 4). Set `qdrant` to use Qdrant.
+  Unknown or failed providers degrade to null memory.
 - **AI Chat** (multi-turn): session + working / declarative / episodic /
   semantic memory. Chat-native tasks start `retrieval_eligible=false`.
   No `@Email` tool in chat (ADR-004). User documents are gated
@@ -59,8 +60,7 @@ Frontend (`frontend/`): `pnpm install` · `pnpm dev` · `pnpm test` ·
 - Gmail is `gmail.readonly`. Raw email/attachments are transient; never
   persist them and never ingest them into company RAG or long-term memory.
 - Ask before changing SQL migrations or RAG bootstrap fallbacks.
-- `docs/architectures/current-architectures/04-historical-overall-architecture.md`
-  is a stale pre-RAG extraction. Prefer live source and the docs below.
+- System architecture: Level 1 system architecture is documented in `docs/architectures/current-architectures/`.
 
 ## Verification
 
@@ -78,7 +78,7 @@ before review-heavy work.
 
 - ADRs: `tasks/adr/`
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-- Email RAG runtime: `docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`
+- Email RAG runtime: `docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 - Frontend: `frontend/README.md`, `docs/SPEC-Demo-Frontend.md`
 

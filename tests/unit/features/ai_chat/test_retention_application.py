@@ -113,7 +113,7 @@ def test_retry_reuses_same_expiry_boundary() -> None:
 
     fixed_now = datetime(2026, 8, 11, tzinfo=UTC)
     scope = ChatMemoryScope(
-        tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+        user_id="user@example.com", session_id="session-1"
     )
 
     class RecordingEpisodicPort:

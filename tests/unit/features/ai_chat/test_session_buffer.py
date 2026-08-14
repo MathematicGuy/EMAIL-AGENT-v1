@@ -27,7 +27,6 @@ class FakeClock:
 def _namespace(*, session_id: str = "session-1") -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1",
             user_id="user@example.com",
             session_id=session_id,
         ),

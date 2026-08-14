@@ -93,7 +93,6 @@ def _task(**overrides: object) -> Task:
 def _envelope(body: str) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run_1",
-        tenant_id="tenant_1",
         user_id="user_1",
         gmail_message_id="m1",
         gmail_thread_id="t1",
@@ -118,7 +117,6 @@ def _resolution(route: Route = Route.DIRECT_PLAN) -> RouteResolution:
 def _retrieval(chunk_ids: Sequence[str] = ()) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id="query_1",
-        tenant_id="tenant_1",
         chunks=tuple(
             SemanticChunk(
                 chunk_id=chunk_id,

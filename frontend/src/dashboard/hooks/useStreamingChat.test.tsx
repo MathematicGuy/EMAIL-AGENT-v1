@@ -22,6 +22,43 @@ function sse(events: unknown[]): Response {
 }
 
 describe('useStreamingChat Project chat client', () => {
+  it('attaches completed RAG evidence to the streamed assistant message', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
+      if (url.endsWith('/sessions/session-1/messages') && init?.method === 'POST') {
+        return Promise.resolve(sse([
+          { event_type: 'delta', text: 'Grounded answer' },
+          {
+            event_type: 'completed',
+            retrieval_status: 'success',
+            rag_evidence: [{
+              source: 'company_knowledge', retrieval_status: 'success', chunk_id: 'chunk-1',
+              document_id: 'document-1', document_title: 'Residence guide', section: 'Article 27',
+              source_url: null, relevance_score: 0.842, rerank_score: null,
+              preview: 'A relevant preview.', content: 'The complete retrieved chunk.',
+            }],
+          },
+        ]));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+
+    await act(async () => result.current.sendMessage('Where can I register?'));
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      retrievalStatus: 'success',
+      ragEvidence: [{ chunkId: 'chunk-1', relevanceScore: 0.842, content: 'The complete retrieved chunk.' }],
+    });
+  });
+
   it('creates a Project-bound Cowork session and renders a validated citation', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -77,6 +114,8 @@ describe('useStreamingChat Project chat client', () => {
           assistant_message: 'Answer',
           created_at: '2026-08-12T00:00:00Z',
           citation_coordinates: [],
+          retrieval_status: 'no_results',
+          rag_evidence: [],
         }] }));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
@@ -86,6 +125,10 @@ describe('useStreamingChat Project chat client', () => {
     await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
     await act(async () => result.current.loadExistingChat('session-2'));
     expect(result.current.messages.map((item) => item.content)).toEqual(['Question', 'Answer']);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      retrievalStatus: 'no_results',
+      ragEvidence: [],
+    });
   });
 
   it('uploads composer files persistently to the active Project', async () => {

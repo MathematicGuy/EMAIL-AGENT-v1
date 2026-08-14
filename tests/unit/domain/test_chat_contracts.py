@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 import cowork_agent.domain.chat_contracts as chat_contracts
+from cowork_agent.domain._chat_contracts_memory import ChatRagEvidence
 from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
@@ -59,7 +60,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 def _namespace(*, record_id: str | None = "record-1") -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            user_id="user@example.com", session_id="session-1"
         ),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
@@ -71,7 +72,6 @@ def _episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="episode-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -118,7 +118,6 @@ def _chat_summary_episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="chat-summary-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -140,7 +139,7 @@ def _context_request() -> MemoryContextRequest:
     return MemoryContextRequest(
         session_id="session-1",
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            user_id="user@example.com", session_id="session-1"
         ),
         reads=MemoryReadOptions(
             short_term=True,
@@ -182,10 +181,116 @@ def _chat_turn() -> ChatTurn:
     )
 
 
+def _rag_evidence():
+    return ChatRagEvidence(
+        source="company_knowledge",
+        retrieval_status="success",
+        chunk_id="chunk-27",
+        document_id="citizen-id-law-2023",
+        document_title="Luật Căn cước 2023",
+        section="Điều 27",
+        source_url="https://example.gov.vn/luat-can-cuoc-2023",
+        relevance_score=0.842,
+        rerank_score=0.913,
+        preview="Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước.",
+        content=(
+            "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước "
+            "tại cơ quan quản lý căn cước theo Điều 27."
+        ),
+    )
+
+
+def test_chat_turn_round_trips_bounded_rag_evidence_with_scores_and_content() -> None:
+    turn = ChatTurn(
+        turn_id="turn-1",
+        session_id="session-1",
+        user_message="Làm thẻ Căn cước từ ngày 01/07/2026 ở đâu?",
+        assistant_message="Bạn có thể làm thủ tục tại cơ quan quản lý căn cước.",
+        created_at=datetime(2026, 8, 13, 14, 0, tzinfo=UTC),
+        rag_evidence=(_rag_evidence(),),
+        retrieval_status="success",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["rag_evidence"] == [
+        {
+            "source": "company_knowledge",
+            "retrieval_status": "success",
+            "chunk_id": "chunk-27",
+            "document_id": "citizen-id-law-2023",
+            "document_title": "Luật Căn cước 2023",
+            "section": "Điều 27",
+            "source_url": "https://example.gov.vn/luat-can-cuoc-2023",
+            "relevance_score": 0.842,
+            "rerank_score": 0.913,
+            "preview": "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước.",
+            "content": (
+                "Từ ngày 01/07/2026, người dân có thể làm thủ tục cấp thẻ Căn cước "
+                "tại cơ quan quản lý căn cước theo Điều 27."
+            ),
+        }
+    ]
+
+
+def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status() -> None:
+    event = ChatMessageStreamEvent.completed(
+        event_id="event-4",
+        session_id="session-1",
+        turn_id="turn-1",
+        rag_evidence=(_rag_evidence(),),
+        retrieval_status="success",
+    )
+
+    assert stream_event_from_dict(json.loads(json.dumps(event.to_dict()))) == event
+    assert event.to_dict()["retrieval_status"] == "success"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        ChatMessageStreamEvent.delta(
+            event_id="event-1", session_id="session-1", turn_id="turn-1", text="Hello"
+        ),
+        ChatMessageStreamEvent.memory_citation(
+            event_id="event-2",
+            session_id="session-1",
+            turn_id="turn-1",
+            memory_type=MemoryCitationType.SEMANTIC,
+            source_id="doc-1",
+        ),
+        ChatMessageStreamEvent.task_proposal(
+            event_id="event-3",
+            session_id="session-1",
+            turn_id="turn-1",
+            proposal=_task_proposal_payload(),
+        ),
+        ChatMessageStreamEvent.error(
+            event_id="event-5",
+            session_id="session-1",
+            turn_id="turn-1",
+            code="memory_degraded",
+            safe_message="Some optional context was unavailable.",
+        ),
+    ],
+)
+def test_non_completed_stream_events_reject_rag_evidence(event: ChatMessageStreamEvent) -> None:
+    with pytest.raises(ValueError, match="completed"):
+        replace(event, rag_evidence=(_rag_evidence(),), retrieval_status="success")
+
+
+def test_rag_evidence_rejects_scores_outside_the_unit_interval() -> None:
+    with pytest.raises(ValueError, match="relevance_score"):
+        replace(_rag_evidence(), relevance_score=1.001)
+
+
+def test_chat_turn_rejects_more_than_five_rag_evidence_records() -> None:
+    with pytest.raises(ValueError, match="rag_evidence"):
+        replace(_chat_turn(), rag_evidence=(_rag_evidence(),) * 6, retrieval_status="success")
+
+
 def _profile() -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-1",
-        tenant_id="tenant-1",
         user_id="user@example.com",
         language="en",
         timezone="Asia/Bangkok",
@@ -586,7 +691,7 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
 
     assert namespace.feature == AI_CHAT_FEATURE
     assert (
-        namespace.logical_key() == "tenant-1/user@example.com/session-1/ai_chat/episodic/record-1"
+        namespace.logical_key() == "user@example.com/session-1/ai_chat/episodic/record-1"
     )
 
 
@@ -595,15 +700,6 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
     [
         {
             "scope": {
-                "tenant_id": "",
-                "user_id": "user@example.com",
-                "session_id": "session-1",
-                "feature": "ai_chat",
-            }
-        },
-        {
-            "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "   ",
                 "session_id": "session-1",
                 "feature": "ai_chat",
@@ -611,7 +707,6 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
         },
         {
             "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "user@example.com",
                 "session_id": "",
                 "feature": "ai_chat",
@@ -619,14 +714,13 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
         },
         {
             "scope": {
-                "tenant_id": "tenant-1",
                 "user_id": "user@example.com",
                 "session_id": "session-1",
                 "feature": "email_action_plan",
             }
         },
     ],
-    ids=["missing_tenant", "missing_user", "missing_session", "wrong_feature"],
+    ids=["missing_user", "missing_session", "wrong_feature"],
 )
 def test_namespace_fails_closed_for_missing_or_inconsistent_scope(changes: dict[str, str]) -> None:
     payload = _namespace().to_dict()
@@ -973,7 +1067,7 @@ def test_task_episode_from_dict_rejects_removed_email_shaped_fields(removed_fiel
 
 def test_namespace_rejects_slash_in_logical_key_components() -> None:
     with pytest.raises(ValueError, match="must not contain"):
-        ChatMemoryScope(tenant_id="tenant/one", user_id="user@example.com", session_id="session-1")
+        ChatMemoryScope(user_id="user/one", session_id="session-1")
 
 
 def test_namespace_requires_an_explicit_source_id_key_even_when_null() -> None:
@@ -1011,7 +1105,7 @@ def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively(
 def test_contracts_are_frozen() -> None:
     with pytest.raises(FrozenInstanceError):
         _namespace().scope = ChatMemoryScope(  # type: ignore[misc]
-            tenant_id="other-tenant", user_id="user@example.com", session_id="session-1"
+            user_id="other-user", session_id="session-1"
         )
 
 

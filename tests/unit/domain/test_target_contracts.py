@@ -40,7 +40,6 @@ from cowork_agent.domain.target_contracts import (
 def _envelope() -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run-1",
-        tenant_id="tenant-local",
         user_id="user@example.com",
         gmail_message_id="msg-1",
         gmail_thread_id="thread-1",
@@ -129,7 +128,6 @@ def _action_plan_output() -> ActionPlanOutput:
 def _trace_event() -> TraceEvent:
     return TraceEvent(
         run_id="run-1",
-        tenant_id="tenant-local",
         user_id="user@example.com",
         gmail_message_id="msg-1",
         event_name="task_generated",
@@ -295,11 +293,10 @@ def test_trace_content_policy_constants():
 def _retrieval_request() -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
-        tenant_id="tenant-local",
         user_id="user@example.com",
         query="quarterly report template",
         knowledge_gaps=("template location",),
-        filters=RetrievalFilters(tenant_scope="tenant-local", document_status=("ready",)),
+        filters=RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=5, min_score=0.2, timeout_ms=1500),
     )
 
@@ -307,7 +304,6 @@ def _retrieval_request() -> SemanticRetrievalRequest:
 def _retrieval_response() -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id="q-1",
-        tenant_id="tenant-local",
         chunks=(
             SemanticChunk(
                 chunk_id="doc#0",

@@ -1,7 +1,7 @@
 # Retrieval Golden Set (SPEC-rag §5)
 
 Labeled retrieval evaluation dataset for
-[SPEC-rag-golden-set-and-eval.md](../../../docs/evaluations/email-rag/SPEC-rag-golden-set-and-eval.md).
+[SPEC-rag-golden-set-and-eval.md](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md).
 Consumed by the retrieval evaluation harness (`scripts/evaluate_retrieval.py`)
 and by the end-to-end email→corpus integration fixtures.
 

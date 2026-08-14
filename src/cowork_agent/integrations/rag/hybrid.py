@@ -38,6 +38,7 @@ class HybridSemanticMemory:
         documents: Sequence[KnowledgeDocument],
         embedder: EmbeddingPort,
         *,
+        dense: Any | None = None,
         reranker: RerankerPort | None = None,
         query_transformer: QueryTransformerPort | None = None,
         enable_mmr: bool = False,
@@ -48,18 +49,21 @@ class HybridSemanticMemory:
         min_score_default: float = 0.2,
         dense_backend: str = "numpy",
     ) -> None:
-        warnings.warn(
-            "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        if dense is None:
+            warnings.warn(
+                "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._chunks = tuple(chunk for document in documents for chunk in document.chunks)
         if not self._chunks:
             raise ValueError("HybridSemanticMemory requires a non-empty corpus")
         self._chunks_by_id = {chunk.chunk_id: chunk for chunk in self._chunks}
         self._embedder = embedder
         self._dense: Any
-        if dense_backend == "turbovec":
+        if dense is not None:
+            self._dense = dense
+        elif dense_backend == "turbovec":
             from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 
             self._dense = TurbovecSemanticMemory(
@@ -76,6 +80,7 @@ class HybridSemanticMemory:
                 top_k_default=top_k_default,
                 min_score_default=min_score_default,
             )
+        self.dense = self._dense
         self._bm25 = BM25SearchAdapter(self._chunks)
         self._reranker = reranker
         self._query_transformer = query_transformer
@@ -87,8 +92,10 @@ class HybridSemanticMemory:
         self._rrf = ReciprocalRankFusion()
 
     async def build_index(self) -> None:
-        """Build the delegated dense index once for the static local corpus."""
-        await self._dense.build_index()
+        """Build the delegated dense index when the backend exposes one."""
+        build = getattr(self._dense, "build_index", None)
+        if build is not None:
+            await build()
 
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         started = time.monotonic()
@@ -96,8 +103,7 @@ class HybridSemanticMemory:
         if not is_retrieval_query(query_str):
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
-        if not any(chunk.tenant_id == request.filters.tenant_scope for chunk in self._chunks):
-            return _response(request, (), RetrievalStatus.NO_RESULTS, started)
+
 
         final_top_k = _final_top_k(request, self._top_k_default)
         candidate_limit = _candidate_limit(final_top_k)
@@ -127,7 +133,6 @@ class HybridSemanticMemory:
                 dense_response = await self._dense.retrieve(q_request)
                 lexical = self._bm25.search(
                     q_text,
-                    tenant_id=request.filters.tenant_scope,
                     top_k=candidate_limit,
                 )
                 all_dense_results.extend(
@@ -237,7 +242,6 @@ def _response(
 ) -> SemanticRetrievalResponse:
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
-        tenant_id=request.tenant_id,
         chunks=chunks,
         retrieval_status=status,
         latency_ms=max(0, int((time.monotonic() - started) * 1000)),

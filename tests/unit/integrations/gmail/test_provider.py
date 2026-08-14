@@ -167,7 +167,7 @@ def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Pat
 
     async def resolve_principal(email_address: str) -> VerifiedPrincipal:
         assert email_address == "owner@example.com"
-        return VerifiedPrincipal(tenant_id="workspace-1", user_id="internal-user-1")
+        return VerifiedPrincipal(user_id="internal-user-1")
 
     async def scenario() -> None:
         settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
@@ -229,7 +229,7 @@ def test_gmail_message_parser_reads_text_headers_and_attachment() -> None:
     assert message.fetch_status is FetchStatus.COMPLETE
     assert message.attachments_present is True
     assert message.attachments_processed is False
-    assert message.run_id == "" and message.tenant_id == "" and message.user_id == ""
+    assert message.run_id == "" and message.user_id == ""
 
 
 def test_gmail_message_parser_preserves_html_action_links() -> None:

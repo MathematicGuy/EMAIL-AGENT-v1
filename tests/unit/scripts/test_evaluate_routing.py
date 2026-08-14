@@ -21,6 +21,11 @@ def load_module():
     spec.loader.exec_module(module)
     return module
 
+def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
+    module = load_module()
+
+    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "docs" / "evaluations" / "baselines"
+
 
 def _result(
     module,

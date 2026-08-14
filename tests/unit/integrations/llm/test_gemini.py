@@ -105,7 +105,6 @@ def test_round_robin_starts_each_request_with_the_next_key() -> None:
 def envelope(message_id: str) -> EphemeralEmailEnvelope:
     return EphemeralEmailEnvelope(
         run_id="run-1",
-        tenant_id="tenant-1",
         user_id="user-1",
         gmail_message_id=message_id,
         gmail_thread_id=f"thread-{message_id}",

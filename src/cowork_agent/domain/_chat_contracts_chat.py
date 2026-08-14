@@ -27,6 +27,7 @@ from ._chat_contracts_memory import (
     MAX_TASK_RAG_CITATIONS,
     MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
     MAX_TASK_TITLE_LENGTH,
+    ChatRagEvidence,
     EpisodeCitation,
 )
 from .target_contracts import ValidationStatus
@@ -166,6 +167,8 @@ class ChatMessageStreamEvent:
     section: str | None = None
     page_start: int | None = None
     page_end: int | None = None
+    rag_evidence: tuple[ChatRagEvidence, ...] = ()
+    retrieval_status: str | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
@@ -173,6 +176,10 @@ class ChatMessageStreamEvent:
         _require_string(self.turn_id, "turn_id")
         if self.proposal is not None:
             object.__setattr__(self, "proposal", _validated_task_proposal(self.proposal))
+        if len(self.rag_evidence) > 5 or not all(
+            isinstance(item, ChatRagEvidence) for item in self.rag_evidence
+        ):
+            raise ValueError("rag_evidence must contain at most five ChatRagEvidence items")
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -191,6 +198,8 @@ class ChatMessageStreamEvent:
             "section": self.section,
             "page_start": self.page_start,
             "page_end": self.page_end,
+            "rag_evidence": self.rag_evidence or None,
+            "retrieval_status": self.retrieval_status,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.DELTA: ("text",),
@@ -201,6 +210,10 @@ class ChatMessageStreamEvent:
             ChatEventType.ERROR: ("code", "safe_message"),
         }
         expected = required[self.event_type]
+        if self.event_type is not ChatEventType.COMPLETED and (
+            self.rag_evidence or self.retrieval_status is not None
+        ):
+            raise ValueError("rag_evidence is supported only on completed events")
         citation_fields = {
             "citation_scope",
             "project_id",
@@ -211,6 +224,11 @@ class ChatMessageStreamEvent:
             "page_end",
         }
         for name, value in payloads.items():
+            if (
+                name in {"rag_evidence", "retrieval_status"}
+                and self.event_type is ChatEventType.COMPLETED
+            ):
+                continue
             if name in citation_fields and self.event_type is ChatEventType.MEMORY_CITATION:
                 continue
             if (name in expected) != (value is not None):
@@ -281,8 +299,12 @@ class ChatMessageStreamEvent:
         )
 
     @classmethod
-    def completed(cls, *, event_id: str, session_id: str, turn_id: str) -> Self:
-        return cls(event_id, session_id, turn_id, ChatEventType.COMPLETED)
+    def completed(
+        cls, *, event_id: str, session_id: str, turn_id: str,
+        rag_evidence: tuple[ChatRagEvidence, ...] = (), retrieval_status: str | None = None,
+    ) -> Self:
+        return cls(event_id, session_id, turn_id, ChatEventType.COMPLETED,
+                   rag_evidence=rag_evidence, retrieval_status=retrieval_status)
 
     @classmethod
     def task_proposal(
@@ -363,6 +385,8 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "section",
         "page_start",
         "page_end",
+        "rag_evidence",
+        "retrieval_status",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -411,6 +435,15 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         section=(str(data["section"]) if data.get("section") is not None else None),
         page_start=_optional_int(data.get("page_start"), "page_start"),
         page_end=_optional_int(data.get("page_end"), "page_end"),
+        rag_evidence=tuple(
+            ChatRagEvidence.from_dict(_as_mapping(item, "rag evidence"))
+            for item in _as_sequence(data.get("rag_evidence", ()), "rag_evidence")
+        ),
+        retrieval_status=(
+            str(data["retrieval_status"])
+            if data.get("retrieval_status") is not None
+            else None
+        ),
     )
 
 

@@ -21,12 +21,11 @@ NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 def _namespace(
     *,
-    tenant_id: str = "tenant-1",
     user_id: str = "user@example.com",
     memory_type: MemoryType = MemoryType.LONG_TERM,
 ) -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id="session-1"),
+        scope=ChatMemoryScope(user_id=user_id, session_id="session-1"),
         memory_type=memory_type,
         record_id=None,
         source_id=None,
@@ -36,7 +35,6 @@ def _namespace(
 def _profile(**overrides: object) -> DeclarativeProfile:
     values: dict[str, object] = {
         "profile_id": "profile-1",
-        "tenant_id": "tenant-1",
         "user_id": "user@example.com",
         "language": "vi",
         "timezone": "Asia/Bangkok",
@@ -88,10 +86,9 @@ def test_enterprise_corpus_provenance_is_rejected() -> None:
 @pytest.mark.parametrize(
     "namespace",
     [
-        _namespace(tenant_id="tenant-2"),
         _namespace(user_id="other@example.com"),
     ],
-    ids=["tenant", "user"],
+    ids=["user"],
 )
 def test_foreign_scope_is_rejected(namespace: MemoryNamespace) -> None:
     with pytest.raises(ProfileWriteRejected):

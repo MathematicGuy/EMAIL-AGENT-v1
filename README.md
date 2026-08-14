@@ -65,7 +65,7 @@ $env:QDRANT_REINDEX = "false"
 
 `QDRANT_REINDEX=true` recreates the entire collection from the committed
 Markdown corpus; it is not an incremental update. See
-[`docs/evaluations/email-rag/EMAIL-RAG-STATUS.md`](docs/evaluations/email-rag/EMAIL-RAG-STATUS.md)
+[`docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`](docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md)
 
 ---
 
@@ -188,7 +188,7 @@ email-agent-v1/
 │   └── compatibility/                  # Contract & DTO compatibility tests
 │
 └── docs/                               # Documentation & Specifications
-    ├── architectures/                  # Target architecture & comparison docs
+    ├── architectures/                  # Target architecture specs
     ├── PRD-v1-Core-Email-and-RAG.md    # Product requirements for V1 Email RAG
     ├── PRD-v2-Memory-Extension.md      # Product requirements for V2 Chat Memory System
     └── references/                     # Detailed technical specs & experience registry
@@ -246,8 +246,8 @@ Tạo file `.env` từ `.env.example` và thiết lập các biến môi trườ
 # Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
-# Semantic Memory Store Provider (turbovec | qdrant)
-RAG_STORE_PROVIDER="turbovec"
+# Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
+RAG_STORE_PROVIDER=turbovec # turbovec | qdrant
 QDRANT_ENABLED="false"
 
 # Feature Flags
@@ -329,10 +329,7 @@ pnpm lint
 ---
 
 ## 6. Tài liệu tham khảo (References)
-- **Hiện trạng ↔ Mục tiêu & Milestone di cư:** [`docs/architectures/master-comparison.md`](docs/architectures/master-comparison.md)
 - **Kiến trúc mục tiêu:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
-- **Architecture Decision Records:** [`tasks/adr/`](tasks/adr/) (ADR-003 thay thế phạm vi attachment của ADR-001/002)
-- **Product Requirements:** [`docs/PRD-v1-Core-Email-and-RAG.md`](docs/PRD-v1-Core-Email-and-RAG.md) và [`docs/PRD-v2-Memory-Extension.md`](docs/PRD-v2-Memory-Extension.md)
-- **Project Structure Spec:** [`docs/references/cowork-project-structure-spec.md`](docs/references/cowork-project-structure-spec.md)
+- **Product Requirements:** [`tasks/prds/PRD-v1-Core-Email-and-RAG.md`](tasks/prds/PRD-v1-Core-Email-and-RAG.md) và [`tasks/prds/PRD-v2-Memory-Extension.md`](tasks/prds/PRD-v2-Memory-Extension.md)
 - **Experience Registry cho coding agents:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
 

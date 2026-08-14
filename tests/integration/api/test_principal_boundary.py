@@ -23,7 +23,7 @@ from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import DigestRun, MailboxConnection, RunStatus, RunTrigger
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
-from cowork_agent.identity import LOCAL_TENANT_ID, principal_for_connection
+from cowork_agent.identity import principal_for_connection
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.fakes import FakeMailbox, SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailConnectionService, GmailOAuthGrant
@@ -33,8 +33,9 @@ OWNER_EMAIL = "owner@example.com"
 CONNECTION_ID = "mbx-principal"
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def principal_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("GMAIL_CLIENT_ID", "principal.apps.googleusercontent.com")
     monkeypatch.setenv("GMAIL_CLIENT_SECRET", "principal-secret")
     monkeypatch.setenv(
@@ -137,7 +138,6 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
             connection = connections[0]
             assert connection.user_id == OWNER_EMAIL == connection.email_address
             principal = principal_for_connection(connection)
-            assert principal.tenant_id == LOCAL_TENANT_ID
             assert principal.user_id == OWNER_EMAIL
 
     asyncio.run(scenario())

@@ -44,7 +44,7 @@ def test_task_episode_write_translates_operational_failure_to_memory_unavailable
 
 def _namespace() -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope("tenant-1", "user-1", "session-1"),
+        scope=ChatMemoryScope(user_id="user-1", session_id="session-1"),
         memory_type=MemoryType.EPISODIC,
         record_id="record-1",
         source_id="turn-1",
@@ -56,7 +56,6 @@ def _episode() -> TaskEpisode:
     return TaskEpisode(
         episode_id="episode-1",
         record_id="record-1",
-        tenant_id="tenant-1",
         user_id="user-1",
         chat_session_id="session-1",
         chat_turn_id="turn-1",

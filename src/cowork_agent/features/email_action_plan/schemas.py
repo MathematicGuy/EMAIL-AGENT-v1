@@ -69,11 +69,10 @@ class GenerationContext:
     """Run identity handed to the Generator for one Task Candidate (FR-09).
 
     The Generator stamps the produced Task with these values server-side;
-    tenant/user identity never comes from the model output.
+    user identity never comes from the model output.
     """
 
     run_id: str
-    tenant_id: str
     user_id: str
 
 

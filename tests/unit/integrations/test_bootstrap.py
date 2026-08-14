@@ -1,22 +1,32 @@
-"""Tests for the RAG bootstrap wiring (Qdrant migration, Task C).
+"""Tests for the RAG bootstrap factory (PRD-v4 provider selection).
 
-The point of these tests is the degrade contract: Qdrant failure uses the
-in-repo hybrid adapter, while failure of all stores returns NullSemanticMemory;
-a broken index may never block a digest run.
+The factory returns a SemanticMemoryPort: Hybrid(Turbovec|Qdrant) on success,
+or NullSemanticMemory when the provider is unknown, disabled, or fails.
+A broken index may never block a digest run.
 """
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import JinaEmbeddingSettings, QdrantSettings
+from cowork_agent.domain.target_contracts import (
+    RetrievalFilters,
+    RetrievalLimits,
+    RetrievalStatus,
+    SemanticRetrievalRequest,
+)
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
+from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
+from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory
+from cowork_agent.integrations.rag.turbovec_memory import TURBOVEC_AVAILABLE, TurbovecSemanticMemory
 
 COLLECTION = "bootstrap_company_knowledge"
 
@@ -44,6 +54,7 @@ def _qdrant_settings(**overrides: str) -> QdrantSettings:
 def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     """Route the bootstrap's client and embedder to offline test doubles."""
     client = AsyncQdrantClient(":memory:")
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(bootstrap, "AsyncQdrantClient", lambda **kwargs: client)
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
@@ -51,7 +62,8 @@ def local_qdrant(monkeypatch: pytest.MonkeyPatch) -> AsyncQdrantClient:
     return client
 
 
-def test_disabled_qdrant_yields_null_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_qdrant_provider_yields_null_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
     )
@@ -71,7 +83,8 @@ def test_enabled_qdrant_ingests_the_corpus_and_returns_the_adapter(
         bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
     )
 
-    assert isinstance(memory, QdrantSemanticMemory)
+    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory.dense, QdrantSemanticMemory)
     assert asyncio.run(local_qdrant.count(COLLECTION)).count > 0
 
 
@@ -125,6 +138,7 @@ def test_an_unreachable_qdrant_degrades_to_in_repo_memory(
     def _explode(**kwargs: object) -> AsyncQdrantClient:
         raise ConnectionError("connection refused")
 
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(bootstrap, "AsyncQdrantClient", _explode)
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
@@ -153,6 +167,7 @@ def test_a_missing_corpus_degrades_to_null_memory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = AsyncQdrantClient(":memory:")
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
     monkeypatch.setattr(bootstrap, "AsyncQdrantClient", lambda **kwargs: client)
     monkeypatch.setattr(
         bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder()
@@ -167,3 +182,164 @@ def test_a_missing_corpus_degrades_to_null_memory(
     )
 
     assert isinstance(memory, NullSemanticMemory)
+
+
+def _tiny_corpus() -> tuple[KnowledgeDocument, ...]:
+    return (
+        KnowledgeDocument(
+            "doc",
+            "Doc",
+            "doc.md",
+            (
+                KnowledgeChunk(
+                    "doc#0",
+                    "doc",
+                    "Doc",
+                    None,
+                    "alpha travel policy",
+                    "doc.md",
+                    "local",
+                ),
+            ),
+        ),
+    )
+
+
+def _retrieval_request(*, tenant_scope: str = "local") -> SemanticRetrievalRequest:
+    return SemanticRetrievalRequest(
+        run_id="run-1",
+        tenant_id="local",
+        user_id="user@example.com",
+        query="alpha travel policy",
+        knowledge_gaps=(),
+        filters=RetrievalFilters(tenant_scope=tenant_scope, document_status=("ready",)),
+        limits=RetrievalLimits(top_k=3, min_score=0.0, timeout_ms=1500),
+    )
+
+
+def _stub_turbovec_factory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "turbovec")
+    monkeypatch.setattr(bootstrap, "load_corpus", lambda *args, **kwargs: _tiny_corpus())
+    monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
+    monkeypatch.setattr(bootstrap, "TURBOVEC_SNAPSHOT_PATH", tmp_path / "index.tvim")
+
+
+def test_turbovec_provider_builds_turbovec_memory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if not TURBOVEC_AVAILABLE:
+        pytest.skip("turbovec package not installed")
+    _stub_turbovec_factory(monkeypatch, tmp_path)
+
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
+
+    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory.dense, TurbovecSemanticMemory)
+
+
+def test_unset_provider_defaults_to_turbovec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if not TURBOVEC_AVAILABLE:
+        pytest.skip("turbovec package not installed")
+    monkeypatch.delenv("RAG_STORE_PROVIDER", raising=False)
+    monkeypatch.setattr(bootstrap, "load_corpus", lambda *args, **kwargs: _tiny_corpus())
+    monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
+    monkeypatch.setattr(bootstrap, "TURBOVEC_SNAPSHOT_PATH", tmp_path / "index.tvim")
+
+    memory = asyncio.run(
+        bootstrap.build_semantic_memory(
+            _jina_settings(), _qdrant_settings(QDRANT_ENABLED="true")
+        )
+    )
+
+    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory.dense, TurbovecSemanticMemory)
+
+
+def test_unknown_provider_degrades_to_null(
+    local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "pinecone")
+
+    memory = asyncio.run(
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
+    )
+
+    assert isinstance(memory, NullSemanticMemory)
+    assert not isinstance(memory, QdrantSemanticMemory)
+
+
+def test_explicit_qdrant_provider_uses_qdrant(
+    local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
+
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
+
+    assert isinstance(memory, HybridSemanticMemory)
+    assert isinstance(memory.dense, QdrantSemanticMemory)
+
+
+def test_turbovec_provider_failure_degrades_to_null(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "turbovec")
+
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("turbovec unavailable")
+
+    monkeypatch.setattr(bootstrap, "load_corpus", _boom)
+
+    memory = asyncio.run(
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
+    )
+
+    assert isinstance(memory, NullSemanticMemory)
+
+
+def test_null_factory_retrieve_is_structured_no_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "none")
+    memory = asyncio.run(
+        bootstrap.build_semantic_memory(
+            _jina_settings(), _qdrant_settings(QDRANT_ENABLED="false")
+        )
+    )
+    response = asyncio.run(memory.retrieve(_retrieval_request()))
+
+    assert isinstance(memory, NullSemanticMemory)
+    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
+    assert response.chunks == ()
+
+
+def test_turbovec_factory_retrieve_returns_citation_shaped_chunks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if not TURBOVEC_AVAILABLE:
+        pytest.skip("turbovec package not installed")
+    _stub_turbovec_factory(monkeypatch, tmp_path)
+
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
+    response = asyncio.run(memory.retrieve(_retrieval_request()))
+
+    assert response.retrieval_status is RetrievalStatus.SUCCESS
+    assert response.chunks
+    chunk = response.chunks[0]
+    assert chunk.chunk_id
+    assert chunk.document_id
+    assert chunk.text
+    assert chunk.relevance_score is not None
+
+
+def test_qdrant_factory_retrieve_returns_the_same_response_shape(
+    local_qdrant: AsyncQdrantClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RAG_STORE_PROVIDER", "qdrant")
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
+    response = asyncio.run(memory.retrieve(_retrieval_request()))
+
+    assert response.retrieval_status in {RetrievalStatus.SUCCESS, RetrievalStatus.NO_RESULTS}
+    assert isinstance(response.chunks, tuple)
+    assert isinstance(response.query_id, str)
+    assert response.latency_ms >= 0
+    assert response.tenant_id == "local"

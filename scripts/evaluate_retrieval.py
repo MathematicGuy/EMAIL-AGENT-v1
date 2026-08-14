@@ -56,7 +56,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "loader.py"
 DEFAULT_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "retrieval_golden.json"
 DEFAULT_CORPUS_DIR = REPO_ROOT / "data" / "extracted"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "docs" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "docs" / "evaluations" / "baselines"
 
 #: Tenant stamp for the corpus and the retrieval filter (identity.LOCAL_TENANT_ID).
 TENANT_ID = "local"
@@ -634,7 +634,7 @@ def load_golden_cases(fixture_path: Path, corpus_dir: Path) -> tuple[Any, ...]:
 def load_documents(corpus_dir: Path) -> tuple[KnowledgeDocument, ...]:
     from cowork_agent.integrations.rag.knowledge_base import load_corpus
 
-    return load_corpus(corpus_dir, tenant_id=TENANT_ID)
+    return load_corpus(corpus_dir)
 
 
 def build_embedder(name: str) -> EmbeddingPort | None:
@@ -718,9 +718,7 @@ class Bm25OnlyRetriever:
         # ponytail: --min-score is a cosine floor and does not transfer to
         # unbounded BM25 scores, so this leg ignores it. The adapter already
         # drops non-positive scores, which is the lexical equivalent.
-        ranked = self._bm25.search(
-            query, tenant_id=request.filters.tenant_scope, top_k=top_k
-        )
+        ranked = self._bm25.search(query, top_k=top_k)
         chunks = tuple(
             SemanticChunk(
                 chunk_id=chunk.chunk_id,
@@ -739,7 +737,6 @@ class Bm25OnlyRetriever:
         )
         return SemanticRetrievalResponse(
             query_id=f"q_{uuid4().hex}",
-            tenant_id=request.tenant_id,
             chunks=chunks,
             retrieval_status=(
                 RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
@@ -923,11 +920,10 @@ async def run_evaluation(
     for case in cases:
         request = SemanticRetrievalRequest(
             run_id="retrieval-eval",
-            tenant_id=TENANT_ID,
             user_id="retrieval-eval",
             query=case.query,
             knowledge_gaps=(),
-            filters=RetrievalFilters(tenant_scope=TENANT_ID, document_status=()),
+            filters=RetrievalFilters(document_status=()),
             limits=RetrievalLimits(top_k=top_k, min_score=min_score, timeout_ms=timeout_ms),
         )
         response = await retriever.retrieve(request)

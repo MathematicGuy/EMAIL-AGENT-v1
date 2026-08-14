@@ -1,12 +1,10 @@
 """FastAPI adapter for V2-M4A chat sessions and typed SSE events."""
 
-from __future__ import annotations
-
 import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -136,13 +134,13 @@ def create_chat_router() -> APIRouter:
             response["project_id"] = scope.project_id
         return response
 
-    @router.post("/sessions/{session_id}/messages")
+    @router.post("/sessions/{session_id}/messages", response_class=StreamingResponse)
     @observe(name="api_chat_create_message")
     async def create_message(
         session_id: str,
         payload: _ChatMessagePayload,
         request: Request,
-    ) -> StreamingResponse:
+    ) -> Any:
         if payload.session_id != session_id:
             raise HTTPException(
                 status_code=422,
@@ -413,7 +411,6 @@ async def _write_profile(payload: _ChatProfilePayload, request: Request) -> dict
     now = datetime.now(UTC)
     profile = DeclarativeProfile(
         profile_id=existing.profile_id if existing else f"prof_{uuid.uuid4().hex}",
-        tenant_id=principal.tenant_id,
         user_id=principal.user_id,
         language=payload.language,
         timezone=payload.timezone,
@@ -442,7 +439,7 @@ async def _write_profile(payload: _ChatProfilePayload, request: Request) -> dict
 
 
 def _user_namespace(principal: VerifiedPrincipal, memory_type: MemoryType) -> MemoryNamespace:
-    # User-level administration namespace: storage keys are tenant/user/feature,
+    # User-level administration namespace: storage keys are user/session/feature,
     # so the session component is a stable placeholder, not a live chat session.
     return MemoryNamespace(
         scope=ChatMemoryScope(

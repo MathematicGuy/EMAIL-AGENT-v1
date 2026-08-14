@@ -9,7 +9,7 @@ generation can quietly drop or reorder retrieval and still pass.
 The offline embedder is ``HashingEmbedder``, which buckets tokens by hash and
 carries no semantics; three cases genuinely cannot rank correctly under it and
 are marked xfail with the measured reason. They are confirmed passing under
-``--embedder gemini`` (see docs/baselines/retrieval-eval-*-gemini-dense.json).
+``--embedder gemini`` (see docs/evaluations/baselines/retrieval-eval-*-gemini-dense.json).
 The assertion is deliberately *not* weakened to "somewhere in the top 5": that
 would rebuild the blind spot this spec exists to remove.
 """
