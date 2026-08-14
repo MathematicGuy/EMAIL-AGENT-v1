@@ -8,6 +8,7 @@ from pathlib import Path
 from cowork_agent.integrations.rag.markdown_chunking import MarkdownPage, chunk_markdown_pages
 
 from .docx_extractor import DocxExtractor
+from .ocr import MistralOcrExtractor
 from .pdf_inspector import PdfInspector
 
 _DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -42,14 +43,22 @@ class ProjectDocumentExtractor:
         self,
         docx_extractor: DocxExtractor | None = None,
         pdf_inspector: PdfInspector | None = None,
+        ocr_extractor: MistralOcrExtractor | None = None,
     ) -> None:
         self._docx_extractor = docx_extractor or DocxExtractor()
         self._pdf_inspector = pdf_inspector or PdfInspector()
+        self._ocr_extractor = ocr_extractor
 
     def extract(self, path: Path, media_type: str) -> ExtractedProjectDocument:
         try:
             pages: tuple[tuple[int, str], ...]
-            if media_type == _DOCX_MEDIA_TYPE:
+            if self._ocr_extractor is not None and media_type in (
+                _DOCX_MEDIA_TYPE,
+                "application/pdf",
+            ):
+                markdown = self._ocr_extractor.extract(path.name, path.read_bytes())
+                pages = ((1, markdown),)
+            elif media_type == _DOCX_MEDIA_TYPE:
                 result = self._docx_extractor.extract(path)
                 pages = ((1, result.markdown),)
             elif media_type == "application/pdf":

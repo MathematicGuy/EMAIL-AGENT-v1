@@ -20,7 +20,7 @@
 | **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [knowledge_ingestion](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion) & [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) |
 | **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Multi-backend retrieval engine over committed Markdown documents (`data/extracted/*.md`) supporting Turbovec 4-bit, Qdrant, and In-repo Hybrid search. | [integrations/rag](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag) |
 | **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set. | [persistence/repositories](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories) |
-| **Presentation Clients** | React 19 SPA & Streamlit GUI | Production React 19 + Vite + Tailwind SPA client and Streamlit developer GUI. | [frontend/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/frontend) & [gui/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui) |
+| **Presentation Clients** | React 19 Web SPA | Production React 19 + Vite + Tailwind SPA frontend application. | [frontend/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/frontend) |
 
 
 ### 1.2 State, Queues, Workers, and Persistence
@@ -57,7 +57,7 @@
 | **Google OAuth 2.0 & Gmail API** | Mailbox authorization and unread thread retrieval. | Read-only scope (`gmail.readonly`). Ephemeral signed OAuth state with PKCE. |
 | **Gemini API / Groq API / Faucet API** | Structured email classification, action plan generation, and multi-turn chat replies. | Configured via `LLM_PROVIDER`. Automatic key rotation on HTTP 429 for Gemini. Fallback to unavailable error response if provider fails. |
 | **Jina AI API** | Text embeddings (`v5`) & cross-encoder reranking (`jina-reranker-v2-base-multilingual`). | Used for company RAG ingestion and hybrid reranking. Fallbacks to dense matrix/BM25 if unconfigured. |
-| **Qdrant Vector Database** | Primary vector store for company knowledge and user project documents. | Server-side payload filtering (`tenant_id`, `document_status`). Degrades to `NullSemanticMemory` if Qdrant is disabled or unavailable. |
+| **Qdrant Vector Database** | Primary vector store for company knowledge and user project documents. | Server-side payload filtering (`document_status` for company knowledge; `workspace_id`, `user_id`, `project_id` for project documents). Degrades to `NullSemanticMemory` if Qdrant is disabled or unavailable. |
 | **Turbovec (TurboQuant 4-bit)** | Quantized in-process vector memory store (`.data/turbovec_index.tvim`). | Fast 4-bit quantized local vector search enabled via `RAG_STORE_PROVIDER=turbovec`. |
 
 ---
@@ -68,7 +68,6 @@
 flowchart TB
     subgraph PRESENTATION["Presentation Layer"]
         REACT["React 19 SPA Client<br/>(frontend/)"]
-        STREAMLIT["Streamlit GUI<br/>(scripts/run_gui.py)"]
     end
 
     subgraph CONTROL_PLANE["FastAPI Control Plane (app.py)"]

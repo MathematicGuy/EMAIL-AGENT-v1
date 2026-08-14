@@ -1,7 +1,7 @@
 # System Architecture Dashboard & Status Tracker
 
 **Architecture level:** Level 1 — High-Level Component & System Overview (Least Complexity)  
-**Last Updated:** 2026-08-13  
+**Last Updated:** 2026-08-14  
 **Target Reference:** [TARGET-ARCHITECTURE.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
 
 ---
@@ -16,7 +16,6 @@ The Cowork Agent project consists of two decoupled primary product flows operati
 flowchart TB
     subgraph CLIENTS["Presentation Layer (Level 1)"]
         UI_REACT["React 19 SPA<br/>(frontend/)"]
-        UI_STREAMLIT["Streamlit GUI<br/>(scripts/run_gui.py)"]
     end
 
     subgraph API["FastAPI Control Plane (app.py)"]
@@ -61,7 +60,7 @@ flowchart TB
 | **Document Ingestion Pipeline** | DOCX/PDF conversion, SHA-256 hash manifest, symlink checks, atomic Markdown generation | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §1 & §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)) | [knowledge_ingestion](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion) & [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) |
 | **Control Plane & Auth** | FastAPI app lifespans, Google OAuth flow, `VerifiedPrincipal`, security policies | **Live / Implemented** | Fully Aligned | [app.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/app.py) & [identity.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/identity.py) |
 | **Dual Persistence Engine** | Dynamic switching between SQLite/In-memory local mode and Supabase Postgres mode | **Live / Implemented** | Fully Aligned | [repositories](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories) |
-| **Presentation Layers** | Production React 19 Vite SPA & Developer Streamlit GUI | **Live / Implemented** | Fully Aligned | [frontend/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/frontend) & [gui/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/gui) |
+| **Presentation Layers** | Production React 19 Vite SPA frontend | **Live / Implemented** | Fully Aligned | [frontend/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/frontend) |
 
 ---
 
@@ -84,7 +83,7 @@ For detailed Level 1 component boundaries, sequence flows, and data contracts, r
 
 1. **[01-email-action-plan-and-rag.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/01-email-action-plan-and-rag.md):** Single-turn Email Action Plan workflow, Gmail OAuth adapter, classification routing, and enterprise RAG memory integration.
 2. **[02-ai-chat-and-typed-memory.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md):** Multi-turn AI Chat Controller, 4 typed memory subsystems (`MemoryGateway`), chat-native `TaskEpisode` lifecycle, and classifier-gated User Documents.
-3. **[03-control-plane-persistence-and-uis.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md):** FastAPI control plane, identity resolution, SQLite vs Supabase PostgreSQL persistence, background worker orchestration, and React 19 / Streamlit UIs.
+3. **[03-control-plane-persistence-and-uis.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md):** FastAPI control plane, identity resolution, SQLite vs Supabase PostgreSQL persistence, background worker orchestration, and React 19 SPA frontend.
 4. **[04-overall-architecture.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/04-overall-architecture.md):** Comprehensive Overall System Architecture, system inventory, decoupled product flows, and state/control ownership.
 5. **[05-rag-architecture.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/05-rag-architecture.md):** Deep-dive Enterprise RAG & Vector Memory Subsystem architecture, corpus indexing interface, multi-backend retrieval ladder, and User Documents RAG engine.
 6. **[06-knowledge-and-document-ingestion-pipeline.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/06-knowledge-and-document-ingestion-pipeline.md):** Standalone Document Ingestion Pipeline, DOCX/PDF extractors, SHA-256 hash manifest tracking, and atomic Markdown persistence.

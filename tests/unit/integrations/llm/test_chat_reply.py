@@ -39,6 +39,7 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
         received.append(payload)
         return {
             "assistant_text": "I prepared the requested plan.",
+            "conversation_title": "Quarterly report plan",
             "task_proposal": {
                 "task_title": "Prepare quarterly report",
                 "minimal_request_paraphrase": "Prepare a quarterly report",
@@ -66,6 +67,7 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
     assert chunks[0].task_proposal is not None
     assert chunks[0].task_proposal.task_title == "Prepare quarterly report"
     assert chunks[0].task_proposal.model_id == "faucet-model"
+    assert chunks[0].conversation_title == "Quarterly report plan"
     assert received[0]["context"]["current_instruction"] == "Create a task for the report."
     assert "email" not in str(received[0]).casefold()
 

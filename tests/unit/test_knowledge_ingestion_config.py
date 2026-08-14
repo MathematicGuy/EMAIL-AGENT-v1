@@ -34,3 +34,23 @@ def test_settings_hide_secret() -> None:
     )
 
     assert "secret" not in repr(settings)
+
+
+def test_settings_supports_extraction_mode_env() -> None:
+    basic_settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "basic"}, load_env_file=False
+    )
+    assert basic_settings.extraction_mode == "basic"
+    assert basic_settings.ocr_enabled is False
+
+    adv_settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"}, load_env_file=False
+    )
+    assert adv_settings.extraction_mode == "advance"
+    assert adv_settings.ocr_enabled is True
+
+    with pytest.raises(ValueError, match="Invalid EXTRACTION_MODE"):
+        KnowledgeIngestionSettings.from_env(
+            {"EXTRACTION_MODE": "invalid"}, load_env_file=False
+        )
+

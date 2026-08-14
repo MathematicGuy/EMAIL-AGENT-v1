@@ -37,22 +37,28 @@ When response_mode is evidence_unavailable, only say in Vietnamese that document
 temporarily unavailable; make no factual claims and return citation_ids=[], task_proposal=null,
 and artifact_refs=[].
 Except in clarify mode, return one compact task_proposal for an explicit task or action-plan
-request. If the user explicitly asks to generate, export, or create a document/report/file,
-return a non-empty artifact_refs list containing items with filename (ending in .md) and
-content in Markdown format written in Vietnamese. For all other requests, artifact_refs must be
-an empty array [].
-Return only the required JSON object. citation_ids may contain only IDs supplied with current
+request. For all other requests, task_proposal must be null. If the user explicitly asks to
+generate, export, or create a document/report/file, return a non-empty artifact_refs list
+containing items with filename (ending in .md) and content in Markdown format written in Vietnamese.
+For all other requests, artifact_refs must be an empty array [].
+Return only the required JSON object. conversation_title must be a concise title of at most 120
+characters in the user's language. citation_ids may contain only IDs supplied with current
 project evidence; include the supporting IDs for document-grounded claims and never invent an ID."""
-
-
 
 
 _RESPONSE_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["assistant_text", "citation_ids", "artifact_refs", "task_proposal"],
+    "required": [
+        "assistant_text",
+        "conversation_title",
+        "citation_ids",
+        "artifact_refs",
+        "task_proposal",
+    ],
     "additionalProperties": False,
     "properties": {
         "assistant_text": {"type": "string"},
+        "conversation_title": {"type": "string", "minLength": 1, "maxLength": 120},
         "citation_ids": {"type": "array", "items": {"type": "string"}},
         "artifact_refs": {
             "type": "array",
@@ -138,10 +144,16 @@ class _ConfiguredChatReply:
             text = _required_string(response.get("assistant_text"), "assistant_text")
             citation_ids = _validated_citation_ids(response, context)
             artifact_refs = _artifact_refs_from_response(response)
+            conversation_title = _conversation_title(response.get("conversation_title"))
         except Exception as exc:
             raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
-        yield ChatReplyChunk(text, proposal, citation_ids, artifact_refs)
-
+        yield ChatReplyChunk(
+            text=text,
+            task_proposal=proposal,
+            citation_ids=citation_ids,
+            artifact_refs=artifact_refs,
+            conversation_title=conversation_title,
+        )
 
 
 def _safe_evidence_message(
@@ -377,7 +389,13 @@ def _proposal_from_response(
     configured_model_id: str,
     allowed_citations: frozenset[EpisodeCitation],
 ) -> ChatTaskProposal | None:
-    allowed_keys = {"assistant_text", "citation_ids", "artifact_refs", "task_proposal"}
+    allowed_keys = {
+        "assistant_text",
+        "conversation_title",
+        "citation_ids",
+        "artifact_refs",
+        "task_proposal",
+    }
     if not set(response).issubset(allowed_keys) or "assistant_text" not in response:
         raise ValueError("chat response contains unsupported fields")
 
@@ -419,6 +437,16 @@ def _proposal_from_response(
         prompt_version=_optional_string(proposal.get("prompt_version"), "prompt_version"),
         confidence=_optional_confidence(proposal.get("confidence")),
     )
+
+
+def _conversation_title(value: object) -> str | None:
+    if value is None:
+        return None
+    title = _required_string(value, "conversation_title")
+    normalized = " ".join(title.split())
+    if not normalized or len(normalized) > 120:
+        raise ValueError("conversation_title must be between 1 and 120 characters")
+    return normalized
 
 
 def _allowed_citations(context: GenerationContext) -> frozenset[EpisodeCitation]:

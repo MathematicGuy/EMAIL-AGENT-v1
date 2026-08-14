@@ -13,10 +13,10 @@ The Enterprise RAG & Vector Memory Subsystem provides high-precision, low-latenc
 
 | RAG Capability | Live Implementation | Authoritative Module Location |
 |---|---|---|
-| **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/ingestion_cli.py) & [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) |
+| **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) |
 | **Parsing & Chunking** | Heading-aware section splitting bounded to 1200 characters; page-aware chunking for user documents. | [markdown_chunking.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/markdown_chunking.py) |
 | **Embedding Adapters** | Dual embedding support for Jina AI Embeddings (`v5`) and Gemini Embeddings API. | [embeddings.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) |
-| **Primary Vector Database** | Server-side payload filtering (`tenant_id`, `document_status`) with cosine vector search in Qdrant. | [qdrant.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) |
+| **Primary Vector Database** | Server-side payload filtering (`document_status == 'ready'`) with cosine vector search in Qdrant. | [qdrant.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) |
 | **Quantized Memory Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) for low-footprint local vector search. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
 | **Hybrid & Lexical Search** | Dense matrix cosine search + Okapi BM25 lexical search adapter fused via Reciprocal Rank Fusion (`k=60`). | [hybrid.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py) & [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) |
 | **Cross-Encoder Reranking** | Jina Cross-Encoder Reranker (`jina-reranker-v2-base-multilingual`) for precision candidate reranking. | [jina_reranker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/jina_reranker.py) |
@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, parses section headings (H1/H2), and emits `KnowledgeChunk` instances bounded to 1200 characters.
-2. **Qdrant Vector Indexing (`qdrant.py`):** Embeds chunks via `EmbeddingPort`, verifies payload indexes for `tenant_id` and `document_status`, and upserts points in 128-item batches.
+2. **Qdrant Vector Indexing (`qdrant.py`):** Embeds chunks via `EmbeddingPort`, verifies payload index for `document_status`, and upserts points in 128-item batches.
 3. **Turbovec Quantized Indexing (`turbovec_memory.py`):** When `RAG_STORE_PROVIDER=turbovec`, pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 
@@ -50,12 +50,12 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    REQ["SemanticRetrievalRequest<br/>(query, tenant_scope, filters)"] --> GUARD{"Query Guard<br/>(query_guard.py)"}
+    REQ["SemanticRetrievalRequest<br/>(query, knowledge_gaps, filters)"] --> GUARD{"Query Guard<br/>(query_guard.py)"}
     
     GUARD -->|Invalid / Short Greeting| NULL_RES["Empty Retrieval Response"]
-    GUARD -->|Valid Query| ACL["Tenant & ACL Validation<br/>(tenant_id == tenant_scope)"]
+    GUARD -->|Valid Query| STATUS_CHECK["Document Status & ACL Validation<br/>(document_status == 'ready')"]
     
-    ACL --> TRANSFORM["Query Transformer<br/>(Domain Prefixes & HyDE Expansion)"]
+    STATUS_CHECK --> TRANSFORM["Query Transformer<br/>(Domain Prefixes & HyDE Expansion)"]
     TRANSFORM --> LADDER{"Provider Selection<br/>(RAG_STORE_PROVIDER)"}
 
     LADDER -->|turbovec| TURBO["Turbovec 4-Bit Dense<br/>(.data/turbovec_index.tvim)"]
@@ -70,7 +70,7 @@ flowchart TB
 
 ### Retrieval Execution Ladder:
 
-1. **ACL & Security Filter:** `QdrantSemanticMemory` enforces a server-side payload filter matching `tenant_id == tenant_scope` and `document_status == 'ready'` prior to vector scoring.
+1. **ACL & Status Filter:** `QdrantSemanticMemory` enforces a server-side payload filter matching `document_status == 'ready'` prior to vector scoring (returning `RetrievalStatus.AUTHORIZATION_DENIED` if unapproved status is requested).
 2. **Query Transformation (`query_transform.py`):** Applies domain prefixes ("Quy trình thủ tục...", "Hướng dẫn quy định...") and generates hypothetical passages via HyDE.
 3. **Hybrid wrapper (`hybrid.py`):**
    - Accepts an injected dense `SemanticMemoryPort` (Turbovec or Qdrant) from `build_semantic_memory()`.

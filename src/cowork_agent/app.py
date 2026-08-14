@@ -57,6 +57,7 @@ from cowork_agent.features.ai_chat.memory_observability import (
     MemoryOperationMetrics,
 )
 from cowork_agent.features.ai_chat.ports import (
+    ChatHistoryPort,
     ChatReplyPort,
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
@@ -218,6 +219,10 @@ def _chat_controller_factory(
                 memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
             ),
             reply=cast(ChatReplyPort, app.state.chat_reply),
+            history=cast(
+                ChatHistoryPort | None,
+                getattr(app.state, "chat_history_repository", None),
+            ),
             routing=cast(
                 ChatRoutingService | None,
                 getattr(app.state, "chat_routing_service", None),
@@ -310,6 +315,9 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.repositories.chat_history import (
+                    PostgresChatHistoryRepository,
+                )
                 from cowork_agent.persistence.repositories.chat_sessions import (
                     PostgresChatSessionRegistry,
                 )
@@ -330,7 +338,11 @@ def create_app() -> FastAPI:
                 )
 
                 pool = AsyncConnectionPool(
-                    database_url(), min_size=1, max_size=8, open=False
+                    database_url(),
+                    min_size=1,
+                    max_size=8,
+                    open=False,
+                    kwargs={"prepare_threshold": None},
                 )
                 await pool.open(wait=True)
                 await apply_migrations(pool)
@@ -341,6 +353,7 @@ def create_app() -> FastAPI:
                 app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
                 app.state.project_repository = PostgresProjectRepository(pool)
                 chat_session_registry = PostgresChatSessionRegistry(pool)
+                app.state.chat_history_repository = PostgresChatHistoryRepository(pool)
                 app.state.chat_session_repository = chat_session_registry
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
@@ -360,6 +373,7 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.chat_session_repository = None
+                app.state.chat_history_repository = None
                 app.state.pg_pool = None
                 app.state.project_repository = None
                 chat_session_registry = InMemoryChatSessionRegistry()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
@@ -58,6 +58,7 @@ class ChatReplyChunk:
     task_proposal: ChatTaskProposal | None = None
     citation_ids: tuple[str, ...] = ()
     artifact_refs: tuple[ArtifactRef, ...] = ()
+    conversation_title: str | None = None
 
 
 class ArtifactStoragePort(Protocol):
@@ -100,7 +101,6 @@ def extract_stem_from_content(content: str, default_filename: str = "Báo cáo.m
     return sanitize_filename(fallback_stem).removesuffix(".md")
 
 
-
 class ChatReplyPort(Protocol):
     """Stream one assistant reply from already-bounded, typed chat context."""
 
@@ -129,6 +129,20 @@ class ChatSessionBufferPort(Protocol):
     def append(self, namespace: MemoryNamespace, turn: ChatTurn) -> None: ...
     def read(self, namespace: MemoryNamespace) -> tuple[ChatTurn, ...]: ...
     def clear(self, namespace: MemoryNamespace) -> None: ...
+
+
+class ChatHistoryPort(Protocol):
+    """Durable, UI-facing record of completed chat turns."""
+
+    async def write_turn(
+        self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
+    ) -> None: ...
+
+    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]: ...
+
+    async def titles_for(
+        self, scopes: Sequence[ChatMemoryScope]
+    ) -> Mapping[str, str]: ...
 
 
 class DeclarativeMemoryPort(Protocol):

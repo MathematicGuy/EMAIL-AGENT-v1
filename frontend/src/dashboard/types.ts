@@ -49,6 +49,15 @@ export interface ChatMessage {
   citations?: ChatCitation[];
   ragEvidence?: ChatRagEvidence[];
   retrievalStatus?: ChatRetrievalStatus;
+  mailScan?: MailScanProgress;
+}
+
+export interface MailScanProgress {
+  status: 'connecting' | 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
+  emailsMatched: number;
+  emailsProcessed: number;
+  emailsToProcess: number;
+  actionItemsCount?: number;
 }
 
 export type ChatRetrievalStatus = 'success' | 'no_results' | 'timeout' | 'unavailable';

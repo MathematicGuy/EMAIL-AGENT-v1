@@ -3,6 +3,7 @@
 import asyncio
 import os
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import UTC, datetime
 
 import pytest
 
@@ -12,8 +13,10 @@ try:
 except ImportError:  # pragma: no cover - environment-dependent
     pytest.skip("psycopg is not installed (pip install '.[postgres]')", allow_module_level=True)
 
+from cowork_agent.domain.chat_contracts import ChatTurn
 from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
 from cowork_agent.persistence.migrate import apply_migrations
+from cowork_agent.persistence.repositories.chat_history import PostgresChatHistoryRepository
 from cowork_agent.persistence.repositories.chat_sessions import PostgresChatSessionRegistry
 from cowork_agent.persistence.repositories.identity import PostgresIdentityRepository
 from tests.integration.persistence.pg_probe import server_available
@@ -79,6 +82,39 @@ def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
                 await sessions.require(
                     scope.session_id, tenant_id=other.workspace_id, user_id=other.user_id
                 )
+        finally:
+            await pool.close()
+
+    _run(scenario)
+
+
+def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() -> None:
+    async def scenario() -> None:
+        pool = await _pool()
+        try:
+            await apply_migrations(pool)
+            identities = PostgresIdentityRepository(pool)
+            sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
+            owner = await identities.resolve_or_create_principal("owner@example.com")
+            scope = await sessions.create(
+                tenant_id=owner.workspace_id, user_id=owner.user_id
+            )
+            turn = ChatTurn(
+                turn_id="turn-1",
+                session_id=scope.session_id,
+                user_message="How should I prepare the report?",
+                assistant_message="Start with the quarterly metrics.",
+                created_at=datetime(2026, 8, 14, tzinfo=UTC),
+            )
+
+            writer = PostgresChatHistoryRepository(pool)
+            await writer.write_turn(scope, turn, title="Quarterly report plan")
+            reader = PostgresChatHistoryRepository(pool)
+
+            assert await reader.list_turns(scope) == (turn,)
+            assert await reader.titles_for((scope,)) == {
+                scope.session_id: "Quarterly report plan"
+            }
         finally:
             await pool.close()
 
