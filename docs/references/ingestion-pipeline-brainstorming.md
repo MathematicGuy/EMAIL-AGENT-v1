@@ -176,53 +176,8 @@ sequenceDiagram
 4. **User Documents in Chat** use project-scoped runtime extraction ([`project_documents.py`](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py)) decoupled from the central company knowledge CLI.
 5. **Intent Classification and LLMs** happen at runtime when emails or chat messages arrive, querying the vector store populated by the ingestion pipeline.
 
----
 
-## 6. Turbovec Local Execution vs. Cloud Snapshot Sync (First-Principles Analysis)
-
-A common point of confusion is: **If Turbovec runs locally in-process, why would anyone ever upload or download `.tvim` snapshot files to/from Cloud Storage (e.g. Supabase Storage / S3)?**
-
-### The Core Principle
-
-> **If your application runs 100% locally on your personal PC/laptop, you DO NOT need to upload `.tvim` to the cloud.**  
-> Everything stays on your local hard drive (`.data/turbovec_index.tvim`). Cloud storage in local mode is unnecessary network bloat.
-
-However, when you move off your laptop and deploy your backend to a **Cloud Host** (e.g., Render, Railway, AWS ECS, GCP Cloud Run, or Vercel), infrastructure behavior changes completely due to **Stateless Containers**.
-
-### Deployment Scenario Analysis
-
-#### Scenario 1: Running Locally on Personal PC / Laptop
-* **Setup:** Running `mail-todo-api` locally.
-* **Flow:** Ingestion writes `.data/turbovec_index.tvim` to your local hard drive.
-* **Cloud Upload Needed?** ❌ **No.** Local hard drives persist across restarts; local file loading is 100% offline and instant (< 5 ms).
-
-#### Scenario 2: Deploying Backend to Cloud (Render / Cloud Run / AWS ECS)
-* **Setup:** Running FastAPI inside a Docker container in the cloud.
-* **The Problem (Stateless Disk):** Cloud containers wipe their local `/tmp` disks every time a deploy occurs, container restarts, or auto-scales. The container starts with **zero `.tvim` file**.
-* **Three Cloud Options:**
-  1. *Re-embed on boot:* Send all 1,000 text chunks to Jina AI API on startup (Wastes 10–20s on boot and wastes API credits).
-  2. *Commit `.tvim` to Git:* Store binary vector files in repository (Violates Git best practices; bloats repo size).
-  3. *Download `.tvim` from Cloud Storage on Boot:* Container boots up, fetches the 500 KB `.tvim` file from Supabase Storage in **20 ms**, caches it to `/tmp`, and starts serving search instantly.
-* **Cloud Upload Needed?** ✅ **Yes (for Cloud Deployments).**
-
-#### Scenario 3: Auto-Scaling Cloud Servers (Multiple Replica Containers)
-* **Setup:** Running 3 parallel server instances behind a Load Balancer.
-* **The Problem (State Drift):** Instance A ingests a new document and updates its local memory. Instances B and C still have old vector state on their disks.
-* **Solution:** Instance A uploads updated `.tvim` to Supabase Storage. Instances B and C detect the new SHA-256 hash/ETag and download the refreshed snapshot to stay perfectly in sync.
-* **Cloud Upload Needed?** ✅ **Yes.**
-
-### Decision Matrix: When to Upload `.tvim` to Cloud
-
-| Deployment Environment | Cloud Upload Needed? | Recommended Strategy |
-| :--- | :--- | :--- |
-| **Local PC / Personal Dev Workstation** | ❌ **No** | Store `.tvim` locally on disk (`.data/turbovec_index.tvim`). |
-| **Cloud Deployments (Render / GCP / AWS)** | ✅ **Yes** | Fetch/Upload `.tvim` via Supabase Storage on boot to survive stateless container restarts. |
-| **Pre-baked Docker Image (CI/CD Pipeline)** | ❌ **No** | Build `.tvim` inside GitHub Actions / Docker build stage and bake it into the container image. |
-| **Multi-Tenant SaaS (Users upload docs)** | ✅ **Yes** | Sync `.tvim` snapshots to cloud storage so all replica servers see new document uploads. |
-
----
-
-## 7. Deep-Dive: How PDF Inspection Detects Scanned Pages (Deterministic OCR Identification)
+## 6. Deep-Dive: How PDF Inspection Detects Scanned Pages (Deterministic OCR Identification)
 
 A critical architectural question is: **How does `PdfInspector` determine whether a PDF is native text or a scanned document requiring OCR before sending it to Mistral OCR?**
 
