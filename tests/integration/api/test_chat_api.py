@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI, Request
@@ -10,6 +11,7 @@ from cowork_agent.api.chat import create_chat_router
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
+    ChatTurn,
     EpisodeTransition,
     TaskEpisode,
 )
@@ -119,6 +121,23 @@ class ProfileStore:
         existed = self.profile is not None
         self.profile = None
         return existed
+
+
+class HistoryStore:
+    def __init__(self) -> None:
+        self.turn = ChatTurn(
+            turn_id="turn-history-1",
+            session_id="session-1",
+            user_message="Saved question",
+            assistant_message="Saved answer",
+            created_at=datetime(2026, 8, 14, tzinfo=UTC),
+        )
+
+    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
+        return (self.turn,) if scope.session_id == self.turn.session_id else ()
+
+    async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
+        return {scope.session_id: "Saved conversation" for scope in scopes}
 
 
 class DurableSessionRegistry:
@@ -435,6 +454,52 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
         turns = history.json()["turns"]
         assert [turn["user_message"] for turn in turns] == ["Hello"]
         assert foreign.status_code == 404
+
+    asyncio.run(scenario())
+
+
+def test_delete_session_removes_its_history_and_rejects_future_reads() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            await client.post(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                json={
+                    "session_id": "session-1",
+                    "user_message": "Hello",
+                    "idempotency_key": "delete-1",
+                },
+            )
+
+            deleted = await client.delete("/v1/cowork/chat/sessions/session-1")
+            listed = await client.get("/v1/cowork/chat/sessions")
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+            repeated_delete = await client.delete("/v1/cowork/chat/sessions/session-1")
+
+        assert deleted.status_code == 204
+        assert listed.json() == {"sessions": []}
+        assert history.status_code == 404
+        assert repeated_delete.status_code == 404
+
+    asyncio.run(scenario())
+
+
+def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        app.state.chat_history_repository = HistoryStore()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            listed = await client.get("/v1/cowork/chat/sessions")
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+
+        assert listed.json()["sessions"][0]["title"] == "Saved conversation"
+        assert history.json()["turns"] == [HistoryStore().turn.to_dict()]
 
     asyncio.run(scenario())
 

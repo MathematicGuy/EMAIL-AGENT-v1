@@ -1,0 +1,6 @@
+# Non-secret feature flags loaded after .env. Environment variables supplied by
+# the shell take precedence over this file.
+CHAT_INTENT_CLASSIFIER_ENABLED=true
+KNOWLEDGE_INGEST_OCR_ENABLED=true
+QDRANT_ENABLED=true
+USER_DOCUMENTS_ENABLED=true

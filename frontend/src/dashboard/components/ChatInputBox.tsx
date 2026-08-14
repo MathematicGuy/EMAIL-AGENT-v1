@@ -11,7 +11,8 @@ import {
   Zap,
   FileText,
   LoaderCircle,
-  X
+  X,
+  Mail,
 } from 'lucide-react';
 import type {
   ChatComposerAttachment,
@@ -43,6 +44,11 @@ function formatFileSize(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function activeMentionQuery(value: string): string | null {
+  const match = value.match(/(?:^|\s)@([a-z]*)$/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
 export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   inputText,
   onChangeText,
@@ -64,6 +70,8 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const hasPendingAttachment = attachments.some((item) => item.status !== 'ready');
+  const mentionQuery = activeMentionQuery(inputText);
+  const showMailMention = mentionQuery !== null && 'mail'.startsWith(mentionQuery);
 
   // Auto resize textarea
   useEffect(() => {
@@ -82,10 +90,18 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     }
   };
 
+  const selectMailMention = () => {
+    const mentionStart = inputText.lastIndexOf('@');
+    onChangeText(`${inputText.slice(0, mentionStart)}@mail `);
+    textareaRef.current?.focus();
+  };
+
   return (
     <div className="w-full max-w-3xl md:max-w-4xl mx-auto px-4 select-text">
       {/* Main Floating Card matching image.png */}
-      <div className="bg-[#242320] border border-[#35332f] hover:border-[#44413c] focus-within:border-[#524f4a] rounded-2xl shadow-2xl transition-all duration-150 overflow-hidden">
+      <div className={`bg-[#242320] border border-[#35332f] hover:border-[#44413c] focus-within:border-[#524f4a] rounded-2xl shadow-2xl transition-all duration-150 ${
+        showMailMention ? 'overflow-visible' : 'overflow-hidden'
+      }`}>
         {/* Top Textarea */}
         <div className="p-3.5 pb-2">
           {attachments.length > 0 && (
@@ -137,15 +153,46 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
             </p>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={inputText}
-            onChange={(e) => onChangeText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="How can I help you today?"
-            rows={2}
-            className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans"
-          />
+          <div className="relative">
+            {showMailMention && (
+              <div
+                role="listbox"
+                aria-label="Gợi ý công cụ"
+                className="absolute bottom-full left-0 z-50 mb-3 w-full max-w-md overflow-hidden rounded-xl border border-[#45413b] bg-[#292724] py-1.5 shadow-2xl"
+              >
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={selectMailMention}
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[#37342f]"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#5b493d] bg-[#392c24] text-[#e8a78f]">
+                    <Mail className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-100">Mail</span>
+                    <span className="block truncate text-xs text-zinc-400">
+                      Quét 10 email unread mới nhất
+                    </span>
+                  </span>
+                  <span className="ml-auto rounded border border-[#4b4741] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                    @mail
+                  </span>
+                </button>
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={inputText}
+              onChange={(e) => onChangeText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="How can I help you today?"
+              rows={2}
+              className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans"
+            />
+          </div>
 
           {/* Middle Control Strip: +, Mode Pill [Chat | Cowork], Model Dropdown, Mic, Send */}
           <div className="flex items-center justify-between pt-1.5 text-xs">

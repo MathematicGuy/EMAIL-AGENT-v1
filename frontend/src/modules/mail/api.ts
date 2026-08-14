@@ -191,6 +191,7 @@ export async function createDigestRun(input: {
   mailboxConnectionId: string;
   maxEmails: number;
   idempotencyKey: string;
+  query?: string;
   signal?: AbortSignal;
 }): Promise<{ id: string; status: DigestRunStatus; statusUrl: string }> {
   return request('/v1/mail-todo/runs', {
@@ -202,6 +203,7 @@ export async function createDigestRun(input: {
     body: JSON.stringify({
       mailboxConnectionId: input.mailboxConnectionId,
       maxEmails: input.maxEmails,
+      ...(input.query ? { query: input.query } : {}),
     }),
     signal: input.signal,
   });

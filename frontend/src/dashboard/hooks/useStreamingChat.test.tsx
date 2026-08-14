@@ -22,6 +22,69 @@ function sse(events: unknown[]): Response {
 }
 
 describe('useStreamingChat Project chat client', () => {
+  it('runs @mail against the ten newest unread emails and reports its result', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/mail-todo/connections')) {
+        return Promise.resolve(json({ connections: [{ id: 'mailbox-1', status: 'active' }] }));
+      }
+      if (url.endsWith('/v1/mail-todo/runs') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          mailboxConnectionId: 'mailbox-1',
+          maxEmails: 10,
+          query: 'is:unread in:inbox',
+        });
+        return Promise.resolve(json({ id: 'run-1', status: 'queued', statusUrl: '/v1/mail-todo/runs/run-1' }, 202));
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1')) {
+        return Promise.resolve(json({
+          id: 'run-1', status: 'succeeded',
+          progress: { emailsMatched: 4, emailsProcessed: 4, emailsToProcess: 4, maxEmails: 10 },
+          error: null,
+        }));
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1/tasks')) {
+        return Promise.resolve(json({ tasks: [{ task_id: 'task-1' }, { task_id: 'task-2' }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+
+    await act(async () => result.current.sendMessage('@mail quét giúp tôi'));
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/cowork/chat/sessions/'))).toBe(false);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Đã quét xong: đã quét 4 email và tạo 2 action item.',
+      isStreaming: false,
+      mailScan: { status: 'succeeded', emailsProcessed: 4, actionItemsCount: 2 },
+    });
+  });
+
+  it('records a failed mail scan when no Gmail account is connected', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/mail-todo/connections')) return Promise.resolve(json({ connections: [] }));
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+
+    await act(async () => result.current.sendMessage('@mail'));
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      isStreaming: false,
+      mailScan: { status: 'failed' },
+    });
+    expect(result.current.messages.at(-1)?.content).toContain('Chưa có tài khoản Gmail');
+  });
+
   it('attaches completed RAG evidence to the streamed assistant message', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -105,7 +168,9 @@ describe('useStreamingChat Project chat client', () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/sessions?project_id=project-2')) {
-        return Promise.resolve(json({ sessions: [{ session_id: 'session-2', project_id: 'project-2' }] }));
+        return Promise.resolve(json({ sessions: [{
+          session_id: 'session-2', project_id: 'project-2', title: 'Project rollout plan',
+        }] }));
       }
       if (url.endsWith('/sessions/session-2/messages')) {
         return Promise.resolve(json({ turns: [{
@@ -123,12 +188,52 @@ describe('useStreamingChat Project chat client', () => {
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useStreamingChat('gemini', 'project-2'));
     await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
+    expect(result.current.recentChats[0]?.title).toBe('Project rollout plan');
     await act(async () => result.current.loadExistingChat('session-2'));
     expect(result.current.messages.map((item) => item.content)).toEqual(['Question', 'Answer']);
     expect(result.current.messages.at(-1)).toMatchObject({
       retrievalStatus: 'no_results',
       ragEvidence: [],
     });
+  });
+
+  it('deletes a saved chat and clears it from the active view', async () => {
+    let sessions = [{
+      session_id: 'session-1', project_id: 'project-1', title: 'Delete me',
+    }];
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions }));
+      }
+      if (url.endsWith('/sessions/session-1/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-1', user_message: 'Question', assistant_message: 'Answer',
+          created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          retrieval_status: null,
+        }] }));
+      }
+      if (url.endsWith('/sessions/session-1') && init?.method === 'DELETE') {
+        sessions = [];
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
+    await act(async () => result.current.loadExistingChat('session-1'));
+
+    await act(async () => {
+      await result.current.deleteChat('session-1');
+    });
+
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/sessions/session-1') && (init as RequestInit | undefined)?.method === 'DELETE'
+    )).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.activeConversationId).toBeNull();
+    expect(result.current.recentChats).toEqual([]);
   });
 
   it('uploads composer files persistently to the active Project', async () => {

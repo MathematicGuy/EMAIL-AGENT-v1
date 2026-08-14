@@ -13,6 +13,13 @@ from cowork_agent.integrations.key_rotation import APIKeyRotator
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 
 
+def load_runtime_environment(directory: Path | None = None) -> None:
+    """Load secrets from ``.env`` and non-secret feature flags from ``config``."""
+    root = Path.cwd() if directory is None else directory
+    load_dotenv(root / ".env", override=False)
+    load_dotenv(root / "config", override=False)
+
+
 def database_url(environ: Mapping[str, str] | None = None) -> str:
     """PostgreSQL connection URL (V1-H); empty string keeps local adapters."""
     source = os.environ if environ is None else environ
@@ -33,7 +40,7 @@ class SupabaseStorageSettings:
     ) -> "SupabaseStorageSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         url = environ.get("SUPABASE_URL", "").strip().rstrip("/")
         if not url.startswith("https://"):
@@ -62,7 +69,7 @@ class SessionSettings:
     ) -> "SessionSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         cookie_name = environ.get("APP_SESSION_COOKIE_NAME", "cowork_session").strip()
         if not cookie_name:
@@ -97,7 +104,7 @@ class KnowledgeIngestionSettings:
     ) -> "KnowledgeIngestionSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
 
         extraction_mode_env = environ.get("EXTRACTION_MODE", "").strip().lower()
@@ -151,7 +158,7 @@ class ChatMemorySettings:
     ) -> "ChatMemorySettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         return cls(
             max_turns=_positive_int(environ, "CHAT_MEMORY_MAX_TURNS", 20),
@@ -186,7 +193,7 @@ class ChatIntentSettings:
     ) -> "ChatIntentSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         model = environ.get("CHAT_INTENT_CLASSIFIER_MODEL", "").strip() or default_model
         if not model or model.startswith("replace-with-"):
@@ -230,7 +237,7 @@ class UserDocumentsSettings:
     ) -> "UserDocumentsSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         enabled = _boolean(environ, "USER_DOCUMENTS_ENABLED", True)
         min_score = float(environ.get("USER_DOCUMENTS_MIN_SCORE", "0.6"))
@@ -292,7 +299,7 @@ class QdrantSettings:
     ) -> "QdrantSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         url = environ.get("QDRANT_URL", "").strip()
         if url.startswith("replace-with-"):
@@ -333,7 +340,7 @@ class GmailSettings:
     ) -> "GmailSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
 
         client_id = _required_secret(environ, "GMAIL_CLIENT_ID")
@@ -391,7 +398,7 @@ class GeminiSettings:
     ) -> "GeminiSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
 
         numbered_keys = sorted(
@@ -454,7 +461,7 @@ class GeminiEmbeddingSettings:
     ) -> "GeminiEmbeddingSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         generation = GeminiSettings.from_env(environ, load_env_file=False)
         dimensions = _bounded_positive_int(
@@ -495,7 +502,7 @@ class JinaEmbeddingSettings:
     ) -> "JinaEmbeddingSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         rotator = APIKeyRotator.from_env(
             "JINA_API_KEY", environ=environ, provider_name="Jina"
@@ -533,7 +540,7 @@ class RerankerSettings:
     ) -> "RerankerSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
 
         model = environ.get("RERANKER_MODEL", "rerank-v4.0-fast").strip() or "rerank-v4.0-fast"
@@ -575,7 +582,7 @@ class GroqSettings:
     ) -> "GroqSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         model = environ.get("GROQ_MODEL", "qwen/qwen3.6-27b").strip()
         if not model or model.startswith("replace-with-"):
@@ -607,7 +614,7 @@ class FaucetSettings:
     ) -> "FaucetSettings":
         if environ is None:
             if load_env_file:
-                load_dotenv(override=False)
+                load_runtime_environment()
             environ = os.environ
         model = environ.get("FAUCET_MODEL", "").strip()
         if not model or model.startswith("replace-with-"):

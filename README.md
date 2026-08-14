@@ -240,7 +240,7 @@ pip install -e ".[dev]"
 
 ### 4.2 Cấu hình môi trường (`.env`)
 
-Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự.
+Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự. Sao chép `config.example` thành `config` để thiết lập các feature flag không chứa secret; giữ credential và connection string trong `.env`.
 
 ```env
 # Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
@@ -280,7 +280,32 @@ Jina. Set it back to `false` after that startup. Set
 
 ### 4.3 Khởi chạy dịch vụ
 
-- **Chạy API Server (FastAPI):**
+#### Local development: API and durable worker
+
+For development with durable email runs or Project Documents, start the API and
+the worker together from the repository root:
+
+```powershell
+uv run mail-todo-dev
+```
+
+`mail-todo-dev` starts `mail-todo-api` and `mail-todo-worker` as child
+processes and stops both when you press `Ctrl+C`. It requires `DATABASE_URL` in
+`.env`, because the worker polls durable PostgreSQL jobs; it is not compatible
+with the SQLite-only fallback. Set `APP_HOST` and `APP_PORT` in `.env` when the
+default API address (`127.0.0.1:8000`) is unsuitable.
+
+To run the processes separately, use two terminals:
+
+```powershell
+# Terminal 1
+uv run mail-todo-api
+
+# Terminal 2
+uv run mail-todo-worker
+```
+
+- **Chạy riêng API Server (FastAPI, không chạy worker):**
   - *Linux / Ubuntu:*
     ```bash
     .venv/bin/mail-todo-api

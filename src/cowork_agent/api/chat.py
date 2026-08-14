@@ -29,6 +29,7 @@ from cowork_agent.features.ai_chat.controller import (
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.ai_chat.ports import (
+    ChatHistoryPort,
     ChatSessionBufferPort,
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
@@ -210,7 +211,13 @@ def create_chat_router() -> APIRouter:
                 user_id=principal.user_id,
                 project_id=project_id,
             )
-        return {"sessions": [_session_response(scope) for scope in scopes]}
+        history = _history_repository(request)
+        titles = await history.titles_for(scopes) if history is not None else {}
+        return {
+            "sessions": [
+                _session_response(scope, title=titles.get(scope.session_id)) for scope in scopes
+            ]
+        }
 
     @router.get("/sessions/{session_id}/messages")
     async def list_messages(session_id: str, request: Request) -> dict[str, object]:
@@ -225,7 +232,12 @@ def create_chat_router() -> APIRouter:
             record_id=session_id,
             source_id=None,
         )
-        turns = _buffer(request).read(namespace)
+        history = _history_repository(request)
+        turns = (
+            await history.list_turns(scope)
+            if history is not None
+            else _buffer(request).read(namespace)
+        )
         serialized: list[dict[str, object]] = []
         repository = getattr(request.app.state, "project_repository", None)
         for turn in turns:
@@ -244,6 +256,28 @@ def create_chat_router() -> APIRouter:
                     coordinate["unavailable"] = document is None or document.status != "ready"
             serialized.append(payload)
         return {"session_id": session_id, "turns": serialized}
+
+    @router.delete("/sessions/{session_id}", status_code=204, response_model=None)
+    async def delete_session(session_id: str, request: Request) -> None:
+        principal = await _verified_principal(request)
+        try:
+            scope = await _require_session(request, principal, session_id)
+        except ChatSessionAccessDenied as exc:
+            raise HTTPException(status_code=404, detail="Chat session not found") from exc
+        deleted = await _sessions(request).delete(
+            session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        _buffer(request).clear(
+            MemoryNamespace(
+                scope=scope,
+                memory_type=MemoryType.SHORT_TERM,
+                record_id=session_id,
+                source_id=None,
+            )
+        )
+        _controllers(request).pop(session_id, None)
 
     @router.get("/episodes")
     async def list_episodes(request: Request) -> dict[str, object]:
@@ -484,11 +518,18 @@ def _controller_factory(request: Request) -> ControllerFactory:
     return cast(ControllerFactory, request.app.state.chat_controller_factory)
 
 
-def _session_response(scope: ChatMemoryScope) -> dict[str, str]:
+def _session_response(scope: ChatMemoryScope, *, title: str | None = None) -> dict[str, str]:
     payload = {"session_id": scope.session_id, "feature": scope.feature}
     if scope.project_id != "default-project":
         payload["project_id"] = scope.project_id
+    if title is not None:
+        payload["title"] = title
     return payload
+
+
+def _history_repository(request: Request) -> ChatHistoryPort | None:
+    repository = getattr(request.app.state, "chat_history_repository", None)
+    return cast(ChatHistoryPort | None, repository)
 
 
 __all__ = ["create_chat_router"]

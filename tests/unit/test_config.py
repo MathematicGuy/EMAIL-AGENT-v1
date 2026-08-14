@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from cowork_agent.config import (
@@ -7,9 +9,26 @@ from cowork_agent.config import (
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
+    database_url,
+    load_runtime_environment,
 )
 
 CLOUD_URL = "https://example.us-west-1-0.aws.cloud.qdrant.io"
+
+
+def test_load_runtime_environment_reads_feature_flags_from_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text("DATABASE_URL=postgresql://example/db\n")
+    (tmp_path / "config").write_text("USER_DOCUMENTS_ENABLED=false\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("USER_DOCUMENTS_ENABLED", raising=False)
+
+    load_runtime_environment()
+
+    assert database_url() == "postgresql://example/db"
+    assert UserDocumentsSettings.from_env(load_env_file=False).enabled is False
 
 
 def test_project_gemini_embedding_settings_default_to_3072() -> None:

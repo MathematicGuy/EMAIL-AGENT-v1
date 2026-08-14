@@ -35,15 +35,17 @@ only say document evidence is temporarily unavailable; make no factual claims an
 citation_ids=[] and task_proposal=null.
 Except in clarify mode, return one compact task_proposal for an explicit task or action-plan
 request. For all other requests, task_proposal must be null. Return only the required JSON
-object. citation_ids may contain only IDs supplied with current project evidence; include the
+object. conversation_title must be a concise title of at most 120 characters in the user's
+language. citation_ids may contain only IDs supplied with current project evidence; include the
 supporting IDs for document-grounded claims and never invent an ID."""
 
 _RESPONSE_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["assistant_text", "citation_ids", "task_proposal"],
+    "required": ["assistant_text", "conversation_title", "citation_ids", "task_proposal"],
     "additionalProperties": False,
     "properties": {
         "assistant_text": {"type": "string"},
+        "conversation_title": {"type": "string", "minLength": 1, "maxLength": 120},
         "citation_ids": {"type": "array", "items": {"type": "string"}},
         "task_proposal": {
             "type": ["object", "null"],
@@ -117,7 +119,12 @@ class _ConfiguredChatReply:
             citation_ids = _validated_citation_ids(response, context)
         except Exception as exc:
             raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
-        yield ChatReplyChunk(text, proposal, citation_ids)
+        yield ChatReplyChunk(
+            text,
+            proposal,
+            citation_ids,
+            _conversation_title(response.get("conversation_title")),
+        )
 
 
 def _safe_evidence_message(
@@ -340,6 +347,8 @@ def _proposal_from_response(
     if set(response) not in (
         {"assistant_text", "task_proposal"},
         {"assistant_text", "citation_ids", "task_proposal"},
+        {"assistant_text", "conversation_title", "task_proposal"},
+        {"assistant_text", "conversation_title", "citation_ids", "task_proposal"},
     ):
         raise ValueError("chat response contains unsupported fields")
     proposal = response.get("task_proposal")
@@ -380,6 +389,16 @@ def _proposal_from_response(
         prompt_version=_optional_string(proposal.get("prompt_version"), "prompt_version"),
         confidence=_optional_confidence(proposal.get("confidence")),
     )
+
+
+def _conversation_title(value: object) -> str | None:
+    if value is None:
+        return None
+    title = _required_string(value, "conversation_title")
+    normalized = " ".join(title.split())
+    if not normalized or len(normalized) > 120:
+        raise ValueError("conversation_title must be between 1 and 120 characters")
+    return normalized
 
 
 def _allowed_citations(context: GenerationContext) -> frozenset[EpisodeCitation]:

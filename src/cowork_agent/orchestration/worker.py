@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Protocol
 
 import httpx
-from dotenv import load_dotenv
 from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import (
@@ -21,6 +20,7 @@ from cowork_agent.config import (
     QdrantSettings,
     UserDocumentsSettings,
     database_url,
+    load_runtime_environment,
 )
 from cowork_agent.features.email_action_plan.observability import (
     LifecycleEventPublisher,
@@ -116,7 +116,13 @@ async def run_worker() -> None:
     )
     from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 
-    pool = AsyncConnectionPool(database_url(), min_size=1, max_size=4, open=False)
+    pool = AsyncConnectionPool(
+        database_url(),
+        min_size=1,
+        max_size=4,
+        open=False,
+        kwargs={"prepare_threshold": None},
+    )
     await pool.open(wait=True)
     storage_client: httpx.AsyncClient | None = None
     qdrant_client: AsyncQdrantClient | None = None
@@ -249,7 +255,7 @@ async def run_worker() -> None:
 
 
 def main() -> None:
-    load_dotenv(Path.cwd() / ".env", override=False)
+    load_runtime_environment()
     # See app.main(): INFO records are dropped without a root handler, and the
     # trace sink plus lifecycle publication are INFO-only.
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()

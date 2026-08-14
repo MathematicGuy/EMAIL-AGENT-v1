@@ -8,6 +8,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
+    ChatTurn,
     DeclarativeProfile,
     MemoryNamespace,
     MemoryType,
@@ -125,6 +126,14 @@ class SemanticReader:
         return self.context
 
 
+class HistoryWriter:
+    def __init__(self) -> None:
+        self.writes: list[tuple[ChatMemoryScope, ChatTurn, str]] = []
+
+    async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None:
+        self.writes.append((scope, turn, title))
+
+
 def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
     return ChatMemoryScope(
         user_id="user@example.com",
@@ -164,6 +173,7 @@ def _controller(
     profile: ProfileReader | None,
     episodes: EpisodeWriter | None = None,
     semantic: SemanticReader | None = None,
+    history: HistoryWriter | None = None,
 ) -> tuple[ChatController, InMemoryChatSessionBuffer]:
     ids = iter(f"id-{number}" for number in range(1, 30))
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
@@ -181,6 +191,7 @@ def _controller(
             reply=reply,
             new_id=lambda: next(ids),
             clock=lambda: NOW,
+            history=history,
         ),
         buffer,
     )
@@ -219,6 +230,23 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     assert len(stored) == 1
     assert stored[0].assistant_message == "Hello there"
     assert len(profile.reads) == 1
+
+
+def test_controller_persists_completed_turn_with_the_llm_generated_conversation_title() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply((ChatReplyChunk("Reply", conversation_title="Quarterly report plan"),)),
+        profile=None,
+        history=history,
+    )
+
+    asyncio.run(_collect(controller, _request()))
+
+    assert len(history.writes) == 1
+    scope, turn, title = history.writes[0]
+    assert scope == _scope()
+    assert turn.assistant_message == "Reply"
+    assert title == "Quarterly report plan"
 
 
 def test_controller_persists_and_completes_with_ranked_company_rag_evidence() -> None:
@@ -582,5 +610,20 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
             await registry.require(
                 scope.session_id, user_id="other@example.com"
             )
+
+    asyncio.run(scenario())
+
+
+def test_session_registry_deletes_only_the_verified_principals_session() -> None:
+    registry = InMemoryChatSessionRegistry(new_id=lambda: "session-1")
+
+    async def scenario() -> None:
+        scope = await registry.create(user_id="user@example.com")
+
+        assert not await registry.delete(scope.session_id, user_id="other@example.com")
+        assert await registry.require(scope.session_id, user_id="user@example.com") == scope
+        assert await registry.delete(scope.session_id, user_id="user@example.com")
+        with pytest.raises(ChatSessionAccessDenied):
+            await registry.require(scope.session_id, user_id="user@example.com")
 
     asyncio.run(scenario())
