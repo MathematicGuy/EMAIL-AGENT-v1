@@ -118,11 +118,11 @@ flowchart TB
 
 | Phase | Subsystem | Responsibility | Component / Implementation |
 | :--- | :--- | :--- | :--- |
-| **Offline / Batch** | **Document Ingestion Pipeline** | Converts `.docx`/`.pdf`/`.txt` files into `data/extracted/*.md` with metadata and populates vector stores. | [`ingestion_cli.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [`service.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) |
+| **Offline / Batch** | **★ Document Ingestion Pipeline** | Converts `.docx`/`.pdf`/`.txt`/`.md` into `data/extracted/*.md` with **★ YAML Frontmatter** & indexes chunks with **★ page coordinates**. | [`ingestion_cli.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [`service.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) |
 | **Runtime Request** | **Email Intent Classifier** | Evaluates incoming Gmail envelope to decide `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG`. | [`routing.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/routing.py) |
 | **Runtime Request** | **Chat Intent Classifier** | Determines tool relevance, user document query eligibility, and semantic memory needs. | [`service.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/intent/service.py) |
-| **Runtime Execution** | **Vector Store Retrieval** | Fetches top matching knowledge chunks via Dense (Qdrant/Turbovec) + Sparse (BM25) + Pre-filtering. | [`knowledge_base.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) / [`qdrant.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) / [`turbovec_memory.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
-| **Runtime Generation**| **LLM Action / Reply Generator** | Takes retrieved chunks + prompt to generate structured Action Plans or multi-turn chat replies. | [`workflow.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py) & [`controller.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/controller.py) |
+| **Runtime Execution** | **★ Vector Store Retrieval** | Fetches top matching chunks via Dense (Qdrant/Turbovec) + Sparse (BM25) with **★ Dynamic Metadata Pre-Filtering**. | [`knowledge_base.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) / [`qdrant.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/qdrant.py) / [`turbovec_memory.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
+| **Runtime Generation**| **LLM Action / Reply Generator** | Takes retrieved chunks + prompt to generate structured Action Plans or chat replies with **★ page citations**. | [`workflow.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py) & [`controller.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/controller.py) |
 
 ```mermaid
 sequenceDiagram
@@ -131,56 +131,156 @@ sequenceDiagram
     actor User/Gmail
     participant Ingestion as Knowledge Ingestion Pipeline
     participant Manifest as ingestion-manifest.json
-    participant Markdown as data/extracted/*.md
-    participant VectorDB as Vector Store (Qdrant / Turbovec)
+    participant Markdown as ★ data/extracted/*.md (Frontmatter)
+    participant VectorDB as ★ Vector Store (Pre-Filtered Index)
     participant Classifier as Intent Classifier (Routing)
     participant LLM as LLM Provider (Gemini / Groq)
 
     note over Admin, VectorDB: Phase 1: Offline Knowledge Ingestion (Deterministic Batch)
     Admin->>Ingestion: mail-todo-ingest-knowledge --source data/raw
     Ingestion->>Manifest: Check SHA-256 hash (skip if unmodified)
-    Ingestion->>Ingestion: Clean text (Unicode NFC, strip noise) & Harvest Metadata
-    Ingestion->>Markdown: Write normalized Markdown + Frontmatter (*.tmp -> *.md)
-    Ingestion->>Manifest: Update hash, status, page count, metadata
-    Ingestion->>VectorDB: Chunk & embed Markdown into vector store with metadata payload
+    Ingestion->>Ingestion: ★ Clean text (Unicode NFC, strip noise) & Harvest Metadata
+    Ingestion->>Markdown: ★ Write normalized Markdown + YAML Frontmatter (*.tmp -> *.md)
+    Ingestion->>Manifest: ★ Update manifest with rich metadata (doc_id, year, category)
+    Ingestion->>VectorDB: ★ Index KnowledgeChunks with Page Coordinates & Metadata Payloads
 
     note over User/Gmail, LLM: Phase 2: Runtime Email & Chat Execution
     User/Gmail->>Classifier: Inbound Email or Chat Message
     Classifier->>Classifier: Classify Intent (NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG)
     alt Intent requires RAG Retrieval
-        Classifier->>VectorDB: Query relevant chunks (with Pre-filtering if applicable)
-        VectorDB-->>Classifier: Return top KnowledgeChunk matches with citations
+        Classifier->>VectorDB: ★ Query with Metadata Pre-Filtering (scope by year/category)
+        VectorDB-->>Classifier: ★ Return top KnowledgeChunks with Page Citations (Page N)
     end
-    Classifier->>LLM: Send Prompt + Retrieved Context Chunks
-    LLM-->>User/Gmail: Return Structured Action Plan or Chat Response
+    Classifier->>LLM: Send Prompt + Retrieved Context Chunks & Page Citations
+    LLM-->>User/Gmail: Return Structured Action Plan or Grounded Chat Response
 ```
 
 ---
 
-## 5. Deep-Dive: Deterministic PDF Inspection & Scanned Page Detection
+## 5. Documents Loading (Level 2 Architecture: Current System vs Target Architecture)
+
+Document Loading is the foundational Phase 1 ETL gateway in enterprise RAG systems ([Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1). It governs how raw unstructured assets (`.docx`, `.pdf`, `.txt`, `.md`) are discovered, layout-parsed, sanitized, enriched with metadata, and converted into canonical ground-truth artifacts.
+
+In this architecture, Document Loading is split across two strictly decoupled planes:
+1. **Company Knowledge Ingestion Plane (Offline / Batch):** Curated administrative documents processed into `data/extracted/*.md` and indexed into the shared semantic vector store (Turbovec or Qdrant) for both Email RAG and AI Chat.
+2. **Project-Scoped User Document Ingestion Plane (Runtime / Async):** User-uploaded workspace documents processed on-the-fly into isolated Qdrant collections for AI Chat with user documents (ADR-007).
+
+---
+
+### 5.1 Current System (As-Is Level 2 Architecture)
+
+In the current implementation ([06-knowledge-and-document-ingestion-pipeline.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/06-knowledge-and-document-ingestion-pipeline.md)), Document Loading is driven by [`KnowledgeIngestionService`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) (CLI) and [`ProjectDocumentExtractor`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) (Runtime).
 
 ```mermaid
 flowchart TB
-    PDF["Input PDF File"] --> INSPECT["PdfInspector (detect_pdf)<br/>Fast Rust/C++ COS Layer Scan"]
+    SRC["Source Files (.docx, .pdf)"] --> ROUTER{"Format Router"}
 
-    subgraph ANALYSIS["Structural PDF Content Stream Inspection"]
-        COS["1. COS Object Graph & Content Stream Tokenizer"] --> OPERATORS["2. Operator Analysis<br/>Text (BT..ET, Tj, TJ) vs Images (Do /Image)"]
-        OPERATORS --> DENSITY["3. Text Density vs Image Area Ratio"]
-        OPERATORS --> FONTS["4. Font Encoding & /ToUnicode CMap Validation"]
+    subgraph PARSE_STAGE["1. Layout Extraction Engine"]
+        ROUTER -->|".docx"| DOCX["DocxExtractor<br/>• OpenXML headings & tables"]
+        ROUTER -->|".pdf"| PDF_INSPECT["PdfInspector<br/>• Native text & page markers"]
+        PDF_INSPECT -->|"Scanned / Mixed"| OCR["MistralOcrExtractor<br/>• Cloud OCR fallback"]
+    end
+
+    PARSE_STAGE --> WRITE_STAGE
+
+    subgraph WRITE_STAGE["2. Atomic Markdown Persistence"]
+        OUTPUT["Raw Markdown<br/>• No frontmatter / No NFC"] --> ATOMIC["Atomic Disk Write<br/>• *.tmp -> data/extracted/*.md"]
+        ATOMIC --> LEDGER["ManifestStore<br/>• Update ingestion-manifest.json"]
+    end
+
+    subgraph DOWNSTREAM["3. Downstream Corpus Loading & Indexing"]
+        CORPUS["data/extracted/*.md"] --> LOAD_CORPUS["load_corpus()<br/>• Reads text & H1 title (ignores Page N)"]
+        LOAD_CORPUS --> CHUNKS["KnowledgeChunk Model<br/>• Basic section-split chunks"]
+        CHUNKS --> VECTOR_DB["Vector Stores (Turbovec / Qdrant)<br/>• Unfiltered semantic search"]
+    end
+
+    WRITE_STAGE --> DOWNSTREAM
+```
+
+#### Identified Architectural Inefficiencies in Current System:
+1. **No Central Unicode Normalization (NFC):** Extracted text uses basic `.strip()` without Unicode normalization (`unicodedata.normalize("NFC")`), causing embedding and BM25 token mismatch on Vietnamese/multilingual text.
+2. **Missing Document Frontmatter & Rich Metadata:** Markdown files are emitted without structured YAML frontmatter (`doc_id`, `title`, `author`, `category`, `year`, `page_count`).
+3. **Page Coordinate Disconnection:** `PdfInspector` inserts `<!-- Page N -->` markers, but `load_corpus()` in [`knowledge_base.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) ignores them, preventing page-level citation boundaries.
+4. **Format Restriction:** Whitelist strictly allows `.docx` and `.pdf`, skipping plain text (`.txt`) and pre-existing Markdown (`.md`) files.
+5. **Absence of Pre-Filtering Metadata Payloads:** Vector stores index raw chunk text without structured metadata fields, preventing scope-narrowed search.
+
+---
+
+### 5.2 Target Document Loading (To-Be Level 2 Architecture)
+
+The Target Document Loading architecture aligns with [Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1 and [TARGET-ARCHITECTURE.md §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) to establish high layout fidelity, complete text sanitization, rich metadata frontmatter, and end-to-end page coordinate propagation.
+
+```mermaid
+flowchart TB
+    subgraph INPUTS["Multi-Format Inputs"]
+        DOCS["Source Documents<br/>• .docx, .pdf (native/scanned)<br/>• .txt, .md"]
+    end
+
+    INPUTS --> EXT_ROUTE{"Format Dispatcher"}
+
+    subgraph PARSERS["1. Multi-Engine Layout Extraction"]
+        EXT_ROUTE -->|".docx"| DOCX_PARSER["DocxExtractor<br/>• Heading AST & pipe tables"]
+        EXT_ROUTE -->|".pdf"| PDF_ANALYZER["Deterministic PdfInspector<br/>• Native text vs OCR escalation"]
+        EXT_ROUTE -->|".txt / .md"| TEXT_PARSER["Text & Markdown Extractor<br/>• Direct UTF-8 ingestion"]
+
+        PDF_ANALYZER -->|"Native Text"| LOCAL_RENDER["Local Page Renderer<br/>• Page coordinates & layout"]
+        PDF_ANALYZER -->|"Scanned / Mixed"| MISTRAL_OCR["Mistral OCR API<br/>• Cloud recognition"]
+    end
+
+    PARSERS --> SANITIZE
+
+    subgraph SANITIZE["★ 2. Central Text Sanitization Engine"]
+        CLEAN["sanitize_text()<br/>• Unicode NFC normalization<br/>• Control char & whitespace cleanup"]
+    end
+
+    SANITIZE --> META_ENGINE
+
+    subgraph META_ENGINE["★ 3. Metadata Harvester & Frontmatter Block"]
+        FRONTMATTER["YAML Frontmatter Generator<br/>• doc_id, title, category, year, pages"]
+        FRONTMATTER --> COMPOSITE["Standardized Markdown<br/>• Frontmatter + Sanitized Body + <!-- Page N -->"]
+    end
+
+    META_ENGINE --> PERSIST
+
+    subgraph PERSIST["4. Atomic Storage & Manifest Ledger"]
+        ATOMIC_WRITE["Atomic Disk Write & Manifest<br/>• *.tmp -> data/extracted/*.md<br/>• Rich metadata in manifest"]
+    end
+
+    PERSIST --> RAG_INDEXING
+
+    subgraph RAG_INDEXING["★ 5. Coordinate-Preserving Indexing & Pre-Filtering"]
+        LOADER["load_corpus() Upgrade<br/>• Frontmatter & page markers into chunks"]
+        LOADER --> VECTOR_UP["Vector Stores (Turbovec / Qdrant)<br/>• Pre-filtering on year/category/doc_id<br/>• Page-level citation coordinates"]
+    end
+```
+
+---
+
+### 5.3 Detailed Structural PDF Inspection & Scanned Page Detection Engine
+
+Within the Layout Extraction stage of Document Loading, PDF handling uses a 4-tier deterministic COS inspection pipeline before deciding whether to extract text locally ($0 API cost, <5ms per page) or escalate to cloud OCR:
+
+```mermaid
+flowchart TB
+    PDF["Input PDF File"] --> INSPECT["PdfInspector (detect_pdf)<br/>Fast COS layer scan"]
+
+    subgraph ANALYSIS["Structural Content Stream Inspection"]
+        COS["1. COS Object Graph<br/>• Operator token analysis"]
+        COS --> DENSITY["2. Text vs Image Ratio<br/>• >85% bitmap coverage check"]
+        DENSITY --> FONTS["3. Font & Unicode Validation<br/>• /ToUnicode CMap mapping"]
     end
 
     INSPECT --> ANALYSIS
 
-    ANALYSIS --> CLASSIFY{"Classification Outcome"}
-    CLASSIFY -->|"text_based (pages_needing_ocr is empty)"| NATIVE["Native Digital PDF<br/>Extract via Local PyMuPDF / pdf-inspector<br/>(Fast, Offline, $0 API Cost)"]
-    CLASSIFY -->|"scanned / mixed (OCR needed)"| OCR_ROUTE{"OCR Route Check"}
+    ANALYSIS --> CLASSIFY{"Classification"}
+    CLASSIFY -->|"Native text"| NATIVE["PyMuPDF Native Parser<br/>• Fast offline extraction ($0 cost)"]
+    CLASSIFY -->|"Scanned / Mixed"| OCR_ROUTE{"MISTRAL_API_KEY?"}
 
-    OCR_ROUTE -->|"EXTRACTION_MODE=advance"| MISTRAL["Route to Mistral OCR<br/>(mistral-ocr-latest)"]
-    OCR_ROUTE -->|"EXTRACTION_MODE=adaptive & MISTRAL_API_KEY set"| MISTRAL
-    OCR_ROUTE -->|"EXTRACTION_MODE=basic / No Key"| FAIL["Fail Cleanly<br/>(reason_code='mistral_not_configured')"]
+    OCR_ROUTE -->|"Configured"| MISTRAL["Mistral OCR API<br/>• Cloud extraction"]
+    OCR_ROUTE -->|"Missing"| FAIL["Fail Cleanly<br/>• reason_code='mistral_not_configured'"]
 ```
 
-### The 4 Deterministic Detection Checks Under the Hood
+#### The 4 Deterministic Detection Checks Under the Hood:
 1. **Graphic Operator & Token Analysis:** Evaluates explicit string drawing operators (`BT`..`ET`, `Tj`, `TJ`) vs image XObjects (`/Do` `/Image`).
 2. **Text Density vs Image Area Coverage Ratio:** If single bitmap image coverage $>85\%$ with negligible text characters, flags page as scanned (`needs_ocr=True`).
 3. **Font Encoding & Unicode CMap Mapping:** Verifies glyph-to-Unicode mapping to prevent unreadable replacement glyphs (`\ufffd`).
@@ -188,43 +288,83 @@ flowchart TB
 
 ---
 
+### 5.4 Comprehensive Level 2 Architecture Comparison Matrix
+
+| Architectural Dimension | Current System (As-Is) | Target Document Loading (To-Be) | Key Benefit & Impact |
+| :--- | :--- | :--- | :--- |
+| **Pipeline Architecture Scope** | Single CLI-driven batch script + basic runtime extractor. | Dual-plane architecture: Curated Company Knowledge Ingestion + Asynchronous Project User Document Plane (ADR-007). | Clear isolation between corporate knowledge and transient user files. |
+| **Input Format Whitelist** | Restricted to `.docx` and `.pdf`. | Comprehensive support for `.docx`, `.pdf`, `.txt`, and `.md`. | Enables direct ingestion of markdown guides, legal text dumps, and technical specs. |
+| **Text Sanitization Engine** | Basic `.strip()`; no Unicode normalization across parsers. | Central `sanitize_text()` applying Unicode NFC normalization, control character stripping, and whitespace regularization. | Eliminates token mismatch in Vietnamese/multilingual embeddings and BM25 keyword matching. |
+| **Structural Layout Fidelity** | Word OpenXML headings (`#..###`) and basic tables; PDF plain text. | High-fidelity AST heading hierarchies, pipe tables (`\| a \| b \|`), bullet lists, and figure extraction. | Dense & sparse retrieval engines preserve table rows and list contexts cleanly. |
+| **PDF Inspection & OCR Routing** | Basic PyMuPDF scan with manual/advance Mistral OCR routing. | 4-tier deterministic COS inspection (operators, text density $>85\%$, CMap fonts, invisible OCR) with automated escalation. | Zero API costs for 90%+ digital PDFs; perfect fidelity for scanned documents. |
+| **Metadata Generation** | No metadata emitted in Markdown; technical tracking only in JSON manifest. | Standardized YAML Frontmatter emitted in every Markdown artifact (`doc_id`, `title`, `author`, `year`, `category`, `page_count`). | Self-describing corpus enables auditability, reproducible chunking, and search pre-filtering. |
+| **Page Coordinate Propagation** | `<!-- Page N -->` inserted into Markdown but stripped/ignored downstream. | End-to-end page propagation: `<!-- Page N -->` parsed into `KnowledgeChunk.page_start` & `page_end`. | LLMs can produce precise page-level citations (`[Doc Title, Page 12]`). |
+| **Corpus Loading (`load_corpus`)** | Reads raw text and regex H1 title; creates flat un-attributed chunks. | Frontmatter-aware and page-aware parser loading rich metadata into `KnowledgeChunk` domain models. | Downstream vector stores receive rich metadata payloads alongside chunk text. |
+| **Vector Indexing & Pre-Filtering** | Flat chunk text embedding without metadata payload filters. | Payload keyword indexing in Qdrant & Turbovec allowlists supporting pre-filtering by `year`, `category`, and `doc_id`. | Drastically narrows vector search space and eliminates cross-year / cross-topic false positives. |
+| **Concurrency & Idempotency** | Atomic write (`*.tmp` $\rightarrow$ `*.md`) and SHA-256 gating in `ingestion-manifest.json`. | Retained atomic write & SHA-256 gating + versioned hash updating with prune safety. | Zero dirty reads by parallel indexers; sub-second skip on unmodified files. |
+
+---
+
 ## 6. ★ Document Loading Optimization Deep-Dive (Grounded in `Simple-RAG.pdf`)
 
-In modern RAG theory ([Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1 & §IV.3), **Document Loading** is the single most critical quality gate. If raw data is poorly cleaned or lacks metadata, all downstream phases (Chunking, Embedding, Vector Search, LLM Generation) suffer severe degradation.
+```mermaid
+stateDiagram-v2
+    direction LR
 
-```
-                    ┌────────────────────────────────────────────────────────┐
-                    │          PHASE 1: DOCUMENT LOADING & INGESTION         │
-                    └────────────────────────────────────────────────────────┘
-                                                │
-         ┌──────────────────────────────────────┼──────────────────────────────────────┐
-         ▼                                      ▼                                      ▼
-┌──────────────────┐                  ┌──────────────────┐                   ┌──────────────────┐
-│ 1. Multi-Format  │                  │ 2. Text Cleaning │                   │  3. Metadata     │
-│    Acquisition   │                  │   & Normalizing  │                   │    Harvesting    │
-├──────────────────┤                  ├──────────────────┤                   ├──────────────────┤
-│ • PDF (Text/Scan)│                  │ • Unicode NFC    │                   │ • doc_id / slug  │
-│ • DOCX (OpenXML) │  ──────────────► │ • Strip Control C│   ──────────────► │ • page_start/end │
-│ • Plain TXT / MD │                  │ • Collapse Space │                   │ • title / header │
-│ • Table parsing  │                  │ • Regularize \n  │                   │ • topic/category │
-│ • Repack OOXML   │                  │ • Table pipes    │                   │ • published year │
-└──────────────────┘                  └──────────────────┘                   └──────────────────┘
-                                                                                       │
-                                                                                       ▼
-                                                                             ┌──────────────────┐
-                                                                             │ Output Artifact: │
-                                                                             │ Clean Markdown + │
-                                                                             │ YAML Frontmatter │
-                                                                             └──────────────────┘
+    state "Phase 1: Document Loading & Ingestion Pipeline" as Phase1 {
+        direction LR
+        state "1. Multi-Format Acquisition" as S1 {
+            direction TB
+            P1: [✓] PDF Native & Scanned
+            P2: [✓] DOCX OpenXML & Tables
+            P3: [✓] OOXML Zip Repacking
+            P4: [★] Plain TXT & MD Support
+        }
+        state "★ 2. Text Cleaning & Normalization" as S2 {
+            direction TB
+            C1: [✗] Unicode NFC Normalization
+            C2: [✗] Strip Control & Non-Printable
+            C3: [✗] Regularize Whitespace & \n
+            C4: (Currently basic .strip only)
+        }
+        state "★ 3. Metadata Harvesting" as S3 {
+            direction TB
+            M1: [✗] doc_id & Slug Generation
+            M2: [✗] YAML Frontmatter Synthesis
+            M3: [✗] Page Coordinate Markers
+            M4: [✗] Category & Year Attributes
+        }
+
+        S1 --> S2: Extracted AST / Stream
+        S2 --> S3: Sanitized Buffer
+    }
+
+    state "Output Artifact: Canonical Ground-Truth" as Output {
+        O1: • Clean Standardized Markdown
+        O2: • ★ Rich YAML Frontmatter Block
+        O3: • Embedded <!-- Page N --> Coordinates
+    }
+
+    Phase1 --> Output: Atomic Write (*.tmp -> data/extracted/*.md)
 ```
 
 ### 6.1 Pillar 1: Multi-Format Parsing & Layout Fidelity
-- **DOCX AST Preservation:** Using `docx_extractor.py` to convert Word paragraph styles into Markdown heading hierarchies (`#`, `##`, `###`), bullet lists (`-`), and pipe tables (`| Col1 | Col2 |`).
-- **PDF Layer Extraction:** Using `pdf_inspector.py` to preserve page numbers via `<!-- Page N -->` and extract tables as clean Markdown rather than jumbled columnar text.
-- **OOXML Repacking:** Using `normalize_ooxml()` in `ocr.py` to ensure `[Content_Types].xml` is the initial archive entry, preventing 422 errors with cloud OCR providers.
 
-### 6.2 Pillar 2: Text Cleaning & Normalization Engine (Vietnamese & Multilingual)
-As demonstrated in [Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §IV.3 (`clean_vietnamese_text`), raw documents frequently suffer from Unicode anomalies, mixed accent encodings, and control character noise:
+* **What We Already Have (Live / Implemented):**
+  - **DOCX AST Preservation ([`docx_extractor.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)):** Converts Word OpenXML paragraph styles into Markdown heading hierarchies (`#`, `##`, `###`), bullet lists (`-`), and pipe tables (`| Col1 | Col2 |`).
+  - **PDF Layer Extraction ([`pdf_inspector.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)):** Fast PyMuPDF text extraction with `<!-- Page N -->` insertion and scanned page detection.
+  - **OOXML Repacking ([`ocr.py`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)):** Normalizes `[Content_Types].xml` positioning in zip archives to prevent 422 errors with cloud OCR.
+* **★ What is New / Target Change (Not Yet Implemented):**
+  - **Direct `.txt` and `.md` Ingestion:** Broadening central whitelist beyond `.docx` and `.pdf` to ingest existing plain text and Markdown guidelines directly.
+
+---
+
+### 6.2 ★ Pillar 2: Central Text Sanitization Engine (Vietnamese & Multilingual)
+
+* **What We Already Have (Live / Implemented):**
+  - Basic Python string `.strip()` applied during extractor regex cleaning without Unicode normalization.
+* **★ What is New / Target Change (Not Yet Implemented):**
+  - Central `sanitize_text()` utility integrating **Unicode NFC Normalization**, control character stripping, and whitespace regularization ([Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §IV.3 `clean_vietnamese_text`):
 
 ```python
 def sanitize_text(text: str) -> str:
@@ -248,8 +388,15 @@ def sanitize_text(text: str) -> str:
 > **Why Unicode NFC is a Non-Negotiable Invariant:**  
 > In Vietnamese, a character like `ế` can be encoded as a single code point `\u1EBF` (NFC) or as `e` + `\u0302` (circumflex) + `\u0301` (acute) (NFD). If the corpus uses NFD while the user query uses NFC, BPE/WordPiece tokenizers produce completely different token IDs, causing both Dense Embedding cosine similarity and BM25 exact-match scoring to fail drastically!
 
-### 6.3 Pillar 3: Metadata Harvesting & Frontmatter Generation
-Raw text alone lacks contextual coordinates. A complete Document Loader extracts both document-level and structural metadata:
+---
+
+### 6.3 ★ Pillar 3: Metadata Harvesting & Frontmatter Generation
+
+* **What We Already Have (Live / Implemented):**
+  - Output files in `data/extracted/*.md` are flat Markdown files starting with `# Document Title`.
+  - `ingestion-manifest.json` tracks operational fields only (`source`, `sha256`, `extractor`, `page_count`, `status`).
+* **★ What is New / Target Change (Not Yet Implemented):**
+  - Emitting structured **YAML Frontmatter** at the top of every generated Markdown file so the corpus is self-describing and audit-ready:
 
 ```yaml
 ---
@@ -264,14 +411,20 @@ year: 2021
 ---
 ```
 
-### 6.4 Pillar 4: Why Metadata is Essential for Pre-Filtering
-According to [Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1:
-> *"The role of metadata is extremely important to support Pre-filtering. For example, if the user asks about 'Revenue in 2024', the system uses metadata to filter specifically the documents from 2024 instead of searching the entire knowledge base."*
+---
 
-Pre-filtering provides three immense benefits:
-1. **Precision & Elimination of False Positives:** Hard filters ensure non-relevant years/projects are never scored.
-2. **Reduced Vector Search Latency:** Qdrant and Turbovec search only over candidate subsets (using payload indexes or allowlist masks).
-3. **Grounded Citations:** LLM responses can explicitly cite `[Document Title, Page N, Section M]`.
+### 6.4 ★ Pillar 4: Metadata Pre-Filtering & Page Coordinate Propagation
+
+* **What We Already Have (Live / Implemented):**
+  - [`load_corpus()`](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) extracts only `title` (via H1 regex) and ignores `<!-- Page N -->` comments.
+  - Qdrant payloads filter only on `document_status: ready`.
+  - Turbovec `.tvim` uses flat dense + BM25 search without payload allowlisting.
+* **★ What is New / Target Change (Not Yet Implemented):**
+  - **Page Coordinate Binding:** `load_corpus()` maps `<!-- Page N -->` markers into `KnowledgeChunk.page_start` and `page_end` for exact page-grounded citations (`[Document Title, Page 12]`).
+  - **Dynamic Metadata Pre-Filtering:** Exposing filter keys (`year`, `category`, `document_id`) in retrieval requests to prune non-candidate vectors before scoring ([Simple-RAG.pdf](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/references/Simple-RAG.pdf) §II.2.1):
+    1. **Zero False Positives:** Hard filters guarantee out-of-scope documents (e.g. 2021 files for a 2024 query) are never returned.
+    2. **Reduced Latency:** Vector DB searches only matching payload subsets.
+    3. **Auditable Citations:** LLMs cite exact coordinate metadata.
 
 ---
 

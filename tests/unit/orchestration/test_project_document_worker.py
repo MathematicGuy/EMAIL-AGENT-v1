@@ -60,14 +60,10 @@ class Extractor:
 class Vectors:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
-        self.ready_calls: list[dict[str, object]] = []
 
     async def index(self, **kwargs: object) -> int:
         self.calls.append(kwargs)
         return len(kwargs["chunks"])  # type: ignore[arg-type]
-
-    async def mark_document_ready(self, **kwargs: object) -> None:
-        self.ready_calls.append(kwargs)
 
 
 def test_worker_verifies_then_indexes_private_document_without_persisting_text() -> None:
@@ -80,12 +76,10 @@ def test_worker_verifies_then_indexes_private_document_without_persisting_text()
         assert [item["to_status"] for item in repository.transitions] == ["indexing", "ready"]
         assert repository.finished == [{"document_id": "document-1", "status": "completed"}]
         assert len(vectors.calls[0]["chunks"]) == 2  # type: ignore[arg-type]
-        assert vectors.ready_calls == [{
-            "workspace_id": "workspace-1",
-            "user_id": "user-1",
-            "project_id": "project-1",
-            "document_id": "document-1",
-        }]
+        # ADR-008: nothing publishes readiness into the vector store any more.
+        # The retrieval ACL joins project_documents.status, so the transition
+        # to "ready" above is the only thing that makes the document visible.
+        assert not hasattr(vectors, "ready_calls")
 
     asyncio.run(scenario())
 

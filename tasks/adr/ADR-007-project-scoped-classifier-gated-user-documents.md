@@ -55,3 +55,4 @@ handle deictic or ambiguous turns better than phrase matching.
 - [PRD-v3](../prds/PRD-v3-chat-with-user-documents.md)
 - [Technical SPEC](../specs/SPEC-chat-with-user-documents.md)
 - [Target Architecture §21](../../docs/architectures/TARGET-ARCHITECTURE.md)
+- [ADR-008](ADR-008-turbovec-project-document-plane.md) — accepted; supersedes clauses 4 and 5

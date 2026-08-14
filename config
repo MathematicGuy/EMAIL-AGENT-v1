@@ -1,6 +1,8 @@
-# Non-secret feature flags loaded after .env. Environment variables supplied by
-# the shell take precedence over this file.
+# Non-secret feature flags. Copy this file to `config` for a local setup.
+# Keep credentials and connection strings in .env, never in this file.
 CHAT_INTENT_CLASSIFIER_ENABLED=true
-KNOWLEDGE_INGEST_OCR_ENABLED=true
+CHAT_COMPANY_RAG_ENABLED=false
+KNOWLEDGE_INGEST_OCR_ENABLED=false
 QDRANT_ENABLED=true
 USER_DOCUMENTS_ENABLED=true
+USER_DOCUMENTS_TOOL_AXIS_ENABLED=false

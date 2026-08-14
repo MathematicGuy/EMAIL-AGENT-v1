@@ -41,15 +41,19 @@ def test_project_gemini_embedding_settings_default_to_3072() -> None:
     assert settings.batch_size == 100
 
 
-def test_project_documents_share_the_canonical_qdrant_collection_setting() -> None:
-    environ = {"QDRANT_PROJECT_COLLECTION": "private-project-documents"}
+def test_project_documents_read_the_turbovec_index_root() -> None:
+    """ADR-008: the project plane is addressed by a directory, not a collection."""
 
-    assert UserDocumentsSettings.from_env(
-        environ, load_env_file=False
-    ).collection_name == "private-project-documents"
-    assert QdrantSettings.from_env(
-        environ, load_env_file=False
-    ).project_collection_name == "private-project-documents"
+    environ = {"USER_DOCUMENTS_INDEX_ROOT": "var/private-project-indexes"}
+
+    assert (
+        UserDocumentsSettings.from_env(environ, load_env_file=False).index_root
+        == "var/private-project-indexes"
+    )
+    assert (
+        UserDocumentsSettings.from_env({}, load_env_file=False).index_root
+        == "var/project-indexes"
+    )
 
 
 def test_project_documents_are_enabled_by_default() -> None:

@@ -83,15 +83,6 @@ class ProjectVectorStore(Protocol):
         chunks: tuple[ProjectDocumentChunk, ...],
     ) -> int: ...
 
-    async def mark_document_ready(
-        self,
-        *,
-        workspace_id: str,
-        user_id: str,
-        project_id: str,
-        document_id: str,
-    ) -> None: ...
-
     async def delete_document(
         self,
         *,
@@ -181,12 +172,9 @@ class ProjectDocumentIngestionWorker:
                     chunks=chunks,
                 )
                 vectors_written = True
-                await self._vectors.mark_document_ready(
-                    workspace_id=document.workspace_id,
-                    user_id=document.user_id,
-                    project_id=document.project_id,
-                    document_id=document.id,
-                )
+                # Readiness is no longer published into the vector store: the
+                # ACL query joins project_documents.status, so this transition
+                # is the only thing that makes a document retrievable.
                 if await self._repository.transition_document(
                     document.id,
                     from_status="indexing",

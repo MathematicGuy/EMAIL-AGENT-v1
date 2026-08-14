@@ -16,6 +16,9 @@ GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 def load_runtime_environment(directory: Path | None = None) -> None:
     """Load secrets from ``.env`` and non-secret feature flags from ``config``."""
     root = Path.cwd() if directory is None else directory
+    # Neither file overrides a variable the process already has: the shell (and
+    # a test's monkeypatch) stays authoritative, which is what keeps an
+    # integration test from silently reaching the real Supabase database.
     load_dotenv(root / ".env", override=False)
     load_dotenv(root / "config", override=False)
 
@@ -216,7 +219,7 @@ class UserDocumentsSettings:
     """Project-document plane limits and dependency configuration."""
 
     enabled: bool
-    collection_name: str
+    index_root: str
     max_file_bytes: int
     max_pages: int
     max_documents_per_project: int
@@ -245,8 +248,11 @@ class UserDocumentsSettings:
             raise ValueError("USER_DOCUMENTS_MIN_SCORE must be between 0 and 1")
         return cls(
             enabled=enabled,
-            collection_name=_non_empty_value(
-                environ, "QDRANT_PROJECT_COLLECTION", "project_documents"
+            # Local cache directory for the per-project Turbovec .tvim files
+            # (ADR-008). The durable copy lives in Supabase Storage; this is
+            # only where each process materializes it.
+            index_root=_non_empty_value(
+                environ, "USER_DOCUMENTS_INDEX_ROOT", "var/project-indexes"
             ),
             max_file_bytes=_positive_int(
                 environ, "USER_DOCUMENTS_MAX_FILE_BYTES", 25 * 1024 * 1024
@@ -285,7 +291,6 @@ class QdrantSettings:
     url: str
     api_key: str = field(repr=False)
     collection_name: str
-    project_collection_name: str
     enabled: bool
     vector_size: int
     reindex: bool
@@ -309,10 +314,6 @@ class QdrantSettings:
             api_key=environ.get("QDRANT_API_KEY", "").strip(),
             collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
             or "company_knowledge",
-            project_collection_name=(
-                environ.get("QDRANT_PROJECT_COLLECTION", "project_documents").strip()
-                or "project_documents"
-            ),
             enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
             vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 1024),
             reindex=_boolean(environ, "QDRANT_REINDEX", False),
