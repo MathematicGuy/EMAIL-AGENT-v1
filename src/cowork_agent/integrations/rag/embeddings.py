@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Protocol, cast
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from google import genai
 from google.genai import errors, types
 
 from cowork_agent.config import GeminiEmbeddingSettings, GeminiSettings, JinaEmbeddingSettings
+from cowork_agent.integrations.key_rotation import mask_api_key
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiKeyRotator,
     GeminiRateLimitError,
@@ -27,6 +30,8 @@ DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 _MAX_BATCH_CONTENTS = 100
 JINA_EMBEDDING_ENDPOINT = "https://api.jina.ai/v1/embeddings"
 _USER_AGENT = "cowork-agent/1.0"
+
+logger = logging.getLogger(__name__)
 
 EmbeddingTask = Literal["retrieval.query", "retrieval.passage"]
 
@@ -102,13 +107,15 @@ class JinaEmbeddingAdapter:
         all_vectors: list[tuple[float, ...]] = []
         for start in range(0, len(texts), batch_size):
             batch_texts = list(texts[start : start + batch_size])
-            response = None
-            for attempt in range(5):
+            keys = await self._settings.rotator.candidates(self._settings.max_attempts)
+            response: Mapping[str, object] | None = None
+            last_error: Exception | None = None
+            for key in keys:
                 try:
                     response = await self._transport.post_json(
                         url=JINA_EMBEDDING_ENDPOINT,
                         headers={
-                            "Authorization": f"Bearer {self._settings.api_key}",
+                            "Authorization": f"Bearer {key}",
                             "Content-Type": "application/json",
                             "Accept": "application/json",
                         },
@@ -122,19 +129,36 @@ class JinaEmbeddingAdapter:
                         timeout_seconds=float(self._settings.timeout_seconds),
                     )
                     break
-                except Exception:
-                    if attempt < 4:
-                        await asyncio.sleep(2 * (attempt + 1))
-                    else:
-                        raise
+                except Exception as exc:
+                    last_error = exc
+                    if (
+                        _is_rate_limit_error(exc)
+                        and self._settings.rotate_on_rate_limit
+                    ):
+                        logger.warning(
+                            "Jina embedding rate limit for key %s; rotating key",
+                            mask_api_key(key),
+                        )
+                        continue
+                    raise
             if response is None:
-                raise ValueError("Embedding request failed after retries")
+                raise last_error or ValueError("Embedding request failed without attempting a key")
             batch_vectors = _validated_jina_vectors(
                 response, expected_count=len(batch_texts), dimensions=self._settings.dimensions
             )
             all_vectors.extend(batch_vectors)
             await asyncio.sleep(0.2)
         return tuple(all_vectors)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    if isinstance(exc, HTTPError) and exc.code == 429:
+        return True
+    code = getattr(exc, "code", getattr(exc, "status_code", getattr(exc, "status", None)))
+    if code == 429:
+        return True
+    message = str(exc).lower()
+    return "429" in message or "rate limit" in message or "too many requests" in message
 
 
 class GeminiEmbeddingAdapter:
