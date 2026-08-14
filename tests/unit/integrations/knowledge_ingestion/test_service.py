@@ -186,3 +186,56 @@ def test_service_handles_ocr_failure_cleanly(tmp_path: Path) -> None:
     assert outcome.status == "failed"
     assert outcome.reason_code == "ocr_extraction_failed"
 
+
+def test_service_adaptive_mode_escalates_scanned_pdf_to_ocr(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "mixed.pdf").write_bytes(b"pdf-bytes")
+    inspection = PdfInspection(PdfKind.MIXED, 2, (2,), {1: "page 1"})
+    settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "adaptive", "MISTRAL_API_KEY": "secret"},
+        load_env_file=False,
+    )
+    stub_ocr = _StubOcrExtractor("# Escalated OCR Content")
+    service = KnowledgeIngestionService(
+        settings,
+        DocxExtractor(),
+        StubPdfInspector(inspection),
+        ocr_extractor=stub_ocr,
+    )
+
+    outcome, = service.ingest(raw, tmp_path / "extracted", force=False)
+
+    assert outcome.status == "succeeded"
+    assert outcome.output == "mixed.md"
+    assert stub_ocr.extracted_files == ["mixed.pdf"]
+    output_md = (tmp_path / "extracted" / "mixed.md").read_text(encoding="utf-8")
+    assert output_md == "# Escalated OCR Content"
+
+
+def test_service_adaptive_mode_uses_native_for_clean_pdf(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "clean.pdf").write_bytes(b"pdf-bytes")
+    inspection = PdfInspection(PdfKind.TEXT_BASED, 1, (), {1: "clean digital text"})
+    settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "adaptive", "MISTRAL_API_KEY": "secret"},
+        load_env_file=False,
+    )
+    stub_ocr = _StubOcrExtractor("# Should Not Be Called")
+    service = KnowledgeIngestionService(
+        settings,
+        DocxExtractor(),
+        StubPdfInspector(inspection),
+        ocr_extractor=stub_ocr,
+    )
+
+    outcome, = service.ingest(raw, tmp_path / "extracted", force=False)
+
+    assert outcome.status == "succeeded"
+    assert outcome.output == "clean.md"
+    assert stub_ocr.extracted_files == []
+    output_md = (tmp_path / "extracted" / "clean.md").read_text(encoding="utf-8")
+    assert "clean digital text" in output_md
+
+

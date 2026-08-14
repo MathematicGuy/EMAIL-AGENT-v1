@@ -24,7 +24,7 @@ which is what one route costs; the full suite is parallel.
 | R3 | `tests/unit/integrations/rag` | 45 | 4.6 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
 | R4 | `tests/unit/integrations/llm` | 43 | 2.8 s | Prompt assembly, parsing, key rotation, classifiers. |
 | R5 | `tests/unit/integrations/gmail` | 19 | 0.9 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 189 | 17.0 s | R3+R4+R5 plus Qdrant, bootstrap, Supabase. |
+| R6 | `tests/unit/integrations` | 189 | 17.0 s | R3+R4+R5 plus bootstrap, Supabase. |
 | R7 | `tests/unit/persistence` | 17 | 1.2 s | Repository logic against fakes. |
 | R8 | `tests/unit/orchestration` | 12 | 2.7 s | Workers, pollers, recovery. |
 | R9 | `tests/unit/scripts` | 69 | 13.3 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
@@ -32,7 +32,7 @@ which is what one route costs; the full suite is parallel.
 | R11 | `tests/integration/api` | 22 | 7.1 s | FastAPI via in-process ASGI transport. |
 | R12 | `tests/integration/persistence` | 9 | 4.2 s | Real PostgreSQL. **Skips wholesale without a server.** |
 | R13 | `tests/integration/email_action_plan` | 45 | 4.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 82 | 15.6 s | R11+R12+R13 plus Qdrant-over-corpus. |
+| R14 | `tests/integration` | 82 | 15.6 s | R11+R12+R13 plus corpus-backed workflow. |
 | R15 | `tests/unit` | 904 | 27.4 s | Everything above the integration line. |
 | R16 | `tests/unit --ignore=tests/unit/scripts` | 835 | 20.2 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
 | — | *(everything)* | 977 | **19 s parallel** | `uv run pytest -q` |
@@ -44,7 +44,7 @@ which is what one route costs; the full suite is parallel.
 | `domain/` | R1, then R2 |
 | `features/ai_chat/` | R2 |
 | `features/email_action_plan/` | R2 + R13 |
-| `integrations/rag/` | R3 (+ R6 if `qdrant.py` or `bootstrap.py`) |
+| `integrations/rag/` | R3 (+ R6 if `bootstrap.py` or `project_documents.py`) |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
 | `persistence/` | R7 + R12 |
@@ -92,8 +92,9 @@ absent, add the row when you add the test.
 | Postgres migrations apply once and are idempotent | `integration/persistence/test_postgres_repositories.py` | — |
 | No raw email body reaches any API response | `integration/api/test_principal_boundary.py` | workflow/repository tests |
 | No raw email body reaches chat memory | `unit/domain/test_chat_contracts.py` | gateway tests |
-| Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/test_qdrant.py` (Qdrant) | integration tests |
-| Retrieval over the *committed corpus* + degrade-to-null path | `integration/test_qdrant_integration.py` | — |
+| Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/rag/test_turbovec_memory.py` | integration tests |
+| Retrieval over the *committed corpus* + degrade-to-null path | `unit/integrations/test_bootstrap.py` | — |
+| Project-document ACL (six SQL conditions before embed) + cross-project isolation + empty-allowlist short-circuit | `unit/integrations/test_project_documents_hybrid.py` | orchestration/API tests |
 | Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
 | OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
 | Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |

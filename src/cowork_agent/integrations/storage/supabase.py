@@ -71,6 +71,23 @@ class SupabasePrivateStorage:
         except (httpx.HTTPError, OSError) as exc:
             raise StorageUnavailable("private storage unavailable") from exc
 
+    async def upload_file(self, object_key: str, source: Path) -> None:
+        """Overwrite a server-owned object such as a project index snapshot."""
+        path = quote(object_key, safe="/")
+        try:
+            response = await self._client.post(
+                f"{self._url}/storage/v1/object/{self._bucket}/{path}",
+                headers={
+                    **self._headers(),
+                    "content-type": "application/octet-stream",
+                    "x-upsert": "true",
+                },
+                content=source.read_bytes(),
+            )
+            response.raise_for_status()
+        except (httpx.HTTPError, OSError) as exc:
+            raise StorageUnavailable("private storage unavailable") from exc
+
     async def _signed_url(self, operation: str, object_key: str, payload: dict[str, object]) -> str:
         path = quote(object_key, safe="/")
         try:

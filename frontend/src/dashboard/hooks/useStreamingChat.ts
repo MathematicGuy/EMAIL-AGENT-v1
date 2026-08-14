@@ -261,8 +261,14 @@ export function useStreamingChat(
     setIsHistoryLoading(true);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v1/cowork/chat/sessions?project_id=${encodeURIComponent(projectId)}`
+        `${API_BASE_URL}/v1/cowork/chat/sessions?project_id=${encodeURIComponent(projectId)}`,
+        { credentials: 'include' }
       );
+      if (response.status === 401) {
+        setApiStatus('online');
+        setRecentChats([]);
+        return;
+      }
       if (!response.ok) throw new Error();
       const payload = (await response.json()) as { sessions: ChatSession[] };
       setRecentChats(payload.sessions.map((session, index) => ({
@@ -299,6 +305,7 @@ export function useStreamingChat(
     if (!projectId) throw new Error('Select a Project before starting chat.');
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/sessions`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project_id: projectId }),
     });
@@ -595,6 +602,7 @@ export function useStreamingChat(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session_id: sessionId,
@@ -704,7 +712,8 @@ export function useStreamingChat(
     setIsHistoryLoading(true);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { credentials: 'include' }
       );
       if (!response.ok) throw new Error(`Could not load chat (HTTP ${response.status}).`);
       const payload = (await response.json()) as { turns: ChatTurn[] };

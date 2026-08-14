@@ -1,8 +1,14 @@
-"""Private, project-scoped Qdrant collection for user uploaded documents.
+"""Private, project-scoped hybrid retrieval for user uploaded documents.
 
-This module intentionally has no company-RAG fallback.  A retrieval filter is
-constructed from the verified workspace/user/project coordinates *before* the
-query is embedded, so a vector search cannot consider another project's text.
+This module intentionally has no company-RAG fallback. The tenant ACL is
+evaluated in SQL *before* the query reaches the vector index, so a search
+cannot consider another project's text (ADR-007 §4, restated by ADR-008 §3).
+
+Three stores cooperate, and each owns exactly one thing:
+
+- Postgres owns chunk text, the six-condition ACL, and the lexical ranking.
+- A per-project Turbovec ``.tvim`` owns the quantized vectors.
+- ``ReciprocalRankFusion`` merges the two rankings -- ranks only, never scores.
 """
 
 from __future__ import annotations
@@ -10,22 +16,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, cast
-from uuid import NAMESPACE_URL, uuid5
-
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    FilterSelector,
-    MatchAny,
-    MatchValue,
-    PayloadSchemaType,
-    PointStruct,
-    Range,
-    VectorParams,
-)
+from typing import Protocol
 
 from cowork_agent.domain.project_documents import (
     ProjectDocumentEvidence as DomainProjectDocumentEvidence,
@@ -34,25 +25,26 @@ from cowork_agent.domain.project_documents import (
     ProjectDocumentQuery,
     ProjectDocumentResponse,
 )
+from cowork_agent.persistence.repositories.project_document_chunks import (
+    ChunkInput,
+    EligibleChunks,
+    StoredChunk,
+)
 from cowork_agent.persistence.repositories.projects import ProjectDocument
 
 from .embeddings import EmbeddingPort
 from .markdown_chunking import DEFAULT_MAX_CHARS
+from .project_index import ProjectIndexUnavailable, TurbovecProjectIndexStore
+from .rrf import ReciprocalRankFusion
 
-_POINT_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-chunk")
-_UPSERT_BATCH = 128
-_REQUIRED_KEYWORD_INDEXES = (
-    "workspace_id",
-    "user_id",
-    "project_id",
-    "document_id",
-    "document_status",
-)
+#: How many candidates each leg contributes per requested result. Fusion needs
+#: more input than output or the two rankings barely overlap.
+_CANDIDATE_MULTIPLIER = 4
 
 
 @dataclass(frozen=True, slots=True)
 class ProjectDocumentChunk:
-    """Extracted text retained only in the vector store, with page coordinates."""
+    """An extracted chunk with the page coordinates a citation must carry."""
 
     chunk_id: str
     text: str
@@ -71,7 +63,12 @@ class ProjectDocumentChunk:
 
 @dataclass(frozen=True, slots=True)
 class ProjectDocumentEvidence:
-    """Retrieved private evidence; callers must not persist its text in Postgres."""
+    """Retrieved private evidence.
+
+    ``score`` is the fused RRF score, not a cosine similarity: the dense and
+    lexical legs are combined by rank, so no single-leg score survives fusion.
+    Treat it as an ordering, not a calibrated confidence.
+    """
 
     chunk_id: str
     document_id: str
@@ -83,25 +80,50 @@ class ProjectDocumentEvidence:
     score: float
 
 
-class ProjectDocumentVectorStore:
-    """Qdrant adapter for the project-documents semantic plane only."""
+class ProjectDocumentChunkRepository(Protocol):
+    """The Postgres half of retrieval: ACL, lexical ranking, and text."""
+
+    async def replace_document_chunks(
+        self, *, document_id: str, project_id: str, chunks: tuple[ChunkInput, ...]
+    ) -> tuple[tuple[str, int], ...]: ...
+
+    async def list_eligible(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        project_id: str,
+        document_ids: tuple[str, ...],
+        now: datetime,
+        query: str,
+        lexical_limit: int,
+    ) -> EligibleChunks: ...
+
+    async def hydrate(self, vector_ids: tuple[int, ...]) -> tuple[StoredChunk, ...]: ...
+
+    async def list_document_vector_ids(self, document_id: str) -> tuple[int, ...]: ...
+
+    async def delete_document_chunks(self, document_id: str) -> tuple[int, ...]: ...
+
+
+class HybridProjectDocumentStore:
+    """Turbovec dense leg, Postgres lexical leg, RRF fusion, one ACL."""
 
     def __init__(
         self,
-        client: AsyncQdrantClient,
-        collection_name: str,
+        chunks: ProjectDocumentChunkRepository,
+        indexes: TurbovecProjectIndexStore,
         embedder: EmbeddingPort,
         *,
         vector_size: int = 3072,
     ) -> None:
-        if not collection_name.strip():
-            raise ValueError("collection_name must not be empty")
-        self._client = client
-        self._collection_name = collection_name
-        self._embedder = embedder
         if vector_size < 1:
             raise ValueError("vector_size must be positive")
+        self._chunks = chunks
+        self._indexes = indexes
+        self._embedder = embedder
         self._vector_size = vector_size
+        self._fusion = ReciprocalRankFusion()
 
     async def index(
         self,
@@ -114,66 +136,59 @@ class ProjectDocumentVectorStore:
         expires_at: datetime,
         chunks: tuple[ProjectDocumentChunk, ...],
     ) -> int:
+        """Persist chunk text, then add its vectors to the project index.
+
+        Text lands first because ``vector_id`` is assigned by Postgres and is
+        the external ID Turbovec needs. If embedding then fails, the rows are
+        harmless: the document is not yet ``ready``, and the allowlist is
+        intersected with the index before any search.
+        """
         if not chunks:
             raise ValueError("empty project extraction must not be indexed")
-        _require_scope(workspace_id, user_id, project_id)
+        require_scope(workspace_id, user_id, project_id)
         if not document_id.strip() or not filename.strip():
             raise ValueError("document coordinates must not be empty")
-        expiry = _epoch(expires_at)
-        if expiry <= datetime.now(UTC).timestamp():
+        if expires_at.astimezone(UTC) <= datetime.now(UTC):
             raise ValueError("expired documents must not be indexed")
+
+        assigned = await self._chunks.replace_document_chunks(
+            document_id=document_id,
+            project_id=project_id,
+            chunks=tuple(
+                ChunkInput(
+                    chunk_id=chunk.chunk_id,
+                    chunk_index=index,
+                    text=chunk.text,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                    section=chunk.section,
+                )
+                for index, chunk in enumerate(chunks)
+            ),
+        )
         vectors = await self._embedder.embed(
             tuple(chunk.text for chunk in chunks), task="retrieval.passage"
         )
         if len(vectors) != len(chunks) or not vectors or not vectors[0]:
             raise ValueError("embedding response does not match project chunks")
         if any(len(vector) != self._vector_size for vector in vectors):
-            raise ValueError("project embedding dimension does not match Qdrant configuration")
-        await self.ensure_collection()
-        points = [
-            PointStruct(
-                id=str(uuid5(_POINT_NAMESPACE, f"{document_id}/{chunk.chunk_id}")),
-                vector=list(vector),
-                payload={
-                    "workspace_id": workspace_id,
-                    "user_id": user_id,
-                    "project_id": project_id,
-                    "document_id": document_id,
-                    "document_status": "indexing",
-                    "expires_at_epoch": expiry,
-                    "chunk_id": chunk.chunk_id,
-                    "filename": filename,
-                    "text": chunk.text,
-                    "page_start": chunk.page_start,
-                    "page_end": chunk.page_end,
-                    "section": chunk.section,
-                },
-            )
-            for chunk, vector in zip(chunks, vectors, strict=True)
-        ]
-        for start in range(0, len(points), _UPSERT_BATCH):
-            await self._client.upsert(
-                collection_name=self._collection_name, points=points[start : start + _UPSERT_BATCH]
-            )
-        return len(points)
+            raise ValueError("project embedding dimension does not match index configuration")
 
-    async def mark_document_ready(
-        self,
-        *,
-        workspace_id: str,
-        user_id: str,
-        project_id: str,
-        document_id: str,
-    ) -> None:
-        """Publish an indexed document to retrieval after all chunks are durable."""
-        _require_scope(workspace_id, user_id, project_id)
-        if not document_id.strip():
-            raise ValueError("document_id must not be empty")
-        await self._client.set_payload(
-            collection_name=self._collection_name,
-            payload={"document_status": "ready"},
-            points=_document_filter(workspace_id, user_id, project_id, document_id),
+        by_chunk_id = dict(assigned)
+        await self._indexes.add(
+            project_id=project_id,
+            vector_ids=[by_chunk_id[chunk.chunk_id] for chunk in chunks],
+            vectors=vectors,
         )
+        return len(chunks)
+
+    async def embed_query(self, query: str) -> tuple[float, ...]:
+        if not query.strip():
+            raise ValueError("project document query must not be empty")
+        (vector,) = await self._embedder.embed((query,), task="retrieval.query")
+        if len(vector) != self._vector_size:
+            raise ValueError("project query embedding has an invalid dimension")
+        return vector
 
     async def retrieve(
         self,
@@ -189,31 +204,33 @@ class ProjectDocumentVectorStore:
     ) -> tuple[ProjectDocumentEvidence, ...]:
         if not query.strip() or not document_ids or limit < 1 or not 0 <= min_score <= 1:
             return ()
-        _require_scope(workspace_id, user_id, project_id)
+        require_scope(workspace_id, user_id, project_id)
         # Deliberately precedes embed(): never score another project's vector.
-        query_filter = _retrieval_filter(
-            workspace_id, user_id, project_id, now, document_ids
+        eligible = await self._eligible(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            project_id=project_id,
+            now=now,
+            document_ids=document_ids,
+            query=query,
+            limit=limit,
         )
+        if not eligible.allowlist:
+            return ()
         vector = await self.embed_query(query)
-        return await self._retrieve_vector(
+        return await self._fuse(
+            project_id=project_id,
             vector=vector,
-            query_filter=query_filter,
+            eligible=eligible,
             limit=limit,
             min_score=min_score,
         )
-
-    async def embed_query(self, query: str) -> tuple[float, ...]:
-        if not query.strip():
-            raise ValueError("project document query must not be empty")
-        (vector,) = await self._embedder.embed((query,), task="retrieval.query")
-        if len(vector) != self._vector_size:
-            raise ValueError("project query embedding has an invalid dimension")
-        return vector
 
     async def retrieve_vector(
         self,
         *,
         vector: tuple[float, ...],
+        query: str,
         workspace_id: str,
         user_id: str,
         project_id: str,
@@ -222,38 +239,31 @@ class ProjectDocumentVectorStore:
         limit: int = 5,
         min_score: float = 0.2,
     ) -> tuple[ProjectDocumentEvidence, ...]:
-        _require_scope(workspace_id, user_id, project_id)
+        """Search with a pre-computed query vector.
+
+        ``query`` is still required: the lexical leg needs the original text,
+        and an embedding cannot be inverted back into one.
+        """
+        require_scope(workspace_id, user_id, project_id)
         if len(vector) != self._vector_size or not document_ids:
             raise ValueError("project query vector or document selection is invalid")
-        return await self._retrieve_vector(
+        eligible = await self._eligible(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            project_id=project_id,
+            now=now,
+            document_ids=document_ids,
+            query=query,
+            limit=limit,
+        )
+        if not eligible.allowlist:
+            return ()
+        return await self._fuse(
+            project_id=project_id,
             vector=vector,
-            query_filter=_retrieval_filter(
-                workspace_id, user_id, project_id, now, document_ids
-            ),
+            eligible=eligible,
             limit=limit,
             min_score=min_score,
-        )
-
-    async def _retrieve_vector(
-        self,
-        *,
-        vector: tuple[float, ...],
-        query_filter: Filter,
-        limit: int,
-        min_score: float,
-    ) -> tuple[ProjectDocumentEvidence, ...]:
-        result = await self._client.query_points(
-            collection_name=self._collection_name,
-            query=list(vector),
-            query_filter=query_filter,
-            limit=limit,
-            score_threshold=min_score,
-            with_payload=True,
-        )
-        return tuple(
-            _evidence(point.payload, point.score)
-            for point in result.points
-            if point.payload is not None
         )
 
     async def delete_document(
@@ -264,46 +274,83 @@ class ProjectDocumentVectorStore:
         project_id: str,
         document_id: str,
     ) -> bool:
-        _require_scope(workspace_id, user_id, project_id)
+        """Purge a document from both private stores.
+
+        ``IdMapIndex.remove`` is O(1) by external ID, so the project's index is
+        edited in place rather than rebuilt.
+        """
+        require_scope(workspace_id, user_id, project_id)
         if not document_id.strip():
             raise ValueError("document_id must not be empty")
-        if not await self._client.collection_exists(self._collection_name):
-            return True
-        await self._client.delete(
-            collection_name=self._collection_name,
-            points_selector=FilterSelector(filter=_document_filter(
-                workspace_id, user_id, project_id, document_id
-            )),
-        )
+        vector_ids = await self._chunks.list_document_vector_ids(document_id)
+        await self._indexes.remove(project_id=project_id, vector_ids=vector_ids)
+        await self._chunks.delete_document_chunks(document_id)
         return True
 
-    async def ensure_collection(self) -> None:
-        """Create the canonical collection or reject an incompatible one."""
-        if not await self._client.collection_exists(self._collection_name):
-            await self._client.create_collection(
-                collection_name=self._collection_name,
-                vectors_config=VectorParams(size=self._vector_size, distance=Distance.COSINE),
+    async def _eligible(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        project_id: str,
+        now: datetime,
+        document_ids: tuple[str, ...],
+        query: str,
+        limit: int,
+    ) -> EligibleChunks:
+        return await self._chunks.list_eligible(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            project_id=project_id,
+            document_ids=document_ids,
+            now=now,
+            query=query,
+            lexical_limit=limit * _CANDIDATE_MULTIPLIER,
+        )
+
+    async def _fuse(
+        self,
+        *,
+        project_id: str,
+        vector: tuple[float, ...],
+        eligible: EligibleChunks,
+        limit: int,
+        min_score: float,
+    ) -> tuple[ProjectDocumentEvidence, ...]:
+        dense = await self._indexes.search(
+            project_id=project_id,
+            vector=vector,
+            allowlist=eligible.allowlist,
+            limit=limit * _CANDIDATE_MULTIPLIER,
+        )
+        fused = self._fusion.fuse(
+            dense_results=[
+                (str(vector_id), score) for vector_id, score in dense if score >= min_score
+            ],
+            bm25_results=[(str(vector_id), 0.0) for vector_id in eligible.lexical],
+        )
+        ranked = fused[:limit]
+        if not ranked:
+            return ()
+        scores = {int(candidate.chunk_id): candidate.score for candidate in ranked}
+        stored = await self._chunks.hydrate(tuple(scores))
+        by_vector_id = {chunk.vector_id: chunk for chunk in stored}
+        return tuple(
+            ProjectDocumentEvidence(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                filename=chunk.filename,
+                text=chunk.text,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                section=chunk.section,
+                score=scores[chunk.vector_id],
             )
-        else:
-            collection = await self._client.get_collection(self._collection_name)
-            vectors = collection.config.params.vectors
-            size = getattr(vectors, "size", None)
-            distance = getattr(vectors, "distance", None)
-            if size != self._vector_size or distance != Distance.COSINE:
-                raise ValueError(
-                    f"project document collection configuration size={size}, distance={distance} "
-                    f"does not match size={self._vector_size}, distance={Distance.COSINE}"
-                )
-        for key in _REQUIRED_KEYWORD_INDEXES:
-            await self._client.create_payload_index(
-                collection_name=self._collection_name,
-                field_name=key,
-                field_schema=PayloadSchemaType.KEYWORD,
+            for chunk in (
+                by_vector_id[int(candidate.chunk_id)]
+                for candidate in ranked
+                if int(candidate.chunk_id) in by_vector_id
             )
-        await self._client.create_payload_index(
-            collection_name=self._collection_name,
-            field_name="expires_at_epoch",
-            field_schema=PayloadSchemaType.FLOAT,
         )
 
 
@@ -324,7 +371,7 @@ class CanonicalProjectDocumentRetriever:
     def __init__(
         self,
         repository: ReadyProjectDocumentRepository,
-        vectors: ProjectDocumentVectorStore,
+        vectors: HybridProjectDocumentStore,
         *,
         top_k: int,
         min_score: float,
@@ -345,6 +392,13 @@ class CanonicalProjectDocumentRetriever:
         except TimeoutError:
             return ProjectDocumentResponse(
                 (), degraded=True, reason_code="retrieval_timeout"
+            )
+        except ProjectIndexUnavailable:
+            # The project's .tvim is missing or unreadable. Fail closed rather
+            # than rebuild: reconstruction means re-embedding every chunk, which
+            # does not belong behind a user's query.
+            return ProjectDocumentResponse(
+                (), degraded=True, reason_code="index_unavailable"
             )
         except Exception:
             return ProjectDocumentResponse(
@@ -372,6 +426,7 @@ class CanonicalProjectDocumentRetriever:
             try:
                 evidence = await self._vectors.retrieve_vector(
                     vector=query_vector,
+                    query=request.query,
                     workspace_id=request.tenant_id,
                     user_id=request.user_id,
                     project_id=request.project_id,
@@ -409,61 +464,14 @@ class CanonicalProjectDocumentRetriever:
                         if item.document_id in latest_by_id
                     )
                 )
+            except ProjectIndexUnavailable:
+                raise
             except Exception as exc:
                 last_error = exc
         assert last_error is not None
         raise last_error
 
 
-def _require_scope(workspace_id: str, user_id: str, project_id: str) -> None:
+def require_scope(workspace_id: str, user_id: str, project_id: str) -> None:
     if not all(value.strip() for value in (workspace_id, user_id, project_id)):
         raise ValueError("project retrieval requires workspace, user, and project scope")
-
-
-def _epoch(value: datetime) -> float:
-    return value.astimezone(UTC).timestamp()
-
-
-def _retrieval_filter(
-    workspace_id: str,
-    user_id: str,
-    project_id: str,
-    now: datetime,
-    document_ids: tuple[str, ...],
-) -> Filter:
-    return Filter(
-        must=[
-            FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id)),
-            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
-            FieldCondition(key="project_id", match=MatchValue(value=project_id)),
-            FieldCondition(key="document_id", match=MatchAny(any=list(document_ids))),
-            FieldCondition(key="document_status", match=MatchValue(value="ready")),
-            FieldCondition(key="expires_at_epoch", range=Range(gt=_epoch(now))),
-        ]
-    )
-
-
-def _document_filter(
-    workspace_id: str, user_id: str, project_id: str, document_id: str
-) -> Filter:
-    return Filter(
-        must=[
-            FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id)),
-            FieldCondition(key="user_id", match=MatchValue(value=user_id)),
-            FieldCondition(key="project_id", match=MatchValue(value=project_id)),
-            FieldCondition(key="document_id", match=MatchValue(value=document_id)),
-        ]
-    )
-
-
-def _evidence(payload: dict[str, object], score: float) -> ProjectDocumentEvidence:
-    return ProjectDocumentEvidence(
-        chunk_id=str(payload["chunk_id"]),
-        document_id=str(payload["document_id"]),
-        filename=str(payload["filename"]),
-        text=str(payload["text"]),
-        page_start=int(cast(int | str, payload["page_start"])),
-        page_end=int(cast(int | str, payload["page_end"])),
-        section=str(payload["section"]) if payload.get("section") is not None else None,
-        score=float(score),
-    )

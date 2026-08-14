@@ -137,8 +137,9 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
             await projects.record_deletion_audit(
                 document.id,
                 postgres_outcome="hidden",
-                qdrant_outcome="deleted",
+                vector_store_outcome="deleted",
                 storage_outcome="pending",
+                chunks_outcome="pending",
             )
         finally:
             await pool.close()

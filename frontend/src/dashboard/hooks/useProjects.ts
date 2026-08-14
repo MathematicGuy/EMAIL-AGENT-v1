@@ -31,7 +31,14 @@ export function useProjects() {
 
   const refreshProjects = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`);
+      const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
+        credentials: 'include',
+      });
+      if (response.status === 401) {
+        setProjects([]);
+        setError(null);
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = (await response.json()) as { projects: BackendProject[] };
       const next = payload.projects.map(fromBackend);
@@ -61,6 +68,7 @@ export function useProjects() {
   const createProject = useCallback(async (input: Pick<Project, 'name' | 'icon' | 'color'>) => {
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: input.name.trim() }),
     });
