@@ -62,7 +62,7 @@ class PostgresIdentityRepository:
                     )
                 else:
                     workspace_id = str(workspace_row[0])
-        return VerifiedPrincipal(user_id=user_id)
+        return VerifiedPrincipal(tenant_id=workspace_id, user_id=user_id)
 
 
 class PostgresSessionRepository:
@@ -89,7 +89,7 @@ class PostgresSessionRepository:
                 (
                     session_token_hash(token),
                     principal.user_id,
-                    "local",
+                    principal.workspace_id,
                     expires_at,
                     now,
                 ),
@@ -114,7 +114,7 @@ class PostgresSessionRepository:
             row = await cursor.fetchone()
         if row is None:
             return None
-        return VerifiedPrincipal(user_id=str(row[1]))
+        return VerifiedPrincipal(tenant_id=str(row[0]), user_id=str(row[1]))
 
     async def revoke(self, token: str, *, now: datetime) -> bool:
         async with self._pool.connection() as connection:
