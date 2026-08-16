@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  BrainCircuit,
   Ghost,
   Loader2,
   Wifi,
@@ -14,7 +13,6 @@ import type { Project } from '../types/projectTypes';
 
 interface HeaderProps {
   apiStatus?: 'unknown' | 'online' | 'offline';
-  onOpenMemory: () => void;
   onOpenWorkIntake: () => void;
   projects?: Project[];
   activeProject?: Project;
@@ -23,7 +21,6 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   apiStatus,
-  onOpenMemory,
   onOpenWorkIntake,
   projects,
   activeProject,
@@ -123,14 +120,6 @@ export const Header: React.FC<HeaderProps> = ({
           className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
         >
           <Workflow className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          title="Memory & context"
-          onClick={onOpenMemory}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <BrainCircuit className="w-4 h-4" />
         </button>
         <button
           type="button"

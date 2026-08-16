@@ -14,7 +14,6 @@ import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { UpgradeModal } from './components/UpgradeModal';
 import { VoiceModal } from './components/VoiceModal';
 import { CustomizeModal } from './components/CustomizeModal';
-import { MemoryPanel } from '../modules/memory/MemoryPanel';
 import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
@@ -41,7 +40,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
-  const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
   const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
@@ -166,7 +164,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <Header
           apiStatus={apiStatus}
-          onOpenMemory={() => setIsMemoryPanelOpen(true)}
           onOpenWorkIntake={() => setIsWorkIntakePanelOpen(true)}
           projects={projects}
           activeProject={activeProject}
@@ -269,13 +266,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           resetChat();
         }}
       />
-
-      {isMemoryPanelOpen && (
-        <MemoryPanel
-          isOpen
-          onClose={() => setIsMemoryPanelOpen(false)}
-        />
-      )}
 
       {isWorkIntakePanelOpen && (
         <WorkIntakePanel

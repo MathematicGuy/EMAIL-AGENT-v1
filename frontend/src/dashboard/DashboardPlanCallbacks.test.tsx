@@ -47,7 +47,6 @@ vi.mock('./components/ModelSelectorModal', () => ({ ModelSelectorModal: () => nu
 vi.mock('./components/UpgradeModal', () => ({ UpgradeModal: () => null }));
 vi.mock('./components/VoiceModal', () => ({ VoiceModal: () => null }));
 vi.mock('./components/CustomizeModal', () => ({ CustomizeModal: () => null }));
-vi.mock('../modules/memory/MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('../modules/work-intake/WorkIntakePanel', () => ({ WorkIntakePanel: () => null }));
 vi.mock('./components/ChatStreamView', () => ({
   ChatStreamView: (props: {

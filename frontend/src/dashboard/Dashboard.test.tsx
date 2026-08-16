@@ -73,14 +73,12 @@ describe('Dashboard Project chat', () => {
     expect(screen.getByText('Saved answer')).toBeTruthy();
   });
 
-  it('keeps Work Intake and Memory as separate utility panels', () => {
+  it('opens the Work Intake utility panel', () => {
     vi.stubGlobal('fetch', projectFetch());
     render(<Dashboard />);
     fireEvent.click(screen.getByTitle('Work intake'));
     expect(screen.getByRole('dialog', { name: 'Work intake' })).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Close work intake panel'));
-    fireEvent.click(screen.getByTitle('Memory & context'));
-    expect(screen.getByRole('dialog', { name: 'Memory and context' })).toBeTruthy();
   });
 
   it('uploads composer files persistently to the active Project and opens the panel', async () => {
