@@ -45,6 +45,7 @@ which is what one route costs; the full suite is parallel.
 | `features/ai_chat/` | R2 |
 | `features/email_action_plan/` | R2 + R13 |
 | `integrations/rag/` | R3 (+ R6 if `bootstrap.py` or `project_documents.py`) |
+| `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` if `load_corpus` changed |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
 | `persistence/` | R7 + R12 |

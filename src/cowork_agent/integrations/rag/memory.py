@@ -113,6 +113,8 @@ class InRepoSemanticMemory:
                 document_version=None,
                 relevance_score=score,
                 rerank_score=None,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
             )
             for score, chunk in ranked
         )

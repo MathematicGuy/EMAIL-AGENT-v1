@@ -50,19 +50,19 @@ def test_load_corpus_reads_the_committed_documents() -> None:
         "31-2024-qh15-523642",
         "41-2024-qh15-557190",
         "49-2019-qh14-402073",
-        "cap_lai_cccd",
+        "cap-lai-cccd",
         "chi-tiet-thu-tuc-1-004194-1786097965866",
         "chi-tiet-thu-tuc-1-115132-1786096253281",
         "chi-tiet-thu-tuc-1-115970-1786097982328",
         "chi-tiet-thu-tuc-1-116194-1786096137126",
         "chi-tiet-thu-tuc-2-001194-1786096928665",
         "chi-tiet-thu-tuc-3-000228-1786096860852",
+        "dang-ky-ket-hon",
         "dang-ky-tam-tru",
-        "dang_ky_ket_hon",
-        "dang_ky_xe",
-        "huong_dan_nop_ho_so_dai_hoc_vinuni",
-        "thu_tuc_dang_ky_bhxh_luatvietnam",
-        "thue_dien_tu",
+        "dang-ky-xe",
+        "huong-dan-nop-ho-so-dai-hoc-vinuni",
+        "thu-tuc-dang-ky-bhxh-luatvietnam",
+        "thue-dien-tu",
     ]
     for document in documents:
         assert document.title
@@ -83,6 +83,80 @@ def test_load_corpus_chunks_by_h2_sections(tmp_path: Path) -> None:
     assert document.title == "Policy"
     sections = [chunk.section for chunk in document.chunks]
     assert "First Rule" in sections and "Second Rule" in sections
+    assert any(chunk.text == "Alpha body." for chunk in document.chunks)
+
+
+def test_load_corpus_copies_page_coordinates_and_omits_page_markers(
+    tmp_path: Path,
+) -> None:
+    doc = tmp_path / "paged.md"
+    doc.write_text(
+        "# Title\n"
+        "<!-- Page 1 -->\n"
+        "First page body.\n"
+        "\n"
+        "<!-- Page 2 -->\n"
+        "Second page body.\n",
+        encoding="utf-8",
+    )
+    (document,) = load_corpus(tmp_path)
+    covered: set[int] = set()
+    for chunk in document.chunks:
+        assert "<!-- Page" not in chunk.text
+        if chunk.page_start is None:
+            continue
+        page_end = chunk.page_end if chunk.page_end is not None else chunk.page_start
+        covered.update(range(chunk.page_start, page_end + 1))
+    assert covered & {1, 2}
+
+
+def test_load_corpus_leaves_page_coordinates_none_without_markers(
+    tmp_path: Path,
+) -> None:
+    doc = tmp_path / "unpaged.md"
+    doc.write_text("# Title\n\nJust a body.\n", encoding="utf-8")
+    (document,) = load_corpus(tmp_path)
+    assert document.chunks
+    for chunk in document.chunks:
+        assert chunk.page_start is None
+        assert chunk.page_end is None
+
+
+def test_load_corpus_strips_closed_frontmatter_from_chunk_text(tmp_path: Path) -> None:
+    doc = tmp_path / "policy-file.md"
+    doc.write_text(
+        "---\n"
+        "document_id: yaml-id-must-not-win\n"
+        "title: Frontmatter Title\n"
+        "source_file: Policy File.pdf\n"
+        "extractor: pdf_native\n"
+        "page_count: 2\n"
+        "processed_at: 2026-08-16T00:00:00+00:00\n"
+        "---\n"
+        "\n"
+        "# Body Heading\n"
+        "\n"
+        "Intro line.\n"
+        "\n"
+        "## First Rule\n"
+        "\n"
+        "Alpha body.\n",
+        encoding="utf-8",
+    )
+    (document,) = load_corpus(tmp_path)
+    assert document.document_id == "policy-file"
+    assert document.title == "Body Heading"
+    joined = "\n".join(chunk.text for chunk in document.chunks)
+    for key in (
+        "document_id:",
+        "title:",
+        "source_file:",
+        "extractor:",
+        "page_count:",
+        "processed_at:",
+    ):
+        assert key not in joined
+    assert "Frontmatter Title" not in joined
     assert any(chunk.text == "Alpha body." for chunk in document.chunks)
 
 

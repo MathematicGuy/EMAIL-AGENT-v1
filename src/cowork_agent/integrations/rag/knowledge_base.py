@@ -10,7 +10,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .markdown_chunking import chunk_markdown
+from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import split_frontmatter
+
+from .markdown_chunking import chunk_markdown_pages, split_markdown_pages
 
 _H1_PATTERN = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 
@@ -25,6 +27,8 @@ class KnowledgeChunk:
     section: str | None
     text: str
     source_url: str
+    page_start: int | None = None
+    page_end: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,10 +45,13 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
     """Load every ``*.md`` document under ``corpus_dir`` into chunked form.
 
     Documents are read sorted by filename for determinism; ``document_id``
-    is the file stem, ``title`` the first H1 heading (fallback: stem), and
-    ``source_url`` the POSIX path relative to the repository root. Chunks
-    follow H1/H2 sections (fallback: the whole document), split further on
-    paragraph boundaries near ``_MAX_CHUNK_CHARS``.
+    is the file stem, ``title`` the first H1 heading in the body (fallback:
+    stem), and ``source_url`` the POSIX path relative to the repository
+    root. A leading closed frontmatter block is stripped before title and
+    chunking so YAML keys are never indexed. Page comments become
+    ``page_start`` / ``page_end`` (both ``None`` when unmarked). Chunks
+    follow H1/H2 sections (fallback: the whole document), split further
+    on paragraph boundaries near ``_MAX_CHUNK_CHARS``.
 
     Raises:
         ValueError: when ``corpus_dir`` is missing, unreadable, or contains
@@ -60,15 +67,17 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
     documents: list[KnowledgeDocument] = []
     for path in paths:
         raw_text = path.read_text(encoding="utf-8")
+        _fields, body = split_frontmatter(raw_text)
         document_id = path.stem
-        title_match = _H1_PATTERN.search(raw_text)
+        title_match = _H1_PATTERN.search(body)
         title = title_match.group(1).strip() if title_match else document_id
         if repo_root is not None:
             source_url = path.resolve().relative_to(repo_root).as_posix()
         else:
             source_url = path.name
         chunks: list[KnowledgeChunk] = []
-        for part in chunk_markdown(raw_text):
+        pages = split_markdown_pages(body)
+        for part in chunk_markdown_pages(pages):
             chunks.append(
                 KnowledgeChunk(
                     chunk_id=f"{document_id}#{len(chunks)}",
@@ -77,6 +86,8 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
                     section=part.section,
                     text=part.text,
                     source_url=source_url,
+                    page_start=part.page_start,
+                    page_end=part.page_end,
                 )
             )
         documents.append(

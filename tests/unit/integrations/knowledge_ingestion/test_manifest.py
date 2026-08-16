@@ -67,8 +67,82 @@ def test_manifest_persists_only_safe_entry_fields(tmp_path: Path) -> None:
             "sha256": "abc",
             "source": "a.pdf",
             "status": "succeeded",
+            "title": "",
         }
     }
+
+
+def test_manifest_persists_and_reloads_nonempty_title(tmp_path: Path) -> None:
+    store = ManifestStore(tmp_path / "manifest.json")
+    entry = ManifestEntry(
+        source="a.pdf",
+        sha256="abc",
+        status="succeeded",
+        output="a.md",
+        title="Company Policy",
+    )
+
+    store.record(entry)
+
+    assert store.load() == {"a.pdf": entry}
+    assert store.load()["a.pdf"].title == "Company Policy"
+    assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"][
+        "title"
+    ] == "Company Policy"
+    assert store.should_skip("a.pdf", "abc") is True
+
+
+def test_manifest_loads_missing_title_as_empty(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "a.pdf": {
+                    "extractor": "",
+                    "output": "a.md",
+                    "page_count": 0,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "a.pdf",
+                    "status": "succeeded",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ManifestStore(manifest_path)
+
+    loaded = store.load()["a.pdf"]
+    assert loaded.title == ""
+    assert store.should_skip("a.pdf", "abc") is True
+
+
+def test_manifest_treats_non_string_title_as_empty(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "a.pdf": {
+                    "extractor": "",
+                    "output": "a.md",
+                    "page_count": 0,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "a.pdf",
+                    "status": "succeeded",
+                    "title": 123,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ManifestStore(manifest_path)
+
+    loaded = store.load()["a.pdf"]
+    assert loaded.title == ""
+    assert store.should_skip("a.pdf", "abc") is True
 
 
 def test_sha256_file_reads_large_files(tmp_path: Path) -> None:

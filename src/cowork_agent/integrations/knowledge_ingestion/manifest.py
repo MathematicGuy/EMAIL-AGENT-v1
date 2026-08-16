@@ -20,6 +20,7 @@ _ENTRY_FIELDS = (
     "page_count",
     "processed_at",
     "reason_code",
+    "title",
 )
 
 
@@ -86,6 +87,7 @@ def _entry_from_json(source: object, raw_entry: object) -> ManifestEntry | None:
     page_count = raw_entry.get("page_count")
     processed_at = raw_entry.get("processed_at")
     reason_code = raw_entry.get("reason_code")
+    title = raw_entry.get("title")
     if (
         source_value != source
         or not isinstance(source_value, str)
@@ -100,6 +102,8 @@ def _entry_from_json(source: object, raw_entry: object) -> ManifestEntry | None:
         return None
     if reason_code is not None and not isinstance(reason_code, str):
         return None
+    if not isinstance(title, str):
+        title = ""
     return ManifestEntry(
         source=source_value,
         sha256=sha256,
@@ -109,6 +113,7 @@ def _entry_from_json(source: object, raw_entry: object) -> ManifestEntry | None:
         page_count=page_count,
         processed_at=processed_at,
         reason_code=reason_code,
+        title=title,
     )
 
 

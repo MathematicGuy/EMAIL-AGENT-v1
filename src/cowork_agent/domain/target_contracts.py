@@ -515,6 +515,8 @@ class SemanticChunk:
     document_version: str | None
     relevance_score: float
     rerank_score: float | None
+    page_start: int | None = None
+    page_end: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -531,6 +533,8 @@ class SemanticChunk:
             document_version=_optional(data["document_version"], _as_str),
             relevance_score=_as_float(data["relevance_score"]),
             rerank_score=_optional(data["rerank_score"], _as_float),
+            page_start=_optional(data.get("page_start"), _as_int),
+            page_end=_optional(data.get("page_end"), _as_int),
         )
 
 

@@ -232,6 +232,8 @@ def _semantic_chunk(chunk: KnowledgeChunk, relevance_score: float) -> SemanticCh
         document_version=None,
         relevance_score=relevance_score,
         rerank_score=None,
+        page_start=chunk.page_start,
+        page_end=chunk.page_end,
     )
 
 

@@ -341,3 +341,43 @@ def test_retrieval_status_values():
         "authorization_denied",
         "partial",
     }
+
+
+def test_retrieval_response_chunk_page_fields_default_none():
+    chunk = _retrieval_response().chunks[0]
+    assert chunk.page_start is None
+    assert chunk.page_end is None
+    restored = SemanticRetrievalResponse.from_dict(_retrieval_response().to_dict())
+    assert restored == _retrieval_response()
+    assert restored.chunks[0].page_start is None
+    assert restored.chunks[0].page_end is None
+
+
+def test_semantic_chunk_from_dict_omits_page_keys():
+    payload = _retrieval_response().to_dict()["chunks"][0]
+    assert isinstance(payload, dict)
+    payload.pop("page_start", None)
+    payload.pop("page_end", None)
+    chunk = SemanticChunk.from_dict(payload)
+    assert chunk.page_start is None
+    assert chunk.page_end is None
+
+
+def test_semantic_chunk_from_dict_round_trips_page_coordinates():
+    chunk = SemanticChunk(
+        chunk_id="doc#0",
+        document_id="doc",
+        document_title="Quarterly Report Template",
+        section="Usage",
+        text="Use the shared template.",
+        source_url="data/extracted/doc.md",
+        document_version=None,
+        relevance_score=0.91,
+        rerank_score=None,
+        page_start=1,
+        page_end=2,
+    )
+    restored = SemanticChunk.from_dict(chunk.to_dict())
+    assert restored == chunk
+    assert restored.page_start == 1
+    assert restored.page_end == 2

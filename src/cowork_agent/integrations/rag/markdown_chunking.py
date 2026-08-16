@@ -9,6 +9,7 @@ from dataclasses import dataclass
 DEFAULT_MAX_CHARS = 1_200
 
 _HEADING = re.compile(r"^#{1,2}\s+(.+?)\s*$")
+_PAGE_MARKER = re.compile(r"^<!--\s*Page\s+(\d+)\s*-->\s*$")
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -34,6 +35,38 @@ class MarkdownChunk:
 class _Paragraph:
     text: str
     page_number: int | None
+
+
+def split_markdown_pages(markdown: str) -> tuple[MarkdownPage, ...]:
+    """Split Markdown on `<!-- Page N -->` markers into page fragments."""
+
+    normalized = markdown.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    if not any(_PAGE_MARKER.match(line) for line in lines):
+        return (MarkdownPage(markdown=normalized, page_number=None),)
+
+    pages: list[MarkdownPage] = []
+    current_number: int | None = None
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_lines
+        body = "\n".join(current_lines)
+        if current_number is None and not body:
+            current_lines = []
+            return
+        pages.append(MarkdownPage(markdown=body, page_number=current_number))
+        current_lines = []
+
+    for line in lines:
+        match = _PAGE_MARKER.match(line)
+        if match is not None:
+            flush()
+            current_number = int(match.group(1))
+            continue
+        current_lines.append(line)
+    flush()
+    return tuple(pages)
 
 
 def chunk_markdown(
