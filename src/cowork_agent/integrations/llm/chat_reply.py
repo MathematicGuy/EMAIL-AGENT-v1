@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from typing import cast
+from typing import Any, cast
 
 from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, EpisodeCitation
@@ -217,20 +217,39 @@ class GroqChatReply(_ConfiguredChatReply):
 
 class GeminiChatReply(_ConfiguredChatReply):
     @classmethod
-    def from_settings(cls, settings: GeminiSettings) -> GeminiChatReply:
-        from .providers.gemini import GoogleGenAITransport
+    def from_settings(
+        cls,
+        settings: GeminiSettings,
+        *,
+        transport: Any | None = None,
+    ) -> GeminiChatReply:
+        from .providers.gemini import (
+            GeminiKeyRotator,
+            GeminiRateLimitError,
+            GoogleGenAITransport,
+        )
 
-        transport = GoogleGenAITransport()
+        resolved_transport = transport or GoogleGenAITransport()
+        rotator = GeminiKeyRotator(settings.api_keys)
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
-            return await transport.generate(
-                api_key=settings.api_keys[0],
-                model=settings.model,
-                prompt=json.dumps(payload["context"], ensure_ascii=False),
-                schema=_RESPONSE_SCHEMA,
-                timeout_seconds=settings.timeout_seconds,
-                system_instruction=cast(str, payload["system"]),
-            )
+            keys = await rotator.candidates(settings.max_attempts)
+            last_error: GeminiRateLimitError | None = None
+            for key in keys:
+                try:
+                    return await resolved_transport.generate(
+                        api_key=key,
+                        model=settings.model,
+                        prompt=json.dumps(payload["context"], ensure_ascii=False),
+                        schema=_RESPONSE_SCHEMA,
+                        timeout_seconds=settings.timeout_seconds,
+                        system_instruction=cast(str, payload["system"]),
+                    )
+                except GeminiRateLimitError as error:
+                    last_error = error
+                    if not settings.rotate_on_rate_limit:
+                        raise
+            raise last_error or ChatReplyUnavailable("no Gemini API key was attempted")
 
         return cls(model=settings.model, complete=complete)
 

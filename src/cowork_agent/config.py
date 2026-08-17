@@ -487,7 +487,7 @@ class JinaEmbeddingSettings:
 
 @dataclass(frozen=True, slots=True)
 class RerankerSettings:
-    """Configuration for RerankerAdapter with key rotation."""
+    """Configuration for RerankerAdapter with key rotation (Cohere default)."""
 
     model: str
     rotator: APIKeyRotator
