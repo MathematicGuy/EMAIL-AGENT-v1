@@ -35,6 +35,7 @@ for another.
 | `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `docs/evaluations/baselines/`          |
 | `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `docs/evaluations/CHAT-RAG/baselines/` |
 | `scripts/build_evaluation_dashboard.py` | —                   | `docs/evaluations/baselines/`                                  | `docs/evaluations/dashboard.md`        |
+| Playwright `e2e/chat-history-latency.spec.ts` | Chat-switch UI latency | saved chats in the dashboard | `evaluations/CHAT/latency/` |
 
 Each has a focused test under `tests/unit/scripts/`.
 

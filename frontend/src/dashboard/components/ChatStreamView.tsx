@@ -728,7 +728,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full overflow-hidden relative" data-testid="chat-stream">
       {/* Scrollable Messages Stream Container */}
       <div
         ref={containerRef}
@@ -742,7 +742,12 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
             const parts = parseMarkdownContent(msg.content);
 
             return (
-              <div key={msg.id} className="w-full flex flex-col gap-2">
+              <div
+                key={msg.id}
+                className="w-full flex flex-col gap-2"
+                data-testid="chat-message"
+                data-role={msg.role}
+              >
                 {/* Message Header */}
                 <div className="flex items-center justify-between text-xs text-zinc-400 select-none px-1">
                   <div className="flex items-center gap-2.5">
