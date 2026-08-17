@@ -29,6 +29,7 @@ vi.mock('./hooks/useStreamingChat', () => ({
     resetChat: vi.fn(),
     loadExistingChat: vi.fn(),
     loadFullEvidence: vi.fn(),
+    prefetchChat: vi.fn(),
     apiStatus: 'live',
     recentChats: [],
     isHistoryLoading: false,

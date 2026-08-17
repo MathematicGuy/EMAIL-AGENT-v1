@@ -24,6 +24,7 @@ interface TaskbarProps {
   activeProjectId: string;
   onSelectProject: (projectId: string) => void;
   onSelectRecent: (chat: RecentChat) => void;
+  onPrefetchChat?: (chat: RecentChat) => void;
   onDeleteChat: (chat: RecentChat) => void;
   recentChats: RecentChat[];
   isHistoryLoading?: boolean;
@@ -59,6 +60,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   activeProjectId,
   onSelectProject,
   onSelectRecent,
+  onPrefetchChat,
   onDeleteChat,
   recentChats,
   isHistoryLoading = false,
@@ -365,6 +367,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   <button
                     data-testid="recent-chat"
                     data-chat-id={chat.id}
+                    onMouseEnter={() => onPrefetchChat?.(chat)}
+                    onFocus={() => onPrefetchChat?.(chat)}
                     onClick={() => {
                       onChangeView?.('chat');
                       onSelectRecent(chat);

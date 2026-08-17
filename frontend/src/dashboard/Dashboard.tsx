@@ -97,6 +97,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     deleteChat,
     loadExistingChat,
     loadFullEvidence,
+    prefetchChat,
     apiStatus,
     recentChats,
     isHistoryLoading,
@@ -159,6 +160,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onSelectRecent={handleSelectRecent}
+        onPrefetchChat={(chat) => { void prefetchChat(chat.id); }}
         onDeleteChat={handleDeleteChat}
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}

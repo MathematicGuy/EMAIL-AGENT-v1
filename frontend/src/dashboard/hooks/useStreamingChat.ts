@@ -282,6 +282,7 @@ export function useStreamingChat(
   const abortRef = useRef<AbortController | null>(null);
   const loadHistoryAbortRef = useRef<AbortController | null>(null);
   const transcriptCacheRef = useRef(new Map<string, ChatMessage[]>());
+  const prefetchInFlightRef = useRef(new Set<string>());
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
 
   const rememberTranscript = useCallback((sessionId: string, next: ChatMessage[]) => {
@@ -804,6 +805,27 @@ export function useStreamingChat(
     return null;
   }, [activeConversationId, rememberTranscript]);
 
+  const prefetchChat = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId === activeConversationId) return;
+    if (transcriptCacheRef.current.has(sessionId)) return;
+    if (prefetchInFlightRef.current.has(sessionId)) return;
+    if (prefetchInFlightRef.current.size >= 2) return;
+    prefetchInFlightRef.current.add(sessionId);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) return;
+      const payload = (await response.json()) as { turns: ChatTurn[] };
+      rememberTranscript(sessionId, messagesFromTurns(payload.turns));
+    } catch {
+      return;
+    } finally {
+      prefetchInFlightRef.current.delete(sessionId);
+    }
+  }, [activeConversationId, rememberTranscript]);
+
   const resetChat = useCallback(() => {
     abortRef.current?.abort();
     loadHistoryAbortRef.current?.abort();
@@ -882,6 +904,7 @@ export function useStreamingChat(
     deleteChat,
     loadExistingChat,
     loadFullEvidence,
+    prefetchChat,
     apiStatus,
   };
 }
