@@ -29,6 +29,7 @@ from cowork_agent.features.ai_chat.intent.evaluation import (
     ChatRoutingEvalResult,
     compute_chat_routing_metrics,
 )
+from cowork_agent.features.ai_chat.intent.prompt import INTENT_PROMPT_VERSION
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.integrations.llm.chat_intent import (
     FaucetIntentClassifier,
@@ -36,14 +37,9 @@ from cowork_agent.integrations.llm.chat_intent import (
     GroqIntentClassifier,
 )
 
-DEFAULT_OUTPUT_DIR = Path("docs/evaluations/CHAT")
-FIXTURE_LOADER = (
-    Path(__file__).resolve().parents[1]
-    / "tests"
-    / "fixtures"
-    / "chat_routing"
-    / "loader.py"
-)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "CHAT"
+FIXTURE_LOADER = REPO_ROOT / "tests" / "fixtures" / "chat_routing" / "loader.py"
 
 
 def _load_fixture_module():
@@ -165,7 +161,7 @@ def build_report(
         "date": datetime.now(UTC).date().isoformat(),
         "model": model_id,
         "case_count": len(results),
-        "prompt_version": "chat-intent-v1",
+        "prompt_version": INTENT_PROMPT_VERSION,
         "metrics": asdict(metrics),
         "passed": metrics.passed,
         "per_case": [asdict(result) for result in results],

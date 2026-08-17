@@ -7,8 +7,11 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Whole suite: `uv run pytest -q` -> ~19 s, 977 passed.** Defaults live in
+**Whole suite: `uv run pytest -q` -> ~24 s, 1311 passed.** Defaults live in
 `pyproject.toml`: `-n 4 --dist loadfile -m 'not live' --strict-markers`.
+
+The suite is **offline by construction** -- see §7. Do not undo that to make a
+test pass.
 
 ---
 
@@ -19,23 +22,23 @@ which is what one route costs; the full suite is parallel.
 
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 162 | 1.0 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 362 | 2.3 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 45 | 4.6 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 43 | 2.8 s | Prompt assembly, parsing, key rotation, classifiers. |
-| R5 | `tests/unit/integrations/gmail` | 19 | 0.9 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 189 | 17.0 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 17 | 1.2 s | Repository logic against fakes. |
-| R8 | `tests/unit/orchestration` | 12 | 2.7 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 69 | 13.3 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
-| R10 | `tests/unit/fixtures` | 33 | 3.5 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 22 | 7.1 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 4.2 s | Real PostgreSQL. **Skips wholesale without a server.** |
-| R13 | `tests/integration/email_action_plan` | 45 | 4.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 82 | 15.6 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 904 | 27.4 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 835 | 20.2 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(everything)* | 977 | **19 s parallel** | `uv run pytest -q` |
+| R1 | `tests/unit/domain` | 172 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 634 | 2.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 73 | 5.5 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 43 | 1.6 s | Prompt assembly, parsing, key rotation, classifiers. |
+| R5 | `tests/unit/integrations/gmail` | 19 | 0.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
+| R6 | `tests/unit/integrations` | 251 | 9.0 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 19 | 1.3 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 12 | 1.5 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 66 | 10.4 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
+| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 25 | 5.5 s | FastAPI via in-process ASGI transport. |
+| R12 | `tests/integration/persistence` | 9 | 3.9 s | Real PostgreSQL. **Skips wholesale without a server.** |
+| R13 | `tests/integration/email_action_plan` | 45 | 3.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 76 | 14.4 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1244 | 29.3 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1178 | 19 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
+| — | *(everything)* | 1311 | **24 s parallel** | `uv run pytest -q` |
 
 ### Source -> route
 
@@ -97,11 +100,14 @@ absent, add the row when you add the test.
 | Binary `document_date` harvest (PDF `/Info`, DOCX props; never mtime) | `unit/integrations/knowledge_ingestion/test_date_harvest.py` | service tests except one wire-up |
 | Company RAG pre-filter (`document_ids` / `years` / `months`); missing date fails year/month | `unit/integrations/rag/test_rag.py` (`allowed_chunk_indices`) | hybrid/turbovec except one empty-allowlist-no-embed |
 | Retrieval over the *committed corpus* + degrade-to-null path | `unit/integrations/test_bootstrap.py` | — |
+| Jina embed key rotation (429, empty-wallet 403; not generic 403) | `unit/integrations/rag/test_embeddings.py` | bootstrap / hybrid |
 | Project-document ACL (six SQL conditions before embed) + cross-project isolation + empty-allowlist short-circuit | `unit/integrations/test_project_documents_hybrid.py` | orchestration/API tests |
 | Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
 | OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
 | Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
 | GET `/sessions/{id}/messages` omits `rag_evidence.content` unless `include_content=true` | `integration/api/test_chat_api.py` | frontend mapper except one preview-only case |
+| No test outside the `live` tier opens a non-loopback socket | `tests/unit/test_network_guard.py` | — |
+| App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
 
 ### Two facts that break tests if you forget them
 
@@ -192,7 +198,9 @@ expect a failure so only the first traceback lands in context.
 
 ```
 tests/
-  conftest.py                       suite guards: broken SSL_CERT_FILE, deselect banner
+  conftest.py                       suite guards: SSL_CERT_FILE, offline RAG pin,
+                                    outbound-socket block, deselect banner, log quiet
+  unit/test_network_guard.py        proves the socket block actually blocks
   fixtures/                         shared builders and golden-fixture loaders
   unit/                             no I/O, no app boot, fakes only
     scripts/cli_harness.py          in-process runner for scripts/*.py
@@ -207,3 +215,59 @@ Gate before handing work back:
 ```bash
 uv run pytest -q && uv run ruff check . && uv run mypy src
 ```
+
+---
+
+## 7. The Offline Guarantee
+
+`tests/conftest.py` enforces two rules that keep a run's result a function of
+the code and nothing else.
+
+### `RAG_STORE_PROVIDER` is pinned to `none`
+
+`build_semantic_memory` defaults to `turbovec`, which loads the whole committed
+corpus and then calls the **real Jina embedding API** to build an index.
+`create_app()` runs it during lifespan startup, so every test that booted the
+API made live, billable HTTP calls on whatever keys sat in the developer's
+`.env`.
+
+It looked fine only because the call was 403ing and the `except` branch
+degraded to `NullSemanticMemory` -- every assertion in the API tier was running
+against the degraded object *by accident*. What the suite actually tested
+depended on three things that have nothing to do with the code:
+
+| Ambient state | What the tests then exercised | Cold-cache suite |
+|---|---|---|
+| Bad/absent key (403) | `NullSemanticMemory` via the degrade path | ~24 s |
+| Working key, no snapshot | a real Jina-embedded index, built per boot | **~115-155 s** |
+| Working key, snapshot on disk | an index loaded from `.data/turbovec_index.tvim` | ~16 s |
+
+Three different objects under test, selected by a cache file and a wallet
+balance. Pinning the disabled provider removes the variable entirely and takes
+the cold-cache suite from ~2 minutes to ~22 s.
+
+Set it explicitly (`RAG_STORE_PROVIDER=turbovec uv run pytest ...`) if you mean
+to exercise the real store. To test the *bootstrap* rather than the network,
+copy `unit/integrations/test_bootstrap.py`, which stubs `load_corpus` and
+`JinaEmbeddingAdapter` and stays offline.
+
+### Non-loopback sockets raise
+
+The `_no_external_network` autouse fixture replaces `socket.socket.connect` for
+the duration of each test. Loopback and any host named in `PG_TEST_URL` /
+`DATABASE_URL` pass through -- the Postgres tier and the live server subprocess
+need them. Everything else raises `RuntimeError: Blocked outbound connection`.
+
+`live`-marked tests are exempt by definition: real Gmail OAuth and real Gemini
+calls are what they exist to exercise.
+
+If you hit the error, do not widen the allowlist. Stub the adapter at the seam,
+or mark the test `live` and accept that it leaves the default selection.
+
+### Adding a test that needs a service
+
+1. Can it be a fake? Do that -- see `integrations/*/fakes.py`.
+2. Needs the real thing? Mark it `live` (and `serial` if it binds a port or
+   spawns a process), and give it a loud skip when the service is absent.
+3. Never let a network failure degrade silently into a passing assertion. That
+   is the exact bug this section exists to prevent.

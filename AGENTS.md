@@ -28,6 +28,7 @@ Two decoupled workflows — do not merge them:
 src/cowork_agent/
 ├── app.py                       # FastAPI composition root; entry point `mail-todo-api`
 ├── config.py                    # env settings loaders (Gmail, Gemini, Groq)
+├── prompting.py                 # shared untrusted/retrieved block delimiters for prompts
 ├── api/                         # HTTP handlers / response serialization
 ├── domain/models.py             # pure domain models (no framework imports)
 ├── features/email_action_plan/  # workflow, policies, ports, schemas

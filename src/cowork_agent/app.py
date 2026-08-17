@@ -180,7 +180,7 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 class CreateRunRequest(BaseModel):
     mailbox_connection_id: str = Field(alias="mailboxConnectionId")
     query: str = DEFAULT_QUERY
-    max_emails: int = Field(default=200, alias="maxEmails", ge=1, le=500)
+    max_emails: int = Field(default=10, alias="maxEmails", ge=1, le=500)
 
 
 class KnowledgeChatRequest(BaseModel):
@@ -495,8 +495,10 @@ def create_app() -> FastAPI:
                 classifier: RouteClassifierPort
                 generator: ActionPlanGeneratorPort
                 intent_classifier: IntentClassifierPort
+                generation_concurrency = 1
                 if provider == "gemini":
                     gemini_settings = GeminiSettings.from_env()
+                    generation_concurrency = gemini_settings.action_plan_concurrency
                     intent_settings = ChatIntentSettings.from_env(
                         default_model=gemini_settings.model
                     )
@@ -573,6 +575,8 @@ def create_app() -> FastAPI:
                         settings.connection_db_path.parent, settings.token_encryption_key
                     ),
                     completion_outbox=app.state.outbox_repository,
+                    mailbox_fetch_concurrency=settings.fetch_concurrency,
+                    generation_concurrency=generation_concurrency,
                 )
                 app.state.llm_configuration_error = None
                 app.state.llm_provider_label = provider_label

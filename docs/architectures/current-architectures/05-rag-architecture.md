@@ -3,7 +3,7 @@
 **Architecture level:** Level 1 — Deep-Dive RAG & Vector Memory Subsystem  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/integrations/rag`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1, §2 & §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md), [ADR-004](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md), and [ADR-007](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1, §2 & §3](../TARGET-ARCHITECTURE.md), [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md), and [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)
 
 ---
 
@@ -13,32 +13,32 @@ The Enterprise RAG & Vector Memory Subsystem provides high-precision, low-latenc
 
 | RAG Capability | Live Implementation | Authoritative Module Location |
 |---|---|---|
-| **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) |
-| **Parsing & Chunking** | Heading-aware section splitting bounded to 1200 characters; page-aware chunking for user documents. | [markdown_chunking.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/markdown_chunking.py) |
-| **Embedding Adapters** | Dual embedding support for Jina AI Embeddings (`v5`) and Gemini Embeddings API. | [embeddings.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) |
-| **Primary Vector Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) wrapped with BM25 + RRF. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
-| **Quantized Memory Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) for low-footprint local vector search. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
-| **Hybrid & Lexical Search** | Dense matrix cosine search + Okapi BM25 lexical search adapter fused via Reciprocal Rank Fusion (`k=60`). | [hybrid.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py) & [bm25.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bm25.py) |
-| **Cross-Encoder Reranking** | Jina Cross-Encoder Reranker (`jina-reranker-v2-base-multilingual`) for precision candidate reranking. | [jina_reranker.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/jina_reranker.py) |
-| **Diversity & Query HyDE** | Query guard, domain prefix expansion, HyDE hypothetical document generation, and MMR diversification (`lambda=0.7`). | [query_transform.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/query_transform.py) & [mmr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/mmr.py) |
-| **User Project Docs RAG** | Dedicated vector store for uploaded user files with workspace/user/project isolation and classifier gating. | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py) |
+| **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](../../../src/cowork_agent/ingestion_cli.py) & [knowledge_base.py](../../../src/cowork_agent/integrations/rag/knowledge_base.py) |
+| **Parsing & Chunking** | Heading-aware section splitting bounded to 1200 characters; page-aware chunking for user documents. | [markdown_chunking.py](../../../src/cowork_agent/integrations/rag/markdown_chunking.py) |
+| **Embedding Adapters** | Dual embedding support for Jina AI Embeddings (`v5`) and Gemini Embeddings API. | [embeddings.py](../../../src/cowork_agent/integrations/rag/embeddings.py) |
+| **Primary Vector Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) wrapped with BM25 + RRF. | [turbovec_memory.py](../../../src/cowork_agent/integrations/rag/turbovec_memory.py) |
+| **Quantized Memory Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) for low-footprint local vector search. | [turbovec_memory.py](../../../src/cowork_agent/integrations/rag/turbovec_memory.py) |
+| **Hybrid & Lexical Search** | Dense matrix cosine search + Okapi BM25 lexical search adapter fused via Reciprocal Rank Fusion (`k=60`). | [hybrid.py](../../../src/cowork_agent/integrations/rag/hybrid.py) & [bm25.py](../../../src/cowork_agent/integrations/rag/bm25.py) |
+| **Cross-Encoder Reranking** | Jina Cross-Encoder Reranker (`jina-reranker-v2-base-multilingual`) for precision candidate reranking. | [jina_reranker.py](../../../src/cowork_agent/integrations/rag/jina_reranker.py) |
+| **Diversity & Query HyDE** | Query guard, domain prefix expansion, HyDE hypothetical document generation, and MMR diversification (`lambda=0.7`). | [query_transform.py](../../../src/cowork_agent/integrations/rag/query_transform.py) & [mmr.py](../../../src/cowork_agent/integrations/rag/mmr.py) |
+| **User Project Docs RAG** | Dedicated vector store for uploaded user files with workspace/user/project isolation and classifier gating. | [project_documents.py](../../../src/cowork_agent/integrations/rag/project_documents.py) |
 
 ---
 
 ## 2. Corpus Ingestion Interface & Indexing Boundary
 
-The document ingestion pipeline (DOCX/PDF conversion, SHA-256 manifest tracking, atomic Markdown generation) operates as a standalone subsystem. For the full ingestion pipeline architecture, see **[06-knowledge-and-document-ingestion-pipeline.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures/06-knowledge-and-document-ingestion-pipeline.md)**.
+The document ingestion pipeline (DOCX/PDF conversion, SHA-256 manifest tracking, atomic Markdown generation) operates as a standalone subsystem. For the full ingestion pipeline architecture, see **[06-knowledge-and-document-ingestion-pipeline.md](06-knowledge-and-document-ingestion-pipeline.md)**.
 
 ```mermaid
 flowchart LR
     INGEST["Ingestion Pipeline Subsystem<br/>(06-knowledge-and-document-ingestion-pipeline.md)"] --> MD["Committed Markdown Corpus<br/>(data/extracted/*.md)"]
-    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / 1200-char max)"]
+    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / normalize + hierarchical<br/>target 1200, max 2000)"]
     LOADER --> EMBED["Embedding Adapter<br/>(Jina v5 / Gemini Embeddings)"]
     
     EMBED --> STORE_TURBO["Turbovec 4-Bit Index<br/>(.data/turbovec_index.tvim)"]
 ```
 
-1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, parses section headings (H1/H2), and emits `KnowledgeChunk` instances bounded to 1200 characters.
+1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md` and chunks them along their heading hierarchy; the chunker itself promotes plain-text structural headings (`Điều 1. …`) to ATX first, so every entry point gets the same structure recovery. Each `KnowledgeChunk` opens with its heading breadcrumb, so a retrieved fragment names the article it came from for both dense and BM25 search; a section that fits stays whole, and chunks never exceed 2000 characters.
 2. **Turbovec Quantized Indexing (`turbovec_memory.py`):** Pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 
@@ -79,11 +79,11 @@ flowchart TB
 
 ## 4. User Project Documents Subsystem RAG Engine
 
-In addition to enterprise company knowledge, the project provides a dedicated vector store for user-uploaded project documents ([ADR-007](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)):
+In addition to enterprise company knowledge, the project provides a dedicated vector store for user-uploaded project documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)):
 
 | Aspect | Technical Implementation |
 |---|---|
-| **Authoritative File** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py) |
+| **Authoritative File** | [project_documents.py](../../../src/cowork_agent/integrations/rag/project_documents.py) |
 | **Storage & Extraction** | Private Supabase Storage bucket + page-aware chunking (`page_start`, `page_end`) for PDF/DOCX documents. |
 | **Vector Isolation** | Per-project Turbovec `.tvim` plus a six-condition Postgres allowlist (`workspace_id`, `user_id`, `project_id`, selected ids, ready, unexpired). |
 | **Classifier Gating** | Access is gated behind `USER_DOCUMENTS_ENABLED=true` and evaluated by `ChatRoutingService` intent classification prior to search execution. |

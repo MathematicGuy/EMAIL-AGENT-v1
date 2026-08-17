@@ -1,11 +1,12 @@
 """Run creation, execution and result use cases."""
 
+import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar, cast
 from uuid import uuid4
 
 from langfuse import observe
@@ -64,6 +65,73 @@ from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+_UNSET = object()
+
+
+async def _bounded_gather(
+    items: Sequence[_T],
+    *,
+    limit: int,
+    operation: Callable[[_T], Awaitable[_R]],
+) -> list[_R]:
+    """Run independent I/O with a bounded fan-out and input-order results."""
+    semaphore = asyncio.Semaphore(limit)
+
+    async def run_item(item: _T) -> _R:
+        async with semaphore:
+            return await operation(item)
+
+    return list(await asyncio.gather(*(run_item(item) for item in items)))
+
+
+async def _bounded_fail_fast(
+    items: Sequence[_T],
+    *,
+    limit: int,
+    operation: Callable[[_T], Awaitable[_R]],
+) -> list[_R]:
+    """Run at most ``limit`` operations, stopping queued work after a failure.
+
+    Results remain aligned to the input sequence. When simultaneous work
+    fails, raise the exception belonging to the earliest input item so a run's
+    safe error is deterministic.
+    """
+    results: list[_R | object] = [_UNSET] * len(items)
+    active: dict[asyncio.Task[_R], int] = {}
+    next_index = 0
+
+    async def run_item(item: _T) -> _R:
+        return await operation(item)
+
+    def start_next() -> None:
+        nonlocal next_index
+        task: asyncio.Task[_R] = asyncio.create_task(run_item(items[next_index]))
+        active[task] = next_index
+        next_index += 1
+
+    while next_index < len(items) and len(active) < limit:
+        start_next()
+    while active:
+        done, _pending = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+        failures: list[tuple[int, BaseException]] = []
+        for task in done:
+            index = active.pop(task)
+            try:
+                results[index] = task.result()
+            except BaseException as exc:
+                failures.append((index, exc))
+        if failures:
+            for task in active:
+                task.cancel()
+            await asyncio.gather(*active, return_exceptions=True)
+            _index, error = min(failures, key=lambda failure: failure[0])
+            raise error
+        while next_index < len(items) and len(active) < limit:
+            start_next()
+    return [cast(_R, result) for result in results]
+
 
 class _RetrievalOutcome(NamedTuple):
     """§12.3 outcome of the zero-or-one retrieval for one candidate."""
@@ -110,7 +178,7 @@ class CreateDigestRun:
         mailbox_connection_id: str,
         idempotency_key: str,
         query: str | None = None,
-        max_emails: int = 200,
+        max_emails: int = 10,
         trigger: RunTrigger = RunTrigger.ON_DEMAND,
         now: datetime | None = None,
     ) -> DigestRun:
@@ -148,6 +216,8 @@ class DigestWorker:
         dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
         completion_outbox: CompletionOutboxPort | None = None,
+        mailbox_fetch_concurrency: int = 6,
+        generation_concurrency: int = 1,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
         # production baseline must not download or extract attachment content.
@@ -160,6 +230,12 @@ class DigestWorker:
         self._trace_sink = trace_sink
         self._dev_trace = dev_trace
         self._completion_outbox = completion_outbox
+        if mailbox_fetch_concurrency < 1:
+            raise ValueError("mailbox_fetch_concurrency must be positive")
+        if generation_concurrency < 1:
+            raise ValueError("generation_concurrency must be positive")
+        self._mailbox_fetch_concurrency = mailbox_fetch_concurrency
+        self._generation_concurrency = generation_concurrency
 
     @observe(name="execute_digest_run")
     async def execute(
@@ -247,7 +323,7 @@ class DigestWorker:
             run_context = GenerationContext(
                 run_id=run.id, user_id=run.user_id
             )
-            outputs: list[_GeneratedCandidate] = []
+            actionable_candidates: list[tuple[TaskCandidate, RouteResolution]] = []
             for task_candidate in candidates:
                 resolution = resolve_candidate_route(task_candidate)
                 logger.info(
@@ -257,49 +333,28 @@ class DigestWorker:
                 )
                 if resolution.route is Route.NO_ACTION:
                     continue
-                candidate_envelopes = tuple(
-                    messages[message_id] for message_id in task_candidate.source_message_ids
-                )
-                retrieval: _RetrievalOutcome | None = None
-                retrieval_ms: int | None = None
-                if resolution.route is Route.RETRIEVE_RAG:
-                    logger.info("  ├─ 🔍 Querying internal RAG knowledge base...")
-                    retrieval_started = time.monotonic()
-                    retrieval = await self._retrieve_for_candidate(run, task_candidate)
-                    retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
-                    chunks_count = (
-                        len(retrieval.response.chunks) if retrieval and retrieval.response else 0
-                    )
-                    logger.info(
-                        "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
-                        chunks_count,
-                        retrieval_ms,
-                    )
-
-                generation_started = time.monotonic()
-                logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
-                output = await self._generator.generate(
-                    user_timezone=user_timezone,
-                    current_time=clock,
-                    run_context=run_context,
-                    candidate=task_candidate,
-                    envelopes=candidate_envelopes,
-                    resolution=resolution,
-                    retrieval=retrieval.response if retrieval is not None else None,
-                )
-                gen_ms = int((time.monotonic() - generation_started) * 1000)
-                logger.info("  └─ ✍️ Action Plan generated (%d ms)", gen_ms)
-                outputs.append(
-                    _GeneratedCandidate(
-                        task_candidate,
-                        resolution,
-                        retrieval,
-                        candidate_envelopes,
-                        output,
-                        retrieval_ms,
-                        gen_ms,
-                    )
-                )
+                actionable_candidates.append((task_candidate, resolution))
+            generation_started = time.monotonic()
+            outputs = await _bounded_fail_fast(
+                actionable_candidates,
+                limit=self._generation_concurrency,
+                operation=lambda item: self._generate_candidate(
+                    run,
+                    item[0],
+                    item[1],
+                    messages,
+                    run_context,
+                    user_timezone,
+                    clock,
+                ),
+            )
+            logger.info(
+                "Run %s generated %d action plan(s) with concurrency %d in %d ms",
+                run.id,
+                len(outputs),
+                self._generation_concurrency,
+                int((time.monotonic() - generation_started) * 1000),
+            )
             logger.info(
                 "Run %s routed %d candidate(s): %d classifier batch(es), %d generation call(s)",
                 run.id,
@@ -468,19 +523,38 @@ class DigestWorker:
             if cursor is None:
                 break
 
-        received_at_by_id: dict[str, datetime] = {}
-        for ref in refs:
+        async def fetch_received_at(ref: MessageRef) -> datetime | None:
             try:
-                received_at_by_id[ref.message_id] = await self._mailbox.get_message_received_at(
+                return await self._mailbox.get_message_received_at(
                     run.mailbox_connection_id, ref.message_id
                 )
             except MailboxTemporaryError:
-                skipped_threads += 1
                 logger.warning(
                     "Run %s skipping message %s after transient timestamp fetch failure",
                     run.id,
                     ref.message_id,
                 )
+                return None
+
+        timestamp_started = time.monotonic()
+        received_at_results = await _bounded_gather(
+            refs,
+            limit=self._mailbox_fetch_concurrency,
+            operation=fetch_received_at,
+        )
+        received_at_by_id: dict[str, datetime] = {}
+        for ref, received_at in zip(refs, received_at_results, strict=True):
+            if received_at is None:
+                skipped_threads += 1
+                continue
+            received_at_by_id[ref.message_id] = received_at
+        logger.info(
+            "Run %s fetched %d Gmail timestamps with concurrency %d in %d ms",
+            run.id,
+            len(refs),
+            self._mailbox_fetch_concurrency,
+            int((time.monotonic() - timestamp_started) * 1000),
+        )
 
         selected_refs = sorted(
             (ref for ref in refs if ref.message_id in received_at_by_id),
@@ -491,19 +565,43 @@ class DigestWorker:
         for ref in selected_refs:
             messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
 
-        for thread_id, selected_ids in messages_by_thread.items():
+        thread_items = tuple(messages_by_thread.items())
+
+        async def fetch_thread(
+            item: tuple[str, list[str]],
+        ) -> Sequence[EphemeralEmailEnvelope] | None:
+            thread_id, _selected_ids = item
             try:
-                thread = await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
+                return await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
             except MailboxTemporaryError:
                 # T5.4 partial-batch continuation: one thread's transient
                 # failure must not abort the run; the adapter already
                 # exhausted its retry budget, so skip and continue.
-                skipped_threads += 1
                 logger.warning(
                     "Run %s skipping thread %s after transient mailbox failure",
                     run.id,
                     thread_id,
                 )
+                return None
+
+        thread_started = time.monotonic()
+        thread_results = await _bounded_gather(
+            thread_items,
+            limit=self._mailbox_fetch_concurrency,
+            operation=fetch_thread,
+        )
+        logger.info(
+            "Run %s fetched %d Gmail threads with concurrency %d in %d ms",
+            run.id,
+            len(thread_items),
+            self._mailbox_fetch_concurrency,
+            int((time.monotonic() - thread_started) * 1000),
+        )
+        for (_thread_id, selected_ids), thread in zip(
+            thread_items, thread_results, strict=True
+        ):
+            if thread is None:
+                skipped_threads += 1
                 continue
             selected_id_set = set(selected_ids)
             # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
@@ -525,6 +623,55 @@ class DigestWorker:
         if run.emails_matched == 0:
             run.emails_matched = run.emails_processed
         return threads, skipped_threads
+
+    async def _generate_candidate(
+        self,
+        run: DigestRun,
+        task_candidate: TaskCandidate,
+        resolution: RouteResolution,
+        messages: dict[str, EphemeralEmailEnvelope],
+        run_context: GenerationContext,
+        user_timezone: str,
+        clock: datetime,
+    ) -> _GeneratedCandidate:
+        """Retrieve (when needed) and generate one independent candidate."""
+        candidate_envelopes = tuple(
+            messages[message_id] for message_id in task_candidate.source_message_ids
+        )
+        retrieval: _RetrievalOutcome | None = None
+        retrieval_ms: int | None = None
+        if resolution.route is Route.RETRIEVE_RAG:
+            logger.info("  ├─ 🔍 Querying internal RAG knowledge base...")
+            retrieval_started = time.monotonic()
+            retrieval = await self._retrieve_for_candidate(run, task_candidate)
+            retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
+            logger.info(
+                "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
+                len(retrieval.response.chunks),
+                retrieval_ms,
+            )
+        generation_started = time.monotonic()
+        logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
+        output = await self._generator.generate(
+            user_timezone=user_timezone,
+            current_time=clock,
+            run_context=run_context,
+            candidate=task_candidate,
+            envelopes=candidate_envelopes,
+            resolution=resolution,
+            retrieval=retrieval.response if retrieval is not None else None,
+        )
+        generation_ms = int((time.monotonic() - generation_started) * 1000)
+        logger.info("  └─ ✍️ Action Plan generated (%d ms)", generation_ms)
+        return _GeneratedCandidate(
+            task_candidate,
+            resolution,
+            retrieval,
+            candidate_envelopes,
+            output,
+            retrieval_ms,
+            generation_ms,
+        )
 
     async def _retrieve_for_candidate(
         self, run: DigestRun, candidate: TaskCandidate

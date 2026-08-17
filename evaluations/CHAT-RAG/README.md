@@ -52,7 +52,7 @@ reads a local-only dataset file that is never committed and writes a
 
 ```powershell
 python scripts/evaluate_chat_rag.py --input <local-only>.json
-python scripts/evaluate_chat_rag.py --input <local-only>.json --output docs/evaluations/CHAT-RAG/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json
+python scripts/evaluate_chat_rag.py --input <local-only>.json --output evaluations/CHAT-RAG/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json
 ```
 
 Input schema:

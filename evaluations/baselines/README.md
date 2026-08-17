@@ -48,4 +48,4 @@ prompt/provider version context noted in the PR.
 
 `scripts/evaluate_retrieval.py` writes `retrieval-eval-<date>-<embedder>-<retriever>.json` here by default. Run `python scripts/build_evaluation_dashboard.py` after adding a report to refresh [the retrieval dashboard](../dashboard.md).
 
-Only compare reports with the same case count, document count, and chunk count. Hashing reports validate evaluator mechanics; semantic-quality decisions require a live embedding run. Chat routing reports write to `docs/evaluations/CHAT/`, and future chat-with-documents grounding reports belong in `docs/evaluations/CHAT-RAG/baselines/`.
+Only compare reports with the same case count, document count, and chunk count. Hashing reports validate evaluator mechanics; semantic-quality decisions require a live embedding run. Chat routing reports write to `evaluations/CHAT/`, and future chat-with-documents grounding reports belong in `evaluations/CHAT-RAG/baselines/`.

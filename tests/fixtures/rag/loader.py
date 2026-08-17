@@ -35,8 +35,12 @@ ANSWERABLE_PROBES: tuple[Probe, ...] = (Probe.LEXICAL, Probe.SEMANTIC, Probe.MIX
 
 EXPANDED_CASE_COUNT = 100
 LEGACY_CASE_COUNT = 32
+#: Rotated once, deliberately: q-016 expected `2. Chuẩn bị giấy tờ cần thiết
+#: trong bộ hồ sơ`, a label that only existed while the chunker ignored H3
+#: headings. Now that it honours them, that heading has no body of its own and
+#: the answer sits under its table sub-heading. Rule 5 below is what caught it.
 LEGACY_CASE_SNAPSHOT_SHA256 = (
-    "f48dc74734e271e4b3e5ee1e8163d92166b58a4f394f005a37f1eec6031bdd6b"
+    "075281fd462ea8c2e3faf267daf2ef0f0bef6e2c7ebcd9cae7db3c9ee77515dd"
 )
 NEW_DOCUMENT_IDS = frozenset(
     {

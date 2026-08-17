@@ -1,5 +1,6 @@
 """Project/document metadata repositories; bytes never pass through this layer."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -290,6 +291,26 @@ class PostgresProjectRepository:
             )
             row = await cursor.fetchone()
         return None if row is None else _document(row)
+
+    async def require_documents(
+        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
+    ) -> Mapping[str, ProjectDocument]:
+        if not document_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(document_ids))
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
+                    content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
+                    chunk_count, error_code, deleted_at, created_at, updated_at
+                FROM project_documents
+                WHERE id = ANY(%s) AND project_id = %s AND workspace_id = %s AND user_id = %s
+                """,
+                (unique_ids, project_id, principal.workspace_id, principal.user_id),
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]): _document(row) for row in rows}
 
     async def list_documents(
         self, principal: VerifiedPrincipal, project_id: str

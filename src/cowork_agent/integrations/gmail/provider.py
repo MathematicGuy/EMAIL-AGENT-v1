@@ -14,11 +14,14 @@ from email.utils import getaddresses, parseaddr
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
+import httplib2  # type: ignore[import-untyped]
 from google.auth.exceptions import RefreshError, TransportError
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp  # type: ignore[import-untyped]
 from google_auth_oauthlib.flow import Flow  # type: ignore[import-untyped]
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
+from googleapiclient.http import HttpRequest  # type: ignore[import-untyped]
 
 from cowork_agent.config import GmailSettings
 from cowork_agent.domain import MailboxConnection
@@ -207,6 +210,7 @@ class GmailMailboxAdapter:
         self._repository = repository
         self._cipher = cipher
         self._service_cache: dict[str, Any] = {}
+        self._service_cache_lock = asyncio.Lock()
 
     async def search_unread(
         self,
@@ -302,30 +306,45 @@ class GmailMailboxAdapter:
             yield data[offset : offset + 64 * 1024]
 
     async def _service(self, connection_id: str) -> Any:
-        if connection_id in self._service_cache:
-            return self._service_cache[connection_id]
-        connection = await self._repository.get(connection_id)
-        if connection is None or connection.status != "active":
-            raise MailboxNotConnectedError(connection_id)
-        try:
-            refresh_token = self._cipher.decrypt(connection.encrypted_refresh_token)
-        except ValueError as exc:
-            raise MailboxReauthRequiredError(
-                "Stored Gmail token cannot be decrypted; reconnect Gmail"
-            ) from exc
-        credentials = Credentials(  # type: ignore[no-untyped-call]
-            token=None,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=self._settings.client_id,
-            client_secret=self._settings.client_secret,
-            scopes=list(connection.scopes),
-        )
-        service = await asyncio.to_thread(
-            build, "gmail", "v1", credentials=credentials, cache_discovery=False
-        )
-        self._service_cache[connection_id] = service
-        return service
+        cached = self._service_cache.get(connection_id)
+        if cached is not None:
+            return cached
+
+        # Discovery resources are safe to cache, but the cache's first build
+        # must be serialized so concurrent mailbox reads do not create several
+        # services with independent credential state.
+        async with self._service_cache_lock:
+            cached = self._service_cache.get(connection_id)
+            if cached is not None:
+                return cached
+
+            connection = await self._repository.get(connection_id)
+            if connection is None or connection.status != "active":
+                raise MailboxNotConnectedError(connection_id)
+            try:
+                refresh_token = self._cipher.decrypt(connection.encrypted_refresh_token)
+            except ValueError as exc:
+                raise MailboxReauthRequiredError(
+                    "Stored Gmail token cannot be decrypted; reconnect Gmail"
+                ) from exc
+            credentials = Credentials(  # type: ignore[no-untyped-call]
+                token=None,
+                refresh_token=refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=self._settings.client_id,
+                client_secret=self._settings.client_secret,
+                scopes=list(connection.scopes),
+            )
+            service = await asyncio.to_thread(
+                build,
+                "gmail",
+                "v1",
+                credentials=credentials,
+                requestBuilder=_gmail_request_builder(credentials),
+                cache_discovery=False,
+            )
+            self._service_cache[connection_id] = service
+            return service
 
     async def _call(self, operation: Callable[[], Mapping[str, Any]]) -> Mapping[str, Any]:
         """Bounded retry budget (T5.4): transient API/transport failures —
@@ -360,6 +379,20 @@ class GmailMailboxAdapter:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))
         raise AssertionError("unreachable: retry loop always returns or raises")
+
+
+def _gmail_request_builder(credentials: Credentials) -> Callable[..., Any]:
+    """Create Gmail requests with a transport that is not shared across threads."""
+
+    def build_request(_http: Any, *args: Any, **kwargs: Any) -> Any:
+        # googleapiclient discovery resources retain this builder and invoke it
+        # for every request. httplib2.Http is not thread-safe, so each request
+        # receives an isolated authorized transport before ``execute`` runs in
+        # asyncio.to_thread.
+        transport = AuthorizedHttp(credentials, http=httplib2.Http())
+        return HttpRequest(transport, *args, **kwargs)
+
+    return build_request
 
 
 def _get_profile_email(credentials: Credentials) -> str:

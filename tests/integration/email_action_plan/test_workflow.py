@@ -648,6 +648,182 @@ def test_transient_thread_failure_skips_thread_and_continues() -> None:
     asyncio.run(scenario())
 
 
+def test_mailbox_fetch_is_bounded_and_preserves_newest_first_order() -> None:
+    class DelayedMailbox(FakeMailbox):
+        def __init__(self, messages: Sequence[EphemeralEmailEnvelope]) -> None:
+            super().__init__(messages)
+            self.timestamp_active = self.thread_active = 0
+            self.max_timestamp_active = self.max_thread_active = 0
+
+        async def get_message_received_at(  # type: ignore[override]
+            self, connection_id: str, message_id: str
+        ) -> datetime:
+            self.timestamp_active += 1
+            self.max_timestamp_active = max(self.max_timestamp_active, self.timestamp_active)
+            try:
+                await asyncio.sleep({"m1": 0.03, "m2": 0.02, "m3": 0.01}[message_id])
+                return await super().get_message_received_at(connection_id, message_id)
+            finally:
+                self.timestamp_active -= 1
+
+        async def get_thread(  # type: ignore[override]
+            self, connection_id: str, thread_id: str
+        ) -> Sequence[EphemeralEmailEnvelope]:
+            self.thread_active += 1
+            self.max_thread_active = max(self.max_thread_active, self.thread_active)
+            try:
+                await asyncio.sleep({"t1": 0.03, "t2": 0.02, "t3": 0.01}[thread_id])
+                return await super().get_thread(connection_id, thread_id)
+            finally:
+                self.thread_active -= 1
+
+    async def scenario() -> None:
+        messages = [
+            replace(email("m1", "t1", "Oldest"), received_at=NOW - timedelta(days=2)),
+            replace(email("m2", "t2", "Middle"), received_at=NOW - timedelta(days=1)),
+            email("m3", "t3", "Newest"),
+        ]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="bounded-fetch", now=NOW
+        )
+        mailbox = DelayedMailbox(messages)
+        classifier = FakeRouteClassifier()
+        worker = DigestWorker(
+            runs,
+            results,
+            mailbox,
+            SafeTextAttachmentExtractor(),
+            classifier,
+            FakePlanGenerator(),
+            ShortTermStore(),
+            task_repository=task_repository,
+            mailbox_fetch_concurrency=2,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert mailbox.max_timestamp_active == 2
+        assert mailbox.max_thread_active == 2
+        assert [message.gmail_message_id for message in classifier.received_envelopes] == [
+            "m3",
+            "m2",
+            "m1",
+        ]
+        processed = await results.list_processed_emails(run.id)
+        assert [item.provider_message_id for item in processed] == ["m3", "m2", "m1"]
+
+    asyncio.run(scenario())
+
+
+def test_generation_is_bounded_and_persists_candidate_order_after_out_of_order_completion() -> None:
+    class DelayedPlanGenerator(FakePlanGenerator):
+        def __init__(self, tasks: tuple[Task, ...]) -> None:
+            super().__init__(tasks)
+            self.active = self.max_active = 0
+            self.completed_ids: list[str] = []
+
+        async def generate(self, **kwargs: object):  # type: ignore[no-untyped-def, override]
+            candidate = kwargs["candidate"]
+            message_id = candidate.source_message_ids[0]  # type: ignore[union-attr]
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep({"m1": 0.03, "m2": 0.02, "m3": 0.01}[message_id])
+                self.completed_ids.append(message_id)
+                return await super().generate(**kwargs)
+            finally:
+                self.active -= 1
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "One"), email("m2", "t2", "Two"), email("m3", "t3", "Three")]
+        generator = DelayedPlanGenerator(
+            (task_for("m1", "One"), task_for("m2", "Two"), task_for("m3", "Three"))
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1",
+            mailbox_connection_id="mbx1",
+            idempotency_key="bounded-generation",
+            now=NOW,
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            generation_concurrency=3,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert generator.max_active == 3
+        assert generator.completed_ids == ["m3", "m2", "m1"]
+        stored = await task_repository.list_for_run(run.id)
+        assert [record.task.gmail_message_id for record in stored] == ["m1", "m2", "m3"]
+
+    asyncio.run(scenario())
+
+
+def test_generation_failure_cancels_queued_candidates_before_persistence() -> None:
+    class FailFirstGenerator(FakePlanGenerator):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started_ids: list[str] = []
+            self.cancelled_ids: list[str] = []
+
+        async def generate(self, **kwargs: object):  # type: ignore[no-untyped-def, override]
+            candidate = kwargs["candidate"]
+            message_id = candidate.source_message_ids[0]  # type: ignore[union-attr]
+            self.started_ids.append(message_id)
+            try:
+                if message_id == "m1":
+                    await asyncio.sleep(0.01)
+                    raise GenerationSchemaError("boom")
+                await asyncio.sleep(1)
+                return await super().generate(**kwargs)
+            except asyncio.CancelledError:
+                self.cancelled_ids.append(message_id)
+                raise
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "One"), email("m2", "t2", "Two"), email("m3", "t3", "Three")]
+        generator = FailFirstGenerator()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cancel-generation", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            generation_concurrency=2,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.FAILED
+        assert generator.started_ids == ["m1", "m2"]
+        assert generator.cancelled_ids == ["m2"]
+        assert await task_repository.list_for_run(run.id) == ()
+
+    asyncio.run(scenario())
+
+
 def test_successful_run_finalizer_clears_short_term_memory() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]

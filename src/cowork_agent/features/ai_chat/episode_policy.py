@@ -107,7 +107,7 @@ def build_task_episode_transition(
     to_status: ValidationStatus,
     transitioned_at: datetime,
 ) -> EpisodeTransition:
-    """Build one canonical, allowed task lifecycle transition for dispatch."""
+    """Build one canonical, allowed task lifecycle transition for execution."""
 
     if not isinstance(transitioned_at, datetime):
         raise TaskEpisodeTransitionRejected("transitioned_at must be a datetime")

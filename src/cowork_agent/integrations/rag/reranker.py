@@ -1,4 +1,5 @@
-"""Unified strategy-driven RerankerAdapter supporting Cohere and Jina APIs with key rotation."""
+"""Unified strategy-driven RerankerAdapter supporting Cohere (default) and Jina
+APIs with key rotation."""
 
 from __future__ import annotations
 
@@ -60,7 +61,8 @@ class StdlibRerankerTransport:
 
 
 class RerankerAdapter:
-    """Unified reranker adapter supporting Cohere and Jina endpoints with key rotation failover."""
+    """Unified reranker adapter supporting Cohere (default) and Jina endpoints
+    with key rotation failover."""
 
     def __init__(
         self,

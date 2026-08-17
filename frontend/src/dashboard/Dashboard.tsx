@@ -7,7 +7,6 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { ChatStreamView } from './components/ChatStreamView';
 
-import { AutomationsView } from './components/AutomationsView';
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
@@ -23,10 +22,10 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
-  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts'>(() =>
+  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'artifacts'>(() =>
     new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
   );
-  const [sidebarState, setSidebarState] = useState<SidebarState>('collapsed');
+  const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
   const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
   const [modelAnchor, setModelAnchor] = useState<Pick<
     DOMRect,
@@ -183,10 +182,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
         {activeView === 'mail' && (
           <MailInboxView />
-        )}
-
-        {(activeView === 'schedules' || activeView === 'dispatch') && (
-          <AutomationsView />
         )}
 
         {activeView === 'artifacts' && (

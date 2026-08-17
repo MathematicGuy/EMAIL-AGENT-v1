@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from io import BytesIO
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 from google.genai import errors
@@ -283,6 +285,92 @@ def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit() -> None:
     assert transport.keys == ["Bearer key-1", "Bearer key-2"]
 
 
+class _InsufficientBalanceThenOkTransport:
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def post_json(
+        self,
+        *,
+        url: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> Mapping[str, object]:
+        del url, payload, timeout_seconds
+        auth = headers["Authorization"]
+        self.keys.append(auth)
+        if auth == "Bearer key-1":
+            raise HTTPError(
+                "https://api.jina.ai/v1/embeddings",
+                403,
+                "Forbidden",
+                None,
+                BytesIO(
+                    b'{"detail":"Insufficient account balance.",'
+                    b'"code":"AUTHZ_INSUFFICIENT_BALANCE"}'
+                ),
+            )
+        return {"data": [{"index": 0, "embedding": [0.1] * 1024}]}
+
+
+def test_jina_adapter_rotates_past_a_key_with_insufficient_balance() -> None:
+    settings = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+    )
+    transport = _InsufficientBalanceThenOkTransport()
+    adapter = JinaEmbeddingAdapter(settings, transport=transport)
+
+    vectors = asyncio.run(adapter.embed(["policy"]))
+
+    assert vectors == ((0.1,) * 1024,)
+    assert transport.keys == ["Bearer key-1", "Bearer key-2"]
+    # Verify key-1 is permanently marked exhausted
+    assert settings.rotator.active_keys == ("key-2",)
+    assert settings.rotator.exhausted_keys == ("key-1",)
+
+    # Second embed call directly uses key-2 and never re-attempts key-1
+    transport.keys.clear()
+    vectors2 = asyncio.run(adapter.embed(["second-doc"]))
+    assert vectors2 == ((0.1,) * 1024,)
+    assert transport.keys == ["Bearer key-2"]
+
+
+class _GenericForbiddenTransport:
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def post_json(
+        self,
+        *,
+        url: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, object],
+        timeout_seconds: float,
+    ) -> Mapping[str, object]:
+        del url, payload, timeout_seconds
+        self.keys.append(headers["Authorization"])
+        raise HTTPError(
+            "https://api.jina.ai/v1/embeddings",
+            403,
+            "Forbidden",
+            None,
+            BytesIO(b"error code: 1010"),
+        )
+
+
+def test_jina_adapter_does_not_rotate_on_generic_forbidden() -> None:
+    settings = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+    )
+    transport = _GenericForbiddenTransport()
+
+    with pytest.raises(HTTPError, match="403"):
+        asyncio.run(JinaEmbeddingAdapter(settings, transport=transport).embed(["policy"]))
+
+    assert transport.keys == ["Bearer key-1"]
+
+
 def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
     transport = _RecordingJinaTransport(
         {"data": [{"index": 0, "embedding": [0.1]}]}
@@ -290,4 +378,15 @@ def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
     adapter = JinaEmbeddingAdapter(_jina_settings(), transport=transport)
 
     with pytest.raises(ValueError, match="dimension"):
+        asyncio.run(adapter.embed(["policy"]))
+
+
+def test_jina_adapter_raises_when_all_keys_are_exhausted() -> None:
+    settings = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1"}, load_env_file=False
+    )
+    settings.rotator.mark_exhausted_sync("key-1")
+    adapter = JinaEmbeddingAdapter(settings)
+
+    with pytest.raises(ValueError, match="All Jina API keys are exhausted"):
         asyncio.run(adapter.embed(["policy"]))

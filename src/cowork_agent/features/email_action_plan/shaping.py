@@ -16,6 +16,7 @@ from cowork_agent.features.email_action_plan.schemas import (
     EmailExtraction,
     ExtractedAction,
 )
+from cowork_agent.prompting import ALL_PROMPT_TAGS
 
 _Thread = tuple[EphemeralEmailEnvelope, ...]
 
@@ -68,7 +69,7 @@ def parse_action_plan(value: object) -> tuple[ActionPlanStep, ...]:
         "relatedmessageids",
         "explicitblocker",
         "classificationreason",
-        "<untrusted_data>",
+        *(f"<{tag}>" for tag in ALL_PROMPT_TAGS),
         '"actionplan"',
         '"providermessageid"',
     )

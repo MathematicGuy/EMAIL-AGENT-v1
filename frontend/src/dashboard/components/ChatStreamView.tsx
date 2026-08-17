@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Copy,
   Check,
@@ -253,7 +253,7 @@ function parseMarkdownContent(rawText: string): ContentPart[] {
 }
 
 // Helper component to format inline markdown with rich headers, lists, quotes, tables, and links
-function FormattedMarkdownText({
+const FormattedMarkdownText = React.memo(function FormattedMarkdownText({
   content,
   sourceIdPrefix = 'artifact',
 }: {
@@ -515,7 +515,7 @@ function FormattedMarkdownText({
       })}
     </div>
   );
-}
+});
 
 function resourceName(ref: SourceSnapshotRef): string {
   const uploadedName = ref.provenance?.upload_filename;
@@ -647,6 +647,318 @@ function ArtifactRefCard({
   );
 }
 
+interface CodeBlockItemProps {
+  part: ContentPart;
+  pIdx: number;
+  msgId: string;
+  copiedId: string | null;
+  onCopy: (text: string, id: string) => void;
+  isStreaming?: boolean;
+  isLastPart?: boolean;
+}
+
+const CodeBlockItem: React.FC<CodeBlockItemProps> = React.memo(({
+  part,
+  pIdx,
+  msgId,
+  copiedId,
+  onCopy,
+  isStreaming,
+  isLastPart,
+}) => {
+  const highlighted = useMemo(() => highlightSyntax(part.content), [part.content]);
+
+  return (
+    <div className="rounded-xl bg-[#141311] border border-[#2e2c28] overflow-hidden my-4 shadow-lg select-text">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#1f1e1b] border-b border-[#2d2b27] text-xs text-zinc-400 select-none">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500/70" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
+          </div>
+          <span className="font-mono text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
+            {part.language || 'CODE'}
+          </span>
+        </div>
+
+        <button
+          onClick={() => onCopy(part.content, `${msgId}-code-${pIdx}`)}
+          className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded transition-colors cursor-pointer"
+          title="Copy code"
+        >
+          {copiedId === `${msgId}-code-${pIdx}` ? (
+            <Check className="w-3.5 h-3.5 text-emerald-400" />
+          ) : (
+            <Copy className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
+
+      <pre className="p-4 text-xs font-mono text-zinc-200 overflow-x-auto leading-relaxed whitespace-pre select-text">
+        <code>{highlighted}</code>
+        {isStreaming && isLastPart && (
+          <span className="inline-block w-2 h-4 ml-1 bg-emerald-300 animate-caret align-middle select-none" />
+        )}
+      </pre>
+    </div>
+  );
+});
+
+interface ChatMessageItemProps {
+  msg: ChatMessage;
+  selectedModel: ModelOption;
+  isVietnamese: boolean;
+  copiedId: string | null;
+  onCopy: (text: string, id: string) => void;
+  onSend: (text?: string) => void;
+  workflows?: Record<string, TaskWorkflow>;
+  onApproveWorkflowPlan?: (taskId: string) => Promise<void> | void;
+  onReviseWorkflowPlan?: (taskId: string, feedback: string) => Promise<void> | void;
+  onRetryWorkflowStep?: (taskId: string, stepId: string) => void;
+  onRetryTurn?: (messageId: string) => void;
+  onOpenMailInbox?: () => void;
+  onRetryMessage?: (msg: ChatMessage) => void;
+}
+
+const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
+  msg,
+  selectedModel,
+  isVietnamese,
+  copiedId,
+  onCopy,
+  onSend,
+  workflows,
+  onApproveWorkflowPlan,
+  onReviseWorkflowPlan,
+  onRetryWorkflowStep,
+  onRetryTurn,
+  onOpenMailInbox,
+  onRetryMessage,
+}) => {
+  const isUser = msg.role === 'user';
+  const parts = useMemo(() => parseMarkdownContent(msg.content), [msg.content]);
+
+  return (
+    <div className="w-full flex flex-col gap-2" data-testid="chat-message" data-role={msg.role}>
+      {/* Message Header */}
+      <div className="flex items-center justify-between text-xs text-zinc-400 select-none px-1">
+        <div className="flex items-center gap-2.5">
+          {isUser ? (
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#d97757] to-[#b85c3e] text-white text-xs font-semibold flex items-center justify-center shadow-sm">
+              DM
+            </div>
+          ) : (
+            <div className="w-7 h-7 rounded-xl bg-[#282623] border border-[#3d3a36] shadow-md flex items-center justify-center p-1">
+              <StarburstIcon className="w-full h-full" />
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-zinc-200 text-xs">
+              {isUser ? 'You' : 'F-Cowork AI'}
+            </span>
+            {!isUser && (
+              <span className="text-[10px] font-medium bg-[#2a2825] text-[#d97757] px-2 py-0.5 rounded border border-[#3d3a36]">
+                {selectedModel.name}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <span className="text-zinc-500 text-[11px] font-normal">{msg.timestamp}</span>
+      </div>
+
+      {/* Clean Message Card Container */}
+      <div
+        className={`w-full text-sm leading-relaxed font-sans select-text transition-all relative overflow-hidden ${
+          isUser
+            ? 'p-4 rounded-2xl bg-[#24221e] border border-[#383531] text-zinc-100 shadow-sm'
+            : 'p-5 rounded-2xl bg-[#1e1d1a] border border-[#2d2b27] text-[#f3f2ef] shadow-md space-y-3 backdrop-blur-sm'
+        }`}
+      >
+        {/* Subtle top ambient glowing gradient line on AI messages */}
+        {!isUser && (
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#d97757]/40 to-transparent" />
+        )}
+
+        {parts.map((part, pIdx) => {
+          const isLastPart = pIdx === parts.length - 1;
+
+          if (part.type === 'text') {
+            return (
+              <div key={pIdx} className="relative">
+                <FormattedMarkdownText content={part.content} />
+                {msg.isStreaming && isLastPart && (
+                  <span className="inline-block w-2 h-4 ml-1 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
+                )}
+              </div>
+            );
+          } else {
+            return (
+              <CodeBlockItem
+                key={pIdx}
+                part={part}
+                pIdx={pIdx}
+                msgId={msg.id}
+                copiedId={copiedId}
+                onCopy={onCopy}
+                isStreaming={msg.isStreaming}
+                isLastPart={isLastPart}
+              />
+            );
+          }
+        })}
+        {msg.mailScan && <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />}
+
+        {/* Caret fallback if message is streaming and content is empty */}
+        {msg.isStreaming && parts.length === 0 && (
+          <span className="inline-block w-2 h-4 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
+        )}
+
+        {msg.attachmentRefs && msg.attachmentRefs.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {msg.attachmentRefs.map((attachment) => (
+              <span
+                key={attachment.ref_id}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[#48433d] bg-[#2b2925] px-2.5 py-1.5 text-[11px] text-zinc-300"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-[#d97757]" />
+                <span className="truncate">{resourceName(attachment)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {!isUser && msg.citations && msg.citations.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2" aria-label="Document citations">
+            {msg.citations.map((citation) => (
+              <span
+                key={citation.citationId}
+                title={citation.section}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-[11px] text-zinc-200"
+              >
+                <FileText className="h-3 w-3 text-[#d97757]" />
+                {citation.unavailable
+                  ? `${citation.documentTitle} · ${isVietnamese ? 'không khả dụng' : 'unavailable'}`
+                  : `${citation.documentTitle}${citation.section ? ` · ${citation.section}` : ''} · ${isVietnamese ? 'trang' : 'page'} ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {!isUser && (msg.ragEvidence || msg.retrievalStatus) && (
+          <RagEvidencePanel
+            evidence={msg.ragEvidence ?? []}
+            retrievalStatus={msg.retrievalStatus}
+          />
+        )}
+
+        {!isUser && msg.quickActions && msg.quickActions.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {msg.quickActions.map((action) => (
+              <button
+                key={action}
+                type="button"
+                onClick={() => onSend(action)}
+                className="rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:border-[#d97757] hover:bg-[#34302b]"
+              >
+                {action}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isUser && msg.taskId && workflows?.[msg.taskId] && (
+          <TaskWorkflowCard
+            workflow={workflows[msg.taskId]}
+            onApprove={onApproveWorkflowPlan}
+            onRevise={onReviseWorkflowPlan}
+            onRetry={onRetryWorkflowStep}
+          />
+        )}
+
+        {!isUser && msg.taskId && !workflows?.[msg.taskId] && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#38342f] bg-[#24221f] px-3 py-2 text-[11px]">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-300" />
+            <span className="text-zinc-300">Đang chuẩn bị công việc…</span>
+            {msg.taskStatus && (
+              <span className="rounded-full bg-[#34312d] px-2 py-0.5 text-[#e29a7e]">
+                Đang xử lý
+              </span>
+            )}
+          </div>
+        )}
+
+        {!isUser &&
+          msg.artifactRefs?.map((artifact) => (
+            <ArtifactRefCard
+              key={artifact.ref_id}
+              artifact={artifact}
+              grounding={
+                msg.artifactGrounding?.find(
+                  (item) => item.artifact_ref_id === artifact.ref_id
+                )?.grounding
+              }
+            />
+          ))}
+      </div>
+
+      {/* Ultra-Clean Icon-Only Action Toolbar for AI responses */}
+      {!isUser && !msg.isStreaming && (
+        <div className="flex items-center gap-1 mt-1 text-zinc-500 text-xs select-none px-1">
+          <button
+            onClick={() => onCopy(msg.content, msg.id)}
+            className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
+            title="Copy response"
+          >
+            {copiedId === msg.id ? (
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          <button
+            className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
+            title="Good response"
+          >
+            <ThumbsUp className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
+            title="Bad response"
+          >
+            <ThumbsDown className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            onClick={() => {
+              if (onRetryTurn) {
+                onRetryTurn(msg.id);
+              } else if (onRetryMessage) {
+                onRetryMessage(msg);
+              }
+            }}
+            className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
+            title="Retry"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
+            title="Share conversation"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   messages,
   isTranscriptLoading = false,
@@ -726,11 +1038,23 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
     prevLastMessageRef.current = lastMsg ?? null;
   }, [messages, isGenerating]);
 
-  const handleCopy = (text: string, id: string) => {
+  const handleCopy = useCallback((text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
+  }, []);
+
+  const handleRetryMessage = useCallback((msg: ChatMessage) => {
+    if (onRetryTurn) {
+      onRetryTurn(msg.id);
+    } else {
+      const idx = messages.findIndex((m) => m.id === msg.id);
+      const userMsg = idx > 0 ? messages[idx - 1] : null;
+      if (userMsg && userMsg.role === 'user') {
+        onSend(userMsg.content);
+      }
+    }
+  }, [messages, onRetryTurn, onSend]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative" data-testid="chat-stream">
@@ -751,269 +1075,24 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
               Đang tải cuộc trò chuyện…
             </div>
           )}
-          {messages.map((msg) => {
-            const isUser = msg.role === 'user';
-            const parts = parseMarkdownContent(msg.content);
-
-            return (
-              <div
-                key={msg.id}
-                className="w-full flex flex-col gap-2"
-                data-testid="chat-message"
-                data-role={msg.role}
-              >
-                {/* Message Header */}
-                <div className="flex items-center justify-between text-xs text-zinc-400 select-none px-1">
-                  <div className="flex items-center gap-2.5">
-                    {isUser ? (
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#d97757] to-[#b85c3e] text-white text-xs font-semibold flex items-center justify-center shadow-sm">
-                        DM
-                      </div>
-                    ) : (
-                      <div className="w-7 h-7 rounded-xl bg-[#282623] border border-[#3d3a36] shadow-md flex items-center justify-center p-1">
-                        <StarburstIcon className="w-full h-full" />
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-zinc-200 text-xs">
-                        {isUser ? 'You' : 'F-Cowork AI'}
-                      </span>
-                      {!isUser && (
-                        <span className="text-[10px] font-medium bg-[#2a2825] text-[#d97757] px-2 py-0.5 rounded border border-[#3d3a36]">
-                          {selectedModel.name}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <span className="text-zinc-500 text-[11px] font-normal">{msg.timestamp}</span>
-                </div>
-
-                {/* Clean Message Card Container */}
-                <div
-                  className={`w-full text-sm leading-relaxed font-sans select-text transition-all relative overflow-hidden ${
-                    isUser
-                      ? 'p-4 rounded-2xl bg-[#24221e] border border-[#383531] text-zinc-100 shadow-sm'
-                      : 'p-5 rounded-2xl bg-[#1e1d1a] border border-[#2d2b27] text-[#f3f2ef] shadow-md space-y-3 backdrop-blur-sm'
-                  }`}
-                >
-                  {/* Subtle top ambient glowing gradient line on AI messages */}
-                  {!isUser && (
-                    <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#d97757]/40 to-transparent" />
-                  )}
-
-                  {parts.map((part, pIdx) => {
-                    const isLastPart = pIdx === parts.length - 1;
-
-                    if (part.type === 'text') {
-                      return (
-                        <div key={pIdx} className="relative">
-                          <FormattedMarkdownText content={part.content} />
-                          {msg.isStreaming && isLastPart && (
-                            <span className="inline-block w-2 h-4 ml-1 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
-                          )}
-                        </div>
-                      );
-                    } else {
-                      // Ultra-Clean Code Block with One Dark Pro Syntax Highlighting
-                      return (
-                        <div
-                          key={pIdx}
-                          className="rounded-xl bg-[#141311] border border-[#2e2c28] overflow-hidden my-4 shadow-lg select-text"
-                        >
-                          {/* Code Header Bar with macOS dots and icon-only copy button */}
-                          <div className="flex items-center justify-between px-4 py-2 bg-[#1f1e1b] border-b border-[#2d2b27] text-xs text-zinc-400 select-none">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full bg-rose-500/70" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-                              </div>
-                              <span className="font-mono text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
-                                {part.language || 'CODE'}
-                              </span>
-                            </div>
-
-                            {/* Icon-Only Copy Button */}
-                            <button
-                              onClick={() => handleCopy(part.content, `${msg.id}-code-${pIdx}`)}
-                              className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded transition-colors cursor-pointer"
-                              title="Copy code"
-                            >
-                              {copiedId === `${msg.id}-code-${pIdx}` ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-
-                          {/* Code Body with Rich Syntax Highlighting */}
-                          <pre className="p-4 text-xs font-mono text-zinc-200 overflow-x-auto leading-relaxed whitespace-pre select-text">
-                            <code>{highlightSyntax(part.content)}</code>
-                            {msg.isStreaming && isLastPart && (
-                              <span className="inline-block w-2 h-4 ml-1 bg-emerald-300 animate-caret align-middle select-none" />
-                            )}
-                          </pre>
-                        </div>
-                      );
-                    }
-                  })}
-                  {msg.mailScan && <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />}
-
-                  {/* Caret fallback if message is streaming and content is empty */}
-                  {msg.isStreaming && parts.length === 0 && (
-                    <span className="inline-block w-2 h-4 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
-                  )}
-
-                  {msg.attachmentRefs && msg.attachmentRefs.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {msg.attachmentRefs.map((attachment) => (
-                        <span
-                          key={attachment.ref_id}
-                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[#48433d] bg-[#2b2925] px-2.5 py-1.5 text-[11px] text-zinc-300"
-                        >
-                          <FileText className="h-3.5 w-3.5 shrink-0 text-[#d97757]" />
-                          <span className="truncate">{resourceName(attachment)}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {!isUser && msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2" aria-label="Document citations">
-                      {msg.citations.map((citation) => (
-                        <span
-                          key={citation.citationId}
-                          title={citation.section}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-[11px] text-zinc-200"
-                        >
-                          <FileText className="h-3 w-3 text-[#d97757]" />
-                          {citation.unavailable
-                            ? `${citation.documentTitle} · ${isVietnamese ? 'không khả dụng' : 'unavailable'}`
-                            : `${citation.documentTitle}${citation.section ? ` · ${citation.section}` : ''} · ${isVietnamese ? 'trang' : 'page'} ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {!isUser && (msg.ragEvidence || msg.retrievalStatus) && (
-                    <RagEvidencePanel
-                      evidence={msg.ragEvidence ?? []}
-                      retrievalStatus={msg.retrievalStatus}
-                      onLoadFullEvidence={onLoadFullEvidence}
-                    />
-                  )}
-
-                  {!isUser && msg.quickActions && msg.quickActions.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {msg.quickActions.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => onSend(action)}
-                          className="rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:border-[#d97757] hover:bg-[#34302b]"
-                        >
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {!isUser && msg.taskId && workflows?.[msg.taskId] && (
-                    <TaskWorkflowCard
-                      workflow={workflows[msg.taskId]}
-                      onApprove={onApproveWorkflowPlan}
-                      onRevise={onReviseWorkflowPlan}
-                      onRetry={onRetryWorkflowStep}
-                    />
-                  )}
-
-                  {!isUser && msg.taskId && !workflows?.[msg.taskId] && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#38342f] bg-[#24221f] px-3 py-2 text-[11px]">
-                      <span className="h-2 w-2 animate-pulse rounded-full bg-amber-300" />
-                      <span className="text-zinc-300">Đang chuẩn bị công việc…</span>
-                      {msg.taskStatus && (
-                        <span className="rounded-full bg-[#34312d] px-2 py-0.5 text-[#e29a7e]">
-                          Đang xử lý
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {!isUser &&
-                    msg.artifactRefs?.map((artifact) => (
-                      <ArtifactRefCard
-                        key={artifact.ref_id}
-                        artifact={artifact}
-                        grounding={
-                          msg.artifactGrounding?.find(
-                            (item) => item.artifact_ref_id === artifact.ref_id
-                          )?.grounding
-                        }
-                      />
-                    ))}
-                </div>
-
-                {/* Ultra-Clean Icon-Only Action Toolbar for AI responses */}
-                {!isUser && !msg.isStreaming && (
-                  <div className="flex items-center gap-1 mt-1 text-zinc-500 text-xs select-none px-1">
-                    <button
-                      onClick={() => handleCopy(msg.content, msg.id)}
-                      className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-                      title="Copy response"
-                    >
-                      {copiedId === msg.id ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-
-                    <button
-                      className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-                      title="Good response"
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-                      title="Bad response"
-                    >
-                      <ThumbsDown className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (onRetryTurn) {
-                          onRetryTurn(msg.id);
-                        } else {
-                          const idx = messages.findIndex((m) => m.id === msg.id);
-                          const userMsg = idx > 0 ? messages[idx - 1] : null;
-                          if (userMsg && userMsg.role === 'user') {
-                            onSend(userMsg.content);
-                          }
-                        }
-                      }}
-                      className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-                      title="Retry"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-                      title="Share conversation"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {messages.map((msg) => (
+            <ChatMessageItem
+              key={msg.id}
+              msg={msg}
+              selectedModel={selectedModel}
+              isVietnamese={isVietnamese}
+              copiedId={copiedId}
+              onCopy={handleCopy}
+              onSend={onSend}
+              workflows={workflows}
+              onApproveWorkflowPlan={onApproveWorkflowPlan}
+              onReviseWorkflowPlan={onReviseWorkflowPlan}
+              onRetryWorkflowStep={onRetryWorkflowStep}
+              onRetryTurn={onRetryTurn}
+              onOpenMailInbox={onOpenMailInbox}
+              onRetryMessage={handleRetryMessage}
+            />
+          ))}
           <div ref={bottomRef} />
         </div>
       </div>

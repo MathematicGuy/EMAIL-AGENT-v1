@@ -33,6 +33,7 @@ htmlcov/
 tmp_pytest/
 *tmp_pytest*
 **/tmp_pytest/**
+.pnpm-store
 
 .runlogs/
 .cowork/evaluations/

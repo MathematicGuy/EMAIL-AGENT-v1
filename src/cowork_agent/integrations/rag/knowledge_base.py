@@ -84,9 +84,10 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
     stem), and ``source_url`` the POSIX path relative to the repository
     root. A leading closed frontmatter block is stripped before title and
     chunking so YAML keys are never indexed. Page comments become
-    ``page_start`` / ``page_end`` (both ``None`` when unmarked). Chunks
-    follow H1/H2 sections (fallback: the whole document), split further
-    on paragraph boundaries near ``_MAX_CHUNK_CHARS``.
+    ``page_start`` / ``page_end`` (both ``None`` when unmarked). Chunking
+    follows the document's heading hierarchy — including plain-text headings
+    such as ``Điều 1.``, which the chunker promotes on the way in — and falls
+    back to size only where structure runs out.
 
     Raises:
         ValueError: when ``corpus_dir`` is missing, unreadable, or contains
