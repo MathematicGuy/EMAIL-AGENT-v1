@@ -93,7 +93,6 @@ def _episode(
     *,
     episode_id: str = "episode-1",
     record_id: str = "record-1",
-    tenant_id: str = "tenant-1",
     user_id: str = "user@example.com",
     session_id: str = "session-1",
     turn_id: str = "turn-1",
@@ -168,10 +167,18 @@ def test_write_is_retry_safe_and_rejects_namespace_or_stale_payload_updates() ->
             assert newer.created_at == stale.created_at == NOW
             assert stale.task_title == "Updated report"
             assert stale.validation_status is ValidationStatus.SYSTEM_GENERATED
-            with pytest.raises(ValueError, match="namespace"):
-                await repository.write_task_episode(
-                    _namespace(tenant_id="tenant-2"), _episode(), expires_at=None
+            foreign_tenant = await repository.write_task_episode(
+                _namespace(tenant_id="tenant-2"), _episode(), expires_at=None
+            )
+            assert foreign_tenant == first
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT tenant_id, task_title FROM task_episodes ORDER BY tenant_id"
                 )
+                assert await cursor.fetchall() == [
+                    ("tenant-1", "Updated report"),
+                    ("tenant-2", "Prepare quarterly report"),
+                ]
         finally:
             await pool.close()
 
@@ -375,7 +382,6 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
                 _episode(
                     episode_id="episode-tenant",
                     record_id="other-tenant",
-                    tenant_id="tenant-2",
                     turn_id="other-tenant",
                 ),
                 expires_at=None,
@@ -406,11 +412,9 @@ def test_malicious_payload_shape_is_rejected_before_persistence_and_identifiers_
     async def scenario() -> None:
         repository, pool = await _repository()
         try:
-            source = _episode(
-                tenant_id="tenant'; DELETE FROM task_episodes; --",
-                user_id="user'; DELETE FROM task_episodes; --",
-            )
-            namespace = _namespace(tenant_id=source.tenant_id, user_id=source.user_id)
+            malicious_tenant = "tenant'; DELETE FROM task_episodes; --"
+            source = _episode(user_id="user'; DELETE FROM task_episodes; --")
+            namespace = _namespace(tenant_id=malicious_tenant, user_id=source.user_id)
             malicious = object.__new__(TaskEpisode)
             for field in fields(TaskEpisode):
                 object.__setattr__(malicious, field.name, getattr(source, field.name))

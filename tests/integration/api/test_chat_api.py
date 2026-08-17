@@ -143,6 +143,15 @@ class HistoryStore:
     async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
         return {scope.session_id: "Saved conversation" for scope in scopes}
 
+    async def latest_turns_for(
+        self, scopes: tuple[ChatMemoryScope, ...]
+    ) -> dict[str, ChatTurn]:
+        return {
+            scope.session_id: self.turn
+            for scope in scopes
+            if scope.session_id == self.turn.session_id
+        }
+
 
 class DurableSessionRegistry:
     """Small async registry double: a durable adapter is the HTTP contract."""
@@ -178,6 +187,20 @@ class DurableSessionRegistry:
 
     async def list_for(self, *, tenant_id: str, user_id: str) -> tuple[ChatMemoryScope, ...]:
         return (self.scope,) if (tenant_id, user_id) == ("tenant-1", "user@example.com") else ()
+
+
+class CancelController:
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+        self.cancelled_keys: list[str] = []
+
+    async def cancel_turn(self, turn_id: str) -> bool:
+        self.cancelled.append(turn_id)
+        return turn_id == "turn-active"
+
+    async def cancel_turn_by_idempotency_key(self, idempotency_key: str) -> bool:
+        self.cancelled_keys.append(idempotency_key)
+        return idempotency_key == "idem-active"
 
 
 def _app(
@@ -245,11 +268,12 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
         assert response.headers["content-type"].startswith("text/event-stream")
         events = _events(response.text)
         assert [event["event_type"] for event in events] == [
+            "started",
             "error",
             "delta",
             "completed",
         ]
-        assert events[0]["code"] == "optional_memory_degraded"
+        assert events[1]["code"] == "optional_memory_degraded"
         assert all(event["session_id"] == "session-1" for event in events)
 
     asyncio.run(scenario())
@@ -335,6 +359,70 @@ def test_message_endpoint_rejects_a_path_and_payload_session_mismatch() -> None:
                     "session_id": "session-2",
                     "user_message": "Wrong session",
                     "idempotency_key": "idem-2",
+                },
+            )
+
+        assert response.status_code == 422
+
+    asyncio.run(scenario())
+
+
+def test_cancel_endpoint_targets_one_owned_chat_turn() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        controller = CancelController()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            app.state.chat_controllers["session-1"] = controller
+            cancelled = await client.post(
+                "/v1/cowork/chat/sessions/session-1/turns/turn-active/cancel"
+            )
+            missing = await client.post(
+                "/v1/cowork/chat/sessions/session-1/turns/turn-finished/cancel"
+            )
+
+        assert cancelled.status_code == 204
+        assert missing.status_code == 404
+        assert controller.cancelled == ["turn-active", "turn-finished"]
+
+    asyncio.run(scenario())
+
+
+def test_cancel_endpoint_accepts_idempotency_key_before_started_event() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        controller = CancelController()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            app.state.chat_controllers["session-1"] = controller
+            cancelled = await client.post(
+                "/v1/cowork/chat/sessions/session-1/turns/cancel",
+                json={"idempotency_key": "idem-active"},
+            )
+
+        assert cancelled.status_code == 204
+        assert controller.cancelled_keys == ["idem-active"]
+
+    asyncio.run(scenario())
+
+
+def test_message_endpoint_rejects_oversized_idempotency_key() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            response = await client.post(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                json={
+                    "session_id": "session-1",
+                    "user_message": "Hello",
+                    "idempotency_key": "x" * 129,
                 },
             )
 
@@ -429,14 +517,15 @@ def test_task_episode_controls_use_only_the_originating_session_and_gateway_life
             episode_id = episodes.writes[0].episode_id
             events = _events(created.text)
             assert [event["event_type"] for event in events] == [
+                "started",
                 "error",
                 "delta",
                 "memory_citation",
                 "task_proposal",
                 "completed",
             ]
-            assert events[2]["source_id"] == episode_id
-            proposal = events[3]["proposal"]
+            assert events[3]["source_id"] == episode_id
+            proposal = events[4]["proposal"]
             assert proposal["episode_id"] == episode_id
             assert proposal["task_title"] == "Chat task"
             assert proposal["validation_status"] == "system_generated"
@@ -629,6 +718,8 @@ def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> N
             history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
 
         assert listed.json()["sessions"][0]["title"] == "Saved conversation"
+        assert listed.json()["sessions"][0]["latest_turn_status"] == "completed"
+        assert listed.json()["sessions"][0]["latest_turn_id"] == "turn-history-1"
         assert history.json()["turns"] == [HistoryStore().turn.to_dict()]
 
     asyncio.run(scenario())

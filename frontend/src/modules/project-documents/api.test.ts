@@ -60,6 +60,44 @@ describe('project document polling', () => {
 });
 
 describe('project document availability and upload cancellation', () => {
+  it('copies file bytes into a runtime-owned Uint8Array before hashing', async () => {
+    const digest = vi.fn().mockImplementation((algorithm: string, data: BufferSource) => {
+      expect(algorithm).toBe('SHA-256');
+      expect(data).toBeInstanceOf(Uint8Array);
+      expect(Object.getPrototypeOf(data).constructor).toBe(Uint8Array);
+      expect((data as Uint8Array).buffer).toBeInstanceOf(ArrayBuffer);
+      expect(Object.getPrototypeOf((data as Uint8Array).buffer).constructor).toBe(ArrayBuffer);
+      return Promise.resolve(new Uint8Array(32).buffer);
+    });
+    vi.stubGlobal('crypto', { ...globalThis.crypto, subtle: { digest } });
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({
+          document_id: 'document-1', status: 'received',
+        }), { status: 202, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        document_id: 'document-1',
+        filename: 'policy.pdf',
+        media_type: 'application/pdf',
+        byte_size: 9,
+        status: 'ready',
+        error_code: null,
+        page_count: 1,
+        chunk_count: 1,
+        ocr_page_count: 0,
+        expires_at: '2026-09-12T00:00:00Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }));
+
+    await uploadProjectDocument(
+      'project-1',
+      new File(['%PDF-test'], 'policy.pdf', { type: 'application/pdf' }),
+    );
+
+    expect(digest).toHaveBeenCalledOnce();
+  });
+
   it('keeps document controls fail-closed when feature is disabled', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'disabled',

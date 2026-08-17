@@ -362,6 +362,10 @@ def create_app() -> FastAPI:
                 app.state.session_repository = PostgresSessionRepository(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
+                from cowork_agent.persistence.repositories.local import (
+                    InMemoryChatHistoryRepository,
+                )
+
                 task_repository = SQLiteTaskRepository(
                     settings.connection_db_path.parent / "tasks.db"
                 )
@@ -375,7 +379,7 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.chat_session_repository = None
-                app.state.chat_history_repository = None
+                app.state.chat_history_repository = InMemoryChatHistoryRepository()
                 app.state.pg_pool = None
                 app.state.project_repository = None
                 chat_session_registry = InMemoryChatSessionRegistry()

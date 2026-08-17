@@ -183,6 +183,37 @@ def _chat_turn() -> ChatTurn:
     )
 
 
+def test_chat_turn_round_trips_durable_generation_lifecycle() -> None:
+    turn = ChatTurn(
+        turn_id="turn-pending",
+        session_id="session-1",
+        user_message="Keep this prompt while the reply is generating.",
+        assistant_message=None,
+        created_at=datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
+        status="generating",
+        idempotency_key="submission-1",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["status"] == "generating"
+    assert turn.to_dict()["idempotency_key"] == "submission-1"
+
+
+def test_chat_turn_round_trips_terminal_failure_code() -> None:
+    turn = ChatTurn(
+        turn_id="turn-failed",
+        session_id="session-1",
+        user_message="Try a provider-limited request.",
+        assistant_message=None,
+        created_at=datetime(2026, 8, 17, 9, 1, tzinfo=UTC),
+        status="rate_limited",
+        idempotency_key="submission-2",
+        error_code="provider_rate_limit",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+
+
 def _rag_evidence():
     return ChatRagEvidence(
         source="company_knowledge",
@@ -425,6 +456,15 @@ def test_chat_message_request_rejects_a_message_above_the_contract_limit() -> No
             session_id="session-1",
             user_message="x" * (MAX_CHAT_MESSAGE_LENGTH + 1),
             idempotency_key="idem-1",
+        )
+
+
+def test_chat_message_request_rejects_an_oversized_idempotency_key() -> None:
+    with pytest.raises(ValueError, match="idempotency_key"):
+        ChatMessageRequest(
+            session_id="session-1",
+            user_message="Help me plan.",
+            idempotency_key="x" * 129,
         )
 
 
