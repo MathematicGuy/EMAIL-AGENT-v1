@@ -148,6 +148,40 @@ describe('useStreamingChat Project chat client', () => {
     });
   });
 
+  it('finalizes an in-flight assistant turn when generation is stopped', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
+      if (url.endsWith('/sessions/session-1/messages') && init?.method === 'POST') {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          }, { once: true });
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+
+    act(() => { void result.current.sendMessage('Please draft a response.'); });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).endsWith('/sessions/session-1/messages')
+    )).toBe(true));
+
+    act(() => result.current.stopGeneration());
+
+    await waitFor(() => expect(result.current.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'Chat interrupted.',
+      isStreaming: false,
+    }));
+  });
+
   it('creates a Project-bound Cowork session and renders a validated citation', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

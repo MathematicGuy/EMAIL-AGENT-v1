@@ -675,7 +675,17 @@ export function useStreamingChat(
       setAttachmentError(null);
       void refreshHistory();
     } catch (cause) {
-      if ((cause as { name?: string }).name !== 'AbortError') {
+      if ((cause as { name?: string }).name === 'AbortError') {
+        setMessages((current) => current.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: [message.content, 'Chat interrupted.'].filter(Boolean).join('\n\n'),
+                isStreaming: false,
+              }
+            : message
+        ));
+      } else {
         const error = cause instanceof Error ? cause.message : 'Chat backend unavailable.';
         const failedMailScan = isMailCommand(text);
         const mailScan = failedMailScan
