@@ -102,7 +102,7 @@ flowchart TB
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
 - **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx`, `pdf_native`, or `mistral_ocr`), and ISO-8601 processing timestamp.
-- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec.
+- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec. Structure recovered here survives into the corpus; anything lost is only recoverable from the text by `normalize_structure()` at load time.
 
 ---
 

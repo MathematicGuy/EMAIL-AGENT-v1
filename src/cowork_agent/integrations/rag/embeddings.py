@@ -184,8 +184,6 @@ def _is_insufficient_balance_error(exc: Exception) -> bool:
 
 def _is_unrecoverable_auth_error(exc: Exception) -> bool:
     """True for 401 Unauthorized or 402 Payment Required indicating key is dead/invalid."""
-    if isinstance(exc, HTTPError) and exc.code in {401, 402}:
-        return True
     code = getattr(exc, "code", getattr(exc, "status_code", getattr(exc, "status", None)))
     return code in {401, 402}
 

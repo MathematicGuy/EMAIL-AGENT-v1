@@ -33,13 +33,17 @@ from cowork_agent.persistence.repositories.project_document_chunks import (
 from cowork_agent.persistence.repositories.projects import ProjectDocument
 
 from .embeddings import EmbeddingPort
-from .markdown_chunking import DEFAULT_MAX_CHARS
 from .project_index import ProjectIndexUnavailable, TurbovecProjectIndexStore
 from .rrf import ReciprocalRankFusion
 
 #: How many candidates each leg contributes per requested result. Fusion needs
 #: more input than output or the two rankings barely overlap.
 _CANDIDATE_MULTIPLIER = 4
+
+#: Longest chunk text the embedding request may carry. Stated here rather than
+#: borrowed from the chunker's default, so retuning chunk size cannot silently
+#: move a persistence-facing safety limit.
+MAX_EMBEDDABLE_CHUNK_CHARS = 2_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +59,7 @@ class ProjectDocumentChunk:
     def __post_init__(self) -> None:
         if not self.chunk_id.strip() or not self.text.strip():
             raise ValueError("project chunks require a non-empty identifier and text")
-        if len(self.text) > DEFAULT_MAX_CHARS:
+        if len(self.text) > MAX_EMBEDDABLE_CHUNK_CHARS:
             raise ValueError("project chunks must satisfy the embedding input safety limit")
         if self.page_start < 1 or self.page_end < self.page_start:
             raise ValueError("project chunk page range is invalid")

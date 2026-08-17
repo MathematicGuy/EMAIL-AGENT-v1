@@ -109,7 +109,8 @@ def test_load_corpus_chunks_by_h2_sections(tmp_path: Path) -> None:
     assert document.title == "Policy"
     sections = [chunk.section for chunk in document.chunks]
     assert "First Rule" in sections and "Second Rule" in sections
-    assert any(chunk.text == "Alpha body." for chunk in document.chunks)
+    alpha = next(chunk for chunk in document.chunks if chunk.section == "First Rule")
+    assert alpha.text == "Policy\nFirst Rule\n\nAlpha body."
 
 
 def test_load_corpus_copies_page_coordinates_and_omits_page_markers(
@@ -183,7 +184,8 @@ def test_load_corpus_strips_closed_frontmatter_from_chunk_text(tmp_path: Path) -
     ):
         assert key not in joined
     assert "Frontmatter Title" not in joined
-    assert any(chunk.text == "Alpha body." for chunk in document.chunks)
+    alpha = next(chunk for chunk in document.chunks if chunk.section == "First Rule")
+    assert alpha.text == "Body Heading\nFirst Rule\n\nAlpha body."
 
 
 def test_load_corpus_joins_manifest_document_date_by_output_stem_onto_knowledge_chunk(

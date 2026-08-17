@@ -32,13 +32,13 @@ The document ingestion pipeline (DOCX/PDF conversion, SHA-256 manifest tracking,
 ```mermaid
 flowchart LR
     INGEST["Ingestion Pipeline Subsystem<br/>(06-knowledge-and-document-ingestion-pipeline.md)"] --> MD["Committed Markdown Corpus<br/>(data/extracted/*.md)"]
-    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / 1200-char max)"]
+    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / normalize + hierarchical<br/>target 1200, max 2000)"]
     LOADER --> EMBED["Embedding Adapter<br/>(Jina v5 / Gemini Embeddings)"]
     
     EMBED --> STORE_TURBO["Turbovec 4-Bit Index<br/>(.data/turbovec_index.tvim)"]
 ```
 
-1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, parses section headings (H1/H2), and emits `KnowledgeChunk` instances bounded to 1200 characters.
+1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md` and chunks them along their heading hierarchy; the chunker itself promotes plain-text structural headings (`Điều 1. …`) to ATX first, so every entry point gets the same structure recovery. Each `KnowledgeChunk` opens with its heading breadcrumb, so a retrieved fragment names the article it came from for both dense and BM25 search; a section that fits stays whole, and chunks never exceed 2000 characters.
 2. **Turbovec Quantized Indexing (`turbovec_memory.py`):** Pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 
