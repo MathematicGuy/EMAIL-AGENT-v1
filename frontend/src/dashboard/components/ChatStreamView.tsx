@@ -38,6 +38,7 @@ import { RagEvidencePanel } from './RagEvidencePanel';
 
 interface ChatStreamViewProps {
   messages: ChatMessage[];
+  isTranscriptLoading?: boolean;
   inputText: string;
   onChangeText: (text: string) => void;
   onSend: (text?: string) => void;
@@ -646,6 +647,7 @@ function ArtifactRefCard({
 
 export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   messages,
+  isTranscriptLoading = false,
   inputText,
   onChangeText,
   onSend,
@@ -737,6 +739,15 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
       >
         {/* Inner Centered Messages Wrapper (Slightly wider max-w-4xl md:max-w-5xl) */}
         <div className="max-w-4xl md:max-w-5xl w-full mx-auto px-4 py-6 space-y-6">
+          {isTranscriptLoading && messages.length === 0 && (
+            <div
+              data-testid="chat-transcript-loading"
+              role="status"
+              className="rounded-2xl border border-[#2d2b27] bg-[#1e1d1a] px-4 py-6 text-sm text-zinc-400"
+            >
+              Đang tải cuộc trò chuyện…
+            </div>
+          )}
           {messages.map((msg) => {
             const isUser = msg.role === 'user';
             const parts = parseMarkdownContent(msg.content);

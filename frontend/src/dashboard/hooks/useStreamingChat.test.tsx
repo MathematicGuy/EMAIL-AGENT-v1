@@ -312,6 +312,120 @@ describe('useStreamingChat Project chat client', () => {
     await waitFor(() => expect(result.current.selectedAttachments[0]?.status).toBe('ready'));
     expect(result.current.selectedAttachments[0]?.documentId).toBe('document-1');
   });
+
+  it('highlights the clicked chat and clears stale messages before history returns', async () => {
+    let releaseMessages: ((value: Response) => void) | undefined;
+    const blocked = new Promise<Response>((resolve) => {
+      releaseMessages = resolve;
+    });
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions: [
+          { session_id: 'session-a', project_id: 'project-1', title: 'Chat A' },
+          { session_id: 'session-b', project_id: 'project-1', title: 'Chat B' },
+        ] }));
+      }
+      if (url.endsWith('/sessions/session-a/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-a', user_message: 'Question A', assistant_message: 'Answer A',
+          created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          retrieval_status: null,
+        }] }));
+      }
+      if (url.endsWith('/sessions/session-b/messages')) {
+        return blocked;
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(2));
+    await act(async () => result.current.loadExistingChat('session-a'));
+    expect(result.current.messages.map((item) => item.content)).toEqual(['Question A', 'Answer A']);
+
+    let switchPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      switchPromise = result.current.loadExistingChat('session-b');
+    });
+
+    expect(result.current.activeConversationId).toBe('session-b');
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.isTranscriptLoading).toBe(true);
+    expect(result.current.isSessionListLoading).toBe(false);
+    expect(result.current.isHistoryLoading).toBe(false);
+
+    await act(async () => {
+      releaseMessages?.(json({ turns: [{
+        turn_id: 'turn-b', user_message: 'Question B', assistant_message: 'Answer B',
+        created_at: '2026-08-12T00:01:00Z', citation_coordinates: [], rag_evidence: [],
+        retrieval_status: null,
+      }] }));
+      await switchPromise;
+    });
+
+    expect(result.current.isTranscriptLoading).toBe(false);
+    expect(result.current.messages.map((item) => item.content)).toEqual(['Question B', 'Answer B']);
+  });
+
+  it('paints a previously loaded chat from memory before the refetch returns', async () => {
+    let releaseA: ((value: Response) => void) | undefined;
+    let aLoads = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions: [
+          { session_id: 'session-a', project_id: 'project-1', title: 'Chat A' },
+          { session_id: 'session-b', project_id: 'project-1', title: 'Chat B' },
+        ] }));
+      }
+      if (url.endsWith('/sessions/session-a/messages')) {
+        aLoads += 1;
+        if (aLoads === 1) {
+          return Promise.resolve(json({ turns: [{
+            turn_id: 'turn-a', user_message: 'Question A', assistant_message: 'Answer A',
+            created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+            retrieval_status: null,
+          }] }));
+        }
+        return new Promise<Response>((resolve) => {
+          releaseA = resolve;
+        });
+      }
+      if (url.endsWith('/sessions/session-b/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-b', user_message: 'Question B', assistant_message: 'Answer B',
+          created_at: '2026-08-12T00:01:00Z', citation_coordinates: [], rag_evidence: [],
+          retrieval_status: null,
+        }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(2));
+    await act(async () => result.current.loadExistingChat('session-a'));
+    await act(async () => result.current.loadExistingChat('session-b'));
+
+    act(() => {
+      void result.current.loadExistingChat('session-a');
+    });
+
+    expect(result.current.activeConversationId).toBe('session-a');
+    expect(result.current.messages.map((item) => item.content)).toEqual(['Question A', 'Answer A']);
+    expect(result.current.isTranscriptLoading).toBe(false);
+
+    await act(async () => {
+      releaseA?.(json({ turns: [{
+        turn_id: 'turn-a2', user_message: 'Question A2', assistant_message: 'Answer A2',
+        created_at: '2026-08-12T00:02:00Z', citation_coordinates: [], rag_evidence: [],
+        retrieval_status: null,
+      }] }));
+    });
+    await waitFor(() => {
+      expect(result.current.messages.map((item) => item.content)).toEqual(['Question A2', 'Answer A2']);
+    });
+  });
 });
 
 describe('Project document upload policy', () => {

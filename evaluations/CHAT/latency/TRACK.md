@@ -43,21 +43,22 @@ on a stack with at least two saved chats to pin `request_duration_ms` vs
 | Date | Change | Baseline → result (p50 click→visible) | Verdict | Why |
 |---|---|---|---|---|
 | 2026-08-17 | Harness only. No product change. | Instant 91 ms · 2500 ms API → 2620 ms UX · A→B→A 459–491 ms · heavy 352 KB → 162 ms | baseline | Frontend paint is 11–107 ms. The 2–5 s user wait tracks GET `/messages`, not React. Repeat visits refetch. Stale transcript stays up for the whole wait (~800 ms on a 400 ms API). Live stack was down; no RUM row yet. Snapshot: `baselines/baseline-2026-08-17-harness.json`. |
+| 2026-08-17 | Step 1 skeleton + split loading flags; Step 2 in-memory LRU cache (20) | Repeat B→A **78 ms** (was 459–491) while API still 419 ms. Stale flash **0 ms**. Instant cold 339 ms. 2500 ms API → 3142 ms UX. | keep | Cache hit paints before refetch. Recents no longer share the transcript spinner. Cold visit still waits on GET — next is slim payload / cheaper `list_messages`. Snapshot: `baselines/baseline-2026-08-17-step1-2.json`. |
 
 ## Latest synthetic run
 
 <!-- LATENCY-TRACK:SYNTHETIC-START -->
 
-Last synthetic run: `2026-08-17T07:43:58.423Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T07-43-58-423Z.json`
+Last synthetic run: `2026-08-17T08:17:51.794Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T08-17-51-794Z.json`
 
 | Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| mocked-instant-cold-switch | 1 | 91 | 91 | 91 | 11 | 38 |
-| mocked-2500ms-user-report | 1 | 2620 | 2620 | 2620 | 2513 | 60 |
-| mocked-repeat-first-a | 1 | 491 | 491 | 491 | 414 | 32 |
-| mocked-repeat-a-to-b | 1 | 467 | 467 | 467 | 422 | 11 |
-| mocked-repeat-b-to-a | 1 | 459 | 459 | 459 | 414 | 11 |
-| mocked-heavy-payload | 1 | 162 | 162 | 162 | 19 | 107 |
+| mocked-instant-cold-switch | 1 | 339 | 339 | 339 | 19 | 47 |
+| mocked-2500ms-user-report | 1 | 3142 | 3142 | 3142 | 2522 | 354 |
+| mocked-repeat-first-a | 1 | 1103 | 1103 | 1103 | 421 | 423 |
+| mocked-repeat-a-to-b | 1 | 885 | 885 | 885 | 414 | 421 |
+| mocked-repeat-b-to-a | 1 | 78 | 78 | 78 | 419 | 0 |
+| mocked-heavy-payload | 1 | 351 | 351 | 351 | 20 | 67 |
 
 <!-- LATENCY-TRACK:SYNTHETIC-END -->
 

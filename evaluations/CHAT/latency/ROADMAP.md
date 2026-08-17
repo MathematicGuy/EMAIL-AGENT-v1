@@ -91,6 +91,9 @@ were the new one.
 **Measure:** `stale_content_visible_ms` → 0. `loading_indicator_observed`
 stays true. Primary metric may not move.
 
+**Status:** Done on `fe`. Recents highlight and transcript skeleton flip on
+click. Stale flash 0 ms. Recents list spinner no longer fires on switch.
+
 **Tradeoff:** Extra state. Recents no longer flicker a list-level spinner
 when you are only changing transcript. This is a keep even if p50 is flat
 because the click is no longer a lie.
@@ -108,6 +111,10 @@ background. Abort in-flight fetches already exists.
 `messages_fetch_count_after` can stay 3 (revalidate) while visible-time
 drops. Update the "three GETs, wait for the third" assertion to "three
 GETs, paint from cache before the third returns".
+
+**Status:** Done on `fe`. Repeat B→A click→visible **78 ms** (budget ≤ 100)
+while the background GET still takes ~419 ms. Three GETs remain
+(revalidate). Snapshot `baselines/baseline-2026-08-17-step1-2.json`.
 
 **Tradeoff:** Stale-while-revalidate can briefly show a turn that was
 deleted elsewhere. Acceptable for single-user local/demo. Do not persist

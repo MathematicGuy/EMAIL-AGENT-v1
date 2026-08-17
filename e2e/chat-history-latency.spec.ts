@@ -128,8 +128,9 @@ test.describe('chat history loading latency', () => {
     samples.push(firstA, toB, backToA);
 
     expect(api.messagesFetchCount()).toBe(3);
-    expect(backToA.click_to_first_message_visible_ms).toBeGreaterThanOrEqual(350);
-    expect(toB.stale_content_visible_ms ?? 0).toBeGreaterThan(0);
+    expect(backToA.click_to_first_message_visible_ms).toBeLessThan(150);
+    expect(toB.stale_content_visible_ms ?? 0).toBe(0);
+    expect(backToA.stale_content_visible_ms ?? 0).toBe(0);
   });
 
   test('records frontend cost of a heavy history payload', async ({ page }) => {
@@ -162,6 +163,7 @@ test.describe('chat history loading latency', () => {
     test.skip(!process.env.CHAT_LATENCY_LIVE, 'Set CHAT_LATENCY_LIVE=1 with frontend + API running.');
     await page.goto('/#dashboard');
     const dashboard = new DashboardPage(page);
+    await dashboard.expandSidebar();
     await expect(dashboard.recents.first()).toBeVisible({ timeout: 20_000 });
     const titles = await dashboard.recents.allTextContents();
     const unique = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];

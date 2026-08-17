@@ -1,4 +1,4 @@
-import { type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export class DashboardPage {
   readonly page: Page;
@@ -21,7 +21,16 @@ export class DashboardPage {
     return this.page.locator(`[data-testid="chat-message"][data-role="${role}"]`).filter({ hasText: text });
   }
 
+  async expandSidebar(): Promise<void> {
+    const toggle = this.page.getByRole('button', { name: /Show sidebar/i });
+    await expect(toggle.or(this.recents.first())).toBeVisible({ timeout: 20_000 });
+    if (await toggle.isVisible().catch(() => false)) {
+      await toggle.click();
+    }
+  }
+
   async openRecent(title: string): Promise<void> {
+    await this.expandSidebar();
     await this.recentChat(title).click();
   }
 }

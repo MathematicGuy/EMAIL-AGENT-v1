@@ -127,7 +127,9 @@ export async function measureChatSwitch(
     messagesFetchCount?: () => number;
   },
 ): Promise<ChatSwitchSample> {
-  const loading = page.getByTestId('chat-history-loading');
+  const loading = page.getByTestId('chat-transcript-loading').or(
+    page.getByTestId('chat-history-loading')
+  );
   let loadingObserved = false;
   const watchLoading = loading.waitFor({ state: 'visible', timeout: 2_000 })
     .then(() => {
@@ -142,6 +144,9 @@ export async function measureChatSwitch(
 
   const clickAt = Date.now();
   await input.click();
+
+  const visibleAtPromise = input.ready.waitFor({ state: 'visible', timeout: 30_000 })
+    .then(() => Date.now());
 
   let staleMs: number | null = null;
   const watchStale = (async () => {
@@ -165,8 +170,8 @@ export async function measureChatSwitch(
     response = null;
   }
 
-  await expect(input.ready).toBeVisible({ timeout: 30_000 });
-  const visibleAt = Date.now();
+  const visibleAt = await visibleAtPromise;
+  await expect(input.ready).toBeVisible();
   await Promise.all([watchLoading, watchStale]);
 
   let requestDuration: number | null = null;
@@ -214,5 +219,11 @@ export async function openDashboard(page: Page): Promise<void> {
     window.localStorage.setItem('v-assistant-active-project-id', 'project-latency');
   });
   await page.goto('/#dashboard');
-  await expect(page.getByTestId('recent-chat').first()).toBeVisible({ timeout: 20_000 });
+  const recents = page.getByTestId('recent-chat').first();
+  const toggle = page.getByRole('button', { name: /Show sidebar/i });
+  await expect(toggle.or(recents)).toBeVisible({ timeout: 20_000 });
+  if (await toggle.isVisible().catch(() => false)) {
+    await toggle.click();
+  }
+  await expect(recents).toBeVisible({ timeout: 20_000 });
 }
