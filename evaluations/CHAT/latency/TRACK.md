@@ -34,15 +34,32 @@ the last lever, not the first.
 
 Live RUM against the real API is collected with
 `CHAT_LATENCY_LIVE=1 npx playwright test --project=chat-latency -g @live`.
-The live test seeds two `@mail` turns in the Playwright guest session when
+The live test seeds `@mail` turns in the Playwright guest session when
 Recents is empty. Those payloads are small; they measure handler + pool
 wall time, not a fat evidence JSON.
+
+Live RUM against the real API was collected twice on 2026-08-17:
+
+1. Operator UI (not `fe`): cold/repeat/prefetch all **2.0–2.5 s**. Snapshot:
+   `baselines/baseline-2026-08-17-live.json`.
+2. `fe` worktree Vite + API (`127.0.0.1:5173` / `:8000`, cache + prefetch
+   confirmed in served source): cold **2.92 s** (API 1.72 s, 456 B),
+   repeat **68 ms**, hover-prefetch **58 ms**. Stale flash **0 ms**. GET
+   `/messages` is still **1.0–1.7 s** in the background. Snapshot:
+   `baselines/baseline-2026-08-17-live-fe-cache.json`.
 
 ## Attempt ledger
 
 | Date | Change | Baseline → result (p50 click→visible) | Verdict | Why |
 |---|---|---|---|---|
 | 2026-08-17 | Harness only. No product change. | Instant 91 ms · 2500 ms API → 2620 ms UX · A→B→A 459–491 ms · heavy 352 KB → 162 ms | baseline | Frontend paint is 11–107 ms. The 2–5 s user wait tracks GET `/messages`, not React. Repeat visits refetch. Stale transcript stays up for the whole wait (~800 ms on a 400 ms API). Live stack was down; no RUM row yet. Snapshot: `baselines/baseline-2026-08-17-harness.json`. |
+| 2026-08-17 | Step 1 skeleton + split loading flags; Step 2 in-memory LRU cache (20) | Repeat B→A **78 ms** (was 459–491) while API still 419 ms. Stale flash **0 ms**. Instant cold 339 ms. 2500 ms API → 3142 ms UX. | keep | Cache hit paints before refetch. Recents no longer share the transcript spinner. Cold visit still waits on GET — next is slim payload / cheaper `list_messages`. Snapshot: `baselines/baseline-2026-08-17-step1-2.json`. |
+| 2026-08-17 | Step 3 slim GET `/messages` (omit `rag_evidence.content`; `include_content=true` on drawer) | Heavy payload **352 673 → 31 633 B**. Repeat B→A 66 ms. Cold mock still ~18 ms API. | keep | Transfer/parse of fat chunks is gone. Synthetic cold time did not move (local mock). Live 2–5 s is still likely sequential Postgres — that is Step 4. Snapshot: `baselines/baseline-2026-08-17-step3.json`. |
+| 2026-08-17 | Step 4 one checkout + drop `check_connection` + warmer pool; skip document N+1 on list | Synthetic mocks **will not** show the WAN win. Unit test: require+list = 1 checkout. | keep | Code matches the research ranking. Confirm live `request_duration_ms` on a Seoul RTT before calling the 2–5 s gone. |
+| 2026-08-17 | Step 5 prefetch Recents on hover/focus (cap 2) | Repeat-visit path already 66–78 ms from cache. Prefetch warms the next chat. | keep | Extra GETs only for uncached neighbors. |
+| 2026-08-17 | Step 6 virtualize long transcripts | Heavy render after slim payload is **73 ms**. | skipped | Neutral complexity. Revisit only if a live 200+ turn thread janks. |
+| 2026-08-17 | Live RUM. No new product change. Real API + real persist seed (3 one-turn @mail chats). No route mocks. | Cold **1973 ms** (API 1665 ms, 456 B) · Repeat **1963 ms** (API 1862 ms) · Prefetch **2520 ms** (API 1997 ms) · stale **1882–2411 ms** | baseline (live) | Wait ≈ GET `/messages` to Supabase, not payload size. Running Vite is not the `fe` cache/prefetch UI — restart Vite from `.worktrees/fe/frontend` before attributing Step 1–5. Snapshot: `baselines/baseline-2026-08-17-live.json`. |
+| 2026-08-17 | Same live harness against `fe` Vite + `fe` API (cache/prefetch in served source). | Cold **2922 ms** (API 1716 ms) · Repeat **68 ms** (API 1134 ms, UI 0) · Prefetch **58 ms** (API 989 ms, UI 0) · stale **0 ms** | keep (Steps 1–2, 5) | Cache and hover-prefetch match synthetic. Cold visit still waits on GET `/messages` (~1.0–1.7 s) plus ~1.2 s after the JSON. Snapshot: `baselines/baseline-2026-08-17-live-fe-cache.json`. |
 | 2026-08-17 | skeleton + in-memory cache + local docker postgres (ADR-010) | Instant 87 ms · 2500 ms API → 2938 ms UX · first-A 885 ms · A→B 890 ms · B→A 65 ms · heavy 352 KB → 146 ms | keep | Repeat visit paints from the in-memory LRU before revalidate (65 ms, < 150 ms; 3 GETs; UI after API 0). `stale_content_visible_ms` is 0; cold delayed switch shows `chat-transcript-loading`. Cold visits still wait on GET `/messages`. Live RUM not collected. Report: `runs/2026-08-17T12-38-48-374Z.json`. |
 | 2026-08-18 | Live RUM on local `cowork` Postgres + self-seeding `@live` test | live switch 91 ms · GET `/messages` 16 ms · 488 B / 1 turn · stale 0 ms | keep | Local control plane is already inside the 300 ms LAN budget. ROADMAP Step 4 (handler checkout collapse) is **not** justified on localhost. Slim payload (Step 3) will not move this 488 B path; keep it for hosted/fat evidence only. Report: `runs/2026-08-17T17-31-32-838Z.json`. |
 

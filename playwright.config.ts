@@ -3,7 +3,11 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Frontend lives at Vite :5173. Chat API calls go through `/backend`.
  * The chat-latency project mocks those calls unless CHAT_LATENCY_LIVE=1.
+ * PLAYWRIGHT_BASE_URL overrides the bind (use http://[::1]:5173 when Vite
+ * is IPv6-only so reuseExistingServer does not start a second process).
  */
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5173';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -12,7 +16,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -30,9 +34,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm exec vite --host 127.0.0.1 --port 5173',
+    command: `pnpm exec vite --host ${baseURL.includes('[::1]') ? '::1' : '127.0.0.1'} --port 5173`,
     cwd: 'frontend',
-    url: 'http://127.0.0.1:5173',
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

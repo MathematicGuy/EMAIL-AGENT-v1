@@ -21,6 +21,7 @@ from ._chat_contracts_common import (
     MemoryType,
 )
 from ._chat_contracts_memory import (
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH,
     MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
     MAX_EPISODE_CITATION_SECTION_LENGTH,
@@ -37,6 +38,7 @@ from ._chat_contracts_memory import (
     ChatRagEvidence,
     ChatSummaryEpisode,
     ChatTurn,
+    ChatTurnStatus,
     DeclarativeProfile,
     EpisodeCitation,
     EpisodeTransition,
@@ -84,6 +86,7 @@ __all__ = [
     "AI_CHAT_FEATURE",
     "CHAT_CONTRACTS_VERSION",
     "MAX_CHAT_MESSAGE_LENGTH",
+    "MAX_CHAT_RAG_EVIDENCE_ITEMS",
     "MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH",
     "MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH",
     "MAX_EPISODE_CITATION_SECTION_LENGTH",
@@ -109,6 +112,7 @@ __all__ = [
     "ChatMessageRequest",
     "ChatMessageStreamEvent",
     "ChatTurn",
+    "ChatTurnStatus",
     "ChatRoute",
     "CLASSIFIER_REASON_CODES",
     "DeclarativeProfile",

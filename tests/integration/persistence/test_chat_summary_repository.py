@@ -72,11 +72,14 @@ async def _repository() -> tuple[PostgresChatSummaryEpisodeRepository, AsyncConn
 
 
 def _namespace(
-    *, record_id: str = "record-1", chat_turn_id: str | None = "turn-1"
+    *,
+    tenant_id: str = "tenant-1",
+    record_id: str = "record-1",
+    chat_turn_id: str | None = "turn-1",
 ) -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            tenant_id=tenant_id, user_id="user@example.com", session_id="session-1"
         ),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
@@ -159,6 +162,36 @@ def test_delete_uses_the_exact_persisted_summary_namespace_key() -> None:
             deletion_namespace = _namespace(chat_turn_id=None)
             assert await repository.delete_chat_summary(deletion_namespace) is True
             assert await repository.delete_chat_summary(deletion_namespace) is False
+        finally:
+            await pool.close()
+
+    _run_scenario(scenario)
+
+
+def test_same_summary_identity_in_two_tenants_persists_and_deletes_independently() -> None:
+    async def scenario() -> None:
+        repository, pool = await _repository()
+        try:
+            first_tenant = _namespace(tenant_id="tenant-1")
+            second_tenant = _namespace(tenant_id="tenant-2")
+
+            await repository.write_chat_summary(first_tenant, _episode())
+            await repository.write_chat_summary(second_tenant, _episode())
+
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT tenant_id FROM chat_summary_episodes ORDER BY tenant_id"
+                )
+                assert await cursor.fetchall() == [("tenant-1",), ("tenant-2",)]
+
+            assert await repository.delete_chat_summary(
+                _namespace(tenant_id="tenant-1", chat_turn_id=None)
+            ) is True
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT tenant_id FROM chat_summary_episodes ORDER BY tenant_id"
+                )
+                assert await cursor.fetchall() == [("tenant-2",)]
         finally:
             await pool.close()
 

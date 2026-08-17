@@ -100,6 +100,7 @@ def test_clarify_uses_non_retrieval_reply_mode_and_no_task_proposal() -> None:
     assert routing.calls == 1
     assert reply.contexts[0].response_mode is ChatResponseMode.CLARIFY
     assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
         ChatEventType.ERROR,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
@@ -118,9 +119,11 @@ def test_cancelled_retry_reuses_the_same_routing_outcome() -> None:
 
         stream = controller.stream_message(_request(), is_cancelled=is_cancelled)
         first = await anext(stream)
-        assert first.event_type is ChatEventType.ERROR  # missing optional profile
+        assert first.event_type is ChatEventType.STARTED
         second = await anext(stream)
-        assert second.event_type is ChatEventType.DELTA
+        assert second.event_type is ChatEventType.ERROR  # missing optional profile
+        third = await anext(stream)
+        assert third.event_type is ChatEventType.DELTA
         cancelled = True
         assert [event async for event in stream] == []
         await _collect(controller)

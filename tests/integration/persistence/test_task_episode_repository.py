@@ -366,6 +366,7 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
                 ),
                 expires_at=None,
             )
+
             async with pool.connection() as connection:
                 await connection.execute("CREATE TABLE semantic_rag_sentinel (value text NOT NULL)")
                 await connection.execute("INSERT INTO semantic_rag_sentinel VALUES ('preserve')")
@@ -389,11 +390,9 @@ def test_malicious_payload_shape_is_rejected_before_persistence_and_identifiers_
     async def scenario() -> None:
         repository, pool = await _repository()
         try:
+            malicious_tenant = "tenant'; DELETE FROM task_episodes; --"
             source = _episode(user_id="user'; DELETE FROM task_episodes; --")
-            namespace = _namespace(
-                tenant_id="tenant'; DELETE FROM task_episodes; --",
-                user_id=source.user_id,
-            )
+            namespace = _namespace(tenant_id=malicious_tenant, user_id=source.user_id)
             malicious = object.__new__(TaskEpisode)
             for field in fields(TaskEpisode):
                 object.__setattr__(malicious, field.name, getattr(source, field.name))

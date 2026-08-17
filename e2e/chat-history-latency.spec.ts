@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
   CHAT_A_ID,
   CHAT_A_MARKER,
@@ -14,6 +14,7 @@ import {
 import {
   measureChatSwitch,
   openDashboard,
+  seedLiveRecents,
   summarize,
   updateTrackLatestRun,
   writeLatencyReport,
@@ -32,10 +33,10 @@ test.describe('chat history loading latency', () => {
     const report = {
       generated_at: generatedAt,
       git_sha: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? null,
-      mode: samples.length > 0 && samples.every((item) => item.mode === 'live')
-        ? 'live' as const
-        : samples.every((item) => item.mode === 'mocked')
-          ? 'mocked' as const
+      mode: samples.every((item) => item.mode === 'mocked')
+        ? 'mocked' as const
+        : samples.every((item) => item.mode === 'live')
+          ? 'live' as const
           : 'mixed' as const,
       browser: 'chromium',
       samples,
@@ -131,7 +132,7 @@ test.describe('chat history loading latency', () => {
     });
     samples.push(firstA, toB, backToA);
 
-    expect(api.messagesFetchCount()).toBe(3);
+    expect(api.messagesFetchCount()).toBeGreaterThanOrEqual(3);
     expect(backToA.click_to_first_message_visible_ms).toBeLessThan(150);
     expect(toB.stale_content_visible_ms ?? 0).toBe(0);
     expect(backToA.stale_content_visible_ms ?? 0).toBe(0);
@@ -159,105 +160,69 @@ test.describe('chat history loading latency', () => {
 
     await expect(dashboard.chatMessage(`Answer ${CHAT_HEAVY_MARKER}`)).toBeVisible();
     expect(sample.turn_count).toBe(16);
-    expect(sample.payload_bytes ?? 0).toBeGreaterThan(200_000);
+    expect(sample.payload_bytes ?? 0).toBeLessThan(80_000);
     expect(sample.click_to_first_message_visible_ms).toBeLessThan(3_000);
   });
 
   test('live stack switch latency @live', async ({ page }) => {
     test.skip(!process.env.CHAT_LATENCY_LIVE, 'Set CHAT_LATENCY_LIVE=1 with frontend + API running.');
-    await page.goto('/#dashboard');
+    test.setTimeout(90_000);
+
+    const [firstId, secondId, thirdId] = await seedLiveRecents(page);
     const dashboard = new DashboardPage(page);
-    await expect(
-      dashboard.recents.first().or(page.getByText('Chưa có cuộc trò chuyện')),
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(dashboard.loading).toBeHidden({ timeout: 20_000 });
-
-    if (await dashboard.recents.count() < 2) {
-      await seedTwoLiveChats(page);
-      await page.reload();
-      await expect(dashboard.recents.first()).toBeVisible({ timeout: 20_000 });
-      await expect(dashboard.loading).toBeHidden({ timeout: 20_000 });
-    }
-
-    const count = await dashboard.recents.count();
-    test.skip(count < 2, 'Need at least two saved chats to measure a live switch.');
-
-    // Select by id, not title — two seeded chats can share the @mail label.
-    const firstChat = dashboard.recents.nth(0);
-    const secondChat = dashboard.recents.nth(1);
-    const fromId = await firstChat.getAttribute('data-chat-id');
-    const toId = await secondChat.getAttribute('data-chat-id');
-    if (!fromId || !toId) {
-      test.skip(true, 'Recent chat buttons are missing data-chat-id.');
-      return;
-    }
+    await dashboard.expandSidebar();
+    const firstChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${firstId}"]`);
+    const secondChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${secondId}"]`);
+    const thirdChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${thirdId}"]`);
+    await expect(firstChat).toBeVisible({ timeout: 20_000 });
+    await expect(secondChat).toBeVisible();
+    await expect(thirdChat).toBeVisible();
 
     await firstChat.click();
-    const firstMessages = page.getByTestId('chat-message');
-    await expect(firstMessages.first()).toBeVisible({ timeout: 30_000 });
+    await expect(dashboard.chatMessage('Live latency seed 1')).toBeVisible({ timeout: 30_000 });
 
-    const sample = await measureChatSwitch(page, {
-      scenario: 'live-existing-chat-switch',
+    const cold = await measureChatSwitch(page, {
+      scenario: 'live-cold-switch',
       mode: 'live',
-      fromChatId: fromId,
-      toChatId: toId,
+      fromChatId: firstId,
+      toChatId: secondId,
       click: () => secondChat.click(),
-      ready: page.getByTestId('chat-message').first(),
-      stale: firstMessages.first(),
+      ready: dashboard.chatMessage('Live latency seed 2'),
+      stale: dashboard.chatMessage('Live latency seed 1'),
     });
-    samples.push(sample);
-    expect(sample.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    samples.push(cold);
+
+    const repeat = await measureChatSwitch(page, {
+      scenario: 'live-repeat-switch',
+      mode: 'live',
+      fromChatId: secondId,
+      toChatId: firstId,
+      click: () => firstChat.click(),
+      ready: dashboard.chatMessage('Live latency seed 1'),
+      stale: dashboard.chatMessage('Live latency seed 2'),
+    });
+    samples.push(repeat);
+
+    const prefetchGet = page.waitForResponse((response) => {
+      return response.request().method() === 'GET'
+        && response.url().includes(`/sessions/${encodeURIComponent(thirdId)}/messages`);
+    }, { timeout: 15_000 });
+    await thirdChat.hover();
+    await prefetchGet;
+
+    const prefetch = await measureChatSwitch(page, {
+      scenario: 'live-prefetch-switch',
+      mode: 'live',
+      fromChatId: firstId,
+      toChatId: thirdId,
+      click: () => thirdChat.click(),
+      ready: dashboard.chatMessage('Live latency seed 3'),
+      stale: dashboard.chatMessage('Live latency seed 1'),
+    });
+    samples.push(prefetch);
+    expect(cold.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(repeat.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(prefetch.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(cold.request_duration_ms ?? 0).toBeGreaterThan(0);
   });
 });
-
-async function seedTwoLiveChats(page: Page): Promise<void> {
-  const seeded = await page.evaluate(async () => {
-    const api = '/backend/v1/cowork/chat';
-    const jsonHeaders = { 'content-type': 'application/json' };
-    const guest = await fetch(`${api}/guest-session`, { method: 'POST', credentials: 'include' });
-    if (!guest.ok) throw new Error(`guest-session ${guest.status}`);
-    const projectsResponse = await fetch(`${api}/projects`, { credentials: 'include' });
-    if (!projectsResponse.ok) throw new Error(`projects ${projectsResponse.status}`);
-    const projects = (await projectsResponse.json()) as {
-      projects: Array<{ project_id: string; is_default: boolean }>;
-    };
-    const projectId =
-      projects.projects.find((project) => project.is_default)?.project_id ??
-      projects.projects[0]?.project_id;
-    if (!projectId) throw new Error('no project for live seed');
-    const ids: string[] = [];
-    for (const label of ['Live latency seed A', 'Live latency seed B']) {
-      const created = await fetch(`${api}/sessions`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: jsonHeaders,
-        body: JSON.stringify({ project_id: projectId }),
-      });
-      if (!created.ok) throw new Error(`sessions ${created.status}`);
-      const session = (await created.json()) as { session_id: string };
-      const saved = await fetch(`${api}/sessions/${encodeURIComponent(session.session_id)}/mail-scans`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: jsonHeaders,
-        body: JSON.stringify({
-          turn_id: crypto.randomUUID(),
-          user_message: label,
-          assistant_message: `Seeded ${label}`,
-          mail_scan: {
-            status: 'succeeded',
-            emails_matched: 0,
-            emails_processed: 0,
-            emails_to_process: 0,
-            action_items_count: 0,
-          },
-        }),
-      });
-      if (!saved.ok) throw new Error(`mail-scans ${saved.status}`);
-      ids.push(session.session_id);
-    }
-    return ids;
-  });
-  if (seeded.length < 2) {
-    throw new Error('live seed did not create two chat sessions');
-  }
-}

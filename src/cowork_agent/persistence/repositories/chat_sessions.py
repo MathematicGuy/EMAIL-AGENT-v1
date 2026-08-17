@@ -65,24 +65,33 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
         )
 
     async def require(
-        self, session_id: str, *, user_id: str, tenant_id: str = "local"
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        tenant_id: str = "local",
+        connection: object | None = None,
     ) -> ChatMemoryScope:
-        async with self._pool.connection() as connection:
-            cursor = await connection.execute(
-                """
-                SELECT sessions.workspace_id, sessions.user_id, sessions.id,
-                       sessions.feature, sessions.project_id
-                FROM chat_sessions AS sessions
-                JOIN workspace_members AS members
-                  ON members.workspace_id = sessions.workspace_id
-                 AND members.user_id = sessions.user_id
-                WHERE sessions.id = %s
-                  AND sessions.user_id = %s
-                  AND sessions.workspace_id = %s
-                """,
-                (session_id, user_id, tenant_id),
-            )
-            row = await cursor.fetchone()
+        if connection is None:
+            async with self._pool.connection() as borrowed:
+                return await self.require(
+                    session_id, user_id=user_id, tenant_id=tenant_id, connection=borrowed
+                )
+        cursor = await connection.execute(  # type: ignore[attr-defined]
+            """
+            SELECT sessions.workspace_id, sessions.user_id, sessions.id,
+                   sessions.feature, sessions.project_id
+            FROM chat_sessions AS sessions
+            JOIN workspace_members AS members
+              ON members.workspace_id = sessions.workspace_id
+             AND members.user_id = sessions.user_id
+            WHERE sessions.id = %s
+              AND sessions.user_id = %s
+              AND sessions.workspace_id = %s
+            """,
+            (session_id, user_id, tenant_id),
+        )
+        row = await cursor.fetchone()
         if row is None:
             raise ChatSessionAccessDenied(session_id)
         return ChatMemoryScope(
