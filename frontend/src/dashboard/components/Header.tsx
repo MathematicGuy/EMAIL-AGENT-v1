@@ -8,8 +8,10 @@ import {
   Folder,
   ChevronDown,
   Check,
+  FileText,
 } from 'lucide-react';
 import type { Project } from '../types/projectTypes';
+import { documentText } from '../../modules/project-documents/i18n';
 
 interface HeaderProps {
   apiStatus?: 'unknown' | 'online' | 'offline';
@@ -17,6 +19,8 @@ interface HeaderProps {
   projects?: Project[];
   activeProject?: Project;
   onSelectProject?: (projectId: string) => void;
+  showProjectDocuments?: boolean;
+  onOpenProjectDocuments?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +29,8 @@ export const Header: React.FC<HeaderProps> = ({
   projects,
   activeProject,
   onSelectProject,
+  showProjectDocuments,
+  onOpenProjectDocuments,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -111,8 +117,20 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right: Ghost / Assistant Settings Icon */}
+      {/* Right: Actions */}
       <div className="flex items-center gap-2">
+        {showProjectDocuments && (
+          <button
+            type="button"
+            title={documentText('title')}
+            onClick={onOpenProjectDocuments}
+            disabled={!activeProject?.id}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#252320] hover:bg-[#2e2b27] border border-[#383531] rounded-lg text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+          >
+            <FileText className="w-3.5 h-3.5 text-[#d97757]" />
+            <span>{documentText('title')}</span>
+          </button>
+        )}
         <button
           type="button"
           title="Work intake"

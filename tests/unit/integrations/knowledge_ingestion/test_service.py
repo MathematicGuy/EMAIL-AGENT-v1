@@ -356,7 +356,8 @@ def test_txt_ingest_writes_text_extractor_and_sanitized_body(tmp_path: Path) -> 
     """Skipping sanitize would persist NFD and control characters in the corpus."""
     raw = tmp_path / "raw"
     raw.mkdir()
-    (raw / "note.txt").write_text(f"# Note\n\nHello {_NFD_VIETNAMESE_E}\x00world\n", encoding="utf-8")
+    payload = f"# Note\n\nHello {_NFD_VIETNAMESE_E}\x00world\n"
+    (raw / "note.txt").write_text(payload, encoding="utf-8")
     service = KnowledgeIngestionService(
         _settings(), DocxExtractor(), StubPdfInspector(_native_pdf())
     )

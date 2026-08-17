@@ -84,7 +84,9 @@ A yellow `DESELECTED - NOT VERIFIED BY THIS RUN` banner ends every run, naming
 what `-m 'not live'` dropped. Green above that banner is not a verified suite.
 
 Read [experience registry](docs/references/agent-experience-registry.md)
-before review-heavy work.
+before review-heavy work or multi-file implementation. After a written
+plan exists, fan out file-disjoint implementer subagents; the parent
+keeps spec, scope, and the Definition of Done.
 
 **Context compaction:** before compacting conversation context, invoke the
 `handoff` skill and save the handoff document to the OS temp directory.

@@ -307,45 +307,68 @@ flowchart TB
 
 ## 6. ★ Document Loading Optimization Deep-Dive (Grounded in `Simple-RAG.pdf`)
 
+The document loading and ingestion pipeline is decomposed into three distinct, decoupled processing states:
+
+#### State 1: Multi-Format Acquisition & Parsing
 ```mermaid
 stateDiagram-v2
-    direction LR
+    direction TB
 
-    state "Phase 1: Document Loading & Ingestion Pipeline" as Phase1 {
-        direction LR
-        state "1. Multi-Format Acquisition" as S1 {
-            direction TB
-            P1: [✓] PDF Native & Scanned
-            P2: [✓] DOCX OpenXML & Tables
-            P3: [✓] OOXML Zip Repacking
-            P4: [★] Plain TXT & MD Support
-        }
-        state "★ 2. Text Cleaning & Normalization" as S2 {
-            direction TB
-            C1: [✗] Unicode NFC Normalization
-            C2: [✗] Strip Control & Non-Printable
-            C3: [✗] Regularize Whitespace & \n
-            C4: (Currently basic .strip only)
-        }
-        state "★ 3. Metadata Harvesting" as S3 {
-            direction TB
-            M1: [✗] doc_id & Slug Generation
-            M2: [✗] YAML Frontmatter Synthesis
-            M3: [✗] Page Coordinate Markers
-            M4: [✗] Category & Year Attributes
-        }
+    [*] --> S1: Raw File Input (.pdf, .docx, .txt, .md)
 
-        S1 --> S2: Extracted AST / Stream
-        S2 --> S3: Sanitized Buffer
+    state "1. Multi-Format Acquisition" as S1 {
+        direction TB
+        P1: [✓] PDF Native & Scanned (PyMuPDF / Mistral OCR)
+        P2: [✓] DOCX OpenXML & Tables (Heading AST & Pipes)
+        P3: [✓] OOXML Zip Repacking (Content_Types.xml Fix)
+        P4: [★] Plain TXT & MD Support (Direct Ingestion)
+    }
+
+    S1 --> [*]: Emits Extracted AST / Raw Stream
+```
+
+#### State 2: Text Cleaning & Normalization (Sanitization Engine)
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> S2: Extracted AST / Raw Stream
+
+    state "★ 2. Text Cleaning & Normalization" as S2 {
+        direction TB
+        C1: [✗] Unicode NFC Normalization (Accents & Tokenizer Match)
+        C2: [✗] Strip Control & Non-Printable Characters
+        C3: [✗] Regularize Whitespace & Consecutive Newlines
+        C4: [Current Baseline] Basic string .strip() only
+    }
+
+    S2 --> [*]: Emits Sanitized Text Buffer
+```
+
+#### State 3: Metadata Harvesting & Ground-Truth Artifact Generation
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> S3: Sanitized Text Buffer
+
+    state "★ 3. Metadata Harvesting & Frontmatter Synthesis" as S3 {
+        direction TB
+        M1: [✗] doc_id & Slug Generation
+        M2: [✗] Rich YAML Frontmatter Synthesis (doc_id, title, year, category)
+        M3: [✗] Page Coordinate Markers (<!-- Page N -->)
+        M4: [✗] Manifest Registry Sync (ingestion-manifest.json)
     }
 
     state "Output Artifact: Canonical Ground-Truth" as Output {
-        O1: • Clean Standardized Markdown
-        O2: • ★ Rich YAML Frontmatter Block
-        O3: • Embedded <!-- Page N --> Coordinates
+        direction TB
+        O1: Clean Standardized Markdown
+        O2: Rich YAML Frontmatter Block
+        O3: Embedded <!-- Page N --> Coordinates
     }
 
-    Phase1 --> Output: Atomic Write (*.tmp -> data/extracted/*.md)
+    S3 --> Output: Atomic Write (*.tmp -> data/extracted/*.md)
+    Output --> [*]: Ready for Vector Ingestion (load_corpus)
 ```
 
 ### 6.1 Pillar 1: Multi-Format Parsing & Layout Fidelity

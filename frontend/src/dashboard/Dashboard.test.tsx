@@ -146,4 +146,24 @@ describe('Dashboard Project chat', () => {
     await waitFor(() => expect(document.querySelector('input[type="file"]')).not.toBeNull());
     expect(screen.getByRole('button', { name: 'Project documents' })).toBeTruthy();
   });
+
+  it('shows Project documents button in header on chat view and hides it on other views', async () => {
+    vi.stubGlobal('fetch', projectFetch());
+    render(<Dashboard />);
+
+    await screen.findAllByText('Default Project');
+    // On chat view, header button is present
+    const docButton = screen.getByRole('button', { name: 'Project documents' });
+    expect(docButton).toBeTruthy();
+
+    // Clicking header button opens dialog
+    fireEvent.click(docButton);
+    expect(await screen.findByRole('dialog', { name: 'Project documents' })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Close project documents'));
+
+    // Switch to Mail view
+    fireEvent.click(screen.getByTitle('Mail Inbox'));
+    expect(screen.queryByRole('button', { name: 'Project documents' })).toBeNull();
+  });
 });
+
