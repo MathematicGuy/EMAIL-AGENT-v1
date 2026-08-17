@@ -10,15 +10,22 @@ from docx.document import Document as DocxDocument
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
+from cowork_agent.integrations.rag.structure_profile import DEFAULT_PROFILE, StructureProfile
+
 from .models import ExtractionResult
+
+_HEADING_PREFIXES = {"Heading 1": "#", "Heading 2": "##", "Heading 3": "###"}
 
 
 class DocxExtractor:
     """Extract DOCX body blocks in their original order."""
 
+    def __init__(self, profile: StructureProfile = DEFAULT_PROFILE) -> None:
+        self._profile = profile
+
     def extract(self, path: Path) -> ExtractionResult:
         document = Document(str(path))
-        blocks = [_block_to_markdown(block) for block in _iter_blocks(document)]
+        blocks = [_block_to_markdown(block, self._profile) for block in _iter_blocks(document)]
         markdown = "\n\n".join(block for block in blocks if block)
         return ExtractionResult(markdown=markdown, page_count=1)
 
@@ -31,7 +38,7 @@ def _iter_blocks(document: DocxDocument) -> Iterator[Paragraph | Table]:
             yield Table(child, document)
 
 
-def _block_to_markdown(block: Paragraph | Table) -> str:
+def _block_to_markdown(block: Paragraph | Table, profile: StructureProfile) -> str:
     if isinstance(block, Table):
         return _table_to_markdown(block)
     text = block.text.strip()
@@ -39,14 +46,34 @@ def _block_to_markdown(block: Paragraph | Table) -> str:
         return ""
     style = block.style
     style_name = style.name if style is not None else ""
-    heading_prefixes = {"Heading 1": "#", "Heading 2": "##", "Heading 3": "###"}
-    if prefix := heading_prefixes.get(style_name):
+    if prefix := _HEADING_PREFIXES.get(style_name):
         return f"{prefix} {text}"
     if style_name.startswith("List Bullet"):
         return f"- {text}"
     if style_name.startswith("List Number"):
         return f"1. {text}"
+    if level := _emphasised_heading_level(block, text, profile):
+        return f"{'#' * level} {text}"
     return text
+
+
+def _emphasised_heading_level(
+    block: Paragraph, text: str, profile: StructureProfile
+) -> int | None:
+    """Read a fully bold, short paragraph as a heading.
+
+    Vietnamese legal DOCX files style every paragraph ``Normal`` and mark
+    structure with bold alone. Extraction is the last stage that can see that
+    formatting, so discarding it here destroys the document's structure for
+    good. Requiring *every* run to be bold is what separates a heading from a
+    sentence that merely contains a bold phrase.
+    """
+    if len(text) > profile.max_heading_chars:
+        return None
+    runs = [run for run in block.runs if run.text.strip()]
+    if not runs or not all(run.bold for run in runs):
+        return None
+    return profile.formatted_heading_level(text)
 
 
 def _table_to_markdown(table: Table) -> str:

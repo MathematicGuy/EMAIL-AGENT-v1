@@ -21,11 +21,11 @@ The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative g
 |---|---|---|
 | **Ingestion CLI Entrypoint** | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) | Exposes `mail-todo-ingest-knowledge` CLI for offline batch ingestion of company documents. |
 | **Ingestion Service Orchestrator** | [service.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) | `KnowledgeIngestionService`: Discovers files, checks symlinks, detects filename collisions, and manages extraction outcomes. |
-| **DOCX Extractor** | [docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py) | `DocxExtractor`: Converts `.docx` headings, paragraphs, and tables into structured Markdown formatting. |
+| **DOCX Extractor** | [docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py) | `DocxExtractor`: Converts `.docx` headings, paragraphs, and tables into structured Markdown. Where Word carries no Heading style, a fully bold short paragraph is read as a heading and given a depth by `StructureProfile` — extraction is the last stage that can see run formatting, and Vietnamese statutes mark every `Điều N` with bold alone. |
 | **PDF Inspector & Extractor** | [pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py) | `PdfInspector`: Inspects PDF pages, extracts native text, detects scanned image pages, and enforces page bounds. |
 | **Mistral OCR Extractor** | [ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py) | `MistralOcrExtractor`: Advanced mode extractor using Mistral OCR API (`mistral-ocr-latest`), normalizing OOXML archives and extracting figure assets. |
 | **Manifest & Atomic Store** | [manifest.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/manifest.py) | `ManifestStore`: Tracks SHA-256 hashes in `ingestion-manifest.json`; performs atomic `.tmp` file writes. |
-| **Project Document Extractor** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) | `ProjectDocumentExtractor`: Extracts user project upload files into page-bounded chunks (`page_start`, `page_end`). |
+| **Project Document Extractor** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) | `ProjectDocumentExtractor`: Extracts user project upload files, runs `normalize_structure()` per page, and emits page-bounded chunks (`page_start`, `page_end`). Uploaded documents are never persisted as Markdown, so this in-memory pass is the only chance to recover their structure. |
 | **Ingestion Models** | [models.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/models.py) | Standardized domain models: `IngestionOutcome`, `ManifestEntry`, `PdfInspection`. |
 
 ---
@@ -94,7 +94,7 @@ flowchart TB
 #### 3. ★ Core Stage 3: Format Extraction & Text Normalization
 - **Dual Extraction Modes (`EXTRACTION_MODE=adaptive|advance`):**
   - **Adaptive Mode (`adaptive`, default):** Optimal blend of speed, $0 cost, and accuracy.
-    - DOCX: Local AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown (< 15 ms).
+    - DOCX: Local AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings, bold-only headings, and tables into Markdown (< 15 ms).
     - Digital PDF: Local native text extraction ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)).
     - Scanned / Mixed PDF: Detected by `PdfInspector` and **automatically escalated** to `MistralOcrExtractor` when `MISTRAL_API_KEY` is configured (falls back to `mistral_not_configured` if unconfigured).
   - **Advance Mode (`advance`):** Routes all PDF and DOCX files through Mistral OCR ([ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
@@ -102,7 +102,7 @@ flowchart TB
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
 - **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx`, `pdf_native`, or `mistral_ocr`), and ISO-8601 processing timestamp.
-- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec.
+- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec. Structure recovered here survives into the corpus; anything lost is only recoverable from the text by `normalize_structure()` at load time.
 
 ---
 

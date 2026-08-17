@@ -14,7 +14,7 @@ The Enterprise RAG & Vector Memory Subsystem provides high-precision, low-latenc
 | RAG Capability | Live Implementation | Authoritative Module Location |
 |---|---|---|
 | **Corpus Ingestion** | Offline CLI for Markdown, DOCX, and PDF extraction with SHA-256 hash manifest verification. | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) & [knowledge_base.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/knowledge_base.py) |
-| **Parsing & Chunking** | Heading-aware section splitting bounded to 1200 characters; page-aware chunking for user documents. | [markdown_chunking.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/markdown_chunking.py) |
+| **Parsing & Chunking** | Structure-aware hierarchical chunking (ATX H1-H6 plus plain-text `Phần`/`Chương`/`Mục`/`Điều`/`Bước`); every chunk repeats its heading breadcrumb in its own text; target 1200 / max 2000 chars; page-aware for user documents. | [markdown_chunking.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/markdown_chunking.py) |
 | **Embedding Adapters** | Dual embedding support for Jina AI Embeddings (`v5`) and Gemini Embeddings API. | [embeddings.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/embeddings.py) |
 | **Primary Vector Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) wrapped with BM25 + RRF. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
 | **Quantized Memory Store** | In-process 4-bit TurboQuant index (`.data/turbovec_index.tvim`) for low-footprint local vector search. | [turbovec_memory.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) |
@@ -32,13 +32,13 @@ The document ingestion pipeline (DOCX/PDF conversion, SHA-256 manifest tracking,
 ```mermaid
 flowchart LR
     INGEST["Ingestion Pipeline Subsystem<br/>(06-knowledge-and-document-ingestion-pipeline.md)"] --> MD["Committed Markdown Corpus<br/>(data/extracted/*.md)"]
-    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / 1200-char max)"]
+    MD --> LOADER["Corpus Loader & Chunker<br/>(load_corpus / normalize + hierarchical<br/>target 1200, max 2000)"]
     LOADER --> EMBED["Embedding Adapter<br/>(Jina v5 / Gemini Embeddings)"]
     
     EMBED --> STORE_TURBO["Turbovec 4-Bit Index<br/>(.data/turbovec_index.tvim)"]
 ```
 
-1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, parses section headings (H1/H2), and emits `KnowledgeChunk` instances bounded to 1200 characters.
+1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, runs `normalize_structure()` to promote plain-text structural headings (`Điều 1. …`) to ATX, then chunks along the resulting heading hierarchy. Each `KnowledgeChunk` opens with its heading breadcrumb, so a retrieved fragment names the article it came from for both dense and BM25 search; chunks target 1200 and never exceed 2000 characters.
 2. **Turbovec Quantized Indexing (`turbovec_memory.py`):** Pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 

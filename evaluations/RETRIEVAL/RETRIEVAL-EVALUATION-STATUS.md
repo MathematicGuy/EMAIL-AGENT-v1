@@ -5,7 +5,15 @@
 > [SPEC](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) / [PLAN](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
 > `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
-> **17 documents / 1,066 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
+> **17 documents** (with legacy E2E test scoped to 6 documents).
+>
+> **Revised 2026-08-17.** Chunking is no longer "H1 and H2": it is structure-aware and
+> hierarchical over ATX H1-H6 plus plain-text `Phan`/`Chuong`/`Muc`/`Dieu`/`Buoc`, and every
+> chunk repeats its heading breadcrumb in its own text. The corpus is now **939 chunks**.
+> `section=None` fell from 937/1069 (88%) to 10/939 (1%), and the four statutes went from
+> emitting **zero** sections to full article-level labelling - which is why
+> `excluded_case_count` for the section-level metric fell from 40 to 2. See
+> [the implementation record](../../docs/superpowers/plans/2026-08-17-structure-aware-chunking.md).
 > Purpose: map what is already tested vs. what is missing for the full Email-RAG quality evaluation story.  
 > The evaluation pipeline covers three conceptually distinct layers:  
 > **Routing** (does the classifier decide that RAG is needed?) →  
@@ -26,7 +34,7 @@ flowchart TD
     B1 --> C["Layer 2 · Semantic Retrieval"]
     B2 --> C
 
-    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
+    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nstructure-aware chunking + breadcrumb, source_url shape"]
     C --> C2["✅ test_rag.py · ACL filtering\nTenant scope applied before scoring;\nforeign chunks excluded"]
     C --> C3["✅ test_rag.py · index mechanics\nScore ordering, top_k truncation,\ntimeout status, null memory fallback"]
     C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2375"]
@@ -70,7 +78,7 @@ flowchart TD
 - ❌ **Corpus-Matched Routing Fixtures**: Missing test emails that explicitly ask about ingested procedures (like CCCD renewal) to prove routing works on real domain content.
 
 **Layer 2 · Retrieval (The Librarian)**
-- ✅ **Corpus Loader & Chunking (`test_rag.py`)**: Tests that markdown guidebooks load cleanly and split into H1/H2 section chunks (ensures data ingest reliability).
+- ✅ **Corpus Loader & Chunking (`test_rag.py`, `test_markdown_chunking.py`, `test_structure_normalizer.py`)**: Tests that markdown guidebooks load cleanly and split along the recovered heading hierarchy, that each chunk carries its breadcrumb, and that tables, fenced code and list items are never cut mid-block.
 - ✅ **Tenant ACL Filtering (`test_rag.py`)**: Tests that private company guidebooks are never leaked to unauthorized users/tenants (ensures data privacy).
 - ✅ **Search Index Mechanics (`test_rag.py`)**: Tests score sorting, top-k limits, timeouts, and fallback handling when search fails (ensures basic system stability).
 - ✅ **Retrieval Metrics Harness (Hit@K / MRR)**: 100 labeled questions (32 in the legacy baseline) measure document and section retrieval; fresh hashing runs prove harness mechanics, while fresh real-embedding evidence is still needed for semantic acceptance.
@@ -122,7 +130,7 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 | Test File | What it checks |
 |---|---|
-| `test_rag.py` | Corpus loading (17 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
+| `test_rag.py` | Corpus loading (17 `.md` docs), structure-aware chunking with breadcrumbs, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
 | `test_bm25.py` | Tenant-scoped BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization, ACL filtering before scoring |
 | `test_rrf.py` | Reciprocal Rank Fusion, 1-based position rank scoring (`RRF_K=60`), duplicate handling, score fusion |
 | `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, tenant ACL gate, Jina reranker integration |
@@ -323,3 +331,26 @@ Scan, image-based, and mixed PDFs currently return
 an API key is provided. There is no Gmail-attachment ingestion or upload API,
 and this ingestion capability is not yet included in the retrieval-quality
 golden set or live-Qdrant benchmark.
+
+
+---
+
+## Structure-Aware Chunking Run (2026-08-17)
+
+`scripts/evaluate_retrieval.py --embedder hashing --retriever hybrid`, before/after on the same
+corpus and harness (baseline measured in a detached `HEAD` worktree). No slice regressed.
+
+| | doc hit@1 | doc hit@3 | doc mrr | doc recall@5 | sec hit@1 | sec mrr | sec recall@5 |
+|---|---|---|---|---|---|---|---|
+| before | 0.6818 | 0.7955 | 0.7409 | 0.8295 | 0.3261 | 0.4362 | 0.6087 |
+| after | 0.7045 | 0.8636 | 0.7862 | 0.9091 | 0.3478 | 0.4467 | 0.6304 |
+
+Both rows score the 46 section labels that existed at the time. The saved baseline
+[`retrieval-eval-2026-08-17-hashing-hybrid.json`](../baselines/retrieval-eval-2026-08-17-hashing-hybrid.json)
+was produced after labelling 40 statute cases, so it scores **86** labels and its section-level
+figures (hit@1 0.3256, mrr 0.4273) are not comparable with the table above - the metric now
+covers the hardest documents in the corpus instead of skipping them.
+
+Still open: `excluded_case_count` is 2, not 0 - q-019 and q-021 (`dang-ky-xe`) carry no section
+label. Both sit inside the locked 32-case legacy block. q-019's note is stale: it records that
+heading lines are excluded from chunk text, which is no longer true.

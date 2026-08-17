@@ -945,7 +945,10 @@ def test_dry_run_writes_report_without_provider_keys(tmp_path: Path) -> None:
     assert report["case_count"] == len(json.loads(fixture.read_text(encoding="utf-8")))
     for level in ("document_level", "section_level"):
         assert set(report[level]) >= {"hit_at_1", "hit_at_3", "mrr", "recall_at_5"}
-    assert report["section_level"]["excluded_case_count"] == 12
+    # Zero, because every corpus document now emits sections. This was 12 while
+    # the four statutes produced only section-less chunks: their three probes
+    # each dropped out of the gating metric.
+    assert report["section_level"]["excluded_case_count"] == 0
     assert report["by_probe"].keys() == {"lexical", "semantic", "mixed"}
     assert report["abstention"]["case_count"] == 1
     assert set(report["latency_ms"]) == {"p50", "p95"}

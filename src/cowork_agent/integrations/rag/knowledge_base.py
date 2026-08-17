@@ -17,6 +17,7 @@ from cowork_agent.integrations.knowledge_ingestion.manifest import ManifestStore
 from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import split_frontmatter
 
 from .markdown_chunking import chunk_markdown_pages, split_markdown_pages
+from .structure_normalizer import normalize_structure
 
 _MANIFEST_NAME = "ingestion-manifest.json"
 
@@ -113,7 +114,7 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
         else:
             source_url = path.name
         chunks: list[KnowledgeChunk] = []
-        pages = split_markdown_pages(body)
+        pages = split_markdown_pages(normalize_structure(body))
         for part in chunk_markdown_pages(pages):
             chunks.append(
                 KnowledgeChunk(

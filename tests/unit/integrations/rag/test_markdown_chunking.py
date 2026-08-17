@@ -4,18 +4,25 @@ from cowork_agent.integrations.rag.markdown_chunking import (
     chunk_markdown_pages,
     split_markdown_pages,
 )
+from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
 
 
-def test_chunks_by_section_and_paragraph_without_overlap() -> None:
+def test_chunks_by_section_and_prefixes_each_with_its_breadcrumb() -> None:
     chunks = chunk_markdown(
         "Preamble.\n\n# Policy\n\nAlpha.\n\nBeta.\n\n## Detail\n\nGamma."
     )
 
     assert [(chunk.section, chunk.text) for chunk in chunks] == [
         (None, "Preamble."),
-        ("Policy", "Alpha.\n\nBeta."),
-        ("Detail", "Gamma."),
+        ("Policy", "Policy\n\nAlpha.\n\nBeta."),
+        ("Detail", "Policy\nDetail\n\nGamma."),
     ]
+
+
+def test_chunk_records_the_full_heading_path() -> None:
+    chunks = chunk_markdown("# Policy\n\n## Detail\n\nGamma.")
+
+    assert [chunk.heading_path for chunk in chunks] == [("Policy", "Detail")]
 
 
 def test_page_coordinates_span_pages_within_one_section() -> None:
@@ -30,7 +37,7 @@ def test_page_coordinates_span_pages_within_one_section() -> None:
     assert chunks[0].section == "Policy"
     assert chunks[0].page_start == 1
     assert chunks[0].page_end == 2
-    assert chunks[0].text == "First paragraph.\n\nSecond paragraph."
+    assert chunks[0].text == "Policy\n\nFirst paragraph.\n\nSecond paragraph."
 
 
 def test_short_existing_markdown_keeps_meaningful_whitespace_exactly() -> None:
@@ -39,7 +46,7 @@ def test_short_existing_markdown_keeps_meaningful_whitespace_exactly() -> None:
     (chunk,) = chunk_markdown(f"# Policy\n{body}\n")
 
     assert chunk.section == "Policy"
-    assert chunk.text == body
+    assert chunk.text == f"Policy\n\n{body}"
 
 
 def test_oversize_paragraph_splits_deterministically_within_limit() -> None:
@@ -105,5 +112,87 @@ def test_chunk_markdown_still_splits_sections() -> None:
 
     assert [(chunk.section, chunk.text) for chunk in chunks] == [
         (None, "Preamble."),
-        ("Policy", "Alpha."),
+        ("Policy", "Policy\n\nAlpha."),
     ]
+
+
+def test_plain_text_article_heading_opens_its_own_section() -> None:
+    chunks = chunk_markdown(
+        normalize_structure(
+            "Chương I\n\nQUY ĐỊNH CHUNG\n\n"
+            "Điều 1. Phạm vi điều chỉnh\n\nLuật này quy định về đất đai.\n\n"
+            "Điều 2. Đối tượng áp dụng\n\nNgười sử dụng đất chịu điều chỉnh."
+        )
+    )
+
+    assert [chunk.section for chunk in chunks] == [
+        "Điều 1. Phạm vi điều chỉnh",
+        "Điều 2. Đối tượng áp dụng",
+    ]
+    assert chunks[0].text.startswith("Chương I — QUY ĐỊNH CHUNG\nĐiều 1.")
+
+
+def test_numbered_clause_is_not_mistaken_for_a_heading() -> None:
+    clause = (
+        "1. Bản đồ địa chính là bản đồ thể hiện các thửa đất và các đối tượng "
+        "địa lý có liên quan, lập theo đơn vị hành chính cấp xã."
+    )
+
+    (chunk,) = chunk_markdown(f"# Giải thích từ ngữ\n\n{clause}")
+
+    assert chunk.section == "Giải thích từ ngữ"
+    assert clause in chunk.text
+
+
+def test_table_split_repeats_its_header_on_every_part() -> None:
+    rows = "\n".join(f"| row {index} | {'x' * 60} |" for index in range(20))
+    table = f"| Name | Value |\n| --- | --- |\n{rows}"
+
+    chunks = chunk_markdown(f"# Fees\n\n{table}", max_chars=400)
+
+    assert len(chunks) > 1
+    assert all("| Name | Value |" in chunk.text for chunk in chunks)
+    assert all("| --- | --- |" in chunk.text for chunk in chunks)
+
+
+def test_fenced_code_is_never_cut_mid_block() -> None:
+    body = "\n".join(f"value_{index} = {index}" for index in range(60))
+
+    chunks = chunk_markdown(f"# Snippet\n\n```python\n{body}\n```", max_chars=400)
+
+    assert len(chunks) > 1
+    assert all(chunk.text.count("```") % 2 == 0 for chunk in chunks)
+
+
+def test_page_marker_comment_never_becomes_a_chunk() -> None:
+    chunks = chunk_markdown("# Policy\n\n<!-- Page 1 -->\n\nAlpha body.")
+
+    assert [chunk.text for chunk in chunks] == ["Policy\n\nAlpha body."]
+
+
+def test_split_section_overlaps_within_itself_but_not_across_articles() -> None:
+    long_body = " ".join(f"Câu số {index} trong điều này." for index in range(80))
+    chunks = chunk_markdown(
+        normalize_structure(
+            f"Điều 1. Điều dài\n\n{long_body}\n\nĐiều 2. Điều ngắn\n\nNội dung ngắn."
+        ),
+        max_chars=600,
+    )
+
+    first = [chunk for chunk in chunks if chunk.section == "Điều 1. Điều dài"]
+    assert len(first) > 1
+    tail = first[0].text.rsplit(" ", 4)[-1]
+    assert tail in first[1].text
+    assert all("Điều 2" not in chunk.text for chunk in first)
+
+
+def test_breadcrumb_and_body_together_respect_the_ceiling() -> None:
+    body = " ".join(f"Đoạn văn số {index}." for index in range(400))
+    markdown = normalize_structure(
+        f"Chương I\n\nQUY ĐỊNH CHUNG\n\nĐiều 7. Một điều rất dài\n\n{body}"
+    )
+
+    chunks = chunk_markdown(markdown, max_chars=500)
+
+    assert len(chunks) > 1
+    assert all(len(chunk.text) <= 500 for chunk in chunks)
