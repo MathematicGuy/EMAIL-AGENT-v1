@@ -47,6 +47,14 @@ _PAGE_MARKER = re.compile(r"^<!--\s*Page\s+(\d+)\s*-->\s*$")
 _COMMENT_OPEN: Final = "<!--"
 _COMMENT_ONLY = re.compile(r"^\s*(?:<!--.*?-->\s*)+$", re.S)
 _CLAUSE_START = re.compile(r"(?m)^(?=\d+(?:\.\d+)*[.)]\s|[a-zđ][.)]\s)")
+_CLAUSE_MARKER = re.compile(r"^\d+(?:\.\d+)*[.)]\s")
+_POINT_MARKER = re.compile(r"^[a-zđ][.)]\s")
+#: A repeated clause stem is spent out of the chunk it re-opens, so it is only
+#: worth carrying while it stays a heading-sized line. A quarter of the budget
+#: admits the openers statutes actually write ("5. Trách nhiệm của Ủy ban nhân
+#: dân cấp tỉnh đối với quốc lộ được phân cấp") and refuses a clause that is a
+#: substantive paragraph in its own right.
+_MAX_STEM_SHARE: Final = 4
 # A period preceded by a digit or a lone capital ends a clause number or an
 # initial, not a sentence: splitting there shreds "Điều 1." and "1." alike.
 _SENTENCE_BOUNDARY = re.compile(r"(?<!\d\.)(?<![A-ZĐ]\.)(?<=[.!?])\s+")
@@ -343,6 +351,7 @@ def _pack_blocks(
     used: list[_Block] = []
     length = 0
     carry = ""
+    stem = ""
 
     def flush() -> None:
         nonlocal current, used, length, carry
@@ -360,16 +369,43 @@ def _pack_blocks(
         current, used, length = [], [], 0
 
     for part, block in pieces:
+        if _CLAUSE_MARKER.match(part):
+            stem = _clause_stem(part, budget)
         if current and length + len(part) + 2 > budget:
             flush()
-        if not current and carry and len(carry) + len(part) + 2 <= budget:
-            current.append(carry)
-            length = len(carry)
+        if not current:
+            for line in _resume_prefix(stem, carry, part, budget):
+                current.append(line)
+                length += len(line) + (2 if length else 0)
         current.append(part)
         used.append(block)
         length += len(part) + (2 if length else 0)
     flush()
     return drafts
+
+
+def _clause_stem(part: str, budget: int) -> str:
+    """The opening line of a clause, kept only while a chunk can repeat it."""
+    line = part.split("\n", 1)[0].strip()
+    return line if len(line) <= budget // _MAX_STEM_SHARE else ""
+
+
+def _resume_prefix(stem: str, carry: str, part: str, budget: int) -> list[str]:
+    """Lines that re-open a cut before the piece that resumes it.
+
+    A lettered point cut away from its clause is the one fragment structure
+    cannot speak for: ``a) Đầu tư, xây dựng quốc lộ được phân cấp`` names
+    neither the duty it belongs to nor who owes it, and no reader — human or
+    retrieval — can put it back. So the clause stem is repeated ahead of it,
+    the way a split table repeats its header. Overlap is the cheaper of the
+    two and is dropped first when both will not fit.
+    """
+    if not _POINT_MARKER.match(part):
+        return [carry] if carry and len(carry) + len(part) + 2 <= budget else []
+    prefix = [line for line in (stem, carry) if line]
+    while prefix and sum(len(line) + 2 for line in prefix) + len(part) > budget:
+        prefix.pop()
+    return prefix
 
 
 def _merge_undersized(
