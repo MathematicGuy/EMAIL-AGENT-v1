@@ -13,7 +13,6 @@ import { ArtifactsView } from './components/ArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { UpgradeModal } from './components/UpgradeModal';
 import { VoiceModal } from './components/VoiceModal';
-import { CustomizeModal } from './components/CustomizeModal';
 import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
@@ -39,12 +38,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
-  const [selectedThemeId, setSelectedThemeId] = useState('warm-charcoal');
   const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
@@ -163,7 +160,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}
         onOpenUpgradeModal={() => setIsUpgradeModalOpen(true)}
-        onOpenCustomizeModal={() => setIsCustomizeModalOpen(true)}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
         onChangeView={setActiveView}
@@ -259,13 +255,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         isOpen={isVoiceModalOpen}
         onClose={() => setIsVoiceModalOpen(false)}
         onSendTranscript={(text) => sendMessage(text)}
-      />
-
-      <CustomizeModal
-        isOpen={isCustomizeModalOpen}
-        onClose={() => setIsCustomizeModalOpen(false)}
-        selectedThemeId={selectedThemeId}
-        onSelectTheme={setSelectedThemeId}
       />
 
       <NewProjectModal

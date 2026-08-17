@@ -7,6 +7,11 @@ import path from 'node:path'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    hmr: true,
+    watch: {
+      usePolling: true,
+      interval: 250,
+    },
     proxy: {
       '/backend': {
         target: 'http://127.0.0.1:8000',

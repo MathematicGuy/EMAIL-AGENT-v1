@@ -5,13 +5,10 @@ import {
   FolderKanban,
   GitBranch,
   Code2,
-  Palette,
   Search,
   SlidersHorizontal,
   Download,
-  Home,
   Clock,
-  Briefcase,
   FlaskConical,
   LayoutGrid,
   Mail,
@@ -37,7 +34,6 @@ interface TaskbarProps {
   isHistoryLoading?: boolean;
   activeChatId?: string;
   onOpenUpgradeModal: () => void;
-  onOpenCustomizeModal: () => void;
   onNavigateHome?: () => void;
   activeView?: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts';
   onChangeView?: (view: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts') => void;
@@ -74,13 +70,11 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   isHistoryLoading = false,
   activeChatId,
   onOpenUpgradeModal,
-  onOpenCustomizeModal,
   onNavigateHome,
   activeView = 'chat',
   onChangeView,
   isGenerating = false
 }) => {
-  const [topTab, setTopTab] = useState<'home' | 'code'>('home');
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
     () => new Set(projects.map((project) => project.id))
   );
@@ -147,16 +141,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Dispatch Operations"
-            onClick={() => onChangeView?.('dispatch')}
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              activeView === 'dispatch' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
-            }`}
-          >
-            <Briefcase className="w-4 h-4" />
-          </button>
-
-          <button
             title="Projects"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
@@ -183,13 +167,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <Code2 className="w-4 h-4" />
           </button>
 
-          <button
-            title="Customize"
-            onClick={onOpenCustomizeModal}
-            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
-          >
-            <Palette className="w-4 h-4" />
-          </button>
         </div>
 
         <div className="flex flex-col items-center gap-3 w-full">
@@ -245,31 +222,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 p-0.5 bg-[#252320] rounded-xl border border-[#33312d] text-xs font-medium">
-          <button
-            onClick={() => setTopTab('home')}
-            className={`flex items-center justify-center gap-1.5 py-1 rounded-lg transition-colors cursor-pointer ${
-              topTab === 'home'
-                ? 'bg-[#383531] text-zinc-100 font-semibold shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>Home</span>
-          </button>
-          <button
-            onClick={() => setTopTab('code')}
-            className={`flex items-center justify-center gap-1.5 py-1 rounded-lg transition-colors cursor-pointer ${
-              topTab === 'code'
-                ? 'bg-[#383531] text-zinc-100 font-semibold shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>Code</span>
-          </button>
-        </div>
-
         <button
           onClick={onNewChat}
           className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
@@ -311,28 +263,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <span>Mail Inbox</span>
           </button>
 
-          <button
-            onClick={() => onChangeView?.('dispatch')}
-            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'dispatch' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
-              <span>Dispatch</span>
-            </div>
-            <span className="text-[9px] font-semibold text-zinc-400 bg-zinc-800/90 px-1.5 py-0.2 rounded border border-zinc-700/50">
-              Beta
-            </span>
-          </button>
-
-          <button
-            onClick={onOpenCustomizeModal}
-            className="flex items-center gap-2.5 px-2.5 py-1.5 text-zinc-300 hover:text-white hover:bg-[#272522] rounded-lg text-left transition-colors font-medium cursor-pointer"
-          >
-            <Palette className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Customize</span>
-          </button>
         </div>
 
         <div className="mt-2 flex flex-col text-xs">
