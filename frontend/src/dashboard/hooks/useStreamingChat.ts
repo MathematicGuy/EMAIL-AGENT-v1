@@ -214,8 +214,7 @@ function ragEvidenceFromPayload(value: unknown): ChatRagEvidence[] {
       typeof (item as Record<string, unknown>).document_id !== 'string' ||
       typeof (item as Record<string, unknown>).document_title !== 'string' ||
       typeof (item as Record<string, unknown>).relevance_score !== 'number' ||
-      typeof (item as Record<string, unknown>).preview !== 'string' ||
-      typeof (item as Record<string, unknown>).content !== 'string'
+      typeof (item as Record<string, unknown>).preview !== 'string'
     ) return [];
     const evidence = item as Record<string, unknown>;
     return [{
@@ -229,7 +228,7 @@ function ragEvidenceFromPayload(value: unknown): ChatRagEvidence[] {
       relevanceScore: evidence.relevance_score as number,
       rerankScore: typeof evidence.rerank_score === 'number' ? evidence.rerank_score : null,
       preview: evidence.preview as string,
-      content: evidence.content as string,
+      content: typeof evidence.content === 'string' ? evidence.content : '',
     }];
   }).slice(0, 5);
 }
@@ -787,6 +786,24 @@ export function useStreamingChat(
     }
   }, [rememberTranscript]);
 
+  const loadFullEvidence = useCallback(async (chunkId: string): Promise<ChatRagEvidence | null> => {
+    if (!activeConversationId) return null;
+    const response = await fetch(
+      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(activeConversationId)}/messages?include_content=true`,
+      { credentials: 'include' },
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { turns: ChatTurn[] };
+    const next = messagesFromTurns(payload.turns);
+    rememberTranscript(activeConversationId, next);
+    setMessages(next);
+    for (const message of next) {
+      const found = message.ragEvidence?.find((item) => item.chunkId === chunkId);
+      if (found) return found;
+    }
+    return null;
+  }, [activeConversationId, rememberTranscript]);
+
   const resetChat = useCallback(() => {
     abortRef.current?.abort();
     loadHistoryAbortRef.current?.abort();
@@ -864,6 +881,7 @@ export function useStreamingChat(
     resetChat,
     deleteChat,
     loadExistingChat,
+    loadFullEvidence,
     apiStatus,
   };
 }

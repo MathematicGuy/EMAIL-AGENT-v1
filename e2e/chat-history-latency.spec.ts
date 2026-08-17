@@ -155,7 +155,7 @@ test.describe('chat history loading latency', () => {
 
     await expect(dashboard.chatMessage(`Answer ${CHAT_HEAVY_MARKER}`)).toBeVisible();
     expect(sample.turn_count).toBe(16);
-    expect(sample.payload_bytes ?? 0).toBeGreaterThan(200_000);
+    expect(sample.payload_bytes ?? 0).toBeLessThan(80_000);
     expect(sample.click_to_first_message_visible_ms).toBeLessThan(3_000);
   });
 

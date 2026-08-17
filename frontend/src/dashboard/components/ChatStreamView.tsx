@@ -27,6 +27,7 @@ import { readResourceText } from '../../modules/workspace/resourceApi';
 import type {
   ChatComposerAttachment,
   ChatMessage,
+  ChatRagEvidence,
   ModelOption,
   TaskWorkflow,
 } from '../types';
@@ -57,6 +58,7 @@ interface ChatStreamViewProps {
   onReviseWorkflowPlan?: (taskId: string, feedback: string) => Promise<void> | void;
   onRetryWorkflowStep?: (taskId: string, stepId: string) => void;
   onRetryTurn?: (messageId: string) => void;
+  onLoadFullEvidence?: (chunkId: string) => Promise<ChatRagEvidence | null>;
   activeProject?: Project;
   projects?: Project[];
   onSelectProject?: (projectId: string) => void;
@@ -666,6 +668,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   onReviseWorkflowPlan,
   onRetryWorkflowStep,
   onRetryTurn,
+  onLoadFullEvidence,
   activeProject,
   projects,
   onSelectProject,
@@ -899,6 +902,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
                     <RagEvidencePanel
                       evidence={msg.ragEvidence ?? []}
                       retrievalStatus={msg.retrievalStatus}
+                      onLoadFullEvidence={onLoadFullEvidence}
                     />
                   )}
 

@@ -101,6 +101,7 @@ absent, add the row when you add the test.
 | Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
 | OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
 | Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
+| GET `/sessions/{id}/messages` omits `rag_evidence.content` unless `include_content=true` | `integration/api/test_chat_api.py` | frontend mapper except one preview-only case |
 
 ### Two facts that break tests if you forget them
 

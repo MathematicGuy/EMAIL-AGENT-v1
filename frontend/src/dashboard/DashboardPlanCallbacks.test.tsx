@@ -28,6 +28,7 @@ vi.mock('./hooks/useStreamingChat', () => ({
     stopGeneration: vi.fn(),
     resetChat: vi.fn(),
     loadExistingChat: vi.fn(),
+    loadFullEvidence: vi.fn(),
     apiStatus: 'live',
     recentChats: [],
     isHistoryLoading: false,
@@ -37,6 +38,7 @@ vi.mock('./hooks/useStreamingChat', () => ({
     approveWorkflowPlan: streaming.approveWorkflowPlan,
     reviseWorkflowPlan: streaming.reviseWorkflowPlan,
     retryWorkflowStep: vi.fn(),
+    retryTurn: vi.fn(),
   }),
 }));
 

@@ -5,6 +5,7 @@ import type { ChatRagEvidence, ChatRetrievalStatus } from '../types';
 interface RagEvidencePanelProps {
   evidence: ChatRagEvidence[];
   retrievalStatus?: ChatRetrievalStatus;
+  onLoadFullEvidence?: (chunkId: string) => Promise<ChatRagEvidence | null>;
 }
 
 function summaryText(evidence: ChatRagEvidence[], retrievalStatus?: ChatRetrievalStatus): string {
@@ -20,10 +21,23 @@ function emptyMessage(retrievalStatus?: ChatRetrievalStatus): string {
   return 'Retrieval was unavailable for this response.';
 }
 
-export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanelProps) {
+export function RagEvidencePanel({
+  evidence,
+  retrievalStatus,
+  onLoadFullEvidence,
+}: RagEvidencePanelProps) {
   const [selectedEvidence, setSelectedEvidence] = useState<ChatRagEvidence | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  const openFullChunk = async (item: ChatRagEvidence) => {
+    if (item.content) {
+      setSelectedEvidence(item);
+      return;
+    }
+    const full = onLoadFullEvidence ? await onLoadFullEvidence(item.chunkId) : null;
+    setSelectedEvidence(full ?? { ...item, content: item.preview });
+  };
 
   useEffect(() => {
     if (selectedEvidence) closeButtonRef.current?.focus();
@@ -61,7 +75,7 @@ export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanel
               <p className="mt-2 whitespace-pre-wrap text-zinc-300">{item.preview}</p>
               <button
                 type="button"
-                onClick={() => setSelectedEvidence(item)}
+                onClick={() => { void openFullChunk(item); }}
                 className="mt-2 rounded-md border border-[#5a5149] px-2 py-1 text-zinc-200 hover:bg-[#38342f]"
               >
                 View full chunk
@@ -96,7 +110,7 @@ export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanel
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
-          <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-6">{selectedEvidence.content}</p>
+          <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-6">{selectedEvidence.content || selectedEvidence.preview}</p>
         </dialog>
       )}
     </>

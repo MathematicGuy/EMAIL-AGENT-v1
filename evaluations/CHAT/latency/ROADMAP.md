@@ -132,6 +132,10 @@ Optionally cap default turns (`limit=30&before=`).
 **Ask before shipping** if this needs a SQL migration or a new route —
 the list query itself does not, a second evidence route might.
 
+**Status:** Done on `fe` without a new route or migration. Default list
+omits `content`. `?include_content=true` loads full chunks when the
+drawer opens. Heavy payload **352 673 → 31 633 bytes**.
+
 **Measure:** `payload_bytes` on `mocked-heavy-payload` and live p50.
 Expect the live 2–5 s to drop if the wait was serialize + transfer +
 parse, not the SQL round-trip alone.

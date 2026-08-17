@@ -96,6 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     resetChat,
     deleteChat,
     loadExistingChat,
+    loadFullEvidence,
     apiStatus,
     recentChats,
     isHistoryLoading,
@@ -214,6 +215,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
                 void retryWorkflowStep(taskId, stepId)
               }
               onRetryTurn={retryTurn}
+              onLoadFullEvidence={loadFullEvidence}
               activeProject={activeProject}
               projects={projects}
               onSelectProject={handleSelectProject}

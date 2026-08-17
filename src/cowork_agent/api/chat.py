@@ -48,6 +48,26 @@ GuestSessionIssuer = Callable[[Request, Response], Awaitable[None]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
 
 
+def slim_listed_turn(
+    payload: dict[str, object], *, include_content: bool
+) -> dict[str, object]:
+    """Drop ``rag_evidence.content`` from GET /messages unless the client asks."""
+    if include_content:
+        return payload
+    evidence = payload.get("rag_evidence")
+    if not isinstance(evidence, list):
+        return payload
+    slimmed: list[object] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            slimmed.append(item)
+            continue
+        next_item = dict(item)
+        next_item.pop("content", None)
+        slimmed.append(next_item)
+    return {**payload, "rag_evidence": slimmed}
+
+
 class _ChatMessagePayload(BaseModel):
     """Untrusted HTTP body kept separate from the pure chat contract."""
 
@@ -289,7 +309,11 @@ def create_chat_router() -> APIRouter:
         }
 
     @router.get("/sessions/{session_id}/messages")
-    async def list_messages(session_id: str, request: Request) -> dict[str, object]:
+    async def list_messages(
+        session_id: str,
+        request: Request,
+        include_content: bool = Query(False),
+    ) -> dict[str, object]:
         principal = await _verified_principal(request)
         try:
             scope = await _require_session(request, principal, session_id)
@@ -323,7 +347,7 @@ def create_chat_router() -> APIRouter:
                         CanonicalProjectRepository, repository
                     ).require_document(principal, scope.project_id, document_id)
                     coordinate["unavailable"] = document is None or document.status != "ready"
-            serialized.append(payload)
+            serialized.append(slim_listed_turn(payload, include_content=include_content))
         return {"session_id": session_id, "turns": serialized}
 
     @router.delete("/sessions/{session_id}", status_code=204, response_model=None)

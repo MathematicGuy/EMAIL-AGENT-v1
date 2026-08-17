@@ -228,6 +228,52 @@ describe('useStreamingChat Project chat client', () => {
     });
   });
 
+  it('keeps list-history RAG evidence when the payload omits chunk content', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions: [{
+          session_id: 'session-slim', project_id: 'project-1', title: 'Slim history',
+        }] }));
+      }
+      if (url.includes('/sessions/session-slim/messages') && !url.includes('include_content=true')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-slim',
+          user_message: 'What is the policy?',
+          assistant_message: 'See the retrieved policy.',
+          created_at: '2026-08-17T00:00:00Z',
+          citation_coordinates: [],
+          retrieval_status: 'success',
+          rag_evidence: [{
+            source: 'company_knowledge',
+            retrieval_status: 'success',
+            chunk_id: 'chunk-slim',
+            document_id: 'doc-slim',
+            document_title: 'Policy.md',
+            section: 'Overview',
+            source_url: null,
+            relevance_score: 0.81,
+            rerank_score: 0.77,
+            preview: 'Short preview of the chunk.',
+          }],
+        }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(1));
+    await act(async () => result.current.loadExistingChat('session-slim'));
+    expect(result.current.messages.at(-1)).toMatchObject({
+      retrievalStatus: 'success',
+      ragEvidence: [{
+        chunkId: 'chunk-slim',
+        preview: 'Short preview of the chunk.',
+        content: '',
+      }],
+    });
+  });
+
   it('deletes a saved chat and clears it from the active view', async () => {
     let sessions = [{
       session_id: 'session-1', project_id: 'project-1', title: 'Delete me',
