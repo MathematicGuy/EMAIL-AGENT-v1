@@ -237,7 +237,7 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
                     "SELECT tenant_id, user_id FROM chat_summary_episodes"
                     " ORDER BY tenant_id, user_id"
                 )
-                assert await cursor.fetchall() == [("local", "other@example.com")]
+                assert await cursor.fetchall() == [("tenant-1", "other@example.com")]
         finally:
             await pool.close()
 

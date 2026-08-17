@@ -330,15 +330,15 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
             async with pool.connection() as connection:
                 await connection.execute(
                     "DELETE FROM chat_profiles WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
                 await connection.execute(
                     "DELETE FROM task_episodes WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
                 await connection.execute(
                     "DELETE FROM chat_summary_episodes WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
 
             # Verify deletion.
@@ -346,7 +346,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                 for table in ("chat_profiles", "task_episodes", "chat_summary_episodes"):
                     cursor = await connection.execute(
                         f"SELECT count(*) FROM {table} WHERE tenant_id = %s",
-                        ("local",),
+                        ("tenant-bak",),
                     )
                     assert (await cursor.fetchone())[0] == 0  # type: ignore[index]
 
@@ -385,7 +385,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                     "SELECT validation_status, retrieval_eligible"
                     " FROM task_episodes"
                     " WHERE tenant_id = %s AND episode_id = %s",
-                    ("local", "ep-bak-ineligible"),
+                    ("tenant-bak", "ep-bak-ineligible"),
                 )
                 row = await cursor.fetchone()
                 assert row is not None
@@ -399,7 +399,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                     " updated_at, expires_at, episode_id"
                     " FROM task_episodes"
                     " WHERE tenant_id = %s AND episode_id = %s",
-                    ("local", "ep-bak-approved"),
+                    ("tenant-bak", "ep-bak-approved"),
                 )
                 row = await cursor.fetchone()
                 assert row is not None
@@ -415,11 +415,11 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                     " expires_at"
                     " FROM chat_summary_episodes"
                     " WHERE tenant_id = %s AND episode_id = %s",
-                    ("local", "ep-summary-bak"),
+                    ("tenant-bak", "ep-summary-bak"),
                 )
                 row = await cursor.fetchone()
                 assert row is not None
-                assert row[0] == "local"
+                assert row[0] == "tenant-bak"
                 assert row[1] == "bak-user@example.com"
                 assert row[2] == "ai_chat"
                 assert row[3] == "system_generated"
@@ -459,7 +459,7 @@ def test_backup_restore_preserves_expired_row_exclusion() -> None:
             async with pool.connection() as connection:
                 await connection.execute(
                     "DELETE FROM chat_profiles WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
 
             # Restore.
@@ -473,7 +473,7 @@ def test_backup_restore_preserves_expired_row_exclusion() -> None:
                 cursor = await connection.execute(
                     "SELECT count(*) FROM chat_profiles"
                     " WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
                 row = await cursor.fetchone()
                 assert row is not None
@@ -481,7 +481,7 @@ def test_backup_restore_preserves_expired_row_exclusion() -> None:
                 cursor = await connection.execute(
                     "SELECT expires_at FROM chat_profiles"
                     " WHERE tenant_id = %s",
-                    ("local",),
+                    ("tenant-bak",),
                 )
                 row = await cursor.fetchone()
                 assert row is not None

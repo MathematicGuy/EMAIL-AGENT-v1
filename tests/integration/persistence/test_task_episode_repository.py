@@ -377,7 +377,7 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
                     "SELECT tenant_id, user_id, retrieval_eligible FROM task_episodes"
                     " ORDER BY tenant_id, user_id"
                 )
-                assert await cursor.fetchall() == [("local", "other@example.com", False)]
+                assert await cursor.fetchall() == [("tenant-1", "other@example.com", False)]
                 sentinel = await connection.execute("SELECT value FROM semantic_rag_sentinel")
                 assert await sentinel.fetchall() == [("preserve",)]
         finally:
