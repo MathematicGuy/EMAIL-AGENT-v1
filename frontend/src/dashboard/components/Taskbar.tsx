@@ -314,7 +314,10 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
           <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar text-xs">
             {isHistoryLoading && (
-              <div className="px-2.5 py-2 text-[11px] text-zinc-500">
+              <div
+                className="px-2.5 py-2 text-[11px] text-zinc-500"
+                data-testid="chat-history-loading"
+              >
                 Đang tải lịch sử…
               </div>
             )}
@@ -328,6 +331,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               return (
                 <div key={chat.id} className="group flex items-center gap-1">
                   <button
+                    data-testid="recent-chat"
+                    data-chat-id={chat.id}
                     onClick={() => {
                       onChangeView?.('chat');
                       onSelectRecent(chat);
