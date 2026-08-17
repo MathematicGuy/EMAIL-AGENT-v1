@@ -47,7 +47,7 @@ load path until the Playwright harness has a committed baseline.
 ### Phase 3: Cold-visit payload (roadmap Step 3–4)
 
 - [x] Task 3: Slim `GET .../messages` (no `rag_evidence.content` on list)
-- [ ] Task 4: Backend list cheaper — only if live API p50 stays high
+- [x] Task 4: Backend list cheaper — one checkout, no check ping, warmer pool
 
 ### Phase 4: Polish (roadmap Step 5–6)
 

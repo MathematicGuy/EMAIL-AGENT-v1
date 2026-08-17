@@ -339,12 +339,11 @@ def create_app() -> FastAPI:
 
                 pool = AsyncConnectionPool(
                     database_url(),
-                    min_size=1,
+                    min_size=2,
                     max_size=8,
                     open=False,
-                    check=AsyncConnectionPool.check_connection,
-                    max_idle=60.0,
-                    max_lifetime=300.0,
+                    max_idle=600.0,
+                    max_lifetime=3600.0,
                     kwargs={"prepare_threshold": None},
                 )
                 await pool.open(wait=True)

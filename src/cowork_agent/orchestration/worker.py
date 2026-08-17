@@ -116,9 +116,11 @@ async def run_worker() -> None:
 
     pool = AsyncConnectionPool(
         database_url(),
-        min_size=1,
+        min_size=2,
         max_size=4,
         open=False,
+        max_idle=600.0,
+        max_lifetime=3600.0,
         kwargs={"prepare_threshold": None},
     )
     await pool.open(wait=True)

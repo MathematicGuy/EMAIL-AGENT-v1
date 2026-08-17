@@ -200,6 +200,14 @@ are skipped. Never show a deleted citation as live. Sharing one
 connection is a keep if live p50 drops by ~2+ RTTs. Bumping `min_size`
 to 8 blindly can crowd Auth/Storage/PostgREST on a small compute.
 
+**Status:** Done on `fe` (code + pool knobs). `load_owned_history` uses
+one checkout for require + `list_turns`. List no longer N+1s
+`require_document`. Pool is `min_size=2`, no per-checkout
+`check_connection`, idle/lifetime back to psycopg defaults.
+`DATABASE_URL` still operator-owned — `.env.example` already documents
+session `:5432`. Pipeline not added. Live `request_duration_ms` not
+re-measured in this session.
+
 **Do not:** enable prepared statements on :6543; use
 `NullConnectionPool`; pipeline across three checkouts; treat Shared
 transaction as “faster” for this FastAPI; colocate by moving the

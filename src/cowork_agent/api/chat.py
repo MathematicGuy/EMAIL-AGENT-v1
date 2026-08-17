@@ -68,6 +68,46 @@ def slim_listed_turn(
     return {**payload, "rag_evidence": slimmed}
 
 
+async def load_owned_history(
+    *,
+    sessions: ChatSessionRegistryPort,
+    history: ChatHistoryPort | None,
+    buffer: ChatSessionBufferPort | None,
+    principal: VerifiedPrincipal,
+    session_id: str,
+) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]]:
+    """Load owned turns. Shared Postgres pools use one checkout for require + list."""
+    session_pool = getattr(sessions, "_pool", None)
+    history_pool = getattr(history, "_pool", None) if history is not None else None
+    pool = session_pool
+    if pool is not None and pool is history_pool:
+        async with pool.connection() as connection:
+            scope = await sessions.require(
+                session_id,
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+                connection=connection,
+            )
+            if history is None:
+                return scope, ()
+            turns = await history.list_turns(scope, connection=connection)
+            return scope, turns
+    scope = await sessions.require(
+        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+    )
+    namespace = MemoryNamespace(
+        scope=scope,
+        memory_type=MemoryType.SHORT_TERM,
+        record_id=session_id,
+        source_id=None,
+    )
+    if history is not None:
+        return scope, await history.list_turns(scope)
+    if buffer is None:
+        return scope, ()
+    return scope, buffer.read(namespace)
+
+
 class _ChatMessagePayload(BaseModel):
     """Untrusted HTTP body kept separate from the pure chat contract."""
 
@@ -315,39 +355,21 @@ def create_chat_router() -> APIRouter:
         include_content: bool = Query(False),
     ) -> dict[str, object]:
         principal = await _verified_principal(request)
+        history = _history_repository(request)
         try:
-            scope = await _require_session(request, principal, session_id)
+            _scope, turns = await load_owned_history(
+                sessions=_sessions(request),
+                history=history,
+                buffer=_buffer(request),
+                principal=principal,
+                session_id=session_id,
+            )
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
-        namespace = MemoryNamespace(
-            scope=scope,
-            memory_type=MemoryType.SHORT_TERM,
-            record_id=session_id,
-            source_id=None,
-        )
-        history = _history_repository(request)
-        turns = (
-            await history.list_turns(scope)
-            if history is not None
-            else _buffer(request).read(namespace)
-        )
-        serialized: list[dict[str, object]] = []
-        repository = getattr(request.app.state, "project_repository", None)
-        for turn in turns:
-            payload = turn.to_dict()
-            coordinates = payload.get("citation_coordinates")
-            if isinstance(coordinates, list) and repository is not None:
-                for coordinate in coordinates:
-                    if not isinstance(coordinate, dict):
-                        continue
-                    document_id = coordinate.get("document_id")
-                    if not isinstance(document_id, str):
-                        continue
-                    document = await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
-                    coordinate["unavailable"] = document is None or document.status != "ready"
-            serialized.append(slim_listed_turn(payload, include_content=include_content))
+        serialized = [
+            slim_listed_turn(turn.to_dict(), include_content=include_content)
+            for turn in turns
+        ]
         return {"session_id": session_id, "turns": serialized}
 
     @router.delete("/sessions/{session_id}", status_code=204, response_model=None)

@@ -134,7 +134,10 @@ class HistoryStore:
             created_at=datetime(2026, 8, 14, tzinfo=UTC),
         )
 
-    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
+    async def list_turns(
+        self, scope: ChatMemoryScope, *, connection: object | None = None
+    ) -> tuple[ChatTurn, ...]:
+        del connection
         return (self.turn,) if scope.session_id == self.turn.session_id else ()
 
     async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
@@ -156,8 +159,14 @@ class DurableSessionRegistry:
         return self.scope
 
     async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
+        self,
+        session_id: str,
+        *,
+        tenant_id: str,
+        user_id: str,
+        connection: object | None = None,
     ) -> ChatMemoryScope:
+        del connection
         self.required.append((session_id, tenant_id, user_id))
         if self.scope != ChatMemoryScope(
             tenant_id=tenant_id, user_id=user_id, session_id=session_id

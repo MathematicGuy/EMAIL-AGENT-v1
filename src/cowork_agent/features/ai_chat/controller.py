@@ -202,7 +202,12 @@ class ChatSessionRegistryPort(Protocol):
     ) -> ChatMemoryScope: ...
 
     async def require(
-        self, session_id: str, *, user_id: str, tenant_id: str = "local"
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        tenant_id: str = "local",
+        connection: object | None = None,
     ) -> ChatMemoryScope: ...
 
     async def list_for(
@@ -291,7 +296,9 @@ class InMemoryChatSessionRegistry:
         *,
         user_id: str,
         tenant_id: str = "local",
+        connection: object | None = None,
     ) -> ChatMemoryScope:
+        del connection
         with self._lock:
             scope = self._sessions.get(session_id)
         if scope is None or scope.tenant_id != tenant_id or scope.user_id != user_id:

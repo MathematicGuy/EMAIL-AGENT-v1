@@ -63,24 +63,28 @@ class PostgresChatHistoryRepository:
                 (title, scope.session_id, scope.tenant_id, scope.user_id),
             )
 
-    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
-        async with self._pool.connection() as connection:
-            cursor = await connection.execute(
-                """
-                SELECT turns.turn_id, turns.session_id, turns.user_message,
-                       turns.assistant_message, turns.created_at,
-                       turns.citation_coordinates, turns.rag_evidence,
-                       turns.retrieval_status, turns.mail_scan
-                FROM chat_turns AS turns
-                JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
-                WHERE turns.session_id = %s
-                  AND sessions.workspace_id = %s
-                  AND sessions.user_id = %s
-                ORDER BY turns.created_at, turns.turn_id
-                """,
-                (scope.session_id, scope.tenant_id, scope.user_id),
-            )
-            rows = await cursor.fetchall()
+    async def list_turns(
+        self, scope: ChatMemoryScope, *, connection: object | None = None
+    ) -> tuple[ChatTurn, ...]:
+        if connection is None:
+            async with self._pool.connection() as borrowed:
+                return await self.list_turns(scope, connection=borrowed)
+        cursor = await connection.execute(  # type: ignore[union-attr]
+            """
+            SELECT turns.turn_id, turns.session_id, turns.user_message,
+                   turns.assistant_message, turns.created_at,
+                   turns.citation_coordinates, turns.rag_evidence,
+                   turns.retrieval_status, turns.mail_scan
+            FROM chat_turns AS turns
+            JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
+            WHERE turns.session_id = %s
+              AND sessions.workspace_id = %s
+              AND sessions.user_id = %s
+            ORDER BY turns.created_at, turns.turn_id
+            """,
+            (scope.session_id, scope.tenant_id, scope.user_id),
+        )
+        rows = await cursor.fetchall()
         return tuple(_turn_from_row(row) for row in rows)
 
     async def titles_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, str]:
