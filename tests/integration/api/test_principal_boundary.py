@@ -267,6 +267,7 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
             run = await app.state.run_repository.get(payload["id"])
             assert run is not None
             assert run.user_id == OWNER_EMAIL == connection.email_address
+            assert run.max_emails == 10
 
     asyncio.run(scenario())
 

@@ -41,7 +41,16 @@ def environment(**overrides: str) -> dict[str, str]:
 def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None:
     settings = GeminiSettings.from_env(environment(), load_env_file=False)
     assert settings.api_keys == ("key-one", "key-two", "key-three")
+    assert settings.action_plan_concurrency == 3
     assert "key-one" not in repr(settings)
+
+
+@pytest.mark.parametrize("value", ["0", "9"])
+def test_settings_reject_out_of_range_action_plan_concurrency(value: str) -> None:
+    with pytest.raises(ValueError, match="GEMINI_ACTION_PLAN_CONCURRENCY"):
+        GeminiSettings.from_env(
+            environment(GEMINI_ACTION_PLAN_CONCURRENCY=value), load_env_file=False
+        )
 
 
 def test_settings_load_all_numbered_gemini_keys() -> None:
