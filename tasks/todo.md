@@ -30,6 +30,17 @@ Plan: [PLAN-format-txt-md.md](plans/PLAN-format-txt-md.md)
 - [x] T1 TextExtractor
 - [x] T2 Service + CLI wire
 
+### retrieval-metadata-filters — 2026-08-16
+
+Plan: [PLAN-retrieval-metadata-filters.md](plans/PLAN-retrieval-metadata-filters.md)
+Spec: [SPEC-retrieval-metadata-filters.md](specs/SPEC-retrieval-metadata-filters.md)
+
+- [x] T1 Binary `document_date` harvest
+- [x] T2 `RetrievalFilters` + `SemanticChunk.document_date`
+- [x] T3 Manifest persist + `load_corpus` join
+- [x] T4 Allowlist + Hybrid/BM25/Turbovec
+- [x] T5 Capability map + verify
+
 ---
 
 Agent-tracked backlogs (GitHub Issues is the source of truth; these files are indexes):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from datetime import date
 
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
@@ -71,13 +72,15 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
     return memory, embedder
 
 
-def _request(*, top_k: int = 5) -> SemanticRetrievalRequest:
+def _request(
+    *, top_k: int = 5, filters: RetrievalFilters | None = None
+) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
         user_id="user@example.com",
         query="alpha",
         knowledge_gaps=(),
-        filters=RetrievalFilters(document_status=("ready",)),
+        filters=filters if filters is not None else RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=top_k, min_score=0.0, timeout_ms=1500),
     )
 
@@ -168,3 +171,52 @@ def test_hybrid_uses_injected_dense_port_and_still_fuses_bm25() -> None:
     assert dense.calls >= 1
     assert response.retrieval_status is RetrievalStatus.SUCCESS
     assert {chunk.chunk_id for chunk in response.chunks} == {"a", "b", "c"}
+
+
+def test_hybrid_retrieve_with_document_ids_does_not_return_excluded() -> None:
+    memory, _ = _memory()
+
+    response = asyncio.run(memory.retrieve(_request(filters=RetrievalFilters(document_ids=("b",)))))
+
+    assert response.retrieval_status is RetrievalStatus.SUCCESS
+    assert [chunk.chunk_id for chunk in response.chunks] == ["b"]
+
+
+def test_hybrid_empty_allowlist_returns_no_results_before_dense() -> None:
+    chunks = (
+        KnowledgeChunk("a", "a", "A", None, "dense exclusive", "a.md"),
+        KnowledgeChunk("b", "b", "B", None, "lexical alpha", "b.md"),
+        KnowledgeChunk("c", "c", "C", None, "lexical alpha", "c.md"),
+    )
+    documents = (KnowledgeDocument("knowledge", "Knowledge", "knowledge.md", chunks),)
+    dense = RecordingDense()
+    memory = HybridSemanticMemory(documents, FixedEmbedder(), dense=dense, min_score_default=0.0)
+
+    response = asyncio.run(memory.retrieve(_request(filters=RetrievalFilters(years=(1999,)))))
+
+    assert dense.calls == 0
+    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
+    assert response.chunks == ()
+
+
+def test_hybrid_retrieve_copies_document_date_onto_semantic_chunk() -> None:
+    dated = date(2026, 8, 7)
+    chunks = (
+        KnowledgeChunk(
+            "b",
+            "b",
+            "B",
+            None,
+            "lexical alpha",
+            "b.md",
+            document_date=dated,
+        ),
+    )
+    documents = (KnowledgeDocument("b", "B", "b.md", chunks),)
+    memory = HybridSemanticMemory(documents, FixedEmbedder(), min_score_default=0.0)
+    asyncio.run(memory.build_index())
+
+    response = asyncio.run(memory.retrieve(_request()))
+
+    assert response.chunks
+    assert all(chunk.document_date == dated for chunk in response.chunks)

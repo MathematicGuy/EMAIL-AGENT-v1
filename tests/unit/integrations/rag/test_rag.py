@@ -1,6 +1,8 @@
 """Tests for the in-repo Semantic Memory (RAG) adapter (V1-M3 T3.1/T3.2)."""
 
 import asyncio
+import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,12 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.integrations.rag import NullSemanticMemory
 from cowork_agent.integrations.rag.fakes import HashingEmbedder, SlowEmbedder
-from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.knowledge_base import (
+    KnowledgeChunk,
+    KnowledgeDocument,
+    allowed_chunk_indices,
+    load_corpus,
+)
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -25,14 +32,33 @@ def _request(
     query: str = "đăng ký tạm trú",
     top_k: int = 5,
     min_score: float = 0.0,
+    filters: RetrievalFilters | None = None,
 ) -> SemanticRetrievalRequest:
     return SemanticRetrievalRequest(
         run_id="run-1",
         user_id="user@example.com",
         query=query,
         knowledge_gaps=(),
-        filters=RetrievalFilters(document_status=("ready",)),
+        filters=filters if filters is not None else RetrievalFilters(document_status=("ready",)),
         limits=RetrievalLimits(top_k=top_k, min_score=min_score, timeout_ms=1500),
+    )
+
+
+def _filter_chunk(
+    chunk_id: str,
+    document_id: str,
+    *,
+    document_date: date | None = None,
+    text: str = "body",
+) -> KnowledgeChunk:
+    return KnowledgeChunk(
+        chunk_id=chunk_id,
+        document_id=document_id,
+        document_title=document_id,
+        section=None,
+        text=text,
+        source_url=f"{document_id}.md",
+        document_date=document_date,
     )
 
 
@@ -160,6 +186,87 @@ def test_load_corpus_strips_closed_frontmatter_from_chunk_text(tmp_path: Path) -
     assert any(chunk.text == "Alpha body." for chunk in document.chunks)
 
 
+def test_load_corpus_joins_manifest_document_date_by_output_stem_onto_knowledge_chunk(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "policy.md").write_text(
+        "# Policy\n\nIntro line.\n\n## First Rule\n\nAlpha body.\n\n## Second Rule\n\nBeta body.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ingestion-manifest.json").write_text(
+        json.dumps(
+            {
+                "Policy File.docx": {
+                    "extractor": "docx",
+                    "output": "policy.md",
+                    "page_count": 1,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "Policy File.docx",
+                    "status": "succeeded",
+                    "title": "",
+                    "document_date": "2026-08-07",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (document,) = load_corpus(tmp_path)
+
+    assert document.chunks
+    for chunk in document.chunks:
+        assert chunk.document_date == date(2026, 8, 7)
+
+
+def test_load_corpus_without_manifest_or_empty_field_leaves_document_date_none(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "plain.md").write_text("# Title\n\nJust a body.\n", encoding="utf-8")
+    (document,) = load_corpus(tmp_path)
+    assert document.chunks
+    for chunk in document.chunks:
+        assert chunk.document_date is None
+
+    (tmp_path / "dated.md").write_text("# Dated\n\nBody.\n", encoding="utf-8")
+    (tmp_path / "ingestion-manifest.json").write_text(
+        json.dumps(
+            {
+                "plain.txt": {
+                    "extractor": "text",
+                    "output": "plain.md",
+                    "page_count": 1,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "plain.txt",
+                    "status": "succeeded",
+                    "title": "",
+                    "document_date": "",
+                },
+                "dated.docx": {
+                    "extractor": "docx",
+                    "output": "dated.md",
+                    "page_count": 1,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "def",
+                    "source": "dated.docx",
+                    "status": "succeeded",
+                    "title": "",
+                    "document_date": "not-a-date",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    documents = load_corpus(tmp_path)
+    for document in documents:
+        for chunk in document.chunks:
+            assert chunk.document_date is None
+
+
 def test_load_corpus_rejects_missing_or_empty_dir(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not found"):
         load_corpus(tmp_path / "missing")
@@ -202,3 +309,114 @@ def test_hashing_embedder_is_deterministic() -> None:
     first = asyncio.run(HashingEmbedder().embed(("xin chào",)))
     second = asyncio.run(HashingEmbedder().embed(("xin chào",)))
     assert first == second
+
+
+def test_allowed_chunk_indices_unconstrained_keeps_all() -> None:
+    chunks = (
+        _filter_chunk("a#0", "a", document_date=None),
+        _filter_chunk("b#0", "b", document_date=date(2026, 8, 7)),
+    )
+
+    assert allowed_chunk_indices(chunks, RetrievalFilters()) == (0, 1)
+    assert allowed_chunk_indices(chunks, RetrievalFilters(document_status=("ready",))) == (0, 1)
+
+
+def test_allowed_chunk_indices_document_ids_keeps_only_those_ids() -> None:
+    chunks = (
+        _filter_chunk("a#0", "a"),
+        _filter_chunk("b#0", "b"),
+        _filter_chunk("b#1", "b"),
+        _filter_chunk("c#0", "c"),
+    )
+
+    assert allowed_chunk_indices(chunks, RetrievalFilters(document_ids=("b",))) == (1, 2)
+
+
+def test_allowed_chunk_indices_years_excludes_none_dates_and_other_years() -> None:
+    chunks = (
+        _filter_chunk("none#0", "none", document_date=None),
+        _filter_chunk("y2025#0", "y2025", document_date=date(2025, 1, 1)),
+        _filter_chunk("y2026#0", "y2026", document_date=date(2026, 8, 7)),
+    )
+
+    assert allowed_chunk_indices(chunks, RetrievalFilters(years=(2026,))) == (2,)
+
+
+def test_allowed_chunk_indices_months_excludes_none_dates() -> None:
+    chunks = (
+        _filter_chunk("none#0", "none", document_date=None),
+        _filter_chunk("july#0", "july", document_date=date(2026, 7, 1)),
+        _filter_chunk("aug#0", "aug", document_date=date(2026, 8, 7)),
+    )
+
+    assert allowed_chunk_indices(chunks, RetrievalFilters(months=(8,))) == (2,)
+
+
+def test_allowed_chunk_indices_ands_document_ids_and_years() -> None:
+    chunks = (
+        _filter_chunk("keep#0", "keep", document_date=date(2026, 8, 7)),
+        _filter_chunk("keep#1", "keep", document_date=date(2025, 1, 1)),
+        _filter_chunk("other#0", "other", document_date=date(2026, 8, 7)),
+    )
+
+    assert allowed_chunk_indices(
+        chunks, RetrievalFilters(document_ids=("keep",), years=(2026,))
+    ) == (0,)
+
+
+def test_inrepo_retrieve_with_years_on_undated_corpus_returns_no_results_without_embed(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "plain.md").write_text(
+        "# Title\n\nJust a body about residency.\n", encoding="utf-8"
+    )
+    documents = load_corpus(tmp_path)
+    embedder = _CountingEmbedder()
+    memory = InRepoSemanticMemory(documents, embedder)
+    asyncio.run(memory.build_index())
+    embeds_after_build = embedder.calls
+
+    response = asyncio.run(
+        memory.retrieve(_request(query="residency", filters=RetrievalFilters(years=(1999,))))
+    )
+
+    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
+    assert response.chunks == ()
+    assert embedder.calls == embeds_after_build
+
+
+def test_inrepo_retrieve_copies_document_date_onto_semantic_chunk() -> None:
+    dated = date(2026, 8, 7)
+    documents = (
+        KnowledgeDocument(
+            "policy",
+            "Policy",
+            "policy.md",
+            (
+                _filter_chunk(
+                    "policy#0",
+                    "policy",
+                    document_date=dated,
+                    text="residency registration procedure",
+                ),
+            ),
+        ),
+    )
+    memory = InRepoSemanticMemory(documents, HashingEmbedder())
+    asyncio.run(memory.build_index())
+
+    response = asyncio.run(memory.retrieve(_request(query="residency registration")))
+
+    assert response.retrieval_status is RetrievalStatus.SUCCESS
+    assert response.chunks
+    assert all(chunk.document_date == dated for chunk in response.chunks)
+
+
+class _CountingEmbedder:
+    def __init__(self) -> None:
+        self.calls = 0
+        self._inner = HashingEmbedder()
+
+    async def embed(self, texts, *, task: str = "retrieval.query"):
+        self.calls += 1
+        return await self._inner.embed(texts, task=task)

@@ -26,7 +26,7 @@ from cowork_agent.domain.target_contracts import (
 )
 
 from .embeddings import EmbeddingPort
-from .knowledge_base import KnowledgeChunk, KnowledgeDocument
+from .knowledge_base import KnowledgeChunk, KnowledgeDocument, allowed_chunk_indices
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class TurbovecSemanticMemory:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
 
-        allowed_indices = list(range(len(self._chunks)))
+        allowed_indices = list(allowed_chunk_indices(self._chunks, request.filters))
         if not allowed_indices:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
@@ -162,6 +162,7 @@ class TurbovecSemanticMemory:
                 rerank_score=None,
                 page_start=chunk.page_start,
                 page_end=chunk.page_end,
+                document_date=chunk.document_date,
             )
             for score, chunk in ranked
         )

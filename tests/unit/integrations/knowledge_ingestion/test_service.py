@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
+from xml.etree import ElementTree as ET
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from docx import Document
 
@@ -16,6 +20,8 @@ from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import (
 
 _NFD_VIETNAMESE_E = "e\u0302\u0301"
 _MANIFEST_NAME = "ingestion-manifest.json"
+_DCTERMS_CREATED = "{http://purl.org/dc/terms/}created"
+_DCTERMS_MODIFIED = "{http://purl.org/dc/terms/}modified"
 
 
 class StubPdfInspector:
@@ -39,6 +45,20 @@ def _write_docx(path: Path, text: str = "Knowledge body") -> None:
     document.add_heading("Policy", level=1)
     document.add_paragraph(text)
     document.save(path)
+
+
+def _drop_docx_core_dates(path: Path) -> None:
+    with ZipFile(path) as archive:
+        contents = {info.filename: archive.read(info.filename) for info in archive.infolist()}
+    core = ET.fromstring(contents["docProps/core.xml"])
+    drop_tags = {_DCTERMS_CREATED, _DCTERMS_MODIFIED}
+    for child in list(core):
+        if child.tag in drop_tags:
+            core.remove(child)
+    contents["docProps/core.xml"] = ET.tostring(core, encoding="utf-8", xml_declaration=True)
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
 
 
 def test_docx_is_written_as_markdown_and_can_be_skipped(tmp_path: Path) -> None:
@@ -429,6 +449,46 @@ def test_invalid_utf8_txt_is_decode_failed_without_output(tmp_path: Path) -> Non
     assert outcome.status == "failed"
     assert outcome.reason_code == "decode_failed"
     assert not (tmp_path / "extracted" / "bad.md").exists()
+
+
+def test_service_records_harvested_docx_created_date(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    document = Document()
+    document.add_heading("Policy", level=1)
+    document.add_paragraph("Knowledge body")
+    document.core_properties.created = datetime(2026, 8, 7, 10, 19, 25)
+    document.save(raw / "dated.docx")
+    extracted = tmp_path / "extracted"
+    service = KnowledgeIngestionService(
+        _settings(), DocxExtractor(), StubPdfInspector(_native_pdf())
+    )
+
+    outcome, = service.ingest(raw, extracted, force=False)
+
+    assert outcome.status == "succeeded"
+    manifest = json.loads((extracted / _MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert manifest["dated.docx"]["document_date"] == "2026-08-07"
+    fields, _body = split_frontmatter((extracted / "dated.md").read_text(encoding="utf-8"))
+    assert "document_date" not in fields
+
+
+def test_service_records_empty_document_date_when_harvest_is_none(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    path = raw / "undated.docx"
+    _write_docx(path)
+    _drop_docx_core_dates(path)
+    extracted = tmp_path / "extracted"
+    service = KnowledgeIngestionService(
+        _settings(), DocxExtractor(), StubPdfInspector(_native_pdf())
+    )
+
+    outcome, = service.ingest(raw, extracted, force=False)
+
+    assert outcome.status == "succeeded"
+    manifest = json.loads((extracted / _MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert manifest["undated.docx"]["document_date"] == ""
 
 
 def test_unchanged_txt_is_skipped_on_second_ingest(tmp_path: Path) -> None:

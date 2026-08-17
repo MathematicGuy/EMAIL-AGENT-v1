@@ -68,6 +68,7 @@ def test_manifest_persists_only_safe_entry_fields(tmp_path: Path) -> None:
             "source": "a.pdf",
             "status": "succeeded",
             "title": "",
+            "document_date": "",
         }
     }
 
@@ -115,6 +116,78 @@ def test_manifest_loads_missing_title_as_empty(tmp_path: Path) -> None:
 
     loaded = store.load()["a.pdf"]
     assert loaded.title == ""
+    assert store.should_skip("a.pdf", "abc") is True
+
+
+def test_manifest_persists_and_reloads_nonempty_document_date(tmp_path: Path) -> None:
+    store = ManifestStore(tmp_path / "manifest.json")
+    entry = ManifestEntry(
+        source="a.pdf",
+        sha256="abc",
+        status="succeeded",
+        output="a.md",
+        document_date="2026-08-07",
+    )
+
+    store.record(entry)
+
+    assert store.load() == {"a.pdf": entry}
+    assert store.load()["a.pdf"].document_date == "2026-08-07"
+    assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"][
+        "document_date"
+    ] == "2026-08-07"
+
+
+def test_manifest_missing_document_date_key_loads_as_empty(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "a.pdf": {
+                    "extractor": "",
+                    "output": "a.md",
+                    "page_count": 0,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "a.pdf",
+                    "status": "succeeded",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ManifestStore(manifest_path)
+
+    loaded = store.load()["a.pdf"]
+    assert loaded.document_date == ""
+    assert store.should_skip("a.pdf", "abc") is True
+
+
+def test_manifest_treats_non_string_document_date_as_empty(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "a.pdf": {
+                    "extractor": "",
+                    "output": "a.md",
+                    "page_count": 0,
+                    "processed_at": "",
+                    "reason_code": None,
+                    "sha256": "abc",
+                    "source": "a.pdf",
+                    "status": "succeeded",
+                    "document_date": 20260807,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ManifestStore(manifest_path)
+
+    loaded = store.load()["a.pdf"]
+    assert loaded.document_date == ""
     assert store.should_skip("a.pdf", "abc") is True
 
 

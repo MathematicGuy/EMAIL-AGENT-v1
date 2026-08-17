@@ -10,6 +10,7 @@ from pathlib import Path
 
 from cowork_agent.config import KnowledgeIngestionSettings
 
+from .date_harvest import harvest_document_date
 from .docx_extractor import DocxExtractor
 from .manifest import ManifestStore, sha256_file, write_markdown_atomically
 from .models import IngestionOutcome, ManifestEntry, PdfInspection
@@ -116,6 +117,7 @@ class KnowledgeIngestionService:
                 processed_at=processed_at,
             ) + body
             write_markdown_atomically(output_dir / output_name, markdown)
+            harvested = harvest_document_date(path)
             manifest.record(
                 ManifestEntry(
                     source=relative,
@@ -126,6 +128,7 @@ class KnowledgeIngestionService:
                     page_count=page_count,
                     processed_at=processed_at,
                     title=title,
+                    document_date=harvested.isoformat() if harvested is not None else "",
                 )
             )
         except (OSError, ValueError):

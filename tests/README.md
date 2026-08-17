@@ -94,6 +94,8 @@ absent, add the row when you add the test.
 | No raw email body reaches any API response | `integration/api/test_principal_boundary.py` | workflow/repository tests |
 | No raw email body reaches chat memory | `unit/domain/test_chat_contracts.py` | gateway tests |
 | Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/rag/test_turbovec_memory.py` | integration tests |
+| Binary `document_date` harvest (PDF `/Info`, DOCX props; never mtime) | `unit/integrations/knowledge_ingestion/test_date_harvest.py` | service tests except one wire-up |
+| Company RAG pre-filter (`document_ids` / `years` / `months`); missing date fails year/month | `unit/integrations/rag/test_rag.py` (`allowed_chunk_indices`) | hybrid/turbovec except one empty-allowlist-no-embed |
 | Retrieval over the *committed corpus* + degrade-to-null path | `unit/integrations/test_bootstrap.py` | — |
 | Project-document ACL (six SQL conditions before embed) + cross-project isolation + empty-allowlist short-circuit | `unit/integrations/test_project_documents_hybrid.py` | orchestration/API tests |
 | Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |

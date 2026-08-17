@@ -18,7 +18,7 @@ share one spec.
 | `document-loading` | Company CLI Document Loading: discover, extract, NFC-sanitize, emit closed document metadata, persist atomic Markdown + manifest. Stops at `data/extracted/*.md`. | — | [SPEC-document-loading.md](./SPEC-document-loading.md) |
 | `page-aware-corpus-load` | `load_corpus()` parses `<!-- Page N -->` into `KnowledgeChunk.page_start` / `page_end`. Coordinates survive onto `SemanticChunk`. | `document-loading` | [SPEC-page-aware-corpus-load.md](./SPEC-page-aware-corpus-load.md) |
 | `format-txt-md` | Expand the company CLI whitelist to `.txt` and `.md`. | `document-loading` | [SPEC-format-txt-md.md](./SPEC-format-txt-md.md) |
-| `retrieval-metadata-filters` | Query-time filters beyond `document_status=ready`. Requires a real metadata source first (`year` / `category` are **not** produced by `document-loading`). | `page-aware-corpus-load` | *not written* |
+| `retrieval-metadata-filters` | Query-time filters on `document_ids` and binary `document_date` (`years` / `months`). No `category`. | `page-aware-corpus-load` | [SPEC-retrieval-metadata-filters.md](./SPEC-retrieval-metadata-filters.md) |
 
 ## Build order
 

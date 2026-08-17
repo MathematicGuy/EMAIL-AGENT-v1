@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -381,3 +381,80 @@ def test_semantic_chunk_from_dict_round_trips_page_coordinates():
     assert restored == chunk
     assert restored.page_start == 1
     assert restored.page_end == 2
+
+
+def test_retrieval_filters_defaults_document_ids_years_months_empty():
+    filters = RetrievalFilters()
+    assert filters.document_status == ("ready",)
+    assert filters.document_ids == ()
+    assert filters.years == ()
+    assert filters.months == ()
+
+
+def test_retrieval_filters_from_dict_without_new_keys_still_works():
+    filters = RetrievalFilters.from_dict({"document_status": ["ready"]})
+    assert filters.document_status == ("ready",)
+    assert filters.document_ids == ()
+    assert filters.years == ()
+    assert filters.months == ()
+
+
+def test_retrieval_filters_from_dict_ignores_unknown_extra_keys():
+    filters = RetrievalFilters.from_dict(
+        {
+            "document_status": ["ready"],
+            "category": "policy",
+            "unexpected": True,
+        }
+    )
+    assert filters.document_status == ("ready",)
+    assert filters.document_ids == ()
+    assert filters.years == ()
+    assert filters.months == ()
+
+
+def test_retrieval_filters_round_trip_with_document_ids_years_months():
+    filters = RetrievalFilters(
+        document_status=("ready",),
+        document_ids=("doc-1", "doc-2"),
+        years=(2025, 2026),
+        months=(1, 8, 12),
+    )
+    payload = filters.to_dict()
+    assert payload["document_ids"] == ["doc-1", "doc-2"]
+    assert payload["years"] == [2025, 2026]
+    assert payload["months"] == [1, 8, 12]
+    restored = RetrievalFilters.from_dict(payload)
+    assert restored == filters
+    text = json.dumps(payload)
+    assert RetrievalFilters.from_dict(json.loads(text)) == filters
+
+
+def test_semantic_chunk_document_date_defaults_none():
+    chunk = _retrieval_response().chunks[0]
+    assert chunk.document_date is None
+    payload = chunk.to_dict()
+    payload.pop("document_date", None)
+    restored = SemanticChunk.from_dict(payload)
+    assert restored.document_date is None
+
+
+def test_semantic_chunk_round_trip_with_document_date():
+    chunk = SemanticChunk(
+        chunk_id="doc#0",
+        document_id="doc",
+        document_title="Quarterly Report Template",
+        section="Usage",
+        text="Use the shared template.",
+        source_url="data/extracted/doc.md",
+        document_version=None,
+        relevance_score=0.91,
+        rerank_score=None,
+        document_date=date(2026, 8, 7),
+    )
+    payload = chunk.to_dict()
+    assert payload["document_date"] == "2026-08-07"
+    text = json.dumps(payload)
+    restored = SemanticChunk.from_dict(json.loads(text))
+    assert restored == chunk
+    assert restored.document_date == date(2026, 8, 7)

@@ -43,6 +43,7 @@ class ManifestEntry:
     processed_at: str = ""
     reason_code: str | None = None
     title: str = ""
+    document_date: str = ""
 
 
 @dataclass(frozen=True, slots=True)
