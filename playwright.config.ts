@@ -34,7 +34,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm exec vite --host 127.0.0.1 --port 5173',
+    command: `pnpm exec vite --host ${baseURL.includes('[::1]') ? '::1' : '127.0.0.1'} --port 5173`,
     cwd: 'frontend',
     url: baseURL,
     reuseExistingServer: !process.env.CI,
