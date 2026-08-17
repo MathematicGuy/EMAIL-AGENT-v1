@@ -51,8 +51,8 @@ load path until the Playwright harness has a committed baseline.
 
 ### Phase 4: Polish (roadmap Step 5–6)
 
-- [ ] Task 5: Hover prefetch, capped
-- [ ] Task 6: Virtualize — only if render p50 stays high
+- [x] Task 5: Hover prefetch, capped
+- [x] Task 6: Virtualize — skipped (73 ms render after slim payload)
 
 ## Risks and Mitigations
 

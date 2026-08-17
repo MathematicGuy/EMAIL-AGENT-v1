@@ -46,6 +46,8 @@ on a stack with at least two saved chats to pin `request_duration_ms` vs
 | 2026-08-17 | Step 1 skeleton + split loading flags; Step 2 in-memory LRU cache (20) | Repeat B→A **78 ms** (was 459–491) while API still 419 ms. Stale flash **0 ms**. Instant cold 339 ms. 2500 ms API → 3142 ms UX. | keep | Cache hit paints before refetch. Recents no longer share the transcript spinner. Cold visit still waits on GET — next is slim payload / cheaper `list_messages`. Snapshot: `baselines/baseline-2026-08-17-step1-2.json`. |
 | 2026-08-17 | Step 3 slim GET `/messages` (omit `rag_evidence.content`; `include_content=true` on drawer) | Heavy payload **352 673 → 31 633 B**. Repeat B→A 66 ms. Cold mock still ~18 ms API. | keep | Transfer/parse of fat chunks is gone. Synthetic cold time did not move (local mock). Live 2–5 s is still likely sequential Postgres — that is Step 4. Snapshot: `baselines/baseline-2026-08-17-step3.json`. |
 | 2026-08-17 | Step 4 one checkout + drop `check_connection` + warmer pool; skip document N+1 on list | Synthetic mocks **will not** show the WAN win. Unit test: require+list = 1 checkout. | keep | Code matches the research ranking. Confirm live `request_duration_ms` on a Seoul RTT before calling the 2–5 s gone. |
+| 2026-08-17 | Step 5 prefetch Recents on hover/focus (cap 2) | Repeat-visit path already 66–78 ms from cache. Prefetch warms the next chat. | keep | Extra GETs only for uncached neighbors. |
+| 2026-08-17 | Step 6 virtualize long transcripts | Heavy render after slim payload is **73 ms**. | skipped | Neutral complexity. Revisit only if a live 200+ turn thread janks. |
 
 ## Latest synthetic run
 

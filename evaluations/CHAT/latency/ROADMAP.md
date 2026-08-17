@@ -224,6 +224,11 @@ visits instant.
 **Tradeoff:** Extra GETs and more memory. Easy to over-fetch on scroll.
 Keep a 1–2 session prefetch cap.
 
+**Status:** Done on `fe`. Recents `mouseenter`/`focus` call `prefetchChat`,
+capped at two in-flight GETs, skip if already cached or active.
+Prefetch fills the Step 2 cache only — it does not change the open
+transcript.
+
 **Revert if:** Network/CPU up, primary metric flat.
 
 ### Step 6 — Virtualize long transcripts
@@ -231,6 +236,10 @@ Keep a 1–2 session prefetch cap.
 **Do:** Only if `mocked-heavy-payload` `response_to_first_message_visible_ms`
 stays high after slim payloads. Window the DOM; do not fetch less unless
 Step 3 already paginates.
+
+**Status:** Skipped. After Step 3, `mocked-heavy-payload`
+`response_to_first_message_visible_ms` is **73 ms**. Virtualizing would
+not beat that enough to pay scroll-jump / find-in-page cost.
 
 **Tradeoff:** Scroll-jump and find-in-page pain. Last resort.
 
