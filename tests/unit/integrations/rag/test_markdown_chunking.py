@@ -1,3 +1,4 @@
+from cowork_agent.domain._chat_contracts_memory import MAX_CHAT_RAG_SECTION_LENGTH
 from cowork_agent.integrations.rag.markdown_chunking import (
     MarkdownPage,
     chunk_markdown,
@@ -196,3 +197,26 @@ def test_breadcrumb_and_body_together_respect_the_ceiling() -> None:
 
     assert len(chunks) > 1
     assert all(len(chunk.text) <= 500 for chunk in chunks)
+
+
+def test_overlong_heading_is_fitted_to_the_citation_label_limit() -> None:
+    """``section`` is a citation label, and every consumer rejects one past 300
+    characters — so a statute title that long must be fitted, not passed on."""
+    title = "Điều 100. " + "Bồi thường về đất khi Nhà nước thu hồi đất, " * 8
+    heading = title.strip()
+
+    (chunk,) = chunk_markdown(f"# {heading}\n\nNội dung.")
+
+    assert chunk.section is not None
+    assert len(heading) > MAX_CHAT_RAG_SECTION_LENGTH
+    assert len(chunk.section) <= MAX_CHAT_RAG_SECTION_LENGTH
+    assert chunk.section.startswith("Điều 100.")
+    assert chunk.section.endswith("…")
+    # The full heading is still recoverable, so nothing is lost by labelling.
+    assert chunk.heading_path == (heading,)
+
+
+def test_heading_within_the_label_limit_is_left_exactly_as_written() -> None:
+    (chunk,) = chunk_markdown("# Điều 1. Phạm vi điều chỉnh\n\nNội dung.")
+
+    assert chunk.section == "Điều 1. Phạm vi điều chỉnh"

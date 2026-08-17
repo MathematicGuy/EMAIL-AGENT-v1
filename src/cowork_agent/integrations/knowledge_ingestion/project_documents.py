@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cowork_agent.integrations.rag.markdown_chunking import MarkdownPage, chunk_markdown_pages
-from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
 
 from .docx_extractor import DocxExtractor
 from .ocr import MistralOcrExtractor
@@ -77,8 +76,7 @@ class ProjectDocumentExtractor:
         except Exception as exc:
             raise ProjectDocumentExtractionError("native_extraction_failed") from exc
         shared_chunks = chunk_markdown_pages(
-            MarkdownPage(markdown=normalize_structure(markdown), page_number=page)
-            for page, markdown in pages
+            MarkdownPage(markdown=markdown, page_number=page) for page, markdown in pages
         )
         chunks = tuple(
             ExtractedProjectDocumentChunk(

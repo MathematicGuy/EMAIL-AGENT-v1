@@ -9,7 +9,7 @@ Keeping the rule table here is what makes the three stages consistent.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 #: Statute titles run long — ``Điều 100. Bồi thường về đất khi Nhà nước thu hồi
@@ -52,6 +52,21 @@ DEFAULT_RULES: Final = (
 # Genuine outline headings reach us as ATX from extraction anyway.
 
 
+def _compile_scanner(rules: tuple[HeadingRule, ...]) -> re.Pattern[str]:
+    """Compile a rule table into one alternation, so a line is scanned once.
+
+    Every rule is anchored on a literal keyword, so trying them in turn re-walks
+    the same prefix once per rule. Named groups let a single match report which
+    rule fired.
+    """
+    return re.compile(
+        "|".join(
+            f"(?P<rule{index}>{rule.pattern.pattern})"
+            for index, rule in enumerate(rules)
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StructureProfile:
     """Heading vocabulary for a corpus, ordered from the outermost division in."""
@@ -60,6 +75,13 @@ class StructureProfile:
     max_heading_chars: int = DEFAULT_MAX_HEADING_CHARS
     max_title_chars: int = DEFAULT_MAX_TITLE_CHARS
     formatted_level: int = DEFAULT_FORMATTED_LEVEL
+    #: Bound to the instance so recognising a line costs one attribute read.
+    #: A module-level cache keyed on ``rules`` would re-hash the rule table on
+    #: every line instead, which costs more than the scan it saves.
+    scanner: re.Pattern[str] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scanner", _compile_scanner(self.rules))
 
     def match_heading(self, text: str) -> HeadingMatch | None:
         """Recognise ``text`` as a plain-text heading, or return ``None``.
@@ -72,23 +94,27 @@ class StructureProfile:
         candidate = text.strip()
         if not candidate or "\n" in candidate or len(candidate) > self.max_heading_chars:
             return None
-        for rule in self.rules:
-            match = rule.pattern.match(candidate)
-            if match is not None:
-                return HeadingMatch(level=rule.level, prefix_end=match.end())
-        return None
+        match = self.scanner.match(candidate)
+        if match is None or match.lastgroup is None:
+            return None
+        index = int(match.lastgroup.removeprefix("rule"))
+        return HeadingMatch(level=self.rules[index].level, prefix_end=match.end())
 
     def heading_level(self, text: str) -> int | None:
         """Depth of ``text`` read as a plain-text heading, or ``None`` for prose."""
         match = self.match_heading(text)
         return None if match is None else match.level
 
-    def formatted_heading_level(self, text: str) -> int:
+    def formatted_heading_level(self, text: str) -> int | None:
         """Depth for a line the *source* already marked as a heading.
 
         Typography (a fully bold paragraph, a Word Heading style) establishes
         that the line is a heading; the rule table only refines how deep it sits.
+        Returns ``None`` for text too long to be one, so the length ceiling is
+        enforced here rather than again in every caller that reads typography.
         """
+        if len(text.strip()) > self.max_heading_chars:
+            return None
         return self.heading_level(text) or self.formatted_level
 
     def is_titleless(self, text: str) -> bool:

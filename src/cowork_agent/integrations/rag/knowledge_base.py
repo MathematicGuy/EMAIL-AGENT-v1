@@ -17,7 +17,6 @@ from cowork_agent.integrations.knowledge_ingestion.manifest import ManifestStore
 from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import split_frontmatter
 
 from .markdown_chunking import chunk_markdown_pages, split_markdown_pages
-from .structure_normalizer import normalize_structure
 
 _MANIFEST_NAME = "ingestion-manifest.json"
 
@@ -85,9 +84,10 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
     stem), and ``source_url`` the POSIX path relative to the repository
     root. A leading closed frontmatter block is stripped before title and
     chunking so YAML keys are never indexed. Page comments become
-    ``page_start`` / ``page_end`` (both ``None`` when unmarked). Chunks
-    follow H1/H2 sections (fallback: the whole document), split further
-    on paragraph boundaries near ``_MAX_CHUNK_CHARS``.
+    ``page_start`` / ``page_end`` (both ``None`` when unmarked). Chunking
+    follows the document's heading hierarchy — including plain-text headings
+    such as ``Điều 1.``, which the chunker promotes on the way in — and falls
+    back to size only where structure runs out.
 
     Raises:
         ValueError: when ``corpus_dir`` is missing, unreadable, or contains
@@ -114,7 +114,7 @@ def load_corpus(corpus_dir: Path, *, tenant_id: str | None = None) -> tuple[Know
         else:
             source_url = path.name
         chunks: list[KnowledgeChunk] = []
-        pages = split_markdown_pages(normalize_structure(body))
+        pages = split_markdown_pages(body)
         for part in chunk_markdown_pages(pages):
             chunks.append(
                 KnowledgeChunk(

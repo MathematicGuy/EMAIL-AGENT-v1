@@ -14,7 +14,9 @@ from cowork_agent.integrations.rag.structure_profile import DEFAULT_PROFILE, Str
 
 from .models import ExtractionResult
 
-_HEADING_PREFIXES = {"Heading 1": "#", "Heading 2": "##", "Heading 3": "###"}
+#: A Word Heading style states the author's own depth, so it wins over the
+#: profile's rule table rather than being re-derived from the text.
+_HEADING_STYLE_LEVELS = {"Heading 1": 1, "Heading 2": 2, "Heading 3": 3}
 
 
 class DocxExtractor:
@@ -46,15 +48,14 @@ def _block_to_markdown(block: Paragraph | Table, profile: StructureProfile) -> s
         return ""
     style = block.style
     style_name = style.name if style is not None else ""
-    if prefix := _HEADING_PREFIXES.get(style_name):
-        return f"{prefix} {text}"
-    if style_name.startswith("List Bullet"):
-        return f"- {text}"
-    if style_name.startswith("List Number"):
-        return f"1. {text}"
-    if level := _emphasised_heading_level(block, text, profile):
-        return f"{'#' * level} {text}"
-    return text
+    level = _HEADING_STYLE_LEVELS.get(style_name)
+    if level is None:
+        if style_name.startswith("List Bullet"):
+            return f"- {text}"
+        if style_name.startswith("List Number"):
+            return f"1. {text}"
+        level = _emphasised_heading_level(block, text, profile)
+    return f"{'#' * level} {text}" if level else text
 
 
 def _emphasised_heading_level(
@@ -68,12 +69,26 @@ def _emphasised_heading_level(
     good. Requiring *every* run to be bold is what separates a heading from a
     sentence that merely contains a bold phrase.
     """
-    if len(text) > profile.max_heading_chars:
-        return None
-    runs = [run for run in block.runs if run.text.strip()]
-    if not runs or not all(run.bold for run in runs):
+    if not _is_fully_bold(block):
         return None
     return profile.formatted_heading_level(text)
+
+
+def _is_fully_bold(block: Paragraph) -> bool:
+    """True when every run carrying text is bold.
+
+    Bails on the first non-bold run: ``block.runs`` builds a fresh object per
+    run, so prose — the overwhelmingly common case — should not pay for the
+    whole list.
+    """
+    seen = False
+    for run in block.runs:
+        if not run.text.strip():
+            continue
+        if not run.bold:
+            return False
+        seen = True
+    return seen
 
 
 def _table_to_markdown(table: Table) -> str:

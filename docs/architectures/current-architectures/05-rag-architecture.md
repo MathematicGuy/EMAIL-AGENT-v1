@@ -38,7 +38,7 @@ flowchart LR
     EMBED --> STORE_TURBO["Turbovec 4-Bit Index<br/>(.data/turbovec_index.tvim)"]
 ```
 
-1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md`, runs `normalize_structure()` to promote plain-text structural headings (`Điều 1. …`) to ATX, then chunks along the resulting heading hierarchy. Each `KnowledgeChunk` opens with its heading breadcrumb, so a retrieved fragment names the article it came from for both dense and BM25 search; chunks target 1200 and never exceed 2000 characters.
+1. **Corpus Interface (`knowledge_base.py`):** `load_corpus()` deterministically reads the committed Markdown documents from `data/extracted/*.md` and chunks them along their heading hierarchy; the chunker itself promotes plain-text structural headings (`Điều 1. …`) to ATX first, so every entry point gets the same structure recovery. Each `KnowledgeChunk` opens with its heading breadcrumb, so a retrieved fragment names the article it came from for both dense and BM25 search; a section that fits stays whole, and chunks never exceed 2000 characters.
 2. **Turbovec Quantized Indexing (`turbovec_memory.py`):** Pads embedding dimensions to multiples of 8 and builds a 4-bit TurboQuant quantized index saved to `.data/turbovec_index.tvim`.
 
 

@@ -17,24 +17,34 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
+from .markdown_syntax import ATX_HEADING as _ATX
+from .markdown_syntax import FENCE as _FENCE
+from .markdown_syntax import LIST_ITEM as _LIST_ITEM
+from .markdown_syntax import TABLE_ROW as _TABLE_ROW
+from .markdown_syntax import TABLE_SEPARATOR as _TABLE_SEPARATOR
+from .markdown_syntax import normalize_newlines
+from .structure_normalizer import normalize_lines
 from .structure_profile import DEFAULT_PROFILE, StructureProfile
 
 DEFAULT_MAX_CHARS: Final = 2_000
-DEFAULT_TARGET_CHARS: Final = 1_200
 DEFAULT_MIN_CHARS: Final = 300
 DEFAULT_OVERLAP_CHARS: Final = 180
 MIN_SUPPORTED_MAX_CHARS: Final = 200
 
 _MAX_BREADCRUMB_DEPTH: Final = 3
 _MAX_BREADCRUMB_CHARS: Final = 240
+#: ``section`` is a label — it names the chunk in citations and evidence lists,
+#: it is not content. Every consumer bounds it at 300 characters
+#: (``MAX_CHAT_RAG_SECTION_LENGTH``, ``MAX_EPISODE_CITATION_SECTION_LENGTH``),
+#: and statute titles do run past that, so the label is fitted here where it is
+#: made rather than at each boundary that would otherwise reject the chunk. The
+#: untruncated trail stays available in ``heading_path`` and in the breadcrumb
+#: that opens ``text``.
+_MAX_SECTION_CHARS: Final = 300
+_ELLIPSIS: Final = "…"
 
-_ATX = re.compile(r"^\s*(#{1,6})\s+(.+?)\s*$")
 _PAGE_MARKER = re.compile(r"^<!--\s*Page\s+(\d+)\s*-->\s*$")
-_FENCE = re.compile(r"^\s*(?:```|~~~)")
-_TABLE_ROW = re.compile(r"^\s*\|")
-_TABLE_SEPARATOR = re.compile(r"^\s*\|[\s:|-]+\|?\s*$")
-_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+(?:\.\d+)*[.)])\s+")
-_QUOTE = re.compile(r"^\s*>")
+_COMMENT_OPEN: Final = "<!--"
 _COMMENT_ONLY = re.compile(r"^\s*(?:<!--.*?-->\s*)+$", re.S)
 _CLAUSE_START = re.compile(r"(?m)^(?=\d+(?:\.\d+)*[.)]\s|[a-zđ][.)]\s)")
 # A period preceded by a digit or a lone capital ends a clause number or an
@@ -73,26 +83,22 @@ class ChunkingPolicy:
     """Size budget applied where structure alone cannot bound a chunk."""
 
     max_chars: int = DEFAULT_MAX_CHARS
-    target_chars: int = DEFAULT_TARGET_CHARS
     min_chars: int = DEFAULT_MIN_CHARS
     overlap_chars: int = DEFAULT_OVERLAP_CHARS
 
     def __post_init__(self) -> None:
         if self.max_chars < MIN_SUPPORTED_MAX_CHARS:
             raise ValueError("max_chars must be at least 200")
-        if not 0 < self.target_chars <= self.max_chars:
-            raise ValueError("target_chars must be positive and at most max_chars")
-        if not 0 <= self.min_chars <= self.target_chars:
-            raise ValueError("min_chars must not exceed target_chars")
-        if not 0 <= self.overlap_chars < self.target_chars:
-            raise ValueError("overlap_chars must be smaller than target_chars")
+        if not 0 <= self.min_chars <= self.max_chars:
+            raise ValueError("min_chars must not exceed max_chars")
+        if not 0 <= self.overlap_chars < self.max_chars:
+            raise ValueError("overlap_chars must be smaller than max_chars")
 
     @classmethod
     def scaled_to(cls, max_chars: int) -> ChunkingPolicy:
         """Derive a whole policy from a caller that states only a ceiling."""
         return cls(
             max_chars=max_chars,
-            target_chars=min(DEFAULT_TARGET_CHARS, max_chars),
             min_chars=min(DEFAULT_MIN_CHARS, max_chars // 4),
             overlap_chars=min(DEFAULT_OVERLAP_CHARS, max_chars // 8),
         )
@@ -101,7 +107,7 @@ class ChunkingPolicy:
 def split_markdown_pages(markdown: str) -> tuple[MarkdownPage, ...]:
     """Split Markdown on `<!-- Page N -->` markers into page fragments."""
 
-    normalized = markdown.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalize_newlines(markdown)
     lines = normalized.split("\n")
     if not any(_PAGE_MARKER.match(line) for line in lines):
         return (MarkdownPage(markdown=normalized, page_number=None),)
@@ -152,8 +158,8 @@ def chunk_markdown_pages(
 ) -> tuple[MarkdownChunk, ...]:
     """Chunk ordered page fragments, keeping sections whole where they fit."""
     resolved = policy or ChunkingPolicy.scaled_to(max_chars)
-    blocks = _parse_blocks(pages)
-    root = _build_tree(blocks, profile)
+    blocks = _parse_blocks(pages, profile)
+    root = _build_tree(blocks)
     drafts = _merge_undersized(_emit(root, resolved), resolved)
     return tuple(_to_chunk(draft) for draft in drafts if draft.body)
 
@@ -163,18 +169,16 @@ class _Block:
     kind: str
     lines: tuple[str, ...]
     page_number: int | None
+    #: Joined once at construction. As a property this was re-joined on every
+    #: read — classification, packing and rendering each want the same string.
+    text: str
     level: int = 0
     title: str = ""
-
-    @property
-    def text(self) -> str:
-        return "\n".join(self.lines)
 
 
 @dataclass(slots=True)
 class _Node:
     level: int
-    title: str | None
     path: tuple[str, ...]
     blocks: list[_Block] = field(default_factory=list)
     children: list[_Node] = field(default_factory=list)
@@ -185,15 +189,28 @@ class _Draft:
     path: tuple[str, ...]
     body: str
     blocks: tuple[_Block, ...]
+    #: Derived from ``path`` alone, so it is computed once where the node is
+    #: known rather than again per merge and per emitted chunk.
+    breadcrumb: str = ""
 
 
-def _parse_blocks(pages: Iterable[MarkdownPage]) -> list[_Block]:
+def _parse_blocks(
+    pages: Iterable[MarkdownPage], profile: StructureProfile
+) -> list[_Block]:
+    """Turn pages into blocks, recovering plain-text headings on the way.
+
+    Normalization happens here rather than in each caller so there is one
+    answer to "does this document have structure?". Doing it per page, after
+    page markers are already stripped, also keeps a heading that opens a page
+    promotable — it is not glued to the marker line above it. Promotion is
+    idempotent, so a caller that normalized already is unaffected.
+    """
     blocks: list[_Block] = []
     for page in pages:
         if page.page_number is not None and page.page_number < 1:
             raise ValueError("page numbers must be positive")
-        normalized = page.markdown.replace("\r\n", "\n").replace("\r", "\n")
-        blocks.extend(_parse_page(normalized.split("\n"), page.page_number))
+        lines = normalize_lines(normalize_newlines(page.markdown).split("\n"), profile)
+        blocks.extend(_parse_page(lines, page.page_number))
     return blocks
 
 
@@ -212,7 +229,8 @@ def _parse_page(lines: Sequence[str], page_number: int | None) -> list[_Block]:
             while index < len(lines) and not _FENCE.match(lines[index]):
                 index += 1
             index = min(index + 1, len(lines))
-            blocks.append(_Block(_CODE, tuple(lines[start:index]), page_number))
+            body = tuple(lines[start:index])
+            blocks.append(_Block(_CODE, body, page_number, "\n".join(body)))
             continue
         heading = _ATX.match(line)
         if heading is not None:
@@ -221,8 +239,9 @@ def _parse_page(lines: Sequence[str], page_number: int | None) -> list[_Block]:
                     _HEADING,
                     (line,),
                     page_number,
-                    level=len(heading.group(1)),
-                    title=heading.group(2).strip(),
+                    line,
+                    len(heading.group(1)),
+                    heading.group(2).strip(),
                 )
             )
             index += 1
@@ -231,14 +250,15 @@ def _parse_page(lines: Sequence[str], page_number: int | None) -> list[_Block]:
             start = index
             while index < len(lines) and _TABLE_ROW.match(lines[index]):
                 index += 1
-            blocks.append(_Block(_TABLE, tuple(lines[start:index]), page_number))
+            body = tuple(lines[start:index])
+            blocks.append(_Block(_TABLE, body, page_number, "\n".join(body)))
             continue
         start = index
         index += 1
         while index < len(lines) and _continues(lines[index]):
             index += 1
         body = tuple(lines[start:index])
-        blocks.append(_Block(_classify(body), body, page_number))
+        blocks.append(_Block(_classify(body), body, page_number, "\n".join(body)))
     return blocks
 
 
@@ -254,13 +274,18 @@ def _continues(line: str) -> bool:
 
 
 def _classify(lines: tuple[str, ...]) -> str:
-    if _COMMENT_ONLY.match("\n".join(lines)):
+    # Only a block that opens with a comment can be comment-only, and the
+    # backtracking `.*?` scan is the most expensive pattern here — so pay for
+    # it on the handful of blocks that could possibly match.
+    if lines[0].lstrip().startswith(_COMMENT_OPEN) and _COMMENT_ONLY.match(
+        "\n".join(lines)
+    ):
         return _BOILERPLATE
     return _LIST if any(_LIST_ITEM.match(line) for line in lines) else _PARAGRAPH
 
 
-def _build_tree(blocks: Sequence[_Block], profile: StructureProfile) -> _Node:
-    root = _Node(level=0, title=None, path=())
+def _build_tree(blocks: Sequence[_Block]) -> _Node:
+    root = _Node(level=0, path=())
     stack = [root]
     for block in blocks:
         if block.kind == _BOILERPLATE:
@@ -271,9 +296,7 @@ def _build_tree(blocks: Sequence[_Block], profile: StructureProfile) -> _Node:
         while len(stack) > 1 and stack[-1].level >= block.level:
             stack.pop()
         parent = stack[-1]
-        node = _Node(
-            level=block.level, title=block.title, path=(*parent.path, block.title)
-        )
+        node = _Node(level=block.level, path=(*parent.path, block.title))
         parent.children.append(node)
         stack.append(node)
     return root
@@ -287,13 +310,18 @@ def _emit(node: _Node, policy: ChunkingPolicy) -> list[_Draft]:
     heading a chunk actually sits under. Collapsing early would label a chunk
     with its chapter when the article is the answer to the reader's question.
     """
-    overhead = _breadcrumb_cost(node.path)
+    breadcrumb = _breadcrumb(node.path)
+    overhead = len(breadcrumb) + 2 if breadcrumb else 0
     budget = max(policy.max_chars - overhead, MIN_SUPPORTED_MAX_CHARS)
-    body = _render_blocks(node.blocks)
-    if body and len(body) + overhead <= policy.max_chars:
-        drafts = [_Draft(node.path, body, tuple(node.blocks))]
+    # Measure before joining: over half the nodes overflow, and rendering a
+    # body only to discard it is the single largest source of wasted work here.
+    size = _rendered_length(node.blocks)
+    if size and size + overhead <= policy.max_chars:
+        drafts = [
+            _Draft(node.path, _render_blocks(node.blocks), tuple(node.blocks), breadcrumb)
+        ]
     else:
-        drafts = _pack_blocks(node.blocks, node.path, budget, policy)
+        drafts = _pack_blocks(node.blocks, node.path, budget, policy, breadcrumb)
     for child in node.children:
         drafts.extend(_emit(child, policy))
     return drafts
@@ -304,6 +332,7 @@ def _pack_blocks(
     path: tuple[str, ...],
     budget: int,
     policy: ChunkingPolicy,
+    breadcrumb: str,
 ) -> list[_Draft]:
     """Fill chunks with a node's own blocks, overlapping consecutive cuts."""
     pieces = [
@@ -319,7 +348,7 @@ def _pack_blocks(
         nonlocal current, used, length, carry
         if not current:
             return
-        drafts.append(_Draft(path, "\n\n".join(current), tuple(used)))
+        drafts.append(_Draft(path, "\n\n".join(current), tuple(used), breadcrumb))
         # Overlap restores prose continuity across a cut. Carrying the tail of
         # a table or a fenced block instead would duplicate rows and strand an
         # unmatched fence in the next chunk.
@@ -371,13 +400,23 @@ def _combine(
     if len(previous.body) >= policy.min_chars and len(draft.body) >= policy.min_chars:
         return None
     body = f"{previous.body}\n\n{draft.body}"
-    if len(body) + _breadcrumb_cost(draft.path) > policy.max_chars:
+    overhead = len(draft.breadcrumb) + 2 if draft.breadcrumb else 0
+    if len(body) + overhead > policy.max_chars:
         return None
-    return _Draft(draft.path, body, previous.blocks + draft.blocks)
+    return _Draft(
+        draft.path, body, previous.blocks + draft.blocks, draft.breadcrumb
+    )
 
 
 def _render_blocks(blocks: Sequence[_Block]) -> str:
     return "\n\n".join(block.text for block in blocks)
+
+
+def _rendered_length(blocks: Sequence[_Block]) -> int:
+    """Length ``_render_blocks`` would produce, without building the string."""
+    if not blocks:
+        return 0
+    return sum(len(block.text) for block in blocks) + 2 * (len(blocks) - 1)
 
 
 def _breadcrumb(path: tuple[str, ...]) -> str:
@@ -388,23 +427,31 @@ def _breadcrumb(path: tuple[str, ...]) -> str:
     return "\n".join(kept)
 
 
-def _breadcrumb_cost(path: tuple[str, ...]) -> int:
-    breadcrumb = _breadcrumb(path)
-    return len(breadcrumb) + 2 if breadcrumb else 0
-
-
 def _to_chunk(draft: _Draft) -> MarkdownChunk:
-    breadcrumb = _breadcrumb(draft.path)
+    breadcrumb = draft.breadcrumb
     pages = [
         block.page_number for block in draft.blocks if block.page_number is not None
     ]
     return MarkdownChunk(
         text=f"{breadcrumb}\n\n{draft.body}" if breadcrumb else draft.body,
-        section=draft.path[-1] if draft.path else None,
+        section=_section_label(draft.path[-1]) if draft.path else None,
         page_start=min(pages) if pages else None,
         page_end=max(pages) if pages else None,
         heading_path=draft.path,
     )
+
+
+def _section_label(title: str) -> str:
+    """Fit a heading to the length every citation consumer allows for a label.
+
+    Cut on a word boundary where one is near the limit: ``Điều 100. Bồi thường
+    về đất…`` still names its article, while a mid-word cut reads as corruption.
+    """
+    if len(title) <= _MAX_SECTION_CHARS:
+        return title
+    keep = _MAX_SECTION_CHARS - len(_ELLIPSIS)
+    boundary = title.rfind(" ", keep // 2, keep + 1)
+    return title[: boundary if boundary > 0 else keep].rstrip() + _ELLIPSIS
 
 
 def _split_block(block: _Block, budget: int) -> list[str]:
@@ -426,45 +473,48 @@ def _split_block(block: _Block, budget: int) -> list[str]:
     ]
 
 
+def _split_wrapped(
+    units: Sequence[str],
+    budget: int,
+    prefix: Sequence[str],
+    suffix: Sequence[str] = (),
+) -> list[str]:
+    """Cut lines between units, repeating a fixed wrapper around every part.
+
+    A table's header and a fenced block's delimiters are the same problem:
+    every part has to carry them, so every part pays for them out of its
+    budget.
+    """
+    overhead = sum(len(line) + 1 for line in (*prefix, *suffix))
+    parts: list[str] = []
+    current: list[str] = []
+    length = overhead
+    for unit in units:
+        if current and length + len(unit) + 1 > budget:
+            parts.append("\n".join([*prefix, *current, *suffix]))
+            current, length = [], overhead
+        current.append(unit)
+        length += len(unit) + 1
+    if current:
+        parts.append("\n".join([*prefix, *current, *suffix]))
+    return parts or ["\n".join([*prefix, *suffix])]
+
+
 def _split_table(lines: Sequence[str], budget: int) -> list[str]:
     """Cut a table between rows, repeating its header on every part."""
     header = [lines[0]]
     rows = list(lines[1:])
     if rows and _TABLE_SEPARATOR.match(rows[0]):
         header.append(rows.pop(0))
-    prefix_length = sum(len(line) + 1 for line in header)
-    parts: list[str] = []
-    current: list[str] = []
-    length = prefix_length
-    for row in rows:
-        if current and length + len(row) + 1 > budget:
-            parts.append("\n".join(header + current))
-            current, length = [], prefix_length
-        current.append(row)
-        length += len(row) + 1
-    if current:
-        parts.append("\n".join(header + current))
-    return parts or ["\n".join(header)]
+    return _split_wrapped(rows, budget, header)
 
 
 def _split_code(lines: Sequence[str], budget: int) -> list[str]:
     """Cut a fenced block between lines, re-fencing every part."""
     opening = lines[0] if _FENCE.match(lines[0]) else "```"
     closed = len(lines) > 1 and _FENCE.match(lines[-1]) is not None
-    body = list(lines[1:-1] if closed else lines[1:])
-    overhead = len(opening) + 5
-    parts: list[str] = []
-    current: list[str] = []
-    length = overhead
-    for line in body:
-        if current and length + len(line) + 1 > budget:
-            parts.append("\n".join([opening, *current, "```"]))
-            current, length = [], overhead
-        current.append(line)
-        length += len(line) + 1
-    if current:
-        parts.append("\n".join([opening, *current, "```"]))
-    return parts or [opening + "\n```"]
+    body = lines[1:-1] if closed else lines[1:]
+    return _split_wrapped(body, budget, [opening], ["```"])
 
 
 def _split_list(lines: Sequence[str], budget: int) -> list[str]:
