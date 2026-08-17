@@ -1,3 +1,5 @@
+import pytest
+
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_observability import (
     MemoryOperation,
@@ -32,36 +34,41 @@ def test_metadata_only_event_never_exposes_sensitive_sentinels_and_bounds_counts
     assert sink.events == (event,)
 
 
-def test_event_rejects_negative_or_unbounded_counts_and_unsafe_reason() -> None:
-    for field, value in (("result_count", -1), ("filtered_count", 10001), ("latency_ms", -1)):
-        kwargs = dict(
-            memory_type=MemoryType.LONG_TERM,
-            operation=MemoryOperation.DELETE,
-            outcome=MemoryOutcome.SUCCESS,
-            result_count=0,
-            filtered_count=0,
-            latency_ms=0,
-            reason_code="configured",
-        )
-        kwargs[field] = value
-        try:
-            MemoryOperationEvent(**kwargs)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"{field} must be rejected")
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("result_count", -1),
+        ("filtered_count", 10001),
+        ("latency_ms", -1),
+    ],
+    ids=["negative_results", "unbounded_filtered", "negative_latency"],
+)
+def test_event_rejects_counts_outside_the_bounded_nonnegative_range(
+    field: str, value: int
+) -> None:
+    kwargs: dict[str, object] = {
+        "memory_type": MemoryType.LONG_TERM,
+        "operation": MemoryOperation.DELETE,
+        "outcome": MemoryOutcome.SUCCESS,
+        "result_count": 0,
+        "filtered_count": 0,
+        "latency_ms": 0,
+        "reason_code": "configured",
+        field: value,
+    }
 
-    try:
+    with pytest.raises(ValueError, match=f"{field} must be a bounded nonnegative integer"):
+        MemoryOperationEvent(**kwargs)  # type: ignore[arg-type]
+
+
+def test_event_rejects_a_reason_code_that_is_not_a_short_safe_identifier() -> None:
+    with pytest.raises(ValueError, match="reason_code must be a short safe identifier"):
         MemoryOperationEvent(
             memory_type=MemoryType.LONG_TERM,
             operation=MemoryOperation.READ,
             outcome=MemoryOutcome.DEGRADED,
             reason_code="unsafe reason text",
         )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("unsafe reason_code must be rejected")
 
 
 def test_logging_sink_logs_only_metadata_and_never_raises() -> None:
@@ -210,28 +217,54 @@ def test_metrics_snapshot_counts_and_latency_summary() -> None:
 
 
 def test_sink_never_raises_even_when_logger_fails() -> None:
+    """A broken log handler must not take a memory operation down with it.
+
+    The old version of this test proved less than it looked like: it asserted
+    nothing, so it would have passed just as happily if the sink had stopped
+    logging altogether and never touched the failing handler at all. It also
+    restored the handler only on the success path, so the one failure it
+    guards against would have leaked a raising handler into every later test
+    on the same xdist worker.
+    """
     import logging
 
     from cowork_agent.features.ai_chat.memory_observability import (
         LoggingMemoryOperationSink,
     )
 
+    emit_attempts: list[logging.LogRecord] = []
+
     class RaisingHandler(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
+            emit_attempts.append(record)
             raise RuntimeError("handler failure")
+
+        def handleError(self, record: logging.LogRecord) -> None:
+            # Default behaviour prints "--- Logging error ---" plus a traceback
+            # to stderr. Swallow it: the raise is the fixture here, not a
+            # surprise, and the noise buries real failures in a 1000-test run.
+            return
 
     handler = RaisingHandler()
     logger = logging.getLogger("test_memory_observability_raising")
+    previous_level = logger.level
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
-    sink = LoggingMemoryOperationSink(logger=logger)
+    try:
+        sink = LoggingMemoryOperationSink(logger=logger)
+        event = MemoryOperationEvent(
+            memory_type=MemoryType.SEMANTIC,
+            operation=MemoryOperation.READ,
+            outcome=MemoryOutcome.SUCCESS,
+        )
 
-    event = MemoryOperationEvent(
-        memory_type=MemoryType.SEMANTIC,
-        operation=MemoryOperation.READ,
-        outcome=MemoryOutcome.SUCCESS,
-    )
-    sink.emit(event)
+        sink.emit(event)  # must not propagate RuntimeError("handler failure")
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
 
-    logger.removeHandler(handler)
+    # The handler really was reached, so the swallowed failure is the one under
+    # test rather than an emit that silently never happened.
+    assert len(emit_attempts) == 1
+    assert emit_attempts[0].levelno == logging.INFO
