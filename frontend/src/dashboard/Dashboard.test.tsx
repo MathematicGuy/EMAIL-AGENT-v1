@@ -67,7 +67,6 @@ describe('Dashboard Project chat', () => {
       return undefined;
     }));
     render(<Dashboard />);
-    fireEvent.click(screen.getByTitle('Show sidebar (Click to expand)'));
     fireEvent.click((await screen.findAllByText('Chat 1'))[0]);
     expect(await screen.findByText('Saved question')).toBeTruthy();
     expect(screen.getByText('Saved answer')).toBeTruthy();

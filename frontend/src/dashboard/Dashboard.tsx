@@ -27,7 +27,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [activeView, setActiveView] = useState<'chat' | 'mail' | 'artifacts'>(() =>
     new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
   );
-  const [sidebarState, setSidebarState] = useState<SidebarState>('collapsed');
+  const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
   const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
   const [modelAnchor, setModelAnchor] = useState<Pick<
     DOMRect,
