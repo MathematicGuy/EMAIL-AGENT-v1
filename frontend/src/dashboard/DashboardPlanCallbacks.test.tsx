@@ -42,11 +42,9 @@ vi.mock('./hooks/useStreamingChat', () => ({
 vi.mock('./components/Taskbar', () => ({ Taskbar: () => null }));
 vi.mock('./components/Header', () => ({ Header: () => null }));
 vi.mock('./components/HeroSection', () => ({ HeroSection: () => null }));
-vi.mock('./components/AutomationsView', () => ({ AutomationsView: () => null }));
 vi.mock('./components/ModelSelectorModal', () => ({ ModelSelectorModal: () => null }));
 vi.mock('./components/UpgradeModal', () => ({ UpgradeModal: () => null }));
 vi.mock('./components/VoiceModal', () => ({ VoiceModal: () => null }));
-vi.mock('./components/CustomizeModal', () => ({ CustomizeModal: () => null }));
 vi.mock('../modules/work-intake/WorkIntakePanel', () => ({ WorkIntakePanel: () => null }));
 vi.mock('./components/ChatStreamView', () => ({
   ChatStreamView: (props: {

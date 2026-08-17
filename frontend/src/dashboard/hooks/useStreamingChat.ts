@@ -250,6 +250,7 @@ export function useStreamingChat(
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [workflows] = useState<Record<string, TaskWorkflow>>({});
   const abortRef = useRef<AbortController | null>(null);
+  const loadHistoryAbortRef = useRef<AbortController | null>(null);
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
 
   const refreshHistory = useCallback(async () => {
@@ -709,14 +710,18 @@ export function useStreamingChat(
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {
     void loadedProjectId;
+    loadHistoryAbortRef.current?.abort();
+    const abort = new AbortController();
+    loadHistoryAbortRef.current = abort;
     setIsHistoryLoading(true);
     try {
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { credentials: 'include' }
+        { credentials: 'include', signal: abort.signal }
       );
       if (!response.ok) throw new Error(`Could not load chat (HTTP ${response.status}).`);
       const payload = (await response.json()) as { turns: ChatTurn[] };
+      if (abort.signal.aborted) return;
       setMessages(payload.turns.flatMap((turn) => {
         const citations = (turn.citation_coordinates ?? [])
           .map(citationFromCoordinate)
@@ -734,13 +739,19 @@ export function useStreamingChat(
         ];
       }));
       setActiveConversationId(sessionId);
+    } catch (err) {
+      if ((err as { name?: string }).name === 'AbortError') return;
+      throw err;
     } finally {
-      setIsHistoryLoading(false);
+      if (loadHistoryAbortRef.current === abort) {
+        setIsHistoryLoading(false);
+      }
     }
   }, []);
 
   const resetChat = useCallback(() => {
     abortRef.current?.abort();
+    loadHistoryAbortRef.current?.abort();
     setMessages([]);
     setActiveConversationId(null);
     setIsGenerating(false);

@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
 
@@ -95,6 +95,10 @@ class CanonicalProjectRepository(Protocol):
     async def require_document(
         self, principal: VerifiedPrincipal, project_id: str, document_id: str
     ) -> ProjectDocument | None: ...
+
+    async def require_documents(
+        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
+    ) -> Mapping[str, ProjectDocument]: ...
 
 
 class _ChatProfilePayload(BaseModel):
@@ -299,8 +303,33 @@ def create_chat_router() -> APIRouter:
             if history is not None
             else _buffer(request).read(namespace)
         )
-        serialized: list[dict[str, object]] = []
+        # Collect all unique document IDs referenced in citation coordinates
+        doc_ids: list[str] = []
+        for turn in turns:
+            for coordinate in turn.citation_coordinates:
+                if isinstance(coordinate, dict):
+                    doc_id = coordinate.get("document_id")
+                    if isinstance(doc_id, str) and doc_id not in doc_ids:
+                        doc_ids.append(doc_id)
+
+        documents_by_id: dict[str, ProjectDocument] = {}
         repository = getattr(request.app.state, "project_repository", None)
+        if doc_ids and repository is not None:
+            repo = cast(CanonicalProjectRepository, repository)
+            if hasattr(repo, "require_documents"):
+                batch_docs = await repo.require_documents(
+                    principal, scope.project_id, doc_ids
+                )
+                documents_by_id.update(batch_docs)
+            else:
+                for doc_id in doc_ids:
+                    doc = await repo.require_document(
+                        principal, scope.project_id, doc_id
+                    )
+                    if doc is not None:
+                        documents_by_id[doc_id] = doc
+
+        serialized: list[dict[str, object]] = []
         for turn in turns:
             payload = turn.to_dict()
             coordinates = payload.get("citation_coordinates")
@@ -311,9 +340,7 @@ def create_chat_router() -> APIRouter:
                     document_id = coordinate.get("document_id")
                     if not isinstance(document_id, str):
                         continue
-                    document = await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
+                    document = documents_by_id.get(document_id)
                     coordinate["unavailable"] = document is None or document.status != "ready"
             serialized.append(payload)
         return {"session_id": session_id, "turns": serialized}
