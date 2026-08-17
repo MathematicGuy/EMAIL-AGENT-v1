@@ -7,7 +7,7 @@ is on the chunk the generator actually received, so nothing between routing and
 generation can quietly drop or reorder retrieval and still pass.
 
 The offline embedder is ``HashingEmbedder``, which buckets tokens by hash and
-carries no semantics; three cases genuinely cannot rank correctly under it and
+carries no semantics; listed hashing cases cannot rank correctly under it and
 are marked xfail with the measured reason. They are confirmed passing under
 ``--embedder gemini`` (see docs/evaluations/baselines/retrieval-eval-*-gemini-dense.json).
 The assertion is deliberately *not* weakened to "somewhere in the top 5": that
@@ -47,12 +47,12 @@ CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 
 LEGACY_EMAIL_DOCUMENT_IDS = frozenset(
     {
-        "cap_lai_cccd",
-        "dang_ky_ket_hon",
-        "dang_ky_xe",
-        "huong_dan_nop_ho_so_dai_hoc_vinuni",
-        "thue_dien_tu",
-        "thu_tuc_dang_ky_bhxh_luatvietnam",
+        "cap-lai-cccd",
+        "dang-ky-ket-hon",
+        "dang-ky-xe",
+        "huong-dan-nop-ho-so-dai-hoc-vinuni",
+        "thue-dien-tu",
+        "thu-tuc-dang-ky-bhxh-luatvietnam",
     }
 )
 
@@ -60,9 +60,9 @@ LEGACY_EMAIL_DOCUMENT_IDS = frozenset(
 #: guessed: each ranks a topically unrelated document first under HashingEmbedder
 #: and the expected document first under Gemini.
 _HASHING_XFAIL = {
-    "q-001": "HashingEmbedder ranks dang_ky_xe first; passes under Gemini",
-    "q-006": "HashingEmbedder ranks thu_tuc_dang_ky_bhxh_luatvietnam first; passes under Gemini",
-    "q-026": "HashingEmbedder ranks dang_ky_xe first; passes under Gemini",
+    "q-001": "HashingEmbedder ranks dang-ky-xe first; passes under Gemini",
+    "q-006": "HashingEmbedder ranks thu-tuc-dang-ky-bhxh-luatvietnam first; passes under Gemini",
+    "q-014": "HashingEmbedder ranks thu-tuc-dang-ky-bhxh-luatvietnam first; no semantics",
 }
 
 #: Not an embedder artifact: no retriever in the repo abstains on an

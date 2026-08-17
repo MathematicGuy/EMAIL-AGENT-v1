@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Literal, Self, TypeVar
 
@@ -127,6 +127,9 @@ def _jsonable(value: object) -> object:
     """Convert one contract field value to its JSON-safe representation."""
     if isinstance(value, Enum):
         return value.value
+    # datetime is a date subclass; date-only values must stay YYYY-MM-DD.
+    if type(value) is date:
+        return value.isoformat()
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, tuple | list):
@@ -173,6 +176,18 @@ def _as_datetime(value: object) -> datetime:
     if isinstance(value, str):
         return datetime.fromisoformat(value)
     raise TypeError(f"Expected datetime or ISO-8601 string, got {type(value).__name__}")
+
+
+def _as_date(value: object) -> date:
+    if type(value) is date:
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise TypeError(f"Expected date or ISO-8601 date string, got {type(value).__name__}")
+
+
+def _as_int_tuple(value: object) -> tuple[int, ...]:
+    return tuple(_as_int(item) for item in _as_sequence(value))
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:
@@ -515,6 +530,9 @@ class SemanticChunk:
     document_version: str | None
     relevance_score: float
     rerank_score: float | None
+    page_start: int | None = None
+    page_end: int | None = None
+    document_date: date | None = None
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -531,6 +549,9 @@ class SemanticChunk:
             document_version=_optional(data["document_version"], _as_str),
             relevance_score=_as_float(data["relevance_score"]),
             rerank_score=_optional(data["rerank_score"], _as_float),
+            page_start=_optional(data.get("page_start"), _as_int),
+            page_end=_optional(data.get("page_end"), _as_int),
+            document_date=_optional(data.get("document_date"), _as_date),
         )
 
 
@@ -539,6 +560,9 @@ class RetrievalFilters:
     """Status filters applied to a semantic retrieval (§6.4)."""
 
     document_status: tuple[str, ...] = ("ready",)
+    document_ids: tuple[str, ...] = ()
+    years: tuple[int, ...] = ()
+    months: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -547,6 +571,9 @@ class RetrievalFilters:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             document_status=_as_str_tuple(data.get("document_status", ("ready",))),
+            document_ids=_as_str_tuple(data.get("document_ids", ())),
+            years=_as_int_tuple(data.get("years", ())),
+            months=_as_int_tuple(data.get("months", ())),
         )
 
 

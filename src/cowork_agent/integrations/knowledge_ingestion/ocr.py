@@ -64,7 +64,11 @@ class MistralOcrExtractor:
         except Exception as exc:
             raise RuntimeError(f"Mistral OCR failed for {filename}: {exc}") from exc
         pages = [self._page_markdown(filename, page) for page in response.pages]
-        return "\n\n".join(page for page in pages if page)
+        return "\n\n".join(
+            f"<!-- Page {n} -->\n{page}"
+            for n, page in enumerate(pages, start=1)
+            if page
+        )
 
     def _page_markdown(self, filename: str, page: Any) -> str:
         markdown = (getattr(page, "markdown", "") or "").strip()

@@ -42,3 +42,21 @@ def test_search_orders_equal_scores_by_chunk_id_and_respects_top_k() -> None:
     results = adapter.search("same exact terms", top_k=2)
 
     assert [chunk_id for chunk_id, _ in results] == ["alpha", "extra"]
+
+
+def test_search_allowlist_omits_excluded_chunk_ids() -> None:
+    adapter = BM25SearchAdapter(
+        (
+            _chunk("keep", "alpha token match"),
+            _chunk("drop", "alpha token match"),
+        )
+    )
+
+    allowed = adapter.search("alpha token", top_k=5, allowlist=("keep",))
+    assert [chunk_id for chunk_id, _ in allowed] == ["keep"]
+    assert allowed[0][1] > 0
+
+    unrestricted = adapter.search("alpha token", top_k=5)
+    assert {chunk_id for chunk_id, _ in unrestricted} == {"keep", "drop"}
+
+    assert adapter.search("alpha token", top_k=5, allowlist=()) == ()

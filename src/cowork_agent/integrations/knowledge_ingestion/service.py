@@ -10,13 +10,17 @@ from pathlib import Path
 
 from cowork_agent.config import KnowledgeIngestionSettings
 
+from .date_harvest import harvest_document_date
 from .docx_extractor import DocxExtractor
 from .manifest import ManifestStore, sha256_file, write_markdown_atomically
 from .models import IngestionOutcome, ManifestEntry, PdfInspection
 from .ocr import MistralOcrExtractor
 from .pdf_inspector import PdfInspector
+from .text_extractor import TextExtractor
+from .text_sanitizer import build_frontmatter, resolve_title, sanitize_text
 
-_SUPPORTED_SUFFIXES = {".docx", ".pdf"}
+_SUPPORTED_SUFFIXES = {".docx", ".pdf", ".txt", ".md"}
+_TEXT_VALUE_ERRORS = frozenset({"decode_failed", "empty_extraction"})
 _MANIFEST_NAME = "ingestion-manifest.json"
 
 
@@ -29,11 +33,13 @@ class KnowledgeIngestionService:
         docx_extractor: DocxExtractor | None = None,
         pdf_inspector: PdfInspector | None = None,
         ocr_extractor: MistralOcrExtractor | None = None,
+        text_extractor: TextExtractor | None = None,
     ) -> None:
         self._settings = settings
         self._docx_extractor = docx_extractor or DocxExtractor()
         self._pdf_inspector = pdf_inspector or PdfInspector()
         self._ocr_extractor = ocr_extractor
+        self._text_extractor = text_extractor or TextExtractor()
 
     def ingest(
         self,
@@ -98,7 +104,20 @@ class KnowledgeIngestionService:
         if dry_run:
             return IngestionOutcome(relative, "succeeded", output=output_name)
         try:
+            body = sanitize_text(markdown)
+            document_id = Path(output_name).stem
+            title = resolve_title(body, document_id)
+            processed_at = datetime.now(UTC).isoformat()
+            markdown = build_frontmatter(
+                document_id=document_id,
+                title=title,
+                source_file=relative,
+                extractor=extractor,
+                page_count=page_count,
+                processed_at=processed_at,
+            ) + body
             write_markdown_atomically(output_dir / output_name, markdown)
+            harvested = harvest_document_date(path)
             manifest.record(
                 ManifestEntry(
                     source=relative,
@@ -107,7 +126,9 @@ class KnowledgeIngestionService:
                     output=output_name,
                     extractor=extractor,
                     page_count=page_count,
-                    processed_at=datetime.now(UTC).isoformat(),
+                    processed_at=processed_at,
+                    title=title,
+                    document_date=harvested.isoformat() if harvested is not None else "",
                 )
             )
         except (OSError, ValueError):
@@ -115,6 +136,22 @@ class KnowledgeIngestionService:
         return IngestionOutcome(relative, "succeeded", output=output_name)
 
     def _extract(self, path: Path, output_dir: Path) -> tuple[str, str, int]:
+        suffix = path.suffix.lower()
+        if suffix in {".txt", ".md"}:
+            try:
+                result = self._text_extractor.extract(path)
+            except ValueError as error:
+                reason = str(error)
+                if reason in _TEXT_VALUE_ERRORS:
+                    raise _IngestionError(reason) from error
+                raise _IngestionError("text_extraction_failed") from error
+            except Exception as error:
+                raise _IngestionError("text_extraction_failed") from error
+            if not result.markdown.strip():
+                raise _IngestionError("empty_extraction")
+            extractor = "text" if suffix == ".txt" else "markdown"
+            return result.markdown, extractor, result.page_count
+
         if self._settings.extraction_mode in ("advance", "advanced") or self._settings.ocr_enabled:
             ocr = self._get_or_create_ocr(output_dir)
             try:

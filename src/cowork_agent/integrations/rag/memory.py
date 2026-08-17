@@ -23,7 +23,7 @@ from cowork_agent.domain.target_contracts import (
 )
 
 from .embeddings import EmbeddingPort
-from .knowledge_base import KnowledgeChunk, KnowledgeDocument
+from .knowledge_base import KnowledgeChunk, KnowledgeDocument, allowed_chunk_indices
 
 
 class InRepoSemanticMemory:
@@ -71,7 +71,10 @@ class InRepoSemanticMemory:
         if self._matrix is None:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
-        allowed = list(enumerate(self._chunks))
+        allowed = [
+            (index, self._chunks[index])
+            for index in allowed_chunk_indices(self._chunks, request.filters)
+        ]
         if not allowed:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
         query_text = _query_text(request)
@@ -113,6 +116,9 @@ class InRepoSemanticMemory:
                 document_version=None,
                 relevance_score=score,
                 rerank_score=None,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                document_date=chunk.document_date,
             )
             for score, chunk in ranked
         )

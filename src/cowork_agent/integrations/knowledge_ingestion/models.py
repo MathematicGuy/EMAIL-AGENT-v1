@@ -42,6 +42,8 @@ class ManifestEntry:
     page_count: int = 0
     processed_at: str = ""
     reason_code: str | None = None
+    title: str = ""
+    document_date: str = ""
 
 
 @dataclass(frozen=True, slots=True)
