@@ -5,13 +5,15 @@ from pathlib import Path
 
 from tests.unit.scripts.cli_harness import load_script, run_cli
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _module():
     return load_script("evaluate_chat_routing")
 
 
 def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
-    assert _module().DEFAULT_OUTPUT_DIR == Path("docs/evaluations/CHAT")
+    assert _module().DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "CHAT"
 
 
 def test_chat_routing_dry_run_passes_and_report_is_metadata_only(tmp_path: Path) -> None:

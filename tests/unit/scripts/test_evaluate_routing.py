@@ -20,7 +20,7 @@ def load_module():
 def test_default_output_directory_stays_under_documented_evaluations_store() -> None:
     module = load_module()
 
-    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "docs" / "evaluations" / "baselines"
+    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "baselines"
 
 
 def _result(

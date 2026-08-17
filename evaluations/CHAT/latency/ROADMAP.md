@@ -136,23 +136,31 @@ transcript still has to look complete.
 **Revert if:** Evidence panel is empty for stored turns, or Chat RAG
 invariants in `tests/unit/domain` / controller tests break.
 
-### Step 4 — Backend `list_messages` cheaper
+### Step 4 — Backend `list_messages` cheaper (Supabase WAN)
 
-**Do:** Only after Step 3 numbers say the API is still the p50. Candidates:
-one connection for principal + require + list_turns (today each opens
-its own `pool.connection()`), skip `require_documents` on list (stamp
-`unavailable` lazily), raise pool `min_size` above 1 if live traces show
-checkout wait. Select fewer columns only if `EXPLAIN` says so.
+**Do not start** until a live `CHAT_LATENCY_LIVE=1` run shows
+`request_duration_ms` still > 300 ms. Mocks will not move.
 
-**Ask before changing SQL migrations.**
+Research (2026-08-17): Context7 + official Supabase/psycopg docs. Each
+`pool.connection()` also runs `check=check_connection` (network ping on
+**every** checkout) and COMMITs on exit. Three checkouts can be many
+WAN RTTs. Shared Supavisor **transaction** `:6543` is for serverless;
+a long-lived FastAPI should use **direct :5432** or **shared session
+:5432** ([connect](https://supabase.com/docs/guides/database/connecting-to-postgres)).
 
-**Measure:** live `request_duration_ms`. Synthetic mocks will not move.
+**Do, in this order (no SQL migration):** one checkout for the whole
+handler → `check=None` → persistent-backend `DATABASE_URL` (direct or
+session :5432) → warm `min_size` 2–4 and stop recycling at 60/300 s →
+pipeline only if still > 300 ms → lazy documents → `EXPLAIN` (ask
+before migrations).
 
-**Tradeoff:** `unavailable` badges may be one request late. Document
-lookup is correctness for deleted project docs — do not skip it in a
-way that shows a dead citation as live. Sharing one connection is a
-keep if live p50 drops by ~2 RTTs; bumping `min_size` costs idle
-connections.
+**Measure:** live `request_duration_ms` + `pool.get_stats()`.
+
+**Do not:** prepared statements on :6543; `NullConnectionPool`; pipeline
+across three checkouts; treat Shared transaction as faster for this API.
+
+The living copy of this research lives on branch `fe`:
+`evaluations/CHAT/latency/ROADMAP.md` (section “Supabase WAN latency”).
 
 ### Step 5 — Prefetch
 

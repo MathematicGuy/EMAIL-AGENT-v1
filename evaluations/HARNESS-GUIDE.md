@@ -30,11 +30,11 @@ for another.
 
 | Script                                  | Layer               | Input                                                          | Default report location                |
 | --------------------------------------- | ------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| `scripts/evaluate_routing.py`           | Email routing       | `tests/fixtures/routing/`                                      | `docs/evaluations/baselines/`          |
-| `scripts/evaluate_chat_routing.py`      | Chat intent routing | `tests/fixtures/chat_routing/`                                 | `docs/evaluations/CHAT/`               |
-| `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `docs/evaluations/baselines/`          |
-| `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `docs/evaluations/CHAT-RAG/baselines/` |
-| `scripts/build_evaluation_dashboard.py` | —                   | `docs/evaluations/baselines/`                                  | `docs/evaluations/dashboard.md`        |
+| `scripts/evaluate_routing.py`           | Email routing       | `tests/fixtures/routing/`                                      | `evaluations/baselines/`               |
+| `scripts/evaluate_chat_routing.py`      | Chat intent routing | `tests/fixtures/chat_routing/`                                 | `evaluations/CHAT/`                    |
+| `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `evaluations/baselines/`               |
+| `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `evaluations/CHAT-RAG/baselines/`      |
+| `scripts/build_evaluation_dashboard.py` | —                   | `evaluations/baselines/`                                       | `evaluations/dashboard.md`             |
 | Playwright `e2e/chat-history-latency.spec.ts` | Chat-switch UI latency | saved chats in the dashboard | `evaluations/CHAT/latency/` |
 
 Each has a focused test under `tests/unit/scripts/`.
@@ -93,8 +93,8 @@ never committed. Full schema and the opt-in `--ragas` gate are in
 
 ### 2.4 `build_evaluation_dashboard.py`
 
-Reads the retrieval report metadata in `docs/evaluations/baselines/` and
-regenerates `docs/evaluations/dashboard.md`. Never hand-edit that dashboard;
+Reads the retrieval report metadata in `evaluations/baselines/` and
+regenerates `evaluations/dashboard.md`. Never hand-edit that dashboard;
 rerun the generator.
 
 ```powershell
@@ -124,7 +124,7 @@ slice breakdown inside it.
 
 ## 4. Adding a Harness
 
-1. Default the output directory to a folder under `docs/evaluations/`.
+1. Default the output directory to a folder under `evaluations/`.
 2. Version the output with a `schema_version` string.
 3. Write a focused test in `tests/unit/scripts/` covering the metric math and
    asserting that no source text reaches the report.

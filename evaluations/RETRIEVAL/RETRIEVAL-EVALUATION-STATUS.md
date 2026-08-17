@@ -1,11 +1,11 @@
 # RAG Evaluation — Status Report
 
-> **Document status:** current snapshot as of 2026-08-13, revised after the golden-set
+> **Document status:** current snapshot as of 2026-08-17, revised after the golden-set
 > and evaluation-harness work landed (C4, C5, C6 are implemented — see
 > [SPEC](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) / [PLAN](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
 > `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
-> **17 documents / 1,066 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
+> **17 documents / 1,069 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
 > Purpose: map what is already tested vs. what is missing for the full Email-RAG quality evaluation story.  
 > The evaluation pipeline covers three conceptually distinct layers:  
 > **Routing** (does the classifier decide that RAG is needed?) →  
@@ -29,7 +29,7 @@ flowchart TD
     C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
     C --> C2["✅ test_rag.py · ACL filtering\nTenant scope applied before scoring;\nforeign chunks excluded"]
     C --> C3["✅ test_rag.py · index mechanics\nScore ordering, top_k truncation,\ntimeout status, null memory fallback"]
-    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2375"]
+    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2272"]
     C --> C5["✅ test_rag_retrieval_golden.py\n8 legacy email-body cases scoped to 6 docs;\nreal InRepoSemanticMemory in the\nDigestWorker graph, 3 xfail under fake"]
     C --> C6["✅ Historical 4-way live comparison\ndense / bm25 / hybrid / hybrid+rerank\n32-case, 6-document baseline only;\nnot current-corpus acceptance evidence"]
     C --> C7["❌ OPEN: abstention\nFresh hashing-dense run returns chunks\nfor all 12 unanswerable queries;\nrate 0.0 at min_score=0.2"]
@@ -99,7 +99,7 @@ flowchart TD
 | **Scope** | All labeled fixture cases under `tests/fixtures/routing/` |
 | **Mode** | `--dry-run` (deterministic fake, perfect by construction) or live LLM provider |
 | **Metrics** | Actionability accuracy, per-Route precision & recall, **False-Negative Retrieval Rate** |
-| **Output** | JSON report written to `docs/evaluations/baselines/routing-eval-<date>.json` |
+| **Output** | JSON report written to `evaluations/baselines/routing-eval-<date>.json` |
 | **PRD ref** | PRD-v1 §16 Milestone 2 exit obligation (task T2.6) |
 
 The **False-Negative Retrieval Rate** (`false_negative_retrieval.rate`) is the primary quality gate: it tracks how often emails labeled `RETRIEVE_RAG` were incorrectly routed to `DIRECT_PLAN` or `NO_ACTION`. This is PRD-v1 §14's highest-risk error class.
@@ -141,7 +141,7 @@ Two design constraints make the numbers meaningful and must not be simplified aw
 
 The loader validates every label against live `load_corpus` output, so a re-chunk fails loudly instead of silently scoring 0.0.
 
-**Fresh offline harness run (2026-08-13):** `python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,066 chunks** with the deterministic `HashingEmbedder`. It reported document MRR **0.5809**, section MRR **0.2375**, section Recall@5 **0.3333**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
+**Fresh offline harness run (2026-08-17):** `uv run python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,069 chunks** with the deterministic `HashingEmbedder`. It reported document MRR **0.5576**, section MRR **0.2272**, section Recall@5 **0.3913**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
 
 ### ✅ C5 — End-to-end email → retrieval fixture (closed 2026-08-09)
 
@@ -151,7 +151,7 @@ Offline it runs on `HashingEmbedder`; 3 cases (`q-001`, `q-006`, `q-026`) cannot
 
 ### ✅ C6 — Historical Hybrid Comparative Benchmark (retained)
 
-Four variants, same 32 legacy cases and six-document corpus, reports in `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
+Four variants, same 32 legacy cases and six-document corpus, reports in `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
 
 **Section-level MRR — the discriminating metric:**
 
@@ -267,7 +267,7 @@ context-relevance judgments.
 | Retrieval | BM25, RRF & Hybrid unit tests | ✅ Available | `tests/unit/integrations/rag/` (`test_bm25.py`, `test_rrf.py`, `test_hybrid.py`, `test_jina_reranker.py`) |
 | Retrieval | Real-embedding Hit@K / MRR | ✅ Available | `scripts/evaluate_retrieval.py`, `tests/fixtures/rag/` |
 | Retrieval | Email → corpus retrieval fixture | ✅ Available | `tests/integration/email_action_plan/test_rag_retrieval_golden.py` |
-| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
+| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
 | Retrieval | Abstention on unanswerable queries | ❌ Missing | measured at 0.000 for every retriever |
 | Generation | Retrieval wiring (request shape, feed to generator) | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
 | Generation | Degradation on retrieval failure | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |

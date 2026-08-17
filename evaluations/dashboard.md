@@ -1,10 +1,10 @@
 # Retrieval Evaluation Dashboard
 
-> Generated from metadata-only JSON under `docs/evaluations/baselines/`. Do not use hashing runs as semantic-quality or production-latency evidence.
+> Generated from metadata-only JSON under `evaluations/baselines/`. Do not use hashing runs as semantic-quality or production-latency evidence.
 
 ## Decision Snapshot
 
-- **Current corpus:** 17 documents / 1066 chunks, 100 cases.
+- **Current corpus:** 17 documents / 1069 chunks, 100 cases.
 - **Current evidence:** mechanical-only; live semantic evidence missing.
 - **Historical comparison reports:** 5; retain for context only.
 
@@ -37,16 +37,8 @@ Green: exercised by retrieval reports. Amber: exercised only as part of a combin
 
 | Report | Embedder | Retriever | Corpus | Section MRR | Semantic MRR | p50 / p95 ms | Evidence |
 |---|---|---|---|---:|---:|---:|---|
-| `retrieval-eval-2026-08-11-hashing-qdrant.json` | hashing | qdrant | 100 cases / 17 docs / 1043 chunks | 0.2524 | 0.0256 | 0 / 16 | mechanical-only |
-| `retrieval-eval-2026-08-12-hashing-turbovec.json` | hashing | turbovec | 100 cases / 17 docs / 1043 chunks | 0.2434 | 0.0256 | 0 / 0 (integer-truncated) | mechanical-only |
-| `retrieval-eval-2026-08-12-hashing-dense.json` | hashing | dense | 100 cases / 17 docs / 1043 chunks | 0.2524 | 0.0256 | 0 / 0 (integer-truncated) | mechanical-only |
-| `retrieval-eval-2026-08-12-hashing-qdrant.json` | hashing | qdrant | 100 cases / 17 docs / 1043 chunks | 0.0000 | 0.0000 | 0 / 0 (integer-truncated) | mechanical-only |
-| `retrieval-eval-2026-08-12-hashing-hybrid.json` | hashing | hybrid | 100 cases / 17 docs / 1043 chunks | 0.4806 | 0.2051 | 12 / 17 | mechanical-only |
-| `retrieval-eval-2026-08-13-hashing-hybrid.json` | hashing | hybrid | 100 cases / 17 docs / 1043 chunks | 0.4806 | 0.2051 | 12 / 17 | mechanical-only |
-| `retrieval-eval-2026-08-13-hashing-hybrid_turbovec.json` | hashing | hybrid_turbovec | 100 cases / 17 docs / 1043 chunks | 0.4660 | 0.1987 | 12 / 18 | mechanical-only |
-| `retrieval-eval-2026-08-13T075140-hashing-dense.json` | hashing | dense | 100 cases / 17 docs / 1066 chunks | 0.2375 | 0.0410 | 0 / 0 (integer-truncated) | mechanical-only |
-| `retrieval-eval-2026-08-13T075207-hashing-dense.json` | hashing | dense | 100 cases / 17 docs / 1066 chunks | 0.2375 | 0.0410 | 0 / 0 (integer-truncated) | mechanical-only |
-| `retrieval-eval-2026-08-13-hashing-dense.json` | hashing | dense | 100 cases / 17 docs / 1066 chunks | 0.2375 | 0.0410 | 0 / 0 (integer-truncated) | mechanical-only |
+| `retrieval-eval-2026-08-17-hashing-dense.json` | hashing | dense | 100 cases / 17 docs / 1069 chunks | 0.2272 | 0.0449 | 0 / 0 (integer-truncated) | mechanical-only |
+| `retrieval-eval-2026-08-17-hashing-hybrid.json` | hashing | hybrid | 100 cases / 17 docs / 1069 chunks | 0.4362 | 0.1692 | 25 / 37 | mechanical-only |
 
 ## Historical Baselines
 
@@ -74,15 +66,14 @@ Green: exercised by retrieval reports. Amber: exercised only as part of a combin
 ## Bottleneck Readout
 
 - **Current bottleneck:** not identifiable from the stored reports. Per-component timing is not emitted; they measure only end-to-end retrieval latency.
-- **Current strength signal:** the report set exercises dense, Qdrant, Turbovec, and hybrid paths on the 100-case / 17-document corpus.
+- **Current retrieval coverage:** dense, hybrid.
 - **Current quality limit:** every current report uses hashing embeddings, so rank differences are not semantic evidence.
-- **Current comparability limit:** reports span multiple chunking cohorts (1043, 1066 chunks); compare only within one cohort.
 - **Historical trade-off:** live six-document reports retain useful context, but cannot select the current default.
 - **Highest-value next measurement:** emit per-component timings from one current live dense/hybrid/rerank run.
 
 ## Refresh Contract
 
-1. Store every evaluator JSON under `docs/evaluations/`; retrieval reports belong in `baselines/`.
+1. Store every evaluator JSON under `evaluations/`; retrieval reports belong in `baselines/`.
 2. Run the relevant evaluator with its default output path, then run `python scripts/build_evaluation_dashboard.py`.
 3. Do not compare reports across different corpus/case counts as a release decision.
 4. Add `embedding_ms`, `dense_search_ms`, `bm25_ms`, `fusion_ms`, `rerank_ms`, `post_filter_ms`, routing, and generation timings before assigning a component bottleneck.

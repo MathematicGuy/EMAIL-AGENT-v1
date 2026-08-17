@@ -16,6 +16,13 @@ def load_module():
     return module
 
 
+def test_default_paths_use_the_evaluation_workspace() -> None:
+    module = load_module()
+
+    assert module.DEFAULT_INPUT_DIR == REPO_ROOT / "evaluations" / "baselines"
+    assert module.DEFAULT_OUTPUT == REPO_ROOT / "evaluations" / "dashboard.md"
+
+
 def _report(*, cases: int, documents: int, chunks: int, embedder: str, retriever: str):
     return {
         "generated_at": "2026-08-13T00:00:00Z",
@@ -70,6 +77,22 @@ def test_render_dashboard_keeps_component_latency_gaps_visible(tmp_path: Path) -
     assert "Per-component timing is not emitted" in dashboard
     assert "Hybrid retrieval" in dashboard
     assert "RAG request" in dashboard
+
+
+def test_render_dashboard_describes_only_currently_reported_retrievers(tmp_path: Path) -> None:
+    module = load_module()
+    target = tmp_path / "retrieval-eval-2026-08-17-hashing-dense.json"
+    target.write_text(
+        json.dumps(
+            _report(cases=100, documents=17, chunks=1069, embedder="hashing", retriever="dense")
+        ),
+        encoding="utf-8",
+    )
+
+    dashboard = module.render_dashboard(module.load_reports(tmp_path))
+
+    assert "**Current retrieval coverage:** dense." in dashboard
+    assert "current report set exercises dense, Turbovec, and hybrid" not in dashboard
 
 
 def test_render_dashboard_warns_about_chunking_cohorts(tmp_path: Path) -> None:
