@@ -3,6 +3,9 @@ import {
   Plus,
   MessageSquare,
   GitBranch,
+  Search,
+  SlidersHorizontal,
+  Clock,
   Mail,
   LoaderCircle,
   Trash2
@@ -21,13 +24,14 @@ interface TaskbarProps {
   activeProjectId: string;
   onSelectProject: (projectId: string) => void;
   onSelectRecent: (chat: RecentChat) => void;
+  onPrefetchChat?: (chat: RecentChat) => void;
   onDeleteChat: (chat: RecentChat) => void;
   recentChats: RecentChat[];
   isHistoryLoading?: boolean;
   activeChatId?: string;
   onNavigateHome?: () => void;
-  activeView?: 'chat' | 'mail' | 'artifacts';
-  onChangeView?: (view: 'chat' | 'mail' | 'artifacts') => void;
+  activeView?: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts';
+  onChangeView?: (view: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts') => void;
   isGenerating?: boolean;
 }
 
@@ -56,6 +60,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   activeProjectId,
   onSelectProject,
   onSelectRecent,
+  onPrefetchChat,
   onDeleteChat,
   recentChats,
   isHistoryLoading = false,
@@ -111,6 +116,16 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
+            title="Scheduled Automations"
+            onClick={() => onChangeView?.('schedules')}
+            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+              activeView === 'schedules' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+          </button>
+
+          <button
             title="Mail Inbox"
             onClick={() => onChangeView?.('mail')}
             className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
@@ -131,6 +146,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           >
             <GitBranch className="w-4 h-4" />
           </button>
+
+
         </div>
 
         <div className="flex flex-col items-center gap-3 w-full">
@@ -169,12 +186,17 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             >
               <SidebarToggleIcon className="w-4 h-4" />
             </button>
+            <button
+              title="Search chats"
+              className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
+            >
+              <Search className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
         <button
           onClick={onNewChat}
-          title="New chat"
           className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
         >
           <Plus className="w-4 h-4 text-zinc-400" />
@@ -183,7 +205,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
         <div className="flex flex-col gap-0.5 text-xs">
           <button
-            title="Artifacts"
             onClick={() => onChangeView?.('artifacts')}
             className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
               activeView === 'artifacts'
@@ -196,7 +217,16 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Mail Inbox"
+            onClick={() => onChangeView?.('schedules')}
+            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
+              activeView === 'schedules' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-[#d97757]" />
+            <span>Scheduled</span>
+          </button>
+
+          <button
             onClick={() => onChangeView?.('mail')}
             className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
               activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
@@ -205,6 +235,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <Mail className="w-3.5 h-3.5 text-[#d97757]" />
             <span>Mail Inbox</span>
           </button>
+
         </div>
 
         <div className="mt-2 flex flex-col text-xs">
@@ -308,8 +339,11 @@ export const Taskbar: React.FC<TaskbarProps> = ({
         </div>
 
         <div className="mt-3 flex-1 flex flex-col min-h-0">
-          <div className="px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
+          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
             <span>Recents</span>
+            <button className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer">
+              <SlidersHorizontal className="w-3 h-3" />
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar text-xs">
@@ -333,6 +367,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   <button
                     data-testid="recent-chat"
                     data-chat-id={chat.id}
+                    onMouseEnter={() => onPrefetchChat?.(chat)}
+                    onFocus={() => onPrefetchChat?.(chat)}
                     onClick={() => {
                       onChangeView?.('chat');
                       onSelectRecent(chat);
@@ -377,6 +413,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               steven · <span className="text-zinc-500">Pro</span>
             </span>
           </div>
+
         </div>
       </div>
     </aside>

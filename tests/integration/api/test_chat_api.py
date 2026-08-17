@@ -13,6 +13,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatMessageRequest,
     ChatTurn,
     EpisodeTransition,
+    MemoryNamespace,
     TaskEpisode,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
@@ -133,7 +134,10 @@ class HistoryStore:
             created_at=datetime(2026, 8, 14, tzinfo=UTC),
         )
 
-    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
+    async def list_turns(
+        self, scope: ChatMemoryScope, *, connection: object | None = None
+    ) -> tuple[ChatTurn, ...]:
+        del connection
         return (self.turn,) if scope.session_id == self.turn.session_id else ()
 
     async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
@@ -155,8 +159,14 @@ class DurableSessionRegistry:
         return self.scope
 
     async def require(
-        self, session_id: str, *, tenant_id: str, user_id: str
+        self,
+        session_id: str,
+        *,
+        tenant_id: str,
+        user_id: str,
+        connection: object | None = None,
     ) -> ChatMemoryScope:
+        del connection
         self.required.append((session_id, tenant_id, user_id))
         if self.scope != ChatMemoryScope(
             tenant_id=tenant_id, user_id=user_id, session_id=session_id
@@ -484,6 +494,64 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
         turns = history.json()["turns"]
         assert [turn["user_message"] for turn in turns] == ["Hello"]
         assert foreign.status_code == 404
+
+    asyncio.run(scenario())
+
+
+def test_list_messages_omits_rag_evidence_content_unless_requested() -> None:
+    from cowork_agent.domain.chat_contracts import ChatRagEvidence, MemoryType
+
+    async def scenario() -> None:
+        principal = VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com")
+        app = _app(principal)
+        scope = ChatMemoryScope("tenant-1", "user@example.com", "session-1")
+        evidence = ChatRagEvidence(
+            source="company_knowledge",
+            retrieval_status="success",
+            chunk_id="chunk-slim",
+            document_id="doc-slim",
+            document_title="Policy.md",
+            section="Overview",
+            source_url=None,
+            relevance_score=0.81,
+            rerank_score=0.77,
+            preview="Short preview of the chunk.",
+            content="FULL CHUNK BODY THAT MUST NOT SHIP ON THE LIST PATH.",
+        )
+        app.state.chat_session_buffer.append(
+            MemoryNamespace(
+                scope=scope,
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            ),
+            ChatTurn(
+                turn_id="turn-slim",
+                session_id="session-1",
+                user_message="What is the policy?",
+                assistant_message="See the retrieved policy.",
+                created_at=datetime(2026, 8, 17, tzinfo=UTC),
+                rag_evidence=(evidence,),
+                retrieval_status="success",
+            ),
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            slim = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+            full = await client.get(
+                "/v1/cowork/chat/sessions/session-1/messages",
+                params={"include_content": "true"},
+            )
+
+        assert slim.status_code == 200
+        slim_item = slim.json()["turns"][0]["rag_evidence"][0]
+        assert slim_item["preview"] == "Short preview of the chunk."
+        assert "content" not in slim_item
+        assert full.status_code == 200
+        full_item = full.json()["turns"][0]["rag_evidence"][0]
+        assert full_item["content"] == "FULL CHUNK BODY THAT MUST NOT SHIP ON THE LIST PATH."
 
     asyncio.run(scenario())
 

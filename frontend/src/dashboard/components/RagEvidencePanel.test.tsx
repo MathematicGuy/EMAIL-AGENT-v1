@@ -47,6 +47,16 @@ describe('RagEvidencePanel', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('falls back to preview when list history omitted chunk content', async () => {
+    const slim: ChatRagEvidence[] = [{ ...evidence[0], content: '' }];
+    render(<RagEvidencePanel evidence={slim} retrievalStatus="success" />);
+    fireEvent.click(screen.getByText('RAG evidence · 1 chunk · success'));
+    fireEvent.click(screen.getByRole('button', { name: 'View full chunk' }));
+    expect(screen.getByRole('dialog').textContent).toContain(
+      'A relevant preview from the retrieved document.',
+    );
+  });
+
   it('shows the retrieval state when no chunks were found', () => {
     render(<RagEvidencePanel evidence={[]} retrievalStatus="no_results" />);
     fireEvent.click(screen.getByText('RAG evidence · no results'));

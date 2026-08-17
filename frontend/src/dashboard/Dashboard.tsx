@@ -95,9 +95,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     resetChat,
     deleteChat,
     loadExistingChat,
+    loadFullEvidence,
+    prefetchChat,
     apiStatus,
     recentChats,
     isHistoryLoading,
+    isTranscriptLoading,
     activeConversationId,
     workflows,
     approveWorkflowPlan,
@@ -156,6 +159,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onSelectRecent={handleSelectRecent}
+        onPrefetchChat={(chat) => { void prefetchChat(chat.id); }}
         onDeleteChat={handleDeleteChat}
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
@@ -185,26 +189,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         )}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>
-          {messages.length === 0 ? (
-            <HeroSection
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={handleSendMessage}
-              isGenerating={isGenerating}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
-            />
-          ) : (
+          {isTranscriptLoading || messages.length > 0 ? (
             <ChatStreamView
               messages={messages}
+              isTranscriptLoading={isTranscriptLoading}
               inputText={inputText}
               onChangeText={setInputText}
               onSend={handleSendMessage}
@@ -224,10 +212,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
                 void retryWorkflowStep(taskId, stepId)
               }
               onRetryTurn={retryTurn}
+              onLoadFullEvidence={loadFullEvidence}
               activeProject={activeProject}
               projects={projects}
               onSelectProject={handleSelectProject}
               onOpenMailInbox={() => setActiveView('mail')}
+            />
+          ) : (
+            <HeroSection
+              inputText={inputText}
+              onChangeText={setInputText}
+              onSend={handleSendMessage}
+              isGenerating={isGenerating}
+              selectedModel={selectedModel}
+              onOpenModelModal={openModelSelector}
+              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+              attachments={selectedAttachments}
+              attachmentError={attachmentError}
+              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+              onRemoveAttachment={removeAttachment}
+              activeProject={activeProject}
+              projects={projects}
+              onSelectProject={handleSelectProject}
             />
           )}
         </div>

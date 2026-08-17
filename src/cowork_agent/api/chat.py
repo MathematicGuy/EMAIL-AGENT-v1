@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
 
@@ -46,6 +46,66 @@ from cowork_agent.persistence.repositories.projects import Project, ProjectDocum
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 GuestSessionIssuer = Callable[[Request, Response], Awaitable[None]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
+
+
+def slim_listed_turn(
+    payload: dict[str, object], *, include_content: bool
+) -> dict[str, object]:
+    """Drop ``rag_evidence.content`` from GET /messages unless the client asks."""
+    if include_content:
+        return payload
+    evidence = payload.get("rag_evidence")
+    if not isinstance(evidence, list):
+        return payload
+    slimmed: list[object] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            slimmed.append(item)
+            continue
+        next_item = dict(item)
+        next_item.pop("content", None)
+        slimmed.append(next_item)
+    return {**payload, "rag_evidence": slimmed}
+
+
+async def load_owned_history(
+    *,
+    sessions: ChatSessionRegistryPort,
+    history: ChatHistoryPort | None,
+    buffer: ChatSessionBufferPort | None,
+    principal: VerifiedPrincipal,
+    session_id: str,
+) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]]:
+    """Load owned turns. Shared Postgres pools use one checkout for require + list."""
+    session_pool = getattr(sessions, "_pool", None)
+    history_pool = getattr(history, "_pool", None) if history is not None else None
+    pool = session_pool
+    if pool is not None and pool is history_pool:
+        async with pool.connection() as connection:
+            scope = await sessions.require(
+                session_id,
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+                connection=connection,
+            )
+            if history is None:
+                return scope, ()
+            turns = await history.list_turns(scope, connection=connection)
+            return scope, turns
+    scope = await sessions.require(
+        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+    )
+    namespace = MemoryNamespace(
+        scope=scope,
+        memory_type=MemoryType.SHORT_TERM,
+        record_id=session_id,
+        source_id=None,
+    )
+    if history is not None:
+        return scope, await history.list_turns(scope)
+    if buffer is None:
+        return scope, ()
+    return scope, buffer.read(namespace)
 
 
 class _ChatMessagePayload(BaseModel):
@@ -96,10 +156,6 @@ class CanonicalProjectRepository(Protocol):
     async def require_document(
         self, principal: VerifiedPrincipal, project_id: str, document_id: str
     ) -> ProjectDocument | None: ...
-
-    async def require_documents(
-        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
-    ) -> Mapping[str, ProjectDocument]: ...
 
 
 class _ChatProfilePayload(BaseModel):
@@ -293,64 +349,27 @@ def create_chat_router() -> APIRouter:
         }
 
     @router.get("/sessions/{session_id}/messages")
-    async def list_messages(session_id: str, request: Request) -> dict[str, object]:
+    async def list_messages(
+        session_id: str,
+        request: Request,
+        include_content: bool = Query(False),
+    ) -> dict[str, object]:
         principal = await _verified_principal(request)
+        history = _history_repository(request)
         try:
-            scope = await _require_session(request, principal, session_id)
+            _scope, turns = await load_owned_history(
+                sessions=_sessions(request),
+                history=history,
+                buffer=_buffer(request),
+                principal=principal,
+                session_id=session_id,
+            )
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
-        namespace = MemoryNamespace(
-            scope=scope,
-            memory_type=MemoryType.SHORT_TERM,
-            record_id=session_id,
-            source_id=None,
-        )
-        history = _history_repository(request)
-        turns = (
-            await history.list_turns(scope)
-            if history is not None
-            else _buffer(request).read(namespace)
-        )
-        # Collect all unique document IDs referenced in citation coordinates
-        doc_ids: list[str] = []
-        for turn in turns:
-            for coordinate in turn.citation_coordinates:
-                if isinstance(coordinate, dict):
-                    doc_id = coordinate.get("document_id")
-                    if isinstance(doc_id, str) and doc_id not in doc_ids:
-                        doc_ids.append(doc_id)
-
-        documents_by_id: dict[str, ProjectDocument] = {}
-        repository = getattr(request.app.state, "project_repository", None)
-        if doc_ids and repository is not None:
-            repo = cast(CanonicalProjectRepository, repository)
-            if hasattr(repo, "require_documents"):
-                batch_docs = await repo.require_documents(
-                    principal, scope.project_id, doc_ids
-                )
-                documents_by_id.update(batch_docs)
-            else:
-                for doc_id in doc_ids:
-                    doc = await repo.require_document(
-                        principal, scope.project_id, doc_id
-                    )
-                    if doc is not None:
-                        documents_by_id[doc_id] = doc
-
-        serialized: list[dict[str, object]] = []
-        for turn in turns:
-            payload = turn.to_dict()
-            coordinates = payload.get("citation_coordinates")
-            if isinstance(coordinates, list) and repository is not None:
-                for coordinate in coordinates:
-                    if not isinstance(coordinate, dict):
-                        continue
-                    document_id = coordinate.get("document_id")
-                    if not isinstance(document_id, str):
-                        continue
-                    document = documents_by_id.get(document_id)
-                    coordinate["unavailable"] = document is None or document.status != "ready"
-            serialized.append(payload)
+        serialized = [
+            slim_listed_turn(turn.to_dict(), include_content=include_content)
+            for turn in turns
+        ]
         return {"session_id": session_id, "turns": serialized}
 
     @router.delete("/sessions/{session_id}", status_code=204, response_model=None)

@@ -116,12 +116,11 @@ async def run_worker() -> None:
 
     pool = AsyncConnectionPool(
         database_url(),
-        min_size=1,
+        min_size=2,
         max_size=4,
         open=False,
-        check=AsyncConnectionPool.check_connection,
-        max_idle=60.0,
-        max_lifetime=300.0,
+        max_idle=600.0,
+        max_lifetime=3600.0,
         kwargs={"prepare_threshold": None},
     )
     await pool.open(wait=True)
@@ -136,10 +135,8 @@ async def run_worker() -> None:
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         classifier: RouteClassifierPort
         generator: ActionPlanGeneratorPort
-        generation_concurrency = 1
         if provider == "gemini":
             gemini_settings = GeminiSettings.from_env()
-            generation_concurrency = gemini_settings.action_plan_concurrency
             classifier = GeminiRouteClassifier(gemini_settings)
             generator = GeminiActionPlanGenerator(gemini_settings)
             jina_embedding_settings = JinaEmbeddingSettings.from_env()
@@ -173,8 +170,6 @@ async def run_worker() -> None:
                 settings.connection_db_path.parent, settings.token_encryption_key
             ),
             completion_outbox=outbox,
-            mailbox_fetch_concurrency=settings.fetch_concurrency,
-            generation_concurrency=generation_concurrency,
         )
         projects = PostgresProjectRepository(pool)
         maintenance = PostgresWorkerMaintenance(
