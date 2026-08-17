@@ -8,6 +8,12 @@ from cryptography.fernet import Fernet
 from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import MailboxConnection
+from cowork_agent.domain.chat_contracts import (
+    ChatMemoryScope,
+    ChatMessageRequest,
+    ChatTurnStatus,
+)
+from cowork_agent.persistence.repositories.local import InMemoryChatHistoryRepository
 
 
 def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch: object) -> None:
@@ -39,6 +45,66 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
                 assert "gmail.readonly" in response.headers["location"]
                 connections = await client.get("/v1/mail-todo/connections")
                 assert connections.json() == {"connections": []}
+
+    asyncio.run(scenario())
+
+
+def test_local_fallback_wires_chat_history_into_scoped_controllers(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    values = {
+        "DATABASE_URL": "",
+        "GMAIL_CLIENT_ID": "test.apps.googleusercontent.com",
+        "GMAIL_CLIENT_SECRET": "test-secret",
+        "GMAIL_REDIRECT_URI": "http://localhost:8000/v1/mail-todo/oauth/gmail/callback",
+        "GMAIL_SCOPES": GMAIL_READONLY_SCOPE,
+        "GMAIL_CONNECTION_DB_PATH": str(tmp_path / "connections.db"),
+        "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+        "OAUTH_STATE_SECRET": "state-secret-that-is-at-least-32-characters",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)  # type: ignore[attr-defined]
+
+    async def scenario() -> None:
+        app = create_app()
+        async with app.router.lifespan_context(app):
+            assert isinstance(
+                app.state.chat_history_repository, InMemoryChatHistoryRepository
+            )
+            scope = ChatMemoryScope(
+                tenant_id="local", user_id="owner", session_id="session-1"
+            )
+
+            class AssertPendingBeforeReply:
+                observed_pending = False
+
+                async def stream_reply(self, _request: object, _context: object):
+                    turns = await app.state.chat_history_repository.list_turns(scope)
+                    assert len(turns) == 1
+                    assert turns[0].status is ChatTurnStatus.GENERATING
+                    assert turns[0].assistant_message is None
+                    self.observed_pending = True
+                    yield "Reply"
+
+            reply = AssertPendingBeforeReply()
+            app.state.chat_reply = reply
+            controller = app.state.chat_controller_factory(scope)
+            assert controller._history is app.state.chat_history_repository
+            events = [
+                event
+                async for event in controller.stream_message(
+                    ChatMessageRequest(
+                        session_id=scope.session_id,
+                        user_message="Persist me first",
+                        idempotency_key="submission-1",
+                    )
+                )
+            ]
+            stored = await app.state.chat_history_repository.list_turns(scope)
+            assert reply.observed_pending is True
+            assert events[-1].event_type.value == "completed"
+            assert stored[0].status is ChatTurnStatus.COMPLETED
+            assert stored[0].assistant_message == "Reply"
 
     asyncio.run(scenario())
 

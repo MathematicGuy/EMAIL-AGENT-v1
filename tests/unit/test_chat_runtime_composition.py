@@ -167,7 +167,12 @@ def test_runtime_composition_passes_current_company_evidence_only_through_gatewa
         _events(controller, _request("What does the company policy say about travel?", key="1"))
     )
 
-    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
+    assert [event.event_type.value for event in events] == [
+        "started",
+        "error",
+        "delta",
+        "completed",
+    ]
     assert len(semantic_memory.requests) == 1
     assert reply.contexts[0].current_company_evidence is not None
     assert (
@@ -236,8 +241,13 @@ def test_runtime_composition_degrades_when_semantic_retrieval_fails() -> None:
         _events(controller, _request("What does the company procedure say?", key="3"))
     )
 
-    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
-    assert events[0].code == "optional_memory_degraded"
+    assert [event.event_type.value for event in events] == [
+        "started",
+        "error",
+        "delta",
+        "completed",
+    ]
+    assert events[1].code == "optional_memory_degraded"
     assert len(semantic_memory.requests) == 1
     assert reply.contexts[0].current_company_evidence is None
 
@@ -274,7 +284,12 @@ def test_runtime_injection_records_gateway_events() -> None:
         _events(controller, _request("What does the company policy say about travel?", key="5"))
     )
 
-    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
+    assert [event.event_type.value for event in events] == [
+        "started",
+        "error",
+        "delta",
+        "completed",
+    ]
     assert len(sink.events) >= 1
     read_events = [e for e in sink.events if e.operation == MemoryOperation.READ]
     assert len(read_events) >= 1
@@ -292,8 +307,13 @@ def test_runtime_sink_failure_isolation() -> None:
         _events(controller, _request("What does the company procedure say?", key="6"))
     )
 
-    assert [event.event_type.value for event in events] == ["error", "delta", "completed"]
-    assert events[0].code == "optional_memory_degraded"
+    assert [event.event_type.value for event in events] == [
+        "started",
+        "error",
+        "delta",
+        "completed",
+    ]
+    assert events[1].code == "optional_memory_degraded"
 
 
 def test_factory_passes_episode_retention_seconds_from_chat_memory_settings() -> None:

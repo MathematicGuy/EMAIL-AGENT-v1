@@ -106,6 +106,7 @@ absent, add the row when you add the test.
 | OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
 | Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
 | GET `/sessions/{id}/messages` omits `rag_evidence.content` unless `include_content=true` | `integration/api/test_chat_api.py` | frontend mapper except one preview-only case |
+| Chat submissions persist one lifecycle row before generation and update it by idempotency key | `unit/features/ai_chat/test_controller.py` + `unit/persistence/test_chat_history_migration.py` | frontend hook tests except API-shape mapping |
 | No test outside the `live` tier opens a non-loopback socket | `tests/unit/test_network_guard.py` | — |
 | App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
 

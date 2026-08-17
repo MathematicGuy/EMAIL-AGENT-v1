@@ -63,6 +63,10 @@ _HASHING_XFAIL = {
     "q-001": "HashingEmbedder ranks dang-ky-xe first; passes under Gemini",
     "q-006": "HashingEmbedder ranks thu-tuc-dang-ky-bhxh-luatvietnam first; passes under Gemini",
     "q-014": "HashingEmbedder ranks thu-tuc-dang-ky-bhxh-luatvietnam first; no semantics",
+    "q-016": (
+        "HashingEmbedder ranks dang-ky-xe first instead of the VinUni giấy-tờ table; "
+        "no semantics"
+    ),
 }
 
 #: Not an embedder artifact: no retriever in the repo abstains on an

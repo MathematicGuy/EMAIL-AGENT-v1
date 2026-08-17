@@ -5,14 +5,69 @@ import {
   GitBranch,
   Search,
   SlidersHorizontal,
-  Clock,
   Mail,
   LoaderCircle,
   Trash2
 } from 'lucide-react';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
-import type { SidebarState, RecentChat } from '../types';
+import type { ChatGenerationStatus, SidebarState, RecentChat } from '../types';
 import type { Project } from '../types/projectTypes';
+
+const terminalLifecycleLabels: Partial<Record<ChatGenerationStatus, string>> = {
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+  cancelled: 'Cancelled',
+  usage_limit_reached: 'Usage limit reached',
+  temporarily_rate_limited: 'Temporarily rate-limited',
+};
+
+const ChatLifecycleIndicator = ({
+  chat,
+  isActive,
+  legacyGenerating,
+}: {
+  chat: RecentChat;
+  isActive: boolean;
+  legacyGenerating: boolean;
+}) => {
+  const isChatGenerating = chat.generationStatus === 'generating' || (!chat.generationStatus && legacyGenerating);
+  const terminalLabel = chat.generationStatus
+    ? terminalLifecycleLabels[chat.generationStatus]
+    : undefined;
+
+  if (isChatGenerating) {
+    return (
+      <span className="flex shrink-0 items-center" title="Generating">
+        <LoaderCircle aria-hidden="true" className="h-3 w-3 animate-spin text-[#d97757]" />
+        <span className="sr-only">Generating</span>
+      </span>
+    );
+  }
+
+  if (terminalLabel) {
+    return (
+      <span
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-600 text-[9px] font-bold leading-none text-zinc-400"
+        title={terminalLabel}
+      >
+        <span aria-hidden="true">!</span>
+        <span className="sr-only">{terminalLabel}</span>
+      </span>
+    );
+  }
+
+  if (chat.unread && !isActive) {
+    return (
+      <span
+        aria-label="Unread"
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d97757] ring-2 ring-[#1b1a18]"
+        title="Unread"
+      />
+    );
+  }
+
+  return <MessageSquare aria-hidden="true" className="h-3 w-3 shrink-0 text-[#d97757]" />;
+};
 
 interface TaskbarProps {
   sidebarState: SidebarState;
@@ -30,8 +85,8 @@ interface TaskbarProps {
   isHistoryLoading?: boolean;
   activeChatId?: string;
   onNavigateHome?: () => void;
-  activeView?: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts';
-  onChangeView?: (view: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts') => void;
+  activeView?: 'chat' | 'mail' | 'artifacts';
+  onChangeView?: (view: 'chat' | 'mail' | 'artifacts') => void;
   isGenerating?: boolean;
 }
 
@@ -113,16 +168,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             }`}
           >
             <MessageSquare className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Scheduled Automations"
-            onClick={() => onChangeView?.('schedules')}
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
           </button>
 
           <button
@@ -217,16 +262,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            onClick={() => onChangeView?.('schedules')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-[#d97757]" />
-            <span>Scheduled</span>
-          </button>
-
-          <button
+            title="Mail Inbox"
             onClick={() => onChangeView?.('mail')}
             className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
               activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
@@ -309,16 +345,19 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                             }`}
                             title={chat.title}
                           >
-                            {isGenerating && activeChatId === chat.id ? (
-                              <LoaderCircle className="h-3 w-3 shrink-0 text-[#d97757] animate-spin" />
-                            ) : (
-                              <MessageSquare className="h-3 w-3 shrink-0 text-[#d97757]" />
-                            )}
-                            <span className="truncate">{chat.title}</span>
+                            <ChatLifecycleIndicator
+                              chat={chat}
+                              isActive={activeChatId === chat.id}
+                              legacyGenerating={isGenerating && activeChatId === chat.id}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
                           </button>
                           <button
                             onClick={() => onDeleteChat(chat)}
-                            disabled={isGenerating && activeChatId === chat.id}
+                            disabled={
+                              chat.generationStatus === 'generating'
+                              || (!chat.generationStatus && isGenerating && activeChatId === chat.id)
+                            }
                             className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
                             title={`Delete ${chat.title}`}
                             aria-label={`Delete ${chat.title}`}
@@ -380,16 +419,19 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                     }`}
                     title={chat.title}
                   >
-                    {isGenerating && isActive ? (
-                      <LoaderCircle className="w-3 h-3 text-[#d97757] shrink-0 animate-spin" />
-                    ) : (
-                      <MessageSquare className="w-3 h-3 text-[#d97757] shrink-0" />
-                    )}
-                    <span className="truncate">{chat.title}</span>
+                    <ChatLifecycleIndicator
+                      chat={chat}
+                      isActive={isActive}
+                      legacyGenerating={isGenerating && isActive}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{chat.title}</span>
                   </button>
                   <button
                     onClick={() => onDeleteChat(chat)}
-                    disabled={isGenerating && isActive}
+                    disabled={
+                      chat.generationStatus === 'generating'
+                      || (!chat.generationStatus && isGenerating && isActive)
+                    }
                     className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
                     title={`Delete ${chat.title}`}
                     aria-label={`Delete ${chat.title}`}
