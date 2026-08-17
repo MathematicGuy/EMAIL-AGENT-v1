@@ -40,8 +40,10 @@ export interface LatencyRunReport {
   }[];
 }
 
-const TRACK_START = '<!-- LATENCY-TRACK:SYNTHETIC-START -->';
-const TRACK_END = '<!-- LATENCY-TRACK:SYNTHETIC-END -->';
+const SYNTHETIC_START = '<!-- LATENCY-TRACK:SYNTHETIC-START -->';
+const SYNTHETIC_END = '<!-- LATENCY-TRACK:SYNTHETIC-END -->';
+const LIVE_START = '<!-- LATENCY-TRACK:LIVE-START -->';
+const LIVE_END = '<!-- LATENCY-TRACK:LIVE-END -->';
 
 export function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
@@ -87,6 +89,10 @@ export function writeLatencyReport(report: LatencyRunReport, filename?: string):
 
 export function updateTrackLatestRun(report: LatencyRunReport, reportPath: string): void {
   if (!existsSync(LATENCY_TRACK_FILE)) return;
+  const isLive = report.mode === 'live';
+  const start = isLive ? LIVE_START : SYNTHETIC_START;
+  const end = isLive ? LIVE_END : SYNTHETIC_END;
+  const label = isLive ? 'Last live run' : 'Last synthetic run';
   const current = readFileSync(LATENCY_TRACK_FILE, 'utf8');
   const rows = report.summary
     .map((row) => {
@@ -98,18 +104,18 @@ export function updateTrackLatestRun(report: LatencyRunReport, reportPath: strin
     })
     .join('\n');
   const block = [
-    TRACK_START,
+    start,
     '',
-    `Last synthetic run: \`${report.generated_at}\` · browser \`${report.browser}\` · report \`${reportPath.replace(/\\/g, '/')}\``,
+    `${label}: \`${report.generated_at}\` · browser \`${report.browser}\` · report \`${reportPath.replace(/\\/g, '/')}\``,
     '',
     '| Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |',
     '|---|---:|---:|---:|---:|---:|---:|',
     rows,
     '',
-    TRACK_END,
+    end,
   ].join('\n');
-  const next = current.includes(TRACK_START) && current.includes(TRACK_END)
-    ? current.replace(new RegExp(`${TRACK_START}[\\s\\S]*?${TRACK_END}`), block)
+  const next = current.includes(start) && current.includes(end)
+    ? current.replace(new RegExp(`${start}[\\s\\S]*?${end}`), block)
     : `${current.trimEnd()}\n\n${block}\n`;
   writeFileSync(LATENCY_TRACK_FILE, next, 'utf8');
 }
@@ -212,6 +218,72 @@ export async function measureChatSwitch(
     stale_content_visible_ms: staleMs,
     messages_fetch_count_after: input.messagesFetchCount?.() ?? null,
   };
+}
+
+/** Create three owned sessions with persisted turns on the live API (no LLM). */
+export async function seedLiveRecents(page: Page): Promise<string[]> {
+  await page.goto('/#dashboard');
+  await page.waitForFunction(
+    () => Boolean(window.localStorage.getItem('v-assistant-active-project-id')),
+    { timeout: 20_000 },
+  );
+  const projectId = await page.evaluate(
+    () => window.localStorage.getItem('v-assistant-active-project-id'),
+  );
+  if (!projectId) {
+    throw new Error('Live stack did not select a project after guest bootstrap.');
+  }
+
+  const sessionIds = await page.evaluate(async (activeProjectId) => {
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const created = await fetch('/backend/v1/cowork/chat/sessions', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: activeProjectId }),
+      });
+      const createdText = await created.text();
+      if (!created.ok) {
+        throw new Error(`POST /sessions failed (${created.status}): ${createdText.slice(0, 240)}`);
+      }
+      const createdBody = JSON.parse(createdText) as { session_id?: string };
+      if (!createdBody.session_id) {
+        throw new Error('POST /sessions did not return session_id');
+      }
+      const persisted = await fetch(
+        `/backend/v1/cowork/chat/sessions/${encodeURIComponent(createdBody.session_id)}/mail-scans`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            turn_id: `live-seed-${index}-${Date.now()}`,
+            user_message: '@mail',
+            assistant_message: `Live latency seed ${index + 1}`,
+            mail_scan: {
+              status: 'succeeded',
+              emails_matched: 1,
+              emails_processed: 1,
+              emails_to_process: 1,
+              action_items_count: 0,
+            },
+          }),
+        },
+      );
+      const persistedText = await persisted.text();
+      if (!persisted.ok) {
+        throw new Error(
+          `POST /sessions/${createdBody.session_id}/mail-scans failed (${persisted.status}): ${persistedText.slice(0, 240)}`,
+        );
+      }
+      ids.push(createdBody.session_id);
+    }
+    return ids;
+  }, projectId);
+
+  await page.reload();
+  return sessionIds;
 }
 
 export async function openDashboard(page: Page): Promise<void> {

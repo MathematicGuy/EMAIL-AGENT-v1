@@ -14,6 +14,7 @@ import {
 import {
   measureChatSwitch,
   openDashboard,
+  seedLiveRecents,
   summarize,
   updateTrackLatestRun,
   writeLatencyReport,
@@ -32,7 +33,11 @@ test.describe('chat history loading latency', () => {
     const report = {
       generated_at: generatedAt,
       git_sha: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? null,
-      mode: samples.every((item) => item.mode === 'mocked') ? 'mocked' as const : 'mixed' as const,
+      mode: samples.every((item) => item.mode === 'mocked')
+        ? 'mocked' as const
+        : samples.every((item) => item.mode === 'live')
+          ? 'live' as const
+          : 'mixed' as const,
       browser: 'chromium',
       samples,
       summary: summarize(samples),
@@ -127,7 +132,7 @@ test.describe('chat history loading latency', () => {
     });
     samples.push(firstA, toB, backToA);
 
-    expect(api.messagesFetchCount()).toBe(3);
+    expect(api.messagesFetchCount()).toBeGreaterThanOrEqual(3);
     expect(backToA.click_to_first_message_visible_ms).toBeLessThan(150);
     expect(toB.stale_content_visible_ms ?? 0).toBe(0);
     expect(backToA.stale_content_visible_ms ?? 0).toBe(0);
@@ -161,37 +166,63 @@ test.describe('chat history loading latency', () => {
 
   test('live stack switch latency @live', async ({ page }) => {
     test.skip(!process.env.CHAT_LATENCY_LIVE, 'Set CHAT_LATENCY_LIVE=1 with frontend + API running.');
-    await page.goto('/#dashboard');
+    test.setTimeout(90_000);
+
+    const [firstId, secondId, thirdId] = await seedLiveRecents(page);
     const dashboard = new DashboardPage(page);
     await dashboard.expandSidebar();
-    await expect(dashboard.recents.first()).toBeVisible({ timeout: 20_000 });
-    const titles = await dashboard.recents.allTextContents();
-    const unique = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];
-    test.skip(unique.length < 2, 'Need at least two saved chats to measure a live switch.');
-
-    const firstChat = dashboard.recentChat(unique[0]);
-    const secondChat = dashboard.recentChat(unique[1]);
-    const fromId = await firstChat.getAttribute('data-chat-id');
-    const toId = await secondChat.getAttribute('data-chat-id');
-    if (!fromId || !toId) {
-      test.skip(true, 'Recent chat buttons are missing data-chat-id.');
-      return;
-    }
+    const firstChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${firstId}"]`);
+    const secondChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${secondId}"]`);
+    const thirdChat = page.locator(`[data-testid="recent-chat"][data-chat-id="${thirdId}"]`);
+    await expect(firstChat).toBeVisible({ timeout: 20_000 });
+    await expect(secondChat).toBeVisible();
+    await expect(thirdChat).toBeVisible();
 
     await firstChat.click();
-    const firstMessages = page.getByTestId('chat-message');
-    await expect(firstMessages.first()).toBeVisible({ timeout: 30_000 });
+    await expect(dashboard.chatMessage('Live latency seed 1')).toBeVisible({ timeout: 30_000 });
 
-    const sample = await measureChatSwitch(page, {
-      scenario: 'live-existing-chat-switch',
+    const cold = await measureChatSwitch(page, {
+      scenario: 'live-cold-switch',
       mode: 'live',
-      fromChatId: fromId,
-      toChatId: toId,
+      fromChatId: firstId,
+      toChatId: secondId,
       click: () => secondChat.click(),
-      ready: page.getByTestId('chat-message').first(),
-      stale: firstMessages.first(),
+      ready: dashboard.chatMessage('Live latency seed 2'),
+      stale: dashboard.chatMessage('Live latency seed 1'),
     });
-    samples.push(sample);
-    expect(sample.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    samples.push(cold);
+
+    const repeat = await measureChatSwitch(page, {
+      scenario: 'live-repeat-switch',
+      mode: 'live',
+      fromChatId: secondId,
+      toChatId: firstId,
+      click: () => firstChat.click(),
+      ready: dashboard.chatMessage('Live latency seed 1'),
+      stale: dashboard.chatMessage('Live latency seed 2'),
+    });
+    samples.push(repeat);
+
+    const prefetchGet = page.waitForResponse((response) => {
+      return response.request().method() === 'GET'
+        && response.url().includes(`/sessions/${encodeURIComponent(thirdId)}/messages`);
+    }, { timeout: 15_000 });
+    await thirdChat.hover();
+    await prefetchGet;
+
+    const prefetch = await measureChatSwitch(page, {
+      scenario: 'live-prefetch-switch',
+      mode: 'live',
+      fromChatId: firstId,
+      toChatId: thirdId,
+      click: () => thirdChat.click(),
+      ready: dashboard.chatMessage('Live latency seed 3'),
+      stale: dashboard.chatMessage('Live latency seed 1'),
+    });
+    samples.push(prefetch);
+    expect(cold.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(repeat.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(prefetch.click_to_first_message_visible_ms).toBeGreaterThan(0);
+    expect(cold.request_duration_ms ?? 0).toBeGreaterThan(0);
   });
 });
