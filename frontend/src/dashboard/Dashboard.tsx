@@ -7,13 +7,11 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { ChatStreamView } from './components/ChatStreamView';
 
-import { AutomationsView } from './components/AutomationsView';
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { UpgradeModal } from './components/UpgradeModal';
 import { VoiceModal } from './components/VoiceModal';
-import { CustomizeModal } from './components/CustomizeModal';
 import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
@@ -26,7 +24,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
-  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts'>(() =>
+  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'artifacts'>(() =>
     new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
   );
   const [sidebarState, setSidebarState] = useState<SidebarState>('collapsed');
@@ -39,11 +37,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
-  const [selectedThemeId, setSelectedThemeId] = useState('warm-charcoal');
   const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
@@ -154,7 +150,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}
         onOpenUpgradeModal={() => setIsUpgradeModalOpen(true)}
-        onOpenCustomizeModal={() => setIsCustomizeModalOpen(true)}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
         onChangeView={setActiveView}
@@ -172,10 +167,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
         {activeView === 'mail' && (
           <MailInboxView />
-        )}
-
-        {(activeView === 'schedules' || activeView === 'dispatch') && (
-          <AutomationsView />
         )}
 
         {activeView === 'artifacts' && (
@@ -250,12 +241,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         onSendTranscript={(text) => sendMessage(text)}
       />
 
-      <CustomizeModal
-        isOpen={isCustomizeModalOpen}
-        onClose={() => setIsCustomizeModalOpen(false)}
-        selectedThemeId={selectedThemeId}
-        onSelectTheme={setSelectedThemeId}
-      />
 
       <NewProjectModal
         isOpen={isNewProjectModalOpen}
