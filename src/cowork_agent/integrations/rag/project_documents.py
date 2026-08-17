@@ -14,6 +14,7 @@ Three stores cooperate, and each owns exactly one thing:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -39,6 +40,14 @@ from .rrf import ReciprocalRankFusion
 #: How many candidates each leg contributes per requested result. Fusion needs
 #: more input than output or the two rankings barely overlap.
 _CANDIDATE_MULTIPLIER = 4
+
+#: Headroom over ``limit`` for chunks pulled in by section, on top of the ones
+#: that earned their place by rank. An article cut into several chunks is worth
+#: reassembling; an entire chapter arriving because one chunk of it ranked is
+#: not. A section that will not fit inside the headroom is left unexpanded and
+#: its ranked chunk stands alone, so expansion can never evict a result that
+#: retrieval actually chose.
+_SECTION_HEADROOM = 2
 
 #: Longest chunk text the embedding request may carry. Stated here rather than
 #: borrowed from the chunker's default, so retuning chunk size cannot silently
@@ -102,6 +111,10 @@ class ProjectDocumentChunkRepository(Protocol):
         query: str,
         lexical_limit: int,
     ) -> EligibleChunks: ...
+
+    async def list_section_siblings(
+        self, *, vector_ids: tuple[int, ...], allowlist: tuple[int, ...]
+    ) -> tuple[tuple[int, int], ...]: ...
 
     async def hydrate(self, vector_ids: tuple[int, ...]) -> tuple[StoredChunk, ...]: ...
 
@@ -336,7 +349,14 @@ class HybridProjectDocumentStore:
         ranked = fused[:limit]
         if not ranked:
             return ()
-        scores = {int(candidate.chunk_id): candidate.score for candidate in ranked}
+        seeds = {int(candidate.chunk_id): candidate.score for candidate in ranked}
+        scores = _with_section_siblings(
+            seeds,
+            await self._chunks.list_section_siblings(
+                vector_ids=tuple(seeds), allowlist=eligible.allowlist
+            ),
+            limit * _SECTION_HEADROOM,
+        )
         stored = await self._chunks.hydrate(tuple(scores))
         by_vector_id = {chunk.vector_id: chunk for chunk in stored}
         return tuple(
@@ -351,11 +371,39 @@ class HybridProjectDocumentStore:
                 score=scores[chunk.vector_id],
             )
             for chunk in (
-                by_vector_id[int(candidate.chunk_id)]
-                for candidate in ranked
-                if int(candidate.chunk_id) in by_vector_id
+                by_vector_id[vector_id]
+                for vector_id in scores
+                if vector_id in by_vector_id
             )
         )
+
+
+def _with_section_siblings(
+    seeds: dict[int, float],
+    siblings: Sequence[tuple[int, int]],
+    ceiling: int,
+) -> dict[int, float]:
+    """Widen a fused ranking to whole sections, best-ranked section first.
+
+    Returned in reading order within each section, so an article arrives at the
+    model as an article rather than as two disconnected fragments. A sibling
+    inherits the fused score of the chunk that pulled it in: it was not ranked
+    on its own merit, and ``score`` is already documented as an ordering rather
+    than a confidence.
+    """
+    by_seed: dict[int, list[int]] = {}
+    for seed, sibling in siblings:
+        by_seed.setdefault(seed, []).append(sibling)
+
+    widened: dict[int, float] = {}
+    for seed, score in seeds.items():
+        section = by_seed.get(seed) or [seed]
+        if len(widened) + sum(1 for item in section if item not in widened) > ceiling:
+            widened.setdefault(seed, score)
+            continue
+        for vector_id in section:
+            widened.setdefault(vector_id, score)
+    return widened
 
 
 class ReadyProjectDocumentRepository(Protocol):

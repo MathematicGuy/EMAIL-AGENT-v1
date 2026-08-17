@@ -18,11 +18,11 @@ jobs:
         node-version: lts/*
         cache: pnpm
         cache-dependency-path: frontend/pnpm-lock.yaml
-    - name: Install Playwright runner
+    - name: Install dependencies
       run: npm ci
-    - name: Install frontend
-      run: pnpm install --frozen-lockfile
+    - name: Install frontend dependencies
       working-directory: frontend
+      run: pnpm install --frozen-lockfile
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
     - name: Run Playwright tests

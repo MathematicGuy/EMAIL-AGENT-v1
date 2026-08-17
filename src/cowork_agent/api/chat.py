@@ -9,7 +9,7 @@ from typing import Any, Literal, Protocol, cast
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from langfuse import observe
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -114,7 +114,7 @@ class _ChatMessagePayload(BaseModel):
 
     session_id: str
     user_message: str
-    idempotency_key: str
+    idempotency_key: str = Field(min_length=1, max_length=128)
     document_ids: list[str] = []
 
 
@@ -122,6 +122,12 @@ class _CreateSessionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str | None = None
+
+
+class _CancelTurnPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=1, max_length=128)
 
 
 class _MailScanPayload(BaseModel):
@@ -341,9 +347,15 @@ def create_chat_router() -> APIRouter:
             )
         history = _history_repository(request)
         titles = await history.titles_for(scopes) if history is not None else {}
+        latest_turns = await history.latest_turns_for(scopes) if history is not None else {}
         return {
             "sessions": [
-                _session_response(scope, title=titles.get(scope.session_id)) for scope in scopes
+                _session_response(
+                    scope,
+                    title=titles.get(scope.session_id),
+                    latest_turn=latest_turns.get(scope.session_id),
+                )
+                for scope in scopes
             ]
         }
 
@@ -370,6 +382,30 @@ def create_chat_router() -> APIRouter:
             for turn in turns
         ]
         return {"session_id": session_id, "turns": serialized}
+
+    @router.post(
+        "/sessions/{session_id}/turns/{turn_id}/cancel",
+        status_code=204,
+        response_model=None,
+    )
+    async def cancel_turn(session_id: str, turn_id: str, request: Request) -> None:
+        controller = await _owned_controller(request, session_id)
+        if not await controller.cancel_turn(turn_id):
+            raise HTTPException(status_code=404, detail="Active chat turn not found")
+
+    @router.post(
+        "/sessions/{session_id}/turns/cancel",
+        status_code=204,
+        response_model=None,
+    )
+    async def cancel_turn_by_idempotency_key(
+        session_id: str,
+        payload: _CancelTurnPayload,
+        request: Request,
+    ) -> None:
+        controller = await _owned_controller(request, session_id)
+        if not await controller.cancel_turn_by_idempotency_key(payload.idempotency_key):
+            raise HTTPException(status_code=404, detail="Active chat turn not found")
 
     @router.delete("/sessions/{session_id}", status_code=204, response_model=None)
     async def delete_session(session_id: str, request: Request) -> None:
@@ -632,12 +668,24 @@ def _controller_factory(request: Request) -> ControllerFactory:
     return cast(ControllerFactory, request.app.state.chat_controller_factory)
 
 
-def _session_response(scope: ChatMemoryScope, *, title: str | None = None) -> dict[str, str]:
-    payload = {"session_id": scope.session_id, "feature": scope.feature}
+def _session_response(
+    scope: ChatMemoryScope,
+    *,
+    title: str | None = None,
+    latest_turn: ChatTurn | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"session_id": scope.session_id, "feature": scope.feature}
     if scope.project_id != "default-project":
         payload["project_id"] = scope.project_id
     if title is not None:
         payload["title"] = title
+    if latest_turn is not None:
+        payload["latest_turn_status"] = latest_turn.status.value
+        payload["latest_turn_id"] = latest_turn.turn_id
+        if latest_turn.idempotency_key is not None:
+            payload["latest_turn_idempotency_key"] = latest_turn.idempotency_key
+        if latest_turn.error_code is not None:
+            payload["latest_turn_error_code"] = latest_turn.error_code
     return payload
 
 

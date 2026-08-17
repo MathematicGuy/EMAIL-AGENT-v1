@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from cowork_agent.integrations.key_rotation import APIKeyRotator
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+LOCAL_POSTGRES_DEFAULT_URL = "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork"
+_POSTGRES_MODES = frozenset({"local", "cloud", "off"})
 
 
 def load_runtime_environment(directory: Path | None = None) -> None:
@@ -23,9 +25,45 @@ def load_runtime_environment(directory: Path | None = None) -> None:
     load_dotenv(root / "config", override=False)
 
 
-def database_url(environ: Mapping[str, str] | None = None) -> str:
-    """PostgreSQL connection URL (V1-H); empty string keeps local adapters."""
+def postgres_mode(environ: Mapping[str, str] | None = None) -> str:
+    """Control-plane target: ``local``, ``cloud``, ``off``, or empty (legacy)."""
     source = os.environ if environ is None else environ
+    mode = source.get("POSTGRES_MODE", "").strip().lower()
+    if not mode:
+        return ""
+    if mode not in _POSTGRES_MODES:
+        raise ValueError("POSTGRES_MODE must be 'local', 'cloud', or 'off'")
+    return mode
+
+
+def database_url(environ: Mapping[str, str] | None = None) -> str:
+    """PostgreSQL connection URL; empty string keeps SQLite / in-memory adapters.
+
+    ``POSTGRES_MODE`` selects the URL when set and wins over ``DATABASE_URL``:
+
+    * ``local`` — ``DATABASE_URL_LOCAL``, else the Docker Compose app DB
+    * ``cloud`` — ``DATABASE_URL_CLOUD`` (session or direct ``:5432``)
+    * ``off`` — empty (SQLite mailbox/runs/tasks + in-memory chat)
+
+    With no mode, ``DATABASE_URL`` is used unchanged (tests and older .env files).
+    """
+    source = os.environ if environ is None else environ
+    mode = postgres_mode(source)
+    if mode == "off":
+        return ""
+    if mode == "local":
+        return source.get("DATABASE_URL_LOCAL", "").strip() or LOCAL_POSTGRES_DEFAULT_URL
+    if mode == "cloud":
+        url = source.get("DATABASE_URL_CLOUD", "").strip()
+        if not url:
+            raise ValueError("POSTGRES_MODE=cloud requires DATABASE_URL_CLOUD")
+        port = urlsplit(url).port
+        if port == 6543:
+            raise ValueError(
+                "POSTGRES_MODE=cloud must use session or direct :5432, "
+                "not Supavisor transaction :6543"
+            )
+        return url
     return source.get("DATABASE_URL", "").strip()
 
 
@@ -77,10 +115,14 @@ class SessionSettings:
         cookie_name = environ.get("APP_SESSION_COOKIE_NAME", "cowork_session").strip()
         if not cookie_name:
             raise ValueError("APP_SESSION_COOKIE_NAME must not be empty")
+        # Local HTTP on 127.0.0.1 drops Secure cookies in some browsers.
+        cookie_secure_default = postgres_mode(environ) != "local"
         return cls(
             session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
             cookie_name=cookie_name,
-            cookie_secure=_boolean(environ, "APP_SESSION_COOKIE_SECURE", True),
+            cookie_secure=_boolean(
+                environ, "APP_SESSION_COOKIE_SECURE", cookie_secure_default
+            ),
         )
 
 

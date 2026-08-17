@@ -45,6 +45,8 @@ _TASK_PROPOSAL_FIELDS = frozenset(
     }
 )
 
+MAX_IDEMPOTENCY_KEY_LENGTH = 128
+
 
 def _validated_task_proposal(value: object) -> Mapping[str, object]:
     proposal = _as_mapping(value, "proposal")
@@ -115,7 +117,9 @@ class ChatMessageRequest:
     def __post_init__(self) -> None:
         _require_string(self.session_id, "session_id")
         _require_bounded_string(self.user_message, "user_message", MAX_CHAT_MESSAGE_LENGTH)
-        _require_string(self.idempotency_key, "idempotency_key")
+        _require_bounded_string(
+            self.idempotency_key, "idempotency_key", MAX_IDEMPOTENCY_KEY_LENGTH
+        )
         if len(self.document_ids) > 50 or len(set(self.document_ids)) != len(self.document_ids):
             raise ValueError("document_ids must contain at most 50 unique identifiers")
         for document_id in self.document_ids:
@@ -137,7 +141,11 @@ class ChatMessageRequest:
             user_message=_require_bounded_string(
                 data["user_message"], "user_message", MAX_CHAT_MESSAGE_LENGTH
             ),
-            idempotency_key=_require_string(data["idempotency_key"], "idempotency_key"),
+            idempotency_key=_require_bounded_string(
+                data["idempotency_key"],
+                "idempotency_key",
+                MAX_IDEMPOTENCY_KEY_LENGTH,
+            ),
             document_ids=tuple(
                 _require_string(item, "document_ids item")
                 for item in _as_sequence(data.get("document_ids", ()), "document_ids")
@@ -200,6 +208,7 @@ class ChatMessageStreamEvent:
             "retrieval_status": self.retrieval_status,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
+            ChatEventType.STARTED: (),
             ChatEventType.DELTA: ("text",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
             ChatEventType.TASK_PROPOSAL: ("proposal",),
@@ -257,6 +266,10 @@ class ChatMessageStreamEvent:
                 raise ValueError("project citations require a page range")
             if self.page_start < 1 or self.page_end < self.page_start:
                 raise ValueError("project citation page range is invalid")
+
+    @classmethod
+    def started(cls, *, event_id: str, session_id: str, turn_id: str) -> Self:
+        return cls(event_id, session_id, turn_id, ChatEventType.STARTED)
 
     @classmethod
     def delta(cls, *, event_id: str, session_id: str, turn_id: str, text: str) -> Self:

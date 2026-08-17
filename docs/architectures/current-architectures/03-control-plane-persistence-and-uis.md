@@ -60,8 +60,9 @@ flowchart TB
 
 The application dynamically selects storage backends based on environment configuration:
 
-- **Local Fallback Mode (`DATABASE_URL` absent):** SQLite at `.data/mail_todo.db` (OAuth / mailbox connections; path from `GMAIL_CONNECTION_DB_PATH`) plus sibling `runs.db` and `tasks.db`. Results, outbox, and chat session registry stay in-process. Identity/session repositories and durable chat profile / TaskEpisode / history stores are not bound.
-- **Production Mode (`DATABASE_URL` present):** `psycopg_pool.AsyncConnectionPool` to Supabase Postgres. Lifespan (and `mail-todo-worker` boot) apply [migrations](../../../src/cowork_agent/persistence/migrations) in filename order from `001_mail_todo.sql` through `013_digest_run_filtered_summary.sql`. `mail-todo-worker` refuses to start without `DATABASE_URL`.
+- **Local Fallback Mode (`POSTGRES_MODE=off` or no URL):** SQLite at `.data/mail_todo.db` (OAuth / mailbox connections; path from `GMAIL_CONNECTION_DB_PATH`) plus sibling `runs.db` and `tasks.db`. Results, outbox, and chat session registry stay in-process. Identity/session repositories and durable chat profile / TaskEpisode / history stores are not bound.
+- **Cloud Mode (`POSTGRES_MODE=cloud`):** `psycopg_pool.AsyncConnectionPool` to hosted Supabase Postgres via `DATABASE_URL_CLOUD` (session or direct `:5432`). Lifespan (and `mail-todo-worker` boot) apply [migrations](../../../src/cowork_agent/persistence/migrations) in filename order from `001_mail_todo.sql` through `013_digest_run_filtered_summary.sql`. `mail-todo-worker` refuses to start without a resolved URL.
+- **Durable local MVP (`POSTGRES_MODE=local`, [ADR-010](../../../tasks/adr/ADR-010-local-postgres-control-plane-latency.md)):** `docker compose up -d postgres` then `DATABASE_URL_LOCAL` to `127.0.0.1:5432/cowork`. Do not treat the SQLite fallback as a chat-memory store. Local and cloud are separate databases.
 
 ---
 

@@ -14,6 +14,7 @@ import selectors
 import sys
 from collections.abc import Callable, Coroutine, Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -192,14 +193,19 @@ def test_migrations_apply_once_and_are_idempotent() -> None:
         pool = await _pool()
         try:
             first = await apply_migrations(pool)
-            assert first == (
-                "001_mail_todo.sql",
-                "002_chat_profiles.sql",
-                "003_chat_summary_episodes.sql",
-                "004_task_episodes.sql",
-                "005_identity_workspace_sessions.sql",
-                "006_durable_chat_sessions.sql",
+            migrations_dir = (
+                Path(__file__).resolve().parents[3]
+                / "src"
+                / "cowork_agent"
+                / "persistence"
+                / "migrations"
             )
+            expected = tuple(
+                path.name
+                for path in sorted(migrations_dir.glob("*.sql"))
+                if not path.name.endswith(".down.sql")
+            )
+            assert first == expected
             assert await apply_migrations(pool) == ()
         finally:
             await pool.close()

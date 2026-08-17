@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from cowork_agent.config import (
+    LOCAL_POSTGRES_DEFAULT_URL,
     GeminiEmbeddingSettings,
     RerankerSettings,
     SessionSettings,
@@ -10,6 +11,7 @@ from cowork_agent.config import (
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
+    postgres_mode,
 )
 
 
@@ -20,12 +22,94 @@ def test_load_runtime_environment_reads_feature_flags_from_config(
     (tmp_path / "config").write_text("USER_DOCUMENTS_ENABLED=false\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_MODE", raising=False)
     monkeypatch.delenv("USER_DOCUMENTS_ENABLED", raising=False)
 
     load_runtime_environment()
 
     assert database_url() == "postgresql://example/db"
+    assert postgres_mode() == ""
     assert UserDocumentsSettings.from_env(load_env_file=False).enabled is False
+
+
+def test_database_url_follows_postgres_mode_local_and_ignores_legacy_url() -> None:
+    assert (
+        database_url(
+            {
+                "POSTGRES_MODE": "local",
+                "DATABASE_URL_LOCAL": "postgresql://cowork:dev@127.0.0.1:5432/cowork",
+                "DATABASE_URL": "postgresql://ignored/db",
+            }
+        )
+        == "postgresql://cowork:dev@127.0.0.1:5432/cowork"
+    )
+    assert postgres_mode({"POSTGRES_MODE": "local"}) == "local"
+
+
+def test_database_url_local_mode_defaults_to_compose_app_db() -> None:
+    assert database_url({"POSTGRES_MODE": "local"}) == LOCAL_POSTGRES_DEFAULT_URL
+
+
+def test_database_url_follows_postgres_mode_cloud() -> None:
+    cloud = "postgresql://postgres:secret@db.example:5432/postgres?sslmode=require"
+    assert (
+        database_url(
+            {
+                "POSTGRES_MODE": "cloud",
+                "DATABASE_URL_CLOUD": cloud,
+                "DATABASE_URL": "postgresql://ignored/db",
+            }
+        )
+        == cloud
+    )
+
+
+def test_database_url_cloud_mode_requires_cloud_url() -> None:
+    with pytest.raises(ValueError, match="DATABASE_URL_CLOUD"):
+        database_url({"POSTGRES_MODE": "cloud"})
+
+
+def test_database_url_cloud_mode_rejects_transaction_pooler_port() -> None:
+    with pytest.raises(ValueError, match="5432"):
+        database_url(
+            {
+                "POSTGRES_MODE": "cloud",
+                "DATABASE_URL_CLOUD": (
+                    "postgresql://postgres:secret@aws-0.pooler.supabase.com:6543/postgres"
+                ),
+            }
+        )
+
+
+def test_database_url_off_mode_is_the_sqlite_fallback() -> None:
+    assert (
+        database_url({"POSTGRES_MODE": "off", "DATABASE_URL": "postgresql://ignored/db"})
+        == ""
+    )
+
+
+def test_database_url_without_mode_keeps_legacy_database_url() -> None:
+    assert database_url({"DATABASE_URL": "postgresql://example/db"}) == "postgresql://example/db"
+
+
+def test_postgres_mode_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError, match="local"):
+        database_url({"POSTGRES_MODE": "supabase"})
+
+
+def test_session_cookie_defaults_insecure_on_local_postgres_mode() -> None:
+    settings = SessionSettings.from_env({"POSTGRES_MODE": "local"}, load_env_file=False)
+
+    assert settings.cookie_secure is False
+
+
+def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
+    settings = SessionSettings.from_env(
+        {"POSTGRES_MODE": "local", "APP_SESSION_COOKIE_SECURE": "true"},
+        load_env_file=False,
+    )
+
+    assert settings.cookie_secure is True
 
 
 def test_project_gemini_embedding_settings_default_to_3072() -> None:

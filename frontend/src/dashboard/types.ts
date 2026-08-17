@@ -50,7 +50,23 @@ export interface ChatMessage {
   ragEvidence?: ChatRagEvidence[];
   retrievalStatus?: ChatRetrievalStatus;
   mailScan?: MailScanProgress;
+  /** Client-visible lifecycle for an assistant turn. */
+  generationStatus?: ChatGenerationStatus;
+  errorCode?: string;
+  /** Reused when retrying the same logical turn. */
+  idempotencyKey?: string;
+  turnId?: string;
 }
+
+export type ChatGenerationStatus =
+  | 'idle'
+  | 'generating'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'cancelled'
+  | 'usage_limit_reached'
+  | 'temporarily_rate_limited';
 
 export interface MailScanProgress {
   status: 'connecting' | 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
@@ -104,6 +120,7 @@ export interface RecentChat {
   date?: string;
   unread?: boolean;
   category?: 'recent' | 'product' | 'project';
+  generationStatus?: ChatGenerationStatus;
 }
 
 export interface ThemeOption {

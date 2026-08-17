@@ -315,6 +315,7 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.pool import control_plane_pool_kwargs
                 from cowork_agent.persistence.repositories.chat_history import (
                     PostgresChatHistoryRepository,
                 )
@@ -339,12 +340,7 @@ def create_app() -> FastAPI:
 
                 pool = AsyncConnectionPool(
                     database_url(),
-                    min_size=2,
-                    max_size=8,
-                    open=False,
-                    max_idle=600.0,
-                    max_lifetime=3600.0,
-                    kwargs={"prepare_threshold": None},
+                    **control_plane_pool_kwargs(),
                 )
                 await pool.open(wait=True)
                 await apply_migrations(pool)
@@ -362,6 +358,10 @@ def create_app() -> FastAPI:
                 app.state.session_repository = PostgresSessionRepository(pool)
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
+                from cowork_agent.persistence.repositories.local import (
+                    InMemoryChatHistoryRepository,
+                )
+
                 task_repository = SQLiteTaskRepository(
                     settings.connection_db_path.parent / "tasks.db"
                 )
@@ -375,7 +375,7 @@ def create_app() -> FastAPI:
                 app.state.chat_profile_repository = None
                 app.state.chat_task_episode_repository = None
                 app.state.chat_session_repository = None
-                app.state.chat_history_repository = None
+                app.state.chat_history_repository = InMemoryChatHistoryRepository()
                 app.state.pg_pool = None
                 app.state.project_repository = None
                 chat_session_registry = InMemoryChatSessionRegistry()

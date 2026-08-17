@@ -61,13 +61,17 @@ jobs:
 
       - run: uv run ruff check .
       - run: uv run mypy src
-      - run: uv run pytest -q
+      # Persistence tests reset database schemas and therefore cannot share the
+      # xdist workers used by the fast offline suite. The next step owns that
+      # tier and runs it once, serially, against the service container.
+      - run: uv run pytest -q --ignore=tests/integration/persistence
 
       # A green suite that skipped the whole Postgres tier looks identical to one
       # that ran it. Make the difference fatal.
       - name: Prove the persistence tier actually ran
         run: |
-          uv run pytest tests/integration/persistence -q --no-header \
+          set -o pipefail
+          uv run pytest tests/integration/persistence -q -n 0 --no-header \
             -p no:cacheprovider | tee pg.log
           if grep -qE "[0-9]+ skipped" pg.log; then
             echo "::error::Postgres tier skipped - the service container was unreachable."

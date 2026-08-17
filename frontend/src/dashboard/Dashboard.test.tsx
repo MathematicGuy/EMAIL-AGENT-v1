@@ -256,5 +256,19 @@ describe('Dashboard Project chat', () => {
     fireEvent.click(screen.getByTitle('Mail Inbox'));
     expect(screen.queryByRole('button', { name: 'Project documents' })).toBeNull();
   });
+
+  it('announces a background chat completion without changing the active view', async () => {
+    vi.stubGlobal('fetch', projectFetch());
+    render(<Dashboard />);
+    await screen.findAllByText('Default Project');
+
+    window.dispatchEvent(new CustomEvent('chat-background-completed', {
+      detail: { sessionId: 'session-background', title: 'Quarterly plan' },
+    }));
+
+    expect((await screen.findByRole('status')).textContent).toContain(
+      'Quarterly plan finished generating.'
+    );
+  });
 });
 

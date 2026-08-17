@@ -7,7 +7,7 @@ import hashlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol, cast
 from uuid import uuid4
@@ -15,12 +15,14 @@ from uuid import uuid4
 from langfuse import observe
 
 from cowork_agent.domain.chat_contracts import (
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
     ChatRagEvidence,
     ChatRoute,
     ChatTurn,
+    ChatTurnStatus,
     EpisodeSourceType,
     MemoryCitationType,
     MemoryContextRequest,
@@ -86,7 +88,7 @@ def _rag_evidence(
         return (
             tuple(
                 _project_evidence_to_rag_evidence(item)
-                for item in project_documents.evidence[:5]
+                for item in project_documents.evidence[:MAX_CHAT_RAG_EVIDENCE_ITEMS]
             ),
             "success",
         )
@@ -384,7 +386,56 @@ class ChatController:
         self._pending_task_episodes: dict[str, _PendingTaskEpisode] = {}
         self._task_episodes: dict[str, TaskEpisode] = {}
         self._routing_outcomes: dict[str, RoutingOutcome] = {}
+        self._turns_by_id: dict[str, ChatTurn] = {}
+        self._cancelled_turn_ids: set[str] = set()
         self._turn_lock = asyncio.Lock()
+
+    async def cancel_turn(self, turn_id: str) -> bool:
+        """Cancel only the named active turn; navigation never calls this method."""
+
+        turn = self._turns_by_id.get(turn_id)
+        if turn is None or turn.status is not ChatTurnStatus.GENERATING:
+            return False
+        self._cancelled_turn_ids.add(turn_id)
+        cancelled = replace(
+            turn,
+            status=ChatTurnStatus.CANCELLED,
+            error_code="cancelled",
+        )
+        if self._history is not None:
+            try:
+                cancelled = await self._history.update_turn(self._scope, cancelled)
+            except Exception:
+                self._cancelled_turn_ids.discard(turn_id)
+                logger.exception("Unable to persist cancelled chat turn")
+                raise
+        self._turns_by_id[turn_id] = cancelled
+        return True
+
+    async def cancel_turn_by_idempotency_key(self, idempotency_key: str) -> bool:
+        """Cancel a pending turn before its streamed ``turn_id`` reaches the client."""
+
+        turn = next(
+            (
+                candidate
+                for candidate in self._turns_by_id.values()
+                if candidate.idempotency_key == idempotency_key
+                and candidate.status is ChatTurnStatus.GENERATING
+            ),
+            None,
+        )
+        if turn is None:
+            return False
+        return await self.cancel_turn(turn.turn_id)
+
+    async def _fail_turn(self, turn: ChatTurn, *, code: str) -> None:
+        failed = replace(turn, status=ChatTurnStatus.FAILED, error_code=code)
+        self._turns_by_id[turn.turn_id] = failed
+        if self._history is not None:
+            try:
+                await self._history.update_turn(self._scope, failed)
+            except Exception:
+                logger.exception("Unable to persist failed chat turn")
 
     @observe(name="chat_stream_message")
     async def stream_message(
@@ -393,7 +444,7 @@ class ChatController:
         *,
         is_cancelled: CancellationCheck = _never_cancelled,
     ) -> AsyncIterator[ChatMessageStreamEvent]:
-        """Stream typed events; append a turn only after a complete reply."""
+        """Persist the user turn first, then stream and update that durable row."""
 
         if request.session_id != self._scope.session_id:
             raise ChatScopeMismatch("message session does not match the verified chat scope")
@@ -432,6 +483,80 @@ class ChatController:
             if await is_cancelled():
                 return
 
+            temporary_title = _fallback_conversation_title(request.user_message)
+            pending_turn = ChatTurn(
+                turn_id=turn_id,
+                session_id=self._scope.session_id,
+                user_message=request.user_message,
+                assistant_message=None,
+                created_at=self._clock(),
+                status=ChatTurnStatus.GENERATING,
+                idempotency_key=request.idempotency_key,
+            )
+            if self._history is not None:
+                try:
+                    pending_turn = await self._history.begin_turn(
+                        self._scope,
+                        pending_turn,
+                        idempotency_key=request.idempotency_key,
+                        title=temporary_title,
+                    )
+                except Exception:
+                    logger.exception("Unable to persist pending chat turn")
+                    yield self._error(
+                        turn_id=turn_id,
+                        code="chat_history_unavailable",
+                        safe_message="The message could not be saved. Please try again.",
+                    )
+                    return
+            turn_id = pending_turn.turn_id
+            replay_completed = pending_turn.status is ChatTurnStatus.COMPLETED
+            if pending_turn.status not in {
+                ChatTurnStatus.GENERATING,
+                ChatTurnStatus.COMPLETED,
+            }:
+                pending_turn = replace(
+                    pending_turn,
+                    assistant_message=None,
+                    status=ChatTurnStatus.GENERATING,
+                    error_code=None,
+                )
+                if self._history is not None:
+                    pending_turn = await self._history.update_turn(
+                        self._scope, pending_turn, title=temporary_title
+                    )
+            self._turns_by_id[turn_id] = pending_turn
+            started = ChatMessageStreamEvent.started(
+                event_id=self._new_id(),
+                session_id=self._scope.session_id,
+                turn_id=turn_id,
+            )
+            emitted: list[ChatMessageStreamEvent] = [started]
+            yield started
+
+            if replay_completed and pending_turn.assistant_message is not None:
+                delta = ChatMessageStreamEvent.delta(
+                    event_id=self._new_id(),
+                    session_id=self._scope.session_id,
+                    turn_id=turn_id,
+                    text=pending_turn.assistant_message,
+                )
+                completed = ChatMessageStreamEvent.completed(
+                    event_id=self._new_id(),
+                    session_id=self._scope.session_id,
+                    turn_id=turn_id,
+                    rag_evidence=pending_turn.rag_evidence,
+                    retrieval_status=pending_turn.retrieval_status,
+                )
+                emitted.extend((delta, completed))
+                self._completed[request.idempotency_key] = (request, tuple(emitted))
+                yield delta
+                yield completed
+                return
+
+            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+                return
+
             routing_outcome = await self._route_turn(request)
             response_mode = (
                 ChatResponseMode.CLARIFY
@@ -451,7 +576,6 @@ class ChatController:
             context = await self._memory.read_context(
                 self._context_request(request, routing_outcome)
             )
-            emitted: list[ChatMessageStreamEvent] = []
             if context.degraded:
                 warning = self._error(
                     turn_id=turn_id,
@@ -482,7 +606,7 @@ class ChatController:
             )
             try:
                 async for chunk in self._reply.stream_reply(request, generation_context):
-                    if await is_cancelled():
+                    if turn_id in self._cancelled_turn_ids or await is_cancelled():
                         return
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
@@ -507,6 +631,10 @@ class ChatController:
                     emitted.append(event)
                     yield event
             except ChatReplyUnavailable:
+                await self._fail_turn(
+                    pending_turn,
+                    code="chat_provider_unavailable",
+                )
                 yield self._error(
                     turn_id=turn_id,
                     code="chat_provider_unavailable",
@@ -514,10 +642,11 @@ class ChatController:
                 )
                 return
 
-            if await is_cancelled():
+            if turn_id in self._cancelled_turn_ids or await is_cancelled():
                 return
             assistant_message = "".join(chunks)
             if not assistant_message:
+                await self._fail_turn(pending_turn, code="empty_chat_response")
                 yield self._error(
                     turn_id=turn_id,
                     code="empty_chat_response",
@@ -528,12 +657,11 @@ class ChatController:
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
             )
-            turn = ChatTurn(
-                    turn_id=turn_id,
-                    session_id=self._scope.session_id,
-                    user_message=request.user_message,
+            turn = replace(
+                    pending_turn,
                     assistant_message=assistant_message,
-                    created_at=self._clock(),
+                    status=ChatTurnStatus.COMPLETED,
+                    error_code=None,
                     citation_coordinates=tuple(
                         {
                             "citation_scope": "project_document",
@@ -552,10 +680,9 @@ class ChatController:
                     rag_evidence=rag_evidence,
                     retrieval_status=retrieval_status,
             )
-            self._memory.append_turn(turn)
             if self._history is not None:
                 try:
-                    await self._history.write_turn(
+                    turn = await self._history.update_turn(
                         self._scope,
                         turn,
                         title=(
@@ -565,6 +692,14 @@ class ChatController:
                     )
                 except Exception:
                     logger.exception("Unable to persist completed chat turn")
+                    yield self._error(
+                        turn_id=turn_id,
+                        code="chat_history_unavailable",
+                        safe_message="The response could not be saved. Please retry.",
+                    )
+                    return
+            self._memory.append_turn(turn)
+            self._turns_by_id[turn_id] = turn
             if project_documents is not None:
                 evidence_by_id = {item.citation_id: item for item in project_documents.evidence}
                 for citation_id in selected_citation_ids:

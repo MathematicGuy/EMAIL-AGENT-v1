@@ -1,13 +1,12 @@
 """Explicit infrastructure purge entry point for chat memory (V2-M6-B).
 
-Connects to PostgreSQL via ``DATABASE_URL``, runs the configured
+Connects to PostgreSQL via ``POSTGRES_MODE`` / ``DATABASE_URL``, runs the configured
 ``MemoryPurgeCoordinator``, and prints only metadata counts.
 
 NO scheduler, NO recurring trigger — this script must be invoked explicitly.
 """
 
 import asyncio
-import os
 import selectors
 import sys
 from datetime import UTC, datetime
@@ -44,13 +43,19 @@ async def run_purge(database_url: str) -> MemoryPurgeReport:
 
 
 def _main() -> int:
-    database_url = os.getenv("DATABASE_URL", "")
-    if not database_url:
-        print("DATABASE_URL environment variable is required", file=sys.stderr)
+    from cowork_agent.config import database_url, load_runtime_environment
+
+    load_runtime_environment()
+    url = database_url()
+    if not url:
+        print(
+            "PostgreSQL is required (set POSTGRES_MODE=local|cloud or DATABASE_URL)",
+            file=sys.stderr,
+        )
         return 1
     try:
         report = asyncio.run(
-            run_purge(database_url),
+            run_purge(url),
             loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
         )
     except Exception as exc:

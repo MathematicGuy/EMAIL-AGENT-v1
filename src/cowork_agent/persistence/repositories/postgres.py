@@ -396,7 +396,7 @@ class PostgresChatProfileRepository:
                 (
                     _profile_key(namespace),
                     profile.profile_id,
-                    "local",
+                    namespace.scope.tenant_id,
                     profile.user_id,
                     namespace.feature,
                     profile.language,
@@ -487,7 +487,7 @@ class PostgresChatSummaryEpisodeRepository:
                     _chat_summary_key(namespace),
                     episode.episode_id,
                     episode.record_id,
-                    "local",
+                    namespace.scope.tenant_id,
                     episode.user_id,
                     namespace.feature,
                     episode.chat_session_id,
@@ -527,8 +527,8 @@ class PostgresChatSummaryEpisodeRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 "DELETE FROM chat_summary_episodes"
-                " WHERE user_id = %s AND feature = %s",
-                (namespace.user_id, namespace.feature),
+                " WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.scope.tenant_id, namespace.user_id, namespace.feature),
             )
             return cursor.rowcount
 
@@ -646,7 +646,7 @@ class PostgresTaskEpisodeRepository:
                 (
                     transition.to_status.value,
                     transition.transitioned_at,
-                    "local",
+                    namespace.scope.tenant_id,
                     namespace.user_id,
                     namespace.feature,
                     namespace.session_id,
@@ -677,7 +677,7 @@ class PostgresTaskEpisodeRepository:
                         AND (expires_at IS NULL OR expires_at > now())
                     """,
                     (
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         namespace.session_id,
@@ -700,7 +700,7 @@ class PostgresTaskEpisodeRepository:
                     AND episode_id = %s
                 """,
                 (
-                    "local",
+                    namespace.scope.tenant_id,
                     namespace.user_id,
                     namespace.feature,
                     namespace.session_id,
@@ -744,7 +744,7 @@ class PostgresTaskEpisodeRepository:
                     """,
                     (
                         query.query,
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         query.min_score,
@@ -774,7 +774,7 @@ class PostgresTaskEpisodeRepository:
                     LIMIT %s
                     """,
                     (
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         max(1, min(limit, MAX_EPISODIC_RETRIEVAL_ITEMS)),
@@ -789,8 +789,9 @@ class PostgresTaskEpisodeRepository:
         _task_episode_read_namespace(namespace)
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                "DELETE FROM task_episodes WHERE user_id = %s AND feature = %s",
-                (namespace.user_id, namespace.feature),
+                "DELETE FROM task_episodes"
+                " WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.scope.tenant_id, namespace.user_id, namespace.feature),
             )
             return cursor.rowcount
 
@@ -835,19 +836,21 @@ def _profile_key(namespace: MemoryNamespace) -> str:
     # not used here.
     if namespace.memory_type is not MemoryType.LONG_TERM:
         raise ValueError("chat profiles require a long-term namespace")
-    return "/".join((namespace.user_id, namespace.feature, "long_term"))
+    return "/".join(
+        (namespace.scope.tenant_id, namespace.user_id, namespace.feature, "long_term")
+    )
 
 
 def _chat_summary_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is None:
         raise ValueError("chat summary writes require an episodic turn namespace")
-    return namespace.logical_key()
+    return "/".join((namespace.scope.tenant_id, namespace.logical_key()))
 
 
 def _chat_summary_deletion_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is not None:
         raise ValueError("chat summary deletion requires an episodic record namespace")
-    return namespace.logical_key()
+    return "/".join((namespace.scope.tenant_id, namespace.logical_key()))
 
 
 def _validate_task_episode_write(
@@ -893,7 +896,7 @@ def _task_episode_params(
     namespace: MemoryNamespace, episode: TaskEpisode, expires_at: datetime | None
 ) -> tuple[object, ...]:
     return (
-        "local",
+        namespace.scope.tenant_id,
         namespace.user_id,
         namespace.feature,
         namespace.session_id,

@@ -32,6 +32,12 @@ transcript stays on screen for the whole wait (814 ms stale flash on a
 paints in **107 ms** once the JSON is local — virtualizing the list is
 the last lever, not the first.
 
+Live RUM against the real API is collected with
+`CHAT_LATENCY_LIVE=1 npx playwright test --project=chat-latency -g @live`.
+The live test seeds `@mail` turns in the Playwright guest session when
+Recents is empty. Those payloads are small; they measure handler + pool
+wall time, not a fat evidence JSON.
+
 Live RUM against the real API was collected twice on 2026-08-17:
 
 1. Operator UI (not `fe`): cold/repeat/prefetch all **2.0–2.5 s**. Snapshot:
@@ -54,21 +60,23 @@ Live RUM against the real API was collected twice on 2026-08-17:
 | 2026-08-17 | Step 6 virtualize long transcripts | Heavy render after slim payload is **73 ms**. | skipped | Neutral complexity. Revisit only if a live 200+ turn thread janks. |
 | 2026-08-17 | Live RUM. No new product change. Real API + real persist seed (3 one-turn @mail chats). No route mocks. | Cold **1973 ms** (API 1665 ms, 456 B) · Repeat **1963 ms** (API 1862 ms) · Prefetch **2520 ms** (API 1997 ms) · stale **1882–2411 ms** | baseline (live) | Wait ≈ GET `/messages` to Supabase, not payload size. Running Vite is not the `fe` cache/prefetch UI — restart Vite from `.worktrees/fe/frontend` before attributing Step 1–5. Snapshot: `baselines/baseline-2026-08-17-live.json`. |
 | 2026-08-17 | Same live harness against `fe` Vite + `fe` API (cache/prefetch in served source). | Cold **2922 ms** (API 1716 ms) · Repeat **68 ms** (API 1134 ms, UI 0) · Prefetch **58 ms** (API 989 ms, UI 0) · stale **0 ms** | keep (Steps 1–2, 5) | Cache and hover-prefetch match synthetic. Cold visit still waits on GET `/messages` (~1.0–1.7 s) plus ~1.2 s after the JSON. Snapshot: `baselines/baseline-2026-08-17-live-fe-cache.json`. |
+| 2026-08-17 | skeleton + in-memory cache + local docker postgres (ADR-010) | Instant 87 ms · 2500 ms API → 2938 ms UX · first-A 885 ms · A→B 890 ms · B→A 65 ms · heavy 352 KB → 146 ms | keep | Repeat visit paints from the in-memory LRU before revalidate (65 ms, < 150 ms; 3 GETs; UI after API 0). `stale_content_visible_ms` is 0; cold delayed switch shows `chat-transcript-loading`. Cold visits still wait on GET `/messages`. Live RUM not collected. Report: `runs/2026-08-17T12-38-48-374Z.json`. |
+| 2026-08-18 | Live RUM on local `cowork` Postgres + self-seeding `@live` test | live switch 91 ms · GET `/messages` 16 ms · 488 B / 1 turn · stale 0 ms | keep | Local control plane is already inside the 300 ms LAN budget. ROADMAP Step 4 (handler checkout collapse) is **not** justified on localhost. Slim payload (Step 3) will not move this 488 B path; keep it for hosted/fat evidence only. Report: `runs/2026-08-17T17-31-32-838Z.json`. |
 
 ## Latest synthetic run
 
 <!-- LATENCY-TRACK:SYNTHETIC-START -->
 
-Last synthetic run: `2026-08-17T09:56:37.501Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T09-56-37-501Z.json`
+Last synthetic run: `2026-08-17T17:32:44.697Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T17-32-44-697Z.json`
 
 | Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| mocked-instant-cold-switch | 1 | 317 | 317 | 317 | 3 | 18 |
-| mocked-2500ms-user-report | 1 | 3243 | 3243 | 3243 | 2552 | 365 |
-| mocked-repeat-first-a | 1 | 1160 | 1160 | 1160 | 412 | 445 |
-| mocked-repeat-a-to-b | 1 | 950 | 950 | 950 | 424 | 441 |
-| mocked-repeat-b-to-a | 1 | 94 | 94 | 94 | 438 | 0 |
-| mocked-heavy-payload | 1 | 428 | 428 | 428 | 8 | 93 |
+| mocked-instant-cold-switch | 1 | 109 | 109 | 109 | 14 | 47 |
+| mocked-2500ms-user-report | 1 | 2939 | 2939 | 2939 | 2514 | 375 |
+| mocked-repeat-first-a | 1 | 892 | 892 | 892 | 415 | 434 |
+| mocked-repeat-a-to-b | 1 | 887 | 887 | 887 | 425 | 422 |
+| mocked-repeat-b-to-a | 1 | 76 | 76 | 76 | 438 | 0 |
+| mocked-heavy-payload | 1 | 169 | 169 | 169 | 20 | 90 |
 
 <!-- LATENCY-TRACK:SYNTHETIC-END -->
 
@@ -76,15 +84,28 @@ Last synthetic run: `2026-08-17T09:56:37.501Z` · browser `chromium` · report `
 
 <!-- LATENCY-TRACK:LIVE-START -->
 
-Last live run: `2026-08-17T09:44:49.803Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T09-44-49-803Z.json`
+Last live run: `2026-08-17T17:31:32.838Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-17T17-31-32-838Z.json`
 
 | Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| live-cold-switch | 1 | 2922 | 2922 | 2922 | 1716 | 1166 |
-| live-repeat-switch | 1 | 68 | 68 | 68 | 1134 | 0 |
-| live-prefetch-switch | 1 | 58 | 58 | 58 | 989 | 0 |
+| live-existing-chat-switch | 1 | 91 | 91 | 91 | 16 | 15 |
 
 <!-- LATENCY-TRACK:LIVE-END -->
+
+## Local vs Cloud PostgreSQL latency comparison
+
+Empirical comparison between `DATABASE_URL_LOCAL` (Docker Compose `127.0.0.1:5432/cowork`) and `DATABASE_URL_CLOUD` (Supabase Direct/Session `aws-0-ap-northeast-2.pooler.supabase.com:5432`). Evaluated on `2026-08-18` ($N=30$ iterations per scenario, warm pool with `check=AsyncConnectionPool.check_connection`).
+
+| Metric / Scenario | LOCAL p50 (ms) | CLOUD p50 (ms) | Latency Delta | Ratio (Cloud/Local) |
+|---|---:|---:|---:|---|
+| Raw Query Wire RTT (`SELECT 1` on open conn) | 0.7 | 102.0 | +101.3 ms | 156.9× slower |
+| SELECT 1 with Pool Checkout Check | 2.4 | 411.2 | +408.8 ms | 168.5× slower |
+| Cold TCP + TLS Connect (5 runs) | 8.5 | 611.8 | +603.3 ms | 71.6× slower |
+| History Switch (3 checkouts un-optimized) | 7.8 | 1217.2 | +1209.4 ms | 156.6× slower |
+| History Switch (1 checkout optimized) | 4.1 | 614.4 | +610.3 ms | 149.9× slower |
+| Transaction (`BEGIN` + Query + `ROLLBACK`) | 3.5 | 512.1 | +508.6 ms | 144.7× slower |
+
+*Empirical finding:* The 2–5 s switch delay on hosted Supabase is driven by ~102 ms WAN round-trips over 3 sequential pool checkouts (~1.2 s pure DB wait). On `DATABASE_URL_LOCAL`, database time is < 8 ms and end-to-end API HTTP duration is ~16 ms.
 
 ## How to log an attempt
 
