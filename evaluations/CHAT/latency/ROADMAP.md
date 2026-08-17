@@ -43,8 +43,9 @@ Ranked now that we have numbers:
    On `DATABASE_URL` the handler takes **three sequential pool checkouts**
    (cookie session → `chat_sessions.require` → `list_turns`) plus an
    optional fourth for cited documents. Pool is `min_size=1` with
-   `check_connection`. A 400–800 ms Supabase RTT × 3 is already 1.2–2.4 s
-   before JSON leaves the server.
+   `check=check_connection` (a **network ping on every checkout**). That
+   is many WAN RTTs, not three. Shared Supavisor `:6543` is transaction
+   mode (serverless). See Step 4 research.
 2. **No cache** — switching back costs the same as a cold visit.
 3. **Stale transcript + shared loading flag** — the click is not
    acknowledged within the 200 ms INP budget. The Recents highlight also
@@ -147,23 +148,62 @@ transcript still has to look complete.
 **Revert if:** Evidence panel is empty for stored turns, or Chat RAG
 invariants in `tests/unit/domain` / controller tests break.
 
-### Step 4 — Backend `list_messages` cheaper
+### Step 4 — Backend `list_messages` cheaper (Supabase WAN)
 
-**Do:** Only after Step 3 numbers say the API is still the p50. Candidates:
-one connection for principal + require + list_turns (today each opens
-its own `pool.connection()`), skip `require_documents` on list (stamp
-`unavailable` lazily), raise pool `min_size` above 1 if live traces show
-checkout wait. Select fewer columns only if `EXPLAIN` says so.
+**Do not start** until a live `CHAT_LATENCY_LIVE=1` run shows
+`request_duration_ms` still > 300 ms. Mocks will not move.
+
+Research (2026-08-17): Context7 + official Supabase/psycopg docs. The
+hypothesis “3 queries × 400–800 ms RTT” is **conservative**. Each
+`async with pool.connection()` also runs `check=check_connection` (a
+network ping on **every** checkout — [psycopg pool](https://www.psycopg.org/psycopg3/docs/advanced/pool.html))
+and COMMITs on exit. Three checkouts can be **many WAN RTTs**, not
+three. Current `DATABASE_URL` uses Shared Supavisor **transaction**
+mode (`…pooler.supabase.com:6543`). Official guidance: that mode is for
+**serverless**; a long-lived FastAPI should use **direct :5432** or
+**shared session :5432**, not transaction 6543
+([connect](https://supabase.com/docs/guides/database/connecting-to-postgres)).
+
+**Do, in this order (no SQL migration):**
+
+1. **One checkout for the whole handler.** Pass one `connection` into
+   cookie resolve + `chat_sessions.require` + `list_turns` (and the
+   optional document lookup). Today each opens its own
+   `pool.connection()`. Biggest code win. No schema change.
+2. **Stop paying `check_connection` on every checkout.** Official
+   default is no check. `check=None`, or a local `closed` test. Keep
+   `prepare_threshold=None` while still on :6543 (transaction mode
+   cannot use prepared statements —
+   [docs](https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL)).
+3. **Point `DATABASE_URL` at the persistent-backend string.** Try
+   Direct `db.<ref>.supabase.co:5432` if the API host has IPv6; else
+   Shared **session** `:5432` (already in `.env.example`). Dedicated
+   PgBouncer `:6543` only if paid + IPv6/add-on. Shared poolers live
+   on a **separate** server; dedicated/direct skip that hop
+   ([latency FAQ](https://supabase.com/docs/guides/database/connecting-to-postgres)).
+4. **Warm the client pool.** psycopg default `min_size` is **4**; we
+   use **1**. `max_idle=60` / `max_lifetime=300` (defaults 600 / 3600)
+   recycle sockets so the next click pays TLS. Raise toward defaults
+   only after `pool.get_stats()` (`requests_wait_ms`, `connections_ms`).
+5. **Only if still > 300 ms:** pipeline the three SELECTs on that one
+   connection ([psycopg pipeline](https://www.psycopg.org/psycopg3/docs/advanced/pipeline.html)).
+   Then lazy `require_documents`. Then `EXPLAIN` `list_turns` —
+   **ask before any migration**.
 
 **Ask before changing SQL migrations.**
 
-**Measure:** live `request_duration_ms`. Synthetic mocks will not move.
+**Measure:** live `request_duration_ms` + `pool.get_stats()` around a
+switch. Synthetic mocks will not move.
 
-**Tradeoff:** `unavailable` badges may be one request late. Document
-lookup is correctness for deleted project docs — do not skip it in a
-way that shows a dead citation as live. Sharing one connection is a
-keep if live p50 drops by ~2 RTTs; bumping `min_size` costs idle
-connections.
+**Tradeoff:** `unavailable` badges may be one request late if documents
+are skipped. Never show a deleted citation as live. Sharing one
+connection is a keep if live p50 drops by ~2+ RTTs. Bumping `min_size`
+to 8 blindly can crowd Auth/Storage/PostgREST on a small compute.
+
+**Do not:** enable prepared statements on :6543; use
+`NullConnectionPool`; pipeline across three checkouts; treat Shared
+transaction as “faster” for this FastAPI; colocate by moving the
+Supabase **region** without asking (that is a new project).
 
 ### Step 5 — Prefetch
 
@@ -194,10 +234,65 @@ Step 1  skeleton         perceived UX, low risk
 Step 2  memory cache     biggest repeat-visit win
   checkpoint: re-run Playwright, fill TRACK.md
 Step 3  slim payload     biggest cold-visit win if payload is fat
-Step 4  backend          only if live request_duration stays > 300 ms
+Step 4  backend          live only: 1 checkout → drop check → session/direct URL → warm pool
 Step 5  prefetch         polish
 Step 6  virtualize       only if render is the leftover
 ```
+
+## Supabase WAN latency — research notes (2026-08-17)
+
+Sources: Context7 `/supabase/supabase`, `/websites/supabase`,
+`/websites/psycopg_psycopg3`; plus official pages the research agent
+fetched. Not implemented in this note.
+
+### What the docs change about our hypothesis
+
+| Claim we had | Official / code correction |
+|---|---|
+| 3 sequential checkouts × 1 RTT | Each checkout also runs `check_connection` (network) and COMMIT. Worst case is **many** RTTs, not 3. |
+| Shared pooler `:6543` is fine | Official: **transaction** mode is for serverless. Persistent backends should use **direct :5432** or **shared session :5432**. |
+| Pooler always helps latency | Dedicated pooler is **on the DB machine** (lower latency). Shared pooler is on a **separate server**. Direct has **no pooler hop**, needs IPv6 or the IPv4 add-on. |
+| `min_size=1` is conservative | psycopg default is **4**. After `max_idle=60` we shrink to one socket; the next click can pay a full TLS handshake. |
+
+Project region in current env: **`ap-northeast-2` (Seoul)**. No pool
+setting fixes a 400–800 ms path from a far API host
+([regions](https://supabase.com/docs/guides/platform/regions)).
+
+### Ranked strategies (config / code / ask-first)
+
+| Rank | Strategy | Expected win | Kind | SQL migration? |
+|---|---|---|---|---|
+| 1 | One `pool.connection()` for cookie + require + `list_turns` | −2 checkout+check+COMMIT cycles | Code | No |
+| 2 | `check=None` (or local-only) | −1–3 RTTs **per** remaining checkout | Config | No |
+| 3 | Leave Shared `:6543`; use Direct `:5432` or Shared session `:5432` | Drops shared extra hop; matches “persistent backend” | Config (`DATABASE_URL`) | No |
+| 4 | `min_size` 2–4; `max_lifetime` → 3600; don’t idle-out at 60 s | Fewer cold TLS handshakes (p99) | Config | No |
+| 5 | Pipeline the 3 SELECTs on that one connection | 3 query RTTs → ~1. Only after (1) | Code | No |
+| 6 | Colocate the API with Seoul | Cuts the RTT itself | Ops | No (region move = new project; ask) |
+| 7 | Skip `require_documents` on list | −0–1 checkout | Code | No |
+| 8 | Slimmer SQL / `limit` | Transfer, not RTT count | Code | **Ask** if new route/table |
+| 9 | Prepared statements | Already off. Revisit only on session/direct. Will not turn 2–5 s into 300 ms | Config later | No |
+
+### What not to do
+
+- Enable prepared statements on **:6543**
+- Treat Shared transaction as faster than session/direct for this API
+- Use `NullConnectionPool` (closes after every use)
+- Run Shared + Dedicated at high `pool_size` on a small compute
+- Jump `min_size` to 8 without `get_stats()`
+- Pipeline across three separate checkouts
+- Skip document lookup in a way that paints a deleted citation as live
+- Start with virtualization (harness already falsified FE parse)
+
+### Live measurement before any Step 4 code
+
+```powershell
+$env:CHAT_LATENCY_LIVE = "1"
+npx playwright test --project=chat-latency -g @live
+```
+
+Log `request_duration_ms` and, if possible, `pool.get_stats()` so a
+checkout wait is distinguishable from query time. Then implement
+Step 4.A (one connection) first.
 
 ## Out of scope
 
