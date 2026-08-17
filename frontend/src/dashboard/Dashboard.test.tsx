@@ -87,7 +87,11 @@ describe('Dashboard Project chat', () => {
     window.localStorage.clear();
 
     render(<Dashboard />);
-    fireEvent.click(screen.getByTitle('New chat'));
+    // The sidebar renders expanded by default, where the global new-chat control
+    // is an untitled button labelled "New" (Taskbar.tsx). `title="New chat"`
+    // only exists on the collapsed rail, and `New chat in <project>` is a
+    // different handler (onNewChatInProject), so match the accessible name.
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
