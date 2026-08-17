@@ -65,9 +65,18 @@ def run_dev(
 
 
 def main() -> None:
-    ArgumentParser(
+    parser = ArgumentParser(
         description="Run the Cowork API and its durable worker for local development."
-    ).parse_args()
+    )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reloading for the API server on code changes.",
+    )
+    args = parser.parse_args()
+    if args.reload:
+        import os
+        os.environ["APP_RELOAD"] = "true"
     raise SystemExit(run_dev())
 
 

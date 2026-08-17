@@ -1,5 +1,6 @@
 """Project/document metadata repositories; bytes never pass through this layer."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -70,7 +71,7 @@ class PostgresProjectRepository:
                 await connection.execute(
                     """
                     INSERT INTO projects (id, workspace_id, owner_user_id, name, is_default)
-                    SELECT %s, workspace_id, user_id, 'Default project', true
+                    SELECT %s, workspace_id, user_id, 'Default Project', true
                     FROM workspace_members
                     WHERE workspace_id = %s AND user_id = %s
                     ON CONFLICT (workspace_id, owner_user_id)
@@ -290,6 +291,26 @@ class PostgresProjectRepository:
             )
             row = await cursor.fetchone()
         return None if row is None else _document(row)
+
+    async def require_documents(
+        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
+    ) -> Mapping[str, ProjectDocument]:
+        if not document_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(document_ids))
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
+                    content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
+                    chunk_count, error_code, deleted_at, created_at, updated_at
+                FROM project_documents
+                WHERE id = ANY(%s) AND project_id = %s AND workspace_id = %s AND user_id = %s
+                """,
+                (unique_ids, project_id, principal.workspace_id, principal.user_id),
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]): _document(row) for row in rows}
 
     async def list_documents(
         self, principal: VerifiedPrincipal, project_id: str
@@ -662,7 +683,7 @@ class PostgresProjectRepository:
                         """
                         INSERT INTO projects (
                             id, workspace_id, owner_user_id, name, is_default
-                        ) VALUES (%s, %s, %s, 'Default project', true)
+                        ) VALUES (%s, %s, %s, 'Default Project', true)
                         RETURNING id, workspace_id, owner_user_id, name, is_default,
                             deleted_at, created_at
                         """,
@@ -764,11 +785,18 @@ class PostgresProjectRepository:
                     """,
                     (document_id,),
                 )
+                # ADR-008 decision 9: chunk text is hard-deleted alongside the
+                # metadata it belongs to, in this transaction, never soft-flagged.
+                await connection.execute(
+                    "DELETE FROM project_document_chunks WHERE document_id = %s",
+                    (document_id,),
+                )
                 await connection.execute(
                     """
                     INSERT INTO document_deletion_audits (
-                        id, document_id, postgres_outcome, qdrant_outcome, storage_outcome
-                    ) VALUES (%s, %s, 'hidden', 'deleted', 'deleted')
+                        id, document_id, postgres_outcome, vector_store_outcome,
+                        storage_outcome, chunks_outcome
+                    ) VALUES (%s, %s, 'hidden', 'deleted', 'deleted', 'deleted')
                     """,
                     (str(uuid4()), document_id),
                 )
@@ -792,17 +820,26 @@ class PostgresProjectRepository:
         document_id: str,
         *,
         postgres_outcome: str,
-        qdrant_outcome: str,
+        vector_store_outcome: str,
         storage_outcome: str,
+        chunks_outcome: str,
     ) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
                 """
                 INSERT INTO document_deletion_audits (
-                    id, document_id, postgres_outcome, qdrant_outcome, storage_outcome
-                ) VALUES (%s, %s, %s, %s, %s)
+                    id, document_id, postgres_outcome, vector_store_outcome,
+                    storage_outcome, chunks_outcome
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (str(uuid4()), document_id, postgres_outcome, qdrant_outcome, storage_outcome),
+                (
+                    str(uuid4()),
+                    document_id,
+                    postgres_outcome,
+                    vector_store_outcome,
+                    storage_outcome,
+                    chunks_outcome,
+                ),
             )
 
     async def _one_project(

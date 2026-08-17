@@ -33,6 +33,7 @@ htmlcov/
 tmp_pytest/
 *tmp_pytest*
 **/tmp_pytest/**
+.pnpm-store
 
 .runlogs/
 .cowork/evaluations/
@@ -49,6 +50,7 @@ frontend/.env
 *corpus2skill*
 **/update_corpus2skill.py
 .superpowers
+.worktrees/
 
 # Agent session artifacts (tracked skills under .claude/ stay tracked)
 .claude/.headroom_wrap_marker.json

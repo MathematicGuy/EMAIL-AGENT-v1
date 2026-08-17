@@ -14,9 +14,9 @@ control plane is Supabase Postgres (runs, tasks, chat memory, identity).
 Two decoupled workflows — do not merge them:
 - **Email RAG** (single-turn): classify → `NO_ACTION` | `DIRECT_PLAN` |
   `RETRIEVE_RAG`. Company corpus is committed `data/extracted/*.md` only.
-  Semantic store: default `RAG_STORE_PROVIDER=turbovec` (Hybrid of dense +
-  BM25 + RRF for Email RAG and Chat Type 4). Set `qdrant` to use Qdrant.
-  Unknown or failed providers degrade to null memory.
+  Semantic store: `RAG_STORE_PROVIDER=turbovec` (Hybrid of dense + BM25 +
+  RRF for Email RAG and Chat Type 4). Unknown, retired (`qdrant`), or
+  failed providers degrade to null memory.
 - **AI Chat** (multi-turn): session + working / declarative / episodic /
   semantic memory. Chat-native tasks start `retrieval_eligible=false`.
   No `@Email` tool in chat (ADR-004). User documents are gated
@@ -85,7 +85,9 @@ A yellow `DESELECTED - NOT VERIFIED BY THIS RUN` banner ends every run, naming
 what `-m 'not live'` dropped. Green above that banner is not a verified suite.
 
 Read [experience registry](docs/references/agent-experience-registry.md)
-before review-heavy work.
+before review-heavy work or multi-file implementation. After a written
+plan exists, fan out file-disjoint implementer subagents; the parent
+keeps spec, scope, and the Definition of Done.
 
 **Context compaction:** before compacting conversation context, invoke the
 `handoff` skill and save the handoff document to the OS temp directory.

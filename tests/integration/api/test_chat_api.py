@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from cowork_agent.api.chat import create_chat_router
 from cowork_agent.domain.chat_contracts import (
@@ -245,6 +245,36 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
     asyncio.run(scenario())
 
 
+def test_guest_session_endpoint_sets_an_opaque_http_only_cookie() -> None:
+    async def scenario() -> None:
+        app = _app()
+
+        async def issue_guest_session(request: Request, response: Response) -> None:
+            del request
+            response.set_cookie(
+                "cowork_session",
+                "opaque-guest-token",
+                httponly=True,
+                secure=True,
+                samesite="lax",
+            )
+
+        app.state.chat_guest_session_issuer = issue_guest_session
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://chat.test"
+        ) as client:
+            response = await client.post("/v1/cowork/chat/guest-session")
+
+        assert response.status_code == 204
+        cookie = response.headers["set-cookie"]
+        assert "cowork_session=opaque-guest-token" in cookie
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "SameSite=lax" in cookie
+
+    asyncio.run(scenario())
+
+
 def test_message_endpoint_rebuilds_a_controller_from_an_async_owned_session_scope() -> None:
     async def scenario() -> None:
         principal = VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com")
@@ -454,6 +484,38 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
         turns = history.json()["turns"]
         assert [turn["user_message"] for turn in turns] == ["Hello"]
         assert foreign.status_code == 404
+
+    asyncio.run(scenario())
+
+
+def test_mail_scan_turn_is_saved_without_calling_the_llm_and_reloads_with_its_card_data() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            saved = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    "turn_id": "mail-turn-1",
+                    "user_message": "@mail",
+                    "assistant_message": "Đã quét xong: đã quét 10 email và tạo 5 action item.",
+                    "mail_scan": {
+                        "status": "succeeded",
+                        "emails_matched": 201,
+                        "emails_processed": 10,
+                        "emails_to_process": 10,
+                        "action_items_count": 5,
+                    },
+                },
+            )
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+
+        assert saved.status_code == 201
+        assert app.state.chat_test_reply.calls == 0
+        assert history.status_code == 200
+        assert history.json()["turns"] == [saved.json()]
 
     asyncio.run(scenario())
 

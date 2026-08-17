@@ -2,11 +2,11 @@
 
 import json
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from langfuse import observe
 from pydantic import BaseModel, ConfigDict
@@ -15,7 +15,9 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatTurn,
     DeclarativeProfile,
+    MailScanSummary,
     MemoryNamespace,
     MemoryProvenance,
     MemoryProvenanceSource,
@@ -42,6 +44,7 @@ from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
 
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
+GuestSessionIssuer = Callable[[Request, Response], Awaitable[None]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
 
 
@@ -62,6 +65,27 @@ class _CreateSessionPayload(BaseModel):
     project_id: str | None = None
 
 
+class _MailScanPayload(BaseModel):
+    """Aggregate-only @mail result; it deliberately accepts no email content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["connecting", "queued", "running", "succeeded", "partial", "failed"]
+    emails_matched: int
+    emails_processed: int
+    emails_to_process: int
+    action_items_count: int | None = None
+
+
+class _PersistMailScanPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    user_message: str
+    assistant_message: str
+    mail_scan: _MailScanPayload
+
+
 class CanonicalProjectRepository(Protocol):
     async def default_project(self, principal: VerifiedPrincipal) -> Project: ...
 
@@ -72,6 +96,10 @@ class CanonicalProjectRepository(Protocol):
     async def require_document(
         self, principal: VerifiedPrincipal, project_id: str, document_id: str
     ) -> ProjectDocument | None: ...
+
+    async def require_documents(
+        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
+    ) -> Mapping[str, ProjectDocument]: ...
 
 
 class _ChatProfilePayload(BaseModel):
@@ -89,6 +117,13 @@ def create_chat_router() -> APIRouter:
     """Create the transport-only router; runtime dependencies live on app.state."""
 
     router = APIRouter(prefix="/v1/cowork/chat", tags=["chat"])
+
+    @router.post("/guest-session", status_code=204, response_model=None)
+    async def create_guest_session(request: Request, response: Response) -> None:
+        issuer = getattr(request.app.state, "chat_guest_session_issuer", None)
+        if issuer is None:
+            raise HTTPException(status_code=503, detail="Guest chat is unavailable")
+        await cast(GuestSessionIssuer, issuer)(request, response)
 
     @router.post("/sessions", status_code=201)
     async def create_session(
@@ -195,6 +230,44 @@ def create_chat_router() -> APIRouter:
             },
         )
 
+    @router.post("/sessions/{session_id}/mail-scans", status_code=201)
+    async def persist_mail_scan(
+        session_id: str, payload: _PersistMailScanPayload, request: Request
+    ) -> dict[str, object]:
+        """Save a completed @mail card without routing it through the LLM workflow."""
+
+        principal = await _verified_principal(request)
+        try:
+            scope = await _require_session(request, principal, session_id)
+        except ChatSessionAccessDenied as exc:
+            raise HTTPException(status_code=404, detail="Chat session not found") from exc
+        try:
+            mail_scan = MailScanSummary.from_dict(payload.mail_scan.model_dump())
+            turn = ChatTurn(
+                turn_id=payload.turn_id,
+                session_id=session_id,
+                user_message=payload.user_message,
+                assistant_message=payload.assistant_message,
+                created_at=datetime.now(UTC),
+                mail_scan=mail_scan,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid mail scan result") from exc
+        history = _history_repository(request)
+        if history is not None:
+            await history.write_turn(scope, turn, title="@mail")
+        else:
+            _buffer(request).append(
+                MemoryNamespace(
+                    scope=scope,
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id=session_id,
+                    source_id=None,
+                ),
+                turn,
+            )
+        return turn.to_dict()
+
     @router.get("/sessions")
     async def list_sessions(
         request: Request, project_id: str | None = Query(default=None)
@@ -238,8 +311,33 @@ def create_chat_router() -> APIRouter:
             if history is not None
             else _buffer(request).read(namespace)
         )
-        serialized: list[dict[str, object]] = []
+        # Collect all unique document IDs referenced in citation coordinates
+        doc_ids: list[str] = []
+        for turn in turns:
+            for coordinate in turn.citation_coordinates:
+                if isinstance(coordinate, dict):
+                    doc_id = coordinate.get("document_id")
+                    if isinstance(doc_id, str) and doc_id not in doc_ids:
+                        doc_ids.append(doc_id)
+
+        documents_by_id: dict[str, ProjectDocument] = {}
         repository = getattr(request.app.state, "project_repository", None)
+        if doc_ids and repository is not None:
+            repo = cast(CanonicalProjectRepository, repository)
+            if hasattr(repo, "require_documents"):
+                batch_docs = await repo.require_documents(
+                    principal, scope.project_id, doc_ids
+                )
+                documents_by_id.update(batch_docs)
+            else:
+                for doc_id in doc_ids:
+                    doc = await repo.require_document(
+                        principal, scope.project_id, doc_id
+                    )
+                    if doc is not None:
+                        documents_by_id[doc_id] = doc
+
+        serialized: list[dict[str, object]] = []
         for turn in turns:
             payload = turn.to_dict()
             coordinates = payload.get("citation_coordinates")
@@ -250,9 +348,7 @@ def create_chat_router() -> APIRouter:
                     document_id = coordinate.get("document_id")
                     if not isinstance(document_id, str):
                         continue
-                    document = await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
+                    document = documents_by_id.get(document_id)
                     coordinate["unavailable"] = document is None or document.status != "ready"
             serialized.append(payload)
         return {"session_id": session_id, "turns": serialized}

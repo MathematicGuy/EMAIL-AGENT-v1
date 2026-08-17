@@ -11,7 +11,7 @@
 
 The Knowledge & Document Ingestion Pipeline is an independent, deterministic processing subsystem. It converts administrator-supplied source documents (`.docx`, `.pdf`) and user-uploaded project files into standardized, safe Markdown files with SHA-256 manifest tracking, atomic writes, and page-aware metadata.
 
-The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative ground-truth source for enterprise RAG vector stores (Qdrant and Turbovec).
+The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative ground-truth source for enterprise RAG (Turbovec).
 
 ---
 
@@ -55,16 +55,18 @@ flowchart TB
     MANIFEST_CHECK -->|New or Modified File| STAGE3
 
     subgraph STAGE3["★ Core Stage 3: Format Extraction & Text Normalization"]
-        MODE{"3.1 Extraction Mode<br/>(EXTRACTION_MODE)"}
-        MODE -->|basic| ROUTE{"Format Router"}
-        MODE -->|advance| OCR["3.4 Mistral OCR Extractor<br/>(MistralOcrExtractor: mistral-ocr-latest)"]
+        MODE{"3.1 Extraction Mode<br/>(EXTRACTION_MODE=adaptive | advance)"}
+        MODE -->|"advance (full cloud OCR)"| OCR["3.4 Mistral OCR Extractor<br/>(MistralOcrExtractor: mistral-ocr-latest)"]
+        MODE -->|"adaptive (default)"| ROUTE{"Format Router"}
         OCR --> FIGURES["Extract Figures to data/extracted/images/"]
 
         ROUTE -->|.docx| DOCX["3.2 DOCX Extraction<br/>(DocxExtractor: Headings & Tables)"]
         ROUTE -->|.pdf| PDF["3.3 PDF Inspection<br/>(PdfInspector: Text vs Scanned)"]
 
-        PDF -->|Native Text PDF| RENDER_PDF["PDF Page Renderer<br/>(Insert <!-- Page N --> comments)"]
-        PDF -->|Scanned / OCR Needed| FAIL_OCR["Fail: mistral_not_configured"]
+        PDF -->|"Native Text PDF"| RENDER_PDF["PDF Page Renderer<br/>(Insert <!-- Page N --> comments)"]
+        PDF -->|"Scanned / OCR Needed"| OCR_CHECK{"MISTRAL_API_KEY<br/>Configured?"}
+        OCR_CHECK -->|Yes| OCR
+        OCR_CHECK -->|No| FAIL_OCR["Fail: mistral_not_configured"]
     end
 
     subgraph STAGE4["★ Core Stage 4: Atomic Persistence & Corpus Commit"]
@@ -90,16 +92,17 @@ flowchart TB
 - **Skip Evaluation:** Queries `ManifestStore` (`ingestion-manifest.json`). If the SHA-256 matches a previous run and `--force` is not set, processing is skipped (`outcome="skipped"`), avoiding redundant LLM/extraction calls.
 
 #### 3. ★ Core Stage 3: Format Extraction & Text Normalization
-- **Dual Extraction Modes (`EXTRACTION_MODE=basic|advance`):**
-  - **Basic Mode (`basic`, default):** Runs 100% locally.
-    - DOCX: AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown.
-    - PDF: Native text extraction ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)). Scanned pages fail safely with `mistral_not_configured`.
-  - **Advance Mode (`advance`):** Routes PDF and DOCX files through Mistral OCR ([ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
+- **Dual Extraction Modes (`EXTRACTION_MODE=adaptive|advance`):**
+  - **Adaptive Mode (`adaptive`, default):** Optimal blend of speed, $0 cost, and accuracy.
+    - DOCX: Local AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown (< 15 ms).
+    - Digital PDF: Local native text extraction ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)).
+    - Scanned / Mixed PDF: Detected by `PdfInspector` and **automatically escalated** to `MistralOcrExtractor` when `MISTRAL_API_KEY` is configured (falls back to `mistral_not_configured` if unconfigured).
+  - **Advance Mode (`advance`):** Routes all PDF and DOCX files through Mistral OCR ([ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
 
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
 - **Manifest Commit:** Updates `ingestion-manifest.json` with source path, SHA-256 digest, page count, extractor type (`docx`, `pdf_native`, or `mistral_ocr`), and ISO-8601 processing timestamp.
-- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Qdrant/Turbovec.
+- **Corpus Output:** Generates clean Markdown files in `data/extracted/*.md` ready for chunking and vector embedding by Turbovec.
 
 ---
 
@@ -109,7 +112,7 @@ flowchart TB
 2. **Output Slug Normalization:** Source file paths are slugified into safe ASCII filenames (`_output_name`). If two input paths map to the same slug, both are blocked with `output_name_collision`.
 3. **Incremental SHA-256 Skipping:** Before processing, source files are hashed (`sha256_file`). If `ingestion-manifest.json` contains a matching entry and `--force` is not set, extraction is skipped cleanly.
 4. **Atomic Write Guarantee:** Markdown content is written to a `.tmp` file before being atomically renamed to the target filename, preventing partial reads by vector indexers.
-5. **OCR Guard:** When `EXTRACTION_MODE=basic`, scanned PDF pages requiring OCR are halted with `mistral_not_configured` without emitting incomplete text to the corpus. When `EXTRACTION_MODE=advance`, Mistral OCR performs complete cloud extraction.
+5. **OCR Guard & Auto-Escalation:** In `adaptive` mode, `PdfInspector` identifies scanned pages and escalates to Mistral OCR when credentials exist, or halts with `mistral_not_configured` without emitting corrupted text to the corpus. In `advance` mode, Mistral OCR processes all files.
 
 ---
 
@@ -119,8 +122,8 @@ flowchart TB
 flowchart LR
     INGEST["Document Ingestion Pipeline<br/>(KnowledgeIngestionService)"] --> CORPUS["Committed Markdown Corpus<br/>(data/extracted/*.md)"]
     CORPUS --> LOADER["Corpus Loader<br/>(load_corpus in knowledge_base.py)"]
-    LOADER --> VECTOR_QDRANT["Qdrant Vector DB<br/>(qdrant.py)"]
+    LOADER --> VECTOR_QDRANT["Turbovec Index<br/>(turbovec_memory.py)"]
     LOADER --> VECTOR_TURBO["Turbovec 4-Bit Store<br/>(turbovec_memory.py)"]
 ```
 
-The output of the ingestion pipeline (`data/extracted/*.md`) is read by `load_corpus()` in `knowledge_base.py`. The resulting `KnowledgeChunk` records are indexed into Qdrant (`qdrant.py`) or Turbovec (`turbovec_memory.py`), establishing the complete ground-truth knowledge base for semantic RAG queries.
+The output of the ingestion pipeline (`data/extracted/*.md`) is read by `load_corpus()` in `knowledge_base.py`. The resulting `KnowledgeChunk` records are indexed into Turbovec (`turbovec_memory.py`), establishing the complete ground-truth knowledge base for semantic RAG queries.

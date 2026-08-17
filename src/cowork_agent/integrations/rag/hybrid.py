@@ -19,7 +19,7 @@ from cowork_agent.domain.target_contracts import (
 from .bm25 import BM25SearchAdapter
 from .embeddings import EmbeddingPort
 from .jina_reranker import RerankerPort
-from .knowledge_base import KnowledgeChunk, KnowledgeDocument
+from .knowledge_base import KnowledgeChunk, KnowledgeDocument, allowed_chunk_indices
 from .memory import InRepoSemanticMemory
 from .mmr import mmr_diversify
 from .query_guard import is_retrieval_query
@@ -51,7 +51,8 @@ class HybridSemanticMemory:
     ) -> None:
         if dense is None:
             warnings.warn(
-                "HybridSemanticMemory is deprecated; use QdrantSemanticMemory",
+                "HybridSemanticMemory without an injected dense store is "
+                "deprecated; pass dense=TurbovecSemanticMemory(...)",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -103,7 +104,10 @@ class HybridSemanticMemory:
         if not is_retrieval_query(query_str):
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
 
-
+        allowed_indices = allowed_chunk_indices(self._chunks, request.filters)
+        if not allowed_indices:
+            return _response(request, (), RetrievalStatus.NO_RESULTS, started)
+        chunk_id_allowlist = tuple(self._chunks[index].chunk_id for index in allowed_indices)
 
         final_top_k = _final_top_k(request, self._top_k_default)
         candidate_limit = _candidate_limit(final_top_k)
@@ -134,6 +138,7 @@ class HybridSemanticMemory:
                 lexical = self._bm25.search(
                     q_text,
                     top_k=candidate_limit,
+                    allowlist=chunk_id_allowlist,
                 )
                 all_dense_results.extend(
                     (chunk.chunk_id, chunk.relevance_score) for chunk in dense_response.chunks
@@ -231,6 +236,9 @@ def _semantic_chunk(chunk: KnowledgeChunk, relevance_score: float) -> SemanticCh
         document_version=None,
         relevance_score=relevance_score,
         rerank_score=None,
+        page_start=chunk.page_start,
+        page_end=chunk.page_end,
+        document_date=chunk.document_date,
     )
 
 

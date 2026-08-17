@@ -13,6 +13,21 @@ const model: ModelOption = {
 afterEach(cleanup);
 
 describe('ChatInputBox mail mention', () => {
+  it('does not render the usage promotion', () => {
+    render(
+      <ChatInputBox
+        inputText=""
+        onChangeText={vi.fn()}
+        onSend={vi.fn()}
+        selectedModel={model}
+        onOpenModelModal={vi.fn()}
+        onOpenVoiceModal={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText(/more usage until/i)).toBeNull();
+  });
+
   it('shows Mail when the user types @ and inserts @mail when selected', () => {
     const onChangeText = vi.fn();
     render(

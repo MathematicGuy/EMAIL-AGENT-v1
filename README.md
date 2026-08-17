@@ -1,71 +1,74 @@
 # Cowork Agent (Email-to-Action-Plan)
 
-## Knowledge ingestion (PDF/DOCX to the RAG corpus)
+## Knowledge ingestion (`mail-todo-ingest-knowledge`)
 
-The RAG corpus is Markdown under `data/extracted/`. Administrators can convert
-local `.docx` and native-text `.pdf` files from a separate source directory
-with the `mail-todo-ingest-knowledge` CLI. This tool is intentionally separate
-from Gmail: raw email bodies and email attachments are never ingested.
+The company RAG corpus is Markdown under `data/extracted/`. Administrators
+convert approved source files from a separate directory with the
+`mail-todo-ingest-knowledge` CLI. This is the **company CLI plane** only
+([capability map](tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md)): it
+stops at `data/extracted/*.md`. It is not the project-document upload plane
+and it never ingests email or email attachments (ADR-003).
+
+The CLI discovers `.pdf`, `.docx`, `.txt`, and `.md`. Suffix wins before any
+OCR branch: `.txt` / `.md` are UTF-8 text (or Markdown body) and are never
+sent to Mistral OCR.
 
 ### Prerequisites
 
-Install the Python project, then install the local Rust PDF utility. The
-ingestion adapter calls its `detect-pdf` and `pdf2md` commands.
+Install the Python project with `uv`, then install the local Rust PDF utility.
+The PDF adapter calls `detect-pdf` and `pdf2md`.
 
 ```powershell
-python -m pip install -e ".[dev]"
+uv sync --extra dev
 cargo install pdf-inspector
 
-# Optional verification: both commands must be on PATH.
+# Optional: both commands must be on PATH for PDF work.
 detect-pdf --help
 pdf2md --help
 ```
 
 `cargo` is supplied by the [Rust toolchain](https://rustup.rs/). Restart the
 shell after installation if Cargo's bin directory is not yet on `PATH`.
+`.txt` / `.md` ingestion does not need `pdf-inspector`.
 
 ### Ingest documents
 
-Place administrator-approved source files in `data/raw/` (or another source
-directory outside the output directory). The CLI recursively discovers only
-`.pdf` and `.docx` regular files, rejects symlinks, creates stable Markdown
-names, and stores hashes/status in `data/extracted/ingestion-manifest.json`.
+Place administrator-approved sources in `data/raw/` (or another directory
+outside the output). The CLI rejects symlinks, writes stable Markdown names,
+NFC-sanitizes body text, wraps a closed frontmatter header, and records
+hash/status (plus optional `document_date` harvested from PDF/DOCX binaries)
+in `data/extracted/ingestion-manifest.json`.
 
 ```powershell
-# Native-text PDFs and DOCX only. OCR is not active in the current runtime.
-$env:KNOWLEDGE_INGEST_OCR_ENABLED = "false"
-
 # Inspect what would be processed without writing files.
-mail-todo-ingest-knowledge --source data/raw --output data/extracted --dry-run
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --dry-run
 
-# Convert changed files to Markdown. Unchanged files are skipped by manifest hash.
-mail-todo-ingest-knowledge --source data/raw --output data/extracted
+# Convert changed files. Unchanged files are skipped by manifest hash.
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted
 
 # Re-extract every source file, replacing its generated Markdown output.
-mail-todo-ingest-knowledge --source data/raw --output data/extracted --force
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --force
 ```
 
-PDFs are first classified by `pdf-inspector`. Native-text pages are converted
-locally and carry `<!-- Page N -->` markers in their Markdown output. A scanned
-or mixed PDF that needs OCR currently reports `mistral_not_configured` and
-writes no partial document; do not treat `KNOWLEDGE_INGEST_OCR_ENABLED=true` as
-an enabled OCR backend yet.
+What the command does after extract (live, post capability-map modules):
 
-After successful ingestion, restart the API/worker. If Qdrant is enabled and
-already contains a collection, request a deliberate full re-index once:
+| Step | Behaviour |
+|---|---|
+| Discover | `.pdf` / `.docx` / `.txt` / `.md`; text never goes to OCR |
+| Persist | NFC + closed frontmatter; PDF/OCR pages keep `<!-- Page N -->` |
+| Manifest | operational fields plus optional `document_date` (ISO or empty) |
+| Later load | `load_corpus()` strips YAML, sets `page_start` / `page_end`, joins date by stem |
+| Later retrieve | optional `document_ids` / `years` / `months` allowlist; no `category` |
 
-```powershell
-$env:QDRANT_REINDEX = "true"
-mail-todo-api
+PDFs are classified by `pdf-inspector`. Native-text pages convert locally.
+A scanned or mixed PDF that needs OCR reports `mistral_not_configured` and
+writes no partial document unless a Mistral OCR backend is actually
+configured. Do not treat `KNOWLEDGE_INGEST_OCR_ENABLED=true` as an enabled
+OCR backend by itself.
 
-# After the collection has been rebuilt, reset this to avoid rebuilding it on
-# every subsequent startup.
-$env:QDRANT_REINDEX = "false"
-```
-
-`QDRANT_REINDEX=true` recreates the entire collection from the committed
-Markdown corpus; it is not an incremental update. See
-[`docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`](docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md)
+After successful ingestion, restart the API/worker so Turbovec rebuilds
+`.data/turbovec_index.tvim` from the committed Markdown. See
+[`docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`](docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md).
 
 ---
 
@@ -165,8 +168,8 @@ email-agent-v1/
 │       ├── integrations/               # External service boundaries & adapters
 │       │   ├── gmail/                  # OAuth flow, Gmail API adapter, deterministic fakes
 │       │   ├── llm/                    # Gemini, Groq, Faucet LLM providers & fakes
-│       │   ├── rag/                    # Dense + BM25 + Turbovec / Qdrant semantic memory
-│       │   ├── knowledge_ingestion/    # Knowledge extraction pipeline (PDF/DOCX)
+│       │   ├── rag/                    # Dense + BM25 + Turbovec hybrid semantic memory
+│       │   ├── knowledge_ingestion/    # Company CLI: PDF/DOCX/TXT/MD → Markdown corpus
 │       │   ├── project_documents/      # Encrypted document store & media sniffing
 │       │   ├── storage/                # Supabase private storage adapter
 │       │   └── key_rotation.py         # API key rotation manager
@@ -247,8 +250,7 @@ Tạo file `.env` từ `.env.example` và thiết lập các biến môi trườ
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
 # Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
-RAG_STORE_PROVIDER=turbovec # turbovec | qdrant
-QDRANT_ENABLED="false"
+RAG_STORE_PROVIDER=turbovec
 
 # Feature Flags
 USER_DOCUMENTS_ENABLED="false"
@@ -272,11 +274,6 @@ GMAIL_CLIENT_SECRET="your_gmail_client_secret"
 TOKEN_ENCRYPTION_KEY="your_fernet_key"
 OAUTH_STATE_SECRET="your_oauth_state_secret"
 ```
-
-When migrating an existing Qdrant company-knowledge collection from Gemini,
-set `QDRANT_REINDEX=true` for one startup so every vector is recreated with
-Jina. Set it back to `false` after that startup. Set
-`QDRANT_VECTOR_SIZE=1024` to match the default Jina v5 Omni Small output.
 
 ### 4.3 Khởi chạy dịch vụ
 
@@ -355,6 +352,7 @@ pnpm lint
 
 ## 6. Tài liệu tham khảo (References)
 - **Kiến trúc mục tiêu:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
+- **Company ingestion capability map:** [`tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md`](tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md)
 - **Product Requirements:** [`tasks/prds/PRD-v1-Core-Email-and-RAG.md`](tasks/prds/PRD-v1-Core-Email-and-RAG.md) và [`tasks/prds/PRD-v2-Memory-Extension.md`](tasks/prds/PRD-v2-Memory-Extension.md)
 - **Experience Registry cho coding agents:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
 

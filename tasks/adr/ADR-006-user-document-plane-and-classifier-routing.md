@@ -1,6 +1,7 @@
 # ADR-006 — A single user-document plane with classifier-gated retrieval
 
-- Status: Superseded by [ADR-007](./ADR-007-project-scoped-classifier-gated-user-documents.md)
+- Status: Superseded by [ADR-007](./ADR-007-project-scoped-classifier-gated-user-documents.md);
+  store choice further superseded by [ADR-008](ADR-008-turbovec-project-document-plane.md)
 - Date: 2026-08-12
 - Decision makers: Product/Engineering team
 - Supersedes: the withdrawn project-scoped chat-document design — a `Project`

@@ -95,3 +95,4 @@ class ClassificationResult:
 
     decisions: tuple[ClassifiedMessage, ...]
     batch_count: int
+    filtered_summary: str | None = None

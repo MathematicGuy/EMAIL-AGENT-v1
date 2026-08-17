@@ -37,10 +37,16 @@ def test_settings_hide_secret() -> None:
 
 
 def test_settings_supports_extraction_mode_env() -> None:
+    adaptive_settings = KnowledgeIngestionSettings.from_env(
+        {"EXTRACTION_MODE": "adaptive"}, load_env_file=False
+    )
+    assert adaptive_settings.extraction_mode == "adaptive"
+    assert adaptive_settings.ocr_enabled is False
+
     basic_settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "basic"}, load_env_file=False
     )
-    assert basic_settings.extraction_mode == "basic"
+    assert basic_settings.extraction_mode == "adaptive"
     assert basic_settings.ocr_enabled is False
 
     adv_settings = KnowledgeIngestionSettings.from_env(
@@ -53,4 +59,5 @@ def test_settings_supports_extraction_mode_env() -> None:
         KnowledgeIngestionSettings.from_env(
             {"EXTRACTION_MODE": "invalid"}, load_env_file=False
         )
+
 

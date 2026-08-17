@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.fernet import Fernet
-from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.domain import ActionFreshness, Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
@@ -54,7 +53,7 @@ from cowork_agent.integrations.llm.fakes import (
 from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
-from cowork_agent.integrations.rag.qdrant import QdrantSemanticMemory, ingest_corpus
+from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
@@ -1452,27 +1451,25 @@ def test_completion_timestamp_is_taken_after_the_work_not_at_claim_time() -> Non
     asyncio.run(scenario())
 
 
-#: Demo-validation for the Qdrant migration: the committed corpus, indexed in
-#: an in-memory Qdrant, reached through the real DigestWorker RETRIEVE_RAG path.
-QDRANT_DEMO_COLLECTION = "workflow_company_knowledge"
+#: The committed corpus, indexed in-process, reached through the real
+#: DigestWorker RETRIEVE_RAG path.
 CORPUS_DIR = Path(__file__).resolve().parents[3] / "data" / "extracted"
 
 
-def test_retrieve_rag_workflow_runs_end_to_end_over_qdrant() -> None:
-    """The whole RETRIEVE_RAG route against a real Qdrant query engine.
+def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
+    """The whole RETRIEVE_RAG route against the in-repo dense index.
 
     No fake memory sits between routing and generation here: whatever the
-    generator receives came out of Qdrant, so the citations are checked
-    against the chunk ids actually ingested from ``data/extracted/``.
+    generator receives came out of the committed corpus, so the citations
+    are checked against the chunk ids actually loaded from ``data/extracted/``.
     """
 
     async def scenario() -> None:
-        client = AsyncQdrantClient(":memory:")
-        documents = load_corpus(CORPUS_DIR)
-        await ingest_corpus(client, QDRANT_DEMO_COLLECTION, documents, HashingEmbedder())
-        memory = QdrantSemanticMemory(
-            client, QDRANT_DEMO_COLLECTION, HashingEmbedder(), min_score_default=0.0
+        documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
+        memory = InRepoSemanticMemory(
+            documents, HashingEmbedder(), min_score_default=0.0
         )
+        await memory.build_index()
         corpus_chunk_ids = {
             chunk.chunk_id for document in documents for chunk in document.chunks
         }
@@ -1481,7 +1478,7 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_qdrant() -> None:
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
         run = await CreateDigestRun(runs).execute(
-            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="qdrant-1", now=NOW
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="corpus-1", now=NOW
         )
         worker = DigestWorker(
             runs,

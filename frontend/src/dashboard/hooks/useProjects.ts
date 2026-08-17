@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from '../../lib/apiConfig';
 import type { Project } from '../types/projectTypes';
 
@@ -24,17 +24,48 @@ function fromBackend(project: BackendProject): Project {
 
 export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const projectMutationVersion = useRef(0);
+  const guestSessionPromise = useRef<Promise<void> | null>(null);
   const [activeProjectId, setActiveProjectIdState] = useState(
     () => window.localStorage.getItem(ACTIVE_PROJECT_KEY) ?? ''
   );
   const [error, setError] = useState<string | null>(null);
 
-  const refreshProjects = useCallback(async () => {
+  const ensureGuestSession = useCallback(async (): Promise<void> => {
+    if (!guestSessionPromise.current) {
+      guestSessionPromise.current = fetch(`${API_BASE_URL}/v1/cowork/chat/guest-session`, {
+        method: 'POST',
+        credentials: 'include',
+      }).then((response) => {
+        if (!response.ok) throw new Error(`Could not start guest chat (HTTP ${response.status})`);
+      });
+    }
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`);
+      await guestSessionPromise.current;
+    } catch (cause) {
+      guestSessionPromise.current = null;
+      throw cause;
+    }
+  }, []);
+
+  const refreshProjects = useCallback(async (): Promise<Project[]> => {
+    const refreshVersion = projectMutationVersion.current;
+    try {
+      await ensureGuestSession();
+      let response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
+        credentials: 'include',
+      });
+      if (response.status === 401) {
+        guestSessionPromise.current = null;
+        await ensureGuestSession();
+        response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
+          credentials: 'include',
+        });
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = (await response.json()) as { projects: BackendProject[] };
       const next = payload.projects.map(fromBackend);
+      if (refreshVersion !== projectMutationVersion.current) return next;
       setProjects(next);
       setActiveProjectIdState((current) => {
         const selected = next.some((project) => project.id === current)
@@ -44,10 +75,12 @@ export function useProjects() {
         return selected;
       });
       setError(null);
+      return next;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Project API unavailable');
+      return [];
     }
-  }, []);
+  }, [ensureGuestSession]);
 
   useEffect(() => {
     queueMicrotask(() => void refreshProjects());
@@ -59,23 +92,35 @@ export function useProjects() {
   }, []);
 
   const createProject = useCallback(async (input: Pick<Project, 'name' | 'icon' | 'color'>) => {
+    await ensureGuestSession();
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/projects`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: input.name.trim() }),
     });
     if (!response.ok) throw new Error(`Could not create project (HTTP ${response.status})`);
     const project = fromBackend((await response.json()) as BackendProject);
+    projectMutationVersion.current += 1;
     setProjects((current) => [...current, project]);
     setActiveProjectId(project.id);
     return project;
-  }, [setActiveProjectId]);
+  }, [ensureGuestSession, setActiveProjectId]);
+
+  const ensureDefaultProject = useCallback(async (): Promise<Project> => {
+    const next = await refreshProjects();
+    const project = next.find((item) => item.isDefault) ?? next[0];
+    if (!project) throw new Error('Could not initialize a project for chat.');
+    setActiveProjectId(project.id);
+    return project;
+  }, [refreshProjects, setActiveProjectId]);
 
   return {
     projects,
     activeProjectId,
     setActiveProjectId,
     createProject,
+    ensureDefaultProject,
     refreshProjects,
     error,
   };

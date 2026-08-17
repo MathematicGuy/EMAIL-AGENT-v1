@@ -24,6 +24,8 @@ from cowork_agent.integrations.llm.providers.gemini import (
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
     FALLBACK_ROUTE_DECISION,
+    FILTERED_SUMMARY_SCHEMA,
+    FILTERED_SUMMARY_SYSTEM_INSTRUCTION,
     GeminiRateLimitError,
     GeminiRouteClassifier,
 )
@@ -212,22 +214,32 @@ def test_invalid_enum_triggers_exactly_one_repair_retry() -> None:
     }
 
     async def scenario() -> None:
-        transport = ClassifierRecordingTransport([broken, repaired])
+        transport = ClassifierRecordingTransport([
+            broken,
+            repaired,
+            {"filteredSummary": "Các email còn lại là bản tin cập nhật."},
+        ])
         result = await gemini_classifier(transport).classify(
             "UTC", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
 
-        assert len(transport.prompts) == 2
+        assert len(transport.prompts) == 3
         assert CLASSIFIER_REPAIR_INSTRUCTION not in transport.prompts[0]
         assert transport.prompts[1].endswith(CLASSIFIER_REPAIR_INSTRUCTION)
-        assert transport.schemas == [CLASSIFICATION_SCHEMA, CLASSIFICATION_SCHEMA]
+        assert transport.schemas == [
+            CLASSIFICATION_SCHEMA,
+            CLASSIFICATION_SCHEMA,
+            FILTERED_SUMMARY_SCHEMA,
+        ]
         assert transport.system_instructions == [
             CLASSIFIER_SYSTEM_INSTRUCTION,
             CLASSIFIER_SYSTEM_INSTRUCTION,
+            FILTERED_SUMMARY_SYSTEM_INSTRUCTION,
         ]
         assert result.decisions[0].decision.candidate_action_item == "Handle msg-1"
         assert result.decisions[1].decision.actionability is Actionability.INFORMATIONAL
         assert result.decisions[1].decision is not FALLBACK_ROUTE_DECISION
+        assert result.filtered_summary == "Các email còn lại là bản tin cập nhật."
 
     asyncio.run(scenario())
 

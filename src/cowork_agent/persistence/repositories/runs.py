@@ -11,7 +11,7 @@ from cowork_agent.domain import DigestRun, RunStatus, RunTrigger
 _RUN_COLUMNS = (
     "id, user_id, mailbox_connection_id, trigger, status, query,"
     " idempotency_key, max_emails, emails_matched, emails_processed,"
-    " emails_actionable, action_items_count, ignored_emails_count,"
+    " emails_actionable, action_items_count, ignored_emails_count, filtered_summary,"
     " attachments_found, attachments_extracted, attachment_warnings_count,"
     " truncated, next_cursor, error_code, error_message_safe,"
     " started_at, completed_at, created_at"
@@ -49,6 +49,7 @@ class SQLiteRunRepository:
                     emails_actionable INTEGER NOT NULL DEFAULT 0,
                     action_items_count INTEGER NOT NULL DEFAULT 0,
                     ignored_emails_count INTEGER NOT NULL DEFAULT 0,
+                    filtered_summary TEXT,
                     attachments_found INTEGER NOT NULL DEFAULT 0,
                     attachments_extracted INTEGER NOT NULL DEFAULT 0,
                     attachment_warnings_count INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +64,9 @@ class SQLiteRunRepository:
                 )
                 """
             )
+            columns = {row[1] for row in database.execute("PRAGMA table_info(digest_runs)")}
+            if "filtered_summary" not in columns:
+                database.execute("ALTER TABLE digest_runs ADD COLUMN filtered_summary TEXT")
             database.execute(
                 """
                 CREATE INDEX IF NOT EXISTS digest_runs_mailbox_created_idx
@@ -79,7 +83,7 @@ class SQLiteRunRepository:
         with self._connect() as database:
             cursor = database.execute(
                 f"INSERT OR IGNORE INTO digest_runs ({_RUN_COLUMNS})"
-                " VALUES (" + ", ".join("?" for _ in range(23)) + ")",
+                " VALUES (" + ", ".join("?" for _ in range(24)) + ")",
                 _run_params(run),
             )
             created = cursor.rowcount == 1
@@ -149,13 +153,13 @@ class SQLiteRunRepository:
                     mailbox_connection_id = ?, trigger = ?, status = ?, query = ?,
                     idempotency_key = ?, max_emails = ?, emails_matched = ?,
                     emails_processed = ?, emails_actionable = ?, action_items_count = ?,
-                    ignored_emails_count = ?, attachments_found = ?,
+                    ignored_emails_count = ?, filtered_summary = ?, attachments_found = ?,
                     attachments_extracted = ?, attachment_warnings_count = ?,
                     truncated = ?, next_cursor = ?, error_code = ?,
                     error_message_safe = ?, started_at = ?, completed_at = ?
                 WHERE id = ?
                 """,
-                _run_params(run)[2:20] + _run_params(run)[20:22] + (run.id,),
+                _run_params(run)[2:21] + _run_params(run)[21:23] + (run.id,),
             )
 
     async def list_stuck_runs(
@@ -209,6 +213,7 @@ def _run_params(run: DigestRun) -> tuple[object, ...]:
         run.emails_actionable,
         run.action_items_count,
         run.ignored_emails_count,
+        run.filtered_summary,
         run.attachments_found,
         run.attachments_extracted,
         run.attachment_warnings_count,
@@ -237,16 +242,17 @@ def _run_from_row(row: Sequence[object]) -> DigestRun:
         emails_actionable=int(str(row[10])),
         action_items_count=int(str(row[11])),
         ignored_emails_count=int(str(row[12])),
-        attachments_found=int(str(row[13])),
-        attachments_extracted=int(str(row[14])),
-        attachment_warnings_count=int(str(row[15])),
-        truncated=bool(int(str(row[16]))),
-        next_cursor=None if row[17] is None else str(row[17]),
-        error_code=None if row[18] is None else str(row[18]),
-        error_message_safe=None if row[19] is None else str(row[19]),
-        started_at=_optional_datetime(row[20]),
-        completed_at=_optional_datetime(row[21]),
-        created_at=datetime.fromisoformat(str(row[22])),
+        filtered_summary=None if row[13] is None else str(row[13]),
+        attachments_found=int(str(row[14])),
+        attachments_extracted=int(str(row[15])),
+        attachment_warnings_count=int(str(row[16])),
+        truncated=bool(int(str(row[17]))),
+        next_cursor=None if row[18] is None else str(row[18]),
+        error_code=None if row[19] is None else str(row[19]),
+        error_message_safe=None if row[20] is None else str(row[20]),
+        started_at=_optional_datetime(row[21]),
+        completed_at=_optional_datetime(row[22]),
+        created_at=datetime.fromisoformat(str(row[23])),
     )
 
 

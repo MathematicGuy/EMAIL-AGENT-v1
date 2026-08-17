@@ -31,7 +31,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ingest local PDF/DOCX files into Markdown.")
+    parser = argparse.ArgumentParser(
+        description="Ingest local PDF, DOCX, TXT, and MD files into Markdown."
+    )
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--force", action="store_true")

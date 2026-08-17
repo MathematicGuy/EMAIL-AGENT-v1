@@ -232,6 +232,7 @@ class DigestWorker:
             )
             classification = await self._classifier.classify(user_timezone, clock, stored_envelopes)
             classifier_ms = int((time.monotonic() - classify_started) * 1000)
+            run.filtered_summary = classification.filtered_summary
             decisions = {
                 classified.gmail_message_id: classified.decision
                 for classified in classification.decisions

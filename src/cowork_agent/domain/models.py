@@ -145,6 +145,7 @@ class DigestRun:
     emails_actionable: int = 0
     action_items_count: int = 0
     ignored_emails_count: int = 0
+    filtered_summary: str | None = None
     attachments_found: int = 0
     attachments_extracted: int = 0
     attachment_warnings_count: int = 0

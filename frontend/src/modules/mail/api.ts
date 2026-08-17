@@ -33,6 +33,7 @@ export interface RunProgress {
   emailsToProcess: number;
   maxEmails: number;
   actionItemsCount?: number;
+  filteredSummary?: string | null;
 }
 
 export interface SafeRunError {

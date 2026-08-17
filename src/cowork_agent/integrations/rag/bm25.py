@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Final
 
 from .knowledge_base import KnowledgeChunk
@@ -30,7 +30,12 @@ class BM25SearchAdapter:
         )
 
     def search(
-        self, query: str, *, tenant_id: str | None = None, top_k: int = 5
+        self,
+        query: str,
+        *,
+        tenant_id: str | None = None,
+        top_k: int = 5,
+        allowlist: Collection[str] | None = None,
     ) -> tuple[tuple[str, float], ...]:
         """Return positive-score chunks ranked by BM25 score then chunk ID."""
         query_terms = tuple(dict.fromkeys(_tokenize(query)))
@@ -40,6 +45,9 @@ class BM25SearchAdapter:
         allowed = tuple(
             zip(self._chunks, self._term_frequencies, self._document_lengths, strict=True)
         )
+        if allowlist is not None:
+            allowed_ids = set(allowlist)
+            allowed = tuple(item for item in allowed if item[0].chunk_id in allowed_ids)
         if not allowed:
             return ()
 

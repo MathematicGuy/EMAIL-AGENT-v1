@@ -11,6 +11,7 @@ import {
   listConnections,
   newIdempotencyKey,
   type DigestRunView,
+  type DigestTask,
 } from '../../modules/mail/api';
 import type {
   ChatCitation,
@@ -37,6 +38,7 @@ interface ChatTurn {
   citation_coordinates?: Array<Record<string, unknown>>;
   rag_evidence?: Array<Record<string, unknown>>;
   retrieval_status?: string;
+  mail_scan?: Record<string, unknown>;
 }
 
 interface SseEvent {
@@ -59,7 +61,7 @@ interface SseEvent {
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
 const MAIL_COMMAND = /(?:^|\s)@mail\b/i;
-const MAIL_UNREAD_QUERY = 'is:unread in:inbox';
+const MAIL_UNREAD_QUERY = 'is:unread in:inbox category:primary';
 const MAIL_SCAN_MAX_EMAILS = 10;
 const MAIL_POLL_INTERVAL_MS = 1_500;
 const MAIL_TERMINAL_STATUSES = new Set(['succeeded', 'partial', 'failed']);
@@ -90,6 +92,26 @@ function mailScanProgress(run: DigestRunView): MailScanProgress {
     emailsMatched: run.progress.emailsMatched,
     emailsProcessed: run.progress.emailsProcessed,
     emailsToProcess: run.progress.emailsToProcess,
+  };
+}
+
+function mailScanFromPayload(value: unknown): MailScanProgress | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const scan = value as Record<string, unknown>;
+  if (
+    !['connecting', 'queued', 'running', 'succeeded', 'partial', 'failed'].includes(scan.status as string) ||
+    !Number.isInteger(scan.emails_matched) ||
+    !Number.isInteger(scan.emails_processed) ||
+    !Number.isInteger(scan.emails_to_process)
+  ) return undefined;
+  return {
+    status: scan.status as MailScanProgress['status'],
+    emailsMatched: scan.emails_matched as number,
+    emailsProcessed: scan.emails_processed as number,
+    emailsToProcess: scan.emails_to_process as number,
+    actionItemsCount: Number.isInteger(scan.action_items_count)
+      ? scan.action_items_count as number
+      : undefined,
   };
 }
 
@@ -228,6 +250,7 @@ export function useStreamingChat(
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [workflows] = useState<Record<string, TaskWorkflow>>({});
   const abortRef = useRef<AbortController | null>(null);
+  const loadHistoryAbortRef = useRef<AbortController | null>(null);
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
 
   const refreshHistory = useCallback(async () => {
@@ -239,8 +262,14 @@ export function useStreamingChat(
     setIsHistoryLoading(true);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v1/cowork/chat/sessions?project_id=${encodeURIComponent(projectId)}`
+        `${API_BASE_URL}/v1/cowork/chat/sessions?project_id=${encodeURIComponent(projectId)}`,
+        { credentials: 'include' }
       );
+      if (response.status === 401) {
+        setApiStatus('online');
+        setRecentChats([]);
+        return;
+      }
       if (!response.ok) throw new Error();
       const payload = (await response.json()) as { sessions: ChatSession[] };
       setRecentChats(payload.sessions.map((session, index) => ({
@@ -272,13 +301,15 @@ export function useStreamingChat(
     attachmentPollsRef.current.clear();
   }, [projectId]);
 
-  const ensureSession = useCallback(async (): Promise<string> => {
+  const ensureSession = useCallback(async (projectIdOverride?: string): Promise<string> => {
     if (activeConversationId) return activeConversationId;
-    if (!projectId) throw new Error('Select a Project before starting chat.');
+    const sessionProjectId = projectIdOverride ?? projectId;
+    if (!sessionProjectId) throw new Error('Select a Project before starting chat.');
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/sessions`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId }),
+      body: JSON.stringify({ project_id: sessionProjectId }),
     });
     if (!response.ok) throw new Error(`Could not create chat session (HTTP ${response.status}).`);
     const payload = (await response.json()) as ChatSession;
@@ -362,7 +393,7 @@ export function useStreamingChat(
   const runMailScan = useCallback(async (
     assistantId: string,
     abort: AbortController,
-  ) => {
+  ): Promise<{ content: string; mailScan: MailScanProgress }> => {
     const updateAssistant = (
       content: string,
       mailScan: MailScanProgress,
@@ -375,7 +406,12 @@ export function useStreamingChat(
     const activeConnections = (await listConnections(abort.signal))
       .filter((connection) => connection.status === 'active');
     if (!activeConnections[0]) {
-      throw new Error('Chưa có tài khoản Gmail đang kết nối. Hãy mở Mail Inbox để kết nối Gmail.');
+      const mailScan = {
+        status: 'failed' as const, emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0,
+      };
+      const content = 'Chưa có tài khoản Gmail đang kết nối. Hãy mở Mail Inbox để kết nối Gmail.';
+      updateAssistant(content, mailScan, false);
+      return { content, mailScan };
     }
     updateAssistant('Đã kết nối Gmail. Đang tạo lượt quét 10 email unread mới nhất…', {
       status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0,
@@ -387,8 +423,21 @@ export function useStreamingChat(
       idempotencyKey: newIdempotencyKey(),
       signal: abort.signal,
     });
+    let consecutiveErrors = 0;
     while (!abort.signal.aborted) {
-      const run = await getDigestRun(accepted.id, abort.signal);
+      let run: DigestRunView;
+      try {
+        run = await getDigestRun(accepted.id, abort.signal);
+        consecutiveErrors = 0;
+      } catch (err) {
+        if ((err as { name?: string }).name === 'AbortError') throw err;
+        consecutiveErrors++;
+        if (consecutiveErrors >= 5) {
+          throw err;
+        }
+        await waitForMailPoll(abort.signal);
+        continue;
+      }
       const progress = mailScanProgress(run);
       if (!MAIL_TERMINAL_STATUSES.has(run.status)) {
         updateAssistant('Đang quét 10 email unread mới nhất…', progress);
@@ -398,24 +447,112 @@ export function useStreamingChat(
       if (run.status === 'failed') {
         const message = run.error?.message ?? 'Không thể hoàn tất lượt quét email.';
         updateAssistant(message, progress, false);
-        return;
+        return { content: message, mailScan: progress };
       }
-      const tasks = await getDigestTasks(run.id, abort.signal);
-      const completedProgress = { ...progress, actionItemsCount: tasks.length };
+      let tasks: DigestTask[];
+      try {
+        tasks = await getDigestTasks(run.id, abort.signal);
+      } catch (err) {
+        if ((err as { name?: string }).name === 'AbortError') throw err;
+        // Fallback gracefully if task details retrieval had a blip
+        tasks = [];
+      }
+      const completedProgress = { ...progress, actionItemsCount: tasks.length || run.progress.actionItemsCount || 0 };
       const resultLabel = run.status === 'partial' ? 'Hoàn tất một phần' : 'Đã quét xong';
       const scannedSummary = run.progress.emailsMatched > run.progress.emailsProcessed
         ? `đã xử lý ${run.progress.emailsProcessed}/${run.progress.emailsMatched} email phù hợp`
         : `đã quét ${run.progress.emailsProcessed} email`;
+      const finalCount = tasks.length || run.progress.actionItemsCount || 0;
+      const filteredSummary = run.progress.filteredSummary?.trim();
+      const content = [
+        `${resultLabel}: ${scannedSummary} và tạo ${finalCount} action item.`,
+        filteredSummary,
+      ].filter(Boolean).join('\n\n');
       updateAssistant(
-        `${resultLabel}: ${scannedSummary} và tạo ${tasks.length} action item.`,
+        content,
         completedProgress,
         false,
       );
-      return;
+      return {
+        content,
+        mailScan: completedProgress,
+      };
     }
+    throw new DOMException('Mail scan polling aborted', 'AbortError');
   }, []);
 
-  const sendMessage = useCallback(async (override?: string) => {
+  const persistMailScanTurn = useCallback(async (
+    sessionId: string,
+    turnId: string,
+    userMessage: string,
+    assistantMessage: string,
+    mailScan: MailScanProgress,
+    signal: AbortSignal,
+  ) => {
+    let targetSessionId = sessionId;
+    let response = await fetch(
+      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(targetSessionId)}/mail-scans`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          turn_id: turnId,
+          user_message: userMessage,
+          assistant_message: assistantMessage,
+          mail_scan: {
+            status: mailScan.status,
+            emails_matched: mailScan.emailsMatched,
+            emails_processed: mailScan.emailsProcessed,
+            emails_to_process: mailScan.emailsToProcess,
+            action_items_count: mailScan.actionItemsCount ?? null,
+          },
+        }),
+        signal,
+      }
+    );
+    if (response.status === 404 && projectId) {
+      try {
+        const createRes = await fetch(`${API_BASE_URL}/v1/cowork/chat/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: projectId }),
+          signal,
+        });
+        if (createRes.ok) {
+          const newSession = (await createRes.json()) as ChatSession;
+          targetSessionId = newSession.session_id;
+          setActiveConversationId(newSession.session_id);
+          response = await fetch(
+            `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(targetSessionId)}/mail-scans`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                turn_id: turnId,
+                user_message: userMessage,
+                assistant_message: assistantMessage,
+                mail_scan: {
+                  status: mailScan.status,
+                  emails_matched: mailScan.emailsMatched,
+                  emails_processed: mailScan.emailsProcessed,
+                  emails_to_process: mailScan.emailsToProcess,
+                  action_items_count: mailScan.actionItemsCount ?? null,
+                },
+              }),
+              signal,
+            }
+          );
+        }
+      } catch {
+        // Ignore fallback failure
+      }
+    }
+    if (!response.ok) {
+      console.warn(`Could not save mail scan (HTTP ${response.status}).`);
+    }
+  }, [projectId]);
+
+  const sendMessage = useCallback(async (override?: string, projectIdOverride?: string) => {
     const text = (override ?? inputText).trim();
     if (!text || isGenerating) return;
     if (selectedAttachments.some((item) => item.status !== 'ready')) {
@@ -444,18 +581,30 @@ export function useStreamingChat(
       isStreaming: true,
     }]);
     const abort = new AbortController();
+    let mailSessionId: string | null = null;
     abortRef.current = abort;
     try {
       if (isMailCommand(text)) {
-        await runMailScan(assistantId, abort);
+        const sessionId = await ensureSession(projectIdOverride);
+        mailSessionId = sessionId;
+        const result = await runMailScan(assistantId, abort);
+        try {
+          await persistMailScanTurn(
+            sessionId, assistantId, text, result.content, result.mailScan, abort.signal
+          );
+        } catch (persistErr) {
+          console.warn('Failed to persist mail scan turn to chat history:', persistErr);
+        }
         setApiStatus('online');
+        void refreshHistory();
         return;
       }
-      const sessionId = await ensureSession();
+      const sessionId = await ensureSession(projectIdOverride);
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session_id: sessionId,
@@ -529,40 +678,51 @@ export function useStreamingChat(
       if ((cause as { name?: string }).name !== 'AbortError') {
         const error = cause instanceof Error ? cause.message : 'Chat backend unavailable.';
         const failedMailScan = isMailCommand(text);
+        const mailScan = failedMailScan
+          ? {
+              status: 'failed' as const,
+              emailsMatched: 0,
+              emailsProcessed: 0,
+              emailsToProcess: 0,
+            }
+          : undefined;
         setMessages((current) => current.map((message) =>
           message.id === assistantId
             ? {
                 ...message,
                 content: error,
                 isStreaming: false,
-                mailScan: failedMailScan
-                  ? {
-                      status: 'failed',
-                      emailsMatched: message.mailScan?.emailsMatched ?? 0,
-                      emailsProcessed: message.mailScan?.emailsProcessed ?? 0,
-                      emailsToProcess: message.mailScan?.emailsToProcess ?? 0,
-                    }
-                  : message.mailScan,
+                mailScan: mailScan ?? message.mailScan,
               }
             : message
         ));
+        if (failedMailScan && mailSessionId && mailScan) {
+          void persistMailScanTurn(
+            mailSessionId, assistantId, text, error, mailScan, abort.signal
+          ).then(refreshHistory).catch(() => undefined);
+        }
         setApiStatus('offline');
       }
     } finally {
       abortRef.current = null;
       setIsGenerating(false);
     }
-  }, [ensureSession, inputText, isGenerating, refreshHistory, runMailScan, selectedAttachments]);
+  }, [ensureSession, inputText, isGenerating, persistMailScanTurn, refreshHistory, runMailScan, selectedAttachments]);
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {
     void loadedProjectId;
+    loadHistoryAbortRef.current?.abort();
+    const abort = new AbortController();
+    loadHistoryAbortRef.current = abort;
     setIsHistoryLoading(true);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        { credentials: 'include', signal: abort.signal }
       );
       if (!response.ok) throw new Error(`Could not load chat (HTTP ${response.status}).`);
       const payload = (await response.json()) as { turns: ChatTurn[] };
+      if (abort.signal.aborted) return;
       setMessages(payload.turns.flatMap((turn) => {
         const citations = (turn.citation_coordinates ?? [])
           .map(citationFromCoordinate)
@@ -575,18 +735,24 @@ export function useStreamingChat(
           {
             id: `${turn.turn_id}-assistant`, role: 'assistant' as const,
             content: turn.assistant_message ?? '', timestamp: timestamp(turn.created_at), citations,
-            ragEvidence, retrievalStatus: status,
+            ragEvidence, retrievalStatus: status, mailScan: mailScanFromPayload(turn.mail_scan),
           },
         ];
       }));
       setActiveConversationId(sessionId);
+    } catch (err) {
+      if ((err as { name?: string }).name === 'AbortError') return;
+      throw err;
     } finally {
-      setIsHistoryLoading(false);
+      if (loadHistoryAbortRef.current === abort) {
+        setIsHistoryLoading(false);
+      }
     }
   }, []);
 
   const resetChat = useCallback(() => {
     abortRef.current?.abort();
+    loadHistoryAbortRef.current?.abort();
     setMessages([]);
     setActiveConversationId(null);
     setIsGenerating(false);

@@ -16,6 +16,9 @@ GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 def load_runtime_environment(directory: Path | None = None) -> None:
     """Load secrets from ``.env`` and non-secret feature flags from ``config``."""
     root = Path.cwd() if directory is None else directory
+    # Neither file overrides a variable the process already has: the shell (and
+    # a test's monkeypatch) stays authoritative, which is what keeps an
+    # integration test from silently reaching the real Supabase database.
     load_dotenv(root / ".env", override=False)
     load_dotenv(root / "config", override=False)
 
@@ -93,7 +96,7 @@ class KnowledgeIngestionSettings:
     max_bytes: int
     max_pdf_pages: int
     max_ocr_pages: int
-    extraction_mode: str = "basic"
+    extraction_mode: str = "adaptive"
 
     @classmethod
     def from_env(
@@ -111,15 +114,18 @@ class KnowledgeIngestionSettings:
         if extraction_mode_env in ("advance", "advanced"):
             ocr_enabled = True
             extraction_mode = "advance"
-        elif extraction_mode_env in ("basic", "simple"):
+        elif extraction_mode_env in ("adaptive", "basic", "simple"):
             ocr_enabled = False
-            extraction_mode = "basic"
+            extraction_mode = "adaptive"
         elif extraction_mode_env:
-            msg = f"Invalid EXTRACTION_MODE: {extraction_mode_env}. Must be 'basic' or 'advance'."
+            msg = (
+                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. "
+                "Must be 'adaptive' or 'advance'."
+            )
             raise ValueError(msg)
         else:
             ocr_enabled = _boolean(environ, "KNOWLEDGE_INGEST_OCR_ENABLED", True)
-            extraction_mode = "advance" if ocr_enabled else "basic"
+            extraction_mode = "advance" if ocr_enabled else "adaptive"
 
         api_key = environ.get("MISTRAL_API_KEY", "").strip()
         if ocr_enabled and (not api_key or api_key.startswith("replace-with-")):
@@ -213,7 +219,7 @@ class UserDocumentsSettings:
     """Project-document plane limits and dependency configuration."""
 
     enabled: bool
-    collection_name: str
+    index_root: str
     max_file_bytes: int
     max_pages: int
     max_documents_per_project: int
@@ -222,7 +228,6 @@ class UserDocumentsSettings:
     top_k: int
     min_score: float
     retrieval_timeout_ms: int
-    startup_timeout_ms: int
     ingestion_stream: str
 
     @classmethod
@@ -242,8 +247,11 @@ class UserDocumentsSettings:
             raise ValueError("USER_DOCUMENTS_MIN_SCORE must be between 0 and 1")
         return cls(
             enabled=enabled,
-            collection_name=_non_empty_value(
-                environ, "QDRANT_PROJECT_COLLECTION", "project_documents"
+            # Local cache directory for the per-project Turbovec .tvim files
+            # (ADR-008). The durable copy lives in Supabase Storage; this is
+            # only where each process materializes it.
+            index_root=_non_empty_value(
+                environ, "USER_DOCUMENTS_INDEX_ROOT", "var/project-indexes"
             ),
             max_file_bytes=_positive_int(
                 environ, "USER_DOCUMENTS_MAX_FILE_BYTES", 25 * 1024 * 1024
@@ -261,58 +269,9 @@ class UserDocumentsSettings:
             retrieval_timeout_ms=_bounded_positive_int(
                 environ, "USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS", 10_000, maximum=10_000
             ),
-            startup_timeout_ms=_bounded_positive_int(
-                environ, "USER_DOCUMENTS_STARTUP_TIMEOUT_MS", 30_000, maximum=120_000
-            ),
             ingestion_stream=_non_empty_value(
                 environ, "USER_DOCUMENTS_INGESTION_STREAM", "cowork:project-document-ingestion"
             ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class QdrantSettings:
-    """Qdrant vector store configuration for Semantic Memory retrieval.
-
-    Absent configuration is not an error: ``enabled`` is false when
-    ``QDRANT_URL`` is empty, and the RAG bootstrap degrades to
-    ``NullSemanticMemory`` rather than blocking a digest run (invariant 4).
-    """
-
-    url: str
-    api_key: str = field(repr=False)
-    collection_name: str
-    project_collection_name: str
-    enabled: bool
-    vector_size: int
-    reindex: bool
-
-    @classmethod
-    def from_env(
-        cls,
-        environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
-    ) -> "QdrantSettings":
-        if environ is None:
-            if load_env_file:
-                load_runtime_environment()
-            environ = os.environ
-        url = environ.get("QDRANT_URL", "").strip()
-        if url.startswith("replace-with-"):
-            url = ""
-        return cls(
-            url=url,
-            api_key=environ.get("QDRANT_API_KEY", "").strip(),
-            collection_name=environ.get("QDRANT_COLLECTION", "company_knowledge").strip()
-            or "company_knowledge",
-            project_collection_name=(
-                environ.get("QDRANT_PROJECT_COLLECTION", "project_documents").strip()
-                or "project_documents"
-            ),
-            enabled=bool(url) and _boolean(environ, "QDRANT_ENABLED", False),
-            vector_size=_positive_int(environ, "QDRANT_VECTOR_SIZE", 1024),
-            reindex=_boolean(environ, "QDRANT_REINDEX", False),
         )
 
 

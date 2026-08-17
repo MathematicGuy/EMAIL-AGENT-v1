@@ -13,7 +13,7 @@ try:
 except ImportError:  # pragma: no cover - environment-dependent
     pytest.skip("psycopg is not installed (pip install '.[postgres]')", allow_module_level=True)
 
-from cowork_agent.domain.chat_contracts import ChatTurn
+from cowork_agent.domain.chat_contracts import ChatTurn, MailScanSummary
 from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
 from cowork_agent.persistence.migrate import apply_migrations
 from cowork_agent.persistence.repositories.chat_history import PostgresChatHistoryRepository
@@ -105,6 +105,13 @@ def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() ->
                 user_message="How should I prepare the report?",
                 assistant_message="Start with the quarterly metrics.",
                 created_at=datetime(2026, 8, 14, tzinfo=UTC),
+                mail_scan=MailScanSummary(
+                    status="succeeded",
+                    emails_matched=10,
+                    emails_processed=10,
+                    emails_to_process=10,
+                    action_items_count=3,
+                ),
             )
 
             writer = PostgresChatHistoryRepository(pool)

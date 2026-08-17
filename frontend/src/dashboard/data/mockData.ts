@@ -61,7 +61,7 @@ export const AVAILABLE_MODELS: ModelOption[] = [
 export const IDEAS_FOR_YOU = [
   { id: 'idea-1', icon: '🌤', title: 'Tạo tài liệu', prompt: 'Tạo một tài liệu kế hoạch dự án rõ ràng, bao gồm mục tiêu, phạm vi, các bước thực hiện và tiêu chí hoàn thành.' },
   { id: 'idea-2', icon: '💬', title: 'Tạo báo cáo', prompt: 'Tạo một báo cáo tiến độ dự án ngắn gọn, bao gồm tóm tắt, kết quả, rủi ro và đề xuất tiếp theo.' },
-  { id: 'idea-3', icon: '📝', title: 'Customize Cowork for me', prompt: 'Guide me through tailoring Claude Cowork workflows for my specific team needs.' }
+  { id: 'idea-3', icon: '📝', title: 'Tối ưu hóa quy trình', prompt: 'Hướng dẫn tối ưu hóa các quy trình làm việc theo nhu cầu của nhóm.' }
 ];
 
 export const COWORK_SAMPLE_TASKS: CoworkTask[] = [
@@ -130,7 +130,7 @@ export const DEMO_STREAMING_RESPONSES = [
 
 1. **Thanh Taskbar / Sidebar**:
    - Chế độ Thu gọn (v1.png): Rộng 52px, chứa icon thu gọn ở nút đầu tiên. Click nút này để mở rộng.
-   - Chế độ Mở rộng (v2.png): Rộng 260px, hiển thị đầy đủ danh sách Chats, Projects, Artifacts, Code, Customize và danh sách Recents.
+   - Chế độ Mở rộng (v2.png): Rộng 260px, hiển thị đầy đủ danh sách Chats, Projects, Artifacts, Code và danh sách Recents.
 
 2. **Khung Chat & Streaming Animation**:
    - Phản hồi dạng real-time token streaming với hiệu ứng con trỏ nhấp nháy ▌.

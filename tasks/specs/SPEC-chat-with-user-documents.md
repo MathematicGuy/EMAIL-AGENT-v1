@@ -5,9 +5,9 @@
 | Trạng thái | Accepted — implementation-aligned |
 | Ngày | 2026-08-13 |
 | Nguồn yêu cầu | [PRD-v3](../prds/PRD-v3-chat-with-user-documents.md), `docs/references/user_preference.md` |
-| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [ADR-008](../adr/ADR-008-turbovec-project-document-plane.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
 | Thay thế | Baseline user-wide/no-Project của SPEC v3.0 |
-| Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Supabase Storage, Qdrant, Gemini embeddings |
+| Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Supabase Storage, Turbovec `.tvim`, Gemini embeddings |
 | Feature owner | AI Chat Controller (`feature: ai_chat`) |
 
 > ADR-007 supersedes every user-wide/no-Project statement in earlier revisions. This
@@ -50,7 +50,7 @@ không plane nào là fallback của plane kia.
 Trong phạm vi:
 
 - Upload, validate, extract (native + OCR), chunk theo trang, embed, index.
-- Qdrant collection riêng cho tài liệu người dùng, ACL-first.
+- Postgres `project_document_chunks` + `.tvim` theo project, ACL-first (ADR-008).
 - Intent classifier phân tầng làm cổng định tuyến duy nhất, resolver tất định, 5 route.
 - Graph orchestration cho lượt chat (xem §10, quyết định D-01).
 - Context assembly có section `user_document_evidence` và thứ tự ưu tiên.
@@ -72,7 +72,7 @@ flowchart TB
         OCR["MistralOcrClient"]
         CHUNK["Page-aware chunker"]
         EMBED["Embedding service"]
-        QIDX[("Qdrant project_documents<br/>3,072 dimensions")]
+        QIDX[("Postgres chunks + per-project .tvim<br/>3,072 dimensions")]
         FAIL["failed(reason_code)"]
     end
 
@@ -117,12 +117,14 @@ src/cowork_agent/
 │   └── project_documents.py                     # PDF/DOCX extraction
 ├── integrations/rag/
 │   ├── markdown_chunking.py                     # shared deterministic chunker
-│   └── project_documents.py                     # Qdrant store + canonical retriever
+│   ├── project_documents.py                     # hybrid store + canonical retriever
+│   └── project_index.py                         # per-project Turbovec .tvim
 ├── integrations/storage/supabase.py             # private signed upload/download
 ├── orchestration/project_document_worker.py     # ingestion + durable cleanup workers
 └── persistence/
-    ├── migrations/009_canonical_project_documents.sql
-    └── repositories/projects.py                 # Project/document/job source of truth
+    ├── migrations/012_project_document_chunks.sql
+    ├── repositories/projects.py                 # Project/document/job source of truth
+    └── repositories/project_document_chunks.py  # chunk text + FTS allowlist
 ```
 
 The following legacy map is historical context only:
@@ -290,7 +292,7 @@ giờ trả về chúng khi `USER_DOCUMENTS_TOOL_AXIS_ENABLED=false`.
 
 Cổng chặn cứng, chạy **sau** resolver, **trước** node retrieve: nếu người dùng
 không có tài liệu `ready` nào thì `RAG → CHAT`, ghi
-`reason_codes += no_ready_documents`. Không gọi embedding, không gọi Qdrant.
+`reason_codes += no_ready_documents`. Không gọi embedding, không mở `.tvim`.
 
 ### 6.5 UserDocumentQuery / Response
 
@@ -354,9 +356,9 @@ POST /projects/{project_id}/documents (202)
                   pages_needing_ocr → MistralOcrClient, giới hạn max_ocr_pages
                   trang native không bao giờ OCR lại
 → indexing      : shared Markdown chunker → Gemini embed 3.072d
-                  → upsert Qdrant payload document_status=indexing
-→ publish       : set Qdrant document_status=ready
-→ ready         : guarded PostgreSQL transition + counts; nếu transition fail thì xoá vectors
+                  → persist chunks in Postgres then add vectors to the project .tvim
+→ publish       : PostgreSQL document_status=ready (allowlist gate)
+→ ready         : guarded PostgreSQL transition + counts; nếu transition fail thì xoá chunks/vectors
 ```
 
 Quy tắc:
@@ -380,36 +382,41 @@ Quy tắc:
 `KNOWLEDGE_INGEST_MAX_OCR_PAGES`). Client là adapter thuần: nhận ảnh trang, trả
 `tuple[OcrPage, ...]`, không ghi file, không giữ trạng thái.
 
-## 8. Qdrant schema và ACL
+## 8. Lưu trữ hybrid (Postgres + Turbovec) và ACL
 
-Collection riêng: `QDRANT_PROJECT_COLLECTION` (mặc định `project_documents`).
-Không dùng chung collection với company corpus.
+Plane tài liệu dự án không dùng Qdrant. Văn bản chunk, toạ độ trang và ACL nằm
+trong Postgres (`project_document_chunks`); chân dense là một file `.tvim`
+Turbovec 4-bit **theo từng project**, cache cục bộ tại
+`USER_DOCUMENTS_INDEX_ROOT` (mặc định `var/project-indexes`). Bản bền nằm trên
+Supabase Storage. Company corpus (`QDRANT_COLLECTION=company_knowledge`) không
+tham gia plane này.
 
-Payload mỗi point:
+Mỗi hàng chunk mang:
 
 ```yaml
 workspace_id · user_id · project_id · document_id · chunk_id
 filename · section · page_start · page_end · text
-document_status: indexing | ready
-expires_at_epoch: epoch_seconds
+vector_id          # ID ngoài của Turbovec, ổn định khi ingest lại
+fts                # tsvector sinh tự động, xếp hạng bằng ts_rank_cd
 ```
 
-Payload index: `workspace_id`, `user_id`, `project_id`, `document_id`,
-`document_status`, `expires_at_epoch`.
+Sẵn sàng để retrieval khi `document_status='ready'` và `expires_at > now`.
 
-**ACL-first**: filter (`workspace_id`, `user_id`, `project_id`, optional
-`document_ids`, `document_status=ready`, `expires_at_epoch > now`) được dựng
-**trước khi** query được embed. Sau vector query, canonical retriever đọc lại
-PostgreSQL ready catalog và loại mọi evidence vừa chuyển sang `deleting`, `deleted`
-hoặc hết hạn. Đây là hàng rào bắt buộc cho race deletion giữa authorization và Qdrant I/O.
+**ACL-first**: truy vấn SQL (`workspace_id`, `user_id`, `project_id`, optional
+`document_ids`, `document_status=ready`, `expires_at > now`) chạy **trước khi**
+query được embed, và trả về allowlist `vector_id[]` cho chân dense. Retriever
+canonical đọc lại catalogue ready trên PostgreSQL và loại mọi evidence vừa
+chuyển sang `deleting`, `deleted` hoặc hết hạn. Đây là hàng rào bắt buộc cho
+race deletion giữa authorization và I/O chỉ mục.
 
-Point mới luôn bắt đầu ở `document_status=indexing`, nên không thể được retrieval
-thấy trong lúc upsert theo batch. Worker chỉ promote toàn bộ points sang `ready`
-sau khi index hoàn tất; PostgreSQL chỉ chuyển document sang `ready` sau bước promote.
+Chunk mới không vào allowlist cho đến khi worker ghi xong văn bản + vector và
+PostgreSQL chuyển document sang `ready`. File `.tvim` theo project khiến rò
+chéo tenant trở nên bất khả về mặt cấu trúc; năm điều kiện ACL còn lại nằm
+trong `WHERE` SQL.
 
-Không có fallback in-repo cho plane này: tài liệu người dùng chỉ tồn tại trong
-Qdrant. Qdrant chết ⇒ trả kết quả rỗng với `degraded: true`, không thay thế bằng
-bằng chứng khác.
+Không có fallback in-repo cho plane này. Chỉ mục hoặc Postgres chết ⇒ trả kết
+quả rỗng với `degraded: true` / `reason_code=index_unavailable`, không thay
+thế bằng bằng chứng company-plane.
 
 ## 9. Router — classifier là thẩm quyền định tuyến duy nhất
 
@@ -483,7 +490,7 @@ giờ được tự sinh ra một route**:
 
 | Cơ chế | Tác dụng |
 |---|---|
-| Precondition gate | không có tài liệu `ready` ⇒ `RAG → CHAT`, không gọi embedding/Qdrant |
+| Precondition gate | không có tài liệu `ready` ⇒ `RAG → CHAT`, không gọi embedding/index |
 | Schema validation | output sai schema ⇒ kích hoạt §9.4 |
 | Tool axis downgrade | `needs_tool = true` khi trục tool tắt ⇒ hạ về `false` |
 
@@ -542,7 +549,7 @@ classify → (conditional) → retrieve → assemble → generate → persist
 
 | Node | Trách nhiệm | Không được làm |
 |---|---|---|
-| `classify` | LLM classifier → resolver → 3 boolean + route | gọi Qdrant |
+| `classify` | LLM classifier → resolver → 3 boolean + route | gọi hybrid retrieve |
 | `retrieve` | `UserDocumentRetrievalPort` với ACL filter | quyết định route |
 | `assemble` | dựng `GenerationContext` có section mới | gọi LLM sinh câu trả lời |
 | `generate` | stream reply + citation | ghi bộ nhớ |
@@ -637,7 +644,7 @@ DELETE /v1/cowork/chat/projects/{project_id}
 Canonical schema nằm ở `009_canonical_project_documents.sql`: `projects`,
 `project_documents`, durable ingestion jobs và durable cleanup jobs. PostgreSQL
 là source of truth cho ownership/status/counts; source bytes nằm trong private
-Supabase Storage; extracted chunk text chỉ nằm trong Qdrant.
+Supabase Storage; extracted chunk text nằm ở `project_document_chunks` (ADR-008).
 
 Khối `005_user_documents.sql` dưới đây là historical draft, đã bị ADR-007 và
 migration 009 thay thế; không được dùng để triển khai mới:
@@ -667,14 +674,15 @@ CREATE INDEX user_documents_owner_status
 CREATE INDEX user_documents_expiry ON user_documents (expires_at);
 ```
 
-Bảng không lưu văn bản tài liệu. Văn bản đã trích xuất nằm ở object store có mã
-hoá; chunk nằm ở Qdrant.
+Bảng metadata không lưu văn bản tài liệu. Văn bản gốc nằm ở object store có mã
+hoá; văn bản chunk nằm ở `project_document_chunks`; vector nằm ở `.tvim` theo
+project (ADR-008).
 
 ## 14. Cấu hình
 
 ```text
 USER_DOCUMENTS_ENABLED=true
-QDRANT_PROJECT_COLLECTION=project_documents
+USER_DOCUMENTS_INDEX_ROOT=var/project-indexes
 USER_DOCUMENTS_MAX_FILE_BYTES=26214400
 USER_DOCUMENTS_MAX_PAGES=100
 USER_DOCUMENTS_MAX_DOCUMENTS_PER_PROJECT=50
@@ -751,9 +759,9 @@ episode/log/telemetry.
 | Embedding chết | giữ `indexing`, backoff → `failed(embedding_unavailable)` |
 | Feature flag tắt | document routes trả `503`; frontend ẩn upload/panel; Project, chat, Email Agent tiếp tục hoạt động |
 | Processing không đạt terminal state | frontend abort polling sau 5 phút, hiện timeout và vẫn cho phép xoá |
-| Qdrant chết lúc truy vấn | một retry → kết quả rỗng + `degraded: true`; lượt chat nói rõ bằng chứng tài liệu không khả dụng |
+| Project index chết lúc truy vấn | một retry → kết quả rỗng + `degraded: true`; lượt chat nói rõ bằng chứng tài liệu không khả dụng |
 | Retrieval timeout | một retry → `timeout` + `degraded: true` |
-| Tài liệu bị xoá/hết hạn giữa authorization và query | filter Qdrant chỉ nhận `document_status=ready`, sau query tái kiểm tra PostgreSQL ready catalog; stale evidence bị loại |
+| Tài liệu bị xoá/hết hạn giữa authorization và query | allowlist SQL chỉ nhận `ready`, sau query tái kiểm tra PostgreSQL catalog; stale evidence bị loại |
 | Không chunk nào vượt ngưỡng | `no_results`; câu trả lời nói tài liệu không đề cập |
 | Classifier chết | §9.3 |
 
@@ -765,7 +773,7 @@ bao giờ ảnh hưởng standalone Email Agent PRD-v1.
 | Lớp | Nội dung |
 |---|---|
 | Unit — resolver | bảng chân trị 5 route, thứ tự đánh giá, hạ cấp tool khi tắt trục |
-| Unit — precondition | không có tài liệu `ready` ⇒ `RAG → CHAT`, không gọi embedding/Qdrant |
+| Unit — precondition | không có tài liệu `ready` ⇒ `RAG → CHAT`, không gọi embedding/index |
 | Unit — prompt | template lắp đủ 5 tầng; `prompt_version` đổi khi nội dung đổi; ví dụ trong prompt không trùng fixture |
 | Unit — chunking | `page_start`/`page_end` đúng theo marker; đoạn vắt trang |
 | Unit — validation | sniff type, size, quota, encrypted |
@@ -788,7 +796,7 @@ có nó thì §15 không đo được.
    `UserDocumentQuery`, mở rộng `EpisodeCitation` — kèm test contract.
 2. Ingestion: validation → extraction → `MistralOcrClient` → chunk theo trang →
    state machine + migration. Chưa có truy hồi.
-3. Qdrant collection + `QdrantUserDocumentMemory` ACL-first + xoá lan truyền.
+3. `project_document_chunks` + per-project `.tvim` ACL-first + xoá lan truyền.
 4. Router: prompt phân tầng → classifier → resolver + fixture gán nhãn + bộ đo §15.
 5. Graph + context assembly + trích dẫn theo trang trong câu trả lời.
 6. Retention, xoá, safety counters, gate đánh giá.

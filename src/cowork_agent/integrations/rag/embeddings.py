@@ -140,6 +140,12 @@ class JinaEmbeddingAdapter:
                             mask_api_key(key),
                         )
                         continue
+                    if _is_insufficient_balance_error(exc):
+                        logger.warning(
+                            "Jina embedding insufficient balance for key %s; rotating key",
+                            mask_api_key(key),
+                        )
+                        continue
                     raise
             if response is None:
                 raise last_error or ValueError("Embedding request failed without attempting a key")
@@ -159,6 +165,27 @@ def _is_rate_limit_error(exc: Exception) -> bool:
         return True
     message = str(exc).lower()
     return "429" in message or "rate limit" in message or "too many requests" in message
+
+
+def _is_insufficient_balance_error(exc: Exception) -> bool:
+    """True only for Jina's empty-wallet 403, not Cloudflare or other forbids."""
+    if not isinstance(exc, HTTPError) or exc.code != 403:
+        return False
+    payload = _http_error_body(exc).lower()
+    return (
+        "authz_insufficient_balance" in payload
+        or "insufficient account balance" in payload
+    )
+
+
+def _http_error_body(exc: HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except Exception:
+        return str(exc)
+    if not raw:
+        return str(exc)
+    return raw.decode("utf-8", errors="replace")
 
 
 class GeminiEmbeddingAdapter:

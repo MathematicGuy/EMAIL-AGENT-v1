@@ -7,15 +7,10 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { ChatStreamView } from './components/ChatStreamView';
 
-import { AutomationsView } from './components/AutomationsView';
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
-import { UpgradeModal } from './components/UpgradeModal';
 import { VoiceModal } from './components/VoiceModal';
-import { CustomizeModal } from './components/CustomizeModal';
-import { MemoryPanel } from '../modules/memory/MemoryPanel';
-import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
 import { ProjectDocumentPanel } from '../modules/project-documents/ProjectDocumentPanel';
@@ -27,10 +22,10 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
-  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts'>(() =>
+  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'artifacts'>(() =>
     new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
   );
-  const [sidebarState, setSidebarState] = useState<SidebarState>('collapsed');
+  const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
   const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
   const [modelAnchor, setModelAnchor] = useState<Pick<
     DOMRect,
@@ -38,20 +33,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   > | null>(null);
 
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
-  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
-  const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
-  const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
-  const [selectedThemeId, setSelectedThemeId] = useState('warm-charcoal');
-  const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
+  const { projects, activeProjectId, setActiveProjectId, createProject, ensureDefaultProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId),
     [projects, activeProjectId]
   );
+
+  useEffect(() => {
+    const handleOpenProjectDocs = () => {
+      setIsProjectDocumentsOpen(true);
+    };
+    window.addEventListener('open-project-documents', handleOpenProjectDocs);
+    return () => window.removeEventListener('open-project-documents', handleOpenProjectDocs);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -121,9 +120,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     setIsModelModalOpen(true);
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    if (!activeProjectId) await ensureDefaultProject();
     resetChat();
     setActiveView('chat');
+  };
+
+  const handleSendMessage = async (text?: string) => {
+    const project = activeProject ?? await ensureDefaultProject();
+    await sendMessage(text, project.id);
   };
 
   const handleSelectRecent = (chat: RecentChat) => {
@@ -155,8 +160,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}
-        onOpenUpgradeModal={() => setIsUpgradeModalOpen(true)}
-        onOpenCustomizeModal={() => setIsCustomizeModalOpen(true)}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
         onChangeView={setActiveView}
@@ -166,19 +169,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <Header
           apiStatus={apiStatus}
-          onOpenMemory={() => setIsMemoryPanelOpen(true)}
-          onOpenWorkIntake={() => setIsWorkIntakePanelOpen(true)}
           projects={projects}
           activeProject={activeProject}
           onSelectProject={handleSelectProject}
+          showProjectDocuments={projectDocumentsEnabled && activeView === 'chat'}
+          onOpenProjectDocuments={() => setIsProjectDocumentsOpen(true)}
         />
 
         {activeView === 'mail' && (
           <MailInboxView />
-        )}
-
-        {(activeView === 'schedules' || activeView === 'dispatch') && (
-          <AutomationsView />
         )}
 
         {activeView === 'artifacts' && (
@@ -190,7 +189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
             <HeroSection
               inputText={inputText}
               onChangeText={setInputText}
-              onSend={sendMessage}
+              onSend={handleSendMessage}
               isGenerating={isGenerating}
               selectedModel={selectedModel}
               onOpenModelModal={openModelSelector}
@@ -208,7 +207,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               messages={messages}
               inputText={inputText}
               onChangeText={setInputText}
-              onSend={sendMessage}
+              onSend={handleSendMessage}
               isGenerating={isGenerating}
               onStopGeneration={stopGeneration}
               selectedModel={selectedModel}
@@ -242,22 +241,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         anchor={modelAnchor}
       />
 
-      <UpgradeModal
-        isOpen={isUpgradeModalOpen}
-        onClose={() => setIsUpgradeModalOpen(false)}
-      />
-
       <VoiceModal
         isOpen={isVoiceModalOpen}
         onClose={() => setIsVoiceModalOpen(false)}
-        onSendTranscript={(text) => sendMessage(text)}
-      />
-
-      <CustomizeModal
-        isOpen={isCustomizeModalOpen}
-        onClose={() => setIsCustomizeModalOpen(false)}
-        selectedThemeId={selectedThemeId}
-        onSelectTheme={setSelectedThemeId}
+        onSendTranscript={handleSendMessage}
       />
 
       <NewProjectModal
@@ -270,23 +257,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         }}
       />
 
-      {isMemoryPanelOpen && (
-        <MemoryPanel
-          isOpen
-          onClose={() => setIsMemoryPanelOpen(false)}
-        />
-      )}
-
-      {isWorkIntakePanelOpen && (
-        <WorkIntakePanel
-          isOpen
-          onClose={() => setIsWorkIntakePanelOpen(false)}
-        />
-      )}
       {projectDocumentsEnabled && (
         <ProjectDocumentPanel
           projectId={activeProjectId}
           projectName={activeProject?.name}
+          isOpen={isProjectDocumentsOpen}
+          onClose={() => setIsProjectDocumentsOpen(false)}
+          hideTrigger
         />
       )}
     </div>

@@ -1,33 +1,32 @@
 import React, { useState } from 'react';
 import {
-  BrainCircuit,
-  Ghost,
   Loader2,
   Wifi,
   WifiOff,
-  Workflow,
   Folder,
   ChevronDown,
   Check,
+  FileText,
 } from 'lucide-react';
 import type { Project } from '../types/projectTypes';
+import { documentText } from '../../modules/project-documents/i18n';
 
 interface HeaderProps {
   apiStatus?: 'unknown' | 'online' | 'offline';
-  onOpenMemory: () => void;
-  onOpenWorkIntake: () => void;
   projects?: Project[];
   activeProject?: Project;
   onSelectProject?: (projectId: string) => void;
+  showProjectDocuments?: boolean;
+  onOpenProjectDocuments?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   apiStatus,
-  onOpenMemory,
-  onOpenWorkIntake,
   projects,
   activeProject,
   onSelectProject,
+  showProjectDocuments,
+  onOpenProjectDocuments,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -114,31 +113,20 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right: Ghost / Assistant Settings Icon */}
+      {/* Right: Actions */}
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          title="Work intake"
-          onClick={onOpenWorkIntake}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <Workflow className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          title="Memory & context"
-          onClick={onOpenMemory}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <BrainCircuit className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          title="Assistant menu"
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <Ghost className="w-4 h-4" />
-        </button>
+        {showProjectDocuments && (
+          <button
+            type="button"
+            title={documentText('title')}
+            onClick={onOpenProjectDocuments}
+            disabled={!activeProject?.id}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#252320] hover:bg-[#2e2b27] border border-[#383531] rounded-lg text-xs font-medium text-zinc-300 hover:text-zinc-100 transition-colors cursor-pointer disabled:opacity-40 shadow-xs"
+          >
+            <FileText className="w-3.5 h-3.5 text-[#d97757]" />
+            <span>{documentText('title')}</span>
+          </button>
+        )}
       </div>
     </header>
   );

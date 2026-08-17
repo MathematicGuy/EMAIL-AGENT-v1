@@ -26,6 +26,9 @@ describe('useStreamingChat Project chat client', () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
       if (url.endsWith('/v1/mail-todo/connections')) {
         return Promise.resolve(json({ connections: [{ id: 'mailbox-1', status: 'active' }] }));
       }
@@ -33,19 +36,34 @@ describe('useStreamingChat Project chat client', () => {
         expect(JSON.parse(String(init.body))).toEqual({
           mailboxConnectionId: 'mailbox-1',
           maxEmails: 10,
-          query: 'is:unread in:inbox',
+          query: 'is:unread in:inbox category:primary',
         });
         return Promise.resolve(json({ id: 'run-1', status: 'queued', statusUrl: '/v1/mail-todo/runs/run-1' }, 202));
       }
       if (url.endsWith('/v1/mail-todo/runs/run-1')) {
         return Promise.resolve(json({
           id: 'run-1', status: 'succeeded',
-          progress: { emailsMatched: 4, emailsProcessed: 4, emailsToProcess: 4, maxEmails: 10 },
+          progress: {
+            emailsMatched: 4, emailsProcessed: 4, emailsToProcess: 4, maxEmails: 10,
+            filteredSummary: 'Lưu ý: LLM xác định email còn lại là bản tin cập nhật.',
+          },
           error: null,
         }));
       }
       if (url.endsWith('/v1/mail-todo/runs/run-1/tasks')) {
         return Promise.resolve(json({ tasks: [{ task_id: 'task-1' }, { task_id: 'task-2' }] }));
+      }
+      if (url.endsWith('/sessions/session-1/mail-scans') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          turn_id: expect.stringMatching(/^assistant-/),
+          user_message: '@mail quét giúp tôi',
+          assistant_message: 'Đã quét xong: đã quét 4 email và tạo 2 action item.\n\nLưu ý: LLM xác định email còn lại là bản tin cập nhật.',
+          mail_scan: {
+            status: 'succeeded', emails_matched: 4, emails_processed: 4,
+            emails_to_process: 4, action_items_count: 2,
+          },
+        });
+        return Promise.resolve(json({ turn_id: 'mail-turn-1' }, 201));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
@@ -55,20 +73,28 @@ describe('useStreamingChat Project chat client', () => {
 
     await act(async () => result.current.sendMessage('@mail quét giúp tôi'));
 
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/cowork/chat/sessions/'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/sessions/session-1/mail-scans') && (init as RequestInit).method === 'POST'
+    )).toBe(true);
     expect(result.current.messages.at(-1)).toMatchObject({
       role: 'assistant',
-      content: 'Đã quét xong: đã quét 4 email và tạo 2 action item.',
+      content: 'Đã quét xong: đã quét 4 email và tạo 2 action item.\n\nLưu ý: LLM xác định email còn lại là bản tin cập nhật.',
       isStreaming: false,
       mailScan: { status: 'succeeded', emailsProcessed: 4, actionItemsCount: 2 },
     });
   });
 
   it('records a failed mail scan when no Gmail account is connected', async () => {
-    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
       if (url.endsWith('/v1/mail-todo/connections')) return Promise.resolve(json({ connections: [] }));
+      if (url.endsWith('/sessions/session-1/mail-scans') && init?.method === 'POST') {
+        return Promise.resolve(json({ turn_id: 'mail-turn-1' }, 201));
+      }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -181,6 +207,10 @@ describe('useStreamingChat Project chat client', () => {
           citation_coordinates: [],
           retrieval_status: 'no_results',
           rag_evidence: [],
+          mail_scan: {
+            status: 'succeeded', emails_matched: 10, emails_processed: 10,
+            emails_to_process: 10, action_items_count: 5,
+          },
         }] }));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
@@ -194,6 +224,7 @@ describe('useStreamingChat Project chat client', () => {
     expect(result.current.messages.at(-1)).toMatchObject({
       retrievalStatus: 'no_results',
       ragEvidence: [],
+      mailScan: { status: 'succeeded', emailsProcessed: 10, actionItemsCount: 5 },
     });
   });
 
