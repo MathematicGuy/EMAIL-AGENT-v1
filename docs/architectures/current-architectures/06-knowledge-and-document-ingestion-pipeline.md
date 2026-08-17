@@ -3,7 +3,7 @@
 **Architecture level:** Level 1 — Deep-Dive Ingestion Pipeline Architecture  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/integrations/knowledge_ingestion` & `src/cowork_agent/ingestion_cli.py`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §3](../TARGET-ARCHITECTURE.md)
 
 ---
 
@@ -19,14 +19,14 @@ The output Markdown corpus (`data/extracted/*.md`) serves as the authoritative g
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **Ingestion CLI Entrypoint** | [ingestion_cli.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) | Exposes `mail-todo-ingest-knowledge` CLI for offline batch ingestion of company documents. |
-| **Ingestion Service Orchestrator** | [service.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/service.py) | `KnowledgeIngestionService`: Discovers files, checks symlinks, detects filename collisions, and manages extraction outcomes. |
-| **DOCX Extractor** | [docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py) | `DocxExtractor`: Converts `.docx` headings, paragraphs, and tables into structured Markdown formatting. |
-| **PDF Inspector & Extractor** | [pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py) | `PdfInspector`: Inspects PDF pages, extracts native text, detects scanned image pages, and enforces page bounds. |
-| **Mistral OCR Extractor** | [ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py) | `MistralOcrExtractor`: Advanced mode extractor using Mistral OCR API (`mistral-ocr-latest`), normalizing OOXML archives and extracting figure assets. |
-| **Manifest & Atomic Store** | [manifest.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/manifest.py) | `ManifestStore`: Tracks SHA-256 hashes in `ingestion-manifest.json`; performs atomic `.tmp` file writes. |
-| **Project Document Extractor** | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) | `ProjectDocumentExtractor`: Extracts user project upload files into page-bounded chunks (`page_start`, `page_end`). |
-| **Ingestion Models** | [models.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/models.py) | Standardized domain models: `IngestionOutcome`, `ManifestEntry`, `PdfInspection`. |
+| **Ingestion CLI Entrypoint** | [ingestion_cli.py](../../../src/cowork_agent/ingestion_cli.py) | Exposes `mail-todo-ingest-knowledge` CLI for offline batch ingestion of company documents. |
+| **Ingestion Service Orchestrator** | [service.py](../../../src/cowork_agent/integrations/knowledge_ingestion/service.py) | `KnowledgeIngestionService`: Discovers files, checks symlinks, detects filename collisions, and manages extraction outcomes. |
+| **DOCX Extractor** | [docx_extractor.py](../../../src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py) | `DocxExtractor`: Converts `.docx` headings, paragraphs, and tables into structured Markdown formatting. |
+| **PDF Inspector & Extractor** | [pdf_inspector.py](../../../src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py) | `PdfInspector`: Inspects PDF pages, extracts native text, detects scanned image pages, and enforces page bounds. |
+| **Mistral OCR Extractor** | [ocr.py](../../../src/cowork_agent/integrations/knowledge_ingestion/ocr.py) | `MistralOcrExtractor`: Advanced mode extractor using Mistral OCR API (`mistral-ocr-latest`), normalizing OOXML archives and extracting figure assets. |
+| **Manifest & Atomic Store** | [manifest.py](../../../src/cowork_agent/integrations/knowledge_ingestion/manifest.py) | `ManifestStore`: Tracks SHA-256 hashes in `ingestion-manifest.json`; performs atomic `.tmp` file writes. |
+| **Project Document Extractor** | [project_documents.py](../../../src/cowork_agent/integrations/knowledge_ingestion/project_documents.py) | `ProjectDocumentExtractor`: Extracts user project upload files into page-bounded chunks (`page_start`, `page_end`). |
+| **Ingestion Models** | [models.py](../../../src/cowork_agent/integrations/knowledge_ingestion/models.py) | Standardized domain models: `IngestionOutcome`, `ManifestEntry`, `PdfInspection`. |
 
 ---
 
@@ -94,10 +94,10 @@ flowchart TB
 #### 3. ★ Core Stage 3: Format Extraction & Text Normalization
 - **Dual Extraction Modes (`EXTRACTION_MODE=adaptive|advance`):**
   - **Adaptive Mode (`adaptive`, default):** Optimal blend of speed, $0 cost, and accuracy.
-    - DOCX: Local AST parsing ([docx_extractor.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown (< 15 ms).
-    - Digital PDF: Local native text extraction ([pdf_inspector.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)).
+    - DOCX: Local AST parsing ([docx_extractor.py](../../../src/cowork_agent/integrations/knowledge_ingestion/docx_extractor.py)) converting Word OpenXML headings and tables into Markdown (< 15 ms).
+    - Digital PDF: Local native text extraction ([pdf_inspector.py](../../../src/cowork_agent/integrations/knowledge_ingestion/pdf_inspector.py)).
     - Scanned / Mixed PDF: Detected by `PdfInspector` and **automatically escalated** to `MistralOcrExtractor` when `MISTRAL_API_KEY` is configured (falls back to `mistral_not_configured` if unconfigured).
-  - **Advance Mode (`advance`):** Routes all PDF and DOCX files through Mistral OCR ([ocr.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
+  - **Advance Mode (`advance`):** Routes all PDF and DOCX files through Mistral OCR ([ocr.py](../../../src/cowork_agent/integrations/knowledge_ingestion/ocr.py)). Handles OOXML zip header normalization (`normalize_ooxml`), calls `mistral-ocr-latest`, and writes figure assets to `data/extracted/images/`.
 
 #### 4. ★ Core Stage 4: Atomic Persistence & Corpus Commit
 - **Atomic File Writes:** Writes normalized Markdown to a `.tmp` file before renaming to the final `.md` file, guaranteeing zero dirty reads by parallel vector indexers.
