@@ -71,7 +71,7 @@ flowchart TB
 - **User-document gating:** Aligned with [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md). Hierarchy is `tenant → user → project → documents + sessions`. Classifier is the sole route origin; the readiness gate only narrows. Feature flags `USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED` default true; both must be on (and a ready catalog present) before `ChatRoutingService` is composed.
 - **User-document store:** Aligned. Postgres chunks + per-project `.tvim`; no silent company-index fallback. Live paths are [integrations/rag/project_documents.py](../../../src/cowork_agent/integrations/rag/project_documents.py) and [features/user_documents/ports.py](../../../src/cowork_agent/features/user_documents/ports.py) — there is no `src/cowork_agent/integrations/project_documents/` package.
 - **OCR on the user-document plane:** Aligned with TARGET §3.4 / §21.11. The ingestion worker constructs `ProjectDocumentExtractor()` with no OCR adapter. Pages that need OCR fail closed as `ocr_unavailable`; mixed-PDF native pages are not indexed alone. `document-health` reports `ocr: optional_unavailable`. Mistral OCR exists on the **company** knowledge-ingest CLI, not on this plane.
-- **Local fallback:** When `DATABASE_URL` is absent, chat working memory stays in-process; durable chat/control-plane rows require Postgres.
+- **Local fallback:** When `DATABASE_URL` is absent, chat working memory stays in-process; durable chat/control-plane rows require Postgres. The durable local MVP uses localhost Postgres (`docker compose up -d postgres`) rather than extending SQLite to history/memory ([ADR-010](../../../tasks/adr/ADR-010-local-postgres-control-plane-latency.md)).
 
 Remaining drift vs TARGET:
 

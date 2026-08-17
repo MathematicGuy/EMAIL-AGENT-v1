@@ -7,9 +7,10 @@ install Python dependencies into a virtual environment (venv).
 ## Project
 
 Cowork Agent (Email-to-Action-Plan): FastAPI service that turns unread Gmail
-into structured action plans, plus multi-turn AI Chat. Without `DATABASE_URL`
-the local fallback is SQLite + in-memory stores. With `DATABASE_URL` the
-control plane is Supabase Postgres (runs, tasks, chat memory, identity).
+into structured action plans, plus multi-turn AI Chat. `POSTGRES_MODE=local`
+uses Docker Postgres; `cloud` uses hosted Supabase Postgres; `off` (or no
+`DATABASE_URL`) is SQLite + in-memory. Flip the flag in `.env`; local and
+cloud are separate databases.
 
 Two decoupled workflows — do not merge them:
 - **Email RAG** (single-turn): classify → `NO_ACTION` | `DIRECT_PLAN` |
@@ -94,7 +95,7 @@ keeps spec, scope, and the Definition of Done.
 
 ## Authoritative docs
 
-- ADRs: `tasks/adr/`
+- ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
 - Email RAG runtime: `docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`

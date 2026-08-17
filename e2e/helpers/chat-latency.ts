@@ -42,6 +42,8 @@ export interface LatencyRunReport {
 
 const TRACK_START = '<!-- LATENCY-TRACK:SYNTHETIC-START -->';
 const TRACK_END = '<!-- LATENCY-TRACK:SYNTHETIC-END -->';
+const LIVE_TRACK_START = '<!-- LATENCY-TRACK:LIVE-START -->';
+const LIVE_TRACK_END = '<!-- LATENCY-TRACK:LIVE-END -->';
 
 export function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
@@ -85,10 +87,8 @@ export function writeLatencyReport(report: LatencyRunReport, filename?: string):
   return dest;
 }
 
-export function updateTrackLatestRun(report: LatencyRunReport, reportPath: string): void {
-  if (!existsSync(LATENCY_TRACK_FILE)) return;
-  const current = readFileSync(LATENCY_TRACK_FILE, 'utf8');
-  const rows = report.summary
+function summaryRows(report: LatencyRunReport): string {
+  return report.summary
     .map((row) => {
       const request = row.p50_request_duration_ms === null ? '—' : String(row.p50_request_duration_ms);
       const frontend = row.p50_frontend_after_response_ms === null
@@ -97,6 +97,28 @@ export function updateTrackLatestRun(report: LatencyRunReport, reportPath: strin
       return `| ${row.scenario} | ${row.n} | ${row.p50_click_to_visible_ms} | ${row.p95_click_to_visible_ms} | ${row.max_click_to_visible_ms} | ${request} | ${frontend} |`;
     })
     .join('\n');
+}
+
+function replaceTrackBlock(
+  current: string,
+  start: string,
+  end: string,
+  block: string,
+): string {
+  if (current.includes(start) && current.includes(end)) {
+    return current.replace(new RegExp(`${start}[\\s\\S]*?${end}`), block);
+  }
+  return `${current.trimEnd()}\n\n${block}\n`;
+}
+
+export function updateTrackLatestRun(report: LatencyRunReport, reportPath: string): void {
+  if (!existsSync(LATENCY_TRACK_FILE)) return;
+  // A live-only Playwright invocation must not clobber the synthetic table.
+  if (report.mode === 'live') {
+    updateTrackLiveRun(report, reportPath);
+    return;
+  }
+  const current = readFileSync(LATENCY_TRACK_FILE, 'utf8');
   const block = [
     TRACK_START,
     '',
@@ -104,14 +126,32 @@ export function updateTrackLatestRun(report: LatencyRunReport, reportPath: strin
     '',
     '| Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |',
     '|---|---:|---:|---:|---:|---:|---:|',
-    rows,
+    summaryRows(report),
     '',
     TRACK_END,
   ].join('\n');
-  const next = current.includes(TRACK_START) && current.includes(TRACK_END)
-    ? current.replace(new RegExp(`${TRACK_START}[\\s\\S]*?${TRACK_END}`), block)
-    : `${current.trimEnd()}\n\n${block}\n`;
-  writeFileSync(LATENCY_TRACK_FILE, next, 'utf8');
+  writeFileSync(LATENCY_TRACK_FILE, replaceTrackBlock(current, TRACK_START, TRACK_END, block), 'utf8');
+}
+
+export function updateTrackLiveRun(report: LatencyRunReport, reportPath: string): void {
+  if (!existsSync(LATENCY_TRACK_FILE)) return;
+  const current = readFileSync(LATENCY_TRACK_FILE, 'utf8');
+  const block = [
+    LIVE_TRACK_START,
+    '',
+    `Last live run: \`${report.generated_at}\` · browser \`${report.browser}\` · report \`${reportPath.replace(/\\/g, '/')}\``,
+    '',
+    '| Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |',
+    '|---|---:|---:|---:|---:|---:|---:|',
+    summaryRows(report),
+    '',
+    LIVE_TRACK_END,
+  ].join('\n');
+  writeFileSync(
+    LATENCY_TRACK_FILE,
+    replaceTrackBlock(current, LIVE_TRACK_START, LIVE_TRACK_END, block),
+    'utf8',
+  );
 }
 
 export async function measureChatSwitch(
@@ -127,7 +167,7 @@ export async function measureChatSwitch(
     messagesFetchCount?: () => number;
   },
 ): Promise<ChatSwitchSample> {
-  const loading = page.getByTestId('chat-history-loading');
+  const loading = page.getByTestId('chat-transcript-loading').or(page.getByTestId('chat-history-loading'));
   let loadingObserved = false;
   const watchLoading = loading.waitFor({ state: 'visible', timeout: 2_000 })
     .then(() => {
@@ -158,16 +198,20 @@ export async function measureChatSwitch(
 
   let response: Response | null = null;
   let responseAt: number | null = null;
-  try {
-    response = await responsePromise;
-    responseAt = Date.now();
-  } catch {
-    response = null;
-  }
+  // Cache hits paint `ready` before the revalidate GET returns. Do not
+  // serialize first-message visibility behind that response.
+  const watchResponse = responsePromise
+    .then((next) => {
+      response = next;
+      responseAt = Date.now();
+    })
+    .catch(() => {
+      response = null;
+    });
 
   await expect(input.ready).toBeVisible({ timeout: 30_000 });
   const visibleAt = Date.now();
-  await Promise.all([watchLoading, watchStale]);
+  await Promise.all([watchLoading, watchStale, watchResponse]);
 
   let requestDuration: number | null = null;
   let payloadBytes: number | null = null;

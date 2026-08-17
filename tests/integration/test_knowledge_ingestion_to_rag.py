@@ -34,4 +34,5 @@ def test_ingested_docx_markdown_is_loadable_by_rag(tmp_path: Path) -> None:
 
     assert outcomes[0].status == "succeeded"
     assert documents[0].title == "Expense policy"
-    assert documents[0].chunks[0].text == "Submit receipts within five days."
+    # Structure-aware chunking keeps the H1 with the following paragraph.
+    assert "Submit receipts within five days." in documents[0].chunks[0].text

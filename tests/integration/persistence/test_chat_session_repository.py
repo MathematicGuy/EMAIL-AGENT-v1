@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import selectors
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 
@@ -19,6 +20,7 @@ from cowork_agent.persistence.migrate import apply_migrations
 from cowork_agent.persistence.repositories.chat_history import PostgresChatHistoryRepository
 from cowork_agent.persistence.repositories.chat_sessions import PostgresChatSessionRegistry
 from cowork_agent.persistence.repositories.identity import PostgresIdentityRepository
+from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 from tests.integration.persistence.pg_probe import server_available
 
 DATABASE_URL = os.getenv("PG_TEST_URL", "")
@@ -47,7 +49,9 @@ async def _pool() -> AsyncConnectionPool:
 
 
 def _run(scenario: Callable[[], Awaitable[None]]) -> None:
-    asyncio.run(scenario())
+    asyncio.run(
+        scenario(), loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())
+    )
 
 
 def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
@@ -59,6 +63,7 @@ def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
             sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
             owner = await identities.resolve_or_create_principal("owner@example.com")
             other = await identities.resolve_or_create_principal("other@example.com")
+            await PostgresProjectRepository(pool).default_project(owner)
 
             scope = await sessions.create(
                 tenant_id=owner.workspace_id, user_id=owner.user_id
@@ -96,6 +101,7 @@ def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() ->
             identities = PostgresIdentityRepository(pool)
             sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
             owner = await identities.resolve_or_create_principal("owner@example.com")
+            await PostgresProjectRepository(pool).default_project(owner)
             scope = await sessions.create(
                 tenant_id=owner.workspace_id, user_id=owner.user_id
             )
@@ -122,6 +128,49 @@ def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() ->
             assert await reader.titles_for((scope,)) == {
                 scope.session_id: "Quarterly report plan"
             }
+        finally:
+            await pool.close()
+
+    _run(scenario)
+
+
+def test_chat_history_list_owned_turns_is_none_for_a_non_owner() -> None:
+    async def scenario() -> None:
+        pool = await _pool()
+        try:
+            await apply_migrations(pool)
+            identities = PostgresIdentityRepository(pool)
+            sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
+            history = PostgresChatHistoryRepository(pool)
+            owner = await identities.resolve_or_create_principal("owner@example.com")
+            other = await identities.resolve_or_create_principal("other@example.com")
+            await PostgresProjectRepository(pool).default_project(owner)
+            scope = await sessions.create(
+                tenant_id=owner.workspace_id, user_id=owner.user_id
+            )
+            turn = ChatTurn(
+                turn_id="turn-1",
+                session_id=scope.session_id,
+                user_message="How should I prepare the report?",
+                assistant_message="Start with the quarterly metrics.",
+                created_at=datetime(2026, 8, 14, tzinfo=UTC),
+            )
+            await history.write_turn(scope, turn, title="Quarterly report plan")
+
+            assert (
+                await history.list_owned_turns(
+                    session_id=scope.session_id,
+                    tenant_id=other.workspace_id,
+                    user_id=other.user_id,
+                )
+                is None
+            )
+            owned = await history.list_owned_turns(
+                session_id=scope.session_id,
+                tenant_id=owner.workspace_id,
+                user_id=owner.user_id,
+            )
+            assert owned == (scope, (turn,))
         finally:
             await pool.close()
 

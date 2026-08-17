@@ -64,7 +64,34 @@ class PostgresChatHistoryRepository:
             )
 
     async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
+        owned = await self.list_owned_turns(
+            session_id=scope.session_id,
+            tenant_id=scope.tenant_id,
+            user_id=scope.user_id,
+        )
+        return () if owned is None else owned[1]
+
+    async def list_owned_turns(
+        self, *, session_id: str, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None:
         async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT sessions.workspace_id, sessions.user_id, sessions.id,
+                       sessions.feature, sessions.project_id
+                FROM chat_sessions AS sessions
+                JOIN workspace_members AS members
+                  ON members.workspace_id = sessions.workspace_id
+                 AND members.user_id = sessions.user_id
+                WHERE sessions.id = %s
+                  AND sessions.user_id = %s
+                  AND sessions.workspace_id = %s
+                """,
+                (session_id, user_id, tenant_id),
+            )
+            session_row = await cursor.fetchone()
+            if session_row is None:
+                return None
             cursor = await connection.execute(
                 """
                 SELECT turns.turn_id, turns.session_id, turns.user_message,
@@ -72,16 +99,20 @@ class PostgresChatHistoryRepository:
                        turns.citation_coordinates, turns.rag_evidence,
                        turns.retrieval_status, turns.mail_scan
                 FROM chat_turns AS turns
-                JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
                 WHERE turns.session_id = %s
-                  AND sessions.workspace_id = %s
-                  AND sessions.user_id = %s
                 ORDER BY turns.created_at, turns.turn_id
                 """,
-                (scope.session_id, scope.tenant_id, scope.user_id),
+                (session_id,),
             )
             rows = await cursor.fetchall()
-        return tuple(_turn_from_row(row) for row in rows)
+        scope = ChatMemoryScope(
+            tenant_id=str(session_row[0]),
+            user_id=str(session_row[1]),
+            session_id=str(session_row[2]),
+            feature=str(session_row[3]),
+            project_id=str(session_row[4]),
+        )
+        return scope, tuple(_turn_from_row(row) for row in rows)
 
     async def titles_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, str]:
         if not scopes:

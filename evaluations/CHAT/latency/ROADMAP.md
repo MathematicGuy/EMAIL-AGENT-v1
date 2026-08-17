@@ -4,6 +4,11 @@ Scope: the 2–5 s pause when clicking another saved chat. Measure with
 `npx playwright test --project=chat-latency` and log every attempt in
 [TRACK.md](./TRACK.md). Change one step at a time.
 
+Engine choice (local Postgres vs SQLite vs hosted Supabase) is
+[ADR-010](../../../tasks/adr/ADR-010-local-postgres-control-plane-latency.md).
+This roadmap stays on the Recents-click path. Do not start a SQLite port
+of `chat_turns` here.
+
 ## What the current code does
 
 ```text
@@ -74,11 +79,14 @@ Ranked now that we have numbers:
 optional if the stack is up.
 
 **Status:** Done. Instant 91 ms, 2500 ms API → 2620 ms UX, A→B→A refetch,
-heavy payload 162 ms. Live not yet run.
+heavy payload 162 ms. Live RUM on local Postgres (2026-08-18): click→visible
+91 ms, `request_duration_ms` 16 ms, 488 B / 1 turn.
 
 **Tradeoff:** None. Cost is one dedicated Playwright project.
 
 ### Step 1 — Perceived latency: dedicated transcript loading state
+
+**Status:** Done (2026-08-17). `isTranscriptLoading` + `chat-transcript-loading` skeleton. Recents list no longer shares the transcript fetch flag.
 
 **Do:** Split `isHistoryLoading` into `isSessionListLoading` vs
 `isTranscriptLoading`. On switch, immediately show a transcript skeleton
@@ -99,6 +107,8 @@ because the click is no longer a lie.
 (unexpected) or Recents list regresses.
 
 ### Step 2 — In-memory session cache
+
+**Status:** Done (2026-08-17). LRU of 20 session transcripts in `useStreamingChat`. Repeat visit paints cache then revalidates. Not written to `localStorage`.
 
 **Do:** Keep a `Map<sessionId, ChatMessage[]>` (LRU, ~20 sessions).
 `loadExistingChat` paints cache immediately, then revalidates in the
@@ -139,7 +149,9 @@ invariants in `tests/unit/domain` / controller tests break.
 ### Step 4 — Backend `list_messages` cheaper (Supabase WAN)
 
 **Do not start** until a live `CHAT_LATENCY_LIVE=1` run shows
-`request_duration_ms` still > 300 ms. Mocks will not move.
+`request_duration_ms` still > 300 ms. Mocks will not move. Local Docker
+Postgres (2026-08-18) measured **16 ms** — skip this step on localhost.
+Revisit only if the running `DATABASE_URL` is hosted Supabase again.
 
 Research (2026-08-17): Context7 + official Supabase/psycopg docs. Each
 `pool.connection()` also runs `check=check_connection` (network ping on
@@ -203,3 +215,5 @@ Step 6  virtualize       only if render is the leftover
 - Rewriting `data/extracted/*.md`
 - Persisting raw email into history
 - Putting chat bodies in `localStorage` or `VITE_*`
+- Porting chat history / typed memory / project FTS to SQLite
+  ([ADR-010](../../../tasks/adr/ADR-010-local-postgres-control-plane-latency.md))

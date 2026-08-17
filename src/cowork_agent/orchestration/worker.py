@@ -104,6 +104,7 @@ async def run_worker() -> None:
         ProjectDocumentIngestionWorker,
     )
     from cowork_agent.persistence.migrate import apply_migrations
+    from cowork_agent.persistence.pool import control_plane_pool_kwargs
     from cowork_agent.persistence.repositories.identity import (
         PostgresMailboxConnectionRepository,
     )
@@ -114,16 +115,7 @@ async def run_worker() -> None:
     )
     from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 
-    pool = AsyncConnectionPool(
-        database_url(),
-        min_size=1,
-        max_size=4,
-        open=False,
-        check=AsyncConnectionPool.check_connection,
-        max_idle=60.0,
-        max_lifetime=300.0,
-        kwargs={"prepare_threshold": None},
-    )
+    pool = AsyncConnectionPool(database_url(), **control_plane_pool_kwargs())
     await pool.open(wait=True)
     storage_client: httpx.AsyncClient | None = None
     try:

@@ -132,9 +132,25 @@ class HistoryStore:
             assistant_message="Saved answer",
             created_at=datetime(2026, 8, 14, tzinfo=UTC),
         )
+        self.owner_tenant_id = "tenant-1"
+        self.owner_user_id = "user@example.com"
 
     async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]:
         return (self.turn,) if scope.session_id == self.turn.session_id else ()
+
+    async def list_owned_turns(
+        self, *, session_id: str, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None:
+        if (
+            session_id != self.turn.session_id
+            or tenant_id != self.owner_tenant_id
+            or user_id != self.owner_user_id
+        ):
+            return None
+        scope = ChatMemoryScope(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id
+        )
+        return scope, (self.turn,)
 
     async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
         return {scope.session_id: "Saved conversation" for scope in scopes}
@@ -562,6 +578,20 @@ def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> N
 
         assert listed.json()["sessions"][0]["title"] == "Saved conversation"
         assert history.json()["turns"] == [HistoryStore().turn.to_dict()]
+
+    asyncio.run(scenario())
+
+
+def test_history_endpoint_hides_durable_turns_from_a_non_owner() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="other@example.com"))
+        app.state.chat_history_repository = HistoryStore()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            response = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+
+        assert response.status_code == 404
 
     asyncio.run(scenario())
 

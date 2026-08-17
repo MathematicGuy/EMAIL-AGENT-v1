@@ -295,22 +295,29 @@ def create_chat_router() -> APIRouter:
     @router.get("/sessions/{session_id}/messages")
     async def list_messages(session_id: str, request: Request) -> dict[str, object]:
         principal = await _verified_principal(request)
-        try:
-            scope = await _require_session(request, principal, session_id)
-        except ChatSessionAccessDenied as exc:
-            raise HTTPException(status_code=404, detail="Chat session not found") from exc
-        namespace = MemoryNamespace(
-            scope=scope,
-            memory_type=MemoryType.SHORT_TERM,
-            record_id=session_id,
-            source_id=None,
-        )
         history = _history_repository(request)
-        turns = (
-            await history.list_turns(scope)
-            if history is not None
-            else _buffer(request).read(namespace)
-        )
+        if history is not None:
+            owned = await history.list_owned_turns(
+                session_id=session_id,
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+            )
+            if owned is None:
+                raise HTTPException(status_code=404, detail="Chat session not found")
+            scope, turns = owned
+        else:
+            try:
+                scope = await _require_session(request, principal, session_id)
+            except ChatSessionAccessDenied as exc:
+                raise HTTPException(status_code=404, detail="Chat session not found") from exc
+            turns = _buffer(request).read(
+                MemoryNamespace(
+                    scope=scope,
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id=session_id,
+                    source_id=None,
+                )
+            )
         # Collect all unique document IDs referenced in citation coordinates
         doc_ids: list[str] = []
         for turn in turns:

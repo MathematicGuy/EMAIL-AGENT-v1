@@ -59,20 +59,20 @@ where = ["src"]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
-# -n 4 --dist loadfile: measured 34 s vs 56 s serial. 6 and 8 workers are no
-#   faster -- the floor is each worker's ~5 s `cowork_agent` import. `loadfile`
-#   keeps a file on one worker so module-scoped fixtures are built once and
-#   port-binding tests never race.
+# -n 4 --dist loadgroup: same worker count as the measured loadfile setup.
+#   Ungrouped tests still fan out. tests/integration/persistence is one
+#   xdist_group so DROP SCHEMA public CASCADE never runs on two workers.
 # -m "not live": the live E2E module needs a real server plus Gmail OAuth and
 #   costs 20 s of boot before it can even skip. tests/conftest.py prints a
 #   yellow banner naming whatever was deselected, so this cannot rot silently.
 # --strict-markers: an unregistered marker is a typo that would otherwise make a
 #   test silently vanish from every `-m` selection.
-addopts = "-n 4 --dist loadfile -m 'not live' --strict-markers"
+addopts = "-n 4 --dist loadgroup -m 'not live' --strict-markers"
 markers = [
     "slow: >1s of wall clock on its own. Run with `-m slow`.",
     "live: needs a real external process/service. Deselected by default; skips loudly when absent.",
     "serial: must not run under xdist (spawns subprocesses or binds a fixed port).",
+    "xdist_group(name): pin tests that share a destructive resource to one xdist worker.",
 ]
 
 [tool.ruff]

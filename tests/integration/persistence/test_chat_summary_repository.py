@@ -95,7 +95,6 @@ def _episode(
     return ChatSummaryEpisode(
         episode_id=episode_id,
         record_id=record_id,
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -182,9 +181,6 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
             foreign_user_namespace = scoped_namespace(
                 "tenant-1", "other@example.com", "turn-user"
             )
-            foreign_tenant_namespace = scoped_namespace(
-                "tenant-2", "user@example.com", "turn-tenant"
-            )
             await repository.write_chat_summary(
                 exact_namespace,
                 replace(_episode(), record_id="record-turn-exact", chat_turn_id="turn-exact"),
@@ -192,15 +188,11 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
             await repository.write_chat_summary(
                 foreign_user_namespace,
                 replace(
-                    _episode(), episode_id="episode-user", record_id="record-turn-user",
-                    tenant_id="tenant-1", user_id="other@example.com", chat_turn_id="turn-user",
-                ),
-            )
-            await repository.write_chat_summary(
-                foreign_tenant_namespace,
-                replace(
-                    _episode(), episode_id="episode-tenant", record_id="record-turn-tenant",
-                    tenant_id="tenant-2", chat_turn_id="turn-tenant",
+                    _episode(),
+                    episode_id="episode-user",
+                    record_id="record-turn-user",
+                    user_id="other@example.com",
+                    chat_turn_id="turn-user",
                 ),
             )
 
@@ -212,10 +204,7 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
                     "SELECT tenant_id, user_id FROM chat_summary_episodes"
                     " ORDER BY tenant_id, user_id"
                 )
-                assert await cursor.fetchall() == [
-                    ("tenant-1", "other@example.com"),
-                    ("tenant-2", "user@example.com"),
-                ]
+                assert await cursor.fetchall() == [("local", "other@example.com")]
         finally:
             await pool.close()
 

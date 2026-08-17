@@ -21,6 +21,19 @@ def pytest_configure(config: pytest.Config) -> None:
     # turns a typo into a collection error instead of a silently unselectable test.
     _neutralize_broken_cert_bundle(config)
     _pin_offline_rag_provider(config)
+    _isolate_control_plane_target(config)
+
+
+def _isolate_control_plane_target(config: pytest.Config) -> None:
+    """Do not inherit the developer's POSTGRES_MODE / DATABASE_URL.
+
+    ``POSTGRES_MODE=local`` in ``.env`` would bind ``create_app()`` to the
+    real ``cowork`` database. API tests then send email-shaped user ids
+    into UUID columns. Persistence tests keep their own ``PG_TEST_URL``.
+    A test that needs a URL sets it via ``monkeypatch`` or a tmp ``.env``.
+    """
+    os.environ["POSTGRES_MODE"] = "off"
+    os.environ.pop("DATABASE_URL", None)
 
 
 def _pin_offline_rag_provider(config: pytest.Config) -> None:

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   CHAT_A_ID,
   CHAT_A_MARKER,
@@ -32,7 +32,11 @@ test.describe('chat history loading latency', () => {
     const report = {
       generated_at: generatedAt,
       git_sha: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? null,
-      mode: samples.every((item) => item.mode === 'mocked') ? 'mocked' as const : 'mixed' as const,
+      mode: samples.length > 0 && samples.every((item) => item.mode === 'live')
+        ? 'live' as const
+        : samples.every((item) => item.mode === 'mocked')
+          ? 'mocked' as const
+          : 'mixed' as const,
       browser: 'chromium',
       samples,
       summary: summarize(samples),
@@ -128,8 +132,9 @@ test.describe('chat history loading latency', () => {
     samples.push(firstA, toB, backToA);
 
     expect(api.messagesFetchCount()).toBe(3);
-    expect(backToA.click_to_first_message_visible_ms).toBeGreaterThanOrEqual(350);
-    expect(toB.stale_content_visible_ms ?? 0).toBeGreaterThan(0);
+    expect(backToA.click_to_first_message_visible_ms).toBeLessThan(150);
+    expect(toB.stale_content_visible_ms ?? 0).toBe(0);
+    expect(backToA.stale_content_visible_ms ?? 0).toBe(0);
   });
 
   test('records frontend cost of a heavy history payload', async ({ page }) => {
@@ -162,13 +167,24 @@ test.describe('chat history loading latency', () => {
     test.skip(!process.env.CHAT_LATENCY_LIVE, 'Set CHAT_LATENCY_LIVE=1 with frontend + API running.');
     await page.goto('/#dashboard');
     const dashboard = new DashboardPage(page);
-    await expect(dashboard.recents.first()).toBeVisible({ timeout: 20_000 });
-    const titles = await dashboard.recents.allTextContents();
-    const unique = [...new Set(titles.map((title) => title.trim()).filter(Boolean))];
-    test.skip(unique.length < 2, 'Need at least two saved chats to measure a live switch.');
+    await expect(
+      dashboard.recents.first().or(page.getByText('Chưa có cuộc trò chuyện')),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(dashboard.loading).toBeHidden({ timeout: 20_000 });
 
-    const firstChat = dashboard.recentChat(unique[0]);
-    const secondChat = dashboard.recentChat(unique[1]);
+    if (await dashboard.recents.count() < 2) {
+      await seedTwoLiveChats(page);
+      await page.reload();
+      await expect(dashboard.recents.first()).toBeVisible({ timeout: 20_000 });
+      await expect(dashboard.loading).toBeHidden({ timeout: 20_000 });
+    }
+
+    const count = await dashboard.recents.count();
+    test.skip(count < 2, 'Need at least two saved chats to measure a live switch.');
+
+    // Select by id, not title — two seeded chats can share the @mail label.
+    const firstChat = dashboard.recents.nth(0);
+    const secondChat = dashboard.recents.nth(1);
     const fromId = await firstChat.getAttribute('data-chat-id');
     const toId = await secondChat.getAttribute('data-chat-id');
     if (!fromId || !toId) {
@@ -193,3 +209,55 @@ test.describe('chat history loading latency', () => {
     expect(sample.click_to_first_message_visible_ms).toBeGreaterThan(0);
   });
 });
+
+async function seedTwoLiveChats(page: Page): Promise<void> {
+  const seeded = await page.evaluate(async () => {
+    const api = '/backend/v1/cowork/chat';
+    const jsonHeaders = { 'content-type': 'application/json' };
+    const guest = await fetch(`${api}/guest-session`, { method: 'POST', credentials: 'include' });
+    if (!guest.ok) throw new Error(`guest-session ${guest.status}`);
+    const projectsResponse = await fetch(`${api}/projects`, { credentials: 'include' });
+    if (!projectsResponse.ok) throw new Error(`projects ${projectsResponse.status}`);
+    const projects = (await projectsResponse.json()) as {
+      projects: Array<{ project_id: string; is_default: boolean }>;
+    };
+    const projectId =
+      projects.projects.find((project) => project.is_default)?.project_id ??
+      projects.projects[0]?.project_id;
+    if (!projectId) throw new Error('no project for live seed');
+    const ids: string[] = [];
+    for (const label of ['Live latency seed A', 'Live latency seed B']) {
+      const created = await fetch(`${api}/sessions`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: jsonHeaders,
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      if (!created.ok) throw new Error(`sessions ${created.status}`);
+      const session = (await created.json()) as { session_id: string };
+      const saved = await fetch(`${api}/sessions/${encodeURIComponent(session.session_id)}/mail-scans`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          turn_id: crypto.randomUUID(),
+          user_message: label,
+          assistant_message: `Seeded ${label}`,
+          mail_scan: {
+            status: 'succeeded',
+            emails_matched: 0,
+            emails_processed: 0,
+            emails_to_process: 0,
+            action_items_count: 0,
+          },
+        }),
+      });
+      if (!saved.ok) throw new Error(`mail-scans ${saved.status}`);
+      ids.push(session.session_id);
+    }
+    return ids;
+  });
+  if (seeded.length < 2) {
+    throw new Error('live seed did not create two chat sessions');
+  }
+}

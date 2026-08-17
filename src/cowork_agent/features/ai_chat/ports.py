@@ -91,6 +91,10 @@ class ChatHistoryPort(Protocol):
 
     async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]: ...
 
+    async def list_owned_turns(
+        self, *, session_id: str, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None: ...
+
     async def titles_for(
         self, scopes: Sequence[ChatMemoryScope]
     ) -> Mapping[str, str]: ...

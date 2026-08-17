@@ -315,6 +315,7 @@ def create_app() -> FastAPI:
                 from psycopg_pool import AsyncConnectionPool
 
                 from cowork_agent.persistence.migrate import apply_migrations
+                from cowork_agent.persistence.pool import control_plane_pool_kwargs
                 from cowork_agent.persistence.repositories.chat_history import (
                     PostgresChatHistoryRepository,
                 )
@@ -339,13 +340,7 @@ def create_app() -> FastAPI:
 
                 pool = AsyncConnectionPool(
                     database_url(),
-                    min_size=1,
-                    max_size=8,
-                    open=False,
-                    check=AsyncConnectionPool.check_connection,
-                    max_idle=60.0,
-                    max_lifetime=300.0,
-                    kwargs={"prepare_threshold": None},
+                    **control_plane_pool_kwargs(),
                 )
                 await pool.open(wait=True)
                 await apply_migrations(pool)
