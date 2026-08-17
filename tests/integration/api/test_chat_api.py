@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from cowork_agent.api.chat import create_chat_router
 from cowork_agent.domain.chat_contracts import (
@@ -241,6 +241,36 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
         ]
         assert events[0]["code"] == "optional_memory_degraded"
         assert all(event["session_id"] == "session-1" for event in events)
+
+    asyncio.run(scenario())
+
+
+def test_guest_session_endpoint_sets_an_opaque_http_only_cookie() -> None:
+    async def scenario() -> None:
+        app = _app()
+
+        async def issue_guest_session(request: Request, response: Response) -> None:
+            del request
+            response.set_cookie(
+                "cowork_session",
+                "opaque-guest-token",
+                httponly=True,
+                secure=True,
+                samesite="lax",
+            )
+
+        app.state.chat_guest_session_issuer = issue_guest_session
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://chat.test"
+        ) as client:
+            response = await client.post("/v1/cowork/chat/guest-session")
+
+        assert response.status_code == 204
+        cookie = response.headers["set-cookie"]
+        assert "cowork_session=opaque-guest-token" in cookie
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "SameSite=lax" in cookie
 
     asyncio.run(scenario())
 

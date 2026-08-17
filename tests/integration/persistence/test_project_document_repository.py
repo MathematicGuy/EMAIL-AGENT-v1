@@ -59,6 +59,7 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
 
             default = await projects.default_project(owner)
             assert default.is_default is True
+            assert default.name == "Default Project"
             assert await projects.list_for(owner) == (default,)
 
             document, created = await projects.create_or_get_document(

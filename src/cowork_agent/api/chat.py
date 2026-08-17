@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from langfuse import observe
 from pydantic import BaseModel, ConfigDict
@@ -44,6 +44,7 @@ from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
 
 PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
+GuestSessionIssuer = Callable[[Request, Response], Awaitable[None]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
 
 
@@ -112,6 +113,13 @@ def create_chat_router() -> APIRouter:
     """Create the transport-only router; runtime dependencies live on app.state."""
 
     router = APIRouter(prefix="/v1/cowork/chat", tags=["chat"])
+
+    @router.post("/guest-session", status_code=204, response_model=None)
+    async def create_guest_session(request: Request, response: Response) -> None:
+        issuer = getattr(request.app.state, "chat_guest_session_issuer", None)
+        if issuer is None:
+            raise HTTPException(status_code=503, detail="Guest chat is unavailable")
+        await cast(GuestSessionIssuer, issuer)(request, response)
 
     @router.post("/sessions", status_code=201)
     async def create_session(

@@ -88,6 +88,7 @@ from cowork_agent.identity import (
     LOCAL_TENANT_ID,
     ConnectionNotOwnedError,
     VerifiedPrincipal,
+    create_guest_session,
     ensure_principal_owns_connection,
     principal_for_connection,
     principal_from_opaque_session,
@@ -441,6 +442,7 @@ def create_app() -> FastAPI:
             app.state.project_document_vectors = None
             app.state.project_document_index = None
             app.state.chat_principal_resolver = _resolve_chat_principal
+            app.state.chat_guest_session_issuer = _issue_chat_guest_session
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
             app.state.run_repository = run_repository
@@ -1068,6 +1070,26 @@ async def _authenticated_principal(
     if principal is None and required:
         raise HTTPException(status_code=401, detail="Authentication required")
     return principal
+
+
+async def _issue_chat_guest_session(request: Request, response: Response) -> None:
+    """Bootstrap an isolated guest workspace without replacing an existing session."""
+    existing = await _authenticated_principal(request, required=False)
+    if existing is not None:
+        return
+
+    identities = getattr(request.app.state, "identity_repository", None)
+    sessions = getattr(request.app.state, "session_repository", None)
+    if identities is None or sessions is None:
+        raise HTTPException(status_code=503, detail="Guest chat is unavailable")
+
+    settings = _session_settings(request)
+    _, token = await create_guest_session(
+        identities,
+        sessions,
+        ttl_seconds=settings.session_ttl_seconds,
+    )
+    _set_session_cookie(response, settings, token)
 
 
 async def _connection_principal(
