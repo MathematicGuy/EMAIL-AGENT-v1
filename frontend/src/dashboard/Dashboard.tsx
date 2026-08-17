@@ -11,9 +11,7 @@ import { AutomationsView } from './components/AutomationsView';
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
-import { UpgradeModal } from './components/UpgradeModal';
 import { VoiceModal } from './components/VoiceModal';
-import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
 import { ProjectDocumentPanel } from '../modules/project-documents/ProjectDocumentPanel';
@@ -36,9 +34,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   > | null>(null);
 
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
-  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
@@ -159,7 +155,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}
-        onOpenUpgradeModal={() => setIsUpgradeModalOpen(true)}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
         onChangeView={setActiveView}
@@ -169,7 +164,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <Header
           apiStatus={apiStatus}
-          onOpenWorkIntake={() => setIsWorkIntakePanelOpen(true)}
           projects={projects}
           activeProject={activeProject}
           onSelectProject={handleSelectProject}
@@ -246,11 +240,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         anchor={modelAnchor}
       />
 
-      <UpgradeModal
-        isOpen={isUpgradeModalOpen}
-        onClose={() => setIsUpgradeModalOpen(false)}
-      />
-
       <VoiceModal
         isOpen={isVoiceModalOpen}
         onClose={() => setIsVoiceModalOpen(false)}
@@ -267,12 +256,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         }}
       />
 
-      {isWorkIntakePanelOpen && (
-        <WorkIntakePanel
-          isOpen
-          onClose={() => setIsWorkIntakePanelOpen(false)}
-        />
-      )}
       {projectDocumentsEnabled && (
         <ProjectDocumentPanel
           projectId={activeProjectId}

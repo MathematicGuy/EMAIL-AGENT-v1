@@ -73,14 +73,6 @@ describe('Dashboard Project chat', () => {
     expect(screen.getByText('Saved answer')).toBeTruthy();
   });
 
-  it('opens the Work Intake utility panel', () => {
-    vi.stubGlobal('fetch', projectFetch());
-    render(<Dashboard />);
-    fireEvent.click(screen.getByTitle('Work intake'));
-    expect(screen.getByRole('dialog', { name: 'Work intake' })).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Close work intake panel'));
-  });
-
   it('uploads composer files persistently to the active Project and opens the panel', async () => {
     const fetchMock = projectFetch((url, init) => {
       if (url.endsWith('/projects/project-default/documents') && init?.method === 'POST') {

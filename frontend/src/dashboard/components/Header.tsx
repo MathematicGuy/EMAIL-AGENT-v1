@@ -4,7 +4,6 @@ import {
   Loader2,
   Wifi,
   WifiOff,
-  Workflow,
   Folder,
   ChevronDown,
   Check,
@@ -15,7 +14,6 @@ import { documentText } from '../../modules/project-documents/i18n';
 
 interface HeaderProps {
   apiStatus?: 'unknown' | 'online' | 'offline';
-  onOpenWorkIntake: () => void;
   projects?: Project[];
   activeProject?: Project;
   onSelectProject?: (projectId: string) => void;
@@ -25,7 +23,6 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   apiStatus,
-  onOpenWorkIntake,
   projects,
   activeProject,
   onSelectProject,
@@ -131,14 +128,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{documentText('title')}</span>
           </button>
         )}
-        <button
-          type="button"
-          title="Work intake"
-          onClick={onOpenWorkIntake}
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <Workflow className="w-4 h-4" />
-        </button>
         <button
           type="button"
           title="Assistant menu"

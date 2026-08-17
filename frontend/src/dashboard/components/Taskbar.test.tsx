@@ -14,7 +14,6 @@ const baseProps = {
   onSelectRecent: vi.fn(),
   onDeleteChat: vi.fn(),
   recentChats: [],
-  onOpenUpgradeModal: vi.fn(),
   onNavigateHome: vi.fn(),
   onChangeView: vi.fn(),
 };
@@ -27,6 +26,9 @@ describe('Taskbar', () => {
     expect(screen.queryByText('Customize')).toBeNull();
     expect(screen.queryByText('Home')).toBeNull();
     expect(screen.queryByText('Code')).toBeNull();
+    expect(screen.queryByText('Design')).toBeNull();
+    expect(screen.queryByText('Labs')).toBeNull();
+    expect(screen.queryAllByTitle('Download app')).toHaveLength(0);
   });
 
   it('omits retired icon controls from the collapsed sidebar', () => {
@@ -34,5 +36,8 @@ describe('Taskbar', () => {
 
     expect(screen.queryByTitle('Dispatch Operations')).toBeNull();
     expect(screen.queryByTitle('Customize')).toBeNull();
+    expect(screen.queryByTitle('Projects')).toBeNull();
+    expect(screen.queryByTitle('Code & Plan Upgrade')).toBeNull();
+    expect(screen.queryAllByTitle('Download app')).toHaveLength(0);
   });
 });
