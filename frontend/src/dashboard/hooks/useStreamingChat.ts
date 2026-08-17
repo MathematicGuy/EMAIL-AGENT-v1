@@ -788,16 +788,20 @@ export function useStreamingChat(
   }, [rememberTranscript]);
 
   const loadFullEvidence = useCallback(async (chunkId: string): Promise<ChatRagEvidence | null> => {
-    if (!activeConversationId) return null;
+    const guard = loadHistoryAbortRef.current;
+    const sessionId = activeConversationId;
+    if (!sessionId) return null;
     const response = await fetch(
-      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(activeConversationId)}/messages?include_content=true`,
+      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages?include_content=true`,
       { credentials: 'include' },
     );
     if (!response.ok) return null;
     const payload = (await response.json()) as { turns: ChatTurn[] };
     const next = messagesFromTurns(payload.turns);
-    rememberTranscript(activeConversationId, next);
-    setMessages(next);
+    rememberTranscript(sessionId, next);
+    if (loadHistoryAbortRef.current === guard) {
+      setMessages(next);
+    }
     for (const message of next) {
       const found = message.ragEvidence?.find((item) => item.chunkId === chunkId);
       if (found) return found;
