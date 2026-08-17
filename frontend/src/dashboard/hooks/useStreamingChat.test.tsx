@@ -346,6 +346,201 @@ describe('useStreamingChat Project chat client', () => {
     await waitFor(() => expect(result.current.selectedAttachments[0]?.status).toBe('ready'));
     expect(result.current.selectedAttachments[0]?.documentId).toBe('document-1');
   });
+
+  it('clears the previous transcript immediately when switching chats', async () => {
+    let releaseSecond!: () => void;
+    const secondTurn = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({
+          sessions: [
+            { session_id: 'session-1', project_id: 'project-1', title: 'First' },
+            { session_id: 'session-2', project_id: 'project-1', title: 'Second' },
+          ],
+        }));
+      }
+      if (url.endsWith('/sessions/session-1/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-1', user_message: 'First question', assistant_message: 'First answer',
+          created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+        }] }));
+      }
+      if (url.endsWith('/sessions/session-2/messages')) {
+        return secondTurn.then(() => json({ turns: [{
+          turn_id: 'turn-2', user_message: 'Second question', assistant_message: 'Second answer',
+          created_at: '2026-08-12T00:01:00Z', citation_coordinates: [], rag_evidence: [],
+        }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+    await act(async () => result.current.loadExistingChat('session-1'));
+    expect(result.current.messages.map((item) => item.content)).toEqual(['First question', 'First answer']);
+
+    let pending: Promise<void> | undefined;
+    act(() => {
+      pending = result.current.loadExistingChat('session-2');
+    });
+    expect(result.current.activeConversationId).toBe('session-2');
+    expect(result.current.isTranscriptLoading).toBe(true);
+    expect(result.current.isHistoryLoading).toBe(false);
+    expect(result.current.messages).toEqual([]);
+
+    await act(async () => {
+      releaseSecond();
+      await pending;
+    });
+    expect(result.current.isTranscriptLoading).toBe(false);
+    expect(result.current.messages.map((item) => item.content)).toEqual(['Second question', 'Second answer']);
+  });
+
+  it('paints a previously loaded session from memory before the refetch returns', async () => {
+    let releaseRepeat!: () => void;
+    const repeatTurn = new Promise<void>((resolve) => {
+      releaseRepeat = resolve;
+    });
+    let session1Loads = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({
+          sessions: [
+            { session_id: 'session-1', project_id: 'project-1', title: 'First' },
+            { session_id: 'session-2', project_id: 'project-1', title: 'Second' },
+          ],
+        }));
+      }
+      if (url.endsWith('/sessions/session-1/messages')) {
+        session1Loads += 1;
+        if (session1Loads === 1) {
+          return Promise.resolve(json({ turns: [{
+            turn_id: 'turn-1', user_message: 'Cached question', assistant_message: 'Cached answer',
+            created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          }] }));
+        }
+        return repeatTurn.then(() => json({ turns: [{
+          turn_id: 'turn-1', user_message: 'Cached question', assistant_message: 'Revalidated answer',
+          created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+        }] }));
+      }
+      if (url.endsWith('/sessions/session-2/messages')) {
+        return Promise.resolve(json({ turns: [{
+          turn_id: 'turn-2', user_message: 'Other question', assistant_message: 'Other answer',
+          created_at: '2026-08-12T00:01:00Z', citation_coordinates: [], rag_evidence: [],
+        }] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+    await act(async () => result.current.loadExistingChat('session-1'));
+    await act(async () => result.current.loadExistingChat('session-2'));
+
+    let pending: Promise<void> | undefined;
+    act(() => {
+      pending = result.current.loadExistingChat('session-1');
+    });
+    expect(result.current.activeConversationId).toBe('session-1');
+    expect(result.current.messages.map((item) => item.content)).toEqual([
+      'Cached question',
+      'Cached answer',
+    ]);
+    expect(result.current.isTranscriptLoading).toBe(false);
+
+    await act(async () => {
+      releaseRepeat();
+      await pending;
+    });
+    expect(session1Loads).toBe(2);
+    expect(result.current.messages.map((item) => item.content)).toEqual([
+      'Cached question',
+      'Revalidated answer',
+    ]);
+  });
+
+  it('keeps the just-sent turn when the current Recents item is re-clicked', async () => {
+    let releaseReload!: () => void;
+    const reloadTurn = new Promise<void>((resolve) => {
+      releaseReload = resolve;
+    });
+    let session1Gets = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({
+          sessions: [
+            { session_id: 'session-1', project_id: 'project-1', title: 'Current' },
+          ],
+        }));
+      }
+      if (url.endsWith('/sessions/session-1/messages') && init?.method === 'POST') {
+        return Promise.resolve(sse([
+          { event_type: 'delta', text: 'Just sent answer' },
+          { event_type: 'completed' },
+        ]));
+      }
+      if (url.endsWith('/sessions/session-1/messages')) {
+        session1Gets += 1;
+        if (session1Gets === 1) {
+          return Promise.resolve(json({ turns: [{
+            turn_id: 'turn-1', user_message: 'Earlier question', assistant_message: 'Earlier answer',
+            created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          }] }));
+        }
+        return reloadTurn.then(() => json({ turns: [
+          {
+            turn_id: 'turn-1', user_message: 'Earlier question', assistant_message: 'Earlier answer',
+            created_at: '2026-08-12T00:00:00Z', citation_coordinates: [], rag_evidence: [],
+          },
+          {
+            turn_id: 'turn-2', user_message: 'Just sent question', assistant_message: 'Server answer',
+            created_at: '2026-08-12T00:01:00Z', citation_coordinates: [], rag_evidence: [],
+          },
+        ] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+    await act(async () => result.current.loadExistingChat('session-1'));
+
+    await act(async () => result.current.sendMessage('Just sent question'));
+    expect(result.current.messages.map((item) => item.content)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'Just sent question',
+      'Just sent answer',
+    ]);
+
+    let pending: Promise<void> | undefined;
+    act(() => {
+      pending = result.current.loadExistingChat('session-1');
+    });
+    expect(result.current.activeConversationId).toBe('session-1');
+    expect(result.current.messages.map((item) => item.content)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'Just sent question',
+      'Just sent answer',
+    ]);
+    expect(result.current.isTranscriptLoading).toBe(false);
+
+    await act(async () => {
+      releaseReload();
+      await pending;
+    });
+    expect(result.current.messages.some((item) => item.content === 'Just sent question')).toBe(true);
+    expect(result.current.messages.some((item) =>
+      item.role === 'assistant' && (item.content === 'Just sent answer' || item.content === 'Server answer')
+    )).toBe(true);
+  });
 });
 
 describe('Project document upload policy', () => {

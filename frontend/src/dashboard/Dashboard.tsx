@@ -98,6 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     apiStatus,
     recentChats,
     isHistoryLoading,
+    isTranscriptLoading,
     activeConversationId,
     workflows,
     approveWorkflowPlan,
@@ -185,7 +186,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         )}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>
-          {messages.length === 0 ? (
+          {isTranscriptLoading && messages.length === 0 ? (
+            <div
+              data-testid="chat-transcript-loading"
+              className="flex-1 flex items-center justify-center text-sm text-zinc-500"
+            >
+              Loading conversation…
+            </div>
+          ) : messages.length === 0 ? (
             <HeroSection
               inputText={inputText}
               onChangeText={setInputText}

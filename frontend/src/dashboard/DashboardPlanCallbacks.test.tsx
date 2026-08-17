@@ -31,6 +31,7 @@ vi.mock('./hooks/useStreamingChat', () => ({
     apiStatus: 'live',
     recentChats: [],
     isHistoryLoading: false,
+    isTranscriptLoading: false,
     activeConversationId: null,
     workflows: {},
     approveWorkflowPlan: streaming.approveWorkflowPlan,

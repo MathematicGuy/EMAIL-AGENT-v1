@@ -58,6 +58,7 @@ interface SseEvent {
   retrieval_status?: string;
 }
 
+const HISTORY_CACHE_LIMIT = 20;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
 const MAIL_COMMAND = /(?:^|\s)@mail\b/i;
@@ -79,6 +80,49 @@ function timestamp(value?: string): string {
   return new Date(value ?? Date.now()).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+function rememberTranscript(
+  cache: Map<string, ChatMessage[]>,
+  sessionId: string,
+  transcript: ChatMessage[],
+): void {
+  cache.delete(sessionId);
+  cache.set(sessionId, transcript);
+  while (cache.size > HISTORY_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
+  return turns.flatMap((turn) => {
+    const citations = (turn.citation_coordinates ?? [])
+      .map(citationFromCoordinate)
+      .filter((item): item is ChatCitation => item !== null);
+    const hasStoredEvidence = Array.isArray(turn.rag_evidence);
+    const ragEvidence = hasStoredEvidence ? ragEvidenceFromPayload(turn.rag_evidence) : undefined;
+    const status = retrievalStatus(turn.retrieval_status);
+    return [
+      {
+        id: `${turn.turn_id}-user`,
+        role: 'user' as const,
+        content: turn.user_message,
+        timestamp: timestamp(turn.created_at),
+      },
+      {
+        id: `${turn.turn_id}-assistant`,
+        role: 'assistant' as const,
+        content: turn.assistant_message ?? '',
+        timestamp: timestamp(turn.created_at),
+        citations,
+        ragEvidence,
+        retrievalStatus: status,
+        mailScan: mailScanFromPayload(turn.mail_scan),
+      },
+    ];
   });
 }
 
@@ -242,6 +286,7 @@ export function useStreamingChat(
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [isTranscriptLoading, setIsTranscriptLoading] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -252,6 +297,11 @@ export function useStreamingChat(
   const abortRef = useRef<AbortController | null>(null);
   const loadHistoryAbortRef = useRef<AbortController | null>(null);
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
+  const historyCacheRef = useRef(new Map<string, ChatMessage[]>());
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const activeConversationIdRef = useRef<string | null>(null);
+  messagesRef.current = messages;
+  activeConversationIdRef.current = activeConversationId;
 
   const refreshHistory = useCallback(async () => {
     if (!projectId) {
@@ -721,10 +771,22 @@ export function useStreamingChat(
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {
     void loadedProjectId;
+    const previousId = activeConversationIdRef.current;
+    if (previousId && messagesRef.current.length > 0) {
+      rememberTranscript(historyCacheRef.current, previousId, messagesRef.current);
+    }
     loadHistoryAbortRef.current?.abort();
     const abort = new AbortController();
     loadHistoryAbortRef.current = abort;
-    setIsHistoryLoading(true);
+    setActiveConversationId(sessionId);
+    const cached = historyCacheRef.current.get(sessionId);
+    if (cached) {
+      setMessages(cached);
+      setIsTranscriptLoading(false);
+    } else {
+      setMessages([]);
+      setIsTranscriptLoading(true);
+    }
     try {
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -733,29 +795,15 @@ export function useStreamingChat(
       if (!response.ok) throw new Error(`Could not load chat (HTTP ${response.status}).`);
       const payload = (await response.json()) as { turns: ChatTurn[] };
       if (abort.signal.aborted) return;
-      setMessages(payload.turns.flatMap((turn) => {
-        const citations = (turn.citation_coordinates ?? [])
-          .map(citationFromCoordinate)
-          .filter((item): item is ChatCitation => item !== null);
-        const hasStoredEvidence = Array.isArray(turn.rag_evidence);
-        const ragEvidence = hasStoredEvidence ? ragEvidenceFromPayload(turn.rag_evidence) : undefined;
-        const status = retrievalStatus(turn.retrieval_status);
-        return [
-          { id: `${turn.turn_id}-user`, role: 'user' as const, content: turn.user_message, timestamp: timestamp(turn.created_at) },
-          {
-            id: `${turn.turn_id}-assistant`, role: 'assistant' as const,
-            content: turn.assistant_message ?? '', timestamp: timestamp(turn.created_at), citations,
-            ragEvidence, retrievalStatus: status, mailScan: mailScanFromPayload(turn.mail_scan),
-          },
-        ];
-      }));
-      setActiveConversationId(sessionId);
+      const next = messagesFromTurns(payload.turns);
+      setMessages(next);
+      rememberTranscript(historyCacheRef.current, sessionId, next);
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') return;
       throw err;
     } finally {
       if (loadHistoryAbortRef.current === abort) {
-        setIsHistoryLoading(false);
+        setIsTranscriptLoading(false);
       }
     }
   }, []);
@@ -777,6 +825,7 @@ export function useStreamingChat(
     if (!response.ok) {
       throw new Error(`Could not delete chat (HTTP ${response.status}).`);
     }
+    historyCacheRef.current.delete(sessionId);
     if (activeConversationId === sessionId) {
       setMessages([]);
       setActiveConversationId(null);
@@ -819,6 +868,7 @@ export function useStreamingChat(
     messages,
     recentChats,
     isHistoryLoading,
+    isTranscriptLoading,
     activeConversationId,
     isGenerating,
     inputText,
