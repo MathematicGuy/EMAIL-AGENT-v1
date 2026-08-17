@@ -174,6 +174,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
         <button
           onClick={onNewChat}
+          title="New chat"
           className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
         >
           <Plus className="w-4 h-4 text-zinc-400" />
