@@ -69,7 +69,7 @@ class PostgresChatHistoryRepository:
         if connection is None:
             async with self._pool.connection() as borrowed:
                 return await self.list_turns(scope, connection=borrowed)
-        cursor = await connection.execute(  # type: ignore[union-attr]
+        cursor = await connection.execute(  # type: ignore[attr-defined]
             """
             SELECT turns.turn_id, turns.session_id, turns.user_message,
                    turns.assistant_message, turns.created_at,

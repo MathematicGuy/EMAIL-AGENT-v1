@@ -5,7 +5,6 @@ import {
   GitBranch,
   Search,
   SlidersHorizontal,
-  Clock,
   Mail,
   LoaderCircle,
   Trash2
@@ -30,8 +29,8 @@ interface TaskbarProps {
   isHistoryLoading?: boolean;
   activeChatId?: string;
   onNavigateHome?: () => void;
-  activeView?: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts';
-  onChangeView?: (view: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts') => void;
+  activeView?: 'chat' | 'mail' | 'artifacts';
+  onChangeView?: (view: 'chat' | 'mail' | 'artifacts') => void;
   isGenerating?: boolean;
 }
 
@@ -113,16 +112,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             }`}
           >
             <MessageSquare className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Scheduled Automations"
-            onClick={() => onChangeView?.('schedules')}
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
           </button>
 
           <button
@@ -214,16 +203,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           >
             <GitBranch className={`w-3.5 h-3.5 ${activeView === 'artifacts' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
             <span>Artifacts</span>
-          </button>
-
-          <button
-            onClick={() => onChangeView?.('schedules')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-[#d97757]" />
-            <span>Scheduled</span>
           </button>
 
           <button

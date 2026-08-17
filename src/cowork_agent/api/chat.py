@@ -79,9 +79,8 @@ async def load_owned_history(
     """Load owned turns. Shared Postgres pools use one checkout for require + list."""
     session_pool = getattr(sessions, "_pool", None)
     history_pool = getattr(history, "_pool", None) if history is not None else None
-    pool = session_pool
-    if pool is not None and pool is history_pool:
-        async with pool.connection() as connection:
+    if session_pool is not None and session_pool is history_pool:
+        async with cast(Any, session_pool).connection() as connection:
             scope = await sessions.require(
                 session_id,
                 tenant_id=principal.tenant_id,

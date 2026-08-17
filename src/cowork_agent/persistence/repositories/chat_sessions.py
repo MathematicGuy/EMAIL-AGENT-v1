@@ -77,7 +77,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
                 return await self.require(
                     session_id, user_id=user_id, tenant_id=tenant_id, connection=borrowed
                 )
-        cursor = await connection.execute(  # type: ignore[union-attr]
+        cursor = await connection.execute(  # type: ignore[attr-defined]
             """
             SELECT sessions.workspace_id, sessions.user_id, sessions.id,
                    sessions.feature, sessions.project_id
