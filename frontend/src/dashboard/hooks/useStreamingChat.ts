@@ -300,14 +300,15 @@ export function useStreamingChat(
     attachmentPollsRef.current.clear();
   }, [projectId]);
 
-  const ensureSession = useCallback(async (): Promise<string> => {
+  const ensureSession = useCallback(async (projectIdOverride?: string): Promise<string> => {
     if (activeConversationId) return activeConversationId;
-    if (!projectId) throw new Error('Select a Project before starting chat.');
+    const sessionProjectId = projectIdOverride ?? projectId;
+    if (!sessionProjectId) throw new Error('Select a Project before starting chat.');
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/sessions`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId }),
+      body: JSON.stringify({ project_id: sessionProjectId }),
     });
     if (!response.ok) throw new Error(`Could not create chat session (HTTP ${response.status}).`);
     const payload = (await response.json()) as ChatSession;
@@ -550,7 +551,7 @@ export function useStreamingChat(
     }
   }, [projectId]);
 
-  const sendMessage = useCallback(async (override?: string) => {
+  const sendMessage = useCallback(async (override?: string, projectIdOverride?: string) => {
     const text = (override ?? inputText).trim();
     if (!text || isGenerating) return;
     if (selectedAttachments.some((item) => item.status !== 'ready')) {
@@ -583,7 +584,7 @@ export function useStreamingChat(
     abortRef.current = abort;
     try {
       if (isMailCommand(text)) {
-        const sessionId = await ensureSession();
+        const sessionId = await ensureSession(projectIdOverride);
         mailSessionId = sessionId;
         const result = await runMailScan(assistantId, abort);
         try {
@@ -597,7 +598,7 @@ export function useStreamingChat(
         void refreshHistory();
         return;
       }
-      const sessionId = await ensureSession();
+      const sessionId = await ensureSession(projectIdOverride);
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
         {

@@ -38,7 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
-  const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
+  const { projects, activeProjectId, setActiveProjectId, createProject, ensureDefaultProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId),
@@ -121,9 +121,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     setIsModelModalOpen(true);
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    if (!activeProjectId) await ensureDefaultProject();
     resetChat();
     setActiveView('chat');
+  };
+
+  const handleSendMessage = async (text?: string) => {
+    const project = activeProject ?? await ensureDefaultProject();
+    await sendMessage(text, project.id);
   };
 
   const handleSelectRecent = (chat: RecentChat) => {
@@ -188,7 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
             <HeroSection
               inputText={inputText}
               onChangeText={setInputText}
-              onSend={sendMessage}
+              onSend={handleSendMessage}
               isGenerating={isGenerating}
               selectedModel={selectedModel}
               onOpenModelModal={openModelSelector}
@@ -206,7 +212,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               messages={messages}
               inputText={inputText}
               onChangeText={setInputText}
-              onSend={sendMessage}
+              onSend={handleSendMessage}
               isGenerating={isGenerating}
               onStopGeneration={stopGeneration}
               selectedModel={selectedModel}
@@ -243,7 +249,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
       <VoiceModal
         isOpen={isVoiceModalOpen}
         onClose={() => setIsVoiceModalOpen(false)}
-        onSendTranscript={(text) => sendMessage(text)}
+        onSendTranscript={handleSendMessage}
       />
 
       <NewProjectModal
