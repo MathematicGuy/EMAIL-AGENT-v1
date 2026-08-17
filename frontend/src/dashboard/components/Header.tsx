@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Ghost,
   Loader2,
   Wifi,
   WifiOff,
@@ -128,13 +127,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{documentText('title')}</span>
           </button>
         )}
-        <button
-          type="button"
-          title="Assistant menu"
-          className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-[#2c2a26] rounded-lg transition-colors cursor-pointer"
-        >
-          <Ghost className="w-4 h-4" />
-        </button>
       </div>
     </header>
   );

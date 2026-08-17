@@ -8,7 +8,6 @@ import {
   Folder,
   Check,
   Hand,
-  Zap,
   FileText,
   LoaderCircle,
   X,
@@ -343,12 +342,6 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               <span>Manual</span>
               <ChevronDown className="w-3 h-3 text-zinc-500" />
             </button>
-          </div>
-
-          {/* Right Usage Badge matching image.png */}
-          <div className="flex items-center gap-1 text-zinc-400">
-            <Zap className="w-3 h-3 text-amber-400" />
-            <span>2× more usage until August 5</span>
           </div>
         </div>
       </div>
