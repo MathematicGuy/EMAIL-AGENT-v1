@@ -15,6 +15,7 @@ from uuid import uuid4
 from langfuse import observe
 
 from cowork_agent.domain.chat_contracts import (
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
@@ -87,7 +88,7 @@ def _rag_evidence(
         return (
             tuple(
                 _project_evidence_to_rag_evidence(item)
-                for item in project_documents.evidence[:5]
+                for item in project_documents.evidence[:MAX_CHAT_RAG_EVIDENCE_ITEMS]
             ),
             "success",
         )

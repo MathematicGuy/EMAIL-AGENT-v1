@@ -220,3 +220,57 @@ def test_heading_within_the_label_limit_is_left_exactly_as_written() -> None:
     (chunk,) = chunk_markdown("# Điều 1. Phạm vi điều chỉnh\n\nNội dung.")
 
     assert chunk.section == "Điều 1. Phạm vi điều chỉnh"
+
+
+def test_points_cut_from_their_clause_carry_the_clause_stem() -> None:
+    points = "\n\n".join(
+        f"{letter}) Trách nhiệm số {index} của Ủy ban nhân dân cấp tỉnh "
+        "đối với quốc lộ được phân cấp quản lý."
+        for index, letter in enumerate("abcdđefghi")
+    )
+    markdown = normalize_structure(
+        "Điều 4. Phân cấp quản lý quốc lộ\n\n"
+        "1. Phân cấp để Ủy ban nhân dân cấp tỉnh quản lý quốc lộ bao gồm điều này.\n\n"
+        "5. Trách nhiệm của Ủy ban nhân dân cấp tỉnh đối với quốc lộ được phân cấp\n\n"
+        f"{points}"
+    )
+
+    chunks = chunk_markdown(markdown, max_chars=600)
+
+    resumed = [chunk for chunk in chunks[1:] if chunk.section == "Điều 4. Phân cấp quản lý quốc lộ"]
+    assert resumed
+    assert all(
+        "5. Trách nhiệm của Ủy ban nhân dân cấp tỉnh" in chunk.text for chunk in resumed
+    )
+    assert all(len(chunk.text) <= 600 for chunk in chunks)
+
+
+def test_clause_stem_is_not_repeated_before_a_clause_that_names_itself() -> None:
+    clauses = "\n\n".join(
+        f"{index}. Khoản số {index} nêu rõ nội dung của khoản này một cách đầy đủ."
+        for index in range(1, 12)
+    )
+    chunks = chunk_markdown(
+        normalize_structure(f"Điều 9. Các khoản độc lập\n\n{clauses}"), max_chars=400
+    )
+
+    assert len(chunks) > 1
+    resumed = chunks[1].text.split("\n\n")[1]
+    assert resumed.startswith("7. Khoản số 7")
+    assert resumed not in chunks[0].text
+
+
+def test_a_stem_too_long_to_repeat_is_left_out_of_the_resumed_chunk() -> None:
+    stem = "2. " + " ".join(f"vế thứ {index} của khoản này" for index in range(40)) + ":"
+    points = "\n\n".join(
+        f"{letter}) Điểm {letter} quy định nội dung cụ thể tương ứng."
+        for letter in "abcdđefgh"
+    )
+    chunks = chunk_markdown(
+        normalize_structure(f"Điều 3. Điều có khoản dài\n\n{stem}\n\n{points}"),
+        max_chars=400,
+    )
+
+    assert len(chunks) > 1
+    assert all(len(chunk.text) <= 400 for chunk in chunks)
+    assert not any(chunk.text.count(stem) > 1 for chunk in chunks)

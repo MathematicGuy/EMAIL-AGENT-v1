@@ -12,6 +12,7 @@ from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
     MAX_CHAT_MESSAGE_LENGTH,
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     MAX_CHAT_SUMMARY_LENGTH,
     MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH,
     MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
@@ -341,9 +342,23 @@ def test_rag_evidence_rejects_scores_outside_the_unit_interval() -> None:
         replace(_rag_evidence(), relevance_score=1.001)
 
 
-def test_chat_turn_rejects_more_than_five_rag_evidence_records() -> None:
+def test_chat_turn_rejects_more_rag_evidence_than_retrieval_can_return() -> None:
     with pytest.raises(ValueError, match="rag_evidence"):
-        replace(_chat_turn(), rag_evidence=(_rag_evidence(),) * 6, retrieval_status="success")
+        replace(
+            _chat_turn(),
+            rag_evidence=(_rag_evidence(),) * (MAX_CHAT_RAG_EVIDENCE_ITEMS + 1),
+            retrieval_status="success",
+        )
+
+
+def test_chat_turn_accepts_a_whole_section_widened_evidence_list() -> None:
+    turn = replace(
+        _chat_turn(),
+        rag_evidence=(_rag_evidence(),) * MAX_CHAT_RAG_EVIDENCE_ITEMS,
+        retrieval_status="success",
+    )
+
+    assert len(turn.rag_evidence) == MAX_CHAT_RAG_EVIDENCE_ITEMS
 
 
 def _profile() -> DeclarativeProfile:
