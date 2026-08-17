@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ChevronDown,
@@ -9,40 +9,17 @@ import {
 } from 'lucide-react';
 import {
   MailApiError,
-  createDigestRun,
   disconnectConnection,
   getDigestResult,
-  getDigestRun,
   getDigestTasks,
   getGmailConnectUrl,
   listConnections,
   listDigestRuns,
-  newIdempotencyKey,
   type DigestResult,
-  type DigestRunHistoryItem,
-  type DigestRunStatus,
   type DigestRunView,
   type DigestTask,
   type MailboxConnection,
 } from '../../modules/mail/api';
-
-const POLL_INTERVAL_MS = 1_500;
-const POLL_TIMEOUT_MS = 30 * 60 * 1_000;
-const TERMINAL_STATUSES = new Set<DigestRunStatus>(['succeeded', 'partial', 'failed']);
-
-function waitForPoll(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, POLL_INTERVAL_MS);
-    signal.addEventListener(
-      'abort',
-      () => {
-        window.clearTimeout(timer);
-        reject(new DOMException('Polling aborted', 'AbortError'));
-      },
-      { once: true }
-    );
-  });
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof MailApiError) {
@@ -51,23 +28,6 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return error instanceof Error ? error.message : 'Đã xảy ra lỗi không xác định.';
-}
-
-function statusLabel(status: DigestRunStatus): string {
-  return {
-    queued: 'Đang chờ',
-    running: 'Đang xử lý',
-    succeeded: 'Hoàn tất',
-    partial: 'Hoàn tất một phần',
-    failed: 'Thất bại',
-  }[status];
-}
-
-function statusClass(status: DigestRunStatus): string {
-  if (status === 'succeeded') return 'text-emerald-300 bg-emerald-500/10';
-  if (status === 'partial') return 'text-amber-300 bg-amber-500/10';
-  if (status === 'failed') return 'text-red-300 bg-red-500/10';
-  return 'text-sky-300 bg-sky-500/10';
 }
 
 function initialOAuthBanner(): string | null {
@@ -81,19 +41,14 @@ function initialOAuthBanner(): string | null {
 export const MailInboxView: React.FC = () => {
   const [connections, setConnections] = useState<MailboxConnection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
-  const [history, setHistory] = useState<DigestRunHistoryItem[]>([]);
   const [selectedRun, setSelectedRun] = useState<DigestRunView | null>(null);
   const [result, setResult] = useState<DigestResult | null>(null);
   const [tasks, setTasks] = useState<DigestTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [maxEmails, setMaxEmails] = useState(20);
   const [loadingConnections, setLoadingConnections] = useState(true);
   const [loadingMailbox, setLoadingMailbox] = useState(false);
-  const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(initialOAuthBanner);
-  const pollControllerRef = useRef<AbortController | null>(null);
-  const pendingIdempotencyKeyRef = useRef<string | null>(null);
 
   const selectedConnection = useMemo(
     () => connections.find((connection) => connection.id === selectedConnectionId) ?? null,
@@ -122,27 +77,6 @@ export const MailInboxView: React.FC = () => {
     }
   }, []);
 
-  const refreshHistory = useCallback(async (connectionId: string, signal?: AbortSignal) => {
-    const runs = await listDigestRuns(connectionId, 20, signal);
-    setHistory(runs);
-  }, []);
-
-  const loadMailbox = useCallback(
-    async (connectionId: string, signal?: AbortSignal) => {
-      setLoadingMailbox(true);
-      setError(null);
-      try {
-        const runs = await listDigestRuns(connectionId, 20, signal);
-        setHistory(runs);
-      } catch (cause) {
-        if ((cause as { name?: string }).name !== 'AbortError') setError(errorMessage(cause));
-      } finally {
-        setLoadingMailbox(false);
-      }
-    },
-    []
-  );
-
   const loadOutputs = useCallback(async (runId: string, signal?: AbortSignal) => {
     const [nextResult, nextTasks] = await Promise.all([
       getDigestResult(runId, signal),
@@ -157,39 +91,27 @@ export const MailInboxView: React.FC = () => {
     );
   }, []);
 
-  const pollRun = useCallback(
-    async (runId: string, connectionId: string, controller: AbortController) => {
-      const startedAt = Date.now();
-      setPolling(true);
+  const loadMailbox = useCallback(
+    async (connectionId: string, signal?: AbortSignal) => {
+      setLoadingMailbox(true);
       setError(null);
       try {
-        while (!controller.signal.aborted) {
-          const run = await getDigestRun(runId, controller.signal);
-          setSelectedRun(run);
-          if (TERMINAL_STATUSES.has(run.status)) {
-            if (run.status !== 'failed') await loadOutputs(run.id, controller.signal);
-            else {
-              setResult(null);
-              setTasks([]);
-              setError(run.error?.message ?? 'Run xử lý email thất bại.');
-            }
-            await refreshHistory(connectionId, controller.signal);
-            return;
-          }
-          if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
-            setBanner('Run vẫn có thể đang tiếp tục. Hãy chọn lại run trong lịch sử để theo dõi.');
-            await refreshHistory(connectionId, controller.signal);
-            return;
-          }
-          await waitForPoll(controller.signal);
-        }
+        const runs = await listDigestRuns(connectionId, 20, signal);
+        const latestCompletedRun = runs.find(
+          (run) => run.status === 'succeeded' || run.status === 'partial'
+        );
+        setSelectedRun(latestCompletedRun ?? null);
+        setResult(null);
+        setTasks([]);
+        setSelectedTaskId(null);
+        if (latestCompletedRun) await loadOutputs(latestCompletedRun.id, signal);
       } catch (cause) {
         if ((cause as { name?: string }).name !== 'AbortError') setError(errorMessage(cause));
       } finally {
-        setPolling(false);
+        setLoadingMailbox(false);
       }
     },
-    [loadOutputs, refreshHistory]
+    [loadOutputs]
   );
 
   useEffect(() => {
@@ -209,7 +131,6 @@ export const MailInboxView: React.FC = () => {
   }, [refreshConnections]);
 
   useEffect(() => {
-    pollControllerRef.current?.abort();
     if (!selectedConnectionId) return;
     const controller = new AbortController();
     const timer = window.setTimeout(
@@ -222,60 +143,6 @@ export const MailInboxView: React.FC = () => {
     };
   }, [loadMailbox, selectedConnectionId]);
 
-  useEffect(() => () => pollControllerRef.current?.abort(), []);
-
-  const handleScan = async () => {
-    if (!selectedConnectionId || polling) return;
-    const controller = new AbortController();
-    pollControllerRef.current?.abort();
-    pollControllerRef.current = controller;
-    setResult(null);
-    setTasks([]);
-    setSelectedTaskId(null);
-    setBanner(null);
-    setError(null);
-    const idempotencyKey = pendingIdempotencyKeyRef.current ?? newIdempotencyKey();
-    pendingIdempotencyKeyRef.current = idempotencyKey;
-    try {
-      const accepted = await createDigestRun({
-        mailboxConnectionId: selectedConnectionId,
-        maxEmails,
-        idempotencyKey,
-        signal: controller.signal,
-      });
-      pendingIdempotencyKeyRef.current = null;
-      await pollRun(accepted.id, selectedConnectionId, controller);
-      await loadMailbox(selectedConnectionId, controller.signal);
-    } catch (cause) {
-      if ((cause as { name?: string }).name !== 'AbortError') setError(errorMessage(cause));
-    }
-  };
-
-  const handleSelectRun = async (item: DigestRunHistoryItem) => {
-    if (!selectedConnectionId) return;
-    pollControllerRef.current?.abort();
-    const controller = new AbortController();
-    pollControllerRef.current = controller;
-    setSelectedRun(item);
-    setResult(null);
-    setTasks([]);
-    setSelectedTaskId(null);
-    setError(null);
-    if (item.status === 'queued' || item.status === 'running') {
-      await pollRun(item.id, selectedConnectionId, controller);
-      return;
-    }
-    if (item.status === 'failed') {
-      setError(item.error?.message ?? 'Run xử lý email thất bại.');
-      return;
-    }
-    try {
-      await loadOutputs(item.id, controller.signal);
-    } catch (cause) {
-      if ((cause as { name?: string }).name !== 'AbortError') setError(errorMessage(cause));
-    }
-  };
-
   const handleDisconnect = async () => {
     if (!selectedConnection || hasActiveRun) return;
     if (!window.confirm(`Ngắt kết nối ${selectedConnection.emailAddress}?`)) return;
@@ -287,26 +154,17 @@ export const MailInboxView: React.FC = () => {
       setResult(null);
       setTasks([]);
       setSelectedTaskId(null);
-      setHistory([]);
       await refreshConnections();
     } catch (cause) {
       setError(errorMessage(cause));
     }
   };
 
-  const progress = selectedRun?.progress;
-  const progressPercent = progress
-    ? Math.min(100, Math.round((progress.emailsProcessed / Math.max(progress.emailsToProcess, 1)) * 100))
-    : 0;
-
   const handleConnectionChange = (connectionId: string) => {
-    pollControllerRef.current?.abort();
-    pendingIdempotencyKeyRef.current = null;
     setSelectedRun(null);
     setResult(null);
     setTasks([]);
     setSelectedTaskId(null);
-    setHistory([]);
     setSelectedConnectionId(connectionId);
   };
 
@@ -359,75 +217,6 @@ export const MailInboxView: React.FC = () => {
 
         {selectedConnection && (
           <div className="space-y-6">
-            <section className="rounded-2xl border border-zinc-700 bg-[#22211e] p-4 md:p-5">
-              <div className="grid items-end gap-4 md:grid-cols-[minmax(180px,1fr)_minmax(220px,1.4fr)_auto]">
-                <div>
-                  <label htmlFor="run-history" className="mb-2 block text-xs text-zinc-400">
-                    Lần quét
-                  </label>
-                  <select
-                    id="run-history"
-                    value={selectedRun?.id ?? ''}
-                    onChange={(event) => {
-                      const run = history.find((item) => item.id === event.target.value);
-                      if (run) void handleSelectRun(run);
-                    }}
-                    className="w-full rounded-lg border border-zinc-700 bg-[#191815] px-3 py-2.5 text-sm"
-                  >
-                    <option value="">Chọn lịch sử quét</option>
-                    {history.map((run) => (
-                      <option key={run.id} value={run.id}>
-                        {run.createdAt ? new Date(run.createdAt).toLocaleString('vi-VN') : run.id}
-                        {' · '}{statusLabel(run.status)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <div className="mb-2 flex items-center justify-between text-xs text-zinc-400">
-                    <label htmlFor="max-emails">Số email cần quét</label>
-                    <span>{maxEmails} email</span>
-                  </div>
-                  <input
-                    id="max-emails"
-                    type="range"
-                    min="5"
-                    max="100"
-                    step="5"
-                    value={maxEmails}
-                    onChange={(event) => setMaxEmails(Number(event.target.value))}
-                    className="h-2 w-full accent-[#d97757]"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleScan()}
-                  disabled={polling || loadingMailbox}
-                  className="rounded-lg bg-[#d97757] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  {polling ? 'Đang xử lý…' : 'Quét mail mới'}
-                </button>
-              </div>
-              {selectedRun && (
-                <div className="mt-4 space-y-2 border-t border-zinc-700/70 pt-4">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`rounded px-2 py-1 ${statusClass(selectedRun.status)}`}>
-                      {statusLabel(selectedRun.status)}
-                    </span>
-                    <span className="text-zinc-400">
-                      {progress?.emailsProcessed ?? 0}/{progress?.emailsToProcess ?? 0} email
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded bg-zinc-800">
-                    <div
-                      className="h-full bg-[#d97757] transition-all"
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </section>
-
             <section className="space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-semibold">Danh mục hành động ({tasks.length})</h2>
@@ -443,9 +232,9 @@ export const MailInboxView: React.FC = () => {
                   {result.message}
                 </p>
               )}
-              {!result && tasks.length === 0 && !polling && (
+              {!result && tasks.length === 0 && !loadingMailbox && (
                 <p className="rounded-xl border border-dashed border-zinc-700 p-8 text-center text-sm text-zinc-500">
-                  Quét email hoặc chọn một lần quét cũ để xem danh mục hành động.
+                  Chưa có action item từ lần quét gần nhất.
                 </p>
               )}
               {result?.attachmentWarnings.map((warning) => (

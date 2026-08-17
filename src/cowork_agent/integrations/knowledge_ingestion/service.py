@@ -115,15 +115,8 @@ class KnowledgeIngestionService:
         return IngestionOutcome(relative, "succeeded", output=output_name)
 
     def _extract(self, path: Path, output_dir: Path) -> tuple[str, str, int]:
-        if self._settings.ocr_enabled:
-            ocr = self._ocr_extractor
-            if ocr is None:
-                ocr = MistralOcrExtractor(
-                    api_key=self._settings.api_key,
-                    model=self._settings.model,
-                    timeout_seconds=self._settings.timeout_seconds,
-                    image_dir=output_dir / "images",
-                )
+        if self._settings.extraction_mode in ("advance", "advanced") or self._settings.ocr_enabled:
+            ocr = self._get_or_create_ocr(output_dir)
             try:
                 content = path.read_bytes()
                 markdown = ocr.extract(path.name, content)
@@ -148,8 +141,28 @@ class KnowledgeIngestionService:
         if inspection.page_count > self._settings.max_pdf_pages:
             raise _IngestionError("pdf_page_limit_exceeded")
         if inspection.pages_needing_ocr:
+            if self._settings.api_key or self._ocr_extractor is not None:
+                ocr = self._get_or_create_ocr(output_dir)
+                try:
+                    content = path.read_bytes()
+                    markdown = ocr.extract(path.name, content)
+                except Exception as error:
+                    raise _IngestionError("ocr_extraction_failed") from error
+                if not markdown.strip():
+                    raise _IngestionError("empty_extraction")
+                return markdown, "mistral_ocr", inspection.page_count
             raise _IngestionError("mistral_not_configured")
         return _render_pdf(inspection), "pdf_native", inspection.page_count
+
+    def _get_or_create_ocr(self, output_dir: Path) -> MistralOcrExtractor:
+        if self._ocr_extractor is not None:
+            return self._ocr_extractor
+        return MistralOcrExtractor(
+            api_key=self._settings.api_key,
+            model=self._settings.model,
+            timeout_seconds=self._settings.timeout_seconds,
+            image_dir=output_dir / "images",
+        )
 
 
 class _IngestionError(Exception):

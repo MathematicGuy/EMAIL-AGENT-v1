@@ -51,7 +51,7 @@ python scripts/evaluate_retrieval.py --dry-run
 python scripts/evaluate_retrieval.py --embedder gemini --retriever hybrid --rerank
 ```
 
-Key flags: `--embedder {hashing,gemini}`, `--retriever {dense,bm25,hybrid,hybrid_turbovec,qdrant,turbovec}`,
+Key flags: `--embedder {hashing,gemini}`, `--retriever {dense,bm25,hybrid,hybrid_turbovec,turbovec}`,
 `--rerank`, `--top-k` (5), `--min-score` (0.2), `--fixture`, `--corpus-dir`,
 `--output`. CI gates: `--fail-under-mrr`, `--fail-under-doc-mrr`,
 `--fail-under-recall`, `--fail-over-latency-p95` exit non-zero on regression.

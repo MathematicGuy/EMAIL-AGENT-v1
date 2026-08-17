@@ -2,10 +2,13 @@
 
 Index-propagation N/A evidence (FR-16): user memory (chat_profiles,
 chat_summary_episodes, task_episodes) lives exclusively in PostgreSQL.
-Qdrant indexes company knowledge only; there is no derived user-memory
-search index anywhere in integrations/ or scripts/. Therefore FR-16
-index propagation is N/A by design, and semantic RAG content is never
-affected by user-memory deletion or table-level backup/restore.
+Company knowledge lives in the Turbovec snapshot plus committed Markdown;
+project-document chunk text now also lives in Postgres
+(``project_document_chunks``). There is no derived user-memory search
+index in integrations/ or scripts/. User-memory deletion and table-level
+backup/restore therefore do not touch the company Turbovec snapshot.
+Project chunk rows are in the same database — restore of those tables
+restores searchable project text.
 
 NO scheduler, NO recurring trigger -- this script must be invoked explicitly.
 """

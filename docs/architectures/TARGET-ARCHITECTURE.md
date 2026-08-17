@@ -196,7 +196,7 @@ is served by an optional `document_ids` filter on the request instead.
 | Ingestion | Offline CLI into `data/extracted/` | Runtime ingestion job |
 | Durability | Rebuildable from the repo corpus | User data; not rebuildable |
 | Scope key | `tenant_id` | `workspace_id` + `user_id` + `project_id` + `document_id` |
-| Store | Company Qdrant collection or in-repo hybrid index | Separate user-document Qdrant collection |
+| Store | Company Turbovec `.tvim` + BM25 | Postgres chunks + per-project `.tvim` |
 | Deletion | Corpus re-index | Explicit deletion plus 30-day TTL purge |
 | Consumer | Standalone PRD-v1 Email Agent; AI Chat behind `CHAT_COMPANY_RAG_ENABLED` | AI Chat |
 
@@ -215,7 +215,7 @@ flowchart TB
         OCR["Mistral OCR<br/>scanned and mixed pages"]
         PCHUNK["Page-aware chunker"]
         UEMBED["Embedding service"]
-        UINDEX[("Qdrant project_documents<br/>3,072d · indexing/ready payload")]
+        UINDEX[("Postgres chunks + per-project .tvim<br/>3,072d · SQL ACL allowlist")]
         UFAIL["failed(error_code)"]
     end
 
@@ -370,10 +370,10 @@ routing favours recall, tool routing favours precision.
 
 ## 21.6 Retrieval contract
 
-Qdrant is the store for this plane. Unlike the company corpus, there is no
-in-repo fallback index: a user document exists only in Qdrant, so an unavailable
-vector store degrades the plane explicitly rather than silently substituting
-other evidence.
+Postgres FTS plus a per-project Turbovec `.tvim` is the store for this plane.
+Unlike the company corpus, there is no in-repo fallback index: a user document
+exists only in those two stores, so an unavailable index degrades the plane
+explicitly rather than silently substituting other evidence.
 
 ```yaml
 # request
@@ -518,19 +518,19 @@ full register/PUT/complete/poll chain. The panel stops its own refresh loop at t
 same deadline and allows deletion while a document is `received`, `extracting`,
 or `indexing`.
 
-`document-health` is ready only while PostgreSQL, Storage, embeddings, Qdrant,
-classifier, and a fresh document-worker heartbeat are ready. A degraded response
-is `503`, keeps document controls fail-closed, and is rechecked periodically.
-Document-plane configuration or Qdrant initialization failure never blocks the
-core API lifespan; `/health`, chat without document selection, and email remain
-available.
+`document-health` is ready only while PostgreSQL, Storage, embeddings, the
+project-index cache directory, classifier, and a fresh document-worker
+heartbeat are ready. A degraded response is `503`, keeps document controls
+fail-closed, and is rechecked periodically. Document-plane configuration or
+index-store initialization failure never blocks the core API lifespan;
+`/health`, chat without document selection, and email remain available.
 
 Canonical release defaults:
 
 ```text
 USER_DOCUMENTS_ENABLED=true
 CHAT_INTENT_CLASSIFIER_ENABLED=true
-QDRANT_PROJECT_COLLECTION=project_documents
+USER_DOCUMENTS_INDEX_ROOT=var/project-indexes
 GEMINI_EMBEDDING_MODEL=gemini-embedding-2
 GEMINI_EMBEDDING_DIMENSIONS=3072
 USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=3000
@@ -543,10 +543,10 @@ USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=3000
 | Validation rejection | `failed(reason_code)` at upload; no job, no retained bytes beyond the failure record |
 | Extraction failure | `failed`; the document is never indexed and chat is unaffected |
 | OCR-required PDF | `failed(ocr_unavailable)` until the deferred OCR increment; native-text pages are not indexed alone |
-| Embedding or Qdrant ingestion outage | bounded durable retries with backoff, then `failed(index_unavailable)` |
+| Embedding or project-index ingestion outage | bounded durable retries with backoff, then `failed(index_unavailable)` |
 | User-document feature disabled | document API returns `503` and frontend hides its document surface; chat/email continue |
 | Browser processing poll stalls | abort at five minutes, display timeout, retain delete control for the processing document |
-| Qdrant unavailable at query time | one retry, then an empty result with `degraded: true`; the turn states that document evidence is unavailable |
+| Project index unavailable at query time | one retry, then an empty result with `degraded: true`; the turn states that document evidence is unavailable |
 | Retrieval timeout | one retry, then `timeout` with `degraded: true` |
 | Document deleted or expired mid-session | excluded by the retrieval filter; the turn proceeds without it |
 | No chunk above threshold | `no_results`; the answer states the documents do not cover the question |
@@ -569,7 +569,7 @@ affects the standalone PRD-v1 Email Agent.
   documents are excluded from retrieval before ranking and purged by the existing
   background purge mechanism.
 - Deletion is supported per document, per user, and feature-wide. It purges the
-  object store, the extracted text, and the Qdrant points, and is repeatable until
+  object store, the extracted text, chunk rows, and `.tvim` ids, and is repeatable until
   every store confirms.
 
 ## 21.13 Observability and evaluation gates
@@ -617,8 +617,8 @@ field.
    query and response, and the citation-scope extension.
 2. Ingestion job: validation, extraction, Mistral OCR, page-aware chunking, and
    the status machine — no retrieval yet.
-3. Qdrant user-document collection with ACL-first filtering and deletion
-   propagation.
+3. Postgres chunk table plus per-project Turbovec index with ACL-first
+   filtering and deletion propagation.
 4. Classifier, layered prompt, resolver, labeled fixture set, and the §21.13
    metrics.
 5. Turn graph, the `user_document_evidence` context section, and page-level

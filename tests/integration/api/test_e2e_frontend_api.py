@@ -92,7 +92,7 @@ def _skip_loudly(config: pytest.Config, reason: str, detail: str = "") -> None:
         "!!",
         "!!  To run them:",
         f"!!    1. Ensure {_ENV_FILE} exists and holds working credentials.",
-        "!!    2. Ensure Postgres/Qdrant are reachable - lifespan startup blocks on them.",
+        "!!    2. Ensure Postgres is reachable - lifespan startup blocks on it.",
         f"!!    3. Free TCP port {_PORT}, or set E2E_API_PORT to another one.",
         "!!    4. uv run pytest -m live",
         "!!  Slow boot rather than broken? Raise E2E_STARTUP_TIMEOUT (seconds).",

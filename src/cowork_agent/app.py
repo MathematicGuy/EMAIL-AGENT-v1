@@ -1,6 +1,5 @@
 """Runnable FastAPI entry point for Gmail OAuth connection management."""
 
-import asyncio
 import logging
 import os
 import sys
@@ -13,7 +12,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
@@ -27,11 +25,11 @@ from cowork_agent.config import (
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
-    QdrantSettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
     database_url,
+    load_runtime_environment,
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
@@ -134,13 +132,17 @@ from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.project_documents import (
     CanonicalProjectDocumentRetriever,
-    ProjectDocumentVectorStore,
+    HybridProjectDocumentStore,
 )
+from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
+)
+from cowork_agent.persistence.repositories.project_document_chunks import (
+    PostgresProjectDocumentChunkRepository,
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
@@ -339,6 +341,9 @@ def create_app() -> FastAPI:
                     min_size=1,
                     max_size=8,
                     open=False,
+                    check=AsyncConnectionPool.check_connection,
+                    max_idle=60.0,
+                    max_lifetime=300.0,
                     kwargs={"prepare_threshold": None},
                 )
                 await pool.open(wait=True)
@@ -434,7 +439,7 @@ def create_app() -> FastAPI:
             )
             app.state.project_document_store = None
             app.state.project_document_vectors = None
-            app.state.project_document_qdrant_client = None
+            app.state.project_document_index = None
             app.state.chat_principal_resolver = _resolve_chat_principal
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
@@ -449,44 +454,35 @@ def create_app() -> FastAPI:
             app.state.run_queue = None
 
             if user_documents_settings.enabled and app.state.project_repository is not None:
-                document_qdrant = None
                 try:
-                    qdrant_settings = QdrantSettings.from_env()
-                    if not qdrant_settings.enabled:
-                        raise ValueError("Qdrant is not configured")
-                    from qdrant_client import AsyncQdrantClient
-
                     document_embedding_settings = GeminiEmbeddingSettings.from_env()
                     app.state.document_embeddings_configured = True
-                    document_qdrant = AsyncQdrantClient(
-                        url=qdrant_settings.url,
-                        api_key=qdrant_settings.api_key or None,
+                    # The API only reads .tvim snapshots; mail-todo-worker owns
+                    # writing them. Both sides exchange them through Supabase
+                    # Storage, so a missing local file is pulled on demand.
+                    index_store = TurbovecProjectIndexStore(
+                        user_documents_settings.index_root,
+                        storage=app.state.private_storage,
+                        vector_size=document_embedding_settings.dimensions,
                     )
-                    vector_store = ProjectDocumentVectorStore(
-                        document_qdrant,
-                        qdrant_settings.project_collection_name,
+                    vector_store = HybridProjectDocumentStore(
+                        PostgresProjectDocumentChunkRepository(app.state.pg_pool),
+                        index_store,
                         GeminiEmbeddingAdapter(document_embedding_settings),
                         vector_size=document_embedding_settings.dimensions,
                     )
-                    await asyncio.wait_for(
-                        vector_store.ensure_collection(),
-                        timeout=user_documents_settings.startup_timeout_ms / 1000,
+                    app.state.project_document_index = index_store
+                    app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
+                        app.state.project_repository,
+                        vector_store,
+                        top_k=user_documents_settings.top_k,
+                        min_score=user_documents_settings.min_score,
+                        timeout_ms=user_documents_settings.retrieval_timeout_ms,
                     )
-                    if app.state.project_repository is not None:
-                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                            app.state.project_repository,
-                            vector_store,
-                            top_k=user_documents_settings.top_k,
-                            min_score=user_documents_settings.min_score,
-                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                        )
-                    app.state.project_document_qdrant_client = document_qdrant
                 except Exception:
                     logger.exception(
                         "Project document vector store is unavailable; API remains online"
                     )
-                    if document_qdrant is not None:
-                        await document_qdrant.close()
             app.state.project_document_queue = None
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
@@ -588,9 +584,8 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
-        document_qdrant_to_close = getattr(app.state, "project_document_qdrant_client", None)
-        if document_qdrant_to_close is not None:
-            await document_qdrant_to_close.close()
+        # The project index holds no network handle of its own: it reads local
+        # .tvim files and borrows private_storage, which is closed below.
         pg_pool = getattr(app.state, "pg_pool", None)
         if pg_pool is not None:
             await pg_pool.close()
@@ -616,7 +611,7 @@ def create_app() -> FastAPI:
             "supabase_storage": "disabled",
             "redis": "disabled",
             "redis_mode": "redis" if app.state.redis_client is not None else "local",
-            "qdrant": "disabled",
+            "project_index": "disabled",
             "gemini_embeddings": "disabled",
             "ocr": "optional_unavailable",
             "classifier": "disabled",
@@ -649,13 +644,18 @@ def create_app() -> FastAPI:
                 checks["redis"] = "unavailable"
         else:
             checks["redis"] = "local_fallback"
-        qdrant = app.state.project_document_qdrant_client
-        if qdrant is not None:
+        index_store = app.state.project_document_index
+        if index_store is not None:
+            # A .tvim is pulled per project on demand, so the only thing that
+            # can be checked without a project in hand is that the API can
+            # actually write the root it will cache snapshots into.
             try:
-                await qdrant.get_collections()
-                checks["qdrant"] = "ready"
-            except Exception:
-                checks["qdrant"] = "unavailable"
+                index_store.root.mkdir(parents=True, exist_ok=True)
+                checks["project_index"] = "ready" if os.access(index_store.root, os.W_OK) else (
+                    "unavailable"
+                )
+            except OSError:
+                checks["project_index"] = "unavailable"
         project_repository = app.state.project_repository
         if project_repository is not None:
             try:
@@ -667,7 +667,7 @@ def create_app() -> FastAPI:
                 checks["worker_queue"] = "unavailable"
         required = [
             "supabase_storage",
-            "qdrant",
+            "project_index",
             "gemini_embeddings",
             "classifier",
             "worker_queue",
@@ -877,6 +877,7 @@ def create_app() -> FastAPI:
                 "emailsProcessed": run.emails_processed,
                 "emailsToProcess": min(run.emails_matched, run.max_emails),
                 "maxEmails": run.max_emails,
+                "filteredSummary": run.filtered_summary,
             },
             "error": (
                 {"code": run.error_code, "message": run.error_message_safe}
@@ -1186,14 +1187,19 @@ def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse
 
 
 def main() -> None:
-    load_dotenv(Path.cwd() / ".env", override=False)
+    load_runtime_environment()
     # Without a root handler the stdlib drops every INFO record, which silently
     # discards the whole trace-sink stream (§13) — the observability surface is
     # log lines, so an unconfigured logger means no observability at all.
     # .upper() because basicConfig rejects "debug" with a ValueError, which would
     # kill the process at startup over a lowercase env var.
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
-    api_workers = int(os.getenv("APP_API_WORKERS", "1"))
+    reload = "--reload" in sys.argv or os.getenv("APP_RELOAD", "false").strip().lower() in {
+        "true",
+        "1",
+        "yes",
+    }
+    api_workers = 1 if reload else int(os.getenv("APP_API_WORKERS", "1"))
     if api_workers < 1:
         raise ValueError("APP_API_WORKERS must be positive")
     loop = "auto"
@@ -1209,6 +1215,8 @@ def main() -> None:
         port=int(os.getenv("APP_PORT", "8000")),
         loop=loop,
         workers=api_workers,
+        reload=reload,
+        reload_dirs=["src"] if reload else None,
     )
 
 

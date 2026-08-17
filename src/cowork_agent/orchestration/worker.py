@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Protocol
 
 import httpx
-from dotenv import load_dotenv
-from qdrant_client import AsyncQdrantClient
 
 from cowork_agent.config import (
     FaucetSettings,
@@ -18,9 +16,9 @@ from cowork_agent.config import (
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
-    QdrantSettings,
     UserDocumentsSettings,
     database_url,
+    load_runtime_environment,
 )
 from cowork_agent.features.email_action_plan.observability import (
     LifecycleEventPublisher,
@@ -125,7 +123,6 @@ async def run_worker() -> None:
     )
     await pool.open(wait=True)
     storage_client: httpx.AsyncClient | None = None
-    qdrant_client: AsyncQdrantClient | None = None
     try:
         await apply_migrations(pool)
         runs = PostgresRunRepository(pool)
@@ -192,29 +189,33 @@ async def run_worker() -> None:
                 ProjectDocumentExtractor,
             )
             from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
-            from cowork_agent.integrations.rag.project_documents import ProjectDocumentVectorStore
+            from cowork_agent.integrations.rag.project_documents import (
+                HybridProjectDocumentStore,
+            )
+            from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
             from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
+            from cowork_agent.persistence.repositories.project_document_chunks import (
+                PostgresProjectDocumentChunkRepository,
+            )
 
             try:
-                qdrant = QdrantSettings.from_env()
-                if not qdrant.enabled:
-                    raise ValueError("Qdrant is not configured")
                 storage = SupabaseStorageSettings.from_env()
                 embedding = GeminiEmbeddingSettings.from_env()
                 storage_client = httpx.AsyncClient(timeout=30.0)
-                qdrant_client = AsyncQdrantClient(url=qdrant.url, api_key=qdrant.api_key or None)
                 private_storage = SupabasePrivateStorage(
                     storage.url, storage.secret_key, storage.bucket, storage_client
                 )
-                document_vectors = ProjectDocumentVectorStore(
-                    qdrant_client,
-                    qdrant.project_collection_name,
+                # This process is the only writer of a project .tvim; the API
+                # reads the snapshots it publishes to the same private bucket.
+                document_vectors = HybridProjectDocumentStore(
+                    PostgresProjectDocumentChunkRepository(pool),
+                    TurbovecProjectIndexStore(
+                        document_settings.index_root,
+                        storage=private_storage,
+                        vector_size=embedding.dimensions,
+                    ),
                     GeminiEmbeddingAdapter(embedding),
                     vector_size=embedding.dimensions,
-                )
-                await asyncio.wait_for(
-                    document_vectors.ensure_collection(),
-                    timeout=document_settings.startup_timeout_ms / 1000,
                 )
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
@@ -249,13 +250,11 @@ async def run_worker() -> None:
     finally:
         if storage_client is not None:
             await storage_client.aclose()
-        if qdrant_client is not None:
-            await qdrant_client.close()
         await pool.close()
 
 
 def main() -> None:
-    load_dotenv(Path.cwd() / ".env", override=False)
+    load_runtime_environment()
     # See app.main(): INFO records are dropped without a root handler, and the
     # trace sink plus lifecycle publication are INFO-only.
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()

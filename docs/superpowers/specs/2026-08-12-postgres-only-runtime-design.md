@@ -34,14 +34,16 @@ FastAPI
   Supabase Storage: private PDF/DOCX original objects
 
 mail-todo-worker
-  polls Supabase Postgres -> downloads private source -> Qdrant Cloud
+  polls Supabase Postgres -> downloads private source ->
+  Postgres project_document_chunks + per-project Turbovec .tvim (ADR-008)
 
 No Redis service, Redis client, Redis environment value, or Redis dependency.
 ```
 
-`QDRANT_PROJECT_COLLECTION=project_documents` remains separate from
-`QDRANT_COLLECTION=company_knowledge`. Project extraction requires the Gemini
-embedding provider as in the current worker composition.
+`USER_DOCUMENTS_INDEX_ROOT=var/project-indexes` is the local cache for those
+`.tvim` files. Company-plane Qdrant (`QDRANT_COLLECTION=company_knowledge`) is
+a separate store and is not used for project documents. Project extraction
+requires the Gemini embedding provider as in the current worker composition.
 
 ## Failure and Recovery
 

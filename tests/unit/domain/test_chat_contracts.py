@@ -41,6 +41,7 @@ from cowork_agent.domain.chat_contracts import (
     EpisodeTransition,
     EpisodicMemoryQuery,
     EpisodicMemoryRead,
+    MailScanSummary,
     MemoryCitationType,
     MemoryContextRequest,
     MemoryContextResponse,
@@ -230,6 +231,32 @@ def test_chat_turn_round_trips_bounded_rag_evidence_with_scores_and_content() ->
             ),
         }
     ]
+
+
+def test_chat_turn_round_trips_safe_mail_scan_aggregates() -> None:
+    turn = ChatTurn(
+        turn_id="mail-turn-1",
+        session_id="session-1",
+        user_message="@mail",
+        assistant_message="Đã quét xong: đã quét 10 email và tạo 5 action item.",
+        created_at=datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+        mail_scan=MailScanSummary(
+            status="succeeded",
+            emails_matched=201,
+            emails_processed=10,
+            emails_to_process=10,
+            action_items_count=5,
+        ),
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["mail_scan"] == {
+        "status": "succeeded",
+        "emails_matched": 201,
+        "emails_processed": 10,
+        "emails_to_process": 10,
+        "action_items_count": 5,
+    }
 
 
 def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status() -> None:

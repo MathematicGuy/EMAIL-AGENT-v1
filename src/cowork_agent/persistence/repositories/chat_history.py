@@ -28,9 +28,9 @@ class PostgresChatHistoryRepository:
                 """
                 INSERT INTO chat_turns (
                     session_id, turn_id, user_message, assistant_message,
-                    citation_coordinates, rag_evidence, retrieval_status, created_at
+                    citation_coordinates, rag_evidence, retrieval_status, mail_scan, created_at
                 )
-                SELECT sessions.id, %s, %s, %s, %s, %s, %s, %s
+                SELECT sessions.id, %s, %s, %s, %s, %s, %s, %s, %s
                 FROM chat_sessions AS sessions
                 WHERE sessions.id = %s
                   AND sessions.workspace_id = %s
@@ -44,6 +44,7 @@ class PostgresChatHistoryRepository:
                     Jsonb([dict(item) for item in turn.citation_coordinates]),
                     Jsonb([item.to_dict() for item in turn.rag_evidence]),
                     turn.retrieval_status,
+                    Jsonb(turn.mail_scan.to_dict()) if turn.mail_scan is not None else None,
                     turn.created_at,
                     scope.session_id,
                     scope.tenant_id,
@@ -69,7 +70,7 @@ class PostgresChatHistoryRepository:
                 SELECT turns.turn_id, turns.session_id, turns.user_message,
                        turns.assistant_message, turns.created_at,
                        turns.citation_coordinates, turns.rag_evidence,
-                       turns.retrieval_status
+                       turns.retrieval_status, turns.mail_scan
                 FROM chat_turns AS turns
                 JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
                 WHERE turns.session_id = %s
@@ -116,5 +117,6 @@ def _turn_from_row(row: Sequence[object]) -> ChatTurn:
             "citation_coordinates": citations,
             "rag_evidence": evidence,
             "retrieval_status": None if row[7] is None else str(row[7]),
+            "mail_scan": cast(dict[str, object] | None, row[8]),
         }
     )

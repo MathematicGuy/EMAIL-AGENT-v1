@@ -2,7 +2,7 @@
 
 The Project-document plane is optional to core API availability even though its
 feature flag defaults to enabled. PostgreSQL, Supabase Storage, Gemini embeddings,
-Qdrant initialization, or the document worker may degrade that plane without
+the project-index cache, or the document worker may degrade that plane without
 preventing `/health`, ordinary chat, or Email Agent startup.
 
 `GET /v1/cowork/chat/document-health` reports `ready` only when all document
@@ -10,8 +10,9 @@ dependencies are usable and the worker heartbeat is no older than two minutes.
 The React surface starts fail-closed, mounts document controls only for a `200`
 `ready` response, and rechecks health every ten seconds.
 
-Retrieval has one end-to-end deadline covering both PostgreSQL authorization
-reads, embedding, both Qdrant attempts, and the final PostgreSQL readiness check.
+Retrieval has one end-to-end deadline covering PostgreSQL authorization
+reads, embedding, the Postgres FTS + Turbovec hybrid retrieve, and the final
+PostgreSQL readiness check.
 Timeout and dependency failure return announced degraded evidence rather than
 unsourced generation.
 

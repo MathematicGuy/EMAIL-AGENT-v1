@@ -1,6 +1,9 @@
 # PRD-v4: Pluggable & Switchable Hybrid RAG Provider Architecture
 
-**Status:** Proposed / Draft Specification  
+**Status:** Superseded — company RAG is Turbovec-only (ADR-009). The Qdrant
+provider was deleted; `RAG_STORE_PROVIDER` still selects `turbovec` or
+degrades to null. Keep this file as history of the factory seam, not as a
+plan to restore Qdrant.  
 **Location:** `tasks/prds/PRD-v4-pluggable-hybrid-rag-providers.md`  
 **Target Domain:** Enterprise Semantic RAG Subsystem (`src/cowork_agent/integrations/rag`)  
 **Related ADRs & Specs:**  
@@ -58,7 +61,7 @@ Implement a unified, configuration-driven **Pluggable Hybrid RAG Provider Archit
 
 - **Hybrid Composition (BM25 + Dense + RRF):** Hybrid search is structured as a composite wrapper (`HybridSemanticMemory`) that combines a pluggable dense vector retriever (`Turbovec` or `Qdrant`) with `BM25SearchAdapter` lexical search and `ReciprocalRankFusion` (RRF) candidate re-ranking.
 
-- **Boundary Separation for User Documents (ADR-007):** User-uploaded project documents (`POST /v1/projects/{id}/documents`) bypass the central company RAG ingestion CLI. They are stored exclusively in `ProjectDocumentVectorStore` ([`project_documents.py`](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py)) using Qdrant with strict `workspace_id`, `user_id`, and `project_id` payload filters.
+- **Boundary Separation for User Documents (ADR-007 / ADR-008):** User-uploaded project documents (`POST /v1/projects/{id}/documents`) bypass the central company RAG ingestion CLI. Chunk text and ACL live in Postgres (`project_document_chunks`); the dense leg is a per-project Turbovec `.tvim` searched with a SQL-built allowlist (`HybridProjectDocumentStore` in [`project_documents.py`](file:///E:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py)). Company-plane Qdrant is not on this path.
 
 ---
 

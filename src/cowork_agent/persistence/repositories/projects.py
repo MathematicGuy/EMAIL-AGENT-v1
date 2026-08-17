@@ -764,11 +764,18 @@ class PostgresProjectRepository:
                     """,
                     (document_id,),
                 )
+                # ADR-008 decision 9: chunk text is hard-deleted alongside the
+                # metadata it belongs to, in this transaction, never soft-flagged.
+                await connection.execute(
+                    "DELETE FROM project_document_chunks WHERE document_id = %s",
+                    (document_id,),
+                )
                 await connection.execute(
                     """
                     INSERT INTO document_deletion_audits (
-                        id, document_id, postgres_outcome, qdrant_outcome, storage_outcome
-                    ) VALUES (%s, %s, 'hidden', 'deleted', 'deleted')
+                        id, document_id, postgres_outcome, vector_store_outcome,
+                        storage_outcome, chunks_outcome
+                    ) VALUES (%s, %s, 'hidden', 'deleted', 'deleted', 'deleted')
                     """,
                     (str(uuid4()), document_id),
                 )
@@ -792,17 +799,26 @@ class PostgresProjectRepository:
         document_id: str,
         *,
         postgres_outcome: str,
-        qdrant_outcome: str,
+        vector_store_outcome: str,
         storage_outcome: str,
+        chunks_outcome: str,
     ) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
                 """
                 INSERT INTO document_deletion_audits (
-                    id, document_id, postgres_outcome, qdrant_outcome, storage_outcome
-                ) VALUES (%s, %s, %s, %s, %s)
+                    id, document_id, postgres_outcome, vector_store_outcome,
+                    storage_outcome, chunks_outcome
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (str(uuid4()), document_id, postgres_outcome, qdrant_outcome, storage_outcome),
+                (
+                    str(uuid4()),
+                    document_id,
+                    postgres_outcome,
+                    vector_store_outcome,
+                    storage_outcome,
+                    chunks_outcome,
+                ),
             )
 
     async def _one_project(

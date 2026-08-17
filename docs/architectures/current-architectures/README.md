@@ -32,7 +32,7 @@ flowchart TB
     subgraph STORES["Persistence & Vector Stores"]
         DB_LOCAL[("SQLite / Local Repos<br/>(No DATABASE_URL)")]
         DB_PG[("Supabase PostgreSQL<br/>(With DATABASE_URL)")]
-        VECTOR[("Vector Store<br/>Turbovec / Qdrant")]
+        VECTOR[("Vector Store<br/>Turbovec")]
     end
 
     CLIENTS --> API
@@ -53,7 +53,7 @@ flowchart TB
 | Module / Component | Implemented Scope | Status | Target Architecture Alignment | Authoritative Code Location |
 |---|---|---|---|---|
 | **Email Action Plan & RAG** | Single-turn Gmail extraction, route classification (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), output validation | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §1 & §2](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)) | [features/email_action_plan](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan) |
-| **Enterprise RAG Store** | Vector & Hybrid retrieval over committed Markdown corpus (`data/extracted/*.md`) using Turbovec or Qdrant | **Live / Implemented** | Fully Aligned | [integrations/rag](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag) |
+| **Enterprise RAG Store** | Vector & Hybrid retrieval over committed Markdown corpus (`data/extracted/*.md`) using Turbovec | **Live / Implemented** | Fully Aligned | [integrations/rag](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag) |
 | **AI Chat Controller** | Multi-turn streaming chat, context assembly, intent classifier, chat reply generation | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §2](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)) | [controller.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/controller.py) |
 | **4-Type Memory Gateway** | Short-term buffer, Long-term profile, Episodic memory (`TaskEpisodes`), Semantic company memory | **Live / Implemented** | Fully Aligned ([ADR-004](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md)) | [memory_gateway.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat/memory_gateway.py) |
 | **User Documents Subsystem** | Project document upload, extraction/OCR, vector indexing, classifier gating | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §3](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) & [ADR-007](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)) | [project_documents.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py) |
@@ -70,7 +70,7 @@ flowchart TB
 |---|---|---|---|
 | **Email & Chat Decoupling** | Standalone stateless Email Agent; AI Chat has no email tool interface | Standalone Email Agent; AI Chat has no email tool interface. Email & Chat are strictly decoupled. | **0 Diff — 100% Aligned** |
 | **TaskEpisode Lifecycle** | Tasks proposed in chat start `retrieval_eligible=false` until explicit user approval | `episode_policy.py` sets `retrieval_eligible=false` for system-generated TaskEpisodes. | **0 Diff — 100% Aligned ([ADR-004](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md))** |
-| **Company RAG Corpus** | Knowledge provider reading company corpus; copied chunks forbidden in persistent task outputs | Company RAG reads `data/extracted/*.md` via Turbovec/Qdrant; citations stored as coordinates only. | **0 Diff — 100% Aligned** |
+| **Company RAG Corpus** | Knowledge provider reading company corpus; copied chunks forbidden in persistent task outputs | Company RAG reads `data/extracted/*.md` via Turbovec; citations stored as coordinates only. | **0 Diff — 100% Aligned** |
 | **User Document Security** | Project-scoped user documents gated behind intent classifier | User documents subsystem gated under `USER_DOCUMENTS_ENABLED` with classifier service. | **0 Diff — 100% Aligned ([ADR-007](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md))** |
 | **Persistence Flexibility** | Production Supabase Postgres with robust local development fallback | Supports local SQLite + In-Memory repositories when `DATABASE_URL` is absent; Postgres when present. | **0 Diff — 100% Aligned** |
 | **Architecture Documentation** | Level 1 & Level 2 live architecture docs reflect actual running system | Dashboard & sub-module docs updated to cover live Email RAG, Chat, Memory, Ingestion, and UIs. | **Documentation Up-to-Date** |

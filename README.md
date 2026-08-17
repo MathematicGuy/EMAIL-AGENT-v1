@@ -51,20 +51,8 @@ or mixed PDF that needs OCR currently reports `mistral_not_configured` and
 writes no partial document; do not treat `KNOWLEDGE_INGEST_OCR_ENABLED=true` as
 an enabled OCR backend yet.
 
-After successful ingestion, restart the API/worker. If Qdrant is enabled and
-already contains a collection, request a deliberate full re-index once:
-
-```powershell
-$env:QDRANT_REINDEX = "true"
-mail-todo-api
-
-# After the collection has been rebuilt, reset this to avoid rebuilding it on
-# every subsequent startup.
-$env:QDRANT_REINDEX = "false"
-```
-
-`QDRANT_REINDEX=true` recreates the entire collection from the committed
-Markdown corpus; it is not an incremental update. See
+After successful ingestion, restart the API/worker so Turbovec rebuilds
+`.data/turbovec_index.tvim` from the committed Markdown corpus. See
 [`docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`](docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md)
 
 ---
@@ -165,7 +153,7 @@ email-agent-v1/
 │       ├── integrations/               # External service boundaries & adapters
 │       │   ├── gmail/                  # OAuth flow, Gmail API adapter, deterministic fakes
 │       │   ├── llm/                    # Gemini, Groq, Faucet LLM providers & fakes
-│       │   ├── rag/                    # Dense + BM25 + Turbovec / Qdrant semantic memory
+│       │   ├── rag/                    # Dense + BM25 + Turbovec hybrid semantic memory
 │       │   ├── knowledge_ingestion/    # Knowledge extraction pipeline (PDF/DOCX)
 │       │   ├── project_documents/      # Encrypted document store & media sniffing
 │       │   ├── storage/                # Supabase private storage adapter
@@ -240,15 +228,14 @@ pip install -e ".[dev]"
 
 ### 4.2 Cấu hình môi trường (`.env`)
 
-Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự.
+Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự. Sao chép `config.example` thành `config` để thiết lập các feature flag không chứa secret; giữ credential và connection string trong `.env`.
 
 ```env
 # Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
 DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 
 # Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
-RAG_STORE_PROVIDER=turbovec # turbovec | qdrant
-QDRANT_ENABLED="false"
+RAG_STORE_PROVIDER=turbovec
 
 # Feature Flags
 USER_DOCUMENTS_ENABLED="false"
@@ -273,14 +260,34 @@ TOKEN_ENCRYPTION_KEY="your_fernet_key"
 OAUTH_STATE_SECRET="your_oauth_state_secret"
 ```
 
-When migrating an existing Qdrant company-knowledge collection from Gemini,
-set `QDRANT_REINDEX=true` for one startup so every vector is recreated with
-Jina. Set it back to `false` after that startup. Set
-`QDRANT_VECTOR_SIZE=1024` to match the default Jina v5 Omni Small output.
-
 ### 4.3 Khởi chạy dịch vụ
 
-- **Chạy API Server (FastAPI):**
+#### Local development: API and durable worker
+
+For development with durable email runs or Project Documents, start the API and
+the worker together from the repository root:
+
+```powershell
+uv run mail-todo-dev
+```
+
+`mail-todo-dev` starts `mail-todo-api` and `mail-todo-worker` as child
+processes and stops both when you press `Ctrl+C`. It requires `DATABASE_URL` in
+`.env`, because the worker polls durable PostgreSQL jobs; it is not compatible
+with the SQLite-only fallback. Set `APP_HOST` and `APP_PORT` in `.env` when the
+default API address (`127.0.0.1:8000`) is unsuitable.
+
+To run the processes separately, use two terminals:
+
+```powershell
+# Terminal 1
+uv run mail-todo-api
+
+# Terminal 2
+uv run mail-todo-worker
+```
+
+- **Chạy riêng API Server (FastAPI, không chạy worker):**
   - *Linux / Ubuntu:*
     ```bash
     .venv/bin/mail-todo-api

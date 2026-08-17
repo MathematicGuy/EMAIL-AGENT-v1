@@ -4,7 +4,7 @@
 
 **Goal:** Make `build_semantic_memory()` a configuration-driven factory that returns one `SemanticMemoryPort` backed by Turbovec, Qdrant, or Null, then compose BM25 + RRF hybrid search around the selected dense store.
 
-**Architecture:** `RAG_STORE_PROVIDER` is the single switch (default `turbovec`). `turbovec` builds `TurbovecSemanticMemory` over `data/extracted/*.md`. `qdrant` builds `QdrantSemanticMemory`. Explicit `none`/`off`/`null` or a failed constructor degrades to `NullSemanticMemory`. Hybrid search wraps the selected dense store with BM25 + RRF; project-document Qdrant (ADR-007) stays out of this factory.
+**Architecture:** `RAG_STORE_PROVIDER` is the single switch (default `turbovec`). `turbovec` builds `TurbovecSemanticMemory` over `data/extracted/*.md`. `qdrant` builds `QdrantSemanticMemory`. Explicit `none`/`off`/`null` or a failed constructor degrades to `NullSemanticMemory`. Hybrid search wraps the selected dense store with BM25 + RRF; the project-document plane (ADR-007 / ADR-008 `HybridProjectDocumentStore`) stays out of this factory.
 
 **Tech Stack:** Python 3.11+, `SemanticMemoryPort`, Turbovec 4-bit `IdMapIndex`, Qdrant `AsyncQdrantClient`, `BM25SearchAdapter`, `ReciprocalRankFusion`, pytest, ruff, mypy.
 
@@ -12,7 +12,7 @@
 
 - Work only in `.worktree/pluggable-rag-provider` on `feature/pluggable-rag-providers`. Do not touch the dirty `main` working tree.
 - Do not ingest email bodies or attachments (ADR-003).
-- Do not route user project PDFs through this factory (ADR-007 / `ProjectDocumentVectorStore`).
+- Do not route user project PDFs through this factory (ADR-007 / ADR-008 `HybridProjectDocumentStore`).
 - Ask before changing SQL migrations. Preserve the Qdrant auto-fallback when `RAG_STORE_PROVIDER` is unset and `QDRANT_ENABLED=true`.
 - Tests target the `SemanticMemoryPort` returned by `build_semantic_memory()`, plus the Hybrid constructor seam for injection. Use `HashingEmbedder` (there is no `FakeEmbeddingAdapter`).
 - Never log API keys or embedded text.
