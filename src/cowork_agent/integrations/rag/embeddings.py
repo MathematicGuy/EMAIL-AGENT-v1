@@ -108,6 +108,8 @@ class JinaEmbeddingAdapter:
         for start in range(0, len(texts), batch_size):
             batch_texts = list(texts[start : start + batch_size])
             keys = await self._settings.rotator.candidates(self._settings.max_attempts)
+            if not keys:
+                raise ValueError("All Jina API keys are exhausted or unavailable")
             response: Mapping[str, object] | None = None
             last_error: Exception | None = None
             for key in keys:
@@ -131,18 +133,20 @@ class JinaEmbeddingAdapter:
                     break
                 except Exception as exc:
                     last_error = exc
+                    if _is_insufficient_balance_error(exc) or _is_unrecoverable_auth_error(exc):
+                        logger.warning(
+                            "Jina embedding out of tokens / invalid key for key %s; "
+                            "permanently evicting from key pool",
+                            mask_api_key(key),
+                        )
+                        await self._settings.rotator.mark_exhausted(key)
+                        continue
                     if (
                         _is_rate_limit_error(exc)
                         and self._settings.rotate_on_rate_limit
                     ):
                         logger.warning(
                             "Jina embedding rate limit for key %s; rotating key",
-                            mask_api_key(key),
-                        )
-                        continue
-                    if _is_insufficient_balance_error(exc):
-                        logger.warning(
-                            "Jina embedding insufficient balance for key %s; rotating key",
                             mask_api_key(key),
                         )
                         continue
@@ -176,6 +180,14 @@ def _is_insufficient_balance_error(exc: Exception) -> bool:
         "authz_insufficient_balance" in payload
         or "insufficient account balance" in payload
     )
+
+
+def _is_unrecoverable_auth_error(exc: Exception) -> bool:
+    """True for 401 Unauthorized or 402 Payment Required indicating key is dead/invalid."""
+    if isinstance(exc, HTTPError) and exc.code in {401, 402}:
+        return True
+    code = getattr(exc, "code", getattr(exc, "status_code", getattr(exc, "status", None)))
+    return code in {401, 402}
 
 
 def _http_error_body(exc: HTTPError) -> str:

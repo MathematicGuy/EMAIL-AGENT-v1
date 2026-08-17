@@ -6,5 +6,9 @@
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0"
   },
-  "scripts": {}
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:chat-latency": "playwright test --project=chat-latency",
+    "test:e2e:chat-latency:live": "playwright test --project=chat-latency -g @live"
+  }
 }

@@ -298,8 +298,9 @@ class _InsufficientBalanceThenOkTransport:
         timeout_seconds: float,
     ) -> Mapping[str, object]:
         del url, payload, timeout_seconds
-        self.keys.append(headers["Authorization"])
-        if len(self.keys) == 1:
+        auth = headers["Authorization"]
+        self.keys.append(auth)
+        if auth == "Bearer key-1":
             raise HTTPError(
                 "https://api.jina.ai/v1/embeddings",
                 403,
@@ -318,11 +319,21 @@ def test_jina_adapter_rotates_past_a_key_with_insufficient_balance() -> None:
         {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
     )
     transport = _InsufficientBalanceThenOkTransport()
+    adapter = JinaEmbeddingAdapter(settings, transport=transport)
 
-    vectors = asyncio.run(JinaEmbeddingAdapter(settings, transport=transport).embed(["policy"]))
+    vectors = asyncio.run(adapter.embed(["policy"]))
 
     assert vectors == ((0.1,) * 1024,)
     assert transport.keys == ["Bearer key-1", "Bearer key-2"]
+    # Verify key-1 is permanently marked exhausted
+    assert settings.rotator.active_keys == ("key-2",)
+    assert settings.rotator.exhausted_keys == ("key-1",)
+
+    # Second embed call directly uses key-2 and never re-attempts key-1
+    transport.keys.clear()
+    vectors2 = asyncio.run(adapter.embed(["second-doc"]))
+    assert vectors2 == ((0.1,) * 1024,)
+    assert transport.keys == ["Bearer key-2"]
 
 
 class _GenericForbiddenTransport:
@@ -367,4 +378,15 @@ def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
     adapter = JinaEmbeddingAdapter(_jina_settings(), transport=transport)
 
     with pytest.raises(ValueError, match="dimension"):
+        asyncio.run(adapter.embed(["policy"]))
+
+
+def test_jina_adapter_raises_when_all_keys_are_exhausted() -> None:
+    settings = JinaEmbeddingSettings.from_env(
+        {"JINA_API_KEY": "key-1"}, load_env_file=False
+    )
+    settings.rotator.mark_exhausted_sync("key-1")
+    adapter = JinaEmbeddingAdapter(settings)
+
+    with pytest.raises(ValueError, match="All Jina API keys are exhausted"):
         asyncio.run(adapter.embed(["policy"]))

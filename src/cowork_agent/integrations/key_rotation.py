@@ -48,13 +48,14 @@ def parse_api_keys_from_env(
 
 
 class APIKeyRotator:
-    """Thread/async-safe round-robin API key rotator."""
+    """Thread/async-safe round-robin API key rotator with permanent exhaustion tracking."""
 
     def __init__(self, keys: Sequence[str], provider_name: str = "API") -> None:
         if not keys:
             raise ValueError(f"At least one {provider_name} API key is required")
         self._keys = tuple(keys)
         self._provider_name = provider_name
+        self._exhausted_keys: set[str] = set()
         self._index = 0
         self._lock = asyncio.Lock()
 
@@ -76,19 +77,42 @@ class APIKeyRotator:
         keys = parse_api_keys_from_env(environ, prefix)
         return cls(keys, provider_name=resolved_provider)
 
+    async def mark_exhausted(self, key: str) -> None:
+        """Permanently mark a key as exhausted/dead (e.g. out of prepaid tokens)."""
+        async with self._lock:
+            self._exhausted_keys.add(key)
+
+    def mark_exhausted_sync(self, key: str) -> None:
+        """Synchronous version of mark_exhausted for non-async initialization/testing."""
+        self._exhausted_keys.add(key)
+
     async def candidates(self, max_attempts: int) -> tuple[str, ...]:
         async with self._lock:
-            start = self._index
-            self._index = (self._index + 1) % len(self._keys)
-        attempts = min(max_attempts, len(self._keys))
-        return tuple(
-            self._keys[(start + offset) % len(self._keys)]
-            for offset in range(attempts)
-        )
+            active = [k for k in self._keys if k not in self._exhausted_keys]
+            if not active:
+                return ()
+            start = self._index % len(active)
+            self._index = (start + 1) % len(active)
+            attempts = min(max_attempts, len(active))
+            return tuple(
+                active[(start + offset) % len(active)]
+                for offset in range(attempts)
+            )
 
     @property
     def keys(self) -> tuple[str, ...]:
+        """All configured keys, including exhausted ones."""
         return self._keys
+
+    @property
+    def active_keys(self) -> tuple[str, ...]:
+        """Currently active (non-exhausted) keys."""
+        return tuple(k for k in self._keys if k not in self._exhausted_keys)
+
+    @property
+    def exhausted_keys(self) -> tuple[str, ...]:
+        """Keys marked as exhausted/dead."""
+        return tuple(k for k in self._keys if k in self._exhausted_keys)
 
     @property
     def provider_name(self) -> str:

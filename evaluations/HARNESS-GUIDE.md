@@ -35,6 +35,7 @@ for another.
 | `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `docs/evaluations/baselines/`          |
 | `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `docs/evaluations/CHAT-RAG/baselines/` |
 | `scripts/build_evaluation_dashboard.py` | —                   | `docs/evaluations/baselines/`                                  | `docs/evaluations/dashboard.md`        |
+| Playwright `e2e/chat-history-latency.spec.ts` | Chat-switch UI latency | saved chats in the dashboard | `evaluations/CHAT/latency/` |
 
 Each has a focused test under `tests/unit/scripts/`.
 
@@ -121,20 +122,7 @@ example 1,043 vs 1,066 chunks) are not a valid A/B.
 happened. Whether it supports a decision depends on the embedder, corpus, and
 slice breakdown inside it.
 
-## 4. Running Them Without Melting the Machine (`OPENBLAS_NUM_THREADS` Disable by Default, only run when run out of memory)
-
-- Run one Python process at a time. Running a benchmark next to `pytest` or
-  `mypy` has caused out-of-memory process failures on this machine.
-- Set `OPENBLAS_NUM_THREADS=1` before retrieval runs; the parallel BLAS path has
-  aborted mid-run.
-- The corpus load is the memory-heavy step, not the metric computation.
-
-```powershell
-$env:OPENBLAS_NUM_THREADS = "1"
-python scripts/evaluate_retrieval.py --dry-run
-```
-
-## 5. Adding a Harness
+## 4. Adding a Harness
 
 1. Default the output directory to a folder under `docs/evaluations/`.
 2. Version the output with a `schema_version` string.
@@ -143,7 +131,7 @@ python scripts/evaluate_retrieval.py --dry-run
 4. Extend `build_evaluation_dashboard.py` instead of hand-writing result tables.
 5. Document the command and the exact input schema in the area's README.
 
-## 6. Known Gaps
+## 5. Known Gaps
 
 - Retrieval reports carry only end-to-end latency. Per-component timing
   (`embedding_ms`, `dense_search_ms`, `bm25_ms`, `fusion_ms`, `rerank_ms`,

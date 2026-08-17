@@ -106,3 +106,33 @@ def test_key_rotator_from_env() -> None:
 def test_key_rotator_empty_keys_raises() -> None:
     with pytest.raises(ValueError, match="At least one"):
         APIKeyRotator([])
+
+
+@pytest.mark.asyncio
+async def test_key_rotator_mark_exhausted_evicts_from_candidates() -> None:
+    rotator = APIKeyRotator(["k1", "k2", "k3"], provider_name="Jina")
+    assert rotator.active_keys == ("k1", "k2", "k3")
+    assert rotator.exhausted_keys == ()
+
+    # k1 is marked exhausted (out of prepaid tokens)
+    await rotator.mark_exhausted("k1")
+    assert rotator.active_keys == ("k2", "k3")
+    assert rotator.exhausted_keys == ("k1",)
+
+    # Next candidates calls only return active keys
+    c1 = await rotator.candidates(max_attempts=2)
+    assert set(c1) == {"k2", "k3"}
+    assert "k1" not in c1
+
+    # k2 also marked exhausted
+    await rotator.mark_exhausted("k2")
+    assert rotator.active_keys == ("k3",)
+    c2 = await rotator.candidates(max_attempts=2)
+    assert c2 == ("k3",)
+
+    # k3 also marked exhausted -> returns empty tuple
+    await rotator.mark_exhausted("k3")
+    assert rotator.active_keys == ()
+    assert rotator.exhausted_keys == ("k1", "k2", "k3")
+    c3 = await rotator.candidates(max_attempts=2)
+    assert c3 == ()

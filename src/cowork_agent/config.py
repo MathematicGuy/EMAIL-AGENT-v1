@@ -286,6 +286,7 @@ class GmailSettings:
     token_encryption_key: str = field(repr=False)
     oauth_state_secret: str = field(repr=False)
     oauth_state_ttl_seconds: int
+    fetch_concurrency: int = 6
 
     @classmethod
     def from_env(
@@ -332,6 +333,9 @@ class GmailSettings:
             token_encryption_key=encryption_key,
             oauth_state_secret=state_secret,
             oauth_state_ttl_seconds=_positive_int(environ, "OAUTH_STATE_TTL_SECONDS", 600),
+            fetch_concurrency=_bounded_positive_int(
+                environ, "GMAIL_FETCH_CONCURRENCY", 6, maximum=8
+            ),
         )
 
 
@@ -344,6 +348,7 @@ class GeminiSettings:
     max_emails_per_batch: int
     max_input_tokens: int
     timeout_seconds: int
+    action_plan_concurrency: int = 3
 
     @classmethod
     def from_env(
@@ -393,6 +398,9 @@ class GeminiSettings:
             max_emails_per_batch=_positive_int(environ, "GEMINI_MAX_EMAILS_PER_BATCH", 5),
             max_input_tokens=_positive_int(environ, "GEMINI_MAX_INPUT_TOKENS", 40_000),
             timeout_seconds=_positive_int(environ, "GEMINI_TIMEOUT_SECONDS", 60),
+            action_plan_concurrency=_bounded_positive_int(
+                environ, "GEMINI_ACTION_PLAN_CONCURRENCY", 3, maximum=8
+            ),
         )
 
 
@@ -479,7 +487,7 @@ class JinaEmbeddingSettings:
 
 @dataclass(frozen=True, slots=True)
 class RerankerSettings:
-    """Configuration for RerankerAdapter with key rotation."""
+    """Configuration for RerankerAdapter with key rotation (Cohere default)."""
 
     model: str
     rotator: APIKeyRotator

@@ -73,13 +73,6 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 - **Failure state:** Strict type checks fail on dict-of-Any API payloads, or worse, a bare `str` payload is iterated character-by-character at runtime.
 - **Deploy when:** Consuming loosely-typed JSON payloads (dict[str, Any]) in strict-typed code.
 
-#### "After the plan, fan out file-disjoint implementers"
-- **Version:** v1 (2026-08-16)
-- **Pattern:** After a written implementation plan exists, the parent keeps spec, scope, and Definition of Done. Spawn one general-purpose subagent per file-disjoint TDD task; run a wave in parallel only when write sets do not overlap; start the next wave only after its dependencies have landed. Do not give implementers planning, spec or capability-map edits, later map modules, or the final suite.
-- **Evidence:** 2026-08-16 `document-loading` implementation (`PLAN-document-loading.md`): Wave 1 (sanitizer / OCR markers / manifest title) then Wave 2 (service wiring / `load_corpus` strip) produced 54 focused passing tests and no `data/extracted/` rewrite. The user then required this pattern to fire unprompted.
-- **Failure state:** One agent re-plans or drifts into later modules; two agents collide on the same file; the parent skips integration or the Definition of Done.
-- **Deploy when:** Implementing any written plan that has two or more tasks. Do not wait to be told to use subagents.
-
 ---
 
 ### 2. ArchSeeds (Structural Integrity & System Invariants)

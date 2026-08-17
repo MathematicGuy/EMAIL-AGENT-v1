@@ -11,6 +11,7 @@ New to the harnesses? Start with the [Evaluation Harness Guide](./HARNESS-GUIDE.
 | [RETRIEVAL](./RETRIEVAL/) | Email-RAG routing and retrieval quality | [dashboard.md](./dashboard.md) |
 | [CHAT-RAG](./CHAT-RAG/) | Chat-with-documents grounding evaluation | [dashboard.md](./CHAT-RAG/dashboard.md) |
 | [CHAT](./CHAT/) | Chat intent and route-classification evaluation | JSON reports only |
+| [CHAT/latency](./CHAT/latency/) | Chat-switch UI latency (Playwright) | [TRACK.md](./CHAT/latency/TRACK.md) |
 | [baselines](./baselines/) | Retained JSON reports from retrieval and email-routing evaluators | Generated into the retrieval dashboard |
 
 ## Refresh

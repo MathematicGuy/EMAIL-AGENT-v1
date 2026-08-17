@@ -45,9 +45,21 @@ def gmail_environment(tmp_path: Path) -> dict[str, str]:
 def test_gmail_settings_allow_readonly_scope_and_redact_secrets(tmp_path: Path) -> None:
     settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
     assert settings.scopes == (GMAIL_READONLY_SCOPE,)
+    assert settings.fetch_concurrency == 6
     assert "client-secret" not in repr(settings)
     assert settings.redirect_uri.endswith("/oauth/gmail/callback")
     assert settings.frontend_url is None
+
+
+@pytest.mark.parametrize("value", ["0", "9"])
+def test_gmail_settings_reject_out_of_range_fetch_concurrency(
+    tmp_path: Path, value: str
+) -> None:
+    values = gmail_environment(tmp_path)
+    values["GMAIL_FETCH_CONCURRENCY"] = value
+
+    with pytest.raises(ValueError, match="GMAIL_FETCH_CONCURRENCY"):
+        GmailSettings.from_env(values, load_env_file=False)
 
 
 def test_gmail_settings_accept_safe_frontend_url(tmp_path: Path) -> None:
@@ -391,6 +403,71 @@ def test_service_does_not_translate_unrelated_build_value_errors(
 
     with pytest.raises(ValueError, match="discovery document"):
         asyncio.run(adapter._service("mbx-1"))
+
+
+def test_service_cache_builds_once_and_requests_receive_distinct_transports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Repository:
+        async def get(self, connection_id: str) -> MailboxConnection:
+            assert connection_id == "mbx-1"
+            return _active_connection()
+
+    class DecryptingCipher:
+        def decrypt(self, encrypted_token: str) -> str:
+            assert encrypted_token == "encrypted-token"
+            return "refresh-token"
+
+    class AuthorizedTransport:
+        def __init__(self, credentials: object, http: object) -> None:
+            self.credentials = credentials
+            self.http = http
+
+    captured: dict[str, object] = {}
+    transports: list[object] = []
+
+    def fake_build(*args: object, **kwargs: object) -> object:
+        captured["calls"] = int(captured.get("calls", 0)) + 1
+        captured["credentials"] = kwargs["credentials"]
+        captured["request_builder"] = kwargs["requestBuilder"]
+        return object()
+
+    def fake_http() -> object:
+        transport = object()
+        transports.append(transport)
+        return transport
+
+    def fake_authorized_http(credentials: object, *, http: object) -> AuthorizedTransport:
+        return AuthorizedTransport(credentials, http)
+
+    def fake_request(http: object, *args: object, **kwargs: object) -> object:
+        return http
+
+    monkeypatch.setattr(gmail_provider, "build", fake_build)
+    monkeypatch.setattr(gmail_provider.httplib2, "Http", fake_http)
+    monkeypatch.setattr(gmail_provider, "AuthorizedHttp", fake_authorized_http)
+    monkeypatch.setattr(gmail_provider, "HttpRequest", fake_request)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
+
+    async def scenario() -> None:
+        first, second = await asyncio.gather(adapter._service("mbx-1"), adapter._service("mbx-1"))
+        assert first is second
+
+    asyncio.run(scenario())
+    assert captured["calls"] == 1
+
+    request_builder = captured["request_builder"]
+    assert callable(request_builder)
+    first_request = request_builder(object(), "postproc", "https://example.test/one")
+    second_request = request_builder(object(), "postproc", "https://example.test/two")
+
+    assert isinstance(first_request, AuthorizedTransport)
+    assert isinstance(second_request, AuthorizedTransport)
+    assert first_request.credentials is captured["credentials"]
+    assert second_request.credentials is captured["credentials"]
+    assert first_request.http is not second_request.http
+    assert transports == [first_request.http, second_request.http]
 
 
 def test_call_retries_transient_errors_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
