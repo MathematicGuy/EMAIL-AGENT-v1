@@ -201,6 +201,12 @@ def first_connection_id(client: httpx.Client, pytestconfig: pytest.Config) -> st
     before running tests that depend on a real mailbox connection.
     """
     resp = client.get("/v1/mail-todo/connections")
+    if resp.status_code == 401:
+        _skip_loudly(
+            pytestconfig,
+            "the live server requires an authenticated session - "
+            "complete the OAuth flow in the GUI first, then re-run",
+        )
     assert resp.status_code == 200, f"Unexpected {resp.status_code}: {resp.text}"
     connections = resp.json().get("connections", [])
     active = [c for c in connections if c.get("status") == "active"]
@@ -229,12 +235,13 @@ class TestErrorStates:
         assert resp.json() == {"status": "ok"}
 
     def test_connections_list_shape(self, client: httpx.Client) -> None:
-        """GET /connections always returns a JSON object with a 'connections' list."""
+        """GET /connections returns a JSON object with 'connections' or 401 if unauthenticated."""
         resp = client.get("/v1/mail-todo/connections")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "connections" in body
-        assert isinstance(body["connections"], list)
+        assert resp.status_code in {200, 401}
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "connections" in body
+            assert isinstance(body["connections"], list)
 
     def test_oauth_redirect_starts_google_flow(self, client: httpx.Client) -> None:
         """GET /oauth/gmail/connect redirects to accounts.google.com with
