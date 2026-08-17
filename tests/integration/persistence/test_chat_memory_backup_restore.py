@@ -162,7 +162,6 @@ def _profile_namespace(
 def _profile(*, expires_at: datetime | None = None) -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-bak",
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         language="vi",
         timezone="Asia/Bangkok",
@@ -200,7 +199,6 @@ def _task_episode(
     return TaskEpisode(
         episode_id=episode_id,
         record_id=record_id,
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         chat_session_id="session-bak",
         chat_turn_id=turn_id,
@@ -233,7 +231,6 @@ def _chat_summary_episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="ep-summary-bak",
         record_id="rec-summary-bak",
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         chat_session_id="session-bak",
         chat_turn_id="turn-summary-bak",

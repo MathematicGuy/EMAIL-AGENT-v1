@@ -197,8 +197,20 @@ def test_migrations_apply_once_and_are_idempotent() -> None:
                 "002_chat_profiles.sql",
                 "003_chat_summary_episodes.sql",
                 "004_task_episodes.sql",
+                "005_chat_projects.sql",
                 "005_identity_workspace_sessions.sql",
                 "006_durable_chat_sessions.sql",
+                "006_project_documents.sql",
+                "007_projects_documents.sql",
+                "007_task_episode_project_scope.sql",
+                "008_project_document_cleanup.sql",
+                "009_canonical_project_documents.sql",
+                "010_service_heartbeats.sql",
+                "011_chat_history.sql",
+                "012_chat_mail_scan.sql",
+                "012_project_document_chunks.sql",
+                "013_digest_run_filtered_summary.sql",
+                "014_chat_turn_lifecycle.sql",
             )
             assert await apply_migrations(pool) == ()
         finally:
