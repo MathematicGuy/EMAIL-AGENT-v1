@@ -355,8 +355,9 @@ def test_unchanged_source_is_skipped_on_second_ingest(tmp_path: Path) -> None:
 def test_txt_ingest_writes_text_extractor_and_sanitized_body(tmp_path: Path) -> None:
     """Skipping sanitize would persist NFD and control characters in the corpus."""
     raw = tmp_path / "raw"
-    note_body = f"# Note\n\nHello {_NFD_VIETNAMESE_E}\x00world\n"
-    (raw / "note.txt").write_text(note_body, encoding="utf-8")
+    raw.mkdir()
+    payload = f"# Note\n\nHello {_NFD_VIETNAMESE_E}\x00world\n"
+    (raw / "note.txt").write_text(payload, encoding="utf-8")
     service = KnowledgeIngestionService(
         _settings(), DocxExtractor(), StubPdfInspector(_native_pdf())
     )

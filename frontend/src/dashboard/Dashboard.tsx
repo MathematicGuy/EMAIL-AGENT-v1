@@ -39,6 +39,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
   const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
@@ -46,6 +47,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     () => projects.find((project) => project.id === activeProjectId),
     [projects, activeProjectId]
   );
+
+  useEffect(() => {
+    const handleOpenProjectDocs = () => {
+      setIsProjectDocumentsOpen(true);
+    };
+    window.addEventListener('open-project-documents', handleOpenProjectDocs);
+    return () => window.removeEventListener('open-project-documents', handleOpenProjectDocs);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +172,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           projects={projects}
           activeProject={activeProject}
           onSelectProject={handleSelectProject}
+          showProjectDocuments={projectDocumentsEnabled && activeView === 'chat'}
+          onOpenProjectDocuments={() => setIsProjectDocumentsOpen(true)}
         />
 
         {activeView === 'mail' && (
@@ -262,6 +273,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         <ProjectDocumentPanel
           projectId={activeProjectId}
           projectName={activeProject?.name}
+          isOpen={isProjectDocumentsOpen}
+          onClose={() => setIsProjectDocumentsOpen(false)}
+          hideTrigger
         />
       )}
     </div>

@@ -12,12 +12,32 @@ import { documentError, documentLocale, documentText } from './i18n';
 interface Props {
   projectId: string;
   projectName?: string;
+  isOpen?: boolean;
+  onClose?: () => void;
+  hideTrigger?: boolean;
 }
 
 const ACTIVE = new Set(['received', 'extracting', 'indexing', 'deleting']);
 
-export const ProjectDocumentPanel: React.FC<Props> = ({ projectId, projectName }) => {
-  const [open, setOpen] = useState(false);
+export const ProjectDocumentPanel: React.FC<Props> = ({
+  projectId,
+  projectName,
+  isOpen: controlledIsOpen,
+  onClose,
+  hideTrigger = false,
+}) => {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledIsOpen !== undefined;
+  const open = isControlled ? controlledIsOpen : internalOpen;
+
+  const setOpen = useCallback((nextOpen: boolean) => {
+    if (!nextOpen && onClose) {
+      onClose();
+    }
+    if (!isControlled) {
+      setInternalOpen(nextOpen);
+    }
+  }, [isControlled, onClose]);
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -63,7 +83,7 @@ export const ProjectDocumentPanel: React.FC<Props> = ({ projectId, projectName }
       window.removeEventListener('open-project-documents', openPanel);
       window.removeEventListener('project-documents-updated', updated);
     };
-  }, [refresh]);
+  }, [refresh, setOpen]);
 
   useEffect(() => {
     if (!open || !documents.some((item) => ACTIVE.has(item.status))) {
@@ -122,14 +142,16 @@ export const ProjectDocumentPanel: React.FC<Props> = ({ projectId, projectName }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={!projectId}
-        className="fixed right-5 top-16 z-30 flex items-center gap-2 rounded-lg border border-[#3b3833] bg-[#242320] px-3 py-2 text-xs text-zinc-300 shadow-xl hover:bg-[#302e2a] disabled:opacity-40"
-      >
-        <FileText className="h-4 w-4" /> {documentText('title')}
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          disabled={!projectId}
+          className="fixed right-5 top-16 z-30 flex items-center gap-2 rounded-lg border border-[#3b3833] bg-[#242320] px-3 py-2 text-xs text-zinc-300 shadow-xl hover:bg-[#302e2a] disabled:opacity-40"
+        >
+          <FileText className="h-4 w-4" /> {documentText('title')}
+        </button>
+      )}
       {open && (
         <aside
           role="dialog"
