@@ -71,7 +71,7 @@ class PostgresProjectRepository:
                 await connection.execute(
                     """
                     INSERT INTO projects (id, workspace_id, owner_user_id, name, is_default)
-                    SELECT %s, workspace_id, user_id, 'Default project', true
+                    SELECT %s, workspace_id, user_id, 'Default Project', true
                     FROM workspace_members
                     WHERE workspace_id = %s AND user_id = %s
                     ON CONFLICT (workspace_id, owner_user_id)
@@ -683,7 +683,7 @@ class PostgresProjectRepository:
                         """
                         INSERT INTO projects (
                             id, workspace_id, owner_user_id, name, is_default
-                        ) VALUES (%s, %s, %s, 'Default project', true)
+                        ) VALUES (%s, %s, %s, 'Default Project', true)
                         RETURNING id, workspace_id, owner_user_id, name, is_default,
                             deleted_at, created_at
                         """,

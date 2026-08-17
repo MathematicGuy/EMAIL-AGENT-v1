@@ -14,11 +14,25 @@ function response(payload: unknown, status = 200): Response {
   });
 }
 
+function sse(events: unknown[]): Response {
+  return new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+  );
+}
+
+function noContent(): Response {
+  return new Response(null, { status: 204 });
+}
+
 function projectFetch(extra?: (url: string, init?: RequestInit) => Response | undefined) {
   return vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const custom = extra?.(url, init);
     if (custom) return Promise.resolve(custom);
+    if (url.endsWith('/v1/cowork/chat/guest-session') && init?.method === 'POST') {
+      return Promise.resolve(noContent());
+    }
     if (url.endsWith('/v1/cowork/chat/projects')) {
       return Promise.resolve(response({ projects: [{
         project_id: 'project-default',
@@ -48,6 +62,88 @@ describe('Dashboard Project chat', () => {
     fireEvent.change(input, { target: { value: 'Xin chào AI' } });
     expect((input as HTMLTextAreaElement).value).toBe('Xin chào AI');
     expect((await screen.findAllByText('Default Project')).length).toBeGreaterThan(0);
+  });
+
+  it('creates and selects the Default Project when a new chat starts without one', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/cowork/chat/guest-session') && init?.method === 'POST') {
+        return Promise.resolve(noContent());
+      }
+      if (url.endsWith('/v1/cowork/chat/projects')) {
+        return Promise.resolve(response({ projects: [{
+          project_id: 'project-default',
+          name: 'Default Project',
+          is_default: true,
+          created_at: '2026-08-17T00:00:00Z',
+        }] }));
+      }
+      if (url.endsWith('/v1/cowork/chat/document-health')) {
+        return Promise.resolve(response({ status: 'ready', checks: { feature: 'enabled' } }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.localStorage.clear();
+
+    render(<Dashboard />);
+    fireEvent.click(screen.getByTitle('New chat'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/backend/v1/cowork/chat/guest-session',
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/backend/v1/cowork/chat/projects',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect((await screen.findAllByText('Default Project')).length).toBeGreaterThan(0);
+  });
+
+  it('creates the Default Project before sending a first chat message', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/cowork/chat/guest-session') && init?.method === 'POST') {
+        return Promise.resolve(noContent());
+      }
+      if (url.endsWith('/v1/cowork/chat/projects')) {
+        return Promise.resolve(response({ projects: [{
+          project_id: 'project-default',
+          name: 'Default Project',
+          is_default: true,
+          created_at: '2026-08-17T00:00:00Z',
+        }] }));
+      }
+      if (url.includes('/sessions?project_id=project-default')) {
+        return Promise.resolve(response({ sessions: [] }));
+      }
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ project_id: 'project-default' });
+        return Promise.resolve(response({ session_id: 'session-default', project_id: 'project-default' }, 201));
+      }
+      if (url.endsWith('/sessions/session-default/messages') && init?.method === 'POST') {
+        return Promise.resolve(sse([{ event_type: 'delta', text: 'Hello from the default project.' }, { event_type: 'completed' }]));
+      }
+      if (url.endsWith('/v1/cowork/chat/document-health')) {
+        return Promise.resolve(response({ status: 'ready', checks: { feature: 'enabled' } }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.localStorage.clear();
+
+    render(<Dashboard />);
+    const input = screen.getByPlaceholderText('How can I help you today?');
+    fireEvent.change(input, { target: { value: 'Hello' } });
+    fireEvent.click(screen.getByTitle('Send message'));
+
+    expect(await screen.findByText('Hello from the default project.')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/backend/v1/cowork/chat/guest-session',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
   });
 
   it('loads Project-scoped persisted chat history', async () => {
