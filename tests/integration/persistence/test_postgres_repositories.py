@@ -211,6 +211,7 @@ def test_migrations_apply_once_and_are_idempotent() -> None:
                 "012_project_document_chunks.sql",
                 "013_digest_run_filtered_summary.sql",
                 "014_chat_turn_lifecycle.sql",
+                "014_project_chunk_fts_simple.sql",
             )
             assert await apply_migrations(pool) == ()
         finally:
