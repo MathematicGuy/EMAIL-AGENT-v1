@@ -977,6 +977,17 @@ class MailScanSummary:
         )
 
 
+class ChatTurnStatus(StrEnum):
+    """Durable lifecycle state for one user submission and its assistant reply."""
+
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    USAGE_LIMITED = "usage_limited"
+    RATE_LIMITED = "rate_limited"
+
+
 @dataclass(frozen=True, slots=True)
 class ChatTurn:
     """Transient, bounded session-turn value for the later working-memory buffer."""
@@ -990,6 +1001,9 @@ class ChatTurn:
     rag_evidence: tuple[ChatRagEvidence, ...] = ()
     retrieval_status: ChatRetrievalStatus | None = None
     mail_scan: MailScanSummary | None = None
+    status: ChatTurnStatus = ChatTurnStatus.COMPLETED
+    idempotency_key: str | None = None
+    error_code: str | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -1023,6 +1037,11 @@ class ChatTurn:
         object.__setattr__(self, "rag_evidence", evidence)
         if self.mail_scan is not None and not isinstance(self.mail_scan, MailScanSummary):
             raise TypeError("mail_scan must be a MailScanSummary")
+        object.__setattr__(self, "status", _as_enum(self.status, ChatTurnStatus, "status"))
+        if self.idempotency_key is not None:
+            _require_string(self.idempotency_key, "idempotency_key")
+        if self.error_code is not None:
+            _require_string(self.error_code, "error_code")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -1058,6 +1077,19 @@ class ChatTurn:
             mail_scan=(
                 MailScanSummary.from_dict(_as_mapping(data["mail_scan"], "mail_scan"))
                 if data.get("mail_scan") is not None
+                else None
+            ),
+            status=_as_enum(
+                data.get("status", ChatTurnStatus.COMPLETED), ChatTurnStatus, "status"
+            ),
+            idempotency_key=(
+                _require_string(data["idempotency_key"], "idempotency_key")
+                if data.get("idempotency_key") is not None
+                else None
+            ),
+            error_code=(
+                _require_string(data["error_code"], "error_code")
+                if data.get("error_code") is not None
                 else None
             ),
         )

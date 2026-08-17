@@ -719,6 +719,7 @@ interface ChatMessageItemProps {
   onRetryTurn?: (messageId: string) => void;
   onOpenMailInbox?: () => void;
   onRetryMessage?: (msg: ChatMessage) => void;
+  onLoadFullEvidence?: (chunkId: string) => Promise<ChatRagEvidence | null>;
 }
 
 const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
@@ -735,6 +736,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
   onRetryTurn,
   onOpenMailInbox,
   onRetryMessage,
+  onLoadFullEvidence,
 }) => {
   const isUser = msg.role === 'user';
   const parts = useMemo(() => parseMarkdownContent(msg.content), [msg.content]);
@@ -851,6 +853,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
           <RagEvidencePanel
             evidence={msg.ragEvidence ?? []}
             retrievalStatus={msg.retrievalStatus}
+            onLoadFullEvidence={onLoadFullEvidence}
           />
         )}
 
@@ -1091,6 +1094,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
               onRetryTurn={onRetryTurn}
               onOpenMailInbox={onOpenMailInbox}
               onRetryMessage={handleRetryMessage}
+              onLoadFullEvidence={onLoadFullEvidence}
             />
           ))}
           <div ref={bottomRef} />

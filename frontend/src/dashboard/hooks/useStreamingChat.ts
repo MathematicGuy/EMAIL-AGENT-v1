@@ -16,6 +16,7 @@ import {
 import type {
   ChatCitation,
   ChatComposerAttachment,
+  ChatGenerationStatus,
   ChatMessage,
   ChatRagEvidence,
   ChatRetrievalStatus,
@@ -28,6 +29,8 @@ interface ChatSession {
   session_id: string;
   project_id: string;
   title?: string;
+  status?: string;
+  latest_turn_status?: string;
 }
 
 interface ChatTurn {
@@ -39,6 +42,9 @@ interface ChatTurn {
   rag_evidence?: Array<Record<string, unknown>>;
   retrieval_status?: string;
   mail_scan?: Record<string, unknown>;
+  status?: string;
+  idempotency_key?: string;
+  error_code?: string;
 }
 
 interface SseEvent {
@@ -56,9 +62,22 @@ interface SseEvent {
   page_end?: number;
   rag_evidence?: Array<Record<string, unknown>>;
   retrieval_status?: string;
+  status?: string;
+  idempotency_key?: string;
+  turn_id?: string;
+  error_code?: string;
+}
+
+interface ChatRuntime {
+  messages: ChatMessage[];
+  draft: string;
+  status: ChatGenerationStatus;
+  selectedAttachments: ChatComposerAttachment[];
+  attachmentError: string | null;
 }
 
 const TRANSCRIPT_CACHE_LIMIT = 20;
+const NEW_CHAT_KEY = '__new_chat__';
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
 const MAIL_COMMAND = /(?:^|\s)@mail\b/i;
@@ -174,6 +193,17 @@ function retrievalStatus(value: unknown): ChatRetrievalStatus | undefined {
     : undefined;
 }
 
+function generationStatus(value: unknown): ChatGenerationStatus | undefined {
+  const normalized = value === 'usage_limit' || value === 'usage_limited' ? 'usage_limit_reached'
+    : value === 'rate_limited' ? 'temporarily_rate_limited'
+      : value;
+  return normalized === 'idle' || normalized === 'generating' || normalized === 'completed' ||
+    normalized === 'failed' || normalized === 'interrupted' || normalized === 'cancelled' ||
+    normalized === 'usage_limit_reached' || normalized === 'temporarily_rate_limited'
+    ? normalized
+    : undefined;
+}
+
 function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
   return turns.flatMap((turn) => {
     const citations = (turn.citation_coordinates ?? [])
@@ -182,6 +212,7 @@ function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
     const hasStoredEvidence = Array.isArray(turn.rag_evidence);
     const ragEvidence = hasStoredEvidence ? ragEvidenceFromPayload(turn.rag_evidence) : undefined;
     const status = retrievalStatus(turn.retrieval_status);
+    const persistedGenerationStatus = generationStatus(turn.status);
     return [
       {
         id: `${turn.turn_id}-user`,
@@ -198,6 +229,13 @@ function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
         ragEvidence,
         retrievalStatus: status,
         mailScan: mailScanFromPayload(turn.mail_scan),
+        generationStatus: (persistedGenerationStatus === 'generating'
+          ? 'interrupted'
+          : persistedGenerationStatus) ??
+          (turn.assistant_message === null ? 'interrupted' : 'completed'),
+        errorCode: turn.error_code,
+        idempotencyKey: turn.idempotency_key,
+        turnId: turn.turn_id,
       },
     ];
   });
@@ -268,22 +306,79 @@ export function useStreamingChat(
 ) {
   void modelId;
   void projectIds;
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
   const [isSessionListLoading, setIsSessionListLoading] = useState(true);
   const [isTranscriptLoading, setIsTranscriptLoading] = useState(false);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [inputText, setInputText] = useState('');
-  const [selectedAttachments, setSelectedAttachments] = useState<ChatComposerAttachment[]>([]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationIdState] = useState<string | null>(null);
+  const [draftKey, setDraftKey] = useState(NEW_CHAT_KEY);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState(() => new Map<string, ChatRuntime>([[
+    NEW_CHAT_KEY, {
+      messages: [], draft: '', status: 'idle', selectedAttachments: [], attachmentError: null,
+    },
+  ]]));
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [workflows] = useState<Record<string, TaskWorkflow>>({});
-  const abortRef = useRef<AbortController | null>(null);
+  const activeConversationRef = useRef<string | null>(null);
+  const draftKeyRef = useRef(NEW_CHAT_KEY);
+  const navigationEpochRef = useRef(0);
+  const runtimesRef = useRef(runtimeSnapshot);
+  const abortRefs = useRef(new Map<string, AbortController>());
+  const cancelRequestedRefs = useRef(new Set<string>());
   const loadHistoryAbortRef = useRef<AbortController | null>(null);
   const transcriptCacheRef = useRef(new Map<string, ChatMessage[]>());
   const prefetchInFlightRef = useRef(new Set<string>());
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
+  const pendingProjectChatRef = useRef<{ projectId: string; sessionId: string } | null>(null);
+
+  const runtimeFor = useCallback((key: string): ChatRuntime => {
+    const existing = runtimesRef.current.get(key);
+    if (existing) return existing;
+    const created: ChatRuntime = {
+      messages: [], draft: '', status: 'idle', selectedAttachments: [], attachmentError: null,
+    };
+    runtimesRef.current.set(key, created);
+    return created;
+  }, []);
+
+  const updateRuntime = useCallback((
+    key: string,
+    update: (current: ChatRuntime) => ChatRuntime,
+  ) => {
+    runtimesRef.current.set(key, update(runtimeFor(key)));
+    setRuntimeSnapshot(new Map(runtimesRef.current));
+  }, [runtimeFor]);
+
+  const activateConversation = useCallback((sessionId: string | null) => {
+    activeConversationRef.current = sessionId;
+    setActiveConversationIdState(sessionId);
+  }, []);
+
+  const activateNewDraft = useCallback(() => {
+    const existing = runtimesRef.current.get(draftKeyRef.current);
+    const key = existing?.status === 'idle'
+      ? draftKeyRef.current
+      : `${NEW_CHAT_KEY}:${navigationEpochRef.current}`;
+    draftKeyRef.current = key;
+    setDraftKey(key);
+    activateConversation(null);
+  }, [activateConversation]);
+
+  const activeRuntime = runtimeSnapshot.get(activeConversationId ?? draftKey) ?? {
+    messages: [], draft: '', status: 'idle' as const, selectedAttachments: [], attachmentError: null,
+  };
+  const messages = activeRuntime.messages;
+  const inputText = activeRuntime.draft;
+  const isGenerating = activeRuntime.status === 'generating';
+  const selectedAttachments = activeRuntime.selectedAttachments;
+  const attachmentError = activeRuntime.attachmentError;
+
+  const setInputText = useCallback((value: string | ((current: string) => string)) => {
+    const key = activeConversationRef.current ?? draftKeyRef.current;
+    updateRuntime(key, (current) => ({
+      ...current,
+      draft: typeof value === 'function' ? value(current.draft) : value,
+    }));
+  }, [updateRuntime]);
 
   const rememberTranscript = useCallback((sessionId: string, next: ChatMessage[]) => {
     const cache = transcriptCacheRef.current;
@@ -315,16 +410,33 @@ export function useStreamingChat(
       }
       if (!response.ok) throw new Error();
       const payload = (await response.json()) as { sessions: ChatSession[] };
-      setRecentChats(payload.sessions.map((session, index) => ({
-        id: session.session_id,
-        title: session.title ?? `Chat ${payload.sessions.length - index}`,
-        projectId: session.project_id,
-        category: 'recent',
-      })));
+      setRecentChats((current) => {
+        const localById = new Map(current.map((chat) => [chat.id, chat]));
+        const serverIds = new Set(payload.sessions.map((session) => session.session_id));
+        const serverChats: RecentChat[] = payload.sessions.map((session, index) => {
+          const local = localById.get(session.session_id);
+          const persistedStatus = generationStatus(session.latest_turn_status ?? session.status);
+          return {
+            id: session.session_id,
+            title: session.title ?? local?.title ?? `Chat ${payload.sessions.length - index}`,
+            projectId: session.project_id,
+            category: 'recent',
+            unread: local?.unread,
+            generationStatus: runtimesRef.current.get(session.session_id)?.status ??
+              (persistedStatus === 'generating' ? 'interrupted' : persistedStatus) ??
+              local?.generationStatus,
+          };
+        });
+        const runtimeBacked = current.filter((chat) =>
+          chat.projectId === projectId &&
+          !serverIds.has(chat.id) &&
+          runtimesRef.current.has(chat.id)
+        );
+        return [...runtimeBacked, ...serverChats];
+      });
       setApiStatus('online');
     } catch {
       setApiStatus('offline');
-      setRecentChats([]);
     } finally {
       setIsSessionListLoading(false);
     }
@@ -332,17 +444,21 @@ export function useStreamingChat(
 
   useEffect(() => {
     queueMicrotask(() => {
-      setMessages([]);
-      setActiveConversationId(null);
-      setSelectedAttachments([]);
+      const pending = pendingProjectChatRef.current;
+      if (pending?.projectId === projectId) {
+        pendingProjectChatRef.current = null;
+        activateConversation(pending.sessionId);
+      } else {
+        activateNewDraft();
+      }
       void refreshHistory();
     });
-  }, [projectId, refreshHistory]);
+  }, [activateConversation, activateNewDraft, projectId, refreshHistory]);
 
   useEffect(() => () => {
     for (const controller of attachmentPollsRef.current.values()) controller.abort();
     attachmentPollsRef.current.clear();
-  }, [projectId]);
+  }, []);
 
   const ensureSession = useCallback(async (projectIdOverride?: string): Promise<string> => {
     if (activeConversationId) return activeConversationId;
@@ -356,13 +472,21 @@ export function useStreamingChat(
     });
     if (!response.ok) throw new Error(`Could not create chat session (HTTP ${response.status}).`);
     const payload = (await response.json()) as ChatSession;
-    setActiveConversationId(payload.session_id);
     return payload.session_id;
   }, [activeConversationId, projectId]);
 
   const selectAttachments = useCallback((files: File[]) => {
+    const runtimeKey = activeConversationRef.current ?? draftKeyRef.current;
+    const updateAttachments = (
+      update: (current: ChatComposerAttachment[]) => ChatComposerAttachment[],
+    ) => updateRuntime(runtimeKey, (current) => ({
+      ...current, selectedAttachments: update(current.selectedAttachments),
+    }));
+    const updateError = (attachmentError: string | null) => updateRuntime(
+      runtimeKey, (current) => ({ ...current, attachmentError }),
+    );
     if (!projectId) {
-      setAttachmentError('Select a Project before uploading documents.');
+      updateError('Select a Project before uploading documents.');
       return;
     }
     window.dispatchEvent(new CustomEvent('open-project-documents'));
@@ -370,12 +494,12 @@ export function useStreamingChat(
       const validation = validateAttachmentFile(file);
       const id = `upload_${crypto.randomUUID?.() ?? Date.now()}`;
       if (validation) {
-        setAttachmentError(validation);
+        updateError(validation);
         continue;
       }
       const pollController = new AbortController();
       attachmentPollsRef.current.set(id, pollController);
-      setSelectedAttachments((current) => [...current, {
+      updateAttachments((current) => [...current, {
         id,
         name: file.name,
         mediaType: file.type,
@@ -384,12 +508,12 @@ export function useStreamingChat(
       }]);
       void uploadProjectDocument(projectId, file, (status) => {
         if (pollController.signal.aborted) return;
-        setSelectedAttachments((current) => current.map((item) =>
+        updateAttachments((current) => current.map((item) =>
           item.id === id ? { ...item, status } : item
         ));
       }, pollController.signal).then(async (document) => {
         if (pollController.signal.aborted) return;
-        setSelectedAttachments((current) => current.map((item) =>
+        updateAttachments((current) => current.map((item) =>
           item.id === id ? {
             ...item,
             documentId: document.document_id,
@@ -401,7 +525,7 @@ export function useStreamingChat(
           : await waitForProjectDocument(projectId, document.document_id, {
             signal: pollController.signal,
           });
-        setSelectedAttachments((current) => current.map((item) =>
+        updateAttachments((current) => current.map((item) =>
           item.id === id ? {
             ...item,
             status: finished.status === 'ready' ? 'ready' : 'error',
@@ -410,30 +534,35 @@ export function useStreamingChat(
               : undefined,
           } : item
         ));
-        setAttachmentError(null);
+        updateError(null);
         window.dispatchEvent(new CustomEvent('project-documents-updated'));
       }).catch((cause) => {
         if (pollController.signal.aborted) return;
         const message = cause instanceof Error ? cause.message : 'Upload failed.';
-        setSelectedAttachments((current) => current.map((item) =>
+        updateAttachments((current) => current.map((item) =>
           item.id === id ? { ...item, status: 'error', error: message } : item
         ));
-        setAttachmentError(message);
+        updateError(message);
       }).finally(() => {
         if (attachmentPollsRef.current.get(id) === pollController) {
           attachmentPollsRef.current.delete(id);
         }
       });
     }
-  }, [projectId]);
+  }, [projectId, updateRuntime]);
 
   const removeAttachment = useCallback((attachmentId: string) => {
+    const runtimeKey = activeConversationRef.current ?? draftKeyRef.current;
     attachmentPollsRef.current.get(attachmentId)?.abort();
     attachmentPollsRef.current.delete(attachmentId);
-    setSelectedAttachments((current) => current.filter((item) => item.id !== attachmentId));
-  }, []);
+    updateRuntime(runtimeKey, (current) => ({
+      ...current,
+      selectedAttachments: current.selectedAttachments.filter((item) => item.id !== attachmentId),
+    }));
+  }, [updateRuntime]);
 
   const runMailScan = useCallback(async (
+    sessionId: string,
     assistantId: string,
     abort: AbortController,
   ): Promise<{ content: string; mailScan: MailScanProgress }> => {
@@ -442,9 +571,12 @@ export function useStreamingChat(
       mailScan: MailScanProgress,
       isStreaming = true,
     ) => {
-      setMessages((current) => current.map((message) =>
-        message.id === assistantId ? { ...message, content, mailScan, isStreaming } : message
-      ));
+      updateRuntime(sessionId, (current) => ({
+        ...current,
+        messages: current.messages.map((message) =>
+          message.id === assistantId ? { ...message, content, mailScan, isStreaming } : message
+        ),
+      }));
     };
     const activeConnections = (await listConnections(abort.signal))
       .filter((connection) => connection.status === 'active');
@@ -522,7 +654,7 @@ export function useStreamingChat(
       };
     }
     throw new DOMException('Mail scan polling aborted', 'AbortError');
-  }, []);
+  }, [updateRuntime]);
 
   const persistMailScanTurn = useCallback(async (
     sessionId: string,
@@ -564,7 +696,7 @@ export function useStreamingChat(
         if (createRes.ok) {
           const newSession = (await createRes.json()) as ChatSession;
           targetSessionId = newSession.session_id;
-          setActiveConversationId(newSession.session_id);
+          activateConversation(newSession.session_id);
           response = await fetch(
             `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(targetSessionId)}/mail-scans`,
             {
@@ -593,44 +725,129 @@ export function useStreamingChat(
     if (!response.ok) {
       console.warn(`Could not save mail scan (HTTP ${response.status}).`);
     }
-  }, [projectId]);
+  }, [activateConversation, projectId]);
 
-  const sendMessage = useCallback(async (override?: string, projectIdOverride?: string) => {
-    const text = (override ?? inputText).trim();
-    if (!text || isGenerating) return;
+  const setChatStatus = useCallback((
+    sessionId: string,
+    status: ChatGenerationStatus,
+    unread = false,
+  ) => {
+    updateRuntime(sessionId, (current) => ({ ...current, status }));
+    setRecentChats((current) => current.map((chat) => chat.id === sessionId
+      ? { ...chat, generationStatus: status, unread: unread || chat.unread }
+      : chat));
+  }, [updateRuntime]);
+
+  const requestTurnCancellation = useCallback(async (sessionId: string) => {
+    const assistant = runtimeFor(sessionId).messages.findLast(
+      (message) => message.role === 'assistant' && message.isStreaming
+    );
+    if (!assistant) return;
+    const turnPath = assistant.turnId
+      ? `/turns/${encodeURIComponent(assistant.turnId)}/cancel`
+      : '/turns/cancel';
+    await fetch(
+      `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}${turnPath}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: assistant.turnId ? undefined : { 'Content-Type': 'application/json' },
+        body: assistant.turnId ? undefined : JSON.stringify({
+          idempotency_key: assistant.idempotencyKey,
+        }),
+      },
+    );
+  }, [runtimeFor]);
+
+  const sendMessage = useCallback(async (
+    override?: string,
+    projectIdOverride?: string,
+    retry?: { assistantId: string; idempotencyKey: string },
+  ) => {
+    const originSessionId = activeConversationRef.current;
+    const originKey = originSessionId ?? draftKeyRef.current;
+    const originRuntime = runtimeFor(originKey);
+    const text = (override ?? originRuntime.draft).trim();
+    if (!text || originRuntime.status === 'generating') return;
     if (selectedAttachments.some((item) => item.status !== 'ready')) {
-      setAttachmentError(
-        navigator.language.toLowerCase().startsWith('vi')
+      const message = navigator.language.toLowerCase().startsWith('vi')
           ? 'Tài liệu đang được xử lý. Hãy chờ hoặc gỡ tài liệu để gửi tin nhắn.'
-          : 'A selected document is still processing. Wait or remove it before sending.'
-      );
+          : 'A selected document is still processing. Wait or remove it before sending.';
+      updateRuntime(originKey, (current) => ({ ...current, attachmentError: message }));
       return;
     }
-    setInputText('');
-    setIsGenerating(true);
     const now = Date.now();
+    const navigationEpoch = navigationEpochRef.current;
+    let sessionId: string | null = originSessionId;
+    const assistantId = retry?.assistantId ?? `assistant-${now}`;
+    const idempotencyKey = retry?.idempotencyKey ?? `turn_${crypto.randomUUID?.() ?? now}`;
+    const abort = new AbortController();
+    let mailSessionId: string | null = null;
     const userMessage: ChatMessage = {
       id: `user-${now}`,
       role: 'user',
       content: text,
       timestamp: timestamp(),
     };
-    const assistantId = `assistant-${now}`;
-    setMessages((current) => [...current, userMessage, {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      timestamp: timestamp(),
-      isStreaming: true,
-    }]);
-    const abort = new AbortController();
-    let mailSessionId: string | null = null;
-    abortRef.current = abort;
+    updateRuntime(originKey, (current) => {
+      const messages = retry
+        ? current.messages.map((message) => message.id === assistantId
+          ? {
+              ...message, content: '', isStreaming: true, generationStatus: 'generating' as const,
+              errorCode: undefined, idempotencyKey,
+            }
+          : message)
+        : [...current.messages, userMessage, {
+            id: assistantId,
+            role: 'assistant' as const,
+            content: '',
+            timestamp: timestamp(),
+            isStreaming: true,
+            generationStatus: 'generating' as const,
+            idempotencyKey,
+          }];
+      return { ...current, messages, draft: '', status: 'generating' };
+    });
+    abortRefs.current.set(originKey, abort);
+    const sessionProjectId = projectIdOverride ?? projectId;
+    const temporaryTitle = text.length > 48 ? `${text.slice(0, 47)}…` : text;
+    setRecentChats((current) => [{
+      id: originKey,
+      title: temporaryTitle,
+      projectId: sessionProjectId,
+      category: 'recent',
+      generationStatus: 'generating',
+    }, ...current.filter((chat) => chat.id !== originKey)]);
     try {
+      sessionId = await ensureSession(projectIdOverride);
+      if (!originSessionId) {
+        const provisional = runtimesRef.current.get(originKey);
+        if (provisional) {
+          runtimesRef.current.delete(originKey);
+          runtimesRef.current.set(sessionId, provisional);
+          setRuntimeSnapshot(new Map(runtimesRef.current));
+        }
+        abortRefs.current.delete(originKey);
+        abortRefs.current.set(sessionId, abort);
+        if (cancelRequestedRefs.current.delete(originKey)) {
+          cancelRequestedRefs.current.add(sessionId);
+        }
+      }
+      if (!originSessionId && navigationEpochRef.current === navigationEpoch) {
+        activateConversation(sessionId);
+      }
+      setRecentChats((current) => [{
+        id: sessionId as string,
+        title: temporaryTitle,
+        projectId: sessionProjectId,
+        category: 'recent',
+        generationStatus: 'generating',
+      }, ...current.filter((chat) => chat.id !== sessionId && chat.id !== originKey)]);
+      abortRefs.current.set(sessionId, abort);
+
       if (isMailCommand(text)) {
-        const sessionId = await ensureSession(projectIdOverride);
         mailSessionId = sessionId;
-        const result = await runMailScan(assistantId, abort);
+        const result = await runMailScan(sessionId, assistantId, abort);
         try {
           await persistMailScanTurn(
             sessionId, assistantId, text, result.content, result.mailScan, abort.signal
@@ -639,10 +856,14 @@ export function useStreamingChat(
           console.warn('Failed to persist mail scan turn to chat history:', persistErr);
         }
         setApiStatus('online');
+        const completedInBackground = activeConversationRef.current !== sessionId;
+        setChatStatus(sessionId, 'completed', completedInBackground);
+        if (completedInBackground) window.dispatchEvent(new CustomEvent('chat-background-completed', {
+          detail: { sessionId, title: temporaryTitle },
+        }));
         void refreshHistory();
         return;
       }
-      const sessionId = await ensureSession(projectIdOverride);
       const response = await fetch(
         `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
@@ -652,7 +873,7 @@ export function useStreamingChat(
           body: JSON.stringify({
             session_id: sessionId,
             user_message: text,
-            idempotency_key: `turn_${crypto.randomUUID?.() ?? now}`,
+            idempotency_key: idempotencyKey,
             document_ids: selectedAttachments
               .filter((item) => item.status === 'ready')
               .map((item) => item.documentId)
@@ -661,64 +882,109 @@ export function useStreamingChat(
           signal: abort.signal,
         }
       );
+      if (cancelRequestedRefs.current.has(sessionId)) {
+        await requestTurnCancellation(sessionId).catch(() => undefined);
+        abort.abort();
+        throw new DOMException('Chat cancellation requested.', 'AbortError');
+      }
+      let terminalStatus: ChatGenerationStatus | undefined;
       await parseSse(response, (event) => {
-        if (event.event_type === 'delta' && event.text) {
-          setMessages((current) => current.map((message) =>
-            message.id === assistantId
+        if (event.event_type === 'started') {
+          updateRuntime(sessionId as string, (current) => ({ ...current, status: 'generating',
+            messages: current.messages.map((message) => message.id === assistantId
+              ? { ...message, turnId: event.turn_id ?? message.turnId }
+              : message),
+          }));
+        } else if (event.event_type === 'delta' && event.text) {
+          updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId
               ? { ...message, content: message.content + event.text }
-              : message
-          ));
+              : message),
+          }));
         } else if (event.event_type === 'memory_citation') {
           const citation = citationFromEvent(event);
-          if (citation) setMessages((current) => current.map((message) =>
-            message.id === assistantId
+          if (citation) updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId
               ? { ...message, citations: [...(message.citations ?? []), citation] }
-              : message
-          ));
+              : message),
+          }));
         } else if (event.event_type === 'completed') {
+          terminalStatus = 'completed';
           const status = retrievalStatus(event.retrieval_status);
           if (status || Array.isArray(event.rag_evidence)) {
-            setMessages((current) => current.map((message) =>
-              message.id === assistantId
-                ? {
+            updateRuntime(sessionId as string, (current) => ({ ...current,
+              messages: current.messages.map((message) => message.id === assistantId ? {
                     ...message,
                     ragEvidence: ragEvidenceFromPayload(event.rag_evidence),
                     retrievalStatus: status,
                   }
-                : message
-            ));
+                : message),
+            }));
           }
         } else if (event.event_type === 'warning' && event.safe_message) {
-          setMessages((current) => current.map((message) =>
-            message.id === assistantId
-              ? {
+          updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId ? {
                   ...message,
                   content: [message.content, `⚠ ${event.safe_message}`]
                     .filter(Boolean)
                     .join('\n\n'),
                 }
-              : message
-          ));
+              : message),
+          }));
         } else if (event.event_type === 'error' && event.safe_message) {
-          setMessages((current) => current.map((message) =>
-            message.id === assistantId
-              ? {
+          terminalStatus = generationStatus(event.status) ??
+            (/usage/i.test(event.error_code ?? event.code ?? '') ? 'usage_limit_reached'
+              : /rate/i.test(event.error_code ?? event.code ?? '') ? 'temporarily_rate_limited' : 'failed');
+          updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId ? {
                   ...message,
                   content: [message.content, event.safe_message].filter(Boolean).join('\n\n'),
+                  errorCode: event.error_code ?? event.code,
                 }
-              : message
-          ));
+              : message),
+          }));
         }
       });
-      setMessages((current) => current.map((message) =>
-        message.id === assistantId ? { ...message, isStreaming: false } : message
-      ));
+      const completedStatus = terminalStatus ?? 'completed';
+      updateRuntime(sessionId, (current) => ({ ...current, status: completedStatus,
+        messages: current.messages.map((message) => message.id === assistantId
+          ? { ...message, isStreaming: false, generationStatus: completedStatus }
+          : message),
+      }));
+      setChatStatus(
+        sessionId,
+        completedStatus,
+        completedStatus === 'completed' && activeConversationRef.current !== sessionId,
+      );
+      if (completedStatus === 'completed' && activeConversationRef.current !== sessionId) {
+        window.dispatchEvent(new CustomEvent('chat-background-completed', {
+          detail: { sessionId, title: temporaryTitle },
+        }));
+      }
       setApiStatus('online');
-      setSelectedAttachments([]);
-      setAttachmentError(null);
+      updateRuntime(sessionId, (current) => ({
+        ...current, selectedAttachments: [], attachmentError: null,
+      }));
       void refreshHistory();
     } catch (cause) {
-      if ((cause as { name?: string }).name !== 'AbortError') {
+      if ((cause as { name?: string }).name === 'AbortError') {
+        const targetKey = sessionId ?? originKey;
+        {
+          updateRuntime(targetKey, (current) => ({ ...current, status: 'cancelled',
+            messages: current.messages.map((message) => message.id === assistantId ? {
+                ...message,
+                content: [message.content, 'Chat cancelled.'].filter(Boolean).join('\n\n'),
+                isStreaming: false,
+                generationStatus: 'cancelled',
+              }
+              : message),
+          }));
+          if (sessionId) setChatStatus(sessionId, 'cancelled');
+          else setRecentChats((current) => current.map((chat) => chat.id === originKey
+            ? { ...chat, generationStatus: 'cancelled' }
+            : chat));
+        }
+      } else {
         const error = cause instanceof Error ? cause.message : 'Chat backend unavailable.';
         const failedMailScan = isMailCommand(text);
         const mailScan = failedMailScan
@@ -729,41 +995,66 @@ export function useStreamingChat(
               emailsToProcess: 0,
             }
           : undefined;
-        setMessages((current) => current.map((message) =>
-          message.id === assistantId
-            ? {
+        const status: ChatGenerationStatus = /usage.?limit/i.test(error)
+          ? 'usage_limit_reached'
+          : /rate.?limit|too many requests|http 429/i.test(error)
+            ? 'temporarily_rate_limited'
+            : 'failed';
+        const targetKey = sessionId ?? originKey;
+        updateRuntime(targetKey, (current) => ({ ...current, status,
+          messages: current.messages.map((message) => message.id === assistantId ? {
                 ...message,
                 content: error,
                 isStreaming: false,
                 mailScan: mailScan ?? message.mailScan,
+                generationStatus: status,
               }
-            : message
-        ));
+            : message),
+        }));
         if (failedMailScan && mailSessionId && mailScan) {
           void persistMailScanTurn(
             mailSessionId, assistantId, text, error, mailScan, abort.signal
           ).then(refreshHistory).catch(() => undefined);
         }
+        if (sessionId) setChatStatus(sessionId, status);
+        else setRecentChats((current) => current.map((chat) => chat.id === originKey
+          ? { ...chat, generationStatus: status }
+          : chat));
         setApiStatus('offline');
       }
     } finally {
-      abortRef.current = null;
-      setIsGenerating(false);
+      const abortKey = sessionId ?? originKey;
+      if (abortRefs.current.get(abortKey) === abort) {
+        abortRefs.current.delete(abortKey);
+      }
+      cancelRequestedRefs.current.delete(abortKey);
     }
-  }, [ensureSession, inputText, isGenerating, persistMailScanTurn, refreshHistory, runMailScan, selectedAttachments]);
+  }, [activateConversation, ensureSession, persistMailScanTurn, projectId, refreshHistory,
+    requestTurnCancellation, runMailScan, runtimeFor, selectedAttachments, setChatStatus, updateRuntime]);
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {
-    void loadedProjectId;
+    if (loadedProjectId && loadedProjectId !== projectId) {
+      pendingProjectChatRef.current = { projectId: loadedProjectId, sessionId };
+    }
+    navigationEpochRef.current += 1;
     loadHistoryAbortRef.current?.abort();
     const abort = new AbortController();
     loadHistoryAbortRef.current = abort;
-    setActiveConversationId(sessionId);
-    const cached = transcriptCacheRef.current.get(sessionId);
+    activateConversation(sessionId);
+    setRecentChats((current) => current.map((chat) => chat.id === sessionId
+      ? { ...chat, unread: false }
+      : chat));
+    const live = runtimesRef.current.get(sessionId);
+    if (live?.status === 'generating') {
+      setIsTranscriptLoading(false);
+      return;
+    }
+    const cached = live?.messages.length ? live.messages : transcriptCacheRef.current.get(sessionId);
     if (cached) {
-      setMessages(cached);
+      updateRuntime(sessionId, (current) => ({ ...current, messages: cached }));
       setIsTranscriptLoading(false);
     } else {
-      setMessages([]);
+      updateRuntime(sessionId, (current) => ({ ...current, messages: [] }));
       setIsTranscriptLoading(true);
     }
     try {
@@ -775,7 +1066,14 @@ export function useStreamingChat(
       const payload = (await response.json()) as { turns: ChatTurn[] };
       if (abort.signal.aborted) return;
       const next = messagesFromTurns(payload.turns);
-      setMessages(next);
+      const turnStatus = payload.turns.at(-1)?.status;
+      const loadedStatus = generationStatus(turnStatus);
+      updateRuntime(sessionId, (current) => ({
+        ...current,
+        messages: next,
+        status: (loadedStatus === 'generating' ? 'interrupted' : loadedStatus) ??
+          (payload.turns.at(-1)?.assistant_message === null ? 'interrupted' : current.status),
+      }));
       rememberTranscript(sessionId, next);
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') return;
@@ -785,7 +1083,7 @@ export function useStreamingChat(
         setIsTranscriptLoading(false);
       }
     }
-  }, [rememberTranscript]);
+  }, [activateConversation, projectId, rememberTranscript, updateRuntime]);
 
   const loadFullEvidence = useCallback(async (chunkId: string): Promise<ChatRagEvidence | null> => {
     const guard = loadHistoryAbortRef.current;
@@ -800,14 +1098,14 @@ export function useStreamingChat(
     const next = messagesFromTurns(payload.turns);
     rememberTranscript(sessionId, next);
     if (loadHistoryAbortRef.current === guard) {
-      setMessages(next);
+      updateRuntime(sessionId, (current) => ({ ...current, messages: next }));
     }
     for (const message of next) {
       const found = message.ragEvidence?.find((item) => item.chunkId === chunkId);
       if (found) return found;
     }
     return null;
-  }, [activeConversationId, rememberTranscript]);
+  }, [activeConversationId, rememberTranscript, updateRuntime]);
 
   const prefetchChat = useCallback(async (sessionId: string) => {
     if (!sessionId || sessionId === activeConversationId) return;
@@ -831,16 +1129,14 @@ export function useStreamingChat(
   }, [activeConversationId, rememberTranscript]);
 
   const resetChat = useCallback(() => {
-    abortRef.current?.abort();
+    navigationEpochRef.current += 1;
     loadHistoryAbortRef.current?.abort();
-    setMessages([]);
-    setActiveConversationId(null);
+    activateNewDraft();
     setIsTranscriptLoading(false);
-    setIsGenerating(false);
-  }, []);
+  }, [activateNewDraft]);
 
   const deleteChat = useCallback(async (sessionId: string) => {
-    if (isGenerating && activeConversationId === sessionId) return false;
+    if (runtimesRef.current.get(sessionId)?.status === 'generating') return false;
     const response = await fetch(
       `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}`,
       { method: 'DELETE' }
@@ -849,25 +1145,37 @@ export function useStreamingChat(
       throw new Error(`Could not delete chat (HTTP ${response.status}).`);
     }
     transcriptCacheRef.current.delete(sessionId);
+    runtimesRef.current.delete(sessionId);
+    abortRefs.current.delete(sessionId);
+    setRecentChats((current) => current.filter((chat) => chat.id !== sessionId));
     if (activeConversationId === sessionId) {
-      setMessages([]);
-      setActiveConversationId(null);
-      setSelectedAttachments([]);
+      activateConversation(null);
       setIsTranscriptLoading(false);
     }
     await refreshHistory();
     return true;
-  }, [activeConversationId, isGenerating, refreshHistory]);
+  }, [activateConversation, activeConversationId, refreshHistory]);
 
   const stopGeneration = useCallback(() => {
-    abortRef.current?.abort();
-    setIsGenerating(false);
-  }, []);
+    const sessionId = activeConversationRef.current;
+    const runtimeKey = sessionId ?? draftKeyRef.current;
+    if (runtimesRef.current.get(runtimeKey)?.status !== 'generating') return;
+    cancelRequestedRefs.current.add(runtimeKey);
+    if (sessionId) {
+      void requestTurnCancellation(sessionId).finally(() => {
+        abortRefs.current.get(sessionId)?.abort();
+      });
+    }
+  }, [requestTurnCancellation]);
 
   const retryTurn = useCallback((messageId: string) => {
     const index = messages.findIndex((message) => message.id === messageId);
     const previous = messages.slice(0, index).findLast((message) => message.role === 'user');
-    if (previous) void sendMessage(previous.content);
+    const assistant = messages[index];
+    if (previous && assistant?.role === 'assistant') void sendMessage(previous.content, undefined, {
+      assistantId: assistant.id,
+      idempotencyKey: assistant.idempotencyKey ?? `turn_${assistant.id}`,
+    });
   }, [messages, sendMessage]);
 
   const refreshWorkflow = useCallback(async (taskId: string) => { void taskId; }, []);
