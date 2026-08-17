@@ -43,7 +43,11 @@ MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH = 256
 MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH = 300
 MAX_EPISODE_CITATION_SECTION_LENGTH = 300
 MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
-MAX_CHAT_RAG_EVIDENCE_ITEMS = 5
+#: Retrieval widens a fused ranking to whole sections, so one article cut
+#: into several chunks arrives as several evidence items. The cap follows
+#: that ceiling (``top_k`` 8 x ``_SECTION_HEADROOM`` 2) rather than the
+#: number of results a ranking alone would have produced.
+MAX_CHAT_RAG_EVIDENCE_ITEMS = 16
 MAX_CHAT_RAG_CHUNK_ID_LENGTH = 256
 MAX_CHAT_RAG_DOCUMENT_ID_LENGTH = 256
 MAX_CHAT_RAG_DOCUMENT_TITLE_LENGTH = 300
