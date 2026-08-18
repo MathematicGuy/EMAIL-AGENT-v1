@@ -634,9 +634,7 @@ export function useStreamingChat(
       }
       const completedProgress = { ...progress, actionItemsCount: tasks.length || run.progress.actionItemsCount || 0 };
       const resultLabel = run.status === 'partial' ? 'Hoàn tất một phần' : 'Đã quét xong';
-      const scannedSummary = run.progress.emailsMatched > run.progress.emailsProcessed
-        ? `đã xử lý ${run.progress.emailsProcessed}/${run.progress.emailsMatched} email phù hợp`
-        : `đã quét ${run.progress.emailsProcessed} email`;
+      const scannedSummary = `đã quét ${run.progress.emailsProcessed} email`;
       const finalCount = tasks.length || run.progress.actionItemsCount || 0;
       const filteredSummary = run.progress.filteredSummary?.trim();
       const content = [
