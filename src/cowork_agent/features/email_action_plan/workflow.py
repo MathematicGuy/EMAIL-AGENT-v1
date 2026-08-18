@@ -568,31 +568,37 @@ class DigestWorker:
         for (_thread_id, selected_ids), thread in zip(
             thread_items, thread_results, strict=True
         ):
-            if thread is None:
+            if thread is None or not thread:
                 skipped_threads += 1
                 continue
-            selected_id_set = set(selected_ids)
-            for message in thread:
-                if message.gmail_message_id in selected_id_set:
-                    all_envelopes.append(
-                        replace(
-                            message,
-                            run_id=run.id,
-                            user_id=run.user_id,
-                        )
+            # Sắp xếp toàn bộ email trong thread theo thời gian tăng dần (cũ -> mới)
+            sorted_thread = sorted(thread, key=lambda m: m.received_at)
+            latest_message = sorted_thread[-1]
+
+            # Chỉ thực hiện quét khi email mới nhất trong luồng là email chưa đọc
+            if latest_message.gmail_message_id not in set(selected_ids):
+                continue
+
+            # ADR-011: Lấy tối đa 5 email gần nhất trong chuỗi reply
+            bounded_thread = sorted_thread[-5:]
+            for message in bounded_thread:
+                all_envelopes.append(
+                    replace(
+                        message,
+                        run_id=run.id,
+                        user_id=run.user_id,
                     )
+                )
+            if len(all_envelopes) >= run.max_emails:
+                break
 
-        # Sort all envelopes newest-first and select top run.max_emails
-        all_envelopes.sort(key=lambda e: e.received_at, reverse=True)
-        selected_envelopes = all_envelopes[: run.max_emails]
-
-        # Regroup into threads preserving newest-first order
+        # Regroup into threads preserving order
         grouped_by_thread: dict[str, list[EphemeralEmailEnvelope]] = {}
-        for env in selected_envelopes:
+        for env in all_envelopes:
             grouped_by_thread.setdefault(env.gmail_thread_id, []).append(env)
 
         threads = [tuple(thread_envs) for thread_envs in grouped_by_thread.values()]
-        run.emails_processed = len(selected_envelopes)
+        run.emails_processed = len(all_envelopes)
 
         run.next_cursor = cursor
         run.truncated = cursor is not None or run.emails_matched > run.emails_processed

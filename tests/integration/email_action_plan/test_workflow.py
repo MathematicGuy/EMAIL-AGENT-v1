@@ -493,9 +493,9 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
 def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> None:
     async def scenario() -> None:
         messages = [
-            email("m1", "shared-thread", "First unread"),
-            email("m2", "shared-thread", "Second unread"),
-            email("m3", "shared-thread", "Third unread"),
+            email("m1", "thread-1", "First unread"),
+            email("m2", "thread-2", "Second unread"),
+            email("m3", "thread-3", "Third unread"),
         ]
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
