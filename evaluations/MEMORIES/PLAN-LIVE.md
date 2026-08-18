@@ -56,6 +56,10 @@ Seeding a foreign document into that store and asking about it would report `dan
 
 **3. The episode id arrives on the event stream.** `ChatController.stream_message` emits a `MEMORY_CITATION` event with `memory_type is MemoryCitationType.EPISODIC` and `source_id` set to the new `episode_id`. Approval then goes through `controller.approve_task_episode(episode_id)` — the real user path — rather than a hand-built `gateway.transition_task_episode(...)` call as SPEC §6 sketches. Both reach `ValidationStatus.USER_APPROVED`; the controller route is the one a product action takes, which is the whole point of §6.
 
+**3b. An episode needs BOTH an explicit request and a provider proposal.** Discovered while implementing Task 4. `is_explicit_task_request(request)` is necessary but not sufficient: `controller.py:725` writes the episode only when the reply provider also returned a `ChatTaskProposal`. With a plain-string reply the controller emits a `task_episode_unavailable` error event and no episode exists to approve.
+
+`GeminiChatReply` does return proposals, gated on `task_proposal_requested` in the generation context, so episodic seeding works live. But a model that answers with `task_proposal: null` — which its own schema permits — produces the same empty result. `seed_episodic` reports this as a finding rather than letting it read as episodic amnesia, and `tests/.../test_live_seeding.py::test_a_provider_that_returns_no_proposal_is_a_finding` pins the behaviour. Any fake reply port used to test episodic seeding must yield a `ChatReplyChunk` carrying a proposal.
+
 **4. `asyncio` needs a selector loop for psycopg on Windows.** The persistence suite runs every coroutine through `asyncio.run(scenario(), loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))`. The default `ProactorEventLoop` is unsupported by psycopg async. Task 1 centralises this.
 
 ---
