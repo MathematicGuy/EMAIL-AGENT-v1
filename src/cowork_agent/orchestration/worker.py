@@ -11,7 +11,6 @@ import httpx
 
 from cowork_agent.config import (
     FaucetSettings,
-    GeminiEmbeddingSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
@@ -55,7 +54,7 @@ from cowork_agent.orchestration.document_recovery import (
 )
 from cowork_agent.orchestration.recovery import sweep_stuck_runs
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
-from cowork_agent.runtime import configure_windows_event_loop_policy
+from cowork_agent.runtime import configure_windows_event_loop_policy, run_app_coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +182,7 @@ async def run_worker() -> None:
             from cowork_agent.integrations.knowledge_ingestion.project_documents import (
                 ProjectDocumentExtractor,
             )
-            from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+            from cowork_agent.integrations.rag.bootstrap import build_document_embedder
             from cowork_agent.integrations.rag.project_documents import (
                 HybridProjectDocumentStore,
             )
@@ -195,7 +194,7 @@ async def run_worker() -> None:
 
             try:
                 storage = SupabaseStorageSettings.from_env()
-                embedding = GeminiEmbeddingSettings.from_env()
+                embedder, vector_size = build_document_embedder()
                 storage_client = httpx.AsyncClient(timeout=30.0)
                 private_storage = SupabasePrivateStorage(
                     storage.url, storage.secret_key, storage.bucket, storage_client
@@ -207,10 +206,10 @@ async def run_worker() -> None:
                     TurbovecProjectIndexStore(
                         document_settings.index_root,
                         storage=private_storage,
-                        vector_size=embedding.dimensions,
+                        vector_size=vector_size,
                     ),
-                    GeminiEmbeddingAdapter(embedding),
-                    vector_size=embedding.dimensions,
+                    embedder,
+                    vector_size=vector_size,
                 )
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
@@ -268,7 +267,7 @@ def main() -> None:
     configure_windows_event_loop_policy()
     if not database_url():
         raise SystemExit("mail-todo-worker requires DATABASE_URL")
-    asyncio.run(run_worker())
+    run_app_coroutine(run_worker())
 
 
 if __name__ == "__main__":
