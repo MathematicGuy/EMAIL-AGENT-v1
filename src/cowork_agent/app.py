@@ -20,7 +20,6 @@ from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
     FaucetSettings,
-    GeminiEmbeddingSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
@@ -124,10 +123,10 @@ from cowork_agent.integrations.llm.providers.groq import (
 )
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
+    build_document_embedder,
     build_semantic_memory,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
-from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.integrations.rag.project_documents import (
@@ -482,7 +481,7 @@ def create_app() -> FastAPI:
 
             if user_documents_settings.enabled and app.state.project_repository is not None:
                 try:
-                    document_embedding_settings = GeminiEmbeddingSettings.from_env()
+                    embedder, vector_size = build_document_embedder()
                     app.state.document_embeddings_configured = True
                     if database_url():
                         # The API only reads .tvim snapshots; mail-todo-worker owns
@@ -491,13 +490,13 @@ def create_app() -> FastAPI:
                         index_store = TurbovecProjectIndexStore(
                             user_documents_settings.index_root,
                             storage=app.state.private_storage,
-                            vector_size=document_embedding_settings.dimensions,
+                            vector_size=vector_size,
                         )
                         vector_store = HybridProjectDocumentStore(
                             PostgresProjectDocumentChunkRepository(app.state.pg_pool),
                             index_store,
-                            GeminiEmbeddingAdapter(document_embedding_settings),
-                            vector_size=document_embedding_settings.dimensions,
+                            embedder,
+                            vector_size=vector_size,
                         )
                         app.state.project_document_index = index_store
                         app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
@@ -521,13 +520,13 @@ def create_app() -> FastAPI:
                         await local_chunks.initialize()
                         local_index = TurbovecProjectIndexStore(
                             user_documents_settings.index_root,
-                            vector_size=document_embedding_settings.dimensions,
+                            vector_size=vector_size,
                         )
                         local_vectors = HybridProjectDocumentStore(
                             local_chunks,
                             local_index,
-                            GeminiEmbeddingAdapter(document_embedding_settings),
-                            vector_size=document_embedding_settings.dimensions,
+                            embedder,
+                            vector_size=vector_size,
                         )
                         app.state.project_document_index = local_index
                         app.state.project_document_vectors = CanonicalProjectDocumentRetriever(

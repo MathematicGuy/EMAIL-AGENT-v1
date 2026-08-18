@@ -21,7 +21,7 @@ run. Log loopback and remote runs separately.
 
 | Date | Environment | Providers | Scenarios / n | Report | Result |
 |---|---|---|---|---|---|
-| — | — | — | Awaiting first fixed-protocol live run | — | record-only; no gates |
+| 2026-08-18 | local (loopback Postgres) | supabase_private_storage / jina_embedding_adapter / turbovec | 3 fixtures × 10 reps (n=30) | [baseline-2026-08-18-local-loopback.json](./baselines/baseline-2026-08-18-local-loopback.json) | 30/30 ready (100% success); small PDF p50 11.0s, medium PDF p50 9.2s, DOCX p50 65.1s (430 chunks) |
 
 ## Adding a row
 

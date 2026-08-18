@@ -118,13 +118,13 @@ def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
     assert settings.cookie_secure is True
 
 
-def test_project_gemini_embedding_settings_default_to_3072() -> None:
+def test_project_gemini_embedding_settings_default_to_1024() -> None:
     settings = GeminiEmbeddingSettings.from_env(
         {"GEMINI_API_KEY_1": "key-1"}, load_env_file=False
     )
 
     assert settings.model == "gemini-embedding-2"
-    assert settings.dimensions == 3072
+    assert settings.dimensions == 1024
     assert settings.batch_size == 100
 
 

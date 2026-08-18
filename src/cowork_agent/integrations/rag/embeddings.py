@@ -242,12 +242,23 @@ class GeminiEmbeddingAdapter:
             # text separately so every project-document chunk receives its own
             # embedding. Earlier text models retain their supported batching.
             requests = (
-                ([text] for text in batch)
+                [[text] for text in batch]
                 if "gemini-embedding-2" in self._model
-                else (batch,)
+                else [batch]
             )
-            for contents in requests:
-                response = await self._embed_content(contents, task=task)
+            sem = asyncio.Semaphore(4)
+
+            async def _embed_with_semaphore(
+                contents: list[str],
+                semaphore: asyncio.Semaphore = sem,
+            ) -> types.EmbedContentResponse:
+                async with semaphore:
+                    return await self._embed_content(contents, task=task)
+
+            responses = await asyncio.gather(
+                *(_embed_with_semaphore(contents) for contents in requests)
+            )
+            for response in responses:
                 for item in response.embeddings or ():
                     if item.values is None:
                         raise ValueError("Embedding response contained an empty vector")
@@ -307,6 +318,7 @@ class GeminiEmbeddingAdapter:
                 last_error.__cause__ = exc
                 if not self._settings.rotate_on_rate_limit:
                     raise last_error from exc
+                await asyncio.sleep(2.0)
         raise last_error or RuntimeError("No Gemini API key was attempted")
 
 
