@@ -35,8 +35,12 @@ export interface ChatApiMockHandle {
   messagesFetchCount: () => number;
 }
 
-function ragEvidence(index: number, contentChars: number): Record<string, unknown> {
-  return {
+function ragEvidence(
+  index: number,
+  contentChars: number,
+  includeContent: boolean,
+): Record<string, unknown> {
+  const item: Record<string, unknown> = {
     source: 'company_knowledge',
     retrieval_status: 'success',
     chunk_id: `chunk-${index}`,
@@ -47,8 +51,11 @@ function ragEvidence(index: number, contentChars: number): Record<string, unknow
     relevance_score: 0.81,
     rerank_score: 0.77,
     preview: `Preview ${index}`.padEnd(80, '.'),
-    content: `CONTENT-${index}-`.padEnd(contentChars, 'x'),
   };
+  if (includeContent) {
+    item.content = `CONTENT-${index}-`.padEnd(contentChars, 'x');
+  }
+  return item;
 }
 
 function lightTurns(marker: string): MockTurn[] {
@@ -71,6 +78,7 @@ function heavyTurns(
   turnCount: number,
   evidencePerTurn: number,
   contentChars: number,
+  includeContent: boolean,
 ): MockTurn[] {
   return Array.from({ length: turnCount }, (_, turnIndex) => ({
     turn_id: `turn-${marker}-${turnIndex + 1}`,
@@ -88,7 +96,7 @@ function heavyTurns(
       },
     ],
     rag_evidence: Array.from({ length: evidencePerTurn }, (_, evidenceIndex) =>
-      ragEvidence(turnIndex * evidencePerTurn + evidenceIndex, contentChars),
+      ragEvidence(turnIndex * evidencePerTurn + evidenceIndex, contentChars, includeContent),
     ),
     retrieval_status: 'success',
     mail_scan: null,
@@ -98,6 +106,7 @@ function heavyTurns(
 export function buildSessionPayload(
   sessionId: string,
   options: ChatApiMockOptions = {},
+  includeContent = false,
 ): { turns: MockTurn[] } {
   if (sessionId === CHAT_HEAVY_ID) {
     return {
@@ -106,6 +115,7 @@ export function buildSessionPayload(
         options.extraTurnsForHeavy ?? 16,
         options.evidencePerHeavyTurn ?? 5,
         options.evidenceContentChars ?? 4_000,
+        includeContent,
       ),
     };
   }
@@ -188,7 +198,11 @@ export async function installChatApiMocks(
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-      await json(route, { session_id: sessionId, ...buildSessionPayload(sessionId, options) });
+      const includeContent = url.searchParams.get('include_content') === 'true';
+      await json(route, {
+        session_id: sessionId,
+        ...buildSessionPayload(sessionId, options, includeContent),
+      });
       return;
     }
     if (path.endsWith('/health') || path.endsWith('/api/v1/health')) {

@@ -1,0 +1,242 @@
+{
+  "date": "2026-08-14",
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "case_count": 28,
+  "actionability_accuracy": {
+    "agreement_count": 25,
+    "accuracy": 0.8929
+  },
+  "confusion": {
+    "NO_ACTION": {
+      "NO_ACTION": 6,
+      "DIRECT_PLAN": 1,
+      "RETRIEVE_RAG": 0
+    },
+    "DIRECT_PLAN": {
+      "NO_ACTION": 0,
+      "DIRECT_PLAN": 3,
+      "RETRIEVE_RAG": 3
+    },
+    "RETRIEVE_RAG": {
+      "NO_ACTION": 0,
+      "DIRECT_PLAN": 1,
+      "RETRIEVE_RAG": 14
+    }
+  },
+  "precision": {
+    "NO_ACTION": 1.0,
+    "DIRECT_PLAN": 0.6,
+    "RETRIEVE_RAG": 0.8235
+  },
+  "recall": {
+    "NO_ACTION": 0.8571,
+    "DIRECT_PLAN": 0.5,
+    "RETRIEVE_RAG": 0.9333
+  },
+  "false_negative_retrieval": {
+    "count": 1,
+    "rate": 0.0667,
+    "case_ids": [
+      "r-008"
+    ]
+  },
+  "per_case": [
+    {
+      "case_id": "r-001",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-002",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-003",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-004",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-005",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-006",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-007",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-008",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "DIRECT_PLAN",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-009",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-010",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "DIRECT_PLAN",
+      "expected_actionability": "action_suggested",
+      "predicted_actionability": "action_suggested"
+    },
+    {
+      "case_id": "r-011",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_suggested",
+      "predicted_actionability": "action_suggested"
+    },
+    {
+      "case_id": "r-012",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "informational",
+      "predicted_actionability": "informational"
+    },
+    {
+      "case_id": "r-013",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "informational",
+      "predicted_actionability": "informational"
+    },
+    {
+      "case_id": "r-014",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "irrelevant",
+      "predicted_actionability": "irrelevant"
+    },
+    {
+      "case_id": "r-015",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "irrelevant",
+      "predicted_actionability": "irrelevant"
+    },
+    {
+      "case_id": "r-016",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "unclear",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-017",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "unclear",
+      "predicted_actionability": "unclear"
+    },
+    {
+      "case_id": "r-018",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-019",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-020",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "informational",
+      "predicted_actionability": "informational"
+    },
+    {
+      "case_id": "r-021",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-022",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "DIRECT_PLAN",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-023",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "DIRECT_PLAN",
+      "expected_actionability": "action_suggested",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-024",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-025",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "DIRECT_PLAN",
+      "expected_actionability": "informational",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-026",
+      "expected_route": "RETRIEVE_RAG",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    },
+    {
+      "case_id": "r-027",
+      "expected_route": "NO_ACTION",
+      "predicted_route": "NO_ACTION",
+      "expected_actionability": "irrelevant",
+      "predicted_actionability": "irrelevant"
+    },
+    {
+      "case_id": "r-028",
+      "expected_route": "DIRECT_PLAN",
+      "predicted_route": "RETRIEVE_RAG",
+      "expected_actionability": "action_required",
+      "predicted_actionability": "action_required"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ def test_worker_loads_dotenv_before_requiring_database_url(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_MODE", raising=False)
     monkeypatch.setattr(worker, "run_worker", fake_run_worker)
 
     worker.main()

@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT_DIR = REPO_ROOT / "docs" / "evaluations" / "baselines"
-DEFAULT_OUTPUT = REPO_ROOT / "docs" / "evaluations" / "dashboard.md"
+DEFAULT_INPUT_DIR = REPO_ROOT / "evaluations" / "baselines"
+DEFAULT_OUTPUT = REPO_ROOT / "evaluations" / "dashboard.md"
 CURRENT_CASE_COUNT = 100
 CURRENT_DOCUMENT_COUNT = 17
 
@@ -143,7 +143,7 @@ def render_dashboard(reports: Sequence[RetrievalReport]) -> str:
     lines = [
         "# Retrieval Evaluation Dashboard",
         "",
-        "> Generated from metadata-only JSON under `docs/evaluations/baselines/`. "
+        "> Generated from metadata-only JSON under `evaluations/baselines/`. "
         "Do not use hashing runs as semantic-quality or production-latency evidence.",
         "",
         "## Decision Snapshot",
@@ -203,7 +203,7 @@ def render_dashboard(reports: Sequence[RetrievalReport]) -> str:
         "",
         "## Refresh Contract",
         "",
-        "1. Store every evaluator JSON under `docs/evaluations/`; retrieval reports belong in `baselines/`.",
+        "1. Store every evaluator JSON under `evaluations/`; retrieval reports belong in `baselines/`.",
         "2. Run the relevant evaluator with its default output path, then run `python scripts/build_evaluation_dashboard.py`.",
         "3. Do not compare reports across different corpus/case counts as a release decision.",
         "4. Add `embedding_ms`, `dense_search_ms`, `bm25_ms`, `fusion_ms`, `rerank_ms`, "
@@ -263,9 +263,10 @@ def _latency(report: RetrievalReport) -> str:
 def _bottleneck_readout(
     current: Sequence[RetrievalReport], historical: Sequence[RetrievalReport]
 ) -> str:
+    covered_retrievers = ", ".join(sorted({report.retriever for report in current}))
     lines = [
         "- **Current bottleneck:** not identifiable from the stored reports. Per-component timing is not emitted; they measure only end-to-end retrieval latency.",
-        "- **Current strength signal:** the report set exercises dense, Turbovec, and hybrid paths on the 100-case / 17-document corpus.",
+        f"- **Current retrieval coverage:** {covered_retrievers or 'none'}.",
     ]
     if current and not any(report.semantic_evidence for report in current):
         lines.append(

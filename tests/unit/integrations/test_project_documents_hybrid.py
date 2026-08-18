@@ -48,7 +48,10 @@ class FakeChunks:
         *,
         allowlist: tuple[int, ...] = (11, 12),
         lexical: tuple[int, ...] = (12,),
+        siblings: tuple[tuple[int, int], ...] = (),
     ) -> None:
+        self._siblings = siblings
+        self.sibling_calls: list[dict[str, object]] = []
         self.eligible_calls: list[dict[str, object]] = []
         self.replaced: list[dict[str, object]] = []
         self.deleted: list[str] = []
@@ -67,6 +70,12 @@ class FakeChunks:
     async def list_eligible(self, **kwargs: object) -> EligibleChunks:
         self.eligible_calls.append(kwargs)
         return EligibleChunks(allowlist=self._allowlist, lexical=self._lexical)
+
+    async def list_section_siblings(
+        self, *, vector_ids: tuple[int, ...], allowlist: tuple[int, ...]
+    ) -> tuple[tuple[int, int], ...]:
+        self.sibling_calls.append({"vector_ids": vector_ids, "allowlist": allowlist})
+        return self._siblings
 
     async def hydrate(self, vector_ids: tuple[int, ...]) -> tuple[StoredChunk, ...]:
         self.hydrated.append(vector_ids)
@@ -149,6 +158,66 @@ def test_retrieval_applies_every_acl_condition_before_embedding() -> None:
             "lexical_limit": 20,
         }
         assert embedder.calls == [(("policy",), "retrieval.query")]
+
+    asyncio.run(scenario())
+
+
+def test_a_ranked_chunk_brings_the_rest_of_its_section_with_it() -> None:
+    """An article cut across chunks must arrive whole, in reading order."""
+
+    async def scenario() -> None:
+        chunks = FakeChunks(allowlist=(11, 12), siblings=((11, 11), (11, 12), (12, 11), (12, 12)))
+        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
+            query="Điều 4 gồm những gì",
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            now=datetime.now(UTC),
+            document_ids=("document-1",),
+        )
+
+        assert [item.chunk_id for item in evidence] == ["chunk-11", "chunk-12"]
+        # Siblings are authorized by intersection, never by a second ACL pass.
+        assert chunks.sibling_calls[0]["allowlist"] == (11, 12)
+
+    asyncio.run(scenario())
+
+
+def test_a_section_too_large_for_the_headroom_leaves_its_chunk_alone() -> None:
+    """Widening must never evict a chunk the ranking actually chose."""
+
+    async def scenario() -> None:
+        oversized = tuple((11, sibling) for sibling in range(11, 40))
+        chunks = FakeChunks(allowlist=(11, 12), siblings=oversized)
+        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
+            query="Điều 4 gồm những gì",
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            now=datetime.now(UTC),
+            document_ids=("document-1",),
+            limit=2,
+        )
+
+        # Fused order, untouched: neither chunk was widened, neither was dropped.
+        assert [item.chunk_id for item in evidence] == ["chunk-12", "chunk-11"]
+
+    asyncio.run(scenario())
+
+
+def test_a_chunk_with_no_section_is_returned_on_its_own() -> None:
+    async def scenario() -> None:
+        chunks = FakeChunks(allowlist=(11, 12), siblings=())
+        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
+            query="policy",
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            now=datetime.now(UTC),
+            document_ids=("document-1",),
+        )
+
+        assert [item.chunk_id for item in evidence] == ["chunk-12", "chunk-11"]
 
     asyncio.run(scenario())
 

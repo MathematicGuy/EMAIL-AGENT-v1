@@ -68,7 +68,10 @@ export async function areProjectDocumentsEnabled(): Promise<boolean> {
 
 async function sha256(file: File, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  const source = new Uint8Array(await file.arrayBuffer());
+  const bytes = new Uint8Array(source.byteLength);
+  bytes.set(source);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
   signal?.throwIfAborted();
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

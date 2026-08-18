@@ -23,6 +23,7 @@ def test_main_loads_dotenv_before_selecting_windows_postgres_loop(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_MODE", raising=False)
     monkeypatch.setenv("WEB_CONCURRENCY", "4")
     monkeypatch.setattr(app.sys, "platform", "win32")
     monkeypatch.setattr(app.uvicorn, "run", captured_run)

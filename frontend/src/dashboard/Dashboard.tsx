@@ -37,6 +37,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
+  const [backgroundCompletion, setBackgroundCompletion] = useState<string | null>(null);
   const { projects, activeProjectId, setActiveProjectId, createProject, ensureDefaultProject } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
@@ -50,6 +51,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     };
     window.addEventListener('open-project-documents', handleOpenProjectDocs);
     return () => window.removeEventListener('open-project-documents', handleOpenProjectDocs);
+  }, []);
+
+  useEffect(() => {
+    let dismissTimer: number | undefined;
+    const handleBackgroundCompletion = (event: Event) => {
+      const detail = (event as CustomEvent<{ title?: string }>).detail;
+      setBackgroundCompletion(`${detail?.title || 'A chat'} finished generating.`);
+      if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
+      dismissTimer = window.setTimeout(() => setBackgroundCompletion(null), 5_000);
+    };
+    window.addEventListener('chat-background-completed', handleBackgroundCompletion);
+    return () => {
+      window.removeEventListener('chat-background-completed', handleBackgroundCompletion);
+      if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -95,9 +111,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     resetChat,
     deleteChat,
     loadExistingChat,
+    loadFullEvidence,
+    prefetchChat,
     apiStatus,
     recentChats,
     isHistoryLoading,
+    isTranscriptLoading,
     activeConversationId,
     workflows,
     approveWorkflowPlan,
@@ -156,6 +175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
         onSelectRecent={handleSelectRecent}
+        onPrefetchChat={(chat) => { void prefetchChat(chat.id); }}
         onDeleteChat={handleDeleteChat}
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
@@ -185,26 +205,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         )}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>
-          {messages.length === 0 ? (
-            <HeroSection
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={handleSendMessage}
-              isGenerating={isGenerating}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
-            />
-          ) : (
+          {isTranscriptLoading || messages.length > 0 ? (
             <ChatStreamView
               messages={messages}
+              isTranscriptLoading={isTranscriptLoading}
               inputText={inputText}
               onChangeText={setInputText}
               onSend={handleSendMessage}
@@ -224,10 +228,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
                 void retryWorkflowStep(taskId, stepId)
               }
               onRetryTurn={retryTurn}
+              onLoadFullEvidence={loadFullEvidence}
               activeProject={activeProject}
               projects={projects}
               onSelectProject={handleSelectProject}
               onOpenMailInbox={() => setActiveView('mail')}
+            />
+          ) : (
+            <HeroSection
+              inputText={inputText}
+              onChangeText={setInputText}
+              onSend={handleSendMessage}
+              isGenerating={isGenerating}
+              selectedModel={selectedModel}
+              onOpenModelModal={openModelSelector}
+              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+              attachments={selectedAttachments}
+              attachmentError={attachmentError}
+              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+              onRemoveAttachment={removeAttachment}
+              activeProject={activeProject}
+              projects={projects}
+              onSelectProject={handleSelectProject}
             />
           )}
         </div>
@@ -265,6 +287,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           onClose={() => setIsProjectDocumentsOpen(false)}
           hideTrigger
         />
+      )}
+
+      {backgroundCompletion && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 max-w-sm rounded-xl border border-[#4a4842] bg-[#272622] px-4 py-3 text-sm text-[#f3f2ef] shadow-xl"
+        >
+          {backgroundCompletion}
+        </div>
       )}
     </div>
   );

@@ -33,7 +33,7 @@ which is what one route costs; the full suite is parallel.
 | R9 | `tests/unit/scripts` | 66 | 10.4 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
 | R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
 | R11 | `tests/integration/api` | 25 | 5.5 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 3.9 s | Real PostgreSQL. **Skips wholesale without a server.** |
+| R12 | `tests/integration/persistence` | 9 | 3.9 s | Real PostgreSQL. **Skips wholesale without a server.** One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
 | R13 | `tests/integration/email_action_plan` | 45 | 3.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
 | R14 | `tests/integration` | 76 | 14.4 s | R11+R12+R13 plus corpus-backed workflow. |
 | R15 | `tests/unit` | 1244 | 29.3 s | Everything above the integration line. |
@@ -69,6 +69,7 @@ Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 | `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
 | `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
 | `serial` | Must not run under xdist — spawns processes or binds a fixed port. | Selected; keep it on one worker. |
+| `xdist_group` | Same worker for tests that share a destructive resource. Persistence (R12) uses `pg-control-plane` so `DROP SCHEMA public CASCADE` never runs on two workers. | Selected. Requires `--dist loadgroup`. |
 
 Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
 naming what the filter dropped. A green summary with that banner above it is
@@ -105,6 +106,8 @@ absent, add the row when you add the test.
 | Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
 | OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
 | Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
+| GET `/sessions/{id}/messages` omits `rag_evidence.content` unless `include_content=true` | `integration/api/test_chat_api.py` | frontend mapper except one preview-only case |
+| Chat submissions persist one lifecycle row before generation and update it by idempotency key | `unit/features/ai_chat/test_controller.py` + `unit/persistence/test_chat_history_migration.py` | frontend hook tests except API-shape mapping |
 | No test outside the `live` tier opens a non-loopback socket | `tests/unit/test_network_guard.py` | — |
 | App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
 

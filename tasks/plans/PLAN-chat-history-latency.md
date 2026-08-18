@@ -38,21 +38,21 @@ load path until the Playwright harness has a committed baseline.
 
 ### Phase 1: Perceived UX (roadmap Step 1)
 
-- [ ] Task 1: Split list vs transcript loading; no stale flash
+- [x] Task 1: Split list vs transcript loading; no stale flash
 
 ### Phase 2: Repeat-visit cache (roadmap Step 2)
 
-- [ ] Task 2: In-memory LRU of loaded transcripts
+- [x] Task 2: In-memory LRU of loaded transcripts
 
 ### Phase 3: Cold-visit payload (roadmap Step 3–4)
 
-- [ ] Task 3: Slim `GET .../messages` (no `rag_evidence.content` on list)
-- [ ] Task 4: Backend list cheaper — only if live API p50 stays high
+- [x] Task 3: Slim `GET .../messages` (no `rag_evidence.content` on list)
+- [x] Task 4: Backend list cheaper — one checkout, no check ping, warmer pool
 
 ### Phase 4: Polish (roadmap Step 5–6)
 
-- [ ] Task 5: Hover prefetch, capped
-- [ ] Task 6: Virtualize — only if render p50 stays high
+- [x] Task 5: Hover prefetch, capped
+- [x] Task 6: Virtualize — skipped (73 ms render after slim payload)
 
 ## Risks and Mitigations
 

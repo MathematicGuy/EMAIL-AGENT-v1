@@ -1,11 +1,11 @@
 # RAG Evaluation — Status Report
 
-> **Document status:** current snapshot as of 2026-08-13, revised after the golden-set
+> **Document status:** current snapshot as of 2026-08-17, revised after the golden-set
 > and evaluation-harness work landed (C4, C5, C6 are implemented — see
 > [SPEC](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) / [PLAN](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
 > `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
-> **17 documents / 1,066 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
+> **17 documents / 1,069 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
 > Purpose: map what is already tested vs. what is missing for the full Email-RAG quality evaluation story.  
 > The evaluation pipeline covers three conceptually distinct layers:  
 > **Routing** (does the classifier decide that RAG is needed?) →  
@@ -26,10 +26,10 @@ flowchart TD
     B1 --> C["Layer 2 · Semantic Retrieval"]
     B2 --> C
 
-    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
+    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nstructure-aware chunking + breadcrumb, source_url shape"]
     C --> C2["✅ test_rag.py · ACL filtering\nTenant scope applied before scoring;\nforeign chunks excluded"]
     C --> C3["✅ test_rag.py · index mechanics\nScore ordering, top_k truncation,\ntimeout status, null memory fallback"]
-    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2375"]
+    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2272"]
     C --> C5["✅ test_rag_retrieval_golden.py\n8 legacy email-body cases scoped to 6 docs;\nreal InRepoSemanticMemory in the\nDigestWorker graph, 3 xfail under fake"]
     C --> C6["✅ Historical 4-way live comparison\ndense / bm25 / hybrid / hybrid+rerank\n32-case, 6-document baseline only;\nnot current-corpus acceptance evidence"]
     C --> C7["❌ OPEN: abstention\nFresh hashing-dense run returns chunks\nfor all 12 unanswerable queries;\nrate 0.0 at min_score=0.2"]
@@ -70,7 +70,7 @@ flowchart TD
 - ❌ **Corpus-Matched Routing Fixtures**: Missing test emails that explicitly ask about ingested procedures (like CCCD renewal) to prove routing works on real domain content.
 
 **Layer 2 · Retrieval (The Librarian)**
-- ✅ **Corpus Loader & Chunking (`test_rag.py`)**: Tests that markdown guidebooks load cleanly and split into H1/H2 section chunks (ensures data ingest reliability).
+- ✅ **Corpus Loader & Chunking (`test_rag.py`, `test_markdown_chunking.py`, `test_structure_normalizer.py`)**: Tests that markdown guidebooks load cleanly and split along the recovered heading hierarchy, that each chunk carries its breadcrumb, and that tables, fenced code and list items are never cut mid-block.
 - ✅ **Tenant ACL Filtering (`test_rag.py`)**: Tests that private company guidebooks are never leaked to unauthorized users/tenants (ensures data privacy).
 - ✅ **Search Index Mechanics (`test_rag.py`)**: Tests score sorting, top-k limits, timeouts, and fallback handling when search fails (ensures basic system stability).
 - ✅ **Retrieval Metrics Harness (Hit@K / MRR)**: 100 labeled questions (32 in the legacy baseline) measure document and section retrieval; fresh hashing runs prove harness mechanics, while fresh real-embedding evidence is still needed for semantic acceptance.
@@ -99,7 +99,7 @@ flowchart TD
 | **Scope** | All labeled fixture cases under `tests/fixtures/routing/` |
 | **Mode** | `--dry-run` (deterministic fake, perfect by construction) or live LLM provider |
 | **Metrics** | Actionability accuracy, per-Route precision & recall, **False-Negative Retrieval Rate** |
-| **Output** | JSON report written to `docs/evaluations/baselines/routing-eval-<date>.json` |
+| **Output** | JSON report written to `evaluations/baselines/routing-eval-<date>.json` |
 | **PRD ref** | PRD-v1 §16 Milestone 2 exit obligation (task T2.6) |
 
 The **False-Negative Retrieval Rate** (`false_negative_retrieval.rate`) is the primary quality gate: it tracks how often emails labeled `RETRIEVE_RAG` were incorrectly routed to `DIRECT_PLAN` or `NO_ACTION`. This is PRD-v1 §14's highest-risk error class.
@@ -122,7 +122,7 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 | Test File | What it checks |
 |---|---|
-| `test_rag.py` | Corpus loading (17 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
+| `test_rag.py` | Corpus loading (17 `.md` docs), structure-aware chunking with breadcrumbs, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
 | `test_bm25.py` | Tenant-scoped BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization, ACL filtering before scoring |
 | `test_rrf.py` | Reciprocal Rank Fusion, 1-based position rank scoring (`RRF_K=60`), duplicate handling, score fusion |
 | `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, tenant ACL gate, Jina reranker integration |
@@ -141,7 +141,7 @@ Two design constraints make the numbers meaningful and must not be simplified aw
 
 The loader validates every label against live `load_corpus` output, so a re-chunk fails loudly instead of silently scoring 0.0.
 
-**Fresh offline harness run (2026-08-13):** `python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,066 chunks** with the deterministic `HashingEmbedder`. It reported document MRR **0.5809**, section MRR **0.2375**, section Recall@5 **0.3333**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
+**Fresh offline harness run (2026-08-17):** `uv run python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,069 chunks** with the deterministic `HashingEmbedder`. It reported document MRR **0.5576**, section MRR **0.2272**, section Recall@5 **0.3913**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
 
 ### ✅ C5 — End-to-end email → retrieval fixture (closed 2026-08-09)
 
@@ -151,7 +151,7 @@ Offline it runs on `HashingEmbedder`; 3 cases (`q-001`, `q-006`, `q-026`) cannot
 
 ### ✅ C6 — Historical Hybrid Comparative Benchmark (retained)
 
-Four variants, same 32 legacy cases and six-document corpus, reports in `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
+Four variants, same 32 legacy cases and six-document corpus, reports in `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
 
 **Section-level MRR — the discriminating metric:**
 
@@ -267,7 +267,7 @@ context-relevance judgments.
 | Retrieval | BM25, RRF & Hybrid unit tests | ✅ Available | `tests/unit/integrations/rag/` (`test_bm25.py`, `test_rrf.py`, `test_hybrid.py`, `test_jina_reranker.py`) |
 | Retrieval | Real-embedding Hit@K / MRR | ✅ Available | `scripts/evaluate_retrieval.py`, `tests/fixtures/rag/` |
 | Retrieval | Email → corpus retrieval fixture | ✅ Available | `tests/integration/email_action_plan/test_rag_retrieval_golden.py` |
-| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
+| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
 | Retrieval | Abstention on unanswerable queries | ❌ Missing | measured at 0.000 for every retriever |
 | Generation | Retrieval wiring (request shape, feed to generator) | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
 | Generation | Degradation on retrieval failure | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
@@ -323,3 +323,26 @@ Scan, image-based, and mixed PDFs currently return
 an API key is provided. There is no Gmail-attachment ingestion or upload API,
 and this ingestion capability is not yet included in the retrieval-quality
 golden set or live-Qdrant benchmark.
+
+
+---
+
+## Structure-Aware Chunking Run (2026-08-17)
+
+`scripts/evaluate_retrieval.py --embedder hashing --retriever hybrid`, before/after on the same
+corpus and harness (baseline measured in a detached `HEAD` worktree). No slice regressed.
+
+| | doc hit@1 | doc hit@3 | doc mrr | doc recall@5 | sec hit@1 | sec mrr | sec recall@5 |
+|---|---|---|---|---|---|---|---|
+| before | 0.6818 | 0.7955 | 0.7409 | 0.8295 | 0.3261 | 0.4362 | 0.6087 |
+| after | 0.7045 | 0.8636 | 0.7862 | 0.9091 | 0.3478 | 0.4467 | 0.6304 |
+
+Both rows score the 46 section labels that existed at the time. The saved baseline
+[`retrieval-eval-2026-08-17-hashing-hybrid.json`](../baselines/retrieval-eval-2026-08-17-hashing-hybrid.json)
+was produced after labelling 40 statute cases, so it scores **86** labels and its section-level
+figures (hit@1 0.3256, mrr 0.4273) are not comparable with the table above - the metric now
+covers the hardest documents in the corpus instead of skipping them.
+
+Still open: `excluded_case_count` is 2, not 0 - q-019 and q-021 (`dang-ky-xe`) carry no section
+label. Both sit inside the locked 32-case legacy block. q-019's note is stale: it records that
+heading lines are excluded from chunk text, which is no longer true.

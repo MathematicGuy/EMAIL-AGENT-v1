@@ -356,5 +356,59 @@ def _eligible_episode() -> TaskEpisode:
         prompt_version=None,
         confidence=None,
     )
-async def _collect(reply: FaucetChatReply, request: ChatMessageRequest, context: object):
-    return [chunk async for chunk in reply.stream_reply(request, context)]
+async def _collect(reply: object, request: ChatMessageRequest, context: object):
+    return [chunk async for chunk in reply.stream_reply(request, context)]  # type: ignore[attr-defined]
+
+
+def test_gemini_chat_reply_rotates_past_rate_limited_key() -> None:
+    from cowork_agent.integrations.llm.providers.gemini import GeminiRateLimitError
+
+    attempted_keys: list[str] = []
+
+    class FakeTransport:
+        async def generate(
+            self,
+            *,
+            api_key: str,
+            model: str,
+            prompt: str,
+            schema: object,
+            timeout_seconds: int,
+            system_instruction: str | None = None,
+        ) -> dict[str, object]:
+            del model, prompt, schema, timeout_seconds, system_instruction
+            attempted_keys.append(api_key)
+            if api_key == "key-1":
+                raise GeminiRateLimitError("Rate limit on key-1")
+            return {
+                "assistant_text": "Rotated reply",
+                "conversation_title": "Title",
+                "citation_ids": [],
+                "task_proposal": None,
+            }
+
+    settings = GeminiSettings(
+        api_keys=("key-1", "key-2"),
+        model="gemini-3.5-flash-lite",
+        rotate_on_rate_limit=True,
+        max_attempts=2,
+        max_emails_per_batch=5,
+        max_input_tokens=1000,
+        timeout_seconds=30,
+    )
+    reply = GeminiChatReply.from_settings(settings, transport=FakeTransport())
+    request = ChatMessageRequest("session-1", "Hello", "idem-1")
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+    )
+    chunks = asyncio.run(_collect(reply, request, context))
+    assert chunks[0].text == "Rotated reply"
+    assert attempted_keys == ["key-1", "key-2"]

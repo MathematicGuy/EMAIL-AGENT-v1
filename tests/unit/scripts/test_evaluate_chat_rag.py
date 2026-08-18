@@ -24,6 +24,10 @@ def _module():
     return load_script("evaluate_chat_rag")
 
 
+def test_default_output_directory_uses_the_evaluation_workspace() -> None:
+    assert _module().DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "CHAT-RAG" / "baselines"
+
+
 
 
 def test_metadata_only_report_calculates_retrieval_linkage_abstention_and_latency() -> None:

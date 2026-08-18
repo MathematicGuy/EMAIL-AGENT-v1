@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-08-17T09:33:11.816Z",
+  "git_sha": null,
+  "mode": "live",
+  "browser": "chromium",
+  "samples": [
+    {
+      "scenario": "live-cold-switch",
+      "mode": "live",
+      "from_chat_id": "cf55b144-4bb1-436c-8564-9b9260b66766",
+      "to_chat_id": "a7db26b3-8a5b-47ad-ba1d-b8dfeaabe9ef",
+      "click_to_first_message_visible_ms": 1973,
+      "click_to_response_ms": 1753,
+      "response_to_first_message_visible_ms": 220,
+      "request_duration_ms": 1665,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": 1884,
+      "messages_fetch_count_after": null
+    },
+    {
+      "scenario": "live-repeat-switch",
+      "mode": "live",
+      "from_chat_id": "a7db26b3-8a5b-47ad-ba1d-b8dfeaabe9ef",
+      "to_chat_id": "cf55b144-4bb1-436c-8564-9b9260b66766",
+      "click_to_first_message_visible_ms": 1963,
+      "click_to_response_ms": 1918,
+      "response_to_first_message_visible_ms": 45,
+      "request_duration_ms": 1862,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": 1882,
+      "messages_fetch_count_after": null
+    },
+    {
+      "scenario": "live-prefetch-switch",
+      "mode": "live",
+      "from_chat_id": "cf55b144-4bb1-436c-8564-9b9260b66766",
+      "to_chat_id": "bf0b8434-0720-4173-85b4-85e3eb6bbd62",
+      "click_to_first_message_visible_ms": 2520,
+      "click_to_response_ms": 2059,
+      "response_to_first_message_visible_ms": 461,
+      "request_duration_ms": 1997,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": 2411,
+      "messages_fetch_count_after": null
+    }
+  ],
+  "summary": [
+    {
+      "scenario": "live-cold-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 1973,
+      "p95_click_to_visible_ms": 1973,
+      "max_click_to_visible_ms": 1973,
+      "p50_request_duration_ms": 1665,
+      "p50_frontend_after_response_ms": 220
+    },
+    {
+      "scenario": "live-repeat-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 1963,
+      "p95_click_to_visible_ms": 1963,
+      "max_click_to_visible_ms": 1963,
+      "p50_request_duration_ms": 1862,
+      "p50_frontend_after_response_ms": 45
+    },
+    {
+      "scenario": "live-prefetch-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 2520,
+      "p95_click_to_visible_ms": 2520,
+      "max_click_to_visible_ms": 2520,
+      "p50_request_duration_ms": 1997,
+      "p50_frontend_after_response_ms": 461
+    }
+  ]
+}

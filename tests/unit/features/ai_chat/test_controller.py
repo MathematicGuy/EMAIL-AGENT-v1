@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -144,9 +145,63 @@ class SemanticReader:
 class HistoryWriter:
     def __init__(self) -> None:
         self.writes: list[tuple[ChatMemoryScope, ChatTurn, str]] = []
+        self.begins: list[tuple[ChatMemoryScope, ChatTurn, str, str]] = []
+        self.updates: list[tuple[ChatMemoryScope, ChatTurn, str | None]] = []
 
     async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None:
         self.writes.append((scope, turn, title))
+
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn:
+        self.begins.append((scope, turn, idempotency_key, title))
+        return turn
+
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        return turn
+
+
+class CompletedHistory(HistoryWriter):
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn:
+        await super().begin_turn(
+            scope, turn, idempotency_key=idempotency_key, title=title
+        )
+        return replace(
+            turn,
+            assistant_message="Previously completed answer",
+            status="completed",
+        )
+
+
+class FailingUpdateHistory(HistoryWriter):
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        raise RuntimeError("database unavailable")
 
 
 def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
@@ -225,6 +280,7 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     context = reply.calls[0][1]
 
     assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
@@ -257,11 +313,58 @@ def test_controller_persists_completed_turn_with_the_llm_generated_conversation_
 
     asyncio.run(_collect(controller, _request()))
 
-    assert len(history.writes) == 1
-    scope, turn, title = history.writes[0]
+    assert len(history.begins) == 1
+    begin_scope, pending, idempotency_key, temporary_title = history.begins[0]
+    assert begin_scope == _scope()
+    assert pending.assistant_message is None
+    assert pending.status.value == "generating"
+    assert idempotency_key == "idem-1"
+    assert temporary_title == "Help me plan today."
+    assert len(history.updates) == 1
+    scope, turn, title = history.updates[0]
     assert scope == _scope()
     assert turn.assistant_message == "Reply"
+    assert turn.turn_id == pending.turn_id
+    assert turn.status.value == "completed"
     assert title == "Quarterly report plan"
+
+
+def test_controller_emits_started_after_the_user_turn_is_durable() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply(("Reply",)),
+        profile=None,
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert history.begins
+    assert events[0].event_type is ChatEventType.STARTED
+    assert events[0].turn_id == history.begins[0][1].turn_id
+
+
+def test_controller_marks_the_durable_turn_failed_when_the_provider_is_unavailable() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=BrokenReply(),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
+        ChatEventType.ERROR,
+    ]
+    assert len(history.updates) == 1
+    failed = history.updates[0][1]
+    assert failed.turn_id == history.begins[0][1].turn_id
+    assert failed.user_message == "Help me plan today."
+    assert failed.assistant_message is None
+    assert failed.status.value == "failed"
+    assert failed.error_code == "chat_provider_unavailable"
 
 
 def test_controller_persists_and_completes_with_ranked_company_rag_evidence() -> None:
@@ -313,6 +416,7 @@ def test_controller_persists_and_completes_with_ranked_company_rag_evidence() ->
         )
     )[0]
     assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
@@ -428,14 +532,15 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     assert written.record_id
     assert "Please create" not in written.record_id
     assert [event.event_type for event in task_events] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,
         ChatEventType.COMPLETED,
     ]
-    assert task_events[1].source_id == written.episode_id
-    assert task_events[2].proposal is not None
-    assert task_events[2].proposal["episode_id"] == written.episode_id
+    assert task_events[2].source_id == written.episode_id
+    assert task_events[3].proposal is not None
+    assert task_events[3].proposal["episode_id"] == written.episode_id
 
 
 @pytest.mark.parametrize(
@@ -465,12 +570,13 @@ def test_controller_emits_a_safe_degraded_warning_and_continues_without_profile(
     events = asyncio.run(_collect(controller, _request()))
 
     assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
         ChatEventType.ERROR,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
-    assert events[0].code == "optional_memory_degraded"
-    assert events[0].safe_message == "Some optional memory was unavailable."
+    assert events[1].code == "optional_memory_degraded"
+    assert events[1].safe_message == "Some optional memory was unavailable."
     assert reply.calls[0][1].stored_preference is None
 
 
@@ -496,6 +602,8 @@ def test_disconnect_after_a_delta_does_not_append_a_partial_turn() -> None:
             return disconnected
 
         stream = controller.stream_message(_request(), is_cancelled=is_cancelled)
+        started = await anext(stream)
+        assert started.event_type is ChatEventType.STARTED
         first = await anext(stream)
         assert first.event_type is ChatEventType.DELTA
         disconnected = True
@@ -512,6 +620,96 @@ def test_disconnect_after_a_delta_does_not_append_a_partial_turn() -> None:
     asyncio.run(scenario())
 
 
+def test_cancel_turn_stops_only_the_named_durable_turn() -> None:
+    async def scenario() -> None:
+        history = HistoryWriter()
+        reply = FakeReply(("must not stream",))
+        controller, buffer = _controller(
+            reply=reply,
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+
+        assert await controller.cancel_turn(started.turn_id) is True
+        assert [event async for event in stream] == []
+        assert reply.calls == []
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert history.updates[-1][1].turn_id == started.turn_id
+        assert buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
+        ) == ()
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_does_not_acknowledge_a_failed_durable_update() -> None:
+    async def scenario() -> None:
+        history = FailingUpdateHistory()
+        controller, _ = _controller(
+            reply=FakeReply(("must not stream",)),
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await controller.cancel_turn(started.turn_id)
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_by_idempotency_key_targets_the_pending_turn() -> None:
+    async def scenario() -> None:
+        history = HistoryWriter()
+        controller, _ = _controller(
+            reply=FakeReply(("must not stream",)),
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        await anext(stream)
+
+        assert await controller.cancel_turn_by_idempotency_key("idem-1") is True
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert [event async for event in stream] == []
+
+    asyncio.run(scenario())
+
+
+def test_completed_event_is_not_emitted_when_durable_completion_fails() -> None:
+    history = FailingUpdateHistory()
+    controller, buffer = _controller(
+        reply=FakeReply(("Generated answer",)),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.ERROR,
+    ]
+    assert events[-1].code == "chat_history_unavailable"
+    assert buffer.read(
+        MemoryNamespace(
+            scope=_scope(),
+            memory_type=MemoryType.SHORT_TERM,
+            record_id="session-1",
+            source_id=None,
+        )
+    ) == ()
+
+
 def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() -> None:
     controller, buffer = _controller(
         reply=BrokenReply(), profile=ProfileReader(_profile())
@@ -519,9 +717,12 @@ def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() ->
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [ChatEventType.ERROR]
-    assert events[0].code == "chat_provider_unavailable"
-    assert "sensitive" not in events[0].safe_message
+    assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
+        ChatEventType.ERROR,
+    ]
+    assert events[1].code == "chat_provider_unavailable"
+    assert "sensitive" not in events[1].safe_message
     assert buffer.read(
         MemoryNamespace(
             scope=_scope(),
@@ -553,6 +754,27 @@ def test_completed_idempotent_request_replays_events_without_a_second_turn() -> 
     ) == 1
 
 
+def test_durable_completed_idempotent_request_replays_without_calling_the_provider() -> None:
+    history = CompletedHistory()
+    reply = FakeReply(("must not regenerate",))
+    controller, _ = _controller(
+        reply=reply,
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert [event.event_type for event in events] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.COMPLETED,
+    ]
+    assert events[1].text == "Previously completed answer"
+    assert reply.calls == []
+    assert history.updates == []
+
+
 def test_transient_task_episode_failure_retries_the_same_pending_write_without_a_second_reply(
 ) -> None:
     proposal = ChatTaskProposal(
@@ -579,11 +801,13 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     replay = asyncio.run(_collect(controller, request))
 
     assert [event.event_type for event in first] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.ERROR,
         ChatEventType.COMPLETED,
     ]
     assert [event.event_type for event in retry] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,

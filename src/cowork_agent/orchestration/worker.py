@@ -104,6 +104,7 @@ async def run_worker() -> None:
         ProjectDocumentIngestionWorker,
     )
     from cowork_agent.persistence.migrate import apply_migrations
+    from cowork_agent.persistence.pool import control_plane_pool_kwargs
     from cowork_agent.persistence.repositories.identity import (
         PostgresMailboxConnectionRepository,
     )
@@ -114,16 +115,7 @@ async def run_worker() -> None:
     )
     from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 
-    pool = AsyncConnectionPool(
-        database_url(),
-        min_size=1,
-        max_size=4,
-        open=False,
-        check=AsyncConnectionPool.check_connection,
-        max_idle=60.0,
-        max_lifetime=300.0,
-        kwargs={"prepare_threshold": None},
-    )
+    pool = AsyncConnectionPool(database_url(), **control_plane_pool_kwargs())
     await pool.open(wait=True)
     storage_client: httpx.AsyncClient | None = None
     try:
@@ -136,10 +128,8 @@ async def run_worker() -> None:
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         classifier: RouteClassifierPort
         generator: ActionPlanGeneratorPort
-        generation_concurrency = 1
         if provider == "gemini":
             gemini_settings = GeminiSettings.from_env()
-            generation_concurrency = gemini_settings.action_plan_concurrency
             classifier = GeminiRouteClassifier(gemini_settings)
             generator = GeminiActionPlanGenerator(gemini_settings)
             jina_embedding_settings = JinaEmbeddingSettings.from_env()
@@ -173,8 +163,6 @@ async def run_worker() -> None:
                 settings.connection_db_path.parent, settings.token_encryption_key
             ),
             completion_outbox=outbox,
-            mailbox_fetch_concurrency=settings.fetch_concurrency,
-            generation_concurrency=generation_concurrency,
         )
         projects = PostgresProjectRepository(pool)
         maintenance = PostgresWorkerMaintenance(

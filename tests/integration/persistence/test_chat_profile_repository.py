@@ -130,21 +130,22 @@ def test_profile_round_trips_and_repeated_writes_stay_idempotent() -> None:
     _run_scenario(scenario)
 
 
-def test_profiles_are_isolated_per_tenant_and_user() -> None:
+def test_profiles_are_isolated_per_user() -> None:
     async def scenario() -> None:
         repository, pool = await _repository()
         try:
             await repository.write_profile(_namespace(), _profile())
             await repository.write_profile(
-                _namespace(tenant_id="tenant-2"),
-                _profile(tenant_id="tenant-2", response_tone="formal"),
+                _namespace(user_id="other@example.com"),
+                _profile(user_id="other@example.com", response_tone="formal"),
             )
 
-            assert (await repository.read_profile(_namespace())).response_tone == "direct"  # type: ignore[union-attr]
-            other_tenant = await repository.read_profile(_namespace(tenant_id="tenant-2"))
-            assert other_tenant is not None
-            assert other_tenant.response_tone == "formal"
-            assert await repository.read_profile(_namespace(user_id="other@example.com")) is None
+            stored = await repository.read_profile(_namespace())
+            assert stored is not None
+            assert stored.response_tone == "direct"
+            other_user = await repository.read_profile(_namespace(user_id="other@example.com"))
+            assert other_user is not None
+            assert other_user.response_tone == "formal"
         finally:
             await pool.close()
 

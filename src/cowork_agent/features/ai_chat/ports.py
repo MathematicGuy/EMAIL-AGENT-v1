@@ -83,17 +83,44 @@ class ChatSessionBufferPort(Protocol):
 
 
 class ChatHistoryPort(Protocol):
-    """Durable, UI-facing record of completed chat turns."""
+    """Durable, UI-facing lifecycle record for chat turns."""
+
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn: ...
+
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn: ...
 
     async def write_turn(
         self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
     ) -> None: ...
 
-    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]: ...
+    async def list_turns(
+        self, scope: ChatMemoryScope, *, connection: object | None = None
+    ) -> tuple[ChatTurn, ...]: ...
+
+    async def list_owned_turns(
+        self, *, session_id: str, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None: ...
 
     async def titles_for(
         self, scopes: Sequence[ChatMemoryScope]
     ) -> Mapping[str, str]: ...
+
+    async def latest_turns_for(
+        self, scopes: Sequence[ChatMemoryScope]
+    ) -> Mapping[str, ChatTurn]: ...
 
 
 class DeclarativeMemoryPort(Protocol):

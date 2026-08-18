@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-08-17T09:44:49.803Z",
+  "git_sha": null,
+  "mode": "live",
+  "browser": "chromium",
+  "samples": [
+    {
+      "scenario": "live-cold-switch",
+      "mode": "live",
+      "from_chat_id": "4a4748c6-e36a-455f-b8bb-20ee4f7ca19a",
+      "to_chat_id": "901062f8-2067-400b-b660-f563e59ed2cf",
+      "click_to_first_message_visible_ms": 2922,
+      "click_to_response_ms": 1756,
+      "response_to_first_message_visible_ms": 1166,
+      "request_duration_ms": 1716,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": 0,
+      "messages_fetch_count_after": null
+    },
+    {
+      "scenario": "live-repeat-switch",
+      "mode": "live",
+      "from_chat_id": "901062f8-2067-400b-b660-f563e59ed2cf",
+      "to_chat_id": "4a4748c6-e36a-455f-b8bb-20ee4f7ca19a",
+      "click_to_first_message_visible_ms": 68,
+      "click_to_response_ms": 1174,
+      "response_to_first_message_visible_ms": 0,
+      "request_duration_ms": 1134,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": false,
+      "stale_content_visible_ms": 0,
+      "messages_fetch_count_after": null
+    },
+    {
+      "scenario": "live-prefetch-switch",
+      "mode": "live",
+      "from_chat_id": "4a4748c6-e36a-455f-b8bb-20ee4f7ca19a",
+      "to_chat_id": "3bf0f230-041a-4949-a007-76aefa905e68",
+      "click_to_first_message_visible_ms": 58,
+      "click_to_response_ms": 1022,
+      "response_to_first_message_visible_ms": 0,
+      "request_duration_ms": 989,
+      "payload_bytes": 456,
+      "turn_count": 1,
+      "loading_indicator_observed": false,
+      "stale_content_visible_ms": 0,
+      "messages_fetch_count_after": null
+    }
+  ],
+  "summary": [
+    {
+      "scenario": "live-cold-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 2922,
+      "p95_click_to_visible_ms": 2922,
+      "max_click_to_visible_ms": 2922,
+      "p50_request_duration_ms": 1716,
+      "p50_frontend_after_response_ms": 1166
+    },
+    {
+      "scenario": "live-repeat-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 68,
+      "p95_click_to_visible_ms": 68,
+      "max_click_to_visible_ms": 68,
+      "p50_request_duration_ms": 1134,
+      "p50_frontend_after_response_ms": 0
+    },
+    {
+      "scenario": "live-prefetch-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 58,
+      "p95_click_to_visible_ms": 58,
+      "max_click_to_visible_ms": 58,
+      "p50_request_duration_ms": 989,
+      "p50_frontend_after_response_ms": 0
+    }
+  ]
+}

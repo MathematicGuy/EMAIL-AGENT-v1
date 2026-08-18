@@ -34,4 +34,6 @@ def test_ingested_docx_markdown_is_loadable_by_rag(tmp_path: Path) -> None:
 
     assert outcomes[0].status == "succeeded"
     assert documents[0].title == "Expense policy"
-    assert documents[0].chunks[0].text == "Submit receipts within five days."
+    assert documents[0].chunks[0].text == (
+        "Expense policy\n\nSubmit receipts within five days."
+    )

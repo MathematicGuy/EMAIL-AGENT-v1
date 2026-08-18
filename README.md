@@ -245,9 +245,24 @@ pip install -e ".[dev]"
 
 Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự. Sao chép `config.example` thành `config` để thiết lập các feature flag không chứa secret; giữ credential và connection string trong `.env`.
 
+Local durable chat/memory uses the same Postgres schema on localhost
+([ADR-010](tasks/adr/ADR-010-local-postgres-control-plane-latency.md)).
+Start the container, then set `POSTGRES_MODE=local` (app DB `cowork`).
+`POSTGRES_MODE=cloud` uses `DATABASE_URL_CLOUD` (hosted Supabase session
+or direct `:5432`). `POSTGRES_MODE=off` is the SQLite / in-memory fallback.
+Local and cloud are **separate databases** — flipping the flag does not
+copy rows. Persistence tests use the sibling `cowork_mail_todo` database
+and drop it.
+
+```powershell
+docker compose up -d postgres
+```
+
 ```env
-# Supabase Postgres control plane URL (nếu không thiết lập sẽ dùng local SQLite fallback)
-DATABASE_URL="postgresql://user:pass@host:5432/dbname"
+# Flip this only. Keep both URLs.
+POSTGRES_MODE=local
+DATABASE_URL_LOCAL=postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork
+DATABASE_URL_CLOUD=postgresql://postgres.project-ref:replace-with-password@aws-region.pooler.supabase.com:5432/postgres?sslmode=require
 
 # Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
 RAG_STORE_PROVIDER=turbovec
@@ -287,9 +302,10 @@ uv run mail-todo-dev
 ```
 
 `mail-todo-dev` starts `mail-todo-api` and `mail-todo-worker` as child
-processes and stops both when you press `Ctrl+C`. It requires `DATABASE_URL` in
-`.env`, because the worker polls durable PostgreSQL jobs; it is not compatible
-with the SQLite-only fallback. Set `APP_HOST` and `APP_PORT` in `.env` when the
+processes and stops both when you press `Ctrl+C`. It requires
+`POSTGRES_MODE=local` or `cloud` (or a legacy `DATABASE_URL`), because the
+worker polls durable PostgreSQL jobs; it is not compatible with
+`POSTGRES_MODE=off`. Set `APP_HOST` and `APP_PORT` in `.env` when the
 default API address (`127.0.0.1:8000`) is unsuitable.
 
 To run the processes separately, use two terminals:
