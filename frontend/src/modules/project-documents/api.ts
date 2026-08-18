@@ -52,6 +52,10 @@ function documentUrl(projectId: string, documentId?: string): string {
   return documentId ? `${base}/${encodeURIComponent(documentId)}` : base;
 }
 
+function uploadUrl(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `${API_BASE_URL}${url}`;
+}
+
 export async function areProjectDocumentsEnabled(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/v1/cowork/chat/document-health`);
@@ -115,7 +119,7 @@ export async function uploadProjectDocument(
   const initiated = (await initiatedResponse.json()) as UploadInitiated;
   if (initiated.upload_url) {
     onStatus?.('uploading');
-    await checked(await fetch(initiated.upload_url, {
+    await checked(await fetch(uploadUrl(initiated.upload_url), {
       method: 'PUT',
       headers: { 'Content-Type': file.type || mediaTypeFromName(file.name) },
       body: file,
