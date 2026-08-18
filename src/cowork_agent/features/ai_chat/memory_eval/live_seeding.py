@@ -12,15 +12,26 @@ seed is a finding about that scope (SPEC §6.1), and the other three still run.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
 
-from cowork_agent.domain.chat_contracts import ChatMessageRequest, MemoryType
+from cowork_agent.domain.chat_contracts import (
+    ChatMemoryScope,
+    ChatMessageRequest,
+    EpisodicMemoryQuery,
+    MemoryContextRequest,
+    MemoryReadOptions,
+    MemoryType,
+    SemanticMemoryQuery,
+)
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 from ..controller import ChatController
+from ..memory_gateway import MemoryGateway
 from .live_controller import ask_once, collect_reply
+from .live_env import ScopeAvailability
 from .probes import SeedSpec
 from .seeding import SeedOutcome
 
@@ -129,4 +140,58 @@ async def seed_semantic(
     return (
         SeedOutcome(MemoryType.SEMANTIC, True, f"indexed {len(documents)} documents"),
         SemanticChatMemoryAdapter(index),
+    )
+
+
+def _verification_reads() -> MemoryReadOptions:
+    """Read every scope, masked by nothing. Verification must see the truth."""
+
+    return MemoryReadOptions(
+        short_term=True,
+        long_term=True,
+        episodic=EpisodicMemoryQuery(
+            query="previous task", max_items=5, min_score=0.0, timeout_ms=2000
+        ),
+        semantic=SemanticMemoryQuery(
+            query="company policy", max_items=5, min_score=0.0, timeout_ms=2000
+        ),
+    )
+
+
+async def verify_seed(
+    gateway: MemoryGateway,
+    scope: ChatMemoryScope,
+    expected_scopes: Sequence[MemoryType],
+) -> tuple[ScopeAvailability, ...]:
+    """Confirm each seeded scope actually reads back non-empty.
+
+    Called on the `full` and `<target>_off` arms only. The `control` arm has no
+    seed by definition, so verifying it would fail every scope every run.
+
+    Our writes are transactional, so this is a single check rather than a poll.
+    """
+
+    if not expected_scopes:
+        return ()
+    request = MemoryContextRequest(
+        session_id=scope.session_id, scope=scope, reads=_verification_reads()
+    )
+    try:
+        response = await gateway.read_context(request)
+    except Exception as error:  # noqa: BLE001 - an unreadable store is a finding
+        return tuple(
+            ScopeAvailability(item, False, f"verification read failed: {error}")
+            for item in expected_scopes
+        )
+
+    populated = {
+        MemoryType.SHORT_TERM: bool(response.turns),
+        MemoryType.LONG_TERM: response.profile is not None,
+        MemoryType.EPISODIC: bool(response.episodes),
+        MemoryType.SEMANTIC: response.semantic_context is not None,
+    }
+    return tuple(
+        ScopeAvailability(item, False, f"{item.value} seed did not land: read back empty")
+        for item in expected_scopes
+        if not populated[item]
     )
