@@ -7,8 +7,11 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Whole suite: `uv run pytest -q` -> ~24 s, 1311 passed.** Defaults live in
-`pyproject.toml`: `-n 4 --dist loadfile -m 'not live' --strict-markers`.
+**Whole suite: `uv run pytest -q` -> ~24 s, 1489 passed.** Defaults: 4 xdist
+workers with `--dist loadgroup`, `-m 'not live'`, `--strict-markers`. Worker
+flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
+is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
+route — that throws away the cores. Use `-n 0` only to debug a single failure.
 
 The suite is **offline by construction** -- see §7. Do not undo that to make a
 test pass.
@@ -68,7 +71,7 @@ Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 |---|---|---|
 | `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
 | `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
-| `serial` | Must not run under xdist — spawns processes or binds a fixed port. | Selected; keep it on one worker. |
+| `serial` | Spawns a process or binds a fixed port. Auto-grouped onto one xdist worker (`xdist_group("serial")`). Do not disable xdist for these. | Selected. |
 | `xdist_group` | Same worker for tests that share a destructive resource. Persistence (R12) uses `pg-control-plane` so `DROP SCHEMA public CASCADE` never runs on two workers. | Selected. Requires `--dist loadgroup`. |
 
 Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
@@ -110,6 +113,8 @@ absent, add the row when you add the test.
 | Chat submissions persist one lifecycle row before generation and update it by idempotency key | `unit/features/ai_chat/test_controller.py` + `unit/persistence/test_chat_history_migration.py` | frontend hook tests except API-shape mapping |
 | No test outside the `live` tier opens a non-loopback socket | `tests/unit/test_network_guard.py` | — |
 | App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
+| `import cowork_agent` resolves to this checkout's `src`, not the venv editable install | `unit/test_xdist_harness.py` | — |
+| `-p no:xdist` must not usage-error; default run still fans out to 4 workers | `unit/test_xdist_harness.py` | — |
 
 ### Two facts that break tests if you forget them
 

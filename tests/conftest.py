@@ -9,11 +9,33 @@ import logging
 import os
 import socket
 import ssl
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+
+#: This checkout's ``src``, not whatever the venv's editable install points at.
+#: Worktrees share ``C:\\WORK\\EMAIL-AGENT-v1\\.venv``, whose ``.pth`` names the
+#: main tree. Without this pin, ``import cowork_agent`` on a feature worktree
+#: resolves to the wrong tree and new modules raise ``ModuleNotFoundError``.
+CHECKOUT_SRC = Path(__file__).resolve().parents[1] / "src"
+
+_SERIAL_GROUP = pytest.mark.xdist_group("serial")
+
+
+def prefer_checkout_src(path_entries: list[str] | None = None) -> list[str]:
+    """Put this checkout's ``src`` first so it wins over the editable install."""
+    entries = sys.path if path_entries is None else path_entries
+    src = str(CHECKOUT_SRC)
+    while src in entries:
+        entries.remove(src)
+    entries.insert(0, src)
+    return entries
+
+
+prefer_checkout_src()
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -22,6 +44,34 @@ def pytest_configure(config: pytest.Config) -> None:
     _neutralize_broken_cert_bundle(config)
     _pin_offline_rag_provider(config)
     _isolate_control_plane_target(config)
+    _apply_default_xdist(config)
+
+
+def _apply_default_xdist(config: pytest.Config) -> None:
+    """Fan out to 4 workers when xdist is loaded and the user did not pick ``-n``.
+
+    Worker flags live here, not in ``addopts``, so ``-p no:xdist`` is not a
+    usage error. ``tests/xdist_plugin.py`` injects the same defaults earlier
+    when that plugin is on the command line; this is the fallback.
+    """
+    if not config.pluginmanager.hasplugin("xdist"):
+        return
+    num = getattr(config.option, "numprocesses", None)
+    if num is None:
+        config.option.numprocesses = 4
+    if getattr(config.option, "dist", "no") == "no" and config.option.numprocesses:
+        config.option.dist = "loadgroup"
+
+
+def apply_serial_xdist_group(items: list[pytest.Item]) -> None:
+    """Pin ``serial`` tests to one worker so they need not force ``-n 0``."""
+    for item in items:
+        if item.get_closest_marker("serial") and not item.get_closest_marker("xdist_group"):
+            item.add_marker(_SERIAL_GROUP)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    apply_serial_xdist_group(items)
 
 
 def _isolate_control_plane_target(config: pytest.Config) -> None:

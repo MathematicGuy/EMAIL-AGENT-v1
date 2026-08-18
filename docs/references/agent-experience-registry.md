@@ -75,6 +75,15 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 
 ---
 
+#### "Default pytest already fans out to 4 workers"
+- **Version:** v1 (2026-08-18)
+- **Pattern:** Do not pass `-n 0` or `-p no:xdist` on a focused route. Worker flags are injected by the harness; `-n 0` is only for debugging one failure.
+- **Evidence:** A plan copied `-p no:xdist` 18 times; addopts `-n 4 --dist loadgroup` then usage-errored, and every command was rewritten to `-n 0`.
+- **Failure state:** Every agent run is serial, so a 24 s suite and a 2 s route both pay one core.
+- **Deploy when:** Writing pytest commands in a plan, handoff, or TDD loop.
+
+---
+
 ### 2. ArchSeeds (Structural Integrity & System Invariants)
 
 #### "An ignore rule is only real when git confirms it"
