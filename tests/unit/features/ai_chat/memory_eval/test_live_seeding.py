@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -12,9 +13,15 @@ from cowork_agent.features.ai_chat.memory_eval.live_controller import (
     AdapterSet,
     build_arm_controller,
 )
-from cowork_agent.features.ai_chat.memory_eval.live_seeding import seed_episodic, seed_short_term
+from cowork_agent.features.ai_chat.memory_eval.live_seeding import (
+    seed_episodic,
+    seed_semantic,
+    seed_short_term,
+)
 from cowork_agent.features.ai_chat.memory_eval.probes import EpisodeSeed, SeedSpec
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
+
+_CORPUS = "tests/fixtures/memory_eval/corpus"
 
 
 class _Reply:
@@ -210,3 +217,54 @@ def test_a_provider_that_returns_no_proposal_is_a_finding() -> None:
     outcome = asyncio.run(seed_episodic(controller, "s", spec, key_prefix="seed"))
     assert outcome.ok is False
     assert store.episodes == {}
+
+
+class _Embedder:
+    """Deterministic bag-of-words embedder. No network, stable across runs."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self._fail = fail
+
+    async def embed(self, texts: tuple[str, ...], *, task: str = "") -> list[list[float]]:
+        del task
+        if self._fail:
+            raise RuntimeError("embedder down")
+        vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
+        return [
+            [float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts
+        ]
+
+
+def test_a_declared_corpus_is_indexed_and_an_adapter_returned() -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path(".")))
+    assert outcome.ok is True
+    assert outcome.scope is MemoryType.SEMANTIC
+    assert adapter is not None
+
+
+def test_no_corpus_declared_is_a_skip_with_no_adapter() -> None:
+    outcome, adapter = asyncio.run(
+        seed_semantic(SeedSpec((), {}, (), None), _Embedder(), corpus_root=Path("."))
+    )
+    assert outcome.ok is True
+    assert outcome.reason == "nothing declared"
+    assert adapter is None
+
+
+def test_a_missing_corpus_directory_is_a_finding() -> None:
+    spec = SeedSpec((), {}, (), "tests/fixtures/memory_eval/does-not-exist")
+    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path(".")))
+    assert outcome.ok is False
+    assert "corpus" in outcome.reason.casefold()
+    assert adapter is None
+
+
+def test_an_embedder_failure_is_a_finding_not_a_crash() -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, _Embedder(fail=True), corpus_root=Path("."))
+    )
+    assert outcome.ok is False
+    assert "embedder down" in outcome.reason
+    assert adapter is None

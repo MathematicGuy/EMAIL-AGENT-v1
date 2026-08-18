@@ -11,7 +11,13 @@ seed is a finding about that scope (SPEC §6.1), and the other three still run.
 
 from __future__ import annotations
 
+import warnings
+from pathlib import Path
+
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, MemoryType
+from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
+from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 from ..controller import ChatController
 from .live_controller import ask_once, collect_reply
@@ -85,4 +91,42 @@ async def seed_episodic(
         return SeedOutcome(MemoryType.EPISODIC, False, f"{type(error).__name__}: {error}")
     return SeedOutcome(
         MemoryType.EPISODIC, True, f"seeded {len(spec.episodic)} episodes, approved {approved}"
+    )
+
+
+async def seed_semantic(
+    spec: SeedSpec,
+    embedder: object,
+    *,
+    corpus_root: Path,
+) -> tuple[SeedOutcome, object | None]:
+    """Index the declared corpus and return a read adapter for it.
+
+    Semantic memory has no write path through the gateway — it is retrieval-only
+    over a corpus someone else publishes. "Seeding" it therefore means building
+    the index the read will hit, which is why this returns an adapter instead of
+    mutating a store.
+
+    The probe questions must carry a cue phrase such as "company policy" or the
+    retrieval policy never fires and the probe measures nothing (SPEC §6).
+    """
+
+    if not spec.semantic_corpus_dir:
+        return SeedOutcome(MemoryType.SEMANTIC, True, "nothing declared"), None
+    try:
+        documents = load_corpus(corpus_root / spec.semantic_corpus_dir)
+        with warnings.catch_warnings():
+            # InRepoSemanticMemory is deprecated for production and retained
+            # explicitly for offline evaluation harnesses. This is one.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            index = InRepoSemanticMemory(documents, embedder)  # type: ignore[arg-type]
+        await index.build_index()
+    except Exception as error:  # noqa: BLE001 - a seed failure is a finding
+        return (
+            SeedOutcome(MemoryType.SEMANTIC, False, f"{type(error).__name__}: {error}"),
+            None,
+        )
+    return (
+        SeedOutcome(MemoryType.SEMANTIC, True, f"indexed {len(documents)} documents"),
+        SemanticChatMemoryAdapter(index),
     )
