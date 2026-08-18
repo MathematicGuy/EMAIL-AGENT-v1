@@ -98,6 +98,21 @@ class EpisodeWriter:
         self.writes.append(episode)
         return episode
 
+    async def transition_task_episode(self, transition: object) -> TaskEpisode | None:
+        from dataclasses import replace
+        to_status = getattr(transition, "to_status", ValidationStatus.USER_APPROVED)
+        eligible = to_status in (ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED)
+        for idx, item in enumerate(self.writes):
+            if item.episode_id == getattr(transition, "source_id", None) or len(self.writes) == 1:
+                updated = replace(
+                    item,
+                    validation_status=to_status,
+                    retrieval_eligible=eligible,
+                )
+                self.writes[idx] = updated
+                return updated
+        return None
+
 
 class RetryableEpisodeWriter(EpisodeWriter):
     def __init__(self) -> None:
@@ -627,3 +642,70 @@ def test_session_registry_deletes_only_the_verified_principals_session() -> None
             await registry.require(scope.session_id, user_id="user@example.com")
 
     asyncio.run(scenario())
+
+
+def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() -> None:
+    task_proposal = ChatTaskProposal(
+        task_title="Nộp hồ sơ cấp lại CCCD",
+        minimal_request_paraphrase="Các bước nộp hồ sơ xin cấp lại CCCD",
+        action_plan=(
+            "Bước 1: Đăng nhập VNeID",
+            "Bước 2: Chọn Cấp lại CCCD",
+            "Bước 3: Xác nhận thông tin và nộp",
+        ),
+        rag_citations=(),
+        missing_information=(),
+        model_id="gemini-3.5-flash-lite",
+        prompt_version="chat-v2",
+        confidence=0.95,
+    )
+    reply = FakeReply(
+        (
+            ChatReplyChunk(
+                "Dưới đây là kế hoạch các bước nộp hồ sơ cấp lại CCCD.",
+                task_proposal=task_proposal,
+            ),
+        )
+    )
+    episodes = EpisodeWriter()
+    controller, _ = _controller(
+        reply=reply,
+        profile=ProfileReader(_profile()),
+        episodes=episodes,
+    )
+
+    # 1. Câu hỏi thường không có từ khóa tạo task -> KHÔNG sinh event TASK_PROPOSAL
+    normal_request = _request(
+        idempotency_key="req-normal",
+        user_message="Thủ tục cấp lại CCCD gồm giấy tờ gì?",
+    )
+    normal_events = asyncio.run(_collect(controller, normal_request))
+    assert ChatEventType.TASK_PROPOSAL not in [e.event_type for e in normal_events]
+
+    # 2. Câu lệnh có từ khóa "Tạo task" -> SINH event TASK_PROPOSAL (Card HITL)
+    task_request = _request(
+        idempotency_key="req-task",
+        user_message="Tạo task các bước nộp hồ sơ xin cấp lại CCCD",
+    )
+    task_events = asyncio.run(_collect(controller, task_request))
+    assert [e.event_type for e in task_events] == [
+        ChatEventType.DELTA,
+        ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
+        ChatEventType.COMPLETED,
+    ]
+
+    proposal_event = next(e for e in task_events if e.event_type is ChatEventType.TASK_PROPOSAL)
+    assert proposal_event.proposal is not None
+    assert proposal_event.proposal["task_title"] == "Nộp hồ sơ cấp lại CCCD"
+    assert len(proposal_event.proposal["action_plan"]) == 3
+    assert proposal_event.proposal["validation_status"] == ValidationStatus.SYSTEM_GENERATED
+    assert proposal_event.proposal["retrieval_eligible"] is False
+
+    # 3. Người dùng Approve Card -> Transition sang USER_APPROVED, retrieval_eligible = True
+    episode_id = str(proposal_event.proposal["episode_id"])
+    approved_episode = asyncio.run(controller.approve_task_episode(episode_id))
+    assert approved_episode is not None
+    assert approved_episode.validation_status is ValidationStatus.USER_APPROVED
+    assert approved_episode.retrieval_eligible is True
+

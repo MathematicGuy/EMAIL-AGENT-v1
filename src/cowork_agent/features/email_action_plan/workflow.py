@@ -510,7 +510,7 @@ class DigestWorker:
             page = await self._mailbox.search_unread(
                 run.mailbox_connection_id,
                 run.query,
-                100,
+                min(run.max_emails, 100),
                 cursor,
             )
             run.emails_matched = max(run.emails_matched, page.estimated_total or 0)
@@ -519,48 +519,13 @@ class DigestWorker:
                     continue
                 seen_message_ids.add(ref.message_id)
                 refs.append(ref)
+                if len(refs) >= run.max_emails:
+                    break
             cursor = page.next_cursor
-            if cursor is None:
+            if cursor is None or len(refs) >= run.max_emails:
                 break
 
-        async def fetch_received_at(ref: MessageRef) -> datetime | None:
-            try:
-                return await self._mailbox.get_message_received_at(
-                    run.mailbox_connection_id, ref.message_id
-                )
-            except MailboxTemporaryError:
-                logger.warning(
-                    "Run %s skipping message %s after transient timestamp fetch failure",
-                    run.id,
-                    ref.message_id,
-                )
-                return None
-
-        timestamp_started = time.monotonic()
-        received_at_results = await _bounded_gather(
-            refs,
-            limit=self._mailbox_fetch_concurrency,
-            operation=fetch_received_at,
-        )
-        received_at_by_id: dict[str, datetime] = {}
-        for ref, received_at in zip(refs, received_at_results, strict=True):
-            if received_at is None:
-                skipped_threads += 1
-                continue
-            received_at_by_id[ref.message_id] = received_at
-        logger.info(
-            "Run %s fetched %d Gmail timestamps with concurrency %d in %d ms",
-            run.id,
-            len(refs),
-            self._mailbox_fetch_concurrency,
-            int((time.monotonic() - timestamp_started) * 1000),
-        )
-
-        selected_refs = sorted(
-            (ref for ref in refs if ref.message_id in received_at_by_id),
-            key=lambda ref: received_at_by_id[ref.message_id],
-            reverse=True,
-        )[: run.max_emails]
+        selected_refs = refs[: run.max_emails]
         messages_by_thread: dict[str, list[str]] = {}
         for ref in selected_refs:
             messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
