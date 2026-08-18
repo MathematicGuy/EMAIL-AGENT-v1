@@ -27,7 +27,7 @@ def test_prompt_has_five_tiers_and_only_title_metadata() -> None:
     assert "chunk" not in prompt.casefold()
     assert "<untrusted_data>" in prompt
     assert "</untrusted_data>" in prompt
-    assert INTENT_PROMPT_VERSION == "chat-intent-v2"
+    assert INTENT_PROMPT_VERSION == "chat-intent-v3"
 
 
 def test_message_cannot_close_the_bounded_evidence_block() -> None:
