@@ -1,17 +1,18 @@
-"""Groq adapter for structured Action Plan generation and classification."""
+"""OpenRouter OpenAI-compatible adapters for classification and action plans."""
 
 import asyncio
 import json
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from http.client import IncompleteRead
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from langfuse import observe
 
-from cowork_agent.config import GroqSettings
+from cowork_agent.config import OpenRouterSettings
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
     EphemeralEmailEnvelope,
@@ -24,10 +25,7 @@ from cowork_agent.features.email_action_plan.schemas import (
     ClassifiedMessage,
     GenerationContext,
 )
-from cowork_agent.features.email_action_plan.shaping import (
-    batch_messages,
-    group_by_thread,
-)
+from cowork_agent.features.email_action_plan.shaping import batch_messages, group_by_thread
 
 from .gemini import (
     CLASSIFICATION_SCHEMA,
@@ -45,37 +43,29 @@ from .gemini import (
     _validated_decisions,
 )
 
-GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_USER_AGENT = "module-mail/0.1.0"
+OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_USER_AGENT = "module-mail/0.1.0"
+OPENROUTER_SITE_URL = "https://github.com/cowork-agent"
+OPENROUTER_SITE_NAME = "Cowork Agent"
 
 _CLASSIFIER_LOGGER = logging.getLogger(__name__)
-
 _Thread = tuple[EphemeralEmailEnvelope, ...]
 
 
-class GroqAPIError(RuntimeError):
-    """Groq returned an error or an unusable completion."""
+class OpenRouterAPIError(RuntimeError):
+    """OpenRouter returned an error or an unusable completion."""
 
-    error_code = "GROQ_API_ERROR"
+    error_code = "OPENROUTER_API_ERROR"
 
     def __init__(self, detail: str, *, safe_message: str | None = None) -> None:
         super().__init__(detail)
-        self.safe_message = safe_message or (
-            "Groq không thể phân tích email. Vui lòng kiểm tra cấu hình model và thử lại."
-        )
+        self.safe_message = safe_message or "OpenRouter could not process the email."
 
 
-class GroqActionPlanGenerator:
-    """ActionPlanGeneratorPort adapter for Groq (PRD-v1 FR-09, §6.6).
+class OpenRouterActionPlanGenerator:
+    """ActionPlanGeneratorPort adapter for the OpenRouter chat-completions API."""
 
-    Performs exactly one structured generation call per resolved
-    non-``NO_ACTION`` Task Candidate (master-comparison §3.8) and returns
-    exactly one Task. Schema/parse failures trigger one repair retry
-    (PRD-v1 §12.4); a still-invalid payload wraps into
-    :class:`GroqAPIError` so the run reports ``GROQ_API_ERROR``.
-    """
-
-    def __init__(self, settings: GroqSettings) -> None:
+    def __init__(self, settings: OpenRouterSettings) -> None:
         self._settings = settings
 
     async def generate(
@@ -105,62 +95,27 @@ class GroqActionPlanGenerator:
                 ),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise GroqAPIError(
-                "Groq response did not match the generation schema",
-                safe_message=(
-                    "Groq trả về dữ liệu không đúng cấu trúc task yêu cầu. "
-                    "Vui lòng thử lại hoặc kiểm tra schema generation."
-                ),
+            raise OpenRouterAPIError(
+                "OpenRouter response did not match the generation schema",
+                safe_message="OpenRouter returned invalid task schema.",
             ) from exc
 
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
-        request_body = {
-            "model": self._settings.model,
-            "messages": [
-                {"role": "system", "content": GENERATOR_SYSTEM_INSTRUCTION},
-                {
-                    "role": "user",
-                    "content": (
-                        f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
-                        f"{json.dumps(GENERATION_SCHEMA, ensure_ascii=False)}"
-                    ),
-                },
-            ],
-            "temperature": 0.7,
-            "reasoning_effort": "none",
-            "reasoning_format": "hidden",
-            "response_format": {"type": "json_object"},
-        }
-        response = await asyncio.to_thread(
-            _post_json,
-            GROQ_CHAT_COMPLETIONS_URL,
+        return await execute_chat_completion(
             self._settings.api_key,
-            request_body,
+            self._settings.model,
+            GENERATOR_SYSTEM_INSTRUCTION,
+            prompt,
+            GENERATION_SCHEMA,
+            self._settings.max_output_tokens,
             self._settings.timeout_seconds,
         )
-        try:
-            content = response["choices"][0]["message"]["content"]
-        except (IndexError, KeyError, TypeError) as exc:
-            raise GroqAPIError("Groq response did not contain a chat completion") from exc
-        try:
-            payload = json.loads(str(content))
-        except json.JSONDecodeError as exc:
-            raise GroqAPIError("Groq response was not valid JSON") from exc
-        if not isinstance(payload, Mapping):
-            raise GroqAPIError("Groq response JSON must be an object")
-        return cast(Mapping[str, Any], payload)
 
 
-class GroqRouteClassifier:
-    """Route Classifier adapter for Groq (PRD-v1 FR-05, master-comparison §3.6).
+class OpenRouterRouteClassifier:
+    """RouteClassifierPort adapter with the existing conservative fallback."""
 
-    Mirrors ``GeminiRouteClassifier``: bounded classifier batch calls, exactly
-    one repair retry per PRD-v1 §12.2, then the conservative ``RETRIEVE_RAG``
-    fallback for every still-missing message. ``classify`` never raises for
-    per-message classification failures.
-    """
-
-    def __init__(self, settings: GroqSettings) -> None:
+    def __init__(self, settings: OpenRouterSettings) -> None:
         self._settings = settings
 
     @observe(
@@ -184,7 +139,7 @@ class GroqRouteClassifier:
             },
             metadata={
                 "feature": "email-intent-router",
-                "provider": "groq",
+                "provider": "openrouter",
             },
         )
         for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
@@ -201,7 +156,7 @@ class GroqRouteClassifier:
                 "classified_count": len(result.decisions),
                 "batch_count": result.batch_count,
                 "fallback_count": sum(1 for item in result.decisions if item.is_fallback),
-            },
+            }
         )
         return result
 
@@ -223,8 +178,6 @@ class GroqRouteClassifier:
             await self._complete(prompt, trace_input=trace_input), expected
         )
         if not expected <= decisions.keys():
-            # PRD-v1 §12.2: retry the same batch exactly once; the repair
-            # instruction is appended for schema failures.
             repaired = _validated_decisions(
                 await self._complete(
                     prompt + CLASSIFIER_REPAIR_INSTRUCTION,
@@ -234,12 +187,10 @@ class GroqRouteClassifier:
             )
             decisions = {**repaired, **decisions}
         if not expected <= decisions.keys():
-            missing = sorted(expected - decisions.keys())
             _CLASSIFIER_LOGGER.warning(
-                "Groq classifier fallback for %d of %d batch messages: %s",
-                len(missing),
+                "OpenRouter classifier fallback for %d of %d batch messages",
+                len(expected - decisions.keys()),
                 len(batch_ids),
-                missing,
             )
         return _classified_messages_for(batch_ids, decisions)
 
@@ -255,66 +206,90 @@ class GroqRouteClassifier:
         *,
         trace_input: Mapping[str, object] | None = None,
     ) -> Mapping[str, Any] | None:
-        request_body: dict[str, object] = {
-            "model": self._settings.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": CLASSIFIER_SYSTEM_INSTRUCTION,
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
-                        f"{json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False)}"
-                    ),
-                },
-            ],
-            "temperature": 0.7,
-            "reasoning_effort": "none",
-            "reasoning_format": "hidden",
-            "response_format": {"type": "json_object"},
-        }
         try:
-            response = await asyncio.to_thread(
-                _post_json,
-                GROQ_CHAT_COMPLETIONS_URL,
+            payload = await execute_chat_completion(
                 self._settings.api_key,
-                request_body,
+                self._settings.model,
+                CLASSIFIER_SYSTEM_INSTRUCTION,
+                prompt,
+                CLASSIFICATION_SCHEMA,
+                self._settings.max_output_tokens,
                 self._settings.timeout_seconds,
             )
-        except GroqAPIError as exc:
-            # §12.2: transport failures map to the per-message fallback; log
-            # metadata only, never email content.
-            _CLASSIFIER_LOGGER.warning("Groq classifier transport failed: %s", exc.error_code)
+        except OpenRouterAPIError as exc:
+            _CLASSIFIER_LOGGER.warning("OpenRouter classifier transport failed: %s", exc.error_code)
             return None
-        try:
-            content = response["choices"][0]["message"]["content"]
-        except (IndexError, KeyError, TypeError):
-            _CLASSIFIER_LOGGER.warning("Groq classifier response missing a chat completion")
-            return None
-        try:
-            payload = json.loads(str(content))
-        except json.JSONDecodeError:
-            _CLASSIFIER_LOGGER.warning("Groq classifier response was not valid JSON")
-            return None
-        if not isinstance(payload, Mapping):
-            _CLASSIFIER_LOGGER.warning("Groq classifier response JSON must be an object")
-            return None
-        typed_payload = cast(Mapping[str, Any], payload)
         _update_current_generation(
             input_data=trace_input,
             output_data={
                 "response_type": "structured_json",
-                "top_level_fields": sorted(str(field) for field in typed_payload),
+                "top_level_fields": sorted(str(field) for field in payload),
             },
             metadata={
-                "provider": "groq",
+                "provider": "openrouter",
                 "prompt_version": "current",
             },
             model=self._settings.model,
         )
-        return typed_payload
+        return payload
+
+
+async def execute_chat_completion(
+    api_key: str,
+    model: str,
+    system_instruction: str,
+    prompt: str,
+    schema: Mapping[str, object],
+    max_output_tokens: int,
+    timeout_seconds: int,
+) -> Mapping[str, Any]:
+    response = await asyncio.to_thread(
+        _post_json,
+        OPENROUTER_CHAT_COMPLETIONS_URL,
+        api_key,
+        _request_body(model, system_instruction, prompt, schema, max_output_tokens),
+        timeout_seconds,
+    )
+    return _completion_json(response)
+
+
+def _request_body(
+    model: str,
+    system_instruction: str,
+    prompt: str,
+    schema: Mapping[str, object],
+    max_output_tokens: int,
+) -> dict[str, object]:
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_instruction},
+            {
+                "role": "user",
+                "content": (
+                    f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
+                    f"{json.dumps(schema, ensure_ascii=False)}"
+                ),
+            },
+        ],
+        "temperature": 0.7,
+        "max_tokens": max_output_tokens,
+        "response_format": {"type": "json_object"},
+    }
+
+
+def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:
+    try:
+        content = response["choices"][0]["message"]["content"]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise OpenRouterAPIError("OpenRouter response did not contain a chat completion") from exc
+    try:
+        payload = json.loads(str(content))
+    except json.JSONDecodeError as exc:
+        raise OpenRouterAPIError("OpenRouter response was not valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise OpenRouterAPIError("OpenRouter response JSON must be an object")
+    return cast(Mapping[str, Any], payload)
 
 
 def _post_json(
@@ -327,7 +302,9 @@ def _post_json(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": GROQ_USER_AGENT,
+            "User-Agent": OPENROUTER_USER_AGENT,
+            "HTTP-Referer": OPENROUTER_SITE_URL,
+            "X-Title": OPENROUTER_SITE_NAME,
         },
         method="POST",
     )
@@ -335,21 +312,17 @@ def _post_json(
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 -- fixed HTTPS URL
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise GroqAPIError(
-            f"Groq API returned HTTP {exc.code}",
-            safe_message=(
-                f"Groq từ chối yêu cầu (HTTP {exc.code}). "
-                "Vui lòng kiểm tra model, JSON mode và tham số reasoning rồi thử lại."
-            ),
+        raise OpenRouterAPIError(
+            f"OpenRouter API returned HTTP {exc.code}",
+            safe_message=f"OpenRouter rejected the request (HTTP {exc.code}).",
         ) from exc
-    except (TimeoutError, URLError) as exc:
-        raise GroqAPIError(
-            "Groq API request failed",
-            safe_message=(
-                "Không thể kết nối tới Groq hoặc yêu cầu đã hết thời gian chờ. "
-                "Vui lòng kiểm tra mạng và thử lại."
-            ),
+    except (TimeoutError, URLError, IncompleteRead, OSError) as exc:
+        raise OpenRouterAPIError(
+            "OpenRouter API request failed",
+            safe_message="Could not connect to OpenRouter or the request timed out.",
         ) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OpenRouterAPIError("OpenRouter API response was not valid JSON") from exc
     if not isinstance(payload, Mapping):
-        raise GroqAPIError("Groq API response must be a JSON object")
+        raise OpenRouterAPIError("OpenRouter API response must be a JSON object")
     return cast(Mapping[str, Any], payload)

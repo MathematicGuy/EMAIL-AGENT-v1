@@ -7,7 +7,12 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
+from cowork_agent.config import (
+    FaucetSettings,
+    GeminiSettings,
+    GroqSettings,
+    OpenRouterSettings,
+)
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, EpisodeCitation
 from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
 from cowork_agent.features.ai_chat.generation_context import (
@@ -163,6 +168,25 @@ class FaucetChatReply(_ConfiguredChatReply):
                 settings.timeout_seconds,
             )
             return _completion_json(response)
+
+        return cls(model=settings.model, complete=complete)
+
+
+class OpenRouterChatReply(_ConfiguredChatReply):
+    @classmethod
+    def from_settings(cls, settings: OpenRouterSettings) -> OpenRouterChatReply:
+        from .providers.openrouter import execute_chat_completion
+
+        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+            return await execute_chat_completion(
+                settings.api_key,
+                settings.model,
+                cast(str, payload["system"]),
+                json.dumps(payload["context"], ensure_ascii=False),
+                _RESPONSE_SCHEMA,
+                settings.max_output_tokens,
+                settings.timeout_seconds,
+            )
 
         return cls(model=settings.model, complete=complete)
 

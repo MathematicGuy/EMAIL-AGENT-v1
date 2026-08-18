@@ -654,6 +654,45 @@ class FaucetSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class OpenRouterSettings:
+    """Configuration for the OpenRouter chat-completions provider."""
+
+    api_key: str = field(repr=False)
+    model: str
+    max_emails_per_batch: int
+    max_output_tokens: int
+    timeout_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "OpenRouterSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        model = environ.get("OPENROUTER_MODEL", "").strip()
+        if not model or model.startswith("replace-with-"):
+            raise ValueError("OPENROUTER_MODEL must be a real OpenRouter model name")
+        return cls(
+            api_key=_required_secret(environ, "OPENROUTER_API_KEY"),
+            model=model,
+            max_emails_per_batch=_positive_int(
+                environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5
+            ),
+            max_output_tokens=_bounded_positive_int(
+                environ, "OPENROUTER_MAX_OUTPUT_TOKENS", 2048, maximum=4096
+            ),
+            timeout_seconds=_bounded_positive_int(
+                environ, "OPENROUTER_TIMEOUT_SECONDS", 60, maximum=120
+            ),
+        )
+
+
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
     value = int(environ.get(name, str(default)))
     if value <= 0:
