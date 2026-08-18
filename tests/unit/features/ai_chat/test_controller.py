@@ -913,6 +913,7 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
     )
     task_events = asyncio.run(_collect(controller, task_request))
     assert [e.event_type for e in task_events] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,
