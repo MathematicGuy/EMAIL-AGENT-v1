@@ -23,7 +23,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: /chat-history-latency/,
+      testIgnore: /(?:chat-history-latency|document-ingestion-latency)/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -31,6 +31,18 @@ export default defineConfig({
       testMatch: /chat-history-latency\.spec\.ts/,
       retries: 0,
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'chat-ingestion-latency',
+      testMatch: /document-ingestion-latency\.spec\.ts/,
+      retries: 0,
+      workers: 1,
+      use: {
+        ...devices['Desktop Chrome'],
+        trace: 'off',
+        screenshot: 'off',
+        video: 'off',
+      },
     },
   ],
   webServer: {

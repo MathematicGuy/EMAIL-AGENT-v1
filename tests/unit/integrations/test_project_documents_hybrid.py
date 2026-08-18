@@ -7,6 +7,7 @@ must apply, and the fact that the dense leg only ever sees IDs that survived it.
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -307,6 +308,168 @@ def test_indexing_persists_text_before_vectors_and_scopes_the_index_by_project()
         assert chunks.replaced[0]["document_id"] == "document-1"
         assert indexes.added[0]["project_id"] == PROJECT
         assert indexes.added[0]["vector_ids"] == [11, 12]
+
+    asyncio.run(scenario())
+
+
+def test_indexing_logs_metadata_safe_persistence_and_embedding_timings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO):
+            await _store(FakeChunks(), FakeIndexes(), RecordingEmbedder()).index(
+                workspace_id=WORKSPACE,
+                user_id=USER,
+                project_id=PROJECT,
+                document_id="document-1",
+                filename="private-policy.pdf",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
+            )
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=chunk_persistence",
+            "stage=embedding",
+        ]
+        assert all(" document_id=document-1" in message for message in timing)
+        assert all(" duration_ms=" in message for message in timing)
+        assert all(" outcome=success" in message for message in timing)
+        assert all("project_id=" not in message for message in timing)
+        assert all(
+            sensitive not in "\n".join(timing)
+            for sensitive in ("private-policy.pdf", "chunk-secret", "private text")
+        )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure_stage", ["chunk_persistence", "embedding"])
+def test_indexing_logs_error_for_the_failed_reached_stage(
+    failure_stage: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailingChunks(FakeChunks):
+        async def replace_document_chunks(
+            self, **kwargs: object
+        ) -> tuple[tuple[str, int], ...]:
+            del kwargs
+            raise OSError("private chunk text must-not-be-logged")
+
+    class FailingEmbedder(RecordingEmbedder):
+        async def embed(
+            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+        ) -> tuple[tuple[float, ...], ...]:
+            del texts, task
+            raise OSError("credential=must-not-be-logged")
+
+    async def scenario() -> None:
+        chunks = FailingChunks() if failure_stage == "chunk_persistence" else FakeChunks()
+        embedder = (
+            FailingEmbedder()
+            if failure_stage == "embedding"
+            else RecordingEmbedder()
+        )
+        with caplog.at_level(logging.INFO), pytest.raises(OSError):
+            await _store(chunks, FakeIndexes(), embedder).index(
+                workspace_id=WORKSPACE,
+                user_id=USER,
+                project_id=PROJECT,
+                document_id="document-1",
+                filename="private-policy.pdf",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
+            )
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        expected_stages = (
+            ["stage=chunk_persistence"]
+            if failure_stage == "chunk_persistence"
+            else ["stage=chunk_persistence", "stage=embedding"]
+        )
+        assert [message.split()[1] for message in timing] == expected_stages
+        assert " outcome=error" in timing[-1]
+        assert all(" outcome=success" in message for message in timing[:-1])
+        assert all(
+            sensitive not in "\n".join(timing)
+            for sensitive in ("private text", "credential", "private-policy.pdf")
+        )
+
+    asyncio.run(scenario())
+
+
+def test_invalid_embedding_output_logs_error_instead_of_success(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class InvalidEmbedder(RecordingEmbedder):
+        async def embed(
+            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+        ) -> tuple[tuple[float, ...], ...]:
+            del texts, task
+            return ((1.0,),)
+
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO), pytest.raises(
+            ValueError, match="embedding dimension"
+        ):
+            await _store(FakeChunks(), FakeIndexes(), InvalidEmbedder()).index(
+                workspace_id=WORKSPACE,
+                user_id=USER,
+                project_id=PROJECT,
+                document_id="document-1",
+                filename="private-policy.pdf",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
+            )
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=chunk_persistence",
+            "stage=embedding",
+        ]
+        assert " outcome=error" in timing[-1]
+
+    asyncio.run(scenario())
+
+
+def test_invalid_jsonl_path_never_masks_the_original_embedding_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingEmbedder(RecordingEmbedder):
+        async def embed(
+            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
+        ) -> tuple[tuple[float, ...], ...]:
+            del texts, task
+            raise OSError("original embedding failure")
+
+    async def scenario() -> None:
+        monkeypatch.setenv("CHAT_INGESTION_TIMING_LOG", "invalid-config")
+        monkeypatch.setattr(
+            "cowork_agent.observability.Path",
+            lambda value: (_ for _ in ()).throw(ValueError(f"invalid path: {value}")),
+        )
+        with pytest.raises(OSError, match="original embedding failure"):
+            await _store(FakeChunks(), FakeIndexes(), FailingEmbedder()).index(
+                workspace_id=WORKSPACE,
+                user_id=USER,
+                project_id=PROJECT,
+                document_id="document-1",
+                filename="private-policy.pdf",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
+            )
 
     asyncio.run(scenario())
 

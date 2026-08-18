@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
@@ -17,6 +18,11 @@ from cowork_agent.integrations.knowledge_ingestion.project_documents import (
 )
 from cowork_agent.integrations.rag.project_documents import ProjectDocumentChunk
 from cowork_agent.integrations.storage.supabase import StorageUnavailable
+from cowork_agent.observability import (
+    ProjectDocumentTimingOutcome,
+    log_project_document_timing,
+    safe_provider_label,
+)
 from cowork_agent.persistence.repositories.projects import ProjectDocument
 
 logger = logging.getLogger(__name__)
@@ -121,42 +127,70 @@ class ProjectDocumentIngestionWorker:
         document = await self._repository.claim_job(document_id)
         if document is None:
             return
+        worker_started = perf_counter()
+        worker_outcome: ProjectDocumentTimingOutcome = "error"
         state = "extracting"
         vectors_written = False
         try:
             with tempfile.TemporaryDirectory(prefix="cowork-project-doc-") as directory:
                 source = Path(directory) / _source_name(document.media_type)
-                await self._storage.download_to(document.storage_key, source)
-                _verify_source(source, document)
-                extracted = self._extractor.extract(source, document.media_type)
-                if extracted.page_count > self._max_pages:
-                    raise ProjectDocumentExtractionError("page_limit_exceeded")
-                chunks = tuple(
-                    ProjectDocumentChunk(
-                        chunk_id=str(
-                            uuid5(
-                                NAMESPACE_URL,
-                                ":".join(
-                                    (
-                                        document.id,
-                                        str(index),
-                                        chunk.section or "",
-                                        str(chunk.page_start),
-                                        str(chunk.page_end),
-                                        chunk.text,
-                                    )
-                                ),
-                            )
-                        ),
-                        text=chunk.text,
-                        page_start=chunk.page_start,
-                        page_end=chunk.page_end,
-                        section=chunk.section,
+                stage_started = perf_counter()
+                stage_outcome: ProjectDocumentTimingOutcome = "error"
+                try:
+                    await self._storage.download_to(document.storage_key, source)
+                    stage_outcome = "success"
+                finally:
+                    log_project_document_timing(
+                        logger,
+                        stage="source_download",
+                        started=stage_started,
+                        outcome=stage_outcome,
+                        document_id=document.id,
+                        provider=safe_provider_label(self._storage),
                     )
-                    for index, chunk in enumerate(extracted.chunks)
-                )
-                if not chunks:
-                    raise ProjectDocumentExtractionError("empty_extraction")
+                _verify_source(source, document)
+                stage_started = perf_counter()
+                stage_outcome = "error"
+                try:
+                    extracted = self._extractor.extract(source, document.media_type)
+                    if extracted.page_count > self._max_pages:
+                        raise ProjectDocumentExtractionError("page_limit_exceeded")
+                    chunks = tuple(
+                        ProjectDocumentChunk(
+                            chunk_id=str(
+                                uuid5(
+                                    NAMESPACE_URL,
+                                    ":".join(
+                                        (
+                                            document.id,
+                                            str(index),
+                                            chunk.section or "",
+                                            str(chunk.page_start),
+                                            str(chunk.page_end),
+                                            chunk.text,
+                                        )
+                                    ),
+                                )
+                            ),
+                            text=chunk.text,
+                            page_start=chunk.page_start,
+                            page_end=chunk.page_end,
+                            section=chunk.section,
+                        )
+                        for index, chunk in enumerate(extracted.chunks)
+                    )
+                    if not chunks:
+                        raise ProjectDocumentExtractionError("empty_extraction")
+                    stage_outcome = "success"
+                finally:
+                    log_project_document_timing(
+                        logger,
+                        stage="extraction_chunking",
+                        started=stage_started,
+                        outcome=stage_outcome,
+                        document_id=document.id,
+                        provider=safe_provider_label(self._extractor),
+                    )
                 if not await self._repository.transition_document(
                     document.id, from_status="extracting", to_status="indexing"
                 ):
@@ -175,14 +209,30 @@ class ProjectDocumentIngestionWorker:
                 # Readiness is no longer published into the vector store: the
                 # ACL query joins project_documents.status, so this transition
                 # is the only thing that makes a document retrievable.
-                if await self._repository.transition_document(
-                    document.id,
-                    from_status="indexing",
-                    to_status="ready",
-                    page_count=extracted.page_count,
-                    chunk_count=count,
-                ):
+                stage_started = perf_counter()
+                stage_outcome = "error"
+                try:
+                    ready = await self._repository.transition_document(
+                        document.id,
+                        from_status="indexing",
+                        to_status="ready",
+                        page_count=extracted.page_count,
+                        chunk_count=count,
+                    )
+                    if ready:
+                        stage_outcome = "success"
+                finally:
+                    log_project_document_timing(
+                        logger,
+                        stage="ready_transition",
+                        started=stage_started,
+                        outcome=stage_outcome,
+                        document_id=document.id,
+                        provider=safe_provider_label(self._repository),
+                    )
+                if ready:
                     await self._repository.finish_job(document.id, status="completed")
+                    worker_outcome = "success"
                 else:
                     await self._delete_vectors_best_effort(document)
         except ProjectDocumentExtractionError as exc:
@@ -228,6 +278,14 @@ class ProjectDocumentIngestionWorker:
                 document.id,
                 state,
                 "index_unavailable" if state == "indexing" else "source_download_failed",
+            )
+        finally:
+            log_project_document_timing(
+                logger,
+                stage="worker_execution",
+                started=worker_started,
+                outcome=worker_outcome,
+                document_id=document.id,
             )
 
     async def _retry_or_fail(self, document_id: str, state: str, code: str) -> None:

@@ -62,6 +62,7 @@ frontend/.env
 /playwright/.cache/
 /playwright/.auth/
 evaluations/CHAT/latency/runs/*.json
+evaluations/CHAT/ingestion-latency/runs/*.json
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/

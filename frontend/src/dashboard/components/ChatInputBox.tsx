@@ -111,6 +111,9 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
+                  data-testid="chat-attachment"
+                  data-attachment-status={attachment.status}
+                  data-document-id={attachment.documentId ?? ''}
                   className="flex max-w-full items-center gap-2 rounded-xl border border-[#413d37] bg-[#2b2925] px-2.5 py-2 text-xs text-zinc-200"
                 >
                   {['hashing', 'uploading', 'processing', 'deleting'].includes(attachment.status) ? (
@@ -254,6 +257,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 <button
                   onClick={() => onSend()}
                   disabled={isGenerating || inputText.trim().length === 0 || hasPendingAttachment}
+                  data-testid="chat-send"
                   title="Send message"
                   className="w-7 h-7 ml-1 flex items-center justify-center bg-zinc-200 hover:bg-white text-zinc-900 rounded-md transition-all shadow-sm cursor-pointer disabled:opacity-50"
                 >
