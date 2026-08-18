@@ -113,11 +113,15 @@ def create_project_router() -> APIRouter:
                 max_documents_per_project=settings.max_documents_per_project,
                 max_project_bytes=settings.max_project_bytes,
             )
-            upload_url = (
-                await _storage(request).create_signed_upload_url(document.storage_key)
-                if created or document.status == "received"
-                else None
-            )
+            storage = _storage(request)
+            upload_url = None
+            if created or document.status == "received":
+                if hasattr(storage, "upload_bytes"):
+                    upload_url = (
+                        f"/v1/cowork/chat/projects/{project_id}/documents/{document.id}/source"
+                    )
+                else:
+                    upload_url = await storage.create_signed_upload_url(document.storage_key)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Invalid project document") from exc
         except StorageUnavailable as exc:
@@ -171,6 +175,28 @@ def create_project_router() -> APIRouter:
                 status_code=404, detail="Project document not available for ingestion"
             )
         return {"document_id": document_id, "status": document.status}
+
+    @router.put(
+        "/projects/{project_id}/documents/{document_id}/source",
+        status_code=204,
+        response_model=None,
+    )
+    async def upload_local_source(project_id: str, document_id: str, request: Request) -> Response:
+        _require_user_documents_enabled(request)
+        storage = _storage(request)
+        upload_bytes = getattr(storage, "upload_bytes", None)
+        if upload_bytes is None:
+            raise HTTPException(status_code=405, detail="Direct upload is unavailable")
+        document = await _projects(request).require_document(
+            await _principal(request), project_id, document_id
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Project document not found")
+        content = await request.body()
+        if len(content) != document.byte_size:
+            raise HTTPException(status_code=422, detail="source_size_mismatch")
+        await upload_bytes(document.storage_key, content)
+        return Response(status_code=204)
 
     @router.delete(
         "/projects/{project_id}/documents/{document_id}",

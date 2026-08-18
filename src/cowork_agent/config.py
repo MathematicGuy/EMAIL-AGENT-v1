@@ -37,13 +37,13 @@ def postgres_mode(environ: Mapping[str, str] | None = None) -> str:
 
 
 def database_url(environ: Mapping[str, str] | None = None) -> str:
-    """PostgreSQL connection URL; empty string keeps SQLite / in-memory adapters.
+    """PostgreSQL connection URL; empty string selects local SQLite adapters.
 
     ``POSTGRES_MODE`` selects the URL when set and wins over ``DATABASE_URL``:
 
     * ``local`` — ``DATABASE_URL_LOCAL``, else the Docker Compose app DB
     * ``cloud`` — ``DATABASE_URL_CLOUD`` (session or direct ``:5432``)
-    * ``off`` — empty (SQLite mailbox/runs/tasks + in-memory chat)
+    * ``off`` — empty (SQLite mailbox/runs/tasks/chat history/chat memory)
 
     With no mode, ``DATABASE_URL`` is used unchanged (tests and older .env files).
     """
@@ -116,7 +116,7 @@ class SessionSettings:
         if not cookie_name:
             raise ValueError("APP_SESSION_COOKIE_NAME must not be empty")
         # Local HTTP on 127.0.0.1 drops Secure cookies in some browsers.
-        cookie_secure_default = postgres_mode(environ) != "local"
+        cookie_secure_default = postgres_mode(environ) not in {"local", "off"}
         return cls(
             session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
             cookie_name=cookie_name,

@@ -248,6 +248,58 @@ async def run_worker() -> None:
         await pool.close()
 
 
+async def run_sqlite_worker() -> None:
+    """Poll the single-machine SQLite document queue without Postgres extras."""
+    from cowork_agent.integrations.knowledge_ingestion.project_documents import (
+        ProjectDocumentExtractor,
+    )
+    from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+    from cowork_agent.integrations.rag.project_documents import HybridProjectDocumentStore
+    from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
+    from cowork_agent.integrations.storage.local import LocalPrivateStorage
+    from cowork_agent.orchestration.project_document_worker import ProjectDocumentIngestionWorker
+    from cowork_agent.persistence.repositories.sqlite_project_document_chunks import (
+        SQLiteProjectDocumentChunkRepository,
+    )
+    from cowork_agent.persistence.repositories.sqlite_projects import SQLiteProjectRepository
+
+    settings = GmailSettings.from_env()
+    document_settings = UserDocumentsSettings.from_env()
+    if not document_settings.enabled:
+        logger.info("User documents are disabled; SQLite worker is idle")
+        while True:
+            await asyncio.sleep(60)
+    root = settings.connection_db_path.parent
+    projects = SQLiteProjectRepository(root / "projects.db")
+    chunks = SQLiteProjectDocumentChunkRepository(root / "project_chunks.db", root / "projects.db")
+    embedding = GeminiEmbeddingSettings.from_env()
+    vectors = HybridProjectDocumentStore(
+        chunks,
+        TurbovecProjectIndexStore(
+            document_settings.index_root,
+            vector_size=embedding.dimensions,
+        ),
+        GeminiEmbeddingAdapter(embedding),
+        vector_size=embedding.dimensions,
+    )
+    await projects.initialize()
+    await chunks.initialize()
+    worker = ProjectDocumentIngestionWorker(
+        projects,
+        LocalPrivateStorage(root / "project-documents"),
+        ProjectDocumentExtractor(),
+        vectors,
+        max_pages=document_settings.max_pages,
+    )
+    while True:
+        await projects.record_document_worker_heartbeat()
+        document_id = await projects.next_claimable_job()
+        if document_id is None:
+            await asyncio.sleep(1)
+            continue
+        await worker.execute(document_id)
+
+
 def main() -> None:
     load_runtime_environment()
     # See app.main(): INFO records are dropped without a root handler, and the
@@ -266,9 +318,7 @@ def main() -> None:
         force=True,
     )
     configure_windows_event_loop_policy()
-    if not database_url():
-        raise SystemExit("mail-todo-worker requires DATABASE_URL")
-    asyncio.run(run_worker())
+    asyncio.run(run_worker() if database_url() else run_sqlite_worker())
 
 
 if __name__ == "__main__":
