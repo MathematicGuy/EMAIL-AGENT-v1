@@ -7,6 +7,7 @@ import logging
 import random
 import re
 import secrets
+import ssl
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -371,9 +372,13 @@ class GmailMailboxAdapter:
                 if attempt >= _RETRY_ATTEMPTS or status not in _RETRYABLE_STATUSES:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
                 await asyncio.sleep(_retry_delay(attempt))
-            except TransportError as exc:
+            except (TransportError, httplib2.error.HttpLib2Error, ssl.SSLError, OSError) as exc:
                 logger.warning(
-                    "Gmail API TransportError (attempt=%d/%d): %s", attempt, _RETRY_ATTEMPTS, exc
+                    "Gmail API transport/network error (%s, attempt=%d/%d): %s",
+                    type(exc).__name__,
+                    attempt,
+                    _RETRY_ATTEMPTS,
+                    exc,
                 )
                 if attempt >= _RETRY_ATTEMPTS:
                     raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
@@ -396,12 +401,20 @@ def _gmail_request_builder(credentials: Credentials) -> Callable[..., Any]:
 
 
 def _get_profile_email(credentials: Credentials) -> str:
-    service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
-    profile = service.users().getProfile(userId="me").execute()
-    email_address = str(profile.get("emailAddress", "")).strip()
-    if not email_address:
-        raise MailboxTemporaryError("Gmail profile did not contain an email address")
-    return email_address
+    try:
+        service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+        profile = service.users().getProfile(userId="me").execute()
+        email_address = str(profile.get("emailAddress", "")).strip()
+        if not email_address:
+            raise MailboxTemporaryError("Gmail profile did not contain an email address")
+        return email_address
+    except HttpError as exc:
+        status = getattr(exc.resp, "status", None)
+        if status in {401, 403}:
+            raise MailboxReauthRequiredError("Gmail authorization must be renewed") from exc
+        raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
+    except (TransportError, httplib2.error.HttpLib2Error, ssl.SSLError, OSError) as exc:
+        raise MailboxTemporaryError("Gmail is temporarily unavailable") from exc
 
 
 def _parse_message(raw: Mapping[str, Any]) -> EphemeralEmailEnvelope:

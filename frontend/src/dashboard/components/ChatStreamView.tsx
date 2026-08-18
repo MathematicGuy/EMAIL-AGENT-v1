@@ -784,39 +784,41 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
           <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#d97757]/40 to-transparent" />
         )}
 
-        {parts.map((part, pIdx) => {
-          const isLastPart = pIdx === parts.length - 1;
+        <div data-testid={!isUser ? 'assistant-message-content' : undefined}>
+          {parts.map((part, pIdx) => {
+            const isLastPart = pIdx === parts.length - 1;
 
-          if (part.type === 'text') {
-            return (
-              <div key={pIdx} className="relative">
-                <FormattedMarkdownText content={part.content} />
-                {msg.isStreaming && isLastPart && (
-                  <span className="inline-block w-2 h-4 ml-1 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
-                )}
-              </div>
-            );
-          } else {
-            return (
-              <CodeBlockItem
-                key={pIdx}
-                part={part}
-                pIdx={pIdx}
-                msgId={msg.id}
-                copiedId={copiedId}
-                onCopy={onCopy}
-                isStreaming={msg.isStreaming}
-                isLastPart={isLastPart}
-              />
-            );
-          }
-        })}
+            if (part.type === 'text') {
+              return (
+                <div key={pIdx} className="relative">
+                  <FormattedMarkdownText content={part.content} />
+                  {msg.isStreaming && isLastPart && (
+                    <span className="inline-block w-2 h-4 ml-1 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
+                  )}
+                </div>
+              );
+            } else {
+              return (
+                <CodeBlockItem
+                  key={pIdx}
+                  part={part}
+                  pIdx={pIdx}
+                  msgId={msg.id}
+                  copiedId={copiedId}
+                  onCopy={onCopy}
+                  isStreaming={msg.isStreaming}
+                  isLastPart={isLastPart}
+                />
+              );
+            }
+          })}
+
+          {/* Caret fallback if message is streaming and content is empty */}
+          {msg.isStreaming && parts.length === 0 && (
+            <span className="inline-block w-2 h-4 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
+          )}
+        </div>
         {msg.mailScan && <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />}
-
-        {/* Caret fallback if message is streaming and content is empty */}
-        {msg.isStreaming && parts.length === 0 && (
-          <span className="inline-block w-2 h-4 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
-        )}
 
         {msg.attachmentRefs && msg.attachmentRefs.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">

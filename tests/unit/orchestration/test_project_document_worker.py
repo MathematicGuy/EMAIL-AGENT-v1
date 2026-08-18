@@ -1,7 +1,10 @@
 import asyncio
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import pytest
 
 from cowork_agent.integrations.knowledge_ingestion.project_documents import (
     ExtractedProjectDocument,
@@ -84,6 +87,133 @@ def test_worker_verifies_then_indexes_private_document_without_persisting_text()
     asyncio.run(scenario())
 
 
+def test_worker_logs_metadata_safe_stage_timings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        worker = ProjectDocumentIngestionWorker(
+            Repository(), Storage(), Extractor(), Vectors()
+        )
+        with caplog.at_level(logging.INFO):
+            await worker.execute("document-1")
+
+        messages = [record.getMessage() for record in caplog.records]
+        timing = [
+            message
+            for message in messages
+            if message.startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=source_download",
+            "stage=extraction_chunking",
+            "stage=ready_transition",
+            "stage=worker_execution",
+        ]
+        assert all(" document_id=document-1" in message for message in timing)
+        assert all(" duration_ms=" in message for message in timing)
+        assert all(" outcome=success" in message for message in timing)
+        assert all("project_id=" not in message for message in timing)
+        assert all(
+            sensitive not in "\n".join(timing)
+            for sensitive in ("source.pdf", "private/source", "first page", "second page")
+        )
+
+    asyncio.run(scenario())
+
+
+def test_failed_download_logs_the_reached_stage_and_worker_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailingStorage:
+        async def download_to(self, object_key: str, target: Path) -> None:
+            del object_key, target
+            raise OSError("signed-url=must-not-be-logged")
+
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO):
+            await ProjectDocumentIngestionWorker(
+                Repository(), FailingStorage(), Extractor(), Vectors()
+            ).execute("document-1")
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=source_download",
+            "stage=worker_execution",
+        ]
+        assert all(" outcome=error" in message for message in timing)
+        assert "signed-url" not in "\n".join(timing)
+
+    asyncio.run(scenario())
+
+
+def test_source_verification_is_not_counted_as_extraction_chunking(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class CorruptStorage:
+        async def download_to(self, object_key: str, target: Path) -> None:
+            del object_key
+            target.write_bytes(SOURCE + b"corrupt")
+
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO):
+            await ProjectDocumentIngestionWorker(
+                Repository(), CorruptStorage(), Extractor(), Vectors()
+            ).execute("document-1")
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=source_download",
+            "stage=worker_execution",
+        ]
+        assert " outcome=success" in timing[0]
+        assert " outcome=error" in timing[1]
+
+    asyncio.run(scenario())
+
+
+def test_failed_ready_transition_logs_stage_and_worker_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class StaleRepository(Repository):
+        async def transition_document(self, document_id: str, **kwargs: object) -> bool:
+            self.transitions.append({"document_id": document_id, **kwargs})
+            return kwargs["to_status"] != "ready"
+
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO):
+            await ProjectDocumentIngestionWorker(
+                StaleRepository(), Storage(), Extractor(), Vectors()
+            ).execute("document-1")
+
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=source_download",
+            "stage=extraction_chunking",
+            "stage=ready_transition",
+            "stage=worker_execution",
+        ]
+        assert [" outcome=error" in message for message in timing] == [
+            False,
+            False,
+            True,
+            True,
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
     class RetryRepository(Repository):
         def __init__(self) -> None:
@@ -117,7 +247,9 @@ def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
     asyncio.run(scenario())
 
 
-def test_worker_preserves_the_safe_native_extraction_failure_code() -> None:
+def test_worker_preserves_the_safe_native_extraction_failure_code(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class FailingExtractor:
         def extract(self, path: Path, media_type: str) -> ExtractedProjectDocument:
             del path, media_type
@@ -129,7 +261,8 @@ def test_worker_preserves_the_safe_native_extraction_failure_code() -> None:
             repository, Storage(), FailingExtractor(), Vectors()
         )
 
-        await worker.execute("document-1")
+        with caplog.at_level(logging.INFO):
+            await worker.execute("document-1")
 
         assert repository.transitions == [{
             "document_id": "document-1",
@@ -142,5 +275,42 @@ def test_worker_preserves_the_safe_native_extraction_failure_code() -> None:
             "status": "failed",
             "error_code": "native_extraction_failed",
         }]
+        timing = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert [message.split()[1] for message in timing] == [
+            "stage=source_download",
+            "stage=extraction_chunking",
+            "stage=worker_execution",
+        ]
+        assert [" outcome=error" in message for message in timing] == [False, True, True]
+
+    asyncio.run(scenario())
+
+
+def test_worker_execution_timer_starts_after_successful_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class RecordingRepository(Repository):
+        async def claim_job(self, document_id: str) -> ProjectDocument | None:
+            events.append("claim")
+            return await super().claim_job(document_id)
+
+    def clock() -> float:
+        events.append("clock")
+        return 1.0
+
+    async def scenario() -> None:
+        monkeypatch.setattr(
+            "cowork_agent.orchestration.project_document_worker.perf_counter", clock
+        )
+        await ProjectDocumentIngestionWorker(
+            RecordingRepository(), Storage(), Extractor(), Vectors()
+        ).execute("document-1")
+        assert events[:2] == ["claim", "clock"]
 
     asyncio.run(scenario())

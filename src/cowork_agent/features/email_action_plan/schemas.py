@@ -82,6 +82,7 @@ class ClassifiedMessage:
 
     gmail_message_id: str
     decision: EmailRouteDecision
+    is_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)

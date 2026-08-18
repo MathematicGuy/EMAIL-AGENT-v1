@@ -5,7 +5,7 @@ from __future__ import annotations
 from cowork_agent.domain.chat_contracts import IntentClassifierInput
 from cowork_agent.prompting import UNTRUSTED_DATA_TAG, wrap_json_block
 
-INTENT_PROMPT_VERSION = "chat-intent-v2"
+INTENT_PROMPT_VERSION = "chat-intent-v3"
 
 _DECISION_PRINCIPLE = """TIER 1 — DECISION PRINCIPLE
 Would the quality or correctness of the requested answer depend on retrieving
@@ -51,7 +51,10 @@ Return exactly one JSON object with no additional fields:
   ]
 }
 needs_rag=true requires a non-empty retrieval_query. needs_tool=false requires
-tool_name=null. intent is an observability label and never determines the route."""
+tool_name=null. intent is an observability label and never determines the route.
+The user-document corpus is Vietnamese, so write retrieval_query in Vietnamese even
+when the current message is not, keeping proper names, technical terms and document
+numbers exactly as they appear."""
 
 
 def build_intent_prompt(classifier_input: IntentClassifierInput) -> str:

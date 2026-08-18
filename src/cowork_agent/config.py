@@ -37,13 +37,13 @@ def postgres_mode(environ: Mapping[str, str] | None = None) -> str:
 
 
 def database_url(environ: Mapping[str, str] | None = None) -> str:
-    """PostgreSQL connection URL; empty string keeps SQLite / in-memory adapters.
+    """PostgreSQL connection URL; empty string selects local SQLite adapters.
 
     ``POSTGRES_MODE`` selects the URL when set and wins over ``DATABASE_URL``:
 
     * ``local`` — ``DATABASE_URL_LOCAL``, else the Docker Compose app DB
     * ``cloud`` — ``DATABASE_URL_CLOUD`` (session or direct ``:5432``)
-    * ``off`` — empty (SQLite mailbox/runs/tasks + in-memory chat)
+    * ``off`` — empty (SQLite mailbox/runs/tasks/chat history/chat memory)
 
     With no mode, ``DATABASE_URL`` is used unchanged (tests and older .env files).
     """
@@ -116,7 +116,7 @@ class SessionSettings:
         if not cookie_name:
             raise ValueError("APP_SESSION_COOKIE_NAME must not be empty")
         # Local HTTP on 127.0.0.1 drops Secure cookies in some browsers.
-        cookie_secure_default = postgres_mode(environ) != "local"
+        cookie_secure_default = postgres_mode(environ) not in {"local", "off"}
         return cls(
             session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
             cookie_name=cookie_name,
@@ -471,7 +471,7 @@ class GeminiEmbeddingSettings:
             environ = os.environ
         generation = GeminiSettings.from_env(environ, load_env_file=False)
         dimensions = _bounded_positive_int(
-            environ, "GEMINI_EMBEDDING_DIMENSIONS", 3072, maximum=3072
+            environ, "GEMINI_EMBEDDING_DIMENSIONS", 1024, maximum=3072
         )
         if dimensions < 128:
             raise ValueError("GEMINI_EMBEDDING_DIMENSIONS must be at least 128")
@@ -486,6 +486,22 @@ class GeminiEmbeddingSettings:
             rotate_on_rate_limit=generation.rotate_on_rate_limit,
             max_attempts=generation.max_attempts,
         )
+
+
+def document_embedding_provider(
+    environ: Mapping[str, str] | None = None,
+    *,
+    load_env_file: bool = True,
+) -> str:
+    """Resolve active document embedding provider ('gemini' | 'jina')."""
+    if environ is None:
+        if load_env_file:
+            load_runtime_environment()
+        environ = os.environ
+    provider = environ.get("DOCUMENT_EMBEDDING_PROVIDER", "gemini").strip().lower()
+    if provider in {"jina", "gemini"}:
+        return provider
+    return "gemini"
 
 
 @dataclass(frozen=True, slots=True)
@@ -634,6 +650,45 @@ class FaucetSettings:
             ),
             timeout_seconds=_bounded_positive_int(
                 environ, "FAUCET_TIMEOUT_SECONDS", 60, maximum=120
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OpenRouterSettings:
+    """Configuration for the OpenRouter chat-completions provider."""
+
+    api_key: str = field(repr=False)
+    model: str
+    max_emails_per_batch: int
+    max_output_tokens: int
+    timeout_seconds: int
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "OpenRouterSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        model = environ.get("OPENROUTER_MODEL", "").strip()
+        if not model or model.startswith("replace-with-"):
+            raise ValueError("OPENROUTER_MODEL must be a real OpenRouter model name")
+        return cls(
+            api_key=_required_secret(environ, "OPENROUTER_API_KEY"),
+            model=model,
+            max_emails_per_batch=_positive_int(
+                environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5
+            ),
+            max_output_tokens=_bounded_positive_int(
+                environ, "OPENROUTER_MAX_OUTPUT_TOKENS", 2048, maximum=4096
+            ),
+            timeout_seconds=_bounded_positive_int(
+                environ, "OPENROUTER_TIMEOUT_SECONDS", 60, maximum=120
             ),
         )
 

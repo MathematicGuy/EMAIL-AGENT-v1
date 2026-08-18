@@ -456,7 +456,7 @@ class ChatController:
                     yield self._error(
                         turn_id=self._new_id(),
                         code="idempotency_conflict",
-                        safe_message="The idempotency key was already used for another message.",
+                        safe_message="Khóa idempotency này đã được dùng cho một tin nhắn khác.",
                     )
                     return
                 async for event in self._retry_pending_task_episode(pending, is_cancelled):
@@ -470,7 +470,7 @@ class ChatController:
                     yield self._error(
                         turn_id=self._new_id(),
                         code="idempotency_conflict",
-                        safe_message="The idempotency key was already used for another message.",
+                        safe_message="Khóa idempotency này đã được dùng cho một tin nhắn khác.",
                     )
                     return
                 for event in cached_events:
@@ -506,7 +506,7 @@ class ChatController:
                     yield self._error(
                         turn_id=turn_id,
                         code="chat_history_unavailable",
-                        safe_message="The message could not be saved. Please try again.",
+                        safe_message="Không thể lưu tin nhắn. Vui lòng thử lại.",
                     )
                     return
             turn_id = pending_turn.turn_id
@@ -580,7 +580,7 @@ class ChatController:
                 warning = self._error(
                     turn_id=turn_id,
                     code="optional_memory_degraded",
-                    safe_message="Some optional memory was unavailable.",
+                    safe_message="Một phần bộ nhớ tùy chọn hiện không khả dụng.",
                 )
                 emitted.append(warning)
                 yield warning
@@ -588,7 +588,7 @@ class ChatController:
                 warning = self._error(
                     turn_id=turn_id,
                     code="project_documents_degraded",
-                    safe_message="Project document evidence is temporarily unavailable.",
+                    safe_message="Bằng chứng từ tài liệu dự án tạm thời không khả dụng.",
                 )
                 emitted.append(warning)
                 yield warning
@@ -638,7 +638,7 @@ class ChatController:
                 yield self._error(
                     turn_id=turn_id,
                     code="chat_provider_unavailable",
-                    safe_message="The chat response provider is unavailable.",
+                    safe_message="Dịch vụ sinh câu trả lời hiện không khả dụng.",
                 )
                 return
 
@@ -650,7 +650,7 @@ class ChatController:
                 yield self._error(
                     turn_id=turn_id,
                     code="empty_chat_response",
-                    safe_message="The chat response was empty.",
+                    safe_message="Câu trả lời trả về rỗng.",
                 )
                 return
 
@@ -695,7 +695,7 @@ class ChatController:
                     yield self._error(
                         turn_id=turn_id,
                         code="chat_history_unavailable",
-                        safe_message="The response could not be saved. Please retry.",
+                        safe_message="Không thể lưu câu trả lời. Vui lòng thử lại.",
                     )
                     return
             self._memory.append_turn(turn)
@@ -727,7 +727,7 @@ class ChatController:
                     warning = self._error(
                         turn_id=turn_id,
                         code="task_episode_unavailable",
-                        safe_message="The task proposal could not be saved.",
+                        safe_message="Không thể lưu đề xuất công việc.",
                     )
                     emitted.append(warning)
                     yield warning
@@ -748,7 +748,7 @@ class ChatController:
                         warning = self._error(
                             turn_id=turn_id,
                             code="task_episode_unavailable",
-                            safe_message="The task proposal could not be saved.",
+                            safe_message="Không thể lưu đề xuất công việc.",
                         )
                         emitted.append(warning)
                         yield warning
@@ -756,7 +756,7 @@ class ChatController:
                         warning = self._error(
                             turn_id=turn_id,
                             code="task_episode_unavailable",
-                            safe_message="The task proposal could not be saved.",
+                            safe_message="Không thể lưu đề xuất công việc.",
                         )
                         emitted.append(warning)
                         yield warning

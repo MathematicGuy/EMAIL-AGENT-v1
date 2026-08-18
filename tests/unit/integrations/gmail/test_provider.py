@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import random
+import ssl
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httplib2  # type: ignore[import-untyped]
 import pytest
 from cryptography.fernet import Fernet
 from google.auth.exceptions import TransportError
@@ -553,3 +555,54 @@ def test_retry_delay_is_bounded_and_jittered() -> None:
     assert all(delay <= 4.0 for delay in delays)
     # Jitter: 100 samples of attempt 1 cannot all be identical.
     assert len({_retry_delay(1) for _ in range(100)}) > 1
+
+
+@pytest.mark.parametrize(
+    "transient_error",
+    [
+        ssl.SSLEOFError("EOF occurred in violation of protocol"),
+        ssl.SSLError("SSL handshake failed"),
+        ConnectionResetError("Connection reset by peer"),
+        TimeoutError("Connection timed out"),
+        httplib2.error.HttpLib2Error("HttpLib2 transport failed"),
+    ],
+)
+def test_call_retries_network_and_ssl_errors_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch, transient_error: Exception
+) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def flaky_network() -> dict[str, object]:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise transient_error
+        return {"ok": True}
+
+    result = asyncio.run(_adapter()._call(flaky_network))
+    assert result == {"ok": True}
+    assert calls["count"] == 3
+    assert len(sleeps) == 2
+
+
+def test_call_exhausts_network_error_into_temporary_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def persistent_ssl_error() -> dict[str, object]:
+        calls["count"] += 1
+        raise ssl.SSLEOFError("EOF occurred in violation of protocol")
+
+    with pytest.raises(MailboxTemporaryError):
+        asyncio.run(_adapter()._call(persistent_ssl_error))
+    assert calls["count"] == 3

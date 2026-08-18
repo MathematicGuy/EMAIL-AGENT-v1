@@ -561,7 +561,7 @@ def test_controller_emits_a_safe_degraded_warning_and_continues_without_profile(
         ChatEventType.COMPLETED,
     ]
     assert events[1].code == "optional_memory_degraded"
-    assert events[1].safe_message == "Some optional memory was unavailable."
+    assert events[1].safe_message == "Một phần bộ nhớ tùy chọn hiện không khả dụng."
     assert reply.calls[0][1].stored_preference is None
 
 

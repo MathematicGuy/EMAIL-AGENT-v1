@@ -121,4 +121,38 @@ describe('project document availability and upload cancellation', () => {
     )).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('routes a local storage upload URL through the API proxy', async () => {
+    const uploadUrl = '/v1/cowork/chat/projects/project-1/documents/document-1/source';
+    const fetchMock = vi.fn().mockImplementation((_input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(new Response(JSON.stringify({
+          document_id: 'document-1', status: 'received', upload_url: uploadUrl,
+        }), { status: 202, headers: { 'Content-Type': 'application/json' } }));
+      }
+      if (init?.method === 'PUT') return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(new Response(JSON.stringify({
+        document_id: 'document-1',
+        filename: 'policy.pdf',
+        media_type: 'application/pdf',
+        byte_size: 9,
+        status: 'ready',
+        error_code: null,
+        page_count: 1,
+        chunk_count: 1,
+        ocr_page_count: 0,
+        expires_at: '2026-09-12T00:00:00Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await uploadProjectDocument(
+      'project-1',
+      new File(['%PDF-test'], 'policy.pdf', { type: 'application/pdf' }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(`/backend${uploadUrl}`, expect.objectContaining({
+      method: 'PUT',
+    }));
+  });
 });

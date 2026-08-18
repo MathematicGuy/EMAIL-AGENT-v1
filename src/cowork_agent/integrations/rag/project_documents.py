@@ -14,9 +14,11 @@ Three stores cooperate, and each owns exactly one thing:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Protocol
 
 from cowork_agent.domain.project_documents import (
@@ -25,6 +27,11 @@ from cowork_agent.domain.project_documents import (
 from cowork_agent.domain.project_documents import (
     ProjectDocumentQuery,
     ProjectDocumentResponse,
+)
+from cowork_agent.observability import (
+    ProjectDocumentTimingOutcome,
+    log_project_document_timing,
+    safe_provider_label,
 )
 from cowork_agent.persistence.repositories.project_document_chunks import (
     ChunkInput,
@@ -48,6 +55,8 @@ _CANDIDATE_MULTIPLIER = 4
 #: its ranked chunk stands alone, so expansion can never evict a result that
 #: retrieval actually chose.
 _SECTION_HEADROOM = 2
+
+logger = logging.getLogger(__name__)
 
 #: Longest chunk text the embedding request may carry. Stated here rather than
 #: borrowed from the chunker's default, so retuning chunk size cannot silently
@@ -168,32 +177,60 @@ class HybridProjectDocumentStore:
         if expires_at.astimezone(UTC) <= datetime.now(UTC):
             raise ValueError("expired documents must not be indexed")
 
-        assigned = await self._chunks.replace_document_chunks(
-            document_id=document_id,
-            project_id=project_id,
-            chunks=tuple(
-                ChunkInput(
-                    chunk_id=chunk.chunk_id,
-                    chunk_index=index,
-                    text=chunk.text,
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    section=chunk.section,
+        stage_started = perf_counter()
+        stage_outcome: ProjectDocumentTimingOutcome = "error"
+        try:
+            assigned = await self._chunks.replace_document_chunks(
+                document_id=document_id,
+                project_id=project_id,
+                chunks=tuple(
+                    ChunkInput(
+                        chunk_id=chunk.chunk_id,
+                        chunk_index=index,
+                        text=chunk.text,
+                        page_start=chunk.page_start,
+                        page_end=chunk.page_end,
+                        section=chunk.section,
+                    )
+                    for index, chunk in enumerate(chunks)
+                ),
+            )
+            stage_outcome = "success"
+        finally:
+            log_project_document_timing(
+                logger,
+                stage="chunk_persistence",
+                started=stage_started,
+                outcome=stage_outcome,
+                document_id=document_id,
+                provider=safe_provider_label(self._chunks),
+            )
+        stage_started = perf_counter()
+        stage_outcome = "error"
+        try:
+            vectors = await self._embedder.embed(
+                tuple(chunk.text for chunk in chunks), task="retrieval.passage"
+            )
+            if len(vectors) != len(chunks) or not vectors or not vectors[0]:
+                raise ValueError("embedding response does not match project chunks")
+            if any(len(vector) != self._vector_size for vector in vectors):
+                raise ValueError(
+                    "project embedding dimension does not match index configuration"
                 )
-                for index, chunk in enumerate(chunks)
-            ),
-        )
-        vectors = await self._embedder.embed(
-            tuple(chunk.text for chunk in chunks), task="retrieval.passage"
-        )
-        if len(vectors) != len(chunks) or not vectors or not vectors[0]:
-            raise ValueError("embedding response does not match project chunks")
-        if any(len(vector) != self._vector_size for vector in vectors):
-            raise ValueError("project embedding dimension does not match index configuration")
-
+            stage_outcome = "success"
+        finally:
+            log_project_document_timing(
+                logger,
+                stage="embedding",
+                started=stage_started,
+                outcome=stage_outcome,
+                document_id=document_id,
+                provider=safe_provider_label(self._embedder),
+            )
         by_chunk_id = dict(assigned)
         await self._indexes.add(
             project_id=project_id,
+            document_id=document_id,
             vector_ids=[by_chunk_id[chunk.chunk_id] for chunk in chunks],
             vectors=vectors,
         )

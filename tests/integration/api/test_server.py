@@ -8,12 +8,8 @@ from cryptography.fernet import Fernet
 from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import MailboxConnection
-from cowork_agent.domain.chat_contracts import (
-    ChatMemoryScope,
-    ChatMessageRequest,
-    ChatTurnStatus,
-)
-from cowork_agent.persistence.repositories.local import InMemoryChatHistoryRepository
+from cowork_agent.domain.chat_contracts import ChatMessageRequest, ChatTurnStatus
+from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
 
 
 def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch: object) -> None:
@@ -49,7 +45,7 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
     asyncio.run(scenario())
 
 
-def test_local_fallback_wires_chat_history_into_scoped_controllers(
+def test_sqlite_fallback_wires_chat_history_into_scoped_controllers(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     values = {
@@ -68,12 +64,8 @@ def test_local_fallback_wires_chat_history_into_scoped_controllers(
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
-            assert isinstance(
-                app.state.chat_history_repository, InMemoryChatHistoryRepository
-            )
-            scope = ChatMemoryScope(
-                tenant_id="local", user_id="owner", session_id="session-1"
-            )
+            assert isinstance(app.state.chat_history_repository, SQLiteChatRepository)
+            scope = await app.state.chat_sessions.create(tenant_id="local", user_id="owner")
 
             class AssertPendingBeforeReply:
                 observed_pending = False
@@ -105,6 +97,39 @@ def test_local_fallback_wires_chat_history_into_scoped_controllers(
             assert events[-1].event_type.value == "completed"
             assert stored[0].status is ChatTurnStatus.COMPLETED
             assert stored[0].assistant_message == "Reply"
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_fallback_bootstraps_a_guest_chat_session(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    values = {
+        "POSTGRES_MODE": "off",
+        "DATABASE_URL": "",
+        "GMAIL_CLIENT_ID": "test.apps.googleusercontent.com",
+        "GMAIL_CLIENT_SECRET": "test-secret",
+        "GMAIL_REDIRECT_URI": "http://localhost:8000/v1/mail-todo/oauth/gmail/callback",
+        "GMAIL_SCOPES": GMAIL_READONLY_SCOPE,
+        "GMAIL_CONNECTION_DB_PATH": str(tmp_path / "connections.db"),
+        "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+        "OAUTH_STATE_SECRET": "state-secret-that-is-at-least-32-characters",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)  # type: ignore[attr-defined]
+
+    async def scenario() -> None:
+        app = create_app()
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                guest = await client.post("/v1/cowork/chat/guest-session")
+                session = await client.post("/v1/cowork/chat/sessions")
+
+        assert guest.status_code == 204
+        assert "cowork_session=" in guest.headers["set-cookie"]
+        assert session.status_code == 201
+        assert session.json()["feature"] == "ai_chat"
 
     asyncio.run(scenario())
 
