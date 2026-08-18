@@ -471,7 +471,7 @@ class GeminiEmbeddingSettings:
             environ = os.environ
         generation = GeminiSettings.from_env(environ, load_env_file=False)
         dimensions = _bounded_positive_int(
-            environ, "GEMINI_EMBEDDING_DIMENSIONS", 3072, maximum=3072
+            environ, "GEMINI_EMBEDDING_DIMENSIONS", 1024, maximum=3072
         )
         if dimensions < 128:
             raise ValueError("GEMINI_EMBEDDING_DIMENSIONS must be at least 128")
@@ -486,6 +486,22 @@ class GeminiEmbeddingSettings:
             rotate_on_rate_limit=generation.rotate_on_rate_limit,
             max_attempts=generation.max_attempts,
         )
+
+
+def document_embedding_provider(
+    environ: Mapping[str, str] | None = None,
+    *,
+    load_env_file: bool = True,
+) -> str:
+    """Resolve active document embedding provider ('gemini' | 'jina')."""
+    if environ is None:
+        if load_env_file:
+            load_runtime_environment()
+        environ = os.environ
+    provider = environ.get("DOCUMENT_EMBEDDING_PROVIDER", "gemini").strip().lower()
+    if provider in {"jina", "gemini"}:
+        return provider
+    return "gemini"
 
 
 @dataclass(frozen=True, slots=True)

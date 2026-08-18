@@ -98,3 +98,20 @@ async def _wrap_hybrid(
     await hybrid.build_index()
     logger.info("Dense store wrapped with BM25 + RRF hybrid retrieval")
     return hybrid
+
+
+def build_document_embedder() -> tuple[EmbeddingPort, int]:
+    """Resolve active document embedding provider ('gemini' | 'jina') and vector dimension."""
+    from cowork_agent.config import (
+        GeminiEmbeddingSettings,
+        document_embedding_provider,
+    )
+    from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+
+    provider = document_embedding_provider()
+    if provider == "jina":
+        settings = JinaEmbeddingSettings.from_env()
+        return JinaEmbeddingAdapter(settings), settings.dimensions
+    gemini_settings = GeminiEmbeddingSettings.from_env()
+    return GeminiEmbeddingAdapter(gemini_settings), gemini_settings.dimensions
+

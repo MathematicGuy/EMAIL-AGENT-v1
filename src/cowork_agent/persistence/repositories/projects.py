@@ -1,5 +1,6 @@
 """Project/document metadata repositories; bytes never pass through this layer."""
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -9,9 +10,15 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from psycopg_pool import AsyncConnectionPool
 
 from cowork_agent.identity import VerifiedPrincipal
+from cowork_agent.observability import (
+    database_host_class,
+    log_project_document_timing,
+    safe_provider_label,
+)
 
 _JOB_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-job")
 _CLEANUP_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-cleanup")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,7 +387,8 @@ class PostgresProjectRepository:
                         documents.byte_size, documents.content_sha256, documents.storage_key,
                         documents.status, documents.expires_at, documents.page_count,
                         documents.ocr_page_count, documents.chunk_count, documents.error_code,
-                        documents.deleted_at, documents.created_at, documents.updated_at
+                        documents.deleted_at, documents.created_at, documents.updated_at,
+                        jobs.created_at, jobs.claimed_at
                     """,
                     (document_id,),
                 )
@@ -398,7 +406,23 @@ class PostgresProjectRepository:
                 )
                 if await cursor.fetchone() is None:
                     raise RuntimeError("document state changed while claiming ingestion job")
-        return _document(row[:9] + ("extracting",) + row[10:])
+                job_created_at = _optional_datetime(row[18])
+                claimed_at = _optional_datetime(row[19])
+                if job_created_at is None or claimed_at is None:
+                    raise RuntimeError("claimed ingestion job is missing queue timestamps")
+                host_class = database_host_class(connection)
+                provider = safe_provider_label(connection)
+        log_project_document_timing(
+            logger,
+            stage="queue_delay",
+            duration_ms=max(0, int((claimed_at - job_created_at).total_seconds() * 1000)),
+            outcome="success",
+            document_id=document_id,
+            timestamp=claimed_at,
+            database_host_class=host_class,
+            provider=provider,
+        )
+        return _document(row[:9] + ("extracting",) + row[10:18])
 
     async def next_claimable_job(self) -> str | None:
         """Return one opaque queued job ID; `claim_job` remains the CAS authority."""

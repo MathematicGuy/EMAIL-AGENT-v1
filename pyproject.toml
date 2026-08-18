@@ -59,15 +59,18 @@ where = ["src"]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
-# -n 4 --dist loadgroup: same worker count as the measured loadfile setup.
-#   Ungrouped tests still fan out. tests/integration/persistence is one
-#   xdist_group so DROP SCHEMA public CASCADE never runs on two workers.
+# Worker count is NOT in addopts. `-n 4 --dist loadgroup` used to live here,
+# which made `-p no:xdist` a usage error (those flags need the plugin) and
+# pushed every agent onto `-n 0`. Defaults are applied by tests/xdist_plugin.py
+# (loaded first via -p) and again in tests/conftest.py if the plugin is loaded.
+# Persistence stays one xdist_group so DROP SCHEMA public CASCADE never runs
+# on two workers.
 # -m "not live": the live E2E module needs a real server plus Gmail OAuth and
 #   costs 20 s of boot before it can even skip. tests/conftest.py prints a
 #   yellow banner naming whatever was deselected, so this cannot rot silently.
 # --strict-markers: an unregistered marker is a typo that would otherwise make a
 #   test silently vanish from every `-m` selection.
-addopts = "-n 4 --dist loadgroup -m 'not live' --strict-markers"
+addopts = "-p tests.xdist_plugin -m 'not live' --strict-markers"
 markers = [
     "slow: >1s of wall clock on its own. Run with `-m slow`.",
     "live: needs a real external process/service. Deselected by default; skips loudly when absent.",
