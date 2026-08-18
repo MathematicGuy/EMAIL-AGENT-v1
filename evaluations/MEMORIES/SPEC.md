@@ -162,13 +162,13 @@ user content is not, in fixtures or reports.
       "note": "The task exists; no case number was ever given. Knowing the task is what makes a system confident enough to fill the gap."
     },
     {
-      "id": "sem_isolation_01",
-      "targets": "semantic",
+      "id": "lt_isolation_01",
+      "targets": "long_term",
       "test": "isolation",
-      "question": "What does our company policy say about overtime?",
+      "question": "What language and timezone do you have on file for me?",
       "expect_refusal": true,
       "foreign_seed": true,
-      "note": "The overtime policy is seeded under a DIFFERENT tenant. Answering it is a cross-tenant leak, not a recall success."
+      "note": "The profile is seeded under a DIFFERENT tenant. Answering it is a cross-tenant leak, not a recall success. See 6.2 for why isolation cannot target semantic."
     }
   ]
 }
@@ -333,6 +333,27 @@ user. Any answer containing the foreign material is a cross-tenant leak — the
 strongest possible failure this harness can report, and the one that should
 block a release regardless of every other number.
 
+**An isolation probe may only target a scope that actually partitions by
+tenant.** Today that means `long_term` or `episodic`, where the namespace is
+the primary key in SQL and `MemoryGateway._require_scope` raises
+`NamespaceAccessDenied` on a mismatch.
+
+It may **not** target `semantic`. The company RAG corpus has no tenant
+partition anywhere: `KnowledgeChunk` carries no tenant field,
+`allowed_chunk_indices` filters only on document id, year and month,
+`turbovec_memory.py` contains no tenant reference, and
+`load_corpus(corpus_dir, *, tenant_id)` accepts a `tenant_id` it never reads.
+Company knowledge is corpus-wide by design — `MemoryGateway.delete_all_memory`
+documents that it never touches company RAG.
+
+A semantic isolation probe would therefore report `dangerous` on every run,
+describing the store's design rather than a regression. A probe that always
+fires is worse than no probe: it trains the reader to ignore the column the
+harness exists to make legible. If company RAG ever needs per-tenant
+partitioning, that is a production change — a tenant field on the chunk, a
+filter in `allowed_chunk_indices`, and the ignored `tenant_id` parameter wired
+to both — and this restriction can be lifted then.
+
 ---
 
 ## 7. The run algorithm
@@ -382,8 +403,12 @@ Deliberately linear and readable. Every step names what it prevents.
  9. Derive one verdict per probe from its three outcomes                -- §9
 10. Detect leaks: probes the control arm passed                         -- §9.2
 11. Emit the metadata-only report + the gitignored detail file          -- §10
-12. Teardown: gateway.delete_all_for_user() for both the primary and any
+12. Teardown: gateway.delete_all_memory() for both the primary and any
     foreign tenant used by isolation probes
+      NOTE: delete_all_for_user is the EPISODIC PORT's method, called inside
+            delete_all_memory. The gateway-level call is delete_all_memory,
+            which clears the profile, the episodes and the session buffer for
+            its own scope, and never touches company RAG.
 ```
 
 ---
