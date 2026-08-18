@@ -2278,8 +2278,20 @@ git commit -m "feat(memory-eval): live tier wired end to end behind the live mar
 | §7 steps 7–11 scoring, verdicts, report | — | Already shipped (PLAN.md Tasks 2, 3, 4, 6) |
 | §7 step 12 teardown | 8 | Covered — `delete_all_memory()`, not the spec's `delete_all_for_user()` |
 
-## Follow-up (not in this plan)
+## Open work after Task 10
 
-**Foreign-tenant seeding is declared but not yet executed.** Task 9 retargets `lt_isolation_01` to `long_term` and `RunIdentity` carries `foreign_tenant_id` / `foreign_user_id`, but nothing writes the foreign profile yet. The probe will report `broken` until that lands — honest, and visible. Wiring it needs a second gateway at the foreign scope, one `seed_long_term` call against it, and a teardown entry. It is small; it is separate because it deserves its own test that the primary user genuinely cannot read the foreign profile.
+Tasks 1–10 are implemented, committed and green. Everything below was deliberately left out of this plan, and each item is recorded here so it is read as a known gap rather than rediscovered as a bug.
 
-**Semantic tenancy.** If company RAG ever needs per-tenant partitioning, `KnowledgeChunk` needs a tenant field, `allowed_chunk_indices` needs a filter, and `load_corpus`'s ignored `tenant_id` parameter needs to reach both. That is a production change, not a harness change.
+**1. Foreign-tenant seeding is declared but not executed.** Task 9 retargets `lt_isolation_01` to `long_term` and `RunIdentity` carries `foreign_tenant_id` / `foreign_user_id`, but nothing writes the foreign profile yet.
+
+*Consequence, stated plainly:* `lt_isolation_01` reports **`broken`** on every live run until this lands. That is honest and visible — the probe asks for material that was never seeded, so it gets a refusal from an empty store rather than from real isolation. It proves nothing about tenancy either way, so it must not be read as a passing isolation check.
+
+*What it needs:* a second `ArmScopedMemoryGateway` built at the foreign scope, one `seed_long_term` call against it, that gateway appended to `session.gateways` so teardown reaches it, and — the reason it is separate — its own test that the primary user genuinely **cannot** read the foreign profile. Without that test the wiring would be indistinguishable from a probe that passes because nothing was ever written.
+
+**2. Semantic tenancy is a production change, not a harness change.** If company RAG ever needs per-tenant partitioning, `KnowledgeChunk` needs a tenant field, `allowed_chunk_indices` needs a filter, and `load_corpus`'s ignored `tenant_id` parameter needs to reach both. Until then, SPEC §6.2 forbids an isolation probe from targeting `semantic`, and `test_isolation_probes_target_a_scope_that_actually_partitions` enforces it.
+
+**3. `write_chat_summary` has no production caller.** The port and the gateway method exist; no consolidation loop invokes them. So `ChatSummaryEpisode` is reachable in tests and unreachable in the product, and the episodic scope this harness measures is task episodes only. Found during the original investigation and deliberately out of scope — noted so a future reader does not assume summary episodes are covered.
+
+**4. The launch gate is not in CI.** `evaluate_launch_gate` and its `DeterministicPairedScorer` are untouched by this work (SPEC §1.2). Bridging real outcomes into that gate needs a defensible outcome-to-score mapping first, which is its own decision with its own justification burden.
+
+**5. The live tier has never been executed end to end.** It has no PostgreSQL server, no Gemini key and no Jina key on this machine, so `tests/integration/memory_eval/test_live_smoke.py` skips. Tasks 1–8 are unit-tested against fakes, which proves the wiring and not the behaviour. Expect the first real run to surface finding 3b (an episode is written only when the reply provider also returns a `ChatTaskProposal`) as the most likely episodic seed failure.

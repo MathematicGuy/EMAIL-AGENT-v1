@@ -64,3 +64,16 @@ The isolation probe therefore targets `long_term`, where isolation is real and
 enforced in SQL. A semantic isolation probe would report a leak on every run
 that describes the store's design rather than a regression, which is worse than
 having no probe at all.
+
+## Known gap: `lt_isolation_01` reports `broken`
+
+Read this before reading a live report. `RunIdentity` carries a foreign tenant
+and user, but **nothing writes the foreign profile yet**. So `lt_isolation_01`
+asks for material that was never seeded and gets a refusal from an empty store,
+not from real isolation — it proves nothing about tenancy in either direction
+and must not be read as a passing isolation check.
+
+The full list of what is and is not covered is in
+[PLAN-LIVE.md](PLAN-LIVE.md#open-work-after-task-10): foreign-tenant seeding,
+semantic tenancy, `write_chat_summary` having no production caller, the launch
+gate staying out of CI, and the live tier never yet having run end to end.
