@@ -51,3 +51,16 @@ without it, such a probe would look like a memory success.
 - **Two reports are comparable only at the same `probe_set_id` and
   `schema_version`.**
 - **Exit code 0 means the harness ran**, not that memory is good.
+
+## Known limitation: semantic tenancy
+
+The company RAG corpus has no tenant partition. `KnowledgeChunk` carries no
+tenant field, `allowed_chunk_indices` filters only on document id, year and
+month, and `load_corpus(corpus_dir, *, tenant_id)` accepts a `tenant_id` it
+never reads. Company knowledge is corpus-wide by design — `delete_all_memory`
+documents that it never touches company RAG.
+
+The isolation probe therefore targets `long_term`, where isolation is real and
+enforced in SQL. A semantic isolation probe would report a leak on every run
+that describes the store's design rather than a regression, which is worse than
+having no probe at all.

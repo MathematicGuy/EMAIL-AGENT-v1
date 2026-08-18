@@ -83,13 +83,21 @@
       "note": "Contains the semantic cue 'company policy'. Requires CHAT_COMPANY_RAG_ENABLED=true for the run."
     },
     {
-      "id": "sem_isolation_01",
+      "id": "sem_restraint_01",
       "targets": "semantic",
-      "test": "isolation",
+      "test": "restraint",
       "question": "What does our company policy say about the sabbatical scheme?",
       "expect_refusal": true,
+      "note": "No sabbatical document exists in the corpus. Contains the semantic cue 'company policy', so the read fires and finds nothing - the only correct behaviour is to decline."
+    },
+    {
+      "id": "lt_isolation_01",
+      "targets": "long_term",
+      "test": "isolation",
+      "question": "What language and timezone do you have on file for me?",
+      "expect_refusal": true,
       "foreign_seed": true,
-      "note": "The sabbatical document is seeded under a DIFFERENT tenant. Answering it is a cross-tenant leak, not a recall success."
+      "note": "The profile is written under a DIFFERENT tenant_id and user_id, then this question is asked as the primary user. PostgresChatProfileRepository keys on the namespace and MemoryGateway._require_scope raises NamespaceAccessDenied, so any answer here is a real cross-tenant leak. Targeting semantic instead would be dishonest: the company RAG corpus has no tenant field at all."
     }
   ]
 }
