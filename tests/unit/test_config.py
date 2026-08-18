@@ -103,6 +103,12 @@ def test_session_cookie_defaults_insecure_on_local_postgres_mode() -> None:
     assert settings.cookie_secure is False
 
 
+def test_session_cookie_defaults_insecure_on_sqlite_fallback() -> None:
+    settings = SessionSettings.from_env({"POSTGRES_MODE": "off"}, load_env_file=False)
+
+    assert settings.cookie_secure is False
+
+
 def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
     settings = SessionSettings.from_env(
         {"POSTGRES_MODE": "local", "APP_SESSION_COOKIE_SECURE": "true"},

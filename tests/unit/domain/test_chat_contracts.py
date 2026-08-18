@@ -361,6 +361,28 @@ def test_chat_turn_accepts_a_whole_section_widened_evidence_list() -> None:
     assert len(turn.rag_evidence) == MAX_CHAT_RAG_EVIDENCE_ITEMS
 
 
+def test_chat_stream_event_accepts_max_rag_evidence() -> None:
+    event = ChatMessageStreamEvent.completed(
+        event_id="e1",
+        session_id="s1",
+        turn_id="t1",
+        rag_evidence=(_rag_evidence(),) * MAX_CHAT_RAG_EVIDENCE_ITEMS,
+        retrieval_status="success",
+    )
+    assert len(event.rag_evidence) == MAX_CHAT_RAG_EVIDENCE_ITEMS
+
+
+def test_chat_stream_event_rejects_exceeded_rag_evidence() -> None:
+    with pytest.raises(ValueError, match="rag_evidence"):
+        ChatMessageStreamEvent.completed(
+            event_id="e1",
+            session_id="s1",
+            turn_id="t1",
+            rag_evidence=(_rag_evidence(),) * (MAX_CHAT_RAG_EVIDENCE_ITEMS + 1),
+            retrieval_status="success",
+        )
+
+
 def _profile() -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-1",

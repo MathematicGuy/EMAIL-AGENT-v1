@@ -218,7 +218,7 @@ class GeminiEmbeddingAdapter:
             self._dimensions: int | None = settings.dimensions
             self._batch_size = settings.batch_size
             self._timeout_seconds: float | None = float(settings.timeout_seconds)
-            self._max_attempts = min(settings.max_attempts, 2)
+            self._max_attempts = settings.max_attempts
         else:
             self._dimensions = None
             self._batch_size = _MAX_BATCH_CONTENTS

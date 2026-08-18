@@ -60,7 +60,7 @@ flowchart TB
    - *Key Rule ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):* A TaskEpisode is created only after an explicit user request (`is_explicit_task_request`). New writes are `system_generated` / `retrieval_eligible=false`. Eligibility is derived from `validation_status` (`user_approved` or `completed` → true; `rejected` stays false). Ordinary chat, classifier output, and model-only inference must not create an episode.
 4. **Semantic Memory (two unmerged planes):**
    - **Company RAG:** Optional chat-side read of `data/extracted/*.md` through the Memory Gateway. Gated by `CHAT_COMPANY_RAG_ENABLED` (default **false**). When the flag is on, [retrieval_policy.py](../../../src/cowork_agent/features/ai_chat/retrieval_policy.py) still requires a company-policy cue. Chat does **not** always query the company corpus.
-   - **User documents:** Separate plane (Postgres chunks + per-project Turbovec `.tvim`). Retrieved only on classifier route `RAG`. An unavailable project index degrades that plane; it never falls back to the company index.
+   - **User documents:** Separate plane (Postgres or SQLite chunks + per-project Turbovec `.tvim`). Retrieved only on classifier route `RAG`. An unavailable project index degrades that plane; it never falls back to the company index.
 
 ---
 
@@ -69,9 +69,9 @@ flowchart TB
 - **TaskEpisode lifecycle:** Aligned with [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md). Explicit request only; new episodes start `retrieval_eligible=false`; no in-chat tool; `tool_choices` rejected as an unexpected field.
 - **Company RAG in chat:** Aligned with TARGET §3. Consumer is the standalone Email Agent plus AI Chat **behind** `CHAT_COMPANY_RAG_ENABLED` (env default `false`). Not always-on.
 - **User-document gating:** Aligned with [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md). Hierarchy is `tenant → user → project → documents + sessions`. Classifier is the sole route origin; the readiness gate only narrows. Feature flags `USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED` default true; both must be on (and a ready catalog present) before `ChatRoutingService` is composed.
-- **User-document store:** Aligned. Postgres chunks + per-project `.tvim`; no silent company-index fallback. Live paths are [integrations/rag/project_documents.py](../../../src/cowork_agent/integrations/rag/project_documents.py) and [features/user_documents/ports.py](../../../src/cowork_agent/features/user_documents/ports.py) — there is no `src/cowork_agent/integrations/project_documents/` package.
+- **User-document store:** Aligned. Postgres or SQLite chunks plus per-project `.tvim`; no silent company-index fallback. Live paths are [integrations/rag/project_documents.py](../../../src/cowork_agent/integrations/rag/project_documents.py) and [sqlite_project_document_chunks.py](../../../src/cowork_agent/persistence/repositories/sqlite_project_document_chunks.py) — there is no `src/cowork_agent/integrations/project_documents/` package.
 - **OCR on the user-document plane:** Aligned with TARGET §3.4 / §21.11. The ingestion worker constructs `ProjectDocumentExtractor()` with no OCR adapter. Pages that need OCR fail closed as `ocr_unavailable`; mixed-PDF native pages are not indexed alone. `document-health` reports `ocr: optional_unavailable`. Mistral OCR exists on the **company** knowledge-ingest CLI, not on this plane.
-- **Local fallback:** When `DATABASE_URL` is absent, chat working memory stays in-process; durable chat/control-plane rows require Postgres. The durable local MVP uses localhost Postgres (`docker compose up -d postgres`) rather than extending SQLite to history/memory ([ADR-010](../../../tasks/adr/ADR-010-local-postgres-control-plane-latency.md)).
+- **Local fallback:** With `POSTGRES_MODE=off`, chat sessions, history, profile memory, task episodic memory, projects, document jobs, and document chunks persist in SQLite. The bounded working-memory buffer stays in-process. The local document worker writes Turbovec indexes on disk and uses Gemini embeddings.
 
 Remaining drift vs TARGET:
 

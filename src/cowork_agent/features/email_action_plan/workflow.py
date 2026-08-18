@@ -506,11 +506,13 @@ class DigestWorker:
         refs: list[MessageRef] = []
         seen_message_ids: set[str] = set()
         cursor: str | None = None
+        max_candidate_refs = max(run.max_emails, int(run.max_emails * 1.5))
         while True:
+            page_size = min(max(max_candidate_refs - len(refs), 1), 100)
             page = await self._mailbox.search_unread(
                 run.mailbox_connection_id,
                 run.query,
-                100,
+                page_size,
                 cursor,
             )
             run.emails_matched = max(run.emails_matched, page.estimated_total or 0)
@@ -519,8 +521,10 @@ class DigestWorker:
                     continue
                 seen_message_ids.add(ref.message_id)
                 refs.append(ref)
+                if len(refs) >= max_candidate_refs:
+                    break
             cursor = page.next_cursor
-            if cursor is None:
+            if cursor is None or len(refs) >= max_candidate_refs:
                 break
 
         async def fetch_received_at(ref: MessageRef) -> datetime | None:

@@ -40,7 +40,6 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionRegistryPort,
-    InMemoryChatSessionRegistry,
     UnavailableChatReply,
 )
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
@@ -162,8 +161,8 @@ logger = logging.getLogger(__name__)
 async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
     """Resolve chat identity from a session, with the local MVP fallback."""
 
-    if getattr(request.app.state, "session_repository", None) is not None:
-        principal = await _authenticated_principal(request)
+    if getattr(request.app.state, "chat_opaque_session_repository", None) is not None:
+        principal = await _authenticated_chat_principal(request)
         assert principal is not None
         return principal
 
@@ -253,6 +252,7 @@ def create_chat_session_buffer(
         ttl_seconds=settings.ttl_seconds,
     )
 
+
 def create_app() -> FastAPI:
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
     log_file = os.getenv("LOG_FILE", ".data/app.log")
@@ -276,9 +276,7 @@ def create_app() -> FastAPI:
                 import importlib.util
 
                 script_path = (
-                    Path(__file__).resolve().parents[2]
-                    / "scripts"
-                    / "update_corpus2skill.py"
+                    Path(__file__).resolve().parents[2] / "scripts" / "update_corpus2skill.py"
                 )
                 if script_path.exists():
                     spec = importlib.util.spec_from_file_location(
@@ -303,6 +301,8 @@ def create_app() -> FastAPI:
             app.state.session_settings = session_settings
             app.state.identity_repository = None
             app.state.session_repository = None
+            app.state.chat_identity_repository = None
+            app.state.chat_opaque_session_repository = None
             run_repository: RunRepository
             task_repository: TaskRepository
             chat_session_registry: ChatSessionRegistryPort
@@ -355,10 +355,16 @@ def create_app() -> FastAPI:
                 app.state.pg_pool = pool
                 app.state.identity_repository = PostgresIdentityRepository(pool)
                 app.state.session_repository = PostgresSessionRepository(pool)
+                app.state.chat_identity_repository = app.state.identity_repository
+                app.state.chat_opaque_session_repository = app.state.session_repository
                 repository = PostgresMailboxConnectionRepository(pool)
             else:
-                from cowork_agent.persistence.repositories.local import (
-                    InMemoryChatHistoryRepository,
+                from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
+                from cowork_agent.persistence.repositories.sqlite_chat_identity import (
+                    SQLiteChatIdentityRepository,
+                )
+                from cowork_agent.persistence.repositories.sqlite_projects import (
+                    SQLiteProjectRepository,
                 )
 
                 task_repository = SQLiteTaskRepository(
@@ -371,13 +377,27 @@ def create_app() -> FastAPI:
                 await sqlite_run_repository.initialize()
                 run_repository = sqlite_run_repository
                 app.state.outbox_repository = InMemoryOutbox()
-                app.state.chat_profile_repository = None
-                app.state.chat_task_episode_repository = None
-                app.state.chat_session_repository = None
-                app.state.chat_history_repository = InMemoryChatHistoryRepository()
+                sqlite_chat_repository = SQLiteChatRepository(
+                    settings.connection_db_path.parent / "chat.db"
+                )
+                await sqlite_chat_repository.initialize()
+                sqlite_chat_identity_repository = SQLiteChatIdentityRepository(
+                    settings.connection_db_path.parent / "chat_identity.db"
+                )
+                await sqlite_chat_identity_repository.initialize()
+                app.state.chat_profile_repository = sqlite_chat_repository
+                app.state.chat_task_episode_repository = sqlite_chat_repository
+                app.state.chat_session_repository = sqlite_chat_repository
+                app.state.chat_history_repository = sqlite_chat_repository
                 app.state.pg_pool = None
-                app.state.project_repository = None
-                chat_session_registry = InMemoryChatSessionRegistry()
+                sqlite_project_repository = SQLiteProjectRepository(
+                    settings.connection_db_path.parent / "projects.db"
+                )
+                await sqlite_project_repository.initialize()
+                app.state.project_repository = sqlite_project_repository
+                app.state.chat_identity_repository = sqlite_chat_identity_repository
+                app.state.chat_opaque_session_repository = sqlite_chat_identity_repository
+                chat_session_registry = sqlite_chat_repository
             app.state.connection_repository = repository
             app.state.gmail_connections = GmailConnectionService(
                 settings,
@@ -400,7 +420,9 @@ def create_app() -> FastAPI:
             )
             user_documents_settings = UserDocumentsSettings.from_env()
             app.state.document_embeddings_configured = False
-            if user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip():
+            if database_url() and (
+                user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip()
+            ):
                 try:
                     storage_settings = SupabaseStorageSettings.from_env()
                     storage_client = httpx.AsyncClient(timeout=30.0)
@@ -417,7 +439,11 @@ def create_app() -> FastAPI:
                     app.state.private_storage = None
             else:
                 app.state.private_storage_client = None
-                app.state.private_storage = None
+                from cowork_agent.integrations.storage.local import LocalPrivateStorage
+
+                app.state.private_storage = LocalPrivateStorage(
+                    settings.connection_db_path.parent / "project-documents"
+                )
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = chat_session_registry
@@ -457,28 +483,59 @@ def create_app() -> FastAPI:
                 try:
                     embedder, vector_size = build_document_embedder()
                     app.state.document_embeddings_configured = True
-                    # The API only reads .tvim snapshots; mail-todo-worker owns
-                    # writing them. Both sides exchange them through Supabase
-                    # Storage, so a missing local file is pulled on demand.
-                    index_store = TurbovecProjectIndexStore(
-                        user_documents_settings.index_root,
-                        storage=app.state.private_storage,
-                        vector_size=vector_size,
-                    )
-                    vector_store = HybridProjectDocumentStore(
-                        PostgresProjectDocumentChunkRepository(app.state.pg_pool),
-                        index_store,
-                        embedder,
-                        vector_size=vector_size,
-                    )
-                    app.state.project_document_index = index_store
-                    app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                        app.state.project_repository,
-                        vector_store,
-                        top_k=user_documents_settings.top_k,
-                        min_score=user_documents_settings.min_score,
-                        timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                    )
+                    if database_url():
+                        # The API only reads .tvim snapshots; mail-todo-worker owns
+                        # writing them. Both sides exchange them through Supabase
+                        # Storage, so a missing local file is pulled on demand.
+                        index_store = TurbovecProjectIndexStore(
+                            user_documents_settings.index_root,
+                            storage=app.state.private_storage,
+                            vector_size=vector_size,
+                        )
+                        vector_store = HybridProjectDocumentStore(
+                            PostgresProjectDocumentChunkRepository(app.state.pg_pool),
+                            index_store,
+                            embedder,
+                            vector_size=vector_size,
+                        )
+                        app.state.project_document_index = index_store
+                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
+                            app.state.project_repository,
+                            vector_store,
+                            top_k=user_documents_settings.top_k,
+                            min_score=user_documents_settings.min_score,
+                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
+                        )
+                    else:
+                        from cowork_agent.persistence.repositories import (
+                            sqlite_project_document_chunks,
+                        )
+
+                        local_chunks = (
+                            sqlite_project_document_chunks.SQLiteProjectDocumentChunkRepository(
+                                settings.connection_db_path.parent / "project_chunks.db",
+                                settings.connection_db_path.parent / "projects.db",
+                            )
+                        )
+                        await local_chunks.initialize()
+                        local_index = TurbovecProjectIndexStore(
+                            user_documents_settings.index_root,
+                            vector_size=vector_size,
+                        )
+                        local_vectors = HybridProjectDocumentStore(
+                            local_chunks,
+                            local_index,
+                            embedder,
+                            vector_size=vector_size,
+                        )
+                        app.state.project_document_index = local_index
+                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
+                            app.state.project_repository,
+                            local_vectors,
+                            top_k=user_documents_settings.top_k,
+                            min_score=user_documents_settings.min_score,
+                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
+                        )
                 except Exception:
                     logger.exception(
                         "Project document vector store is unavailable; API remains online"
@@ -506,9 +563,7 @@ def create_app() -> FastAPI:
                     )
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
-                    semantic_memory = await build_semantic_memory(
-                        JinaEmbeddingSettings.from_env()
-                    )
+                    semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
                     groq_settings = GroqSettings.from_env()
@@ -655,17 +710,15 @@ def create_app() -> FastAPI:
             # actually write the root it will cache snapshots into.
             try:
                 index_store.root.mkdir(parents=True, exist_ok=True)
-                checks["project_index"] = "ready" if os.access(index_store.root, os.W_OK) else (
-                    "unavailable"
+                checks["project_index"] = (
+                    "ready" if os.access(index_store.root, os.W_OK) else ("unavailable")
                 )
             except OSError:
                 checks["project_index"] = "unavailable"
         project_repository = app.state.project_repository
         if project_repository is not None:
             try:
-                if await project_repository.worker_heartbeat_is_fresh(
-                    max_age_seconds=120
-                ):
+                if await project_repository.worker_heartbeat_is_fresh(max_age_seconds=120):
                     checks["worker_queue"] = "ready"
             except Exception:
                 checks["worker_queue"] = "unavailable"
@@ -855,9 +908,7 @@ def create_app() -> FastAPI:
         )
         run_queue = getattr(request.app.state, "run_queue", None)
         if run_queue is not None:
-            await run_queue.enqueue_digest_run(
-                run.id, user_id=principal.user_id
-            )
+            await run_queue.enqueue_digest_run(run.id, user_id=principal.user_id)
         else:
             background_tasks.add_task(worker.execute, run.id)
         return {
@@ -1074,14 +1125,39 @@ async def _authenticated_principal(
     return principal
 
 
+async def _authenticated_chat_principal(
+    request: Request, *, required: bool = True
+) -> VerifiedPrincipal | None:
+    """Resolve a browser's opaque chat session in either persistence mode."""
+    sessions = getattr(request.app.state, "chat_opaque_session_repository", None)
+    if sessions is None:
+        sessions = getattr(request.app.state, "session_repository", None)
+    if sessions is None:
+        return None
+    principal = await principal_from_opaque_session(
+        request.cookies.get(_session_settings(request).cookie_name), sessions
+    )
+    if principal is None and required:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return principal
+
+
 async def _issue_chat_guest_session(request: Request, response: Response) -> None:
     """Bootstrap an isolated guest workspace without replacing an existing session."""
-    existing = await _authenticated_principal(request, required=False)
+    existing = await _authenticated_chat_principal(request, required=False)
     if existing is not None:
         return
 
-    identities = getattr(request.app.state, "identity_repository", None)
-    sessions = getattr(request.app.state, "session_repository", None)
+    identities = getattr(
+        request.app.state,
+        "chat_identity_repository",
+        getattr(request.app.state, "identity_repository", None),
+    )
+    sessions = getattr(
+        request.app.state,
+        "chat_opaque_session_repository",
+        getattr(request.app.state, "session_repository", None),
+    )
     if identities is None or sessions is None:
         raise HTTPException(status_code=503, detail="Guest chat is unavailable")
 
@@ -1105,9 +1181,7 @@ async def _connection_principal(
     return principal_for_connection(connection)
 
 
-async def _owned_connection(
-    request: Request, connection_id: str, detail: str
-) -> MailboxConnection:
+async def _owned_connection(request: Request, connection_id: str, detail: str) -> MailboxConnection:
     repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
     connection = await repository.get(connection_id)
     if connection is None:
