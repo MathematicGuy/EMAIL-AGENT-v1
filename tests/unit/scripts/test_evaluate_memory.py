@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -78,3 +79,24 @@ def test_a_missing_probe_set_exits_two(tmp_path: Path) -> None:
 @pytest.mark.live
 def test_live_run_requires_a_database_and_key() -> None:
     pytest.skip("live tier: run manually with DATABASE_URL and a provider key set")
+
+
+def test_a_live_run_without_a_gemini_key_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No model means no reply to score, so there is no run at all. This is the
+    # one dependency whose absence is fatal rather than a per-scope finding.
+    # Every GEMINI_API_KEY* name has to go: a .env sitting in the checkout
+    # supplies numbered keys, and leaving one behind would turn this unit test
+    # into a real billed run against a real model.
+    for name in [item for item in os.environ if item.startswith("GEMINI_API_KEY")]:
+        monkeypatch.delenv(name, raising=False)
+    assert main(["--probe-set", str(_probe_set_file(tmp_path))]) == 1
+
+
+def test_dry_run_still_works_after_the_live_path_lands(tmp_path: Path) -> None:
+    output = tmp_path / "report.json"
+    assert (
+        main(["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
+        == 0
+    )
