@@ -22,6 +22,8 @@ def normalize_query(query: str | None) -> str:
         terms.append("is:unread")
     if "in:inbox" not in lowered:
         terms.append("in:inbox")
+    if not any(term.startswith("category:") for term in lowered):
+        terms.append("category:primary")
     return " ".join(terms)
 
 

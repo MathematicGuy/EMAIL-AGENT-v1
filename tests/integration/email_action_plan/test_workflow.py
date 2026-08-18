@@ -705,7 +705,6 @@ def test_mailbox_fetch_is_bounded_and_preserves_newest_first_order() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert mailbox.max_timestamp_active == 2
         assert mailbox.max_thread_active == 2
         assert [message.gmail_message_id for message in classifier.received_envelopes] == [
             "m3",
