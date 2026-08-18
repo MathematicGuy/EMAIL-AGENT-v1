@@ -1027,7 +1027,7 @@ class ChatTurn:
         )
         evidence = tuple(self.rag_evidence)
         if len(evidence) > MAX_CHAT_RAG_EVIDENCE_ITEMS:
-            raise ValueError("rag_evidence must not exceed 5 items")
+            raise ValueError(f"rag_evidence must not exceed {MAX_CHAT_RAG_EVIDENCE_ITEMS} items")
         if not all(isinstance(item, ChatRagEvidence) for item in evidence):
             raise TypeError("rag_evidence items must be ChatRagEvidence")
         if self.retrieval_status is not None:

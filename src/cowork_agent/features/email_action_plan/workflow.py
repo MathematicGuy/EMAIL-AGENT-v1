@@ -506,11 +506,13 @@ class DigestWorker:
         refs: list[MessageRef] = []
         seen_message_ids: set[str] = set()
         cursor: str | None = None
+        max_candidate_refs = max(run.max_emails, int(run.max_emails * 1.5))
         while True:
+            page_size = min(max(max_candidate_refs - len(refs), 1), 100)
             page = await self._mailbox.search_unread(
                 run.mailbox_connection_id,
                 run.query,
-                min(run.max_emails, 100),
+                page_size,
                 cursor,
             )
             run.emails_matched = max(run.emails_matched, page.estimated_total or 0)
@@ -519,15 +521,14 @@ class DigestWorker:
                     continue
                 seen_message_ids.add(ref.message_id)
                 refs.append(ref)
-                if len(refs) >= run.max_emails:
+                if len(refs) >= max_candidate_refs:
                     break
             cursor = page.next_cursor
-            if cursor is None or len(refs) >= run.max_emails:
+            if cursor is None or len(refs) >= max_candidate_refs:
                 break
 
-        selected_refs = refs[: run.max_emails]
         messages_by_thread: dict[str, list[str]] = {}
-        for ref in selected_refs:
+        for ref in refs:
             messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
 
         thread_items = tuple(messages_by_thread.items())
@@ -562,6 +563,8 @@ class DigestWorker:
             self._mailbox_fetch_concurrency,
             int((time.monotonic() - thread_started) * 1000),
         )
+
+        all_envelopes: list[EphemeralEmailEnvelope] = []
         for (_thread_id, selected_ids), thread in zip(
             thread_items, thread_results, strict=True
         ):
@@ -569,19 +572,27 @@ class DigestWorker:
                 skipped_threads += 1
                 continue
             selected_id_set = set(selected_ids)
-            # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
-            selected = tuple(
-                replace(
-                    message,
-                    run_id=run.id,
-                    user_id=run.user_id,
-                )
-                for message in thread
-                if message.gmail_message_id in selected_id_set
-            )
-            run.emails_processed += len(selected)
-            if selected:
-                threads.append(selected)
+            for message in thread:
+                if message.gmail_message_id in selected_id_set:
+                    all_envelopes.append(
+                        replace(
+                            message,
+                            run_id=run.id,
+                            user_id=run.user_id,
+                        )
+                    )
+
+        # Sort all envelopes newest-first and select top run.max_emails
+        all_envelopes.sort(key=lambda e: e.received_at, reverse=True)
+        selected_envelopes = all_envelopes[: run.max_emails]
+
+        # Regroup into threads preserving newest-first order
+        grouped_by_thread: dict[str, list[EphemeralEmailEnvelope]] = {}
+        for env in selected_envelopes:
+            grouped_by_thread.setdefault(env.gmail_thread_id, []).append(env)
+
+        threads = [tuple(thread_envs) for thread_envs in grouped_by_thread.values()]
+        run.emails_processed = len(selected_envelopes)
 
         run.next_cursor = cursor
         run.truncated = cursor is not None or run.emails_matched > run.emails_processed

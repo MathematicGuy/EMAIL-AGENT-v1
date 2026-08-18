@@ -27,10 +27,10 @@
 
 | Component | Live Implementation | Operational Boundary |
 |---|---|---|
-| **Dual Persistence Engine** | SQLite (`mail_todo.db`, `runs.db`, `tasks.db`) or Supabase PostgreSQL (`AsyncConnectionPool`) | Without `DATABASE_URL`, uses local SQLite and in-memory repositories. With `DATABASE_URL`, connects to Supabase PostgreSQL for runs, tasks, outbox, identity, and chat memory. |
+| **Dual Persistence Engine** | SQLite (`mail_todo.db`, `runs.db`, `tasks.db`, `chat.db`, `projects.db`, `project_chunks.db`) or Supabase PostgreSQL (`AsyncConnectionPool`) | With `POSTGRES_MODE=off`, local SQLite owns mailbox, runs, tasks, chat sessions/history, durable profile/episodic memory, projects, document jobs, and document chunks. With `DATABASE_URL`, Supabase PostgreSQL owns the durable control plane. |
 | **Run & Task Store** | `SQLiteRunRepository` / `PostgresRunRepository` & `SQLiteTaskRepository` / `PostgresTaskRepository` | Persists execution run history, idempotent tokens, and finalized Action Items / TaskEpisodes. |
 | **Background Dispatch** | FastAPI `BackgroundTasks` + `InMemoryOutbox` / `PostgresOutboxRepository` | Triggers background digest execution (`DigestWorker.execute`) and project document indexing without blocking HTTP responses. |
-| **Session & Profile Store** | `InMemoryChatSessionBuffer` & `PostgresChatProfileRepository` | Session window turns kept in-memory for zero latency; long-term user profile preferences persisted to Postgres when available. |
+| **Session & Profile Store** | `InMemoryChatSessionBuffer` & SQLite/Postgres chat repositories | Session window turns kept in-memory for zero latency; long-term user profile preferences persist to SQLite locally or Postgres when configured. |
 
 ### 1.3 Endpoints & API Inventory
 
@@ -139,6 +139,6 @@ flowchart TB
 1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates completely independently from the Email digest workflow. Chat has no `@Email` tools or direct access to inbox contents.
 2. **TaskEpisode Security:** System-proposed tasks created during chat interactions are marked `retrieval_eligible=false` to prevent unverified tasks from contaminating semantic memory context.
 3. **Transient Data Isolation:** Gmail contents and user attachments are processed ephemerally in-memory and are never stored in company vector indices or long-term databases.
-4. **Dual Persistence Strategy:** Zero-friction local development using SQLite and in-memory repositories; seamless production scaling using Supabase PostgreSQL when `DATABASE_URL` is supplied.
+4. **Dual Persistence Strategy:** Zero-friction local development using SQLite plus an in-process bounded working-memory buffer; seamless production scaling using Supabase PostgreSQL when `DATABASE_URL` is supplied.
 
 

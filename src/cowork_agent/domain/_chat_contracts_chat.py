@@ -20,6 +20,7 @@ from ._chat_contracts_common import (
     _to_dict,
 )
 from ._chat_contracts_memory import (
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
     MAX_TASK_ACTION_PLAN_ITEMS,
     MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
@@ -183,10 +184,13 @@ class ChatMessageStreamEvent:
         _require_string(self.turn_id, "turn_id")
         if self.proposal is not None:
             object.__setattr__(self, "proposal", _validated_task_proposal(self.proposal))
-        if len(self.rag_evidence) > 5 or not all(
+        if len(self.rag_evidence) > MAX_CHAT_RAG_EVIDENCE_ITEMS or not all(
             isinstance(item, ChatRagEvidence) for item in self.rag_evidence
         ):
-            raise ValueError("rag_evidence must contain at most five ChatRagEvidence items")
+            raise ValueError(
+                f"rag_evidence must contain at most {MAX_CHAT_RAG_EVIDENCE_ITEMS} "
+                "ChatRagEvidence items"
+            )
         self._validate_variant()
 
     def _validate_variant(self) -> None:

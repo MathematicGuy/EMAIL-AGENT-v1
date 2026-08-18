@@ -89,12 +89,9 @@ const MailScanCard: React.FC<{
         {!isFinished && <LoaderCircle className="h-4 w-4 animate-spin text-[#e8a78f]" />}
       </div>
       <div className="mt-3 flex justify-between text-xs text-zinc-400">
-        <span>{scan.emailsProcessed}/{scan.emailsToProcess || scan.emailsMatched} email</span>
+        <span>{scan.emailsProcessed}/{scan.emailsToProcess || scan.emailsProcessed} email</span>
         {scan.actionItemsCount !== undefined && <span>{scan.actionItemsCount} action item</span>}
       </div>
-      {scan.emailsMatched > scan.emailsToProcess && (
-        <p className="mt-1 text-xs text-amber-200">Có {scan.emailsMatched} email phù hợp.</p>
-      )}
       <div className="mt-2 h-1.5 overflow-hidden rounded bg-zinc-800">
         <div className="h-full bg-[#d97757] transition-all duration-300" style={{ width: `${percentage}%` }} />
       </div>
