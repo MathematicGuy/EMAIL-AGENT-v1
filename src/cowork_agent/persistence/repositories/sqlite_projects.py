@@ -132,9 +132,11 @@ class SQLiteProjectRepository:
                     user_id TEXT NOT NULL, filename TEXT NOT NULL, media_type TEXT NOT NULL,
                     byte_size INTEGER NOT NULL, content_sha256 TEXT NOT NULL, storage_key TEXT NOT NULL,
                     status TEXT NOT NULL, expires_at TEXT NOT NULL, page_count INTEGER, ocr_page_count INTEGER,
-                    chunk_count INTEGER, error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                    UNIQUE(project_id, content_sha256)
+                    chunk_count INTEGER, error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS local_documents_active_content_idx
+                    ON local_documents (project_id, content_sha256)
+                    WHERE status <> 'deleted';
                 CREATE TABLE IF NOT EXISTS local_document_jobs (
                     document_id TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                     available_at TEXT NOT NULL, claimed_at TEXT, error_code TEXT
@@ -217,7 +219,21 @@ class SQLiteProjectRepository:
                 (project_id, digest),
             ).fetchone()
             if existing is not None:
+                if str(existing["status"]) == "failed":
+                    db.execute(
+                        "UPDATE local_documents SET status='received', error_code=NULL, page_count=NULL, ocr_page_count=NULL, chunk_count=NULL, updated_at=? WHERE id=? AND status='failed'",
+                        (_now(), str(existing["id"])),
+                    )
+                    reset = db.execute(
+                        "SELECT * FROM local_documents WHERE id=?", (str(existing["id"]),)
+                    ).fetchone()
+                    assert reset is not None
+                    return _document(reset), True
                 return _document(existing), False
+            db.execute(
+                "DELETE FROM local_documents WHERE project_id=? AND content_sha256=? AND status='deleted'",
+                (project_id, digest),
+            )
             count, total = db.execute(
                 "SELECT count(*), coalesce(sum(byte_size), 0) FROM local_documents WHERE project_id=? AND status <> 'deleted'",
                 (project_id,),

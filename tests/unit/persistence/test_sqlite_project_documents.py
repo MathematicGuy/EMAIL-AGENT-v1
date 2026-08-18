@@ -125,7 +125,6 @@ def test_sqlite_chunks_keep_gemini_hybrid_retrieval_and_acl(tmp_path: Path) -> N
 
     asyncio.run(scenario())
 
-
 def test_sqlite_document_job_retries_after_indexing_failure(tmp_path: Path) -> None:
     async def scenario() -> None:
         projects = SQLiteProjectRepository(tmp_path / "projects.db")
@@ -158,5 +157,63 @@ def test_sqlite_document_job_retries_after_indexing_failure(tmp_path: Path) -> N
         assert retried is not None
         assert retried.status == "received"
         assert await projects.next_claimable_job() is None
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_document_reupload_after_deletion_and_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        projects = SQLiteProjectRepository(tmp_path / "projects.db")
+        await projects.initialize()
+        principal = VerifiedPrincipal(user_id="owner")
+        project = await projects.default_project(principal)
+
+        # 1. Create and delete document
+        doc1, created1 = await projects.create_or_get_document(
+            principal=principal,
+            project_id=project.id,
+            filename="policy.pdf",
+            media_type="application/pdf",
+            byte_size=10,
+            content_sha256="c" * 64,
+            expires_in_seconds=86_400,
+        )
+        assert created1
+        await projects.begin_deletion(principal, project.id, doc1.id)
+
+        # Re-uploading the same content after deletion must succeed with a new active document
+        doc2, created2 = await projects.create_or_get_document(
+            principal=principal,
+            project_id=project.id,
+            filename="policy.pdf",
+            media_type="application/pdf",
+            byte_size=10,
+            content_sha256="c" * 64,
+            expires_in_seconds=86_400,
+        )
+        assert created2
+        assert doc2.status == "received"
+
+        # 2. Re-uploading after failure must reset status to received and allow re-ingestion
+        await projects.mark_upload_completed(principal, project.id, doc2.id)
+        assert await projects.claim_job(doc2.id) is not None
+        await projects.finish_job(doc2.id, status="failed", error_code="index_unavailable")
+        await projects.transition_document(
+            doc2.id, from_status="extracting", to_status="failed", error_code="index_unavailable"
+        )
+
+        doc3, created3 = await projects.create_or_get_document(
+            principal=principal,
+            project_id=project.id,
+            filename="policy.pdf",
+            media_type="application/pdf",
+            byte_size=10,
+            content_sha256="c" * 64,
+            expires_in_seconds=86_400,
+        )
+        assert created3
+        assert doc3.id == doc2.id
+        assert doc3.status == "received"
+        assert doc3.error_code is None
 
     asyncio.run(scenario())

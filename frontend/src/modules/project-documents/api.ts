@@ -53,7 +53,9 @@ function documentUrl(projectId: string, documentId?: string): string {
 }
 
 function uploadUrl(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : `${API_BASE_URL}${url}`;
+  if (/^https?:\/\//i.test(url)) return url;
+  const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanUrl}`;
 }
 
 export async function areProjectDocumentsEnabled(): Promise<boolean> {
