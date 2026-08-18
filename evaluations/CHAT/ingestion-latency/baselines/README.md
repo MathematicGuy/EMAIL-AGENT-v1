@@ -1,7 +1,8 @@
 # Ingestion latency baselines
 
 This directory holds reviewed, metadata-only snapshots promoted from local
-`../runs/` artifacts. There is no committed baseline yet.
+`../runs/` artifacts. The initial local loopback baseline is recorded in
+`baseline-2026-08-18-local-loopback.json`.
 
 A candidate baseline must cover 10 measured repetitions of the ordered
 three-fixture sequence: cold `dang-ky-xe-pdf-v1`, then warm
