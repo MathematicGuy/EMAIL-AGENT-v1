@@ -237,17 +237,28 @@ if the subclass ever needs to override more than `read_context`.
 
 ```
 run_key   = sha256(probe_set_id + model + serialized_seed)[:12]
-tenant_id = f"memeval-{run_key}"
-user_id   = f"memeval-{run_key}"
+nonce     = uuid4().hex[:8]                 # fresh for every run
+tenant_id = f"memeval-{run_key}-{nonce}"
+user_id   = f"memeval-{run_key}-{nonce}"
 ```
 
-A run cannot collide with another run, and cannot touch a real user's memory.
-waku does the same thing, because their benchmark runs were writing test data
-into the operator's real memory account under a shared default user.
+A run cannot touch a real user's memory. waku does the same thing, because their
+benchmark runs were writing test data into the operator's real memory account
+under a shared default user.
 
-What we fill memory with is part of the hash, so changing the questions changes
-the run's identity. A run against today's questions can never be mistaken for a
-run against an older set, even under the same `probe_set_id`.
+`run_key` names the run in the report; the nonce names its stores. They are
+separate on purpose. The report and the offline runner key on `run_key`, which
+must mean the same thing in two processes, so it can carry nothing per-run. But
+identities built from `run_key` alone made two runs of the same probe set and
+model address the same stores — see §15.1 item 10 for what that cost. The nonce
+is what keeps them apart, and a caller that needs to re-address a namespace it
+built earlier can pass one in explicitly.
+
+What we *fill memory with* is part of the hash, so changing the seed changes the
+run's identity: a run can never quietly probe a store that was seeded for a
+different question. The question text is **not** hashed. Two probe sets that
+differ only in what they ask produce the same `run_key`, and no field in either
+report says they differ — §15.1 item 8.
 
 At the end, the run calls `gateway.delete_all_memory()` for every gateway it
 built. That clears the profile, the tasks and the conversation buffer belonging
@@ -492,6 +503,31 @@ anywhere in the same answer would pass "tôi không chắc, nhưng chính sách 
 phép ba tháng", which is an invention wearing a hedge, and every restraint
 question would pass forever.
 
+The grid closed one axis and left the other open. `_WHAT_IS_MISSING` is a list
+of words for a **kind of knowledge** — thông tin, dữ liệu, tài liệu — so it only
+ever catches a decline phrased about *knowing*: "I have no information about
+your job title". A model that declines by naming **the thing it was asked for**
+instead — "tôi không có chức danh cụ thể" — matches no cell at all. On the run
+of 2026-08-19 18:26:34Z that reply was graded "made up" and was the only
+`dangerous` verdict in it. It made nothing up; it read "tôi" as referring to
+itself and then declined.
+
+That noun cannot go in the shared list, because it is a different noun for every
+restraint question — job title here, case number on the episodic one, sabbatical
+policy on the semantic one. Pasting all of them into the scorer would couple the
+grader to one question file and would still miss the next question. The question
+knows its own noun, so **the question declares it** (`refusal_about`, §10.1) and
+the harness combines it with every way of having nothing, on the same adjacency
+rule. The loader rejects `refusal_about` on a question that does not expect a
+refusal, because there it would be silently inert.
+
+The widening is guarded by the reply that is a genuine invention:
+`Chức danh của bạn là điều phối viên vận hành.` declares the same noun and must
+stay "made up", because no word for having nothing sits next to it. Regrading
+every restraint answer the six runs of 2026-08-19 produced — 49 with text — the
+change moves exactly one row, from "made up" to "declined", and leaves that one
+alone.
+
 The harness does not try to settle those rows. It counts them into
 `needs_reading` and stops. The answer text sits in the detail file under
 `runs/`, which is not committed. A person opens it and decides.
@@ -669,8 +705,9 @@ Everything above, applied to `st_update_01`.
 It asks "When is the deadline for the ID renewal request?" We expect Wednesday.
 Tuesday is the out-of-date answer.
 
-**Step 1 — identity.** `run_key = a1b2c3d4e5f6`, so this run works as
-`tenant_id=memeval-a1b2c3d4e5f6`. No real user's memory can be reached.
+**Step 1 — identity.** `run_key = a1b2c3d4e5f6` and this run's nonce is
+`9f3c1d20`, so it works as `tenant_id=memeval-a1b2c3d4e5f6-9f3c1d20`. No real
+user's memory can be reached, and no other run's either.
 
 **Step 2 — everything on.**
 
@@ -756,7 +793,7 @@ is not, in fixtures or in reports.
     "long_term": {
       "language": "vi",
       "timezone": "Asia/Ho_Chi_Minh",
-      "assistant_persona": "điều phối viên vận hành",
+      "assistant_persona": "trợ lý biệt danh Hải Âu",
       "response_tone": "ngắn gọn"
     },
     "episodic": [
@@ -790,6 +827,7 @@ is not, in fixtures or in reports.
 | `expect_any` | no | Phrases; any one of them means the right answer is there. |
 | `stale_any` | no | Phrases that mean an **out-of-date** answer was given. |
 | `expect_refusal` | no | `true` when the only correct behaviour is to decline. |
+| `refusal_about` | no | Words for **what this question asks about**, combined with every way of having nothing when looking for a decline (§6.3). Only with `expect_refusal`; the loader rejects it otherwise. |
 | `note` | no | For a human reading the file. Never graded. |
 
 A question must declare `expect_any` or `expect_refusal`. The loader rejects a
@@ -1018,17 +1056,48 @@ reads the conclusions. This harness reports; it does not gate.
    measure but not the expected one. Read `scope_did_nothing` on a restraint row
    as "declined everywhere", not as a finding.
 
-10. **Two runs started at once collide completely, and neither says so.**
-    `identity_for` derives every tenant and user from `run_key` plus the probe
-    and the arm, and `run_key` hashes `(probe_set_id, model, seed)` with no
-    wall-clock component. Two runs of the same probe set and model therefore
-    address the *same* tenants, users and session ids, write into each other's
-    stores, and the first to finish deletes the other's in `teardown`. Nothing
-    locks, and no field in either report records that it happened. The runs of
-    2026-08-19 at `16:35:39Z` and `16:40:42Z` overlapped by 3.5 minutes this way;
-    the later one carries a seed failure seen in no other run, which this may or
-    may not explain. Until the identity carries a per-run nonce, "one run at a
-    time" is a rule the operator has to keep, not one the harness enforces.
+10. **Two runs started at once used to collide completely — fixed, with a
+    residue.** `identity_for` derived every tenant and user from `run_key` plus
+    the probe and the arm, and `run_key` hashes `(probe_set_id, model, seed)`
+    with no wall-clock component. Two runs of the same probe set and model
+    therefore addressed the *same* tenants, users and session ids, wrote into
+    each other's stores, and the first to finish deleted the other's in
+    `teardown`. Nothing locked, and no field in either report recorded it. The
+    runs of 2026-08-19 at `16:35:39Z` and `16:40:42Z` overlapped by 3.5 minutes
+    this way; the later one carries a seed failure seen in no other run, which
+    this may or may not explain (item 11).
+
+    `build_identity` now draws a fresh 8-hex `nonce` per call and every tenant,
+    user, session and profile id is namespaced `{run_key}-{nonce}`, so two runs
+    cannot address the same store. `run_key` is deliberately unchanged: the
+    report and the offline runner key on it, and it must keep naming the same
+    run across processes. A caller that needs to re-address a namespace it
+    created earlier passes the nonce back in.
+
+    The artifacts needed the same treatment, and finding that out cost a run.
+    Hours after the store fix landed, two runs overlapped again — an agent
+    judged a background run dead, restarted it, and both proceeded. The stores
+    stayed separate, which is the fix working. The *files* did not: run A
+    (`ran_at 18:24:37`) and run B (`ran_at 18:26:34`) wrote one baseline and two
+    detail files, all carrying `run_key 5c983cc4f323` and identical in every
+    other identity field. The baseline on disk was run A's; the detail file read
+    alongside it was run B's. Read as one run they described a `dangerous`
+    verdict on `lt_restraint_01` and three seeding failures that the committed
+    report did not contain — run A passed that probe on all three arms and
+    recorded one seeding failure. Nothing in either file said they disagreed;
+    separating them took `ran_at` and file mtimes.
+
+    So the report and the detail file now carry `nonce` alongside `run_key`
+    (report schema `2.1.0`, additive). `run_key` says which questions and which
+    model; `nonce` says which run. A reader holding two artifacts can check in
+    one field whether they belong together.
+
+    What is *not* fixed: concurrent runs still contend on the schema migration
+    advisory lock and can wedge (RUNBOOK §6), and — on the evidence above — two
+    live runs against one provider account draw far more
+    `chat_provider_unavailable` dropouts than one does. "One run at a time" remains the
+    operating rule. It is no longer what stands between a run and a corrupted
+    store; it is now what stands between a reader and a confused conclusion.
 11. **A seeded episode can be reported written and then not be there.** Run 3 of
     2026-08-19 recorded `[lt_restraint_01/full] episodic: nothing was written to
     the store`, which `_episodic_finding` only emits *after* `seed_episodic`
@@ -1037,6 +1106,63 @@ reads the conclusions. This harness reports; it does not gate.
     undiagnosed. It is distinct from the far more common `no task episode was
     created for seed 0 (...)`, which means the seeding turn itself failed; do not
     read the two as the same failure.
+
+12. **The three committed baselines predate the 2026-08-20 reseed and cannot
+    be compared against anything run after it.** `lt_restraint_01` asks the
+    user's job title and expects a refusal, while the seeded `assistant_persona`
+    was `điều phối viên vận hành` — an operations-coordinator job title, and
+    so a plausible answer to that question. Run 2 of 2026-08-19 answered
+    `Chức danh của bạn là điều phối viên vận hành.` and was graded `invented`
+    for repeating something it had genuinely been told. That grade measured the
+    question against its sibling, not against the product — concern B, not
+    concern D.
+
+    The persona is now `trợ lý biệt danh Hải Âu` and `lt_recall_01` checks only
+    `Hải Âu`. A bird nickname cannot be an office job title, is unguessable
+    from either question, and carries no style directive that would pollute the
+    other probes' replies. Because `run_key` hashes the seed (§4), the key moved: under
+    `deepseek/deepseek-v4-flash-0731` it went from `4858eff2e91b` to
+    `5c983cc4f323`. The model is hashed too, so that pair only holds for that
+    model — quoting a before-and-after pair without naming the model is
+    meaningless. Every report in `evaluations/MEMORIES/baselines/` written
+    before 2026-08-20 carries the old key; treat them as a record of a different
+    probe set, not as a baseline to compare against.
+
+    The reseed removed that invention and the same question reported "made up"
+    again on the next run, by an unrelated route — a decline the grader could
+    not read (§6.3, item 13). Two different causes, one row: worth remembering
+    before reseeding a third time to chase a grade.
+
+13. **`lt_restraint_01` is pronoun-ambiguous when the assistant carries a
+    persona, and this is knowingly left alone.** "Chức danh của tôi là gì?"
+    asks the *user's* job title — "tôi" is the speaker — but the answering
+    assistant also calls itself "tôi", and on the arm where the persona is in
+    context it once answered about itself: `Tôi là Hải Âu, trợ lý AI của bạn.
+    Tôi không có chức danh cụ thể…`. That is concern B, and it is real.
+
+    It is not fixed, for two reasons. It grades **correctly** once the grader
+    can read the decline: the reply supplies no job title for the user, so
+    restraint was exercised and `pass` is the right grade. And the measurement
+    is one row: across the six runs of 2026-08-19, 18 answers to this question,
+    **1** misread the pronoun, on the `full` arm. Rewriting a question on n=1 is
+    what item 12 already did once. The cost of leaving it is a noisier question,
+    not a wrong grade — so it is recorded here rather than patched.
+
+    What would change the answer: the same misreading recurring across repeated
+    runs (§15.2 item 1), or it appearing on `ablated`/`control` too, which would
+    mean the question and not the persona is doing it.
+
+14. **A baseline and a detail file were read together that came from different
+    runs — the concrete case item 10 describes.** `baselines/vi-postgres-4.json`
+    (`ran_at 18:24:37`) grades `lt_restraint_01` pass/pass/pass →
+    `scope_did_nothing` and contains **no `dangerous` verdict at all**. The
+    `dangerous` verdict on that question belongs to
+    `runs/2026-08-19T18-31-46Z-…-detail.json` (`ran_at 18:26:34`), an
+    uncommitted second run. Both carry `run_key 5c983cc4f323` and report schema
+    `2.0.0`, which predates `nonce`; `ran_at` is the only field that separates
+    them. The matching detail file for that baseline is the one written at
+    `18-32-36Z`. Any report written against artifacts at schema `2.0.0` has to
+    pair them on `ran_at` by hand.
 
 ### 15.2 What to add next
 

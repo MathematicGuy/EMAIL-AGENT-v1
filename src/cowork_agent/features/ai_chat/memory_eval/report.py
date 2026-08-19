@@ -18,7 +18,9 @@ from .probes import ProbeSet, ProbeTest
 from .scoring import Outcome
 from .verdicts import Verdict, derive_verdict, verdict_rank
 
-REPORT_SCHEMA_VERSION = "2.0.0"
+# 2.1.0 adds `nonce`. Additive: a 2.0.0 reader that ignores unknown keys still
+# reads a 2.1.0 report, and every field it knew about means what it did.
+REPORT_SCHEMA_VERSION = "2.1.0"
 
 _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
     Verdict.UNREADABLE: "unreadable",
@@ -59,6 +61,7 @@ def build_report(
     run_key: str,
     ran_at: datetime,
     seed_failures: Sequence[str] = (),
+    nonce: str = "",
 ) -> dict[str, object]:
     by_id = {probe.probe_id: probe for probe in probe_set.probes}
     per_scope: dict[str, dict[str, int]] = {
@@ -109,6 +112,12 @@ def build_report(
         "model": model,
         "ran_at": ran_at.isoformat(),
         "run_key": run_key,
+        # Two runs of the same probe set and model share a `run_key` by design,
+        # so on its own it cannot say which of two overlapping runs wrote this
+        # file. The nonce is what the run's stores were named after, and it is
+        # the only field that distinguishes them. Empty when the caller did not
+        # build an identity — the offline and dry-run paths.
+        "nonce": nonce,
         "per_scope": per_scope,
         "verdicts": [entry for _, entry in entries],
         "leaked_probes": sorted(leaked),

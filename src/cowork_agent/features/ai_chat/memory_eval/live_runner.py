@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from cowork_agent.domain.chat_contracts import ChatMemoryScope, MemoryType
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
@@ -27,21 +28,46 @@ class RunIdentity:
     """The throwaway identity one run operates as."""
 
     run_key: str
+    nonce: str
     tenant_id: str
     user_id: str
 
+    @property
+    def namespace(self) -> str:
+        """What names this run's stores. `run_key` names the run in the report."""
 
-def build_identity(probe_set: ProbeSet, model: str) -> RunIdentity:
-    """Derive namespaced identities from the probe set, model and seed.
+        return f"{self.run_key}-{self.nonce}"
 
-    Two properties matter. A run can never collide with another run or touch a
-    real user's memory. And because the seed is part of the key, changing the
-    seed addresses a different tenant — so a run can never quietly probe a store
-    that was seeded for a different question.
+
+def build_identity(
+    probe_set: ProbeSet, model: str, *, nonce: str | None = None
+) -> RunIdentity:
+    """Derive namespaced identities from the probe set, model, seed and a nonce.
+
+    Three properties matter. A run can never touch a real user's memory. Because
+    the seed is part of `run_key`, changing the seed addresses a different
+    tenant — so a run can never quietly probe a store that was seeded for a
+    different question.
+
+    And because a fresh `nonce` joins `run_key` in every id, two runs of the
+    SAME probe set and model cannot collide either. They used to: every tenant,
+    user and session id came from `run_key` alone, so two runs started at once
+    wrote into each other's stores and whichever finished first deleted the
+    other's in `teardown`. Nothing locked, and no field in either report said so
+    — two such runs overlapped by 3.5 minutes on 2026-08-19. The nonce is kept
+    out of `run_key` on purpose: the report and the offline runner key on that,
+    and it must still name the same run across processes. A caller that needs to
+    address a namespace it created earlier can pass the nonce back in.
     """
 
     key = run_key(probe_set.probe_set_id, model, probe_set.seed)
-    return RunIdentity(run_key=key, tenant_id=f"memeval-{key}", user_id=f"memeval-{key}")
+    suffix = uuid4().hex[:8] if nonce is None else nonce
+    return RunIdentity(
+        run_key=key,
+        nonce=suffix,
+        tenant_id=f"memeval-{key}-{suffix}",
+        user_id=f"memeval-{key}-{suffix}",
+    )
 
 
 def identity_for(identity: RunIdentity, probe: Probe, arm: Arm) -> RunIdentity:
@@ -61,6 +87,7 @@ def identity_for(identity: RunIdentity, probe: Probe, arm: Arm) -> RunIdentity:
     suffix = f"{probe.probe_id}-{arm.value}"
     return RunIdentity(
         run_key=identity.run_key,
+        nonce=identity.nonce,
         tenant_id=f"{identity.tenant_id}-{suffix}",
         user_id=f"{identity.user_id}-{suffix}",
     )
@@ -84,9 +111,10 @@ def session_id_for(identity: RunIdentity, probe: Probe, arm: Arm) -> str:
 
     Arms never share a session. Sharing one would carry the full arm's turns
     into the control arm, and control would stop being a clean-store baseline.
+    Two runs never share one either — the namespace carries the run's nonce.
     """
 
-    return f"memeval-{identity.run_key}-{probe.probe_id}-{arm.value}"
+    return f"memeval-{identity.namespace}-{probe.probe_id}-{arm.value}"
 
 
 @dataclass
@@ -160,7 +188,7 @@ async def _seed_for(
             scope,
             session.seed,
             now=datetime.now(UTC),
-            profile_id=session.identity.run_key,
+            profile_id=session.identity.namespace,
         )
     ]
 

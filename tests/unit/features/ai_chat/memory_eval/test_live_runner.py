@@ -38,20 +38,53 @@ def _probe_set() -> ProbeSet:
     return ProbeSet("2.0.0", "unit", "unit", SeedSpec(("a",), {}, (), None), (_probe(),))
 
 
-def test_identity_is_namespaced_by_the_run_key() -> None:
+def test_identity_is_namespaced_by_the_run_key_and_the_nonce() -> None:
     identity = build_identity(_probe_set(), "model-a")
-    assert identity.tenant_id == f"memeval-{identity.run_key}"
-    assert identity.user_id == f"memeval-{identity.run_key}"
+    assert identity.tenant_id == f"memeval-{identity.run_key}-{identity.nonce}"
+    assert identity.user_id == f"memeval-{identity.run_key}-{identity.nonce}"
 
 
 def test_identity_is_stable_for_the_same_inputs() -> None:
     assert build_identity(_probe_set(), "m").run_key == build_identity(_probe_set(), "m").run_key
 
 
-def test_a_different_model_gets_a_different_tenant() -> None:
+def test_a_different_model_gets_a_different_run_key_and_tenant() -> None:
     first = build_identity(_probe_set(), "m1")
     second = build_identity(_probe_set(), "m2")
+    assert first.run_key != second.run_key
     assert first.tenant_id != second.tenant_id
+
+
+def test_two_runs_of_the_same_inputs_never_share_a_store() -> None:
+    # Two runs started at once derived identical tenants, users and session ids,
+    # because every one of them came from `run_key` and nothing else. They wrote
+    # into each other's stores, and whichever finished first deleted the other's
+    # in teardown. The report still keys on `run_key`, so the nonce namespaces
+    # the store without changing what the report calls the run.
+    first = build_identity(_probe_set(), "m")
+    second = build_identity(_probe_set(), "m")
+    probe = _probe(probe_id="ep_1")
+    assert first.run_key == second.run_key
+    assert first.nonce != second.nonce
+    assert first.tenant_id != second.tenant_id
+    assert first.user_id != second.user_id
+    assert session_id_for(first, probe, Arm.FULL) != session_id_for(second, probe, Arm.FULL)
+
+
+def test_arm_identities_of_two_runs_never_collide_either() -> None:
+    first = identity_for(build_identity(_probe_set(), "m"), _probe(probe_id="ep_1"), Arm.FULL)
+    second = identity_for(build_identity(_probe_set(), "m"), _probe(probe_id="ep_1"), Arm.FULL)
+    assert first.tenant_id != second.tenant_id
+    assert first.user_id != second.user_id
+
+
+def test_a_named_nonce_reproduces_the_same_namespace() -> None:
+    # A caller that needs to address a run it created earlier can name the
+    # nonce; only the default is fresh per process.
+    first = build_identity(_probe_set(), "m", nonce="fixed")
+    second = build_identity(_probe_set(), "m", nonce="fixed")
+    assert first.tenant_id == second.tenant_id
+    assert first.user_id == second.user_id
 
 
 def test_a_short_term_probe_keeps_its_session() -> None:

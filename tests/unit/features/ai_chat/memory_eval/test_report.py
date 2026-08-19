@@ -63,11 +63,26 @@ def _report(**kwargs: object) -> dict[str, object]:
 
 def test_report_carries_schema_version_and_provenance() -> None:
     report = _report()
-    assert report["schema_version"] == "2.0.0"
+    assert report["schema_version"] == "2.1.0"
     assert report["probe_set_id"] == "unit"
     assert report["provider"] == "gemini"
     assert report["model"] == "model-id"
     assert report["run_key"] == "a1b2c3d4e5f6"
+
+
+def test_report_names_the_run_nonce_so_two_runs_can_be_told_apart() -> None:
+    # Two runs of the same probe set and model share a run_key by design, so on
+    # 2026-08-19 two overlapping runs left one baseline and two detail files
+    # that were identical in every identity field. Working out which detail
+    # belonged to the committed report took ran_at and file mtimes, and the
+    # first reading of them was wrong.
+    assert _report(nonce="9f3c1d20")["nonce"] == "9f3c1d20"
+
+
+def test_a_report_built_without_an_identity_still_has_the_field() -> None:
+    # The offline and dry-run paths build no identity. An absent key would make
+    # every reader handle two shapes; an empty one says "no store was named".
+    assert _report()["nonce"] == ""
 
 
 def test_report_contains_no_probe_or_seed_text() -> None:

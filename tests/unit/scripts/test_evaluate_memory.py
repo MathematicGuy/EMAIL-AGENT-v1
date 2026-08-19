@@ -55,7 +55,7 @@ def test_dry_run_writes_a_report_and_exits_zero(tmp_path: Path) -> None:
     )
     assert code == 0
     report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["schema_version"] == "2.0.0"
+    assert report["schema_version"] == "2.1.0"
     assert report["probe_set_id"] == "unit"
     assert len(report["verdicts"]) == 1
 

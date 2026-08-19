@@ -62,6 +62,13 @@ class Probe:
     expect_any: tuple[str, ...] = ()
     stale_any: tuple[str, ...] = ()
     expect_refusal: bool = False
+    #: Words for WHAT this probe asks about, used only when ``expect_refusal``
+    #: is set. The scorer's shared phrase list carries generic words for a kind
+    #: of knowledge (thông tin, dữ liệu); a model that declines by naming the
+    #: thing asked for instead — "tôi không có chức danh" — matches none of
+    #: them and is graded INVENTED. That noun is different for every restraint
+    #: probe, so it cannot live in the shared list. The probe knows it.
+    refusal_about: tuple[str, ...] = ()
     note: str = ""
 
 
@@ -138,6 +145,15 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     expect_any = _string_tuple(data.get("expect_any"), f"probe {probe_id}: expect_any")
     stale_any = _string_tuple(data.get("stale_any"), f"probe {probe_id}: stale_any")
     expect_refusal = _bool(data.get("expect_refusal"), f"probe {probe_id}: expect_refusal")
+    refusal_about = _string_tuple(data.get("refusal_about"), f"probe {probe_id}: refusal_about")
+
+    # Declared without a refusal expected, it would silently do nothing: the
+    # noun is only ever combined with a word for having nothing on the refusal
+    # branch. Rejecting it makes an authoring slip loud instead of inert.
+    if refusal_about and not expect_refusal:
+        raise ProbeSetError(
+            f"probe {probe_id}: refusal_about is only meaningful with expect_refusal"
+        )
 
     # A probe with no expectation always passes, which is worse than no probe.
     if not (expect_any or expect_refusal):
@@ -157,6 +173,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         expect_any=expect_any,
         stale_any=stale_any,
         expect_refusal=expect_refusal,
+        refusal_about=refusal_about,
         note=note,
     )
 

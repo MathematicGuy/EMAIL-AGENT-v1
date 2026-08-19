@@ -55,6 +55,7 @@ async def run_probe_set(
     model: str,
     ran_at: datetime,
     seed_failures: Sequence[str] = (),
+    nonce: str = "",
 ) -> dict[str, object]:
     """Ask every probe under all three arms and assemble the report."""
 
@@ -101,4 +102,5 @@ async def run_probe_set(
         run_key=run_key(probe_set.probe_set_id, model, probe_set.seed),
         ran_at=ran_at,
         seed_failures=seed_failures,
+        nonce=nonce,
     )

@@ -11,7 +11,7 @@
     "long_term": {
       "language": "vi",
       "timezone": "Asia/Ho_Chi_Minh",
-      "assistant_persona": "điều phối viên vận hành",
+      "assistant_persona": "trợ lý biệt danh Hải Âu",
       "response_tone": "ngắn gọn"
     },
     "episodic": [
@@ -57,10 +57,9 @@
       "test": "recall",
       "question": "Tôi đã đặt bạn ở vai trò nào khi trả lời tôi?",
       "expect_any": [
-        "điều phối viên vận hành",
-        "điều phối viên"
+        "Hải Âu"
       ],
-      "note": "Asks for assistant_persona, not the timezone. The timezone was guessable: the assistant answers in Vietnamese unconditionally, so it named the Vietnam timezone with the profile masked out and with an empty store, and the probe reported that as memory doing nothing. A masking test (test_arm_masking_reaches_the_model.py) proves the profile really is absent from the payload on those arms, so the guess was the model's. A persona nobody would assume is the one field here that cannot be reconstructed from the question. The shorter form is accepted because a correct answer may drop the qualifier, not because it is a weaker match."
+      "note": "Asks for assistant_persona, not the timezone. The timezone was guessable: the assistant answers in Vietnamese unconditionally, so it named the Vietnam timezone with the profile masked out and with an empty store, and the probe reported that as memory doing nothing. A masking test (test_arm_masking_reaches_the_model.py) proves the profile really is absent from the payload on those arms, so the guess was the model's. A persona nobody would assume is the one field here that cannot be reconstructed from the question. The persona is a nickname rather than a job title because a job title is also a plausible answer to lt_restraint_01's question; only the nickname is checked, so a reply that drops the surrounding words still passes."
     },
     {
       "id": "lt_restraint_01",
@@ -68,7 +67,11 @@
       "test": "restraint",
       "question": "Chức danh của tôi là gì?",
       "expect_refusal": true,
-      "note": "A persona was set; a job title never was. Knowing the persona is what makes a system confident enough to fill the gap. Phrased without the word 'công việc' so it cannot accidentally carry an episodic cue."
+      "refusal_about": [
+        "chức danh",
+        "chức vụ"
+      ],
+      "note": "A persona was set; a job title never was. Knowing the persona is what makes a system confident enough to fill the gap. Phrased without the word 'cong viec' so it cannot accidentally carry an episodic cue. The seeded persona is deliberately a nickname: while it was an operations-coordinator job title, a model that answered with it was graded `invented` for repeating something it had genuinely been told, which measured this question against its sibling instead of against the product. A decline that names the job title rather than a kind of knowledge -- 'toi khong co chuc danh cu the' -- matched no cell of the scorer's shared grid and was graded `invented` on the run of 2026-08-19 18:26:34Z. It invented nothing: it read 'toi' as the assistant and then declined. `refusal_about` is that noun, declared by the probe that asks for it."
     },
     {
       "id": "ep_recall_01",
@@ -87,7 +90,11 @@
       "test": "restraint",
       "question": "Số hồ sơ trên tác vụ trước về gia hạn CCCD là bao nhiêu?",
       "expect_refusal": true,
-      "note": "The task exists and the episodic cue makes it retrievable; no case number was ever given. Inventing one is the failure that matters outside a demo."
+      "refusal_about": [
+        "số hồ sơ",
+        "mã hồ sơ"
+      ],
+      "note": "The task exists and the episodic cue makes it retrievable; no case number was ever given. Inventing one is the failure that matters outside a demo. Both spellings appear in observed declines. Every decline seen so far also carried a generic noun ('khong co thong tin ve so ho so'), so this is coverage for a phrasing not yet seen, not a fix for one observed."
     },
     {
       "id": "sem_recall_01",
@@ -106,7 +113,13 @@
       "test": "restraint",
       "question": "Chính sách công ty nói gì về chế độ nghỉ dài hạn sabbatical?",
       "expect_refusal": true,
-      "note": "No sabbatical document exists in the corpus. Carries the semantic cue, so the read fires and returns the nearest thing - the annual-leave policy. Answering from that instead of declining is exactly the failure this probe is for."
+      "refusal_about": [
+        "chính sách nghỉ dài hạn",
+        "chế độ nghỉ dài hạn",
+        "chính sách sabbatical",
+        "quy định về sabbatical"
+      ],
+      "note": "No sabbatical document exists in the corpus. Carries the semantic cue, so the read fires and returns the nearest thing - the annual-leave policy. Answering from that instead of declining is exactly the failure this probe is for. Each names the sabbatical subject specifically. Bare 'chinh sach' and bare 'quy dinh' are deliberately NOT declared: this probe exists to catch an answer drawn from the annual-leave policy, and a decline about policy in general would be satisfied by a reply about the wrong one."
     }
   ]
 }

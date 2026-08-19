@@ -40,7 +40,10 @@ and no network.
 7. Never write reply text into `evaluations/MEMORIES/baselines/` — those files
    are metadata-only and a test enforces it. Reply text lives in `runs/`, which
    is gitignored.
-8. **Ask before committing anything.**
+8. The write-up goes to `evaluations/MEMORIES/reports/`, in Vietnamese, by a
+   path relative to the repo root, and is never committed (§7). One was
+   committed under `docs/references/` on 2026-08-19 for want of this line.
+9. **Ask before committing anything.**
 
 ---
 
@@ -86,13 +89,34 @@ About 52 model calls — 24 probe asks plus ~28 seeding turns — and single-dig
 minutes. **Run it in the background and wait for the completion notification**
 — do not poll in a sleep loop.
 
-**Never start a second run while one is in flight.** Two reasons, and the second
-is the one that ruins results silently. Concurrent runs wedge on the migration
-advisory lock; and `run_key` has no wall-clock component, so two runs of the same
-probe set and model derive *identical* tenant, user and session ids
-(`identity_for`, `live_runner.py`). They write into each other's stores, and
-whichever finishes first tears down the other's. This has already happened once:
-the runs of 2026-08-19 at `16:35:39Z` and `16:40:42Z` overlapped by 3.5 minutes.
+**Never start a second run while one is in flight.** Concurrent runs pile up on
+the schema migration advisory lock and both wedge, with no output — the failure
+mode RUNBOOK §6 covers.
+
+**Before restarting a run you believe died, prove it died.** An empty output file
+proves nothing: this harness prints almost nothing until it finishes. Check for a
+live process, and check the run's own artifacts:
+
+```bash
+ls -lt evaluations/MEMORIES/runs/ | head -3
+```
+
+A run that got as far as writing a detail file finished. If a process is still
+alive, wait — a full run is single-digit minutes and can be longer under a slow
+provider. Restarting on the assumption of death is how the 2026-08-19 overlap
+happened, and both runs then completed, leaving one baseline and two detail files
+that had to be told apart by `ran_at` and mtime. Reports now carry `nonce`
+alongside `run_key` for exactly this; `run_key` alone cannot distinguish two runs
+of the same probe set and model.
+
+They no longer corrupt each other. They used to: every tenant, user and session
+id came from `run_key`, which has no wall-clock component, so two runs of the
+same probe set and model addressed identical stores and whichever finished first
+tore down the other's. That happened on 2026-08-19, when the runs at `16:35:39Z`
+and `16:40:42Z` overlapped by 3.5 minutes. `build_identity` now namespaces every
+id with a fresh per-run nonce. `run_key` is unchanged, so two runs of the same
+inputs still *report* the same `run_key` while owning different stores — do not
+read a shared `run_key` as evidence that two runs shared a store.
 
 ### 5. Monitor
 React to exactly two things: a line about an API key being evicted, exhausted or
@@ -109,6 +133,20 @@ Then **open `runs/<timestamp>-…-detail.json` and read the replies behind every
 reported without reading them is not finished work.
 
 ### 7. Write up
+**Where:** `evaluations/MEMORIES/reports/<YYYY-MM-DD>-<probe-set>.md`, written as
+a path relative to the repo root. Never an absolute path — this repo is checked
+out at a different path in the main tree and in every worktree, so a link naming
+one of them is dead everywhere else. That directory is gitignored, deliberately:
+a write-up quotes the questions and the replies in full, which is exactly why
+`runs/` is ignored. Do not commit it, and do not put it under `docs/`. The
+2026-08-19 write-up was committed under `docs/references/` because this line did
+not exist.
+
+**In Vietnamese.** The probe set, the seeded memories and every reply you quote
+are Vietnamese; a write-up in another language has to translate its own evidence,
+and a mistranslated reply reads exactly like a wrong grade. Keep identifiers,
+field names, outcome and verdict labels, and file paths verbatim.
+
 Use the template in RUNBOOK §5. Be explicit about what the run does **not**
 support: one run is one sample, and two runs with identical settings have
 disagreed on 2 of 8 questions. Never present a difference between two runs as a

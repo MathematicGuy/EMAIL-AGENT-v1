@@ -116,3 +116,44 @@ def test_unsupported_schema_version_is_rejected() -> None:
         load_probe_set(_payload(schema_version="9.9.9"))
 
 
+
+
+def test_refusal_about_is_parsed() -> None:
+    payload = _payload(
+        probes=[
+            {
+                "id": "lt_restraint_01",
+                "targets": "long_term",
+                "test": "restraint",
+                "question": "what is my job title?",
+                "expect_refusal": True,
+                "refusal_about": ["chức danh", "chức vụ"],
+            }
+        ]
+    )
+    probe = load_probe_set(payload).probes[0]
+    assert probe.refusal_about == ("chức danh", "chức vụ")
+
+
+def test_refusal_about_defaults_to_empty() -> None:
+    assert load_probe_set(_payload()).probes[0].refusal_about == ()
+
+
+def test_refusal_about_without_expect_refusal_is_rejected() -> None:
+    # It would silently do nothing: the noun is only ever combined with a way
+    # of having nothing on the refusal branch. A probe that declares it and
+    # does not expect a refusal is an authoring mistake, not a no-op.
+    payload = _payload(
+        probes=[
+            {
+                "id": "st_recall_01",
+                "targets": "short_term",
+                "test": "recall",
+                "question": "what did I say?",
+                "expect_any": ["a turn"],
+                "refusal_about": ["chức danh"],
+            }
+        ]
+    )
+    with pytest.raises(ProbeSetError, match="refusal_about"):
+        load_probe_set(payload)

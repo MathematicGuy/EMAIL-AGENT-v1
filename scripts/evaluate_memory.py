@@ -260,6 +260,7 @@ async def run_live(
             model=model,
             ran_at=datetime.now(UTC),
             seed_failures=failures,
+            nonce=identity.nonce,
         )
         # Seeding happens inside ask_live, so session.seed_failures is only
         # complete once run_probe_set has returned. Passing it as an argument
@@ -363,6 +364,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "run_key": report.get("run_key"),
+                    # Without this, a detail file cannot be matched to the
+                    # report it belongs to when two runs overlap.
+                    "nonce": report.get("nonce"),
                     "model": report.get("model"),
                     "ran_at": report.get("ran_at"),
                     "seed_failures": report.get("seed_failures"),

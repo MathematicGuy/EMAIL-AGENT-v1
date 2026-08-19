@@ -173,7 +173,9 @@ Two things are worth reacting to:
 - **Silence past roughly ten minutes.** Go to §6.
 
 Do not start a second run while one is in flight. Concurrent runs pile up on
-the migration advisory lock and both wedge.
+the migration advisory lock and both wedge (§6). Since `build_identity` gained
+a per-run nonce they no longer write into each other's stores, so a wedge is now
+the whole risk rather than the visible half of it.
 
 ---
 
@@ -219,6 +221,17 @@ repeated runs with the variation stated (SPEC §7.3).
 ---
 
 ## 5. The write-up
+
+Save it at `evaluations/MEMORIES/reports/<YYYY-MM-DD>-<probe-set>.md`, as a path
+relative to the repo root — never absolute, because the repo sits at a different
+path in the main checkout and in each worktree. The directory is gitignored on
+purpose: a write-up quotes questions and replies in full, the same reason `runs/`
+is. Do not commit it and do not file it under `docs/`.
+
+Write it in Vietnamese. The questions, the seeded memories and the replies are
+Vietnamese, and a write-up in another language ends up translating its own
+evidence. Identifiers, field names, outcome and verdict labels, and paths stay
+verbatim.
 
 What to hand back. Short, and in this shape.
 
