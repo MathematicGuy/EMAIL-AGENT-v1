@@ -1,1 +1,1 @@
-"""Minimal memory evaluation harness. See evaluations/MEMORIES/SPEC.md."""
+"""Minimal memory evaluation harness. See tasks/specs/SPEC-memory-evaluation.md."""

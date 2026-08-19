@@ -3,7 +3,7 @@
              evaluations/MEMORIES/   |   probe set: v1_four_scopes
 ===============================================================================
 
-Plain-language companion to SPEC.md. If you read one file first, read this one.
+Plain-language companion to tasks/specs/SPEC-memory-evaluation.md. If you read one file first, read this one.
 
 
 -------------------------------------------------------------------------------
@@ -34,7 +34,7 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
                persona, tone
   episodic     tasks the user asked for          Postgres        90 days
                AND then approved
-  semantic     company policy documents          RAG corpus      corpus life
+  semantic     company policy documents (vi)     RAG corpus      corpus life
 
   Three facts that shape everything downstream:
 
@@ -212,39 +212,42 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
 -------------------------------------------------------------------------------
 
   PROBE  st_update_01   targets: short_term   test: update
-         seeded turns:  "...deadline is Tuesday."
-                        "Correction: the deadline moved to Wednesday."
-         question:      "When is the CCCD deadline?"
-         expect_any:    Wednesday
-         stale_any:     Tuesday
+         seeded turns:  "Han chot cua viec do la thu Ba."
+                        "Dinh chinh: han chot da doi sang thu Tu."
+         question:      "Han chot cua yeu cau gia han CCCD la khi nao?"
+         expect_any:    thu Tu
+         stale_any:     thu Ba
 
-  ARM 1  full             -> "Wednesday - it moved from Tuesday."   PASS
-                             (Wednesday present, so stale check never runs)
+  ARM 1  full             -> "Thu Tu - da doi tu thu Ba."           PASS
+                             (thu Tu present, so stale check never runs)
 
-  ARM 2  ablated          -> "I don't have a deadline on file."     MISS
+  ARM 2  ablated          -> "Toi khong co thong tin ve han chot."  MISS
 
-  ARM 3  control          -> "I don't have that information."       MISS
+  ARM 3  control          -> "Toi khong co thong tin do."           MISS
+
+         (The probe set itself is written with full Vietnamese diacritics;
+          they are stripped here only because this file is plain ASCII.)
 
   VERDICT:  scope_earned_it
             Short-term memory did its job - and we know it was SHORT-TERM
             specifically, because it was the only thing that moved.
 
   WHAT EACH ARM RULED OUT:
-    control said "Wednesday"        -> model guessed. Not a memory probe.
-    ablated said "Wednesday"        -> something ELSE supplied it.
+    control said "thu Tu"           -> model guessed. Not a memory probe.
+    ablated said "thu Tu"           -> something ELSE supplied it.
                                        Probe is mis-targeted.
-    full said "Tuesday"             -> STALE. Correction stored but lost.
+    full said "thu Ba"              -> STALE. Correction stored but lost.
                                        Worse than forgetting.
 
 
 -------------------------------------------------------------------------------
- 8. THE 9 PROBES THAT SHIP TODAY
+ 8. THE 8 PROBES THAT SHIP TODAY
 -------------------------------------------------------------------------------
 
   ID                 SCOPE        TEST        CORRECT BEHAVIOUR
   ---------------    ----------   ---------   ---------------------------------
   st_recall_01       short_term   recall      says "Da Nang"
-  st_update_01       short_term   update      says Wednesday, not Tuesday
+  st_update_01       short_term   update      says thu Tu, not thu Ba
   lt_recall_01       long_term    recall      names the stored timezone
   lt_restraint_01    long_term    restraint   DECLINES - no job title was set
   ep_recall_01       episodic     recall      names the CCCD renewal task
@@ -259,10 +262,16 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
 
   There is NO isolation probe. See section 11.
 
-  Note the wording is deliberate: ep_recall_01 contains "previous task" and
-  both semantic probes contain "company policy". Those are RETRIEVAL CUES.
-  No cue -> the read never fires -> the probe measures nothing while
-  appearing to work.
+  Note the wording is deliberate: both episodic probes contain "tac vu
+  truoc" and both semantic probes contain "chinh sach cong ty". Those are
+  RETRIEVAL CUES. No cue -> the read never fires -> the probe measures
+  nothing while appearing to work.
+
+  The cues are Vietnamese because the assistant answers only in Vietnamese.
+  They were English until the cue lists were translated, which meant a
+  Vietnamese question fired no retrieval at all - four of these eight probes
+  silently measured nothing. A unit test now holds the probe set to it:
+  tests/unit/features/ai_chat/memory_eval/test_probe_set_fires_retrieval.py
 
   8 probes x 3 arms = 24 model calls per full live run.
 
@@ -287,7 +296,8 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
     # mechanics only - no key, no DB, scripted replies. Measures NOTHING.
     python scripts/evaluate_memory.py --dry-run
 
-    # real run - needs Postgres + GEMINI_API_KEY + JINA_API_KEY
+    # real run - needs a store, a key for --provider, and an embedding key
+    # (GEMINI_API_KEY, or JINA_API_KEY when DOCUMENT_EMBEDDING_PROVIDER=jina)
     python scripts/evaluate_memory.py
 
   EXIT CODES
@@ -314,20 +324,53 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
     [x] live orchestration, run identity, session policy, teardown
     [x] CLI wired end to end, live smoke test behind the `live` marker
 
-  NEVER YET RUN FOR REAL
-    [ ] no PostgreSQL server on this machine
-    [ ] no GEMINI_API_KEY in the environment
-    [ ] no JINA_API_KEY in the environment
-        -> the live smoke test SKIPS. That is correct, not a failure.
-        -> everything above is proven by unit tests against fakes,
-           which proves the WIRING, not the BEHAVIOUR.
+  RUN FOR REAL
+    [x] against a throwaway local PostgreSQL, Vietnamese probe set.
+        That first run is now a HISTORICAL RESULT, not the current state.
+        It found four separate faults, three of which were in the harness
+        or the questions rather than in memory:
+
+        A. THE GRADER counted an empty reply as a memory that forgot.
+           Three of twenty-four answers were empty because the provider
+           was briefly unreachable, and they produced a leaked, a
+           scope_did_nothing and a broken that were conclusions about an
+           outage. Empty is now `NO_ANSWER` / `unreadable` - not a grade,
+           and it outranks everything (SPEC 6.2, 7).
+        B. TWO QUESTIONS WERE GUESSABLE. lt_recall_01 asked for a timezone
+           an assistant that answers in Vietnamese will name anyway;
+           sem_recall_01 accepted the ordinary Vietnamese words for
+           `approve` and `manager`. Both now ask for a fact only the
+           memory holds (SPEC 7.4).
+        C. THE MASK WAS CHECKED BEFORE BLAMING THE QUESTIONS. One arm now
+           runs end to end and asserts the hidden profile appears
+           nowhere in the payload the provider is sent. If that had failed, every conclusion in
+           every report so far would have been void.
+        D. THE EPISODIC LOOKUP COULD NEVER MATCH. It ANDed every word of
+           the user message, question frame included, against the search
+           index. Nothing scored above zero, so the 0.6 threshold was
+           never even reached. The query is now built from the content
+           words only, ORed - the right episode scores 0.8529 where it
+           scored 0.0000 (SPEC 7.5). This one WAS a product defect.
+
+        A, B and C are why the old numbers cannot be read as findings
+        about memory. D is why they should not be read as findings about
+        episodic memory either.
+
+    [ ] a fresh run on the fixed harness. NOTE that nothing in the report
+        records the change: run_key hashes (probe_set_id, model, seed) and
+        the questions are in none of those, and probe_set_id is still
+        v1_four_scopes. So the old and new reports LOOK comparable and are
+        not. See SPEC 15.1 item 8.
+    [ ] repeated runs, so the variation can be reported (SPEC 7.3)
+        -> until then, ONE RUN IS ONE SAMPLE. Do not compare two runs
+           and call the difference a finding.
 
 
 -------------------------------------------------------------------------------
  11. WHAT THIS DOES NOT TELL YOU
 -------------------------------------------------------------------------------
 
-  Four things this harness does NOT cover. SPEC.md section 16 is the single
+  Four things this harness does NOT cover. The spec's section 15 is the single
   authoritative list with the full reasoning; these are the one-line versions,
   and the first one you must know before reading any live report.
 
@@ -337,7 +380,7 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
       passing tenancy check while proving nothing in either direction.
       So it is not shipped.
       Isolation IS covered, strictly and offline, by the memory-policy
-      unit tests. See SPEC 6.2 for why it may also never target semantic:
+      unit tests. See SPEC 5.2 for why it may also never target semantic:
       the company RAG corpus has no tenant field anywhere, by design.
 
   THE LIVE TIER HAS NEVER EXECUTED END TO END.
@@ -361,9 +404,10 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
  WHERE TO GO NEXT
 -------------------------------------------------------------------------------
 
-  SPEC.md     the design and the reason behind every decision above.
-              Section 16 holds the open list; section 6.2 the isolation
-              reasoning; section 8.3 why there is no judge model.
+  the spec    the design and the reason behind every decision above. It
+              lives at tasks/specs/SPEC-memory-evaluation.md. Section 15 holds
+              the open list; section 5.2 the isolation reasoning; section 6.3
+              why there is no judge model.
   README.md   how to run it and how to read a report.
 
   Code:  src/cowork_agent/features/ai_chat/memory_eval/

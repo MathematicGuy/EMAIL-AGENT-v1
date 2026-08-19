@@ -4,15 +4,22 @@ Measures whether each of our four memory scopes holds what was put in it, drops
 superseded values, and refuses to invent — with every result attributable to
 exactly one scope.
 
-Three documents, no overlap:
+Five documents, no overlap:
 
 | | |
 |---|---|
 | **[FLOW.txt](./FLOW.txt)** | What it measures and how, in plain language. **Read this first.** |
-| [SPEC.md](./SPEC.md) | The design and the reason behind each decision. The authority on intent. |
+| [WORKFLOW.md](./WORKFLOW.md) | The order you do things in, what each step is worth, and how to read a report without fooling yourself. |
+| **[RUNBOOK.md](./RUNBOOK.md)** | The operating procedure: pre-check every dependency, run, monitor, write up, validate a suspected defect. Also available as the `/run-memory-eval` skill. |
+| [SPEC-memory-evaluation.md](../../tasks/specs/SPEC-memory-evaluation.md) | The design and the reason behind each decision. The authority on intent. |
 | this file | How to run it and how to read what comes out. |
 
 ## Run it
+
+**For a real run, follow [RUNBOOK.md](./RUNBOOK.md)** — it pre-checks that every
+dependency actually answers before any money is spent, and states the safety
+rules about which database may be written to. What follows is the shape of the
+commands; the runbook is the procedure.
 
 ```powershell
 # Mechanics only. No key, no database, scripted replies.
@@ -23,12 +30,23 @@ A dry run validates that the harness works. It measures nothing about the real
 system and must never be used to make a decision.
 
 ```powershell
-# The real thing. Needs GEMINI_API_KEY, JINA_API_KEY, and a store (see below).
-python scripts/evaluate_memory.py
+# The real thing. Needs a store (see below), a key for the provider, and an
+# embedding key for the corpus: GEMINI_API_KEY, or JINA_API_KEY when
+# DOCUMENT_EMBEDDING_PROVIDER=jina.
+# --provider defaults to $LLM_PROVIDER, else gemini.
+python scripts/evaluate_memory.py --provider openrouter
 ```
 
 8 probes × 3 arms = 24 model calls. The report is written under `baselines/`
 and printed to stdout.
+
+Before that, prove the dependencies answer rather than merely being configured —
+an exhausted embedding key produces a full report in which semantic memory looks
+empty:
+
+```powershell
+python scripts/memeval_preflight.py --provider openrouter
+```
 
 **Exit code 0 means the harness ran**, not that memory is good.
 
@@ -91,6 +109,11 @@ collapse into one verdict.
 `control` disables the seed, **not** the read — the distinction the whole leak
 signal rests on. [FLOW.txt §3](./FLOW.txt) explains why in full.
 
+**One run is one sample.** Two runs at identical configuration have been seen to
+disagree on 2 of 8 probes, including a `control` arm changing its answer. Treat a
+difference between two reports as a hypothesis, not a finding. See
+[SPEC §7.3](../../tasks/specs/SPEC-memory-evaluation.md).
+
 Rows are sorted worst-first, so the top of the table is where to look.
 
 | verdict | means | what to do |
@@ -108,7 +131,18 @@ Two fields decide how much of the above you can believe:
   Read this column first.
 - **`needs_reading`** — how many rows rest on the refusal phrase list rather
   than on a declared substring. The harness does not resolve these; open the
-  matching reply in `runs/` and decide yourself. See [SPEC §8.3](./SPEC.md).
+  matching reply in `runs/` and decide yourself. See [SPEC §6.3](../../tasks/specs/SPEC-memory-evaluation.md).
+
+## The probes are Vietnamese
+
+The assistant answers only in Vietnamese, so the probe questions, the seed
+turns, the refusal phrases and the retrieval cues are all Vietnamese. This is
+not cosmetic: while the cue lists were English, a Vietnamese question fired no
+retrieval at all and four of the eight probes measured nothing while reporting a
+memory failure. [SPEC §2.2](../../tasks/specs/SPEC-memory-evaluation.md) has the full list of what broke.
+
+Diacritics are load-bearing — matching is case-folded but not accent-folded, so
+`khong ro` never meets `không rõ`. Keep new probe text accented.
 
 ## Rules
 
@@ -126,14 +160,14 @@ Two fields decide how much of the above you can believe:
 ## What this does not cover
 
 Cross-tenant isolation, summary episodes, and the launch-gate bridge are all
-out of scope for v1, each for a stated reason. The live tier has also never
-executed end to end. [SPEC §16](./SPEC.md) is the single list — it says what is
-missing and why, and nothing here duplicates it.
+out of scope for v1, each for a stated reason.
+[SPEC §15.1](../../tasks/specs/SPEC-memory-evaluation.md) is the single list — it says what is missing and why,
+and nothing here duplicates it.
 
 The one worth knowing before you read any result: **there is no isolation
 probe.** Seeding a second tenant is not wired, and a probe that asks for
 material nobody seeded gets a refusal from an empty store — it would look like
 a passing tenancy check while proving nothing. Cross-tenant isolation is covered
-strictly, and offline, by the memory-policy unit tests. [SPEC §6.2](./SPEC.md)
+strictly, and offline, by the memory-policy unit tests. [SPEC §5.2](../../tasks/specs/SPEC-memory-evaluation.md)
 covers why it also may never target `semantic`: the company RAG corpus has no
 tenant partition anywhere, by design.
