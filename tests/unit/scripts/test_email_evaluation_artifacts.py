@@ -286,6 +286,24 @@ def test_run_validator_enforces_an_absolute_fifty_case_cap() -> None:
         module.validate_run_artifact(run, maximum_cases=51)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("resolver_expected_route", "direct_plan", "resolver_expected_route"),
+        ("consistency_status", "needs_review", "consistency_status"),
+    ],
+)
+def test_proposal_rejects_stale_resolver_derived_fields(
+    field: str, value: str, message: str
+) -> None:
+    module = load_module()
+    proposals = valid_proposals()
+    proposals["cases"][0][field] = value
+
+    with pytest.raises(ValueError, match=message):
+        module.validate_proposal_batch(proposals, expected_count=1)
+
+
 def test_atomic_write_and_load_json_object_are_metadata_safe(tmp_path: Path) -> None:
     module = load_module()
     destination = tmp_path / "nested" / "artifact.json"
@@ -296,6 +314,44 @@ def test_atomic_write_and_load_json_object_are_metadata_safe(tmp_path: Path) -> 
     assert json.loads(destination.read_text(encoding="utf-8")) == value
     assert module.load_json_object(destination) == value
     assert not destination.with_name(f".{destination.name}.tmp").exists()
+
+
+def test_atomic_write_does_not_unlink_next_writer_temp_after_successful_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_module()
+    destination = tmp_path / "gmail_candidates.json"
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    original_replace = Path.replace
+
+    def replace_then_start_next_writer(self: Path, target: Path) -> Path:
+        replaced = original_replace(self, target)
+        self.write_text("next writer temp", encoding="utf-8")
+        return replaced
+
+    monkeypatch.setattr(Path, "replace", replace_then_start_next_writer)
+
+    module.atomic_write_json({"case_count": 0, "cases": []}, destination)
+
+    assert temporary.read_text(encoding="utf-8") == "next writer temp"
+
+
+def test_atomic_write_removes_candidate_temporary_file_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_module()
+    destination = tmp_path / "gmail_candidates.json"
+    temporary = destination.with_name(f".{destination.name}.tmp")
+
+    def fail_replace(self: Path, target: Path) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        module.atomic_write_json({"case_count": 0, "cases": []}, destination)
+
+    assert not temporary.exists()
 
 
 def test_json_loader_requires_an_object(tmp_path: Path) -> None:

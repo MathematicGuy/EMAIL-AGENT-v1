@@ -9,19 +9,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from cowork_agent.domain.target_contracts import (
-    Actionability,
-    EmailRouteDecision,
-    ExpectedDocumentType,
-    Route,
-)
-from cowork_agent.features.email_action_plan.routing import resolve_route
+from cowork_agent.domain.target_contracts import Route
 
 try:
     from scripts.email_evaluation_artifacts import (
         RUBRIC_VERSION,
         atomic_write_json,
         load_json_object,
+        resolver_expected_route,
         validate_candidate_dataset,
         validate_golden_dataset,
         validate_proposal_batch,
@@ -32,6 +27,7 @@ except ModuleNotFoundError:
         RUBRIC_VERSION,
         atomic_write_json,
         load_json_object,
+        resolver_expected_route,
         validate_candidate_dataset,
         validate_golden_dataset,
         validate_proposal_batch,
@@ -71,26 +67,6 @@ _CANDIDATE_CASE_KEYS = frozenset(
     }
 )
 _CANDIDATE_REFERENCE_KEYS = _CANDIDATE_CASE_KEYS - {"gmail_content"}
-
-
-def resolver_expected_route(ground_truth: Mapping[str, object]) -> str:
-    """Return the route selected by the production resolver for one proposal."""
-
-    decision = EmailRouteDecision(
-        actionability=Actionability(str(ground_truth["actionability"])),
-        route=Route.RETRIEVE_RAG,
-        candidate_action_item=None,
-        email_is_sufficient=bool(ground_truth["email_is_sufficient"]),
-        knowledge_gaps=tuple(str(item) for item in ground_truth["knowledge_gaps"]),
-        retrieval_query=None,
-        expected_document_types=tuple(
-            ExpectedDocumentType(str(item))
-            for item in ground_truth["expected_document_types"]
-        ),
-        reason_codes=(),
-        confidence=1.0,
-    )
-    return resolve_route(decision).route.value
 
 
 def validate_and_enrich_proposals(

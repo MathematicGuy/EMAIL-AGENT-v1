@@ -11,6 +11,14 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import cast
 
+from cowork_agent.domain.target_contracts import (
+    Actionability,
+    EmailRouteDecision,
+    ExpectedDocumentType,
+    Route,
+)
+from cowork_agent.features.email_action_plan.routing import resolve_route
+
 ACTIONABILITIES = frozenset(
     {"action_required", "action_suggested", "informational", "irrelevant", "unclear"}
 )
@@ -52,10 +60,37 @@ def atomic_write_json(value: Mapping[str, object], path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    try:
+        temporary.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        temporary.replace(path)
+    except Exception:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def resolver_expected_route(ground_truth: Mapping[str, object]) -> str:
+    """Return the production resolver route for one validated ground truth."""
+
+    decision = EmailRouteDecision(
+        actionability=Actionability(str(ground_truth["actionability"])),
+        route=Route.RETRIEVE_RAG,
+        candidate_action_item=None,
+        email_is_sufficient=bool(ground_truth["email_is_sufficient"]),
+        knowledge_gaps=tuple(str(item) for item in ground_truth["knowledge_gaps"]),
+        retrieval_query=None,
+        expected_document_types=tuple(
+            ExpectedDocumentType(str(item))
+            for item in ground_truth["expected_document_types"]
+        ),
+        reason_codes=(),
+        confidence=1.0,
     )
-    temporary.replace(path)
+    return resolve_route(decision).route.value
 
 
 def validate_candidate_dataset(
@@ -367,6 +402,21 @@ def _validate_proposal_case(value: object, index: int) -> dict[str, object]:
     )
     _require_nonempty_string(case["selection_reason"], f"{location}.selection_reason")
     _require_enum(case["review_status"], _PROPOSAL_REVIEW_STATUSES, f"{location}.review_status")
+    ground_truth = cast(Mapping[str, object], case["proposed_ground_truth"])
+    expected_route = resolver_expected_route(ground_truth)
+    if case["resolver_expected_route"] != expected_route:
+        raise ValueError(
+            f"{location}.resolver_expected_route must match the production resolver"
+        )
+    consistency_status = (
+        "consistent"
+        if ground_truth["expected_route"] == expected_route
+        else "needs_review"
+    )
+    if case["consistency_status"] != consistency_status:
+        raise ValueError(
+            f"{location}.consistency_status must match the production resolver"
+        )
     return case
 
 
@@ -382,6 +432,8 @@ def _validate_review_case(value: object, index: int) -> dict[str, object]:
     _validate_ground_truth(case["proposal"], f"{location}.proposal")
     _validate_ground_truth(case["final"], f"{location}.final")
     _require_enum(case["review_status"], _REVIEW_STATUSES, f"{location}.review_status")
+    if case["review_status"] == "accepted" and case["final"] != case["proposal"]:
+        raise ValueError(f"{location}.accepted final must exactly match proposal")
     return case
 
 

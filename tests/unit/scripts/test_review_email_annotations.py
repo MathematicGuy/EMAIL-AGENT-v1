@@ -71,6 +71,8 @@ def proposal_case(
     knowledge_gaps: list[str] | None = None,
     expected_document_types: list[str] | None = None,
     expected_route: str = "retrieve_rag",
+    resolver_expected_route: str | None = None,
+    consistency_status: str | None = None,
 ) -> dict[str, object]:
     return {
         "case_id": f"email_case_{index:03d}",
@@ -82,8 +84,12 @@ def proposal_case(
             expected_document_types=expected_document_types,
             expected_route=expected_route,
         ),
-        "resolver_expected_route": expected_route,
-        "consistency_status": "consistent",
+        "resolver_expected_route": (
+            expected_route if resolver_expected_route is None else resolver_expected_route
+        ),
+        "consistency_status": (
+            "consistent" if consistency_status is None else consistency_status
+        ),
         "selection_reason": "Synthetic route-diverse calibration case.",
         "review_status": "pending",
     }
@@ -183,13 +189,15 @@ def second_pass(*, case_ids: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-def test_route_conflict_is_preserved_and_requires_review() -> None:
+def test_route_conflict_with_computed_resolver_values_is_preserved_for_review() -> None:
     module = load_module()
     proposal = proposal_case(
         actionability="action_required",
         email_is_sufficient=False,
         knowledge_gaps=["Missing policy"],
         expected_route="direct_plan",
+        resolver_expected_route="retrieve_rag",
+        consistency_status="needs_review",
     )
 
     enriched = module.validate_and_enrich_proposals(candidates(), proposal_batch(proposal))
@@ -335,6 +343,15 @@ def test_promotion_requires_second_pass_for_every_corrected_case() -> None:
     reviewed = review_export(case_count=70, corrected_case_ids=("email_case_001",))
 
     with pytest.raises(ValueError, match="missing second-pass cases"):
+        module.promote_reviewed_annotations(reviewed, second_pass(case_ids=()))
+
+
+def test_promotion_rejects_an_accepted_final_that_differs_from_its_proposal() -> None:
+    module = load_module()
+    reviewed = review_export()
+    reviewed["cases"][0]["final"]["actionability"] = "action_suggested"
+
+    with pytest.raises(ValueError, match="accepted.*exactly match"):
         module.promote_reviewed_annotations(reviewed, second_pass(case_ids=()))
 
 
