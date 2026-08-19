@@ -254,6 +254,7 @@ def create_chat_session_buffer(
 
 
 def create_app() -> FastAPI:
+    load_runtime_environment()
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
     log_file = os.getenv("LOG_FILE", ".data/app.log")
     handlers: list[logging.Handler] = [logging.StreamHandler()]

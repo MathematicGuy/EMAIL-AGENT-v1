@@ -13,6 +13,7 @@ import {
   type DigestRunView,
   type DigestTask,
 } from '../../modules/mail/api';
+import type { StepView, TaskDetail } from '../../modules/work-intake/types';
 import type {
   ChatCitation,
   ChatComposerAttachment,
@@ -53,6 +54,7 @@ interface SseEvent {
   code?: string;
   safe_message?: string;
   source_id?: string;
+  proposal?: Record<string, unknown>;
   citation_scope?: string;
   project_id?: string;
   document_id?: string;
@@ -271,6 +273,86 @@ function ragEvidenceFromPayload(value: unknown): ChatRagEvidence[] {
   }).slice(0, 5);
 }
 
+function workflowFromTaskProposal(proposal: Record<string, unknown>): TaskWorkflow | null {
+  if (
+    typeof proposal.episode_id !== 'string' ||
+    typeof proposal.task_title !== 'string' ||
+    !Array.isArray(proposal.action_plan)
+  ) {
+    return null;
+  }
+
+  const episodeId = proposal.episode_id;
+  const title = proposal.task_title;
+  const actionPlan = proposal.action_plan.filter((item): item is string => typeof item === 'string');
+  const validationStatus = typeof proposal.validation_status === 'string' ? proposal.validation_status : 'system_generated';
+  const isApproved = validationStatus === 'user_approved' || validationStatus === 'completed';
+  const nowIso = new Date().toISOString();
+
+  const steps: StepView[] = actionPlan.map((desc, idx) => ({
+    step_id: `step-${idx + 1}`,
+    task_type: 'CHAT_ACTION',
+    assigned_module: 'module_2',
+    capability_id: desc,
+    capability_version: '1.0',
+    state: isApproved ? ('SUCCEEDED' as const) : ('READY' as const),
+    required: true,
+    allow_partial: false,
+    accepted_partial: false,
+    current_attempt: 1,
+    current_job_id: null,
+    operation_revision: 1,
+    depends_on: [],
+    completion_criteria: [],
+    updated_at: nowIso,
+  }));
+
+  const detail: TaskDetail = {
+    task: {
+      schema_version: '1.0',
+      task_id: episodeId,
+      run_id: `run-${episodeId}`,
+      request_id: `req-${episodeId}`,
+      client_request_id: `client-${episodeId}`,
+      status: isApproved ? 'COMPLETED' : 'AWAITING_PLAN_APPROVAL',
+      state_version: 1,
+      pause_requested: false,
+      cancellation_generation: 0,
+      current_plan_version: 1,
+      actor_id: 'user',
+      project_id: 'default',
+      workspace_id: 'default',
+      created_at: nowIso,
+      updated_at: nowIso,
+    },
+    run: null,
+    plan: {
+      plan_id: `plan-${episodeId}`,
+      plan_version: 1,
+      objective: title,
+      scope: [],
+      out_of_scope: [],
+      constraints: [],
+      assumptions: [],
+      risks: [],
+      completion_criteria: [],
+      approved: isApproved,
+      steps,
+      plan_steps: [],
+    },
+    steps,
+  };
+
+  return {
+    taskId: episodeId,
+    detail,
+    events: [],
+    phase: isApproved ? 'Kế hoạch đã được phê duyệt' : 'Chờ bạn phê duyệt kế hoạch',
+    connectionState: 'live',
+    lastEventSequence: 1,
+  };
+}
+
 async function parseSse(
   response: Response,
   onEvent: (event: SseEvent) => void
@@ -317,7 +399,7 @@ export function useStreamingChat(
     },
   ]]));
   const [apiStatus, setApiStatus] = useState<'unknown' | 'online' | 'offline'>('unknown');
-  const [workflows] = useState<Record<string, TaskWorkflow>>({});
+  const [workflows, setWorkflows] = useState<Record<string, TaskWorkflow>>({});
   const activeConversationRef = useRef<string | null>(null);
   const draftKeyRef = useRef(NEW_CHAT_KEY);
   const navigationEpochRef = useRef(0);
@@ -929,6 +1011,26 @@ export function useStreamingChat(
                 }
               : message),
           }));
+        } else if (event.event_type === 'task_proposal' && event.proposal) {
+          const workflow = workflowFromTaskProposal(event.proposal);
+          if (workflow) {
+            setWorkflows((current) => ({
+              ...current,
+              [workflow.taskId]: workflow,
+            }));
+            updateRuntime(sessionId as string, (current) => ({
+              ...current,
+              messages: current.messages.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      taskId: workflow.taskId,
+                      taskStatus: 'AWAITING_PLAN_APPROVAL',
+                    }
+                  : message
+              ),
+            }));
+          }
         } else if (event.event_type === 'error' && event.safe_message) {
           terminalStatus = generationStatus(event.status) ??
             (/usage/i.test(event.error_code ?? event.code ?? '') ? 'usage_limit_reached'
@@ -1184,10 +1286,98 @@ export function useStreamingChat(
   }, [messages, sendMessage]);
 
   const refreshWorkflow = useCallback(async (taskId: string) => { void taskId; }, []);
-  const approveWorkflowPlan = useCallback(async (taskId: string) => { void taskId; }, []);
+  const approveWorkflowPlan = useCallback(
+    async (taskId: string) => {
+      const sessionId = activeConversationId;
+      if (!sessionId) return;
+      const response = await fetch(
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/task-episodes/${encodeURIComponent(taskId)}/approve`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Could not approve plan (HTTP ${response.status}).`);
+      }
+      setWorkflows((current) => {
+        const existing = current[taskId];
+        if (!existing || !existing.detail) return current;
+        const updatedSteps: StepView[] = existing.detail.steps.map((step) => ({
+          ...step,
+          state: 'SUCCEEDED' as const,
+        }));
+        return {
+          ...current,
+          [taskId]: {
+            ...existing,
+            phase: 'Plan đã được phê duyệt — đang thực hiện.',
+            detail: {
+              ...existing.detail,
+              task: {
+                ...existing.detail.task,
+                status: 'COMPLETED',
+              },
+              plan: existing.detail.plan
+                ? {
+                    ...existing.detail.plan,
+                    approved: true,
+                    steps: updatedSteps,
+                  }
+                : null,
+              steps: updatedSteps,
+            },
+          },
+        };
+      });
+    },
+    [activeConversationId]
+  );
   const reviseWorkflowPlan = useCallback(
-    async (taskId: string, feedback: string) => { void taskId; void feedback; },
-    []
+    async (taskId: string, feedback: string) => {
+      const sessionId = activeConversationId;
+      if (!sessionId) return;
+      const response = await fetch(
+        `${API_BASE_URL}/v1/cowork/chat/sessions/${encodeURIComponent(sessionId)}/task-episodes/${encodeURIComponent(taskId)}/reject`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Could not reject plan (HTTP ${response.status}).`);
+      }
+      setWorkflows((current) => {
+        const existing = current[taskId];
+        if (!existing || !existing.detail) return current;
+        return {
+          ...current,
+          [taskId]: {
+            ...existing,
+            phase: 'Đã gửi yêu cầu chỉnh sửa kế hoạch.',
+            detail: {
+              ...existing.detail,
+              task: {
+                ...existing.detail.task,
+                status: 'CANCELLED',
+              },
+              plan: existing.detail.plan
+                ? {
+                    ...existing.detail.plan,
+                    approved: false,
+                  }
+                : null,
+            },
+          },
+        };
+      });
+      if (feedback.trim()) {
+        await sendMessage(`Chỉnh sửa kế hoạch: ${feedback.trim()}`);
+      }
+    },
+    [activeConversationId, sendMessage]
   );
   const retryWorkflowStep = useCallback(
     async (taskId: string, stepId: string) => { void taskId; void stepId; },
