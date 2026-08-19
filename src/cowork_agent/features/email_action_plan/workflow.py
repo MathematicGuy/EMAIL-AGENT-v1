@@ -239,7 +239,7 @@ class DigestWorker:
 
     @observe(name="execute_digest_run")
     async def execute(
-        self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
+        self, run_id: str, *, user_timezone: str = "Asia/Ho_Chi_Minh", now: datetime | None = None
     ) -> DigestRun | None:
         clock = now or datetime.now(UTC)
         run = await self._runs.claim(run_id, clock)

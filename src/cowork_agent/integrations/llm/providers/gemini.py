@@ -6,9 +6,10 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from google import genai
 from google.genai import errors, types
@@ -356,10 +357,30 @@ GENERATION_SCHEMA: dict[str, object] = {
 }
 
 
+def _format_datetime_tz(dt: datetime, timezone_str: str) -> str:
+    """Format a datetime localized to user timezone (defaults to Asia/Ho_Chi_Minh)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    target_tz_name = (
+        timezone_str if timezone_str and timezone_str.upper() != "UTC" else "Asia/Ho_Chi_Minh"
+    )
+    try:
+        target_tz = ZoneInfo(target_tz_name)
+        return dt.astimezone(target_tz).isoformat()
+    except Exception:
+        try:
+            return dt.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")).isoformat()
+        except Exception:
+            return dt.isoformat()
+
+
 def _build_prompt(timezone: str, now: datetime, threads: Sequence[_Thread]) -> str:
+    effective_timezone = (
+        timezone if timezone and timezone.upper() != "UTC" else "Asia/Ho_Chi_Minh"
+    )
     data = {
-        "userTimezone": timezone,
-        "currentTime": now.isoformat(),
+        "userTimezone": effective_timezone,
+        "currentTime": _format_datetime_tz(now, effective_timezone),
         "threads": [
             {
                 "messages": [
@@ -369,7 +390,7 @@ def _build_prompt(timezone: str, now: datetime, threads: Sequence[_Thread]) -> s
                         "subject": message.subject,
                         "senderName": message.sender_name,
                         "sender": message.sender_email,
-                        "sentAt": message.received_at.isoformat(),
+                        "sentAt": _format_datetime_tz(message.received_at, effective_timezone),
                         "body": message.normalized_body,
                         # ADR-003: presence only — attachment content is never processed.
                         "attachmentsPresent": message.attachments_present,
