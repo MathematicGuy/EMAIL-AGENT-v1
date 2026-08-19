@@ -1,7 +1,7 @@
 # Email Intent Evaluation Standardization Design
 
-**Date:** 2026-08-19  
-**Status:** Approved in conversation; awaiting written-spec review  
+**Date:** 2026-08-19
+**Status:** Approved in conversation; awaiting written-spec review
 **Scope:** `evaluations/EMAIL/`, its supporting scripts, and script-level tests
 
 ## Objective
