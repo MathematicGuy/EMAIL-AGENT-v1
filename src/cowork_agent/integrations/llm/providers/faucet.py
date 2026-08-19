@@ -30,6 +30,7 @@ from .gemini import (
     CLASSIFICATION_SCHEMA,
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
+    EMAIL_INTENT_PROMPT_VERSION,
     GENERATION_SCHEMA,
     GENERATOR_SYSTEM_INSTRUCTION,
     _build_generation_prompt,
@@ -142,7 +143,7 @@ class FaucetRouteClassifier:
         _update_current_span(
             input_data={
                 "message_count": len(messages),
-                "prompt_version": "current",
+                "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
             },
             metadata={
                 "feature": "email-intent-router",
@@ -179,7 +180,7 @@ class FaucetRouteClassifier:
         trace_input = {
             "operation": "classify-email-intent",
             "message_count": len(batch_ids),
-            "prompt_version": "current",
+            "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
         }
         decisions = _validated_decisions(
             await self._complete(prompt, trace_input=trace_input), expected
@@ -236,7 +237,7 @@ class FaucetRouteClassifier:
                 },
                 metadata={
                     "provider": "faucet",
-                    "prompt_version": "current",
+                    "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
                 },
                 model=self._settings.model,
             )

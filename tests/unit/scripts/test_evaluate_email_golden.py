@@ -1,10 +1,13 @@
-"""Tests for the metadata-only live email-router evaluation harness."""
+"""Tests for immutable, metadata-only Email Intent evaluation runs."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -15,332 +18,217 @@ from cowork_agent.domain.target_contracts import (
     Route,
 )
 from cowork_agent.features.email_action_plan.schemas import ClassificationResult, ClassifiedMessage
-from tests.unit.scripts.cli_harness import load_script
+from tests.unit.scripts.cli_harness import load_script, run_cli
+
+NOW = datetime(2026, 8, 19, tzinfo=UTC)
+RUBRIC_VERSION = "email-intent-annotation-v1"
 
 
 def load_module():
     return load_script("evaluate_email_golden")
 
 
-def _decision(actionability: Actionability, route: Route) -> EmailRouteDecision:
+def _ground_truth() -> dict[str, object]:
+    return {
+        "actionability": "action_required",
+        "email_is_sufficient": False,
+        "knowledge_gaps": ["Synthetic missing policy"],
+        "expected_document_types": ["company_policy"],
+        "expected_route": "retrieve_rag",
+        "rationale": "Synthetic human-reviewed rationale.",
+    }
+
+
+def _candidate_case(index: int) -> dict[str, object]:
+    return {
+        "case_id": f"email_case_{index:03d}",
+        "source_message_id": f"synthetic-message-{index:03d}",
+        "gmail_thread_id": f"synthetic-thread-{index:03d}",
+        "sender": "Synthetic Sender <synthetic@example.com>",
+        "subject": f"Synthetic subject {index}",
+        "received_at": "2026-08-19T00:00:00Z",
+        "labels": ["INBOX"],
+        "gmail_content": "Synthetic private body.",
+    }
+
+
+def candidates(case_count: int) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "fetched_at": "2026-08-19T00:00:00Z",
+        "gmail_query": "in:inbox",
+        "ordering": "received_at_desc",
+        "case_count": case_count,
+        "cases": [_candidate_case(index) for index in range(1, case_count + 1)],
+    }
+
+
+def golden(case_count: int) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "rubric_version": RUBRIC_VERSION,
+        "case_count": case_count,
+        "cases": [
+            {
+                "case_id": f"email_case_{index:03d}",
+                "source_message_id": f"synthetic-message-{index:03d}",
+                "ground_truth": _ground_truth(),
+                "annotation": {
+                    "source": "human_reviewed",
+                    "rubric_version": RUBRIC_VERSION,
+                    "reviewed_at": "2026-08-19T00:00:00Z",
+                },
+            }
+            for index in range(1, case_count + 1)
+        ],
+    }
+
+
+def _decision() -> EmailRouteDecision:
     return EmailRouteDecision(
-        actionability=actionability,
-        route=route,
-        candidate_action_item=None,
-        email_is_sufficient=route is not Route.RETRIEVE_RAG,
-        knowledge_gaps=("gap",) if route is Route.RETRIEVE_RAG else (),
-        retrieval_query=None,
+        actionability=Actionability.ACTION_REQUIRED,
+        route=Route.RETRIEVE_RAG,
+        candidate_action_item="Review the policy.",
+        email_is_sufficient=False,
+        knowledge_gaps=("Synthetic missing policy",),
+        retrieval_query="synthetic policy",
         expected_document_types=(),
-        reason_codes=(ReasonCode.NO_ACTION,) if route is Route.NO_ACTION else (),
+        reason_codes=(ReasonCode.POLICY_REQUIRED,),
         confidence=0.9,
     )
 
 
 class FakeClassifier:
     async def classify(self, user_timezone, current_time, messages):
+        del user_timezone, current_time
         return ClassificationResult(
-            tuple(
-                ClassifiedMessage(
-                    message.gmail_message_id,
-                    _decision(
-                        (
-                            Actionability.INFORMATIONAL
-                            if message.gmail_message_id == "m1"
-                            else Actionability.ACTION_REQUIRED
-                        ),
-                        Route.NO_ACTION if message.gmail_message_id == "m1" else Route.RETRIEVE_RAG,
-                    ),
-                )
-                for message in messages
-            ),
-            batch_count=2,
-            filtered_summary="Automated updates were filtered.",
-        )
-
-
-class FakeFallbackClassifier:
-    async def classify(self, user_timezone, current_time, messages):
-        return ClassificationResult(
-            (
-                ClassifiedMessage(
-                    messages[0].gmail_message_id,
-                    _decision(Actionability.INFORMATIONAL, Route.NO_ACTION),
-                    is_fallback=True,
-                ),
-            ),
+            tuple(ClassifiedMessage(message.gmail_message_id, _decision()) for message in messages),
             batch_count=1,
         )
 
 
-def test_build_envelopes_uses_candidate_snippets_without_evaluation_text_leaks(
-    tmp_path: Path,
-) -> None:
+def _summary(selected_candidates: list[dict[str, object]]) -> dict[str, object]:
     module = load_module()
-    dataset = tmp_path / "candidates.json"
-    dataset.write_text(
-        '[{"id":"email_candidate_001","gmail_message_id":"m1",'
-        '"gmail_thread_id":"t1","sender":"Sender <sender@example.com>",'
-        '"subject":"Subject","received_at":"2026-08-18T00:00:00+00:00",'
-        '"labels":["INBOX"],"snippet":"Body excerpt"}]',
-        encoding="utf-8",
-    )
-
-    envelopes = module.load_envelopes(dataset)
-
-    assert len(envelopes) == 1
-    assert envelopes[0].gmail_message_id == "m1"
-    assert envelopes[0].normalized_body == "Body excerpt"
-    assert envelopes[0].body_format is BodyFormat.TEXT
-    assert envelopes[0].fetch_status is FetchStatus.COMPLETE
+    messages = module.load_envelopes_from_candidates(selected_candidates)
+    return asyncio.run(module.evaluate(messages, FakeClassifier(), NOW))
 
 
-def test_evaluation_limit_is_bounded_to_fifty_cases() -> None:
+def test_build_run_artifact_uses_explicit_shard_and_immutable_versions() -> None:
     module = load_module()
+    candidate_dataset = candidates(200)
+    golden_200 = golden(200)
+    candidate_cases = candidate_dataset["cases"]
+    assert isinstance(candidate_cases, list)
+    selected = [dict(case) for case in candidate_cases[50:100]]
 
-    assert module.MAX_CASES == 50
-
-
-def test_evaluate_and_render_report_separates_predictions_from_ground_truth() -> None:
-    module = load_module()
-    messages = module.load_envelopes_from_records(
-        [
-            {
-                "gmail_message_id": "m1",
-                "gmail_thread_id": "t1",
-                "sender": "a@example.com",
-                "subject": "one",
-                "received_at": "2026-08-18T00:00:00+00:00",
-                "labels": [],
-                "snippet": "first",
-            },
-            {
-                "gmail_message_id": "m2",
-                "gmail_thread_id": "t2",
-                "sender": "b@example.com",
-                "subject": "two",
-                "received_at": "2026-08-18T00:00:00+00:00",
-                "labels": [],
-                "snippet": "second",
-            },
-        ]
-    )
-
-    summary = asyncio.run(module.evaluate(messages, FakeClassifier(), datetime.now(UTC)))
-    report = module.render_report(
-        summary, dataset_name="gmail_candidates.json", run_date="2026-08-18"
-    )
-
-    assert summary["case_count"] == 2
-    assert summary["route_counts"] == {
-        "NO_ACTION": 1,
-        "DIRECT_PLAN": 0,
-        "RETRIEVE_RAG": 1,
-    }
-    assert "Current production Email Intent Router" in report
-    assert "Reviewed route accuracy: **not available**" in report
-    assert "--limit 2" in report
-    assert "first" not in report
-    assert "second" not in report
-
-
-def test_evaluate_persists_one_prediction_record_per_message() -> None:
-    module = load_module()
-    messages = module.load_envelopes_from_records(
-        [
-            {
-                "gmail_message_id": "m1",
-                "gmail_thread_id": "t1",
-                "sender": "a@example.com",
-                "subject": "one",
-                "received_at": "2026-08-18T00:00:00+00:00",
-                "labels": [],
-                "snippet": "first",
-            }
-        ]
-    )
-
-    summary = asyncio.run(module.evaluate(messages, FakeClassifier(), datetime.now(UTC)))
-
-    assert summary["results"] == [
-        {
-            "gmail_message_id": "m1",
-            "prediction": {
-                "actionability": "informational",
-                "candidate_action_item": None,
-                "email_is_sufficient": True,
-                "knowledge_gaps": [],
-                "retrieval_query": None,
-                "expected_document_types": [],
-                "confidence": 0.9,
-                "resolved_route": "no_action",
-                "reason_codes": ["no_action"],
-                "source_status": "model_prediction",
-            },
-        }
-    ]
-
-
-def test_evaluate_tracks_explicit_fallback_provenance() -> None:
-    module = load_module()
-    messages = module.load_envelopes_from_records(
-        [
-            {
-                "gmail_message_id": "m1",
-                "gmail_thread_id": "t1",
-                "sender": "a@example.com",
-                "subject": "one",
-                "received_at": "2026-08-18T00:00:00+00:00",
-                "labels": [],
-                "snippet": "first",
-            }
-        ]
-    )
-
-    summary = asyncio.run(module.evaluate(messages, FakeFallbackClassifier(), datetime.now(UTC)))
-
-    assert summary["missing_ids"] == ["m1"]
-    assert summary["fallback_count"] == 1
-    assert summary["fallback_ids"] == ["m1"]
-    assert summary["results"][0]["prediction"]["source_status"] == "classifier_fallback"
-
-
-def test_merge_preserves_reviewed_labels_and_removes_obsolete_proposals() -> None:
-    module = load_module()
-    existing = [
-        {
-            "id": "email_case_001",
-            "gmail_message_id": "m1",
-            "sender": "old@example.com",
-            "subject": "old",
-            "ground_truth": {
-                "actionability": "informational",
-                "expected_route": "no_action",
-                "rationale": "Reviewed label.",
-            },
-            "ground_truth_proposal": {"expected_route": "retrieve_rag"},
-            "proposal_comparison": {"status": "computed"},
-        }
-    ]
-    candidates = [
-        {
-            "id": "email_candidate_001",
-            "gmail_message_id": "m1",
-            "sender": "new@example.com",
-            "subject": "new",
-            "received_at": "2026-08-18T00:00:00+00:00",
-            "labels": [],
-            "snippet": "first",
-        },
-        {
-            "id": "email_candidate_002",
-            "gmail_message_id": "m2",
-            "sender": "b@example.com",
-            "subject": "two",
-            "received_at": "2026-08-18T00:00:00+00:00",
-            "labels": [],
-            "snippet": "second",
-        },
-    ]
-    current = {
-        "results": [
-            {
-                "gmail_message_id": "m1",
-                "prediction": {"actionability": "informational", "resolved_route": "no_action"},
-            },
-            {
-                "gmail_message_id": "m2",
-                "prediction": {"actionability": "action_required", "resolved_route": "direct_plan"},
-            },
-        ]
-    }
-    merged = module.merge_golden_dataset(
-        existing,
-        candidates,
-        current,
-        provider="gemini",
-        model="test-model",
-        run_at="2026-08-18T00:00:00+00:00",
-    )
-
-    assert [item["gmail_message_id"] for item in merged] == ["m1", "m2"]
-    assert merged[0]["ground_truth"]["rationale"] == "Reviewed label."
-    assert merged[0]["ground_truth_status"] != "proposed"
-    assert "ground_truth_proposal" not in merged[0]
-    assert "proposal_comparison" not in merged[0]
-    assert merged[0]["eval_result"] == {
-        "route_match": True,
-        "actionability_match": True,
-        "status": "computed",
-    }
-    assert merged[1]["ground_truth"] is None
-    assert merged[1]["ground_truth_status"] == "unreviewed"
-    assert merged[1]["latest_evaluation"] == {
-        "provider": "gemini",
-        "model": "test-model",
-        "run_at": "2026-08-18T00:00:00+00:00",
-        "prompt_version": "current",
-    }
-
-
-def test_merge_does_not_relabel_records_outside_the_current_run() -> None:
-    module = load_module()
-    existing = [
-        {
-            "id": "email_case_old",
-            "gmail_message_id": "old-message",
-            "ground_truth": None,
-            "latest_evaluation": {
-                "provider": "previous-provider",
-                "model": "previous-model",
-                "run_at": "2026-08-17T00:00:00+00:00",
-            },
-        }
-    ]
-    candidates = [
-        {
-            "id": "email_candidate_new",
-            "gmail_message_id": "new-message",
-            "sender": "new@example.com",
-            "subject": "new",
-            "received_at": "2026-08-18T00:00:00+00:00",
-            "labels": [],
-            "snippet": "new message",
-        }
-    ]
-
-    merged = module.merge_golden_dataset(
-        existing,
-        candidates,
-        {
-            "results": [
-                {
-                    "gmail_message_id": "new-message",
-                    "prediction": {"actionability": "informational", "resolved_route": "no_action"},
-                }
-            ]
-        },
+    run = module.build_run_artifact(
+        _summary(selected),
+        golden=golden_200,
+        selected_candidates=selected,
         provider="openrouter",
         model="test-model",
-        run_at="2026-08-18T00:00:00+00:00",
+        run_at=NOW,
+        shard_index=2,
+        shard_count=4,
     )
 
-    assert merged[0]["latest_evaluation"]["provider"] == "previous-provider"
-    assert merged[1]["latest_evaluation"]["provider"] == "openrouter"
-    assert "eval_result" not in merged[0]
-    assert "snippet" not in merged[1]
+    assert run["prompt_version"] == "email-intent-v1"
+    assert run["shard"] == {"index": 2, "count": 4, "case_count": 50}
+    assert run["cases"][0]["case_id"] == "email_case_051"
+    assert "ground_truth" not in run["cases"][0]
+    assert "gmail_content" not in json.dumps(run)
 
 
-def test_build_live_classifier_supports_openrouter(monkeypatch) -> None:
+def test_select_shard_is_contiguous_and_limited_to_fifty_cases() -> None:
     module = load_module()
-    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setenv("OPENROUTER_MODEL", "test-model")
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
-    monkeypatch.setenv("LANGFUSE_TRACING_ENABLED", "false")
+    candidate_cases = candidates(200)["cases"]
+    assert isinstance(candidate_cases, list)
 
-    classifier, provider, model = module.build_live_classifier()
+    selected = module.select_shard(candidate_cases, shard_index=2, shard_count=4, limit=50)
 
-    assert classifier.__class__.__name__ == "OpenRouterRouteClassifier"
-    assert provider == "openrouter"
-    assert model == "test-model"
+    assert [case["case_id"] for case in selected] == [
+        f"email_case_{index:03d}" for index in range(51, 101)
+    ]
+
+
+def test_build_run_artifact_rejects_selected_candidate_and_golden_id_mismatch() -> None:
+    module = load_module()
+    candidate_dataset = candidates(1)
+    selected = candidate_dataset["cases"]
+    assert isinstance(selected, list)
+    mismatched_golden = golden(1)
+    golden_cases = mismatched_golden["cases"]
+    assert isinstance(golden_cases, list)
+    golden_cases[0]["case_id"] = "email_case_other"
+
+    with pytest.raises(ValueError, match="case_id"):
+        module.build_run_artifact(
+            _summary(selected),
+            golden=mismatched_golden,
+            selected_candidates=selected,
+            provider="gemini",
+            model="test-model",
+            run_at=NOW,
+            shard_index=1,
+            shard_count=1,
+        )
+
+
+def test_cli_writes_only_a_metadata_safe_run_and_never_writes_golden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_module()
+    candidate_path = tmp_path / "candidates.json"
+    golden_path = tmp_path / "golden.json"
+    runs_dir = tmp_path / "runs"
+    candidate_path.write_text(json.dumps(candidates(1)), encoding="utf-8")
+    golden_value = golden(1)
+    golden_path.write_text(json.dumps(golden_value), encoding="utf-8")
+
+    monkeypatch.setattr(
+        module, "build_live_classifier", lambda: (FakeClassifier(), "gemini", "test")
+    )
+    original_write_text = Path.write_text
+
+    def write_text(path: Path, *args: object, **kwargs: object) -> int:
+        if path == golden_path:
+            raise AssertionError("the evaluator must never write the golden artifact")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+
+    result = run_cli(
+        "evaluate_email_golden",
+        "--candidates",
+        str(candidate_path),
+        "--golden",
+        str(golden_path),
+        "--runs-dir",
+        str(runs_dir),
+        "--shard-index",
+        "1",
+        "--shard-count",
+        "1",
+        "--limit",
+        "1",
+    )
+
+    run_paths = list(runs_dir.glob("*.json"))
+    assert result.returncode == 0
+    assert golden_path.read_text(encoding="utf-8") == json.dumps(golden_value)
+    assert len(run_paths) == 1
+    assert "gmail_content" not in run_paths[0].read_text(encoding="utf-8")
+    assert "gmail_content" not in result.stdout
+    assert not list(tmp_path.glob("*.md"))
+
+
+def test_build_envelopes_loads_candidate_content_only_into_ephemeral_messages() -> None:
+    module = load_module()
+    candidate_cases = candidates(1)["cases"]
+    assert isinstance(candidate_cases, list)
+
+    envelopes = module.load_envelopes_from_candidates(candidate_cases)
+
+    assert envelopes[0].gmail_message_id == "synthetic-message-001"
+    assert envelopes[0].body_format is BodyFormat.TEXT
+    assert envelopes[0].fetch_status is FetchStatus.COMPLETE
