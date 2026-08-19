@@ -11,14 +11,6 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import cast
 
-from cowork_agent.domain.target_contracts import (
-    Actionability,
-    EmailRouteDecision,
-    ExpectedDocumentType,
-    Route,
-)
-from cowork_agent.features.email_action_plan.routing import resolve_route
-
 ACTIONABILITIES = frozenset(
     {"action_required", "action_suggested", "informational", "irrelevant", "unclear"}
 )
@@ -38,9 +30,6 @@ RUBRIC_VERSION = "email-intent-annotation-v1"
 PROMPT_VERSION = "email-intent-v1"
 
 _ANNOTATION_SOURCES = frozenset({"human_reviewed", "calibrated_labeling_agent"})
-_CONSISTENCY_STATUSES = frozenset({"consistent", "needs_review"})
-_PROPOSAL_REVIEW_STATUSES = frozenset({"pending"})
-_REVIEW_STATUSES = frozenset({"accepted", "corrected"})
 _RUN_SOURCE_STATUSES = frozenset({"model_prediction", "classifier_fallback"})
 
 
@@ -71,26 +60,6 @@ def atomic_write_json(value: Mapping[str, object], path: Path) -> None:
         except OSError:
             pass
         raise
-
-
-def resolver_expected_route(ground_truth: Mapping[str, object]) -> str:
-    """Return the production resolver route for one validated ground truth."""
-
-    decision = EmailRouteDecision(
-        actionability=Actionability(str(ground_truth["actionability"])),
-        route=Route.RETRIEVE_RAG,
-        candidate_action_item=None,
-        email_is_sufficient=bool(ground_truth["email_is_sufficient"]),
-        knowledge_gaps=tuple(str(item) for item in ground_truth["knowledge_gaps"]),
-        retrieval_query=None,
-        expected_document_types=tuple(
-            ExpectedDocumentType(str(item))
-            for item in ground_truth["expected_document_types"]
-        ),
-        reason_codes=(),
-        confidence=1.0,
-    )
-    return resolve_route(decision).route.value
 
 
 def validate_candidate_dataset(
@@ -164,25 +133,6 @@ def validate_candidate_dataset(
         for previous, current in zip(received_at, received_at[1:], strict=False)
     ):
         raise ValueError("candidate dataset cases must be ordered by received_at descending")
-    return _copy_validated(top, validated_cases)
-
-
-def validate_proposal_batch(
-    value: object, *, expected_count: int = 70
-) -> dict[str, object]:
-    """Validate the proposal batch, which contains no Gmail content."""
-
-    top = _top_level(
-        value,
-        {"schema_version", "rubric_version", "case_count", "cases"},
-        "proposal batch",
-    )
-    _validate_version_fields(top, "proposal batch")
-    cases = _list(top["cases"], "proposal batch.cases")
-    _require_case_count(top["case_count"], len(cases), expected_count, "proposal batch")
-    validated_cases = [_validate_proposal_case(item, index) for index, item in enumerate(cases)]
-    _require_unique(validated_cases, "case_id", "proposal batch")
-    _require_unique(validated_cases, "source_message_id", "proposal batch")
     return _copy_validated(top, validated_cases)
 
 
@@ -378,62 +328,16 @@ def _require_rubric_version(mapping: Mapping[str, object], location: str) -> Non
         raise ValueError(f"{location}.rubric_version must be '{RUBRIC_VERSION}'")
 
 
-def _validate_proposal_case(value: object, index: int) -> dict[str, object]:
-    location = f"proposal batch.cases[{index}]"
-    case = _top_level(
-        value,
-        {
-            "case_id",
-            "source_message_id",
-            "proposed_ground_truth",
-            "resolver_expected_route",
-            "consistency_status",
-            "selection_reason",
-            "review_status",
-        },
-        location,
-    )
-    _require_nonempty_string(case["case_id"], f"{location}.case_id")
-    _require_nonempty_string(case["source_message_id"], f"{location}.source_message_id")
-    _validate_ground_truth(case["proposed_ground_truth"], f"{location}.proposed_ground_truth")
-    _require_enum(case["resolver_expected_route"], ROUTES, f"{location}.resolver_expected_route")
-    _require_enum(
-        case["consistency_status"], _CONSISTENCY_STATUSES, f"{location}.consistency_status"
-    )
-    _require_nonempty_string(case["selection_reason"], f"{location}.selection_reason")
-    _require_enum(case["review_status"], _PROPOSAL_REVIEW_STATUSES, f"{location}.review_status")
-    ground_truth = cast(Mapping[str, object], case["proposed_ground_truth"])
-    expected_route = resolver_expected_route(ground_truth)
-    if case["resolver_expected_route"] != expected_route:
-        raise ValueError(
-            f"{location}.resolver_expected_route must match the production resolver"
-        )
-    consistency_status = (
-        "consistent"
-        if ground_truth["expected_route"] == expected_route
-        else "needs_review"
-    )
-    if case["consistency_status"] != consistency_status:
-        raise ValueError(
-            f"{location}.consistency_status must match the production resolver"
-        )
-    return case
-
-
 def _validate_review_case(value: object, index: int) -> dict[str, object]:
     location = f"review export.cases[{index}]"
     case = _top_level(
         value,
-        {"case_id", "source_message_id", "proposal", "final", "review_status"},
+        {"case_id", "source_message_id", "final"},
         location,
     )
     _require_nonempty_string(case["case_id"], f"{location}.case_id")
     _require_nonempty_string(case["source_message_id"], f"{location}.source_message_id")
-    _validate_ground_truth(case["proposal"], f"{location}.proposal")
     _validate_ground_truth(case["final"], f"{location}.final")
-    _require_enum(case["review_status"], _REVIEW_STATUSES, f"{location}.review_status")
-    if case["review_status"] == "accepted" and case["final"] != case["proposal"]:
-        raise ValueError(f"{location}.accepted final must exactly match proposal")
     return case
 
 

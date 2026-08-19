@@ -69,6 +69,5 @@ var/
 
 /evaluations/EMAIL/gmail_candidates.json
 /evaluations/EMAIL/.gmail_candidates.json.tmp
-/evaluations/EMAIL/annotation_proposals.json
 /evaluations/EMAIL/reviewed_annotations.json
-/evaluations/EMAIL/annotation_second_pass.json
+/evaluations/EMAIL/email-routes/

@@ -53,35 +53,11 @@ def valid_candidates(case_count: int = 2) -> dict[str, object]:
     }
 
 
-def _proposal_case(index: int = 1) -> dict[str, object]:
-    return {
-        "case_id": f"email_case_{index:03d}",
-        "source_message_id": f"synthetic-message-{index}",
-        "proposed_ground_truth": _ground_truth(),
-        "resolver_expected_route": "retrieve_rag",
-        "consistency_status": "consistent",
-        "selection_reason": "Synthetic route-diverse calibration case.",
-        "review_status": "pending",
-    }
-
-
-def valid_proposals(case_count: int = 1) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "rubric_version": RUBRIC_VERSION,
-        "case_count": case_count,
-        "cases": [_proposal_case(index) for index in range(1, case_count + 1)],
-    }
-
-
 def _review_case(index: int = 1) -> dict[str, object]:
-    truth = _ground_truth()
     return {
         "case_id": f"email_case_{index:03d}",
         "source_message_id": f"synthetic-message-{index}",
-        "proposal": copy.deepcopy(truth),
-        "final": truth,
-        "review_status": "accepted",
+        "final": _ground_truth(),
     }
 
 
@@ -157,10 +133,6 @@ def test_approved_artifacts_validate_and_return_copies() -> None:
         (
             valid_candidates(2),
             lambda value: module.validate_candidate_dataset(value, expected_count=2),
-        ),
-        (
-            valid_proposals(),
-            lambda value: module.validate_proposal_batch(value, expected_count=1),
         ),
         (
             valid_review_export(),
@@ -245,7 +217,6 @@ def test_golden_rejects_prediction_and_private_content() -> None:
 @pytest.mark.parametrize(
     ("factory", "validator"),
     [
-        (valid_proposals, "validate_proposal_batch"),
         (valid_review_export, "validate_review_export"),
         (valid_golden, "validate_golden_dataset"),
         (valid_run, "validate_run_artifact"),
@@ -284,24 +255,6 @@ def test_run_validator_enforces_an_absolute_fifty_case_cap() -> None:
 
     with pytest.raises(ValueError, match="maximum.*50"):
         module.validate_run_artifact(run, maximum_cases=51)
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("resolver_expected_route", "direct_plan", "resolver_expected_route"),
-        ("consistency_status", "needs_review", "consistency_status"),
-    ],
-)
-def test_proposal_rejects_stale_resolver_derived_fields(
-    field: str, value: str, message: str
-) -> None:
-    module = load_module()
-    proposals = valid_proposals()
-    proposals["cases"][0][field] = value
-
-    with pytest.raises(ValueError, match=message):
-        module.validate_proposal_batch(proposals, expected_count=1)
 
 
 def test_atomic_write_and_load_json_object_are_metadata_safe(tmp_path: Path) -> None:
