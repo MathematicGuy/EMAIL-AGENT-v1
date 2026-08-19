@@ -48,4 +48,14 @@ prompt/provider version context noted in the PR.
 
 `scripts/evaluate_retrieval.py` writes `retrieval-eval-<date>-<embedder>-<retriever>.json` here by default. Run `python scripts/build_evaluation_dashboard.py` after adding a report to refresh [the retrieval dashboard](../dashboard.md).
 
-Only compare reports with the same case count, document count, and chunk count. Hashing reports validate evaluator mechanics; semantic-quality decisions require a live embedding run. Chat routing reports write to `evaluations/CHAT/`, and future chat-with-documents grounding reports belong in `evaluations/CHAT-RAG/baselines/`.
+Only compare reports with the same case count, document count, and chunk count.
+
+> **Superseded (checked 2026-08-18):** `retrieval-eval-2026-08-17-hashing-dense.json` and
+> `retrieval-eval-2026-08-17-hashing-hybrid.json` both record `corpus.chunk_count: 1069`.
+> `load_corpus(data/extracted)` now returns **949** chunks — the structure-aware chunking
+> commits `f480906` and `0d06d4d` landed after those reports were written. By the rule above
+> they are no longer comparable with anything produced today, including each other's
+> successors. Regenerate before quoting them; [../dashboard.md](../dashboard.md) still shows
+> the 1,069-chunk figures because it is generated from these files.
+
+Hashing reports validate evaluator mechanics; semantic-quality decisions require a live embedding run. Chat routing reports write to `evaluations/CHAT/`, and future chat-with-documents grounding reports belong in `evaluations/CHAT-RAG/baselines/`.
