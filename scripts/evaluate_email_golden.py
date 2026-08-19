@@ -292,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             shard_count=args.shard_count,
             limit=args.limit,
         )
+        _validated_selected_case_ids(golden, selected)
         run_at = datetime.now(UTC)
         classifier, provider, model = build_live_classifier()
         summary = asyncio.run(

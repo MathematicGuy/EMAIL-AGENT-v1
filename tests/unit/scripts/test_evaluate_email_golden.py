@@ -222,6 +222,61 @@ def test_cli_writes_only_a_metadata_safe_run_and_never_writes_golden(
     assert not list(tmp_path.glob("*.md"))
 
 
+def test_cli_rejects_invalid_selected_identity_before_constructing_or_calling_classifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_module()
+    candidate_path = tmp_path / "candidates.json"
+    golden_path = tmp_path / "golden.json"
+    runs_dir = tmp_path / "runs"
+    candidate_value = candidates(1)
+    golden_value = golden(1)
+    golden_cases = golden_value["cases"]
+    assert isinstance(golden_cases, list)
+    golden_cases[0]["source_message_id"] = "different-synthetic-message"
+    candidate_path.write_text(json.dumps(candidate_value), encoding="utf-8")
+    golden_path.write_text(json.dumps(golden_value), encoding="utf-8")
+
+    constructed = False
+    classified = False
+
+    class UnexpectedClassifier:
+        async def classify(self, user_timezone, current_time, messages):
+            nonlocal classified
+            del user_timezone, current_time, messages
+            classified = True
+            raise AssertionError("invalid selected identities must not be classified")
+
+    def build_unexpected_classifier():
+        nonlocal constructed
+        constructed = True
+        return UnexpectedClassifier(), "gemini", "test"
+
+    monkeypatch.setattr(module, "build_live_classifier", build_unexpected_classifier)
+
+    result = run_cli(
+        "evaluate_email_golden",
+        "--candidates",
+        str(candidate_path),
+        "--golden",
+        str(golden_path),
+        "--runs-dir",
+        str(runs_dir),
+        "--shard-index",
+        "1",
+        "--shard-count",
+        "1",
+        "--limit",
+        "1",
+    )
+
+    assert result.returncode == 2
+    assert "source_message_id does not match" in result.stderr
+    assert not constructed
+    assert not classified
+    assert not runs_dir.exists()
+
+
 def test_build_envelopes_loads_candidate_content_only_into_ephemeral_messages() -> None:
     module = load_module()
     candidate_cases = candidates(1)["cases"]
