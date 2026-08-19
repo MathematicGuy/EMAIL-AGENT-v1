@@ -66,3 +66,8 @@ evaluations/CHAT/ingestion-latency/runs/*.json
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/
+
+/evaluations/EMAIL/gmail_candidates.json
+/evaluations/EMAIL/annotation_proposals.json
+/evaluations/EMAIL/reviewed_annotations.json
+/evaluations/EMAIL/annotation_second_pass.json
