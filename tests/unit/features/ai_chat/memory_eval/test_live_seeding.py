@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
+    EpisodeSourceType,
     MemoryType,
     TaskEpisode,
     ValidationStatus,
@@ -17,6 +19,7 @@ from cowork_agent.features.ai_chat.memory_eval.live_seeding import (
     seed_episodic,
     seed_semantic,
     seed_short_term,
+    verify_seed,
 )
 from cowork_agent.features.ai_chat.memory_eval.probes import EpisodeSeed, SeedSpec
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
@@ -233,9 +236,7 @@ class _Embedder:
         if self._fail:
             raise RuntimeError("embedder down")
         vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
-        return [
-            [float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts
-        ]
+        return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
 
 
 def test_a_declared_corpus_is_indexed_and_an_adapter_returned() -> None:
@@ -265,9 +266,84 @@ def test_a_missing_corpus_directory_is_a_finding() -> None:
 
 def test_an_embedder_failure_is_a_finding_not_a_crash() -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
-    outcome, adapter = asyncio.run(
-        seed_semantic(spec, _Embedder(fail=True), corpus_root=Path("."))
-    )
+    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(fail=True), corpus_root=Path(".")))
     assert outcome.ok is False
     assert "embedder down" in outcome.reason
     assert adapter is None
+
+
+# --- verification: "was it written" is a different question from "can we find it"
+
+
+class _SearchBlindEpisodicStore(_EpisodicStore):
+    """Holds rows that the retrieval query cannot match.
+
+    This is the shape Postgres actually has. `search_vector @@
+    plainto_tsquery('simple', ...)` ANDs every token of the query text, so a
+    whole natural-language question matches nothing even when the episode is
+    sitting in the table. A verification that only searched reported that as
+    an empty store on every arm.
+    """
+
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        del namespace, query
+        return ()
+
+
+def _stored_episode() -> TaskEpisode:
+    now = datetime(2026, 8, 19, tzinfo=UTC)
+    return TaskEpisode(
+        episode_id="ep-1",
+        record_id="rec-1",
+        user_id="u",
+        chat_session_id="s",
+        chat_turn_id="turn-1",
+        creation_reason="explicit_user_task_request",
+        task_title="Gia hạn CCCD cho văn phòng Đà Nẵng",
+        minimal_request_paraphrase="Tạo tác vụ gia hạn CCCD",
+        action_plan=("Thu thập hồ sơ",),
+        rag_citations=(),
+        missing_information=(),
+        validation_status=ValidationStatus.USER_APPROVED,
+        retrieval_eligible=True,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
+        created_at=now,
+        updated_at=now,
+        pipeline_version="v1",
+        model_id="fake-model",
+        prompt_version="v1",
+        confidence=0.9,
+    )
+
+
+def _verify_episodic(store: _EpisodicStore) -> tuple[object, ...]:
+    scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
+    _, gateway = build_arm_controller(
+        scope, AdapterSet(episodic_memory=store), _ProposingReply(_proposal()), masked_scope=None
+    )
+    return asyncio.run(verify_seed(gateway, scope, (MemoryType.EPISODIC,)))
+
+
+def test_a_stored_episode_the_query_cannot_find_is_reported_as_a_retrieval_failure() -> None:
+    # The row is there. Reporting "the store is empty" here sent every reader
+    # to the write path, which was never broken.
+    store = _SearchBlindEpisodicStore()
+    store.episodes["ep-1"] = _stored_episode()
+    findings = _verify_episodic(store)
+    assert len(findings) == 1
+    reason = findings[0].reason
+    assert "1 episode" in reason
+    assert "retriev" in reason
+    assert "came back empty" not in reason
+
+
+def test_an_episodic_scope_with_no_stored_rows_is_reported_as_an_empty_store() -> None:
+    findings = _verify_episodic(_SearchBlindEpisodicStore())
+    assert len(findings) == 1
+    assert "nothing was written" in findings[0].reason
+
+
+def test_an_episode_the_query_finds_produces_no_finding() -> None:
+    store = _EpisodicStore()
+    store.episodes["ep-1"] = _stored_episode()
+    assert _verify_episodic(store) == ()

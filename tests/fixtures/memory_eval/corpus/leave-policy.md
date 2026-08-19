@@ -1,7 +1,7 @@
-# Annual Leave Policy
+# Chính sách nghỉ phép năm
 
-Annual leave is accrued monthly and must be requested through the internal
-portal at least five working days in advance.
+Phép năm được cộng dồn theo tháng và phải đăng ký qua cổng nội bộ trước ít nhất
+năm ngày làm việc.
 
-Unused leave does not carry over past the end of the calendar year. This
-document is synthetic fixture content for evaluation only.
+Số ngày phép chưa dùng không được chuyển sang năm sau. Tài liệu này là nội dung
+tổng hợp dùng cho đánh giá, không phải chính sách thật.

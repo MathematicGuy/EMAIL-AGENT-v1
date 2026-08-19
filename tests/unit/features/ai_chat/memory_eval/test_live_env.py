@@ -28,7 +28,7 @@ def test_everything_present_reports_no_unavailable_scopes() -> None:
     env = probe_environment(_env(), postgres_probe=lambda url: True)
     assert env.postgres_url == "postgresql://127.0.0.1/y"
     assert env.gemini_ready is True
-    assert env.jina_ready is True
+    assert env.embeddings_ready is True
     assert unavailable_scopes(env) == ()
 
 
@@ -93,13 +93,47 @@ def test_an_unreachable_server_makes_the_two_durable_scopes_unavailable() -> Non
     assert scopes == {MemoryType.LONG_TERM, MemoryType.EPISODIC}
 
 
-def test_a_missing_jina_key_makes_only_semantic_unavailable() -> None:
+def test_the_embedding_key_checked_follows_the_configured_provider() -> None:
+    # DOCUMENT_EMBEDDING_PROVIDER defaults to gemini, so a missing JINA_API_KEY
+    # says nothing about whether the corpus can be embedded. Checking the wrong
+    # key is wrong in both directions: it reports semantic unavailable on a
+    # working gemini setup, and reports it available on a jina setup whose only
+    # key is a gemini one.
     environ = _env()
     del environ["JINA_API_KEY"]
     env = probe_environment(environ, postgres_probe=lambda url: True)
+
+    assert env.embeddings_ready is True
+    assert unavailable_scopes(env) == ()
+
+
+def test_a_missing_key_for_the_configured_provider_makes_only_semantic_unavailable() -> None:
+    environ = _env(DOCUMENT_EMBEDDING_PROVIDER="jina")
+    del environ["JINA_API_KEY"]
+    env = probe_environment(environ, postgres_probe=lambda url: True)
     unavailable = unavailable_scopes(env)
+
     assert [item.scope for item in unavailable] == [MemoryType.SEMANTIC]
     assert "JINA_API_KEY" in unavailable[0].reason
+
+
+def test_a_gemini_only_environment_can_still_embed_the_corpus() -> None:
+    environ = _env(DOCUMENT_EMBEDDING_PROVIDER="gemini")
+    del environ["JINA_API_KEY"]
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+
+    assert unavailable_scopes(env) == ()
+
+
+def test_gemini_embeddings_need_a_gemini_key() -> None:
+    environ = _env()
+    del environ["GEMINI_API_KEY"]
+    del environ["JINA_API_KEY"]
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+    unavailable = unavailable_scopes(env)
+
+    assert [item.scope for item in unavailable] == [MemoryType.SEMANTIC]
+    assert "GEMINI_API_KEY" in unavailable[0].reason
 
 
 def test_short_term_is_never_unavailable() -> None:

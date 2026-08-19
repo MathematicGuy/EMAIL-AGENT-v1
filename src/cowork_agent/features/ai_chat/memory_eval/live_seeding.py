@@ -19,6 +19,7 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
     EpisodicMemoryQuery,
+    EpisodicMemoryRead,
     MemoryContextRequest,
     MemoryReadOptions,
     MemoryType,
@@ -177,14 +178,27 @@ class EmptySemanticMemory:
         )
 
 
-def _verification_reads() -> MemoryReadOptions:
-    """Read every scope, masked by nothing. Verification must see the truth."""
+def _verification_reads(episodic_query: str | None) -> MemoryReadOptions:
+    """Read every scope, masked by nothing. Verification must see the truth.
+
+    `episodic_query` is supplied by the caller because no query text is right in
+    the abstract. It used to be the literal "previous task", which matched no
+    row of a Vietnamese corpus on any arm of any run, and the resulting empty
+    read was reported as an empty store. `_episodic_finding` says what is passed
+    instead.
+
+    The semantic query stays fixed. Semantic retrieval is embedding similarity,
+    which returns a nearest neighbour for any text rather than requiring a term
+    to match, so the wording cannot make a populated index look empty.
+    """
 
     return MemoryReadOptions(
         short_term=True,
         long_term=True,
-        episodic=EpisodicMemoryQuery(
-            query="previous task", max_items=5, min_score=0.0, timeout_ms=2000
+        episodic=(
+            EpisodicMemoryQuery(query=episodic_query, max_items=5, min_score=0.0, timeout_ms=2000)
+            if episodic_query
+            else EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=1)
         ),
         semantic=SemanticMemoryQuery(
             query="company policy", max_items=5, min_score=0.0, timeout_ms=2000
@@ -207,18 +221,25 @@ async def verify_seed(
     What this can and cannot say: `short_term` and `long_term` are fetched
     directly, so an empty read means an empty store. `episodic` and `semantic`
     are RETRIEVALS, and a store can hold a record that the query does not
-    match — the SQLite episodic reader scores literal term overlap against the
-    episode text and drops anything scoring zero. So an empty read there means
-    "not retrievable by this query", which is not the same as "not written".
-    The gateway exposes no listing call, and the harness may not reach past it
-    into the repository, so the finding is worded for what was actually
-    observed rather than for a cause it cannot see.
+    match. Episodic therefore asks the storage question separately, through
+    `list_task_episodes`, which runs no search:
+
+    - nothing stored        -> the write path failed. A harness finding.
+    - stored, search empty  -> the write path worked and retrieval did not.
+                               A product finding, and a different bug.
+
+    Reporting those two as one line is what made all sixteen episodic failures
+    unreadable: every one of them named an empty store, and the store was full.
+
+    `semantic` keeps the single wording. It has no write path and no listing —
+    "seeding" it means building the index the read hits — so there is no second
+    question to ask.
     """
 
     if not expected_scopes:
         return ()
     request = MemoryContextRequest(
-        session_id=scope.session_id, scope=scope, reads=_verification_reads()
+        session_id=scope.session_id, scope=scope, reads=_verification_reads(None)
     )
     try:
         # Called through MemoryGateway explicitly, not through `gateway`. On an
@@ -236,11 +257,60 @@ async def verify_seed(
     populated = {
         MemoryType.SHORT_TERM: bool(response.turns),
         MemoryType.LONG_TERM: response.profile is not None,
-        MemoryType.EPISODIC: bool(response.episodes),
         MemoryType.SEMANTIC: response.semantic_context is not None,
     }
-    return tuple(
-        ScopeFinding(item, f"{item.value}: the verification read came back empty")
-        for item in expected_scopes
-        if not populated[item]
+    findings: list[ScopeFinding] = []
+    for item in expected_scopes:
+        if item is MemoryType.EPISODIC:
+            episodic_finding = await _episodic_finding(gateway, scope)
+            if episodic_finding is not None:
+                findings.append(episodic_finding)
+            continue
+        if not populated[item]:
+            findings.append(
+                ScopeFinding(item, f"{item.value}: the verification read came back empty")
+            )
+    return tuple(findings)
+
+
+async def _episodic_finding(gateway: MemoryGateway, scope: ChatMemoryScope) -> ScopeFinding | None:
+    """Ask the storage question first, then the retrieval question separately.
+
+    The retrieval question is asked with the stored episode's OWN title as the
+    query. Every token of a title is in that row's search vector by
+    construction, so this is the friendliest query that row will ever get. An
+    empty result here cannot be blamed on wording, on language, or on the model
+    having paraphrased the seed request: the row is there and the retrieval path
+    will not return it.
+    """
+
+    try:
+        # Called unbound for the same reason read_context is: on an ablated arm
+        # the gateway masks its own target, and a mask is a statement about what
+        # the PROBE may read, never about what the store holds.
+        stored = await MemoryGateway.list_task_episodes(gateway)
+    except Exception as error:  # noqa: BLE001 - an unlistable store is a finding
+        return ScopeFinding(
+            MemoryType.EPISODIC,
+            f"episodic: the stored episodes could not be listed ({type(error).__name__}: {error})",
+        )
+    if not stored:
+        return ScopeFinding(MemoryType.EPISODIC, "episodic: nothing was written to the store")
+
+    title = stored[0].task_title
+    request = MemoryContextRequest(
+        session_id=scope.session_id, scope=scope, reads=_verification_reads(title)
+    )
+    try:
+        response = await MemoryGateway.read_context(gateway, request)
+    except Exception as error:  # noqa: BLE001 - an unreadable store is a finding
+        return ScopeFinding(MemoryType.EPISODIC, f"episodic: verification read failed: {error}")
+    if response.episodes:
+        return None
+    plural = "" if len(stored) == 1 else "s"
+    return ScopeFinding(
+        MemoryType.EPISODIC,
+        f"episodic: {len(stored)} episode{plural} stored, and retrieval returned none of "
+        f"them when queried with a stored title verbatim ({title!r}) - the write path "
+        f"worked and the retrieval path did not",
     )

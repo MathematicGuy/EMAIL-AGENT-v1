@@ -1,7 +1,8 @@
 """Resolving the live tier's external dependencies (SPEC §6.1).
 
 Three things can be missing independently: a PostgreSQL server, a Gemini key,
-a Jina key. Each absence disables a specific set of scopes and nothing else.
+an embedding key. Each absence disables a specific set of scopes and
+nothing else.
 
 A harness that dies on the first missing dependency tells you nothing about the
 other scopes, so every absence becomes a typed finding the report can carry.
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
-from cowork_agent.config import database_url
+from cowork_agent.config import database_url, document_embedding_provider
 from cowork_agent.domain.chat_contracts import MemoryType
 
 _CONNECT_TIMEOUT_SECONDS = 3
@@ -61,7 +62,8 @@ class LiveEnvironment:
     postgres_url: str | None
     sqlite_path: Path | None
     gemini_ready: bool
-    jina_ready: bool
+    embeddings_ready: bool
+    embedding_key_name: str
 
     @property
     def durable_memory_available(self) -> bool:
@@ -84,6 +86,27 @@ def default_postgres_probe(url: str) -> bool:
             return True
     except psycopg.Error:
         return False
+
+
+def _embedding_key_name(environ: Mapping[str, str]) -> str:
+    """Which API key the corpus needs, given the configured embedding provider."""
+
+    provider = document_embedding_provider(environ, load_env_file=False)
+    return "JINA_API_KEY" if provider == "jina" else "GEMINI_API_KEY"
+
+
+def _embeddings_ready(environ: Mapping[str, str]) -> bool:
+    """Whether the corpus can be embedded.
+
+    The provider is chosen by DOCUMENT_EMBEDDING_PROVIDER and defaults to
+    gemini, so checking a fixed key is wrong in both directions: it reports
+    semantic unavailable on a working gemini setup, and reports it available on
+    a jina setup holding only a gemini key.
+    """
+
+    if _embedding_key_name(environ) == "JINA_API_KEY":
+        return bool(environ.get("JINA_API_KEY"))
+    return _gemini_ready(environ)
 
 
 def _gemini_ready(environ: Mapping[str, str]) -> bool:
@@ -155,7 +178,8 @@ def probe_environment(
         postgres_url=url if reachable else None,
         sqlite_path=None if url else sqlite_path,
         gemini_ready=_gemini_ready(environ),
-        jina_ready=bool(environ.get("JINA_API_KEY")),
+        embeddings_ready=_embeddings_ready(environ),
+        embedding_key_name=_embedding_key_name(environ),
     )
 
 
@@ -172,14 +196,16 @@ def unavailable_scopes(env: LiveEnvironment) -> tuple[ScopeFinding, ...]:
         # answer. With no URL at all the product uses SQLite and so do we, so
         # these two scopes stay evaluable.
         reason = (
-            "the configured PostgreSQL is unreachable "
-            "(unset it to use SQLite, as the app does)"
+            "the configured PostgreSQL is unreachable (unset it to use SQLite, as the app does)"
         )
         findings.append(ScopeFinding(MemoryType.LONG_TERM, reason))
         findings.append(ScopeFinding(MemoryType.EPISODIC, reason))
-    if not env.jina_ready:
+    if not env.embeddings_ready:
         findings.append(
-            ScopeFinding(MemoryType.SEMANTIC, "no JINA_API_KEY; corpus cannot be embedded")
+            ScopeFinding(
+                MemoryType.SEMANTIC,
+                f"no {env.embedding_key_name}; corpus cannot be embedded",
+            )
         )
     return tuple(findings)
 

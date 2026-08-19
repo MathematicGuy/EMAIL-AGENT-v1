@@ -23,6 +23,12 @@ class Outcome(StrEnum):
     STALE = "stale"
     INVENTED = "invented"
     MISS = "miss"
+    #: The turn produced no text at all. Not a grade — the absence of one.
+    #: MISS means "memory had it and the answer did not"; a turn where the
+    #: provider never replied says nothing about memory either way, and folding
+    #: the two together fed three conclusions of the first Vietnamese run on
+    #: evidence that was a brief outage.
+    NO_ANSWER = "no_answer"
 
 
 # How models decline when they genuinely have nothing. Deliberately about the
@@ -34,6 +40,47 @@ class Outcome(StrEnum):
 # phrasing scores an honest refusal as INVENTED — the worst direction to be
 # wrong in — so those rows are flagged for a human to read in runs/ rather than
 # silently trusted.
+# Vietnamese says "I have nothing" as a phrase for HAVING NOTHING followed by a
+# word for WHAT is missing. Those two choices are independent, so the phrasings
+# are a grid — and a grid written out as flat strings comes out half filled. It
+# did: "không có thông tin", "không có dữ liệu" and "chưa có thông tin" were on
+# the list and "chưa có dữ liệu" was not. One reply used the missing cell, was
+# graded INVENTED, and made semantic memory the single most severe conclusion in
+# the whole report.
+#
+# Generating the grid is the fix. A new way of saying it is one entry in one of
+# these two tuples, and every combination of it exists from that moment on.
+_HAVING_NOTHING: tuple[str, ...] = (
+    "không có",
+    "chưa có",
+    "không tìm thấy",
+    "chưa tìm thấy",
+    "không nhận được",
+    "chưa nhận được",
+    "không thấy",
+    "chưa thấy",
+    "không thể thấy",
+    "không thể tìm thấy",
+    "không truy cập được",
+    "chưa truy cập được",
+)
+_WHAT_IS_MISSING: tuple[str, ...] = (
+    "thông tin",
+    "dữ liệu",
+    "tài liệu",
+    "dữ kiện",
+    "chi tiết",
+    "ghi nhận",
+    "nội dung",
+)
+#: The two must be ADJACENT to count. A looser rule — the words appearing
+#: anywhere in the same reply — would pass "tôi không chắc, nhưng chính sách
+#: cho phép ba tháng", which is an invention wearing a hedge, and every
+#: restraint question would pass forever.
+_VIETNAMESE_REFUSAL_GRID: tuple[str, ...] = tuple(
+    f"{lack} {thing}" for lack in _HAVING_NOTHING for thing in _WHAT_IS_MISSING
+)
+
 REFUSAL_PHRASES: tuple[str, ...] = (
     "don't know",
     "do not know",
@@ -68,17 +115,18 @@ REFUSAL_PHRASES: tuple[str, ...] = (
     # INVENTED, which is the worst direction to be wrong in. The unaccented
     # forms below are kept but match nothing the model actually writes:
     # casefold does not strip diacritics, so "khong ro" never meets "không rõ".
-    "không có thông tin",
+    #
+    # These are the phrasings that carry no noun of their own. The ones that do
+    # are generated below, because writing them out by hand is what broke.
     "không tìm thấy",
     "không thể thấy",
-    "không có dữ liệu",
     "không được cung cấp",
-    "chưa có thông tin",
     "chưa tìm thấy",
     "chưa được cung cấp",
     "không rõ",
     "khong co thong tin",
     "khong ro",
+    *_VIETNAMESE_REFUSAL_GRID,
 )
 
 
@@ -105,12 +153,14 @@ def score(reply: str, probe: Probe) -> ScoreResult:
     reply = reply or ""
 
     if not reply.strip():
-        # No text at all is not an answer, and on a restraint probe the refusal
-        # branch below would call it INVENTED — the headline failure — for a
-        # turn where the model never spoke. An errored turn looks exactly like
-        # this; `ask_once` returns the error separately so a reader can tell
-        # which it was. Uncertain by construction: it needs a human.
-        return ScoreResult(Outcome.MISS, False, "no reply text: the turn produced nothing")
+        # No text at all is not an answer, so it is not graded as one. An
+        # errored turn looks exactly like this; `ask_once` returns the error
+        # separately so a reader can tell which it was.
+        #
+        # This is CERTAIN. There is no doubt about what happened and nothing in
+        # runs/ for a human to read — the reply is empty. What it needs is a
+        # rerun, which is what the row's `unreadable` conclusion asks for.
+        return ScoreResult(Outcome.NO_ANSWER, True, "no reply text: the turn produced nothing")
 
     if probe.expect_refusal:
         if _has(reply, REFUSAL_PHRASES):

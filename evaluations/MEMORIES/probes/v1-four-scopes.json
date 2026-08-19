@@ -1,22 +1,22 @@
 {
   "schema_version": "2.0.0",
   "probe_set_id": "v1_four_scopes",
-  "label": "The four scopes: recall and restraint each, plus one update",
+  "label": "Bốn phạm vi bộ nhớ: recall và restraint mỗi loại, cộng một update",
   "seed": {
     "short_term": [
-      "I'm working on the CCCD renewal request for the Da Nang office.",
-      "The deadline for that is Tuesday.",
-      "Correction: the deadline moved to Wednesday."
+      "Tôi đang xử lý yêu cầu gia hạn CCCD cho văn phòng Đà Nẵng.",
+      "Hạn chót của việc đó là thứ Ba.",
+      "Đính chính: hạn chót đã dời sang thứ Tư."
     ],
     "long_term": {
       "language": "vi",
       "timezone": "Asia/Ho_Chi_Minh",
-      "assistant_persona": "operations coordinator",
-      "response_tone": "concise"
+      "assistant_persona": "điều phối viên vận hành",
+      "response_tone": "ngắn gọn"
     },
     "episodic": [
       {
-        "request": "Create a task to renew the CCCD for the Da Nang office",
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.",
         "approve": true
       }
     ],
@@ -29,90 +29,84 @@
       "id": "st_recall_01",
       "targets": "short_term",
       "test": "recall",
-      "question": "Which office is the renewal request for?",
+      "question": "Yêu cầu gia hạn đó là cho văn phòng nào?",
       "expect_any": [
-        "Da Nang",
-        "Đà Nẵng"
+        "Đà Nẵng",
+        "Da Nang"
       ],
-      "note": "The floor for short-term memory. A miss here means the buffer stored nothing. The reply provider writes Vietnamese unconditionally, so the Vietnamese spelling has to be accepted or a correct answer scores as a miss."
+      "note": "The floor for short-term memory. A miss means the buffer stored nothing. The unaccented spelling is kept only because a place name sometimes survives untranslated; the accented one is what the product writes."
     },
     {
       "id": "st_update_01",
       "targets": "short_term",
       "test": "update",
-      "question": "When is the CCCD deadline?",
+      "question": "Hạn chót của yêu cầu gia hạn CCCD là khi nào?",
       "expect_any": [
-        "Wednesday",
-        "thứ Tư"
+        "thứ Tư",
+        "thứ 4"
       ],
       "stale_any": [
-        "Tuesday",
-        "thứ Ba"
+        "thứ Ba",
+        "thứ 3"
       ],
-      "note": "Both days were stated in this session; only the later one is true. Answering Tuesday is a confident wrong answer, not a gap. Both spellings are listed because the product answers in Vietnamese."
+      "note": "Both days were stated in this session; only the later one is true. Answering thứ Ba is a confident wrong answer, not a gap. The numeric forms are listed because Vietnamese writes weekdays both ways."
     },
     {
       "id": "lt_recall_01",
       "targets": "long_term",
       "test": "recall",
-      "question": "What timezone should I assume when you schedule things for me?",
+      "question": "Tôi đã đặt bạn ở vai trò nào khi trả lời tôi?",
       "expect_any": [
-        "Ho_Chi_Minh",
-        "ICT",
-        "UTC+7",
-        "+07"
+        "điều phối viên vận hành",
+        "điều phối viên"
       ],
-      "note": "The profile was written with explicit_user_config provenance. Nothing a model produced can carry that."
+      "note": "Asks for assistant_persona, not the timezone. The timezone was guessable: the assistant answers in Vietnamese unconditionally, so it named the Vietnam timezone with the profile masked out and with an empty store, and the probe reported that as memory doing nothing. A masking test (test_arm_masking_reaches_the_model.py) proves the profile really is absent from the payload on those arms, so the guess was the model's. A persona nobody would assume is the one field here that cannot be reconstructed from the question. The shorter form is accepted because a correct answer may drop the qualifier, not because it is a weaker match."
     },
     {
       "id": "lt_restraint_01",
       "targets": "long_term",
       "test": "restraint",
-      "question": "What is my job title?",
+      "question": "Chức danh của tôi là gì?",
       "expect_refusal": true,
-      "note": "A persona was set; a job title never was. Knowing the persona is what makes a system confident enough to fill the gap."
+      "note": "A persona was set; a job title never was. Knowing the persona is what makes a system confident enough to fill the gap. Phrased without the word 'công việc' so it cannot accidentally carry an episodic cue."
     },
     {
       "id": "ep_recall_01",
       "targets": "episodic",
       "test": "recall",
-      "question": "What tasks do I have open from previous task work?",
+      "question": "Tác vụ trước về gia hạn CCCD là cho văn phòng nào?",
       "expect_any": [
-        "CCCD",
-        "renew",
-        "gia hạn"
+        "Đà Nẵng",
+        "Da Nang"
       ],
-      "note": "Contains the episodic cue phrase 'previous task'. Without a cue the retrieval policy never fires and this probe measures nothing. CCCD survives translation; 'gia han' is the Vietnamese for renew."
+      "note": "Contains the episodic cue 'tác vụ trước', and names its subject so the search has something to match on. It used to ask 'Tôi còn tác vụ trước nào đang mở không?' - every word of which is the cue, the question frame, or a status word the episode index does not carry, so it named no episode and could only ever retrieve whatever shared a filler word. That question is a request to ENUMERATE open episodes, which is a product gap recorded in SPEC 12.2, not something a search probe can measure. Asks for the office and not the subject it names, so the answer cannot be read off the question. In an episodic probe the short-term buffer is fresh (SPEC 5.3), so 'Đà Nẵng' can only have come from the episode. Ends in 'không?' - a task-negation marker - so asking cannot itself create a task."
     },
     {
       "id": "ep_restraint_01",
       "targets": "episodic",
       "test": "restraint",
-      "question": "What is the case number on my earlier task for the CCCD renewal?",
+      "question": "Số hồ sơ trên tác vụ trước về gia hạn CCCD là bao nhiêu?",
       "expect_refusal": true,
-      "note": "The task exists; no case number was ever given. Inventing one is the failure that matters outside a demo."
+      "note": "The task exists and the episodic cue makes it retrievable; no case number was ever given. Inventing one is the failure that matters outside a demo."
     },
     {
       "id": "sem_recall_01",
       "targets": "semantic",
       "test": "recall",
-      "question": "What does our company policy say about overtime approval?",
+      "question": "Chính sách công ty yêu cầu nộp đề nghị làm thêm giờ qua biểu mẫu nào?",
       "expect_any": [
-        "manager",
-        "approval",
-        "advance",
-        "phê duyệt",
-        "quản lý"
+        "OT-114",
+        "OT 114"
       ],
-      "note": "Contains the semantic cue 'company policy'. Requires CHAT_COMPANY_RAG_ENABLED=true for the run. The Vietnamese terms are what the corpus answer actually comes back as."
+      "note": "Contains the semantic cue 'chính sách công ty'. Requires CHAT_COMPANY_RAG_ENABLED=true. The expected form code exists only in the corpus document. The previous expectations were 'phê duyệt' and 'quản lý' - ordinary Vietnamese words that any plausible sentence about approving overtime contains, which is why the empty-corpus arm passed this probe. The form code was added to the fixture for this reason: a recall probe needs a fact the document is the only source of."
     },
     {
       "id": "sem_restraint_01",
       "targets": "semantic",
       "test": "restraint",
-      "question": "What does our company policy say about the sabbatical scheme?",
+      "question": "Chính sách công ty nói gì về chế độ nghỉ dài hạn sabbatical?",
       "expect_refusal": true,
-      "note": "No sabbatical document exists in the corpus. Contains the semantic cue 'company policy', so the read fires and finds nothing - the only correct behaviour is to decline."
+      "note": "No sabbatical document exists in the corpus. Carries the semantic cue, so the read fires and returns the nearest thing - the annual-leave policy. Answering from that instead of declining is exactly the failure this probe is for."
     }
   ]
 }

@@ -72,3 +72,31 @@ def test_verdict_ordering_puts_dangerous_first_and_earned_last() -> None:
     )
     assert ordered[0] is Verdict.DANGEROUS
     assert ordered[-1] is Verdict.SCOPE_EARNED_IT
+
+
+def test_an_arm_that_produced_no_answer_makes_the_whole_row_unreadable() -> None:
+    # Three arms of the first Vietnamese run returned no text at all, because
+    # the provider was briefly unavailable. Folding that into MISS produced a
+    # `leaked` on semantic and a `scope_did_nothing` on long_term that were
+    # conclusions about an outage, not about memory.
+    for full, ablated, control in (
+        (Outcome.NO_ANSWER, Outcome.PASS, Outcome.MISS),
+        (Outcome.PASS, Outcome.NO_ANSWER, Outcome.MISS),
+        (Outcome.PASS, Outcome.MISS, Outcome.NO_ANSWER),
+    ):
+        assert derive_verdict(_probe(), full, ablated, control) is Verdict.UNREADABLE
+
+
+def test_unreadable_outranks_every_conclusion_about_behaviour() -> None:
+    # A row you could not read must not sort below a row you could. It says the
+    # run failed, and a failed run invalidates whatever else it printed.
+    for verdict in Verdict:
+        if verdict is Verdict.UNREADABLE:
+            continue
+        assert verdict_rank(Verdict.UNREADABLE) < verdict_rank(verdict)
+
+
+def test_no_answer_is_never_read_as_dangerous_behaviour() -> None:
+    # Silence is not invention. It is the absence of evidence either way.
+    verdict = derive_verdict(_probe(), Outcome.NO_ANSWER, Outcome.NO_ANSWER, Outcome.NO_ANSWER)
+    assert verdict is Verdict.UNREADABLE

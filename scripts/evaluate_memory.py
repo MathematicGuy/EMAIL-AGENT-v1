@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Memory evaluation harness CLI. See evaluations/MEMORIES/SPEC.md.
+"""Memory evaluation harness CLI. See tasks/specs/SPEC-memory-evaluation.md.
 
 Exit codes:
   0 - the run completed and a report was written
@@ -17,17 +17,19 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from cowork_agent.config import (
     GeminiSettings,
-    JinaEmbeddingSettings,
     load_runtime_environment,
 )
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
+from cowork_agent.features.ai_chat.memory_eval.default_project import (
+    NullDefaultProjectEpisodes,
+)
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_env import (
     LiveEnvironment,
@@ -46,12 +48,62 @@ from cowork_agent.features.ai_chat.memory_eval.live_seeding import seed_semantic
 from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, load_probe_set
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
 from cowork_agent.features.ai_chat.memory_eval.scoring import score
-from cowork_agent.integrations.llm.chat_reply import GeminiChatReply
-from cowork_agent.integrations.rag.embeddings import JinaEmbeddingAdapter
 
 _DEFAULT_PROBE_SET = Path("evaluations/MEMORIES/probes/v1-four-scopes.json")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
 _DETAIL_DIR = Path("evaluations/MEMORIES/runs")
+
+#: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
+_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "groq", "faucet")
+
+
+def _default_provider(environ: Mapping[str, str]) -> str:
+    """Which provider to drive when `--provider` is not given.
+
+    Follows `LLM_PROVIDER`, the same switch the rest of the project reads, so a
+    checkout configured for one provider does not silently evaluate on another.
+    """
+
+    return environ.get("LLM_PROVIDER", "").strip().lower() or "gemini"
+
+
+def _build_chat_reply(provider: str, environ: Mapping[str, str]) -> tuple[Any, str, str]:
+    """Build the chat reply adapter for `provider`, with the model it will use.
+
+    Returns the model name the provider actually answers with rather than a
+    literal, because the report is compared across runs: a run labelled with a
+    model that did not produce it cannot be compared against anything.
+
+    `environ` is passed explicitly rather than left to `from_env()`'s default.
+    That default reloads the `.env` file, which would put back any key the
+    caller had deliberately removed - and for this harness a restored key means
+    a real billed run against a real model.
+    """
+
+    if provider == "gemini":
+        from cowork_agent.integrations.llm.chat_reply import GeminiChatReply
+
+        gemini = GeminiSettings.from_env(environ)
+        return GeminiChatReply.from_settings(gemini), provider, gemini.model
+    if provider == "openrouter":
+        from cowork_agent.config import OpenRouterSettings
+        from cowork_agent.integrations.llm.chat_reply import OpenRouterChatReply
+
+        openrouter = OpenRouterSettings.from_env(environ)
+        return OpenRouterChatReply.from_settings(openrouter), provider, openrouter.model
+    if provider == "groq":
+        from cowork_agent.config import GroqSettings
+        from cowork_agent.integrations.llm.chat_reply import GroqChatReply
+
+        groq = GroqSettings.from_env(environ)
+        return GroqChatReply.from_settings(groq), provider, groq.model
+    if provider == "faucet":
+        from cowork_agent.config import FaucetSettings
+        from cowork_agent.integrations.llm.chat_reply import FaucetChatReply
+
+        faucet = FaucetSettings.from_env(environ)
+        return FaucetChatReply.from_settings(faucet), provider, faucet.model
+    raise ValueError(f"unsupported provider for memory evaluation: {provider!r}")
 
 
 def _scripted_ask(probe: Probe, arm: Arm, masked: object) -> tuple[str, int]:
@@ -113,7 +165,11 @@ async def _build_adapters(
         await pool.open(wait=True)
         await apply_migrations(pool)
         declarative = PostgresChatProfileRepository(pool)
-        episodic = PostgresTaskEpisodeRepository(pool)
+        # The harness builds its scopes directly, so they carry the legacy
+        # "default-project" sentinel that the app resolves to a real UUID before
+        # any episode is written. `task_episodes.project_id` is `uuid`, so the
+        # sentinel would fail every write here. See `default_project`.
+        episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
     elif env.sqlite_path is not None:
         # The product backs long_term and episodic with SQLite whenever
         # database_url() is empty, and one SQLiteChatRepository serves both
@@ -128,10 +184,18 @@ async def _build_adapters(
         episodic = sqlite_chat
 
     semantic: object | None = None
-    if env.jina_ready:
+    if env.embeddings_ready:
+        # Use the app's own factory rather than naming a provider here. It
+        # honours DOCUMENT_EMBEDDING_PROVIDER, so the corpus is embedded by
+        # whatever the product embeds documents with. Hardcoding one provider
+        # would measure a retrieval path the product no longer uses, which is
+        # the "same system as shipped" rule in SPEC 12.1.
+        from cowork_agent.integrations.rag.bootstrap import build_document_embedder
+
+        embedder, _dimensions = build_document_embedder()
         outcome, adapter = await seed_semantic(
             probe_set.seed,
-            JinaEmbeddingAdapter(JinaEmbeddingSettings.from_env()),
+            embedder,
             corpus_root=Path("."),
         )
         if outcome.ok:
@@ -145,7 +209,7 @@ async def _build_adapters(
 async def run_live(
     probe_set: ProbeSet,
     env: LiveEnvironment,
-    gemini: GeminiSettings,
+    reply: Any,
     *,
     provider: str,
     model: str,
@@ -164,7 +228,7 @@ async def run_live(
     session = LiveSession(
         identity=identity,
         adapters=adapters,
-        reply=GeminiChatReply.from_settings(gemini),
+        reply=reply,
         seed=probe_set.seed,
     )
     recorded = transcript if transcript is not None else []
@@ -226,6 +290,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Scripted replies. Validates harness mechanics only - never a result.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=_SUPPORTED_PROVIDERS,
+        help="Chat provider to evaluate against; defaults to LLM_PROVIDER, else gemini.",
+    )
     args = parser.parse_args(argv)
     transcript: list[dict[str, object]] = []
 
@@ -250,7 +319,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         except UnsafeTargetError as error:
             print(f"ERROR: {error}", file=sys.stderr)
             return 2
-        if not env.gemini_ready:
+        provider = args.provider or _default_provider(dict(os.environ))
+        if provider == "gemini" and not env.gemini_ready:
             print(
                 "ERROR: no GEMINI_API_KEY. Without a model there is no reply to "
                 "score, so there is no run.",
@@ -258,19 +328,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1
         try:
-            gemini = GeminiSettings.from_env()
+            reply, provider, model = _build_chat_reply(provider, dict(os.environ))
         except ValueError as error:
-            # A key is present but unusable - the same outcome as no key, said
-            # differently so it is not mistaken for an empty environment.
-            print(f"ERROR: Gemini is configured but unusable: {error}", file=sys.stderr)
+            # A provider is selected but unusable - a missing key, an unset
+            # model, or a name this harness cannot drive. The same outcome as no
+            # model at all, said differently so it is not mistaken for one.
+            print(f"ERROR: {provider} is configured but unusable: {error}", file=sys.stderr)
             return 1
         report = run_with_selector_loop(
             run_live(
                 probe_set,
                 env,
-                gemini,
-                provider="gemini",
-                model=gemini.model,
+                reply,
+                provider=provider,
+                model=model,
                 transcript=transcript,
             )
         )

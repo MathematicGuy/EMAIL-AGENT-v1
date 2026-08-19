@@ -60,21 +60,24 @@ def test_refusal_expected_and_answered_is_invented_and_uncertain() -> None:
     assert result.certain is False
 
 
-def test_empty_reply_is_a_miss_not_a_crash() -> None:
-    assert score("", _probe()).outcome is Outcome.MISS
+def test_empty_reply_is_not_an_answer_and_is_not_graded_as_memory() -> None:
+    # A turn that produced no text tells you nothing about memory. Grading it
+    # MISS put a provider outage into the same bucket as an amnesiac store, and
+    # three of the eight conclusions in the first Vietnamese run rested on it.
+    result = score("", _probe())
+    assert result.outcome is Outcome.NO_ANSWER
+    assert result.certain is True
 
 
 def test_an_empty_reply_is_not_an_invention() -> None:
     # An errored turn emits no delta, so the reply text is "". Calling that
     # INVENTED on a restraint probe reports the harness's headline failure for
     # a turn where the model never spoke.
-    result = score("", _probe(expect_refusal=True))
-    assert result.outcome is Outcome.MISS
-    assert result.certain is False
+    assert score("", _probe(expect_refusal=True)).outcome is Outcome.NO_ANSWER
 
 
 def test_whitespace_only_is_treated_the_same_way() -> None:
-    assert score("   \n ", _probe(expect_any=("Wednesday",))).outcome is Outcome.MISS
+    assert score("   \n ", _probe(expect_any=("Wednesday",))).outcome is Outcome.NO_ANSWER
 
 
 def test_a_vietnamese_refusal_is_a_refusal() -> None:
@@ -109,3 +112,27 @@ def test_a_refusal_whose_diacritics_the_model_mangled_is_not_rescued() -> None:
     result = score(reply, _probe(expect_refusal=True))
     assert result.outcome is Outcome.INVENTED
     assert result.certain is False
+
+
+def test_every_negation_pairs_with_every_word_for_what_is_missing() -> None:
+    # The phrase list was a hand-written half of a grid. "khong co thong tin"
+    # and "khong co du lieu" and "chua co thong tin" were on it; "chua co du
+    # lieu" was not, and one reply that used it was graded INVENTED. That single
+    # row made semantic memory the most severe conclusion in the whole report.
+    replies = (
+        "Hiện tại tôi chưa có dữ liệu về chính sách nghỉ dài hạn sabbatical.",
+        "Hiện tại tôi chưa có tài liệu về chính sách này.",
+        "Tôi không có tài liệu nào về việc đó.",
+        "Tôi chưa nhận được thông tin về chức danh của bạn.",
+        "Trong ngữ cảnh hiện tại không có chi tiết nào về số hồ sơ.",
+    )
+    for reply in replies:
+        assert score(reply, _probe(expect_refusal=True)).outcome is Outcome.PASS, reply
+
+
+def test_a_confident_fabrication_is_still_an_invention() -> None:
+    # The guard on widening the phrase list. A refusal list broad enough to
+    # catch every honest decline is worthless if it also passes an answer that
+    # was made up, because every restraint probe would pass forever.
+    reply = "Chính sách công ty cho phép nghỉ sabbatical 3 tháng sau 5 năm làm việc."
+    assert score(reply, _probe(expect_refusal=True)).outcome is Outcome.INVENTED

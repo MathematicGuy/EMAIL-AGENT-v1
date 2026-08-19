@@ -21,6 +21,7 @@ from .verdicts import Verdict, derive_verdict, verdict_rank
 REPORT_SCHEMA_VERSION = "2.0.0"
 
 _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
+    Verdict.UNREADABLE: "unreadable",
     Verdict.DANGEROUS: "dangerous",
     Verdict.BROKEN: "broken",
     Verdict.LEAKED: "leaked",
@@ -44,7 +45,7 @@ class ProbeRow:
 
 
 def _empty_scope_counts() -> dict[str, int]:
-    counts = {"probes": 0, "pass": 0, "stale": 0, "invented": 0, "miss": 0}
+    counts = {"probes": 0, "pass": 0, "stale": 0, "invented": 0, "miss": 0, "no_answer": 0}
     counts.update({key: 0 for key in _VERDICT_COUNT_KEYS.values()})
     return counts
 
