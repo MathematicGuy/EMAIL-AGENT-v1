@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import getaddresses, parseaddr
 from typing import Any, Protocol, cast
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httplib2  # type: ignore[import-untyped]
@@ -28,6 +29,7 @@ from cowork_agent.config import GmailSettings
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.target_contracts import (
     BodyFormat,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     FetchStatus,
 )
@@ -433,7 +435,7 @@ def _parse_message(raw: Mapping[str, Any]) -> EphemeralEmailEnvelope:
     timestamp = datetime.fromtimestamp(int(raw.get("internalDate", 0)) / 1000, tz=UTC)
     message_id = str(raw["id"])
     thread_id = str(raw["threadId"])
-    normalized_body, body_format = _extract_text(payload)
+    normalized_body, body_format, source_links = _extract_text(payload)
     return EphemeralEmailEnvelope(
         run_id="",
         user_id="",
@@ -452,10 +454,13 @@ def _parse_message(raw: Mapping[str, Any]) -> EphemeralEmailEnvelope:
         fetch_status=(
             FetchStatus.COMPLETE if has_payload and normalized_body else FetchStatus.PARTIAL
         ),
+        source_links=source_links,
     )
 
 
-def _extract_text(part: Mapping[str, Any]) -> tuple[str, BodyFormat]:
+def _extract_text(
+    part: Mapping[str, Any],
+) -> tuple[str, BodyFormat, tuple[EmailSourceLink, ...]]:
     plain: list[str] = []
     rich: list[str] = []
 
@@ -464,22 +469,38 @@ def _extract_text(part: Mapping[str, Any]) -> tuple[str, BodyFormat]:
         body = cast(Mapping[str, Any], current.get("body", {}))
         data = body.get("data")
         if data and mime in {"text/plain", "text/html"}:
-            text = _decode_gmail_data(str(data)).decode("utf-8", errors="replace")
+            text = _strip_suspicious_format_controls(
+                _decode_gmail_data(str(data)).decode("utf-8", errors="replace")
+            )
             (plain if mime == "text/plain" else rich).append(text)
         for child in current.get("parts", ()):
             visit(cast(Mapping[str, Any], child))
 
     visit(part)
+    links = _LinkCollector()
     if plain:
         plain_text = "\n".join(plain).strip()
-        links = [link for rich_part in rich for link in _extract_html_links(rich_part)]
-        missing_links = [link for link in dict.fromkeys(links) if link not in plain_text]
+        plain_urls = set(_iter_urls(plain_text))
+        normalized = _plain_to_text(plain_text, links)
+        rich_urls = {
+            url for rich_part in rich for url, _ in _extract_html_links(rich_part, links)
+        }
+        missing_links = [
+            link
+            for link in links.as_tuple()
+            if link.url in rich_urls
+            and link.url not in plain_urls
+            and _include_in_llm_link_appendix(link)
+        ]
         if missing_links:
-            plain_text += "\n\nLiên kết trong email:\n" + "\n".join(missing_links)
-        return plain_text, BodyFormat.TEXT
+            normalized += "\n\nLiên kết trong email:\n" + "\n".join(
+                f"{link.label} [{link.ref}]" for link in missing_links
+            )
+        return _remove_separator_lines(normalized), BodyFormat.TEXT, links.as_tuple()
     if not rich:
-        return "", BodyFormat.TEXT
-    return _html_to_text("\n".join(rich)).strip(), BodyFormat.HTML_CONVERTED
+        return "", BodyFormat.TEXT, ()
+    normalized = _html_to_text("\n".join(rich), links).strip()
+    return _remove_separator_lines(normalized), BodyFormat.HTML_CONVERTED, links.as_tuple()
 
 
 def _has_attachments(part: Mapping[str, Any]) -> bool:
@@ -498,34 +519,265 @@ def _decode_gmail_data(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _html_to_text(value: str) -> str:
+@dataclass(slots=True)
+class _LinkCollector:
+    _links: list[EmailSourceLink]
+    _positions: dict[str, int]
+
+    def __init__(self) -> None:
+        self._links = []
+        self._positions = {}
+
+    def add(self, url: str, label: str | None = None) -> str:
+        position = self._positions.get(url)
+        if position is not None:
+            existing = self._links[position]
+            if existing.label is None and label:
+                self._links[position] = EmailSourceLink(existing.ref, label, existing.url)
+            return existing.ref
+        ref = f"link{len(self._links) + 1}"
+        self._positions[url] = len(self._links)
+        self._links.append(EmailSourceLink(ref=ref, label=label, url=url))
+        return ref
+
+    def as_tuple(self) -> tuple[EmailSourceLink, ...]:
+        return tuple(self._links)
+
+
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"'\[\]]+", re.IGNORECASE)
+_MARKDOWN_LINK_PATTERN = re.compile(
+    r"\[([^\]\r\n]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE
+)
+_HTML_LIKE_PLAIN_PATTERN = re.compile(
+    r"(?is)<!--|</?(?:a|body|br|div|html|p|strong|table|tbody|td|th|thead|tr|"
+    r"v:[\w-]+|w:[\w-]+)\b"
+)
+_TRAILING_URL_PUNCTUATION = ".,;:!?"
+_ALWAYS_REMOVE_FORMAT_CONTROLS = frozenset("\u00ad\u034f\u200b\u200e\u200f\ufeff")
+_SEPARATOR_LINE_PATTERN = re.compile(r"^[ \t]*[-=_*|—–]{2,}[ \t]*$")
+_MULTI_REF_OPEN_WRAPPER = re.compile(
+    r"\[([^\]\r\n]+)\]\(\s*((?:\[link\d+\]\s*){2,})\r?$", re.MULTILINE
+)
+_CROSS_LINE_SINGLE_REF_WRAPPER = re.compile(
+    r"\[([^\]\r\n]+)\]\(\s*(\[link\d+\])\r?\n[^\[\]()\r\n]*\)",
+    re.MULTILINE,
+)
+
+
+def _split_url_punctuation(value: str) -> tuple[str, str]:
+    url = value.rstrip(_TRAILING_URL_PUNCTUATION)
+    return url, value[len(url) :]
+
+
+def _iter_urls(value: str) -> list[str]:
+    urls: list[str] = []
+    for match in _URL_PATTERN.finditer(value):
+        url, _ = _split_url_punctuation(match.group(0))
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _replace_urls(value: str, links: _LinkCollector) -> str:
+    def replace(match: re.Match[str]) -> str:
+        url, punctuation = _split_url_punctuation(match.group(0))
+        if not url:
+            return match.group(0)
+        return f"[{links.add(url)}]{punctuation}"
+
+    replaced = _URL_PATTERN.sub(replace, value)
+    replaced = re.sub(r"\[\[(link\d+)\]\]", r"[\1]", replaced)
+    return re.sub(r"<\[(link\d+)\]>", r"[\1]", replaced)
+
+
+def _replace_markdown_links(value: str, links: _LinkCollector) -> str:
+    def replace(match: re.Match[str]) -> str:
+        label = re.sub(r"\s+", " ", match.group(1)).strip()
+        url = match.group(2)
+        source_label = _source_link_label(label, url)
+        ref = links.add(url, source_label)
+        return f"{source_label} [{ref}]" if source_label else ""
+
+    return _MARKDOWN_LINK_PATTERN.sub(replace, value)
+
+
+def _plain_to_text(value: str, links: _LinkCollector) -> str:
+    value = html.unescape(value)
+    if _HTML_LIKE_PLAIN_PATTERN.search(value):
+        return _html_to_text(value, links)
+    normalized = _replace_urls(_replace_markdown_links(value, links), links)
+    return _normalize_canonical_ref_wrappers(normalized)
+
+
+def _normalize_canonical_ref_wrappers(value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        label = re.sub(r"\s+", " ", match.group(1)).strip()
+        refs = " ".join(re.findall(r"\[link\d+\]", match.group(2)))
+        return f"{label} {refs}".strip()
+
+    normalized = _MULTI_REF_OPEN_WRAPPER.sub(replace, value)
+    return _CROSS_LINE_SINGLE_REF_WRAPPER.sub(replace, normalized)
+
+
+def _source_link_label(label: str, url: str) -> str | None:
+    if not label or label == url or re.match(r"(?i)^https?://", label):
+        return None
+    return label
+
+
+_FOOTER_LINK_LABEL_PATTERN = re.compile(
+    r"(?i)^(?:unsubscribe|switch to the weekly digest|careers?|help center|"
+    r"privacy(?: policy)?|terms(?: of service)?|control your recommendations|"
+    r"become a (?:medium )?member|get (?:medium )?on (?:the )?(?:app store|google play))$"
+)
+_FOOTER_LINK_PATH_PATTERN = re.compile(
+    r"(?i)(?:unsubscribe|privacy|terms-of-service|settings/notifications|"
+    r"missioncontrol|jobs-at-|/plans(?:/|$))"
+)
+
+
+def _include_in_llm_link_appendix(link: EmailSourceLink) -> bool:
+    """Keep semantic content links while retaining all links in source metadata."""
+
+    if link.label is None:
+        return False
+    label = re.sub(r"\s+", " ", link.label).strip()
+    if _FOOTER_LINK_LABEL_PATTERN.fullmatch(label):
+        return False
+
+    parsed = urlparse(link.url)
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    path = parsed.path.rstrip("/")
+    if host in {"itunes.apple.com", "play.google.com"}:
+        return False
+    if host.startswith(("help.", "policy.")) or _FOOTER_LINK_PATH_PATTERN.search(path):
+        return False
+
+    segments = [segment for segment in path.split("/") if segment]
+    if any(segment.startswith("@") for segment in segments):
+        return False
+    if re.search(r"(?i)/(?:author|profile|user)/", f"/{path.lstrip('/')}/"):
+        return False
+    if (host == "medium.com" or host.endswith(".medium.com")) and len(segments) <= 1:
+        return False
+    return True
+
+
+def _anchor_label(value: str) -> str:
+    visible = re.sub(r"(?s)<[^>]+>", " ", value)
+    visible = re.sub(r"\s+", " ", html.unescape(visible)).strip()
+    if visible:
+        return visible
+    alt_values = re.findall(
+        r"(?is)<img\b[^>]*?\balt\s*=\s*(['\"])(.*?)\1", value
+    )
+    return re.sub(
+        r"\s+", " ", " ".join(html.unescape(alt) for _, alt in alt_values)
+    ).strip()
+
+
+def _html_to_text(value: str, links: _LinkCollector | None = None) -> str:
+    collector = links or _LinkCollector()
     without_tags = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", value)
+    without_tags = re.sub(r"(?is)<!--.*?-->", "\n", without_tags)
     without_tags = re.sub(
         r"(?is)<a\b[^>]*?href\s*=\s*(['\"])(.*?)\1[^>]*>(.*?)</a>",
-        _anchor_to_text,
+        lambda match: _anchor_to_text(match, collector),
+        without_tags,
+    )
+    without_tags = re.sub(
+        r"(?is)<\s*/?\s*(?:address|article|aside|blockquote|br|div|dl|dt|dd|"
+        r"fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|"
+        r"ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^>]*>",
+        "\n",
         without_tags,
     )
     without_tags = re.sub(r"(?s)<[^>]+>", " ", without_tags)
-    return re.sub(r"\s+", " ", html.unescape(without_tags))
+    unescaped = html.unescape(without_tags)
+    unescaped = _replace_markdown_links(unescaped, collector)
+    unescaped = _replace_urls(unescaped, collector)
+    unescaped = _normalize_canonical_ref_wrappers(unescaped)
+    lines = (re.sub(r"[^\S\r\n]+", " ", line).strip() for line in unescaped.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
-def _anchor_to_text(match: re.Match[str]) -> str:
+def _strip_suspicious_format_controls(value: str) -> str:
+    """Drop rendering artifacts while preserving emoji ZWJ sequences."""
+
+    characters = list(value)
+    cleaned: list[str] = []
+    for index, character in enumerate(characters):
+        if character in _ALWAYS_REMOVE_FORMAT_CONTROLS:
+            continue
+        if character not in {"\u200c", "\u200d"}:
+            cleaned.append(character)
+            continue
+        left = _nearest_non_variation_selector(characters, index, -1)
+        right = _nearest_non_variation_selector(characters, index, 1)
+        if left is None or right is None:
+            continue
+        if character == "\u200c" and _is_joining_script(left) and _is_joining_script(right):
+            cleaned.append(character)
+        elif character == "\u200d" and (
+            (_is_emoji(left) and _is_emoji(right))
+            or (_is_joining_script(left) and _is_joining_script(right))
+        ):
+            cleaned.append(character)
+    return "".join(cleaned)
+
+
+def _remove_separator_lines(value: str) -> str:
+    return "\n".join(
+        line for line in value.splitlines() if not _SEPARATOR_LINE_PATTERN.fullmatch(line)
+    )
+
+
+def _nearest_non_variation_selector(
+    characters: Sequence[str], start: int, direction: int
+) -> str | None:
+    index = start + direction
+    while 0 <= index < len(characters):
+        character = characters[index]
+        if character not in {"\ufe0e", "\ufe0f"}:
+            return character
+        index += direction
+    return None
+
+
+def _is_emoji(character: str) -> bool:
+    codepoint = ord(character)
+    return 0x1F000 <= codepoint <= 0x1FAFF or 0x2600 <= codepoint <= 0x27BF
+
+
+def _is_joining_script(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x0600 <= codepoint <= 0x08FF
+        or 0x0900 <= codepoint <= 0x0D7F
+        or 0xFB50 <= codepoint <= 0xFEFF
+    )
+
+
+def _anchor_to_text(match: re.Match[str], links: _LinkCollector) -> str:
     url = html.unescape(match.group(2)).strip()
-    label = re.sub(r"(?s)<[^>]+>", " ", match.group(3))
-    label = re.sub(r"\s+", " ", html.unescape(label)).strip() or url
+    label = _anchor_label(match.group(3))
     if not url.startswith(("https://", "http://")):
-        return label
-    return f" {label} [{url}] "
+        return label or url
+    source_label = _source_link_label(label, url)
+    ref = links.add(url, source_label)
+    return f" {source_label} [{ref}] " if source_label else " "
 
 
-def _extract_html_links(value: str) -> list[str]:
+def _extract_html_links(
+    value: str, links: _LinkCollector
+) -> list[tuple[str, str]]:
     anchor_pattern = r"(?is)<a\b[^>]*?href\s*=\s*(['\"])(.*?)\1[^>]*>(.*?)</a>"
-    links = []
+    extracted: list[tuple[str, str]] = []
     for match in re.finditer(anchor_pattern, value):
-        rendered = _anchor_to_text(match).strip()
-        if "[http" in rendered:
-            links.append(rendered)
-    return links
+        url = html.unescape(match.group(2)).strip()
+        if url.startswith(("https://", "http://")):
+            extracted.append((url, _anchor_to_text(match, links).strip()))
+    return extracted
 
 
 def _optional_string(value: object) -> str | None:

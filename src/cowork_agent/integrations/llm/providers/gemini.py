@@ -21,6 +21,7 @@ from cowork_agent.domain.target_contracts import (
     Actionability,
     ActionPlanOutput,
     EmailRouteDecision,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     ExpectedDocumentType,
     PlanStep,
@@ -267,6 +268,7 @@ class GeminiActionPlanGenerator:
                     run_context=run_context,
                     candidate=candidate,
                     first_envelope=envelopes[0],
+                    source_links=_task_source_links(envelopes, candidate.source_message_ids),
                     current_time=current_time,
                 ),
             )
@@ -530,6 +532,7 @@ def _parse_action_plan_output(
     run_context: GenerationContext,
     candidate: TaskCandidate,
     first_envelope: EphemeralEmailEnvelope,
+    source_links: tuple[EmailSourceLink, ...],
     current_time: datetime,
 ) -> ActionPlanOutput:
     """Validate one generation payload into the §6.6 ActionPlanOutput.
@@ -578,7 +581,33 @@ def _parse_action_plan_output(
             ),
             validation_status=validation_status,
             created_at=current_time,
+            source_links=source_links,
         )
+    )
+
+
+def _task_source_links(
+    envelopes: Sequence[EphemeralEmailEnvelope], source_message_ids: Sequence[str]
+) -> tuple[EmailSourceLink, ...]:
+    """Merge candidate email links by exact URL and assign task-local refs."""
+
+    by_message_id = {envelope.gmail_message_id: envelope for envelope in envelopes}
+    ordered: list[tuple[str, str | None]] = []
+    positions: dict[str, int] = {}
+    for message_id in source_message_ids:
+        envelope = by_message_id.get(message_id)
+        if envelope is None:
+            continue
+        for link in envelope.source_links:
+            position = positions.get(link.url)
+            if position is None:
+                positions[link.url] = len(ordered)
+                ordered.append((link.url, link.label))
+            elif ordered[position][1] is None and link.label:
+                ordered[position] = (link.url, link.label)
+    return tuple(
+        EmailSourceLink(ref=f"link{index}", label=label, url=url)
+        for index, (url, label) in enumerate(ordered, start=1)
     )
 
 

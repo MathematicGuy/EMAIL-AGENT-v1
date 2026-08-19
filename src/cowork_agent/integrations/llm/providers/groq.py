@@ -41,6 +41,7 @@ from .gemini import (
     _classified_messages_for,
     _generate_with_schema_repair,
     _parse_action_plan_output,
+    _task_source_links,
     _update_current_generation,
     _update_current_span,
     _validated_decisions,
@@ -102,6 +103,7 @@ class GroqActionPlanGenerator:
                     run_context=run_context,
                     candidate=candidate,
                     first_envelope=envelopes[0],
+                    source_links=_task_source_links(envelopes, candidate.source_message_ids),
                     current_time=current_time,
                 ),
             )

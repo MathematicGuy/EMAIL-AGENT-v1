@@ -69,12 +69,19 @@ export interface SupportingDocument {
   relevance_score: number;
 }
 
+export interface EmailSourceLink {
+  ref: string;
+  label: string | null;
+  url: string;
+}
+
 export interface DigestTask {
   task_id: string;
   run_id: string;
   gmail_message_id: string;
   gmail_url: string;
   source_message_ids: string[];
+  source_links?: EmailSourceLink[];
   incident_key: string | null;
   title: string;
   request_summary: string;

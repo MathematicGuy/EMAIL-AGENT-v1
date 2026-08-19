@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -96,7 +98,15 @@ async def fetch_candidates(
 
 
 def _candidate_record(message: Any, sequence: int) -> dict[str, object]:
-    body = " ".join(str(message.normalized_body).split())
+    sanitized_body = html.unescape(
+        _strip_suspicious_format_runs(str(message.normalized_body))
+    )
+    body = " ".join(
+        normalized
+        for line in sanitized_body.splitlines()
+        if (normalized := re.sub(r"[^\S\r\n]+", " ", line).strip())
+        and not re.fullmatch(r"[-=_*|—–]{2,}", normalized)
+    )
     sender = formataddr((str(message.sender_name), str(message.sender_email))).strip()
     if not sender:
         sender = str(message.sender_email)
@@ -110,6 +120,58 @@ def _candidate_record(message: Any, sequence: int) -> dict[str, object]:
         "labels": [str(label) for label in message.labels],
         "gmail_content": body,
     }
+
+
+def _strip_suspicious_format_runs(value: str) -> str:
+    """Remove rendering artifacts without breaking emoji ZWJ sequences."""
+
+    always_remove = frozenset("\u00ad\u034f\u200b\u200e\u200f\ufeff")
+    characters = list(value)
+    cleaned: list[str] = []
+    for index, character in enumerate(characters):
+        if character in always_remove:
+            continue
+        if character not in {"\u200c", "\u200d"}:
+            cleaned.append(character)
+            continue
+        left = _nearest_non_variation_selector(characters, index, -1)
+        right = _nearest_non_variation_selector(characters, index, 1)
+        if left is None or right is None:
+            continue
+        if character == "\u200c" and _is_joining_script(left) and _is_joining_script(right):
+            cleaned.append(character)
+        elif character == "\u200d" and (
+            (_is_emoji(left) and _is_emoji(right))
+            or (_is_joining_script(left) and _is_joining_script(right))
+        ):
+            cleaned.append(character)
+    return "".join(cleaned)
+
+
+def _nearest_non_variation_selector(
+    characters: Sequence[str], start: int, direction: int
+) -> str | None:
+    index = start + direction
+    while 0 <= index < len(characters):
+        character = characters[index]
+        if character not in {"\ufe0e", "\ufe0f"}:
+            return character
+        index += direction
+    return None
+
+
+def _is_emoji(character: str) -> bool:
+    codepoint = ord(character)
+    return 0x1F000 <= codepoint <= 0x1FAFF or 0x2600 <= codepoint <= 0x27BF
+
+
+def _is_joining_script(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x0600 <= codepoint <= 0x08FF
+        or 0x0900 <= codepoint <= 0x0D7F
+        or 0xFB50 <= codepoint <= 0xFEFF
+    )
 
 
 def write_candidates(

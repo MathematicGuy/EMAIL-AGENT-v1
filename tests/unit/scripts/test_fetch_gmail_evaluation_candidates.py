@@ -117,6 +117,52 @@ def test_fetch_candidates_keeps_complete_content_and_orders_newest_first() -> No
     assert dataset["fetched_at"] == NOW.isoformat()
 
 
+def test_candidate_record_removes_repeated_invisible_format_controls() -> None:
+    module = load_module()
+    message = _envelope(
+        "m1",
+        "t1",
+        "Readable\u200e\u200f\ufeff\u200b\u200c\u200d content",
+    )
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "Readable content"
+
+
+def test_candidate_record_replaces_line_boundaries_with_spaces() -> None:
+    module = load_module()
+    message = _envelope(
+        "m1",
+        "t1",
+        "Overview\n  First action  \n\nSecond action\nOpen item [link1]",
+    )
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == (
+        "Overview First action Second action Open item [link1]"
+    )
+
+
+def test_candidate_record_removes_grapheme_artifacts_but_preserves_emoji_zwj() -> None:
+    module = load_module()
+    message = _envelope("m1", "t1", "A\u200c\u034f\u00adB 👩\u200d💻 می\u200cروم")
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "AB 👩‍💻 می‌روم"
+
+
+def test_candidate_record_removes_only_whole_separator_lines() -> None:
+    module = load_module()
+    message = _envelope("m1", "t1", "Keep\n---------\n|----|\n--\n000\n...\nKeep-inline")
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "Keep 000 ... Keep-inline"
+
+
 def test_fetch_candidates_deduplicates_message_ids_across_pages() -> None:
     module = load_module()
     first = _envelope("m1", "t1", "first body", received_at=OLD_TIME)
