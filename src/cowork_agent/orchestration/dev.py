@@ -36,12 +36,25 @@ def _stop(process: ManagedProcess) -> None:
 
 def run_dev(
     *,
+    reload: bool = False,
     spawn: ProcessFactory = subprocess.Popen,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Keep the API and document worker alive as one local command."""
+    import os
+
+    is_reload = reload or os.getenv("APP_RELOAD", "false").strip().lower() in {
+        "true",
+        "1",
+        "yes",
+    }
+    api_cmd: Sequence[str] = (
+        (sys.executable, "-m", "cowork_agent.app", "--reload")
+        if is_reload
+        else (sys.executable, "-m", "cowork_agent.app")
+    )
     commands = (
-        (sys.executable, "-m", "cowork_agent.app"),
+        api_cmd,
         (sys.executable, "-m", "cowork_agent.orchestration.worker"),
     )
     processes: list[ManagedProcess] = []
@@ -76,8 +89,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.reload:
         import os
+
         os.environ["APP_RELOAD"] = "true"
-    raise SystemExit(run_dev())
+    raise SystemExit(run_dev(reload=args.reload))
 
 
 if __name__ == "__main__":

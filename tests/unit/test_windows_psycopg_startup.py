@@ -32,3 +32,25 @@ def test_main_loads_dotenv_before_selecting_windows_postgres_loop(
 
     assert captured["loop"] == "asyncio:SelectorEventLoop"
     assert captured["workers"] == 1
+
+
+def test_main_passes_reload_and_src_reload_dirs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def captured_run(*args: Any, **kwargs: Any) -> None:
+        del args
+        captured.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(app.sys, "argv", ["mail-todo-api", "--reload"])
+    monkeypatch.setattr(app.uvicorn, "run", captured_run)
+
+    app.main()
+
+    assert captured["reload"] is True
+    assert captured["reload_dirs"] is not None
+    assert str(Path(app.__file__).resolve().parent.parent) in captured["reload_dirs"][0]
+

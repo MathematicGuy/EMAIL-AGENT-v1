@@ -145,7 +145,10 @@ from cowork_agent.persistence.repositories.project_document_chunks import (
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
-from cowork_agent.runtime import configure_windows_event_loop_policy
+from cowork_agent.runtime import (
+    configure_windows_event_loop_policy,
+    configure_windows_reload,
+)
 
 from .api.chat import create_chat_router
 from .api.handlers import _jsonable
@@ -154,6 +157,7 @@ from .api.projects import create_project_router
 # ``uvicorn cowork_agent.app:create_app --factory`` bypasses ``main()``. Set
 # the policy during module import as well, before Uvicorn creates its loop.
 configure_windows_event_loop_policy()
+configure_windows_reload()
 
 logger = logging.getLogger(__name__)
 
@@ -1307,6 +1311,12 @@ def main() -> None:
         # the loop from its own loop_factory, so setting the event loop *policy*
         # here has no effect — the loop has to be named in the config instead.
         loop = "asyncio:SelectorEventLoop"
+    if sys.platform == "win32":
+        configure_windows_reload()
+
+    src_dir = Path(__file__).resolve().parent.parent
+    reload_dirs = [str(src_dir)] if reload else None
+
     uvicorn.run(
         "cowork_agent.app:create_app",
         factory=True,
@@ -1315,7 +1325,7 @@ def main() -> None:
         loop=loop,
         workers=api_workers,
         reload=reload,
-        reload_dirs=["src"] if reload else None,
+        reload_dirs=reload_dirs,
     )
 
 
