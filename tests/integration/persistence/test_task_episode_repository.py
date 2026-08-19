@@ -643,3 +643,97 @@ def test_list_episodes_returns_every_non_expired_status_newest_first() -> None:
         ]
 
     _run_scenario(scenario)
+
+
+def test_a_multi_word_search_matches_an_episode_that_holds_only_some_of_the_words() -> None:
+    """The search terms are ORed, and `min_score` is what decides relevance.
+
+    They used to be ANDed by `plainto_tsquery`, so an episode had to contain
+    every term of the search text to be a candidate at all. Nothing reached the
+    score, and episodic retrieval returned nothing to anyone.
+    """
+
+    async def scenario() -> None:
+        repository, pool = await _repository()
+        try:
+            wanted_namespace = _namespace(
+                session_id="session-wanted", record_id="wanted", turn_id="wanted"
+            )
+            wanted = replace(
+                _episode(
+                    episode_id="episode-wanted",
+                    record_id="wanted",
+                    turn_id="wanted",
+                    session_id="session-wanted",
+                ),
+                task_title="Renew the identity card",
+                minimal_request_paraphrase="Renew the identity card for the branch office.",
+                action_plan=("Collect the identity documents.",),
+                missing_information=("The case number is not stated.",),
+            )
+            other_namespace = _namespace(
+                session_id="session-other", record_id="other", turn_id="other"
+            )
+            other = replace(
+                _episode(
+                    episode_id="episode-other",
+                    record_id="other",
+                    turn_id="other",
+                    session_id="session-other",
+                ),
+                task_title="Book the quarterly meeting",
+                minimal_request_paraphrase="Book a quarterly meeting with finance.",
+                action_plan=("Check the shared calendar.",),
+                missing_information=(),
+            )
+            for namespace, episode in ((wanted_namespace, wanted), (other_namespace, other)):
+                await repository.write_task_episode(namespace, episode, expires_at=None)
+                assert (
+                    await repository.transition_task_episode(
+                        _transition(
+                            namespace,
+                            episode_id=episode.episode_id,
+                            to_status=ValidationStatus.USER_APPROVED,
+                        )
+                    )
+                    is not None
+                )
+
+            # "case" and "number" are in the wanted episode; "renew" and
+            # "identity" are too; "passport" is in neither. Under AND this
+            # matched nothing.
+            found = await repository.read_episodes(
+                _namespace(session_id="new-session"),
+                EpisodicMemoryQuery(
+                    query="renew identity card passport case number",
+                    max_items=10,
+                    min_score=0.0,
+                    timeout_ms=500,
+                ),
+            )
+            assert [episode.episode_id for episode in found] == ["episode-wanted"]
+
+            # A search text with no lexemes at all selects nothing rather than
+            # everything: the expansion yields NULL and `@@ NULL` is not true.
+            assert (
+                await repository.read_episodes(
+                    _namespace(session_id="new-session"),
+                    EpisodicMemoryQuery(
+                        query="- - -", max_items=10, min_score=0.0, timeout_ms=500
+                    ),
+                )
+                == ()
+            )
+
+            # A term that is only tsquery punctuation is data, not syntax.
+            escaped = await repository.read_episodes(
+                _namespace(session_id="new-session"),
+                EpisodicMemoryQuery(
+                    query="renew' | 'x", max_items=10, min_score=0.0, timeout_ms=500
+                ),
+            )
+            assert [episode.episode_id for episode in escaped] == ["episode-wanted"]
+        finally:
+            await pool.close()
+
+    _run_scenario(scenario)

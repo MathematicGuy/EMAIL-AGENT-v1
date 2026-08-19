@@ -729,7 +729,28 @@ class PostgresTaskEpisodeRepository:
                             ts_rank_cd(search_vector, terms.tsquery, 32) AS relevance_score
                         FROM task_episodes
                         CROSS JOIN LATERAL (
-                            SELECT plainto_tsquery('simple', %s) AS tsquery
+                            -- Every term ORed, not ANDed. `plainto_tsquery`
+                            -- joins its terms with `&`, so a search for three
+                            -- words matched only an episode containing all
+                            -- three - and since 'simple' has no stopword
+                            -- dictionary, a search built from a sentence never
+                            -- matched anything at all. Recall belongs to the
+                            -- index and precision to `min_score`; ANDing put
+                            -- both in the index and left the score unreachable.
+                            --
+                            -- Expanded through `to_tsvector` rather than by
+                            -- editing tsquery text: the lexemes come back
+                            -- already normalised, and `quote_literal` escapes
+                            -- them, so no part of the user's message is ever
+                            -- parsed as tsquery syntax. No lexemes (empty or
+                            -- punctuation-only text) yields NULL, and
+                            -- `search_vector @@ NULL` selects nothing.
+                            SELECT (
+                                SELECT string_agg(quote_literal(lexeme), ' | ')::tsquery
+                                FROM unnest(
+                                    tsvector_to_array(to_tsvector('simple', %s))
+                                ) AS lexeme
+                            ) AS tsquery
                         ) AS terms
                         WHERE tenant_id = %s AND user_id = %s AND feature = %s
                             AND validation_status IN ('user_approved', 'completed')
