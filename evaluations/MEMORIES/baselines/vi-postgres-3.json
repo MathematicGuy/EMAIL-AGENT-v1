@@ -1,0 +1,162 @@
+{
+  "schema_version": "2.0.0",
+  "probe_set_id": "v1_four_scopes",
+  "probe_count": 8,
+  "provider": "openrouter",
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "ran_at": "2026-08-19T16:40:42.900878+00:00",
+  "run_key": "4858eff2e91b",
+  "per_scope": {
+    "short_term": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 0,
+      "earned_it": 2
+    },
+    "long_term": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    },
+    "episodic": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    },
+    "semantic": {
+      "probes": 2,
+      "pass": 1,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 1,
+      "unreadable": 1,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 0
+    }
+  },
+  "verdicts": [
+    {
+      "probe": "sem_recall_01",
+      "targets": "semantic",
+      "test": "recall",
+      "full": "no_answer",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "unreadable",
+      "certain": true,
+      "latency_ms": 16171
+    },
+    {
+      "probe": "ep_restraint_01",
+      "targets": "episodic",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 22350
+    },
+    {
+      "probe": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 8180
+    },
+    {
+      "probe": "sem_restraint_01",
+      "targets": "semantic",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 29543
+    },
+    {
+      "probe": "ep_recall_01",
+      "targets": "episodic",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 13370
+    },
+    {
+      "probe": "lt_recall_01",
+      "targets": "long_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 16900
+    },
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 13611
+    },
+    {
+      "probe": "st_update_01",
+      "targets": "short_term",
+      "test": "update",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 25228
+    }
+  ],
+  "leaked_probes": [],
+  "needs_reading": 3,
+  "seed_failures": [
+    "[lt_restraint_01/full] episodic: nothing was written to the store"
+  ]
+}
