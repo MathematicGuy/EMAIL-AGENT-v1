@@ -1,28 +1,27 @@
-"""Export bounded Gmail metadata for human intent-router labeling.
-
-The export deliberately contains the same metadata shape used by the existing
-email golden set, but no full message bodies or attachments. Retrieved body
-text is used only in memory to create a short evaluation snippet.
-"""
+"""Export fresh full-content Gmail candidates for human intent-router labeling."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from email.utils import formataddr
 from pathlib import Path
 from typing import Any, Protocol
 
 from cowork_agent.features.email_action_plan.schemas import SearchPage
 
+try:
+    from scripts.email_evaluation_artifacts import atomic_write_json, validate_candidate_dataset
+except ModuleNotFoundError:
+    from email_evaluation_artifacts import atomic_write_json, validate_candidate_dataset
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPO_ROOT / "evaluations" / "EMAIL" / "gmail_candidates.json"
-DEFAULT_QUERY = "is:unread in:inbox"
+DEFAULT_QUERY = "in:inbox"
 MAX_LIMIT = 200
-SNIPPET_LENGTH = 350
 
 
 class MailboxReader(Protocol):
@@ -45,7 +44,8 @@ async def fetch_candidates(
     *,
     query: str,
     limit: int,
-) -> list[dict[str, object]]:
+    fetched_at: datetime,
+) -> dict[str, object]:
     """Fetch at most ``limit`` matching message IDs, following Gmail pages."""
 
     validate_limit(limit)
@@ -69,7 +69,7 @@ async def fetch_candidates(
         cursor = page.next_cursor
 
     thread_cache: dict[str, Sequence[Any]] = {}
-    candidates: list[dict[str, object]] = []
+    messages: list[Any] = []
     for reference in references:
         thread_id = str(reference.thread_id)
         if thread_id not in thread_cache:
@@ -81,8 +81,18 @@ async def fetch_candidates(
         )
         if message is None:
             continue
-        candidates.append(_candidate_record(message, len(candidates) + 1))
-    return candidates
+        messages.append(message)
+
+    messages.sort(key=lambda message: message.received_at, reverse=True)
+    candidates = [_candidate_record(message, index) for index, message in enumerate(messages, 1)]
+    return {
+        "schema_version": 1,
+        "fetched_at": fetched_at.isoformat(),
+        "gmail_query": query,
+        "ordering": "received_at_desc",
+        "case_count": len(candidates),
+        "cases": candidates,
+    }
 
 
 def _candidate_record(message: Any, sequence: int) -> dict[str, object]:
@@ -91,23 +101,22 @@ def _candidate_record(message: Any, sequence: int) -> dict[str, object]:
     if not sender:
         sender = str(message.sender_email)
     return {
-        "id": f"email_candidate_{sequence:03d}",
-        "gmail_message_id": str(message.gmail_message_id),
+        "case_id": f"email_case_{sequence:03d}",
+        "source_message_id": str(message.gmail_message_id),
         "gmail_thread_id": str(message.gmail_thread_id),
         "sender": sender,
         "subject": str(message.subject),
         "received_at": message.received_at.isoformat(),
         "labels": [str(label) for label in message.labels],
-        "snippet": body[:SNIPPET_LENGTH],
+        "gmail_content": body,
     }
 
 
-def write_candidates(candidates: Sequence[Mapping[str, object]], output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(list(candidates), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+def write_candidates(
+    candidates: Mapping[str, object], output: Path, *, expected_count: int | None = None
+) -> None:
+    validated = validate_candidate_dataset(candidates, expected_count=expected_count)
+    atomic_write_json(validated, output)
 
 
 async def _load_connection(connection_id: str | None) -> tuple[Any, Any, Any]:
@@ -161,14 +170,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connection.id,
                 query=args.query,
                 limit=args.limit,
+                fetched_at=datetime.now(UTC),
             )
         )
-        write_candidates(candidates, args.output)
+        write_candidates(candidates, args.output, expected_count=args.limit)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Gmail candidate export failed: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Exported {len(candidates)} Gmail candidates to {args.output}")
+    print(f"Exported {candidates['case_count']} Gmail candidates to {args.output}")
     return 0
 
 
