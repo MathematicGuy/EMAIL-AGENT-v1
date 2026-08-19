@@ -6,7 +6,7 @@ import copy
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import cast
@@ -119,7 +119,9 @@ def validate_candidate_dataset(
     _require_unique(validated_cases, "case_id", "candidate dataset")
     _require_unique(validated_cases, "source_message_id", "candidate dataset")
     received_at = [
-        _parse_timestamp(case["received_at"], f"candidate case {index}.received_at")
+        _parse_orderable_timestamp(
+            case["received_at"], f"candidate case {index}.received_at"
+        )
         for index, case in enumerate(validated_cases, start=1)
     ]
     if any(
@@ -534,8 +536,13 @@ def _parse_timestamp(value: str, location: str) -> datetime:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"{location} must be an ISO-8601 timestamp") from exc
+    return parsed
+
+
+def _parse_orderable_timestamp(value: str, location: str) -> datetime:
+    parsed = _parse_timestamp(value, location)
     if parsed.tzinfo is None:
-        raise ValueError(f"{location} must include a timezone")
+        return parsed.replace(tzinfo=UTC)
     return parsed
 
 

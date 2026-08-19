@@ -219,6 +219,20 @@ def test_candidate_requires_newest_first_received_at_order() -> None:
         module.validate_candidate_dataset(candidate, expected_count=2)
 
 
+def test_naive_artifact_timestamps_remain_valid_while_candidate_ordering_is_enforced() -> None:
+    module = load_module()
+    review = valid_review_export()
+    review["reviewed_at"] = "2026-08-19T00:00:00"
+
+    assert module.validate_review_export(review, expected_count=1) == review
+
+    candidate = valid_candidates(case_count=2)
+    candidate["cases"][0]["received_at"] = "2026-08-18T00:00:00Z"
+    candidate["cases"][1]["received_at"] = "2026-08-19T00:00:00Z"
+    with pytest.raises(ValueError, match="received_at.*descending"):
+        module.validate_candidate_dataset(candidate, expected_count=2)
+
+
 def test_golden_rejects_prediction_and_private_content() -> None:
     module = load_module()
     golden = valid_golden(case_count=1)
