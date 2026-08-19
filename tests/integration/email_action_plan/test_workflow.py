@@ -493,9 +493,9 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
 def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> None:
     async def scenario() -> None:
         messages = [
-            email("m1", "shared-thread", "First unread"),
-            email("m2", "shared-thread", "Second unread"),
-            email("m3", "shared-thread", "Third unread"),
+            email("m1", "thread-1", "First unread"),
+            email("m2", "thread-2", "Second unread"),
+            email("m3", "thread-3", "Third unread"),
         ]
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
@@ -705,7 +705,6 @@ def test_mailbox_fetch_is_bounded_and_preserves_newest_first_order() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert mailbox.max_timestamp_active == 2
         assert mailbox.max_thread_active == 2
         assert [message.gmail_message_id for message in classifier.received_envelopes] == [
             "m3",

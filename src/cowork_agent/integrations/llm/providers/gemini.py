@@ -316,6 +316,7 @@ Input blocks and their trust rules
 
 Hard boundaries
 - Produce exactly one Task: one title, one requestSummary, one Action Plan. Never split the candidate into multiple tasks and never merge other candidates in.
+- When multiple emails exist in the thread (<untrusted_data>), synthesize the entire reply chain: combine the original request, subsequent replies, additional instructions, new documents/attachments mentioned, and updated deadlines across all emails in the chain into one comprehensive Action Plan.
 - Echo the resolved route from <route_context> back in the Task and respect its mode. If mode is "partial", list the concrete missing knowledge in missingInformation.
 - Use the <retrieved_context> citations (supportingDocuments) for every company-specific step: policies, procedures, governance, templates, product specifics. Reference their citationId values in the step's supportingCitationIds.
 - Every citationId in supportingCitationIds must appear in <retrieved_context>. When retrievedContext is null or empty, supportingDocuments must be an empty array and every supportingCitationIds must be empty.
@@ -327,7 +328,7 @@ Hard boundaries
 Output language and grounding
 - Viết toàn bộ title, requestSummary, missingInformation và actionPlan bằng tiếng Việt, bất kể ngôn ngữ email nguồn. Giữ nguyên tên project, service, environment, volume, URL, biến môi trường và câu lệnh kỹ thuật.
 - Không phát minh project, resource, deadline, URL hay trạng thái không xuất hiện trong dữ liệu nguồn.
-- deadline phải là chuỗi ISO-8601 khi email nêu thời hạn rõ ràng; nếu không có thời hạn, trả về null.
+- deadline phải là chuỗi ISO-8601 khi email nêu thời hạn rõ ràng; nếu không có thời hạn, trả về null. Mặc định mọi mốc thời gian được nhắc tới trong nội dung email là theo giờ Việt Nam (múi giờ userTimezone / UTC+7, ví dụ: +07:00 đối với Asia/Ho_Chi_Minh). Nếu email ghi '10h sáng ngày 20/8', định dạng chính xác phải là '2026-08-20T10:00:00+07:00' (tuyệt đối không để đuôi +00:00 hay Z trừ khi email ghi rõ UTC).
 - priority là đánh giá của bạn: low, medium, high hoặc urgent; dùng null khi không đủ căn cứ.
 - classifierConfidence kế thừa độ tin cậy phân loại được cung cấp; generationConfidence là độ tin cậy của chính bạn vào Task đã tạo, từ 0 đến 1, hoặc null khi không chắc chắn.
 - validationStatus luôn là "system_generated".
@@ -862,9 +863,14 @@ class GeminiRouteClassifier:
 
 CLASSIFIER_SYSTEM_INSTRUCTION = """Email Route Classifier
 You are the Classifier in an email-to-action-plan pipeline. For every email in the input you produce exactly one structured Route Decision with:
-- actionability: one of action_required, action_suggested, informational, unclear, irrelevant.
-- candidateActionItem: one short candidate action item, or null when there is none.
-- emailIsSufficient: true only when the email alone contains everything needed to act.
+- actionability:
+  * action_required: Email contains a direct request, assignment, deadline, procedure, or action that requires the recipient to act.
+  * action_suggested: Email recommends or suggests an action without strict obligation.
+  * informational: Updates, meeting minutes, newsletters, announcements, or notifications that do not require any action.
+  * unclear: Vague email where it is ambiguous whether action is needed.
+  * irrelevant: Spam, promotional ads, automated social media suggestions, marketing.
+- candidateActionItem: one short candidate action item in Vietnamese, or null when there is none.
+- emailIsSufficient: true only when the email alone contains everything needed to act without consulting company documents.
 - knowledgeGaps: the concrete missing knowledge; empty when nothing is missing.
 - retrievalQuery: a Vietnamese-language query for the company document corpus that could fill the gaps, or null. The corpus is Vietnamese; write the query in Vietnamese even when the email is not.
 - expectedDocumentTypes: which company document categories retrieval should find.

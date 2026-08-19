@@ -40,10 +40,21 @@ _SEMANTIC_CUES = frozenset(
         "our procedure",
     }
 )
-_TASK_DIRECTIVE_VERBS = frozenset({"create", "make", "add", "draft", "prepare", "build"})
-_TASK_FILLERS = frozenset({"a", "an", "the", "new"})
-_TASK_ARTICLES = frozenset({"a", "an", "the"})
-_TASK_NEGATION_MARKERS = (("do", "not"), ("don't",), ("dont",), ("never",), ("no",))
+_TASK_DIRECTIVE_VERBS = frozenset(
+    {"create", "make", "add", "draft", "prepare", "build", "tạo", "lập", "lên"}
+)
+_TASK_FILLERS = frozenset({"a", "an", "the", "new", "một", "cho"})
+_TASK_ARTICLES = frozenset({"a", "an", "the", "một"})
+_TASK_NEGATION_MARKERS = (
+    ("do", "not"),
+    ("don't",),
+    ("dont",),
+    ("never",),
+    ("no",),
+    ("không", "cần"),
+    ("đừng",),
+    ("không",),
+)
 _TURN_TARGETS = frozenset({"this", "that", "it"})
 _MAX_TASK_FILLERS = 2
 
@@ -159,7 +170,7 @@ def _is_task_target(
     while index < len(tokens) and max_fillers and tokens[index] in fillers:
         index += 1
         max_fillers -= 1
-    return tokens[index : index + 1] == ("task",) or tokens[index : index + 2] == (
-        "action",
-        "plan",
+    return (
+        tokens[index : index + 1] in (("task",), ("tasks",), ("todo",), ("to-do",))
+        or tokens[index : index + 2] in (("action", "plan"), ("kế", "hoạch"), ("to", "do"))
     )

@@ -527,46 +527,8 @@ class DigestWorker:
             if cursor is None or len(refs) >= max_candidate_refs:
                 break
 
-        async def fetch_received_at(ref: MessageRef) -> datetime | None:
-            try:
-                return await self._mailbox.get_message_received_at(
-                    run.mailbox_connection_id, ref.message_id
-                )
-            except MailboxTemporaryError:
-                logger.warning(
-                    "Run %s skipping message %s after transient timestamp fetch failure",
-                    run.id,
-                    ref.message_id,
-                )
-                return None
-
-        timestamp_started = time.monotonic()
-        received_at_results = await _bounded_gather(
-            refs,
-            limit=self._mailbox_fetch_concurrency,
-            operation=fetch_received_at,
-        )
-        received_at_by_id: dict[str, datetime] = {}
-        for ref, received_at in zip(refs, received_at_results, strict=True):
-            if received_at is None:
-                skipped_threads += 1
-                continue
-            received_at_by_id[ref.message_id] = received_at
-        logger.info(
-            "Run %s fetched %d Gmail timestamps with concurrency %d in %d ms",
-            run.id,
-            len(refs),
-            self._mailbox_fetch_concurrency,
-            int((time.monotonic() - timestamp_started) * 1000),
-        )
-
-        selected_refs = sorted(
-            (ref for ref in refs if ref.message_id in received_at_by_id),
-            key=lambda ref: received_at_by_id[ref.message_id],
-            reverse=True,
-        )[: run.max_emails]
         messages_by_thread: dict[str, list[str]] = {}
-        for ref in selected_refs:
+        for ref in refs:
             messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
 
         thread_items = tuple(messages_by_thread.items())
@@ -601,26 +563,42 @@ class DigestWorker:
             self._mailbox_fetch_concurrency,
             int((time.monotonic() - thread_started) * 1000),
         )
+
+        all_envelopes: list[EphemeralEmailEnvelope] = []
         for (_thread_id, selected_ids), thread in zip(
             thread_items, thread_results, strict=True
         ):
-            if thread is None:
+            if thread is None or not thread:
                 skipped_threads += 1
                 continue
-            selected_id_set = set(selected_ids)
-            # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
-            selected = tuple(
-                replace(
-                    message,
-                    run_id=run.id,
-                    user_id=run.user_id,
+            # Sắp xếp toàn bộ email trong thread theo thời gian tăng dần (cũ -> mới)
+            sorted_thread = sorted(thread, key=lambda m: m.received_at)
+            latest_message = sorted_thread[-1]
+
+            # Chỉ thực hiện quét khi email mới nhất trong luồng là email chưa đọc
+            if latest_message.gmail_message_id not in set(selected_ids):
+                continue
+
+            # ADR-011: Lấy tối đa 5 email gần nhất trong chuỗi reply
+            bounded_thread = sorted_thread[-5:]
+            for message in bounded_thread:
+                all_envelopes.append(
+                    replace(
+                        message,
+                        run_id=run.id,
+                        user_id=run.user_id,
+                    )
                 )
-                for message in thread
-                if message.gmail_message_id in selected_id_set
-            )
-            run.emails_processed += len(selected)
-            if selected:
-                threads.append(selected)
+            if len(all_envelopes) >= run.max_emails:
+                break
+
+        # Regroup into threads preserving order
+        grouped_by_thread: dict[str, list[EphemeralEmailEnvelope]] = {}
+        for env in all_envelopes:
+            grouped_by_thread.setdefault(env.gmail_thread_id, []).append(env)
+
+        threads = [tuple(thread_envs) for thread_envs in grouped_by_thread.values()]
+        run.emails_processed = len(all_envelopes)
 
         run.next_cursor = cursor
         run.truncated = cursor is not None or run.emails_matched > run.emails_processed
