@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
-from tests.unit.scripts.cli_harness import load_script
+from tests.unit.scripts.cli_harness import load_script, run_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REVIEW_HTML = REPO_ROOT / "evaluations" / "EMAIL" / "review" / "review_annotations.html"
@@ -94,6 +95,91 @@ def proposal_batch(*proposal_cases: dict[str, object]) -> dict[str, object]:
         "rubric_version": RUBRIC_VERSION,
         "case_count": len(proposal_cases),
         "cases": list(proposal_cases),
+    }
+
+
+def reviewed_case(
+    index: int = 1,
+    *,
+    final: dict[str, object] | None = None,
+    review_status: str = "accepted",
+) -> dict[str, object]:
+    proposal = ground_truth()
+    return {
+        "case_id": f"email_case_{index:03d}",
+        "source_message_id": f"synthetic-message-{index}",
+        "proposal": proposal,
+        "final": deepcopy(final if final is not None else proposal),
+        "review_status": review_status,
+    }
+
+
+def review_export(
+    case_count: int = 70,
+    *,
+    corrected_actionability: int = 0,
+    corrected_route: int = 0,
+    corrected_case_ids: tuple[str, ...] = (),
+    conflict_case_ids: tuple[str, ...] = (),
+    systematic_errors_resolved: bool = True,
+) -> dict[str, object]:
+    actionability_ids = {
+        f"email_case_{index:03d}"
+        for index in range(1, corrected_actionability + 1)
+    }
+    route_ids = {
+        f"email_case_{index:03d}"
+        for index in range(
+            corrected_actionability + 1,
+            corrected_actionability + corrected_route + 1,
+        )
+    }
+    corrected_ids = actionability_ids | route_ids | set(corrected_case_ids)
+    conflict_ids = set(conflict_case_ids)
+    cases: list[dict[str, object]] = []
+    for index in range(1, case_count + 1):
+        case_id = f"email_case_{index:03d}"
+        final = ground_truth()
+        if case_id in actionability_ids:
+            final["actionability"] = "action_suggested"
+        if case_id in route_ids:
+            final.update(
+                {
+                    "email_is_sufficient": True,
+                    "knowledge_gaps": [],
+                    "expected_document_types": [],
+                    "expected_route": "direct_plan",
+                }
+            )
+        if case_id in conflict_ids:
+            final["expected_route"] = "direct_plan"
+        cases.append(
+            reviewed_case(
+                index,
+                final=final,
+                review_status=(
+                    "corrected"
+                    if case_id in corrected_ids or case_id in conflict_ids
+                    else "accepted"
+                ),
+            )
+        )
+    return {
+        "schema_version": 1,
+        "rubric_version": RUBRIC_VERSION,
+        "reviewed_at": "2026-08-19T00:00:00Z",
+        "systematic_errors_resolved": systematic_errors_resolved,
+        "case_count": case_count,
+        "cases": cases,
+    }
+
+
+def second_pass(*, case_ids: tuple[str, ...]) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "rubric_version": RUBRIC_VERSION,
+        "case_count": len(case_ids),
+        "case_ids": list(case_ids),
     }
 
 
@@ -208,3 +294,159 @@ def test_review_page_is_local_and_contains_required_controls() -> None:
         assert value in html
     assert 'id="completed-count"' in html
     assert 'id="remaining-count"' in html
+
+
+def test_promotion_metrics_measure_unchanged_actionability_and_route() -> None:
+    module = load_module()
+
+    metrics = module.promotion_metrics(
+        review_export(corrected_actionability=2, corrected_route=1)
+    )
+
+    assert metrics["review_count"] == 70
+    assert metrics["actionability_agreement"] == {
+        "unchanged": 68,
+        "total": 70,
+        "rate": 68 / 70,
+    }
+    assert metrics["route_agreement"] == {
+        "unchanged": 69,
+        "total": 70,
+        "rate": 69 / 70,
+    }
+    assert metrics["corrected_case_ids"] == [
+        "email_case_001",
+        "email_case_002",
+        "email_case_003",
+    ]
+    assert metrics["final_resolver_conflict_case_ids"] == []
+
+
+def test_promotion_requires_seventy_reviews_and_ninety_percent_agreement() -> None:
+    module = load_module()
+    reviewed = review_export(case_count=70, corrected_actionability=8, corrected_route=7)
+
+    with pytest.raises(ValueError, match="actionability agreement 88.6% is below 90.0%"):
+        module.promote_reviewed_annotations(reviewed, second_pass(case_ids=()))
+
+
+def test_promotion_requires_second_pass_for_every_corrected_case() -> None:
+    module = load_module()
+    reviewed = review_export(case_count=70, corrected_case_ids=("email_case_001",))
+
+    with pytest.raises(ValueError, match="missing second-pass cases"):
+        module.promote_reviewed_annotations(reviewed, second_pass(case_ids=()))
+
+
+def test_promotion_rejects_unresolved_systematic_errors() -> None:
+    module = load_module()
+    reviewed = review_export(systematic_errors_resolved=False)
+
+    with pytest.raises(ValueError, match="systematic errors"):
+        module.promote_reviewed_annotations(reviewed, second_pass(case_ids=()))
+
+
+def test_promotion_rejects_final_resolver_conflicts() -> None:
+    module = load_module()
+    reviewed = review_export(conflict_case_ids=("email_case_001",))
+
+    with pytest.raises(ValueError, match="final resolver conflict"):
+        module.promote_reviewed_annotations(
+            reviewed, second_pass(case_ids=("email_case_001",))
+        )
+
+
+def test_successful_promotion_is_truth_only_and_human_reviewed() -> None:
+    module = load_module()
+    reviewed = review_export(corrected_case_ids=("email_case_001",))
+
+    golden = module.promote_reviewed_annotations(
+        reviewed,
+        second_pass(case_ids=("email_case_001",)),
+        reviewed_at="2026-08-20T00:00:00Z",
+    )
+
+    assert set(golden) == {"schema_version", "rubric_version", "case_count", "cases"}
+    assert golden["case_count"] == 70
+    assert set(golden["cases"][0]) == {
+        "case_id",
+        "source_message_id",
+        "ground_truth",
+        "annotation",
+    }
+    assert all(
+        case["annotation"] == {
+            "source": "human_reviewed",
+            "rubric_version": RUBRIC_VERSION,
+            "reviewed_at": "2026-08-20T00:00:00Z",
+        }
+        for case in golden["cases"]
+    )
+    serialized = json.dumps(golden)
+    for forbidden in ("proposal", "comparison", "prediction", "gmail_content"):
+        assert forbidden not in serialized
+
+
+def test_validate_proposals_cli_reads_inputs_without_writing_output(tmp_path: Path) -> None:
+    candidates_path = tmp_path / "candidates.json"
+    proposals_path = tmp_path / "proposals.json"
+    candidates_path.write_text(json.dumps(candidates()), encoding="utf-8")
+    proposals_path.write_text(
+        json.dumps(proposal_batch(proposal_case())), encoding="utf-8"
+    )
+
+    result = run_cli(
+        "review_email_annotations",
+        "validate-proposals",
+        "--candidates",
+        str(candidates_path),
+        "--proposals",
+        str(proposals_path),
+    )
+
+    assert result.returncode == 0
+    assert "Validated 1 proposals" in result.stdout
+    assert not (tmp_path / "golden_dataset.json").exists()
+
+
+def test_promote_cli_validates_before_atomic_write_and_protects_existing_output(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = tmp_path / "reviewed.json"
+    second_pass_path = tmp_path / "second-pass.json"
+    output_path = tmp_path / "golden.json"
+    reviewed_path.write_text(json.dumps(review_export()), encoding="utf-8")
+    second_pass_path.write_text(json.dumps(second_pass(case_ids=())), encoding="utf-8")
+    output_path.write_text('{"sentinel": true}\n', encoding="utf-8")
+
+    result = run_cli(
+        "review_email_annotations",
+        "promote",
+        "--reviewed",
+        str(reviewed_path),
+        "--second-pass",
+        str(second_pass_path),
+        "--output",
+        str(output_path),
+    )
+
+    assert result.returncode == 2
+    assert "--replace" in result.stderr
+    assert output_path.read_text(encoding="utf-8") == '{"sentinel": true}\n'
+
+    result = run_cli(
+        "review_email_annotations",
+        "promote",
+        "--reviewed",
+        str(reviewed_path),
+        "--second-pass",
+        str(second_pass_path),
+        "--output",
+        str(output_path),
+        "--replace",
+    )
+
+    assert result.returncode == 0
+    promoted = json.loads(output_path.read_text(encoding="utf-8"))
+    assert promoted["case_count"] == 70
+    assert "proposal" not in json.dumps(promoted)
