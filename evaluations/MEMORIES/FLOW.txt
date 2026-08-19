@@ -1,0 +1,367 @@
+===============================================================================
+                     MEMORY EVALUATION - THE WHOLE FLOW
+             evaluations/MEMORIES/   |   probe set: v1_four_scopes
+===============================================================================
+
+Plain-language companion to SPEC.md. If you read one file first, read this one.
+
+
+-------------------------------------------------------------------------------
+ 1. WHAT QUESTION DOES THIS ANSWER?
+-------------------------------------------------------------------------------
+
+  NOT this:   "Can memory leak, or be written without authorization?"
+              ~80 policy unit tests already answer that. They are strict.
+
+  THIS:       "Does memory make the answer better,
+               and WHICH of the four scopes actually did it?"
+
+  The second half - WHICH scope - is the entire reason this harness exists.
+  Without it you get one number ("memory helped") that nobody can check.
+
+
+-------------------------------------------------------------------------------
+ 2. THE FOUR MEMORY SCOPES
+-------------------------------------------------------------------------------
+
+  All four are called "memory" but they behave nothing alike.
+
+  SCOPE        WHAT IT HOLDS                     LIVES IN        LASTS
+  ---------    -----------------------------     -----------     ----------
+  short_term   last 20 turns of THIS chat        in-process      30 min idle
+  long_term    4 profile fields:                 Postgres        90 days
+               language, timezone,
+               persona, tone
+  episodic     tasks the user asked for          Postgres        90 days
+               AND then approved
+  semantic     company policy documents          RAG corpus      corpus life
+
+  Three facts that shape everything downstream:
+
+    * No model can write to long_term or episodic. Both need an explicit
+      authorization step. So we cannot seed them by chatting at them.
+
+    * A brand-new episode is NOT retrievable. It becomes readable only after
+      an approval. Seeding episodic takes 3 steps; the others take 1.
+
+    * semantic is OFF by default, and even when on, the question must contain
+      a cue phrase or the read never fires.
+
+
+-------------------------------------------------------------------------------
+ 3. THE CORE TRICK: ASK THE SAME QUESTION THREE TIMES
+-------------------------------------------------------------------------------
+
+  A PROBE = one question
+          + what a correct answer looks like
+          + EXACTLY ONE target scope
+
+  That single declared target is what makes attribution possible.
+  Each probe is asked 3 times. Only ONE thing changes between them.
+
+
+    +----------------------+----------------------+----------------------+
+    |        ARM 1         |        ARM 2         |        ARM 3         |
+    |        "full"        |   "<target>_off"     |      "control"       |
+    +----------------------+----------------------+----------------------+
+    | memory seeded  YES   | memory seeded  YES   | memory seeded   NO   |
+    | target scope    ON   | target scope   OFF   | target scope    ON   |
+    | other scopes    ON   | other scopes    ON   | other scopes    ON   |
+    +----------------------+----------------------+----------------------+
+    | the product as it    | was the target scope | did this question    |
+    | actually ships       | load-bearing?        | need memory at all?  |
+    +----------------------+----------------------+----------------------+
+    |  should PASS         |  should FAIL         |  should FAIL         |
+    +----------------------+----------------------+----------------------+
+
+  If the answer only changes when the target scope is removed,
+  the change can ONLY have come from that scope. That is the attribution.
+
+
+  !! THE ONE THING EVERYBODY GETS BACKWARDS !!
+  ---------------------------------------------
+  "control" turns off the SEED, not the READS.
+  All four scopes stay switched ON in control - they are simply EMPTY.
+
+  Why it matters: if control disabled the reads instead, it would just be a
+  second ablation arm. A question the model can answer from training data
+  would then PASS under "full" and look like a memory success.
+
+  A PASS under control means one thing only:
+  --> this probe never needed memory. It is measuring the model, not us.
+
+
+-------------------------------------------------------------------------------
+ 4. WHAT ONE RUN ACTUALLY DOES
+-------------------------------------------------------------------------------
+
+   START
+     |
+     v
+  [1] MAKE A THROWAWAY IDENTITY
+     |    hash(probe set + model + seed) -> tenant_id / user_id
+     |    PREVENTS: colliding with another run, or touching a real user
+     v
+  [2] FOR EACH PROBE, FOR EACH OF THE 3 ARMS ------------------------+
+     |                                                               |
+     |   [2a] SEED THE MEMORY   (skipped entirely for "control")      |
+     |        short_term -> speak each line as a real chat turn       |
+     |        long_term  -> one profile write w/ explicit provenance  |
+     |        episodic   -> ask for the task, THEN approve it         |
+     |        semantic   -> index a small policy corpus               |
+     |        RULE: seed the way a real user would. Never write rows  |
+     |              straight into the DB.                             |
+     |                                                               |
+     |   [2b] VERIFY THE SEED LANDED                                  |
+     |        read every scope back, confirm non-empty                |
+     |        PREVENTS: a failed seed reading as amnesia              |
+     |                                                               |
+     |   [2c] OPEN A FRESH SESSION                                    |
+     |        ...unless the probe targets short_term                  |
+     |        PREVENTS: the answer sitting in the prompt already,     |
+     |                  so the scope under test is never consulted    |
+     |                                                               |
+     |   [2d] ASK THE QUESTION through the real ChatController        |
+     |        collect the reply text + latency                        |
+     |                                                               |
+     |   [2e] SCORE THE REPLY -> PASS / MISS / STALE / INVENTED       |
+     |        pure function: no model, no DB, no clock                |
+     |        if the grade rests on the refusal word-list,            |
+     |        mark it UNCERTAIN and ask a judge model                 |
+     |                                                               |
+     +---------------------------------------------------------------+
+     |
+     v
+  [3] COLLAPSE 3 OUTCOMES -> 1 VERDICT     (the line a human reads)
+     |
+     v
+  [4] WRITE 2 FILES
+     |    baselines/<stamp>.json   committed, METADATA ONLY
+     |    runs/<stamp>-detail.json gitignored, full replies for debugging
+     v
+  [5] TEAR DOWN
+     |    delete every store this run created. Company RAG never touched.
+     v
+   END
+
+
+-------------------------------------------------------------------------------
+ 5. SCORING: FOUR GRADES, NOT PASS/FAIL
+-------------------------------------------------------------------------------
+
+  PASS       the expected answer is there
+             (or the probe wanted a refusal, and got one)
+
+  MISS       the answer is simply absent.  A gap. Unhelpful but honest.
+
+  STALE      a SUPERSEDED value was given INSTEAD of the current one.
+             The user was told something false, not nothing.
+
+  INVENTED   the probe expected a refusal and got a confident answer.
+             THE HEADLINE FAILURE.
+
+  Why four and not two:
+
+      A system that says "I don't know" is behaving correctly under
+      uncertainty. A system that confidently returns last month's answer,
+      or invents one, is dangerous - and both look identical to "fail"
+      on a boolean.
+
+  One ordering rule that matters:
+    STALE only fires when the expected answer is MISSING.
+    "Wednesday - it moved from Tuesday" is a GOOD reply, not a stale one.
+
+
+-------------------------------------------------------------------------------
+ 6. VERDICTS: THE LINE YOU ACTUALLY READ
+-------------------------------------------------------------------------------
+
+  Three outcomes per probe collapse into one verdict.
+  Sorted WORST FIRST, so the interesting rows are never buried.
+
+    full      ablated   control     VERDICT              MEANS
+    -------   -------   -------     -----------------    -------------------
+    any INVENTED or STALE anywhere  dangerous            overrides everything
+    not PASS     -      not PASS    broken               scope not delivering
+    any        any      PASS        leaked               not a memory probe
+    PASS      PASS      not PASS    scope_did_nothing    right answer,
+                                                         wrong attribution
+    PASS    not PASS    not PASS    scope_earned_it      the scope did its job
+
+  "leaked" = the control arm passed = the question never needed memory.
+  Those probes are excluded from scoring and named in the report.
+
+
+-------------------------------------------------------------------------------
+ 7. WORKED EXAMPLE - ONE PROBE, START TO FINISH
+-------------------------------------------------------------------------------
+
+  PROBE  st_update_01   targets: short_term   test: update
+         seeded turns:  "...deadline is Tuesday."
+                        "Correction: the deadline moved to Wednesday."
+         question:      "When is the CCCD deadline?"
+         expect_any:    Wednesday
+         stale_any:     Tuesday
+
+  ARM 1  full             -> "Wednesday - it moved from Tuesday."   PASS
+                             (Wednesday present, so stale check never runs)
+
+  ARM 2  short_term_off   -> "I don't have a deadline on file."     MISS
+
+  ARM 3  control          -> "I don't have that information."       MISS
+
+  VERDICT:  scope_earned_it
+            Short-term memory did its job - and we know it was SHORT-TERM
+            specifically, because it was the only thing that moved.
+
+  WHAT EACH ARM RULED OUT:
+    control said "Wednesday"        -> model guessed. Not a memory probe.
+    short_term_off said "Wednesday" -> something ELSE supplied it.
+                                       Probe is mis-targeted.
+    full said "Tuesday"             -> STALE. Correction stored but lost.
+                                       Worse than forgetting.
+
+
+-------------------------------------------------------------------------------
+ 8. THE 9 PROBES THAT SHIP TODAY
+-------------------------------------------------------------------------------
+
+  ID                 SCOPE        TEST        CORRECT BEHAVIOUR
+  ---------------    ----------   ---------   ---------------------------------
+  st_recall_01       short_term   recall      says "Da Nang"
+  st_update_01       short_term   update      says Wednesday, not Tuesday
+  lt_recall_01       long_term    recall      names the stored timezone
+  lt_restraint_01    long_term    restraint   DECLINES - no job title was set
+  ep_recall_01       episodic     recall      names the CCCD renewal task
+  ep_restraint_01    episodic     restraint   DECLINES - no case number exists
+  sem_recall_01      semantic     recall      answers from the policy corpus
+  sem_restraint_01   semantic     restraint   DECLINES - no sabbatical doc
+  lt_isolation_01    long_term    isolation   DECLINES - other tenant's profile
+
+  Note the wording is deliberate: ep_recall_01 contains "previous task" and
+  both semantic probes contain "company policy". Those are RETRIEVAL CUES.
+  No cue -> the read never fires -> the probe measures nothing while
+  appearing to work.
+
+  9 probes x 3 arms = 27 model calls per full live run.
+
+
+-------------------------------------------------------------------------------
+ 9. TWO TIERS - WHAT GATES CI AND WHAT DOES NOT
+-------------------------------------------------------------------------------
+
+  OFFLINE TIER                          LIVE TIER
+  scoring, masking, verdicts, report    real model + real Postgres + real RAG
+  pure functions                        27 real model calls
+  no model, no DB, no network           needs 3 external dependencies
+  ---------------------------------     ---------------------------------
+  RUNS IN CI: yes                       RUNS IN CI: no
+  GATES: YES, must pass 100%            GATES: no - it MEASURES
+
+  Why the live tier does not gate: small-model behaviour drifts. A hard
+  assertion would make releases hostage to provider drift. A regression here
+  is read by a human, not enforced by a robot.
+
+  COMMANDS
+    # mechanics only - no key, no DB, scripted replies. Measures NOTHING.
+    python scripts/evaluate_memory.py --dry-run
+
+    # real run - needs Postgres + GEMINI_API_KEY + JINA_API_KEY
+    python scripts/evaluate_memory.py
+
+  EXIT CODES
+    0  the run completed and a report was written
+    1  no usable model - no reply to score, so there is no run
+    2  the probe set could not be loaded
+
+  !! EXIT CODE 0 DOES NOT MEAN MEMORY IS GOOD. It means the harness ran. !!
+
+
+===============================================================================
+ 10. WHERE WE ARE RIGHT NOW
+===============================================================================
+
+  BUILT AND GREEN
+    [x] probe format + loader + validation
+    [x] scoring (4 outcomes, pure function)
+    [x] verdicts + leak detection + worst-first ordering
+    [x] report assembly, metadata-only enforced by a test
+    [x] arm masking via a gateway subclass - NO production change
+    [x] refusal judge + reconciliation
+    [x] all 4 seeding rituals through real authorization paths
+    [x] seed verification
+    [x] live environment probing, per-scope findings
+    [x] live orchestration, run identity, session policy, teardown
+    [x] CLI wired end to end, live smoke test behind the `live` marker
+
+    Full suite: 1627 passed, 9 skipped. ruff clean. mypy --strict clean.
+
+  NEVER YET RUN FOR REAL
+    [ ] no PostgreSQL server on this machine
+    [ ] no GEMINI_API_KEY in the environment
+    [ ] no JINA_API_KEY in the environment
+        -> the live smoke test SKIPS. That is correct, not a failure.
+        -> everything above is proven by unit tests against fakes,
+           which proves the WIRING, not the BEHAVIOUR.
+
+
+-------------------------------------------------------------------------------
+ 11. THE REMAINING ISSUES
+-------------------------------------------------------------------------------
+
+  #1  FOREIGN-TENANT SEEDING IS NOT WIRED            <-- affects a real result
+      The isolation probe exists. The foreign identity exists. But NOTHING
+      writes the foreign profile.
+      CONSEQUENCE: lt_isolation_01 reports `broken` on every live run. It
+      asks for material that was never seeded, so it gets a refusal from an
+      EMPTY STORE, not from real isolation. It proves nothing either way and
+      must NOT be read as a passing isolation check.
+      NEEDS: a 2nd gateway at the foreign scope, one seed_long_term call,
+             a teardown entry, and its own test proving the primary user
+             genuinely CANNOT read the foreign profile.
+      SIZE: small.
+
+  #2  THE LIVE TIER HAS NEVER EXECUTED END TO END
+      Expect the first real run to surface this: an episode is only written
+      when the reply provider ALSO returns a task proposal. Asking for a task
+      is necessary but not sufficient. seed_episodic reports that as a
+      finding rather than letting it look like amnesia - but it is the most
+      likely episodic seed failure on day one.
+      NEEDS: Postgres running + both API keys, then one run.
+
+  #3  SEMANTIC HAS NO TENANT PARTITION           <-- production, not harness
+      The company RAG corpus has no tenant field anywhere: not on the chunk,
+      not in the retrieval filter, and load_corpus takes a tenant_id it never
+      reads. Company knowledge is corpus-wide BY DESIGN.
+      That is why isolation targets long_term instead - a semantic isolation
+      probe would report `dangerous` every single run while describing the
+      store's design rather than a regression.
+      NEEDS: a tenant field on KnowledgeChunk, a filter in
+             allowed_chunk_indices, and the ignored tenant_id wired to both.
+
+  #4  write_chat_summary HAS NO PRODUCTION CALLER
+      The port and the gateway method exist. No consolidation loop calls
+      them. So ChatSummaryEpisode is reachable in tests and unreachable in
+      the product, and the episodic scope measured here is TASK EPISODES
+      ONLY. Do not assume summary episodes are covered.
+
+  #5  THE LAUNCH GATE IS NOT FED BY THIS
+      evaluate_launch_gate still uses its hardcoded stand-in scorer.
+      Bridging real outcomes into it needs a defensible outcome-to-score
+      mapping first. That is its own decision, not a wiring task.
+
+
+-------------------------------------------------------------------------------
+ WHERE TO GO NEXT
+-------------------------------------------------------------------------------
+
+  SPEC.md        the design, 16 sections, with a worked walkthrough
+  PLAN.md        offline tier, tasks 1-9, all shipped
+  PLAN-LIVE.md   live tier, tasks 1-10, all shipped
+                 -> section "Open work after Task 10" holds the list above
+  README.md      how to run it and how to read a report
+
+  Code:  src/cowork_agent/features/ai_chat/memory_eval/
+  CLI:   scripts/evaluate_memory.py
+
+===============================================================================
