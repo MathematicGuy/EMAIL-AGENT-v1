@@ -18,7 +18,7 @@ from .probes import ProbeSet, ProbeTest
 from .scoring import Outcome
 from .verdicts import Verdict, derive_verdict, verdict_rank
 
-REPORT_SCHEMA_VERSION = "1.0.0"
+REPORT_SCHEMA_VERSION = "2.0.0"
 
 _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
     Verdict.DANGEROUS: "dangerous",
@@ -55,12 +55,9 @@ def build_report(
     *,
     provider: str,
     model: str,
-    judge_model: str | None,
     run_key: str,
     ran_at: datetime,
     seed_failures: Sequence[str] = (),
-    unscorable_probes: Sequence[str] = (),
-    degraded_sources_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     by_id = {probe.probe_id: probe for probe in probe_set.probes}
     per_scope: dict[str, dict[str, int]] = {
@@ -69,7 +66,7 @@ def build_report(
 
     entries: list[tuple[int, dict[str, object]]] = []
     leaked: list[str] = []
-    needs_judge = 0
+    needs_reading = 0
 
     for row in rows:
         probe = by_id.get(row.probe_id)
@@ -83,7 +80,7 @@ def build_report(
         if verdict is Verdict.LEAKED:
             leaked.append(row.probe_id)
         if not row.certain:
-            needs_judge += 1
+            needs_reading += 1
         entries.append(
             (
                 verdict_rank(verdict),
@@ -109,14 +106,11 @@ def build_report(
         "probe_count": len(probe_set.probes),
         "provider": provider,
         "model": model,
-        "judge_model": judge_model,
         "ran_at": ran_at.isoformat(),
         "run_key": run_key,
         "per_scope": per_scope,
         "verdicts": [entry for _, entry in entries],
         "leaked_probes": sorted(leaked),
-        "unscorable_probes": sorted(unscorable_probes),
-        "needs_judge": needs_judge,
+        "needs_reading": needs_reading,
         "seed_failures": sorted(seed_failures),
-        "degraded_sources_seen": sorted(set(degraded_sources_seen)),
     }

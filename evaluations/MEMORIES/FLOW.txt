@@ -62,7 +62,7 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
 
     +----------------------+----------------------+----------------------+
     |        ARM 1         |        ARM 2         |        ARM 3         |
-    |        "full"        |   "<target>_off"     |      "control"       |
+    |        "full"        |      "ablated"       |      "control"       |
     +----------------------+----------------------+----------------------+
     | memory seeded  YES   | memory seeded  YES   | memory seeded   NO   |
     | target scope    ON   | target scope   OFF   | target scope    ON   |
@@ -126,8 +126,9 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
      |                                                               |
      |   [2e] SCORE THE REPLY -> PASS / MISS / STALE / INVENTED       |
      |        pure function: no model, no DB, no clock                |
-     |        if the grade rests on the refusal word-list,            |
-     |        mark it UNCERTAIN and ask a judge model                 |
+     |        if the grade rests on the refusal word-list, mark it    |
+     |        UNCERTAIN and count it. A human reads those, not a      |
+     |        judge model - see section 5.                            |
      |                                                               |
      +---------------------------------------------------------------+
      |
@@ -171,6 +172,20 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
     STALE only fires when the expected answer is MISSING.
     "Wednesday - it moved from Tuesday" is a GOOD reply, not a stale one.
 
+  WHAT THE SCORER WILL NOT CLAIM
+  ------------------------------
+  PASS / MISS / STALE are decided by looking for text the probe DECLARED.
+  Those are certain by construction.
+
+  Deciding whether a reply DECLINED is different: it rests on a list of
+  refusal phrases, and that list can never be complete. So those rows are
+  marked UNCERTAIN and counted in the report as `needs_reading`.
+
+  The harness does not guess and does not ask a judge model. It says
+  "I am not sure about these N rows" and the replies are waiting in runs/
+  for a person to read. A benchmark may not publish a verdict it cannot
+  defend - so it publishes the doubt instead.
+
 
 -------------------------------------------------------------------------------
  6. VERDICTS: THE LINE YOU ACTUALLY READ
@@ -206,7 +221,7 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
   ARM 1  full             -> "Wednesday - it moved from Tuesday."   PASS
                              (Wednesday present, so stale check never runs)
 
-  ARM 2  short_term_off   -> "I don't have a deadline on file."     MISS
+  ARM 2  ablated          -> "I don't have a deadline on file."     MISS
 
   ARM 3  control          -> "I don't have that information."       MISS
 
@@ -216,7 +231,7 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
 
   WHAT EACH ARM RULED OUT:
     control said "Wednesday"        -> model guessed. Not a memory probe.
-    short_term_off said "Wednesday" -> something ELSE supplied it.
+    ablated said "Wednesday"        -> something ELSE supplied it.
                                        Probe is mis-targeted.
     full said "Tuesday"             -> STALE. Correction stored but lost.
                                        Worse than forgetting.
@@ -236,14 +251,20 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
   ep_restraint_01    episodic     restraint   DECLINES - no case number exists
   sem_recall_01      semantic     recall      answers from the policy corpus
   sem_restraint_01   semantic     restraint   DECLINES - no sabbatical doc
-  lt_isolation_01    long_term    isolation   DECLINES - other tenant's profile
+
+  The shape is deliberate: every scope gets ONE recall probe and ONE
+  restraint probe - can it remember, and does it stay quiet when it should.
+  short_term gets the only `update` probe, because a single session is the
+  only place a value can be superseded and re-asked in one run.
+
+  There is NO isolation probe. See section 11.
 
   Note the wording is deliberate: ep_recall_01 contains "previous task" and
   both semantic probes contain "company policy". Those are RETRIEVAL CUES.
   No cue -> the read never fires -> the probe measures nothing while
   appearing to work.
 
-  9 probes x 3 arms = 27 model calls per full live run.
+  8 probes x 3 arms = 24 model calls per full live run.
 
 
 -------------------------------------------------------------------------------
@@ -287,14 +308,11 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
     [x] verdicts + leak detection + worst-first ordering
     [x] report assembly, metadata-only enforced by a test
     [x] arm masking via a gateway subclass - NO production change
-    [x] refusal judge + reconciliation
     [x] all 4 seeding rituals through real authorization paths
     [x] seed verification
     [x] live environment probing, per-scope findings
     [x] live orchestration, run identity, session policy, teardown
     [x] CLI wired end to end, live smoke test behind the `live` marker
-
-    Full suite: 1627 passed, 9 skipped. ruff clean. mypy --strict clean.
 
   NEVER YET RUN FOR REAL
     [ ] no PostgreSQL server on this machine
@@ -306,60 +324,47 @@ Plain-language companion to SPEC.md. If you read one file first, read this one.
 
 
 -------------------------------------------------------------------------------
- 11. THE REMAINING ISSUES
+ 11. WHAT THIS DOES NOT TELL YOU
 -------------------------------------------------------------------------------
 
-  #1  FOREIGN-TENANT SEEDING IS NOT WIRED            <-- affects a real result
-      The isolation probe exists. The foreign identity exists. But NOTHING
-      writes the foreign profile.
-      CONSEQUENCE: lt_isolation_01 reports `broken` on every live run. It
-      asks for material that was never seeded, so it gets a refusal from an
-      EMPTY STORE, not from real isolation. It proves nothing either way and
-      must NOT be read as a passing isolation check.
-      NEEDS: a 2nd gateway at the foreign scope, one seed_long_term call,
-             a teardown entry, and its own test proving the primary user
-             genuinely CANNOT read the foreign profile.
-      SIZE: small.
+  Four things this harness does NOT cover. SPEC.md section 16 is the single
+  authoritative list with the full reasoning; these are the one-line versions,
+  and the first one you must know before reading any live report.
 
-  #2  THE LIVE TIER HAS NEVER EXECUTED END TO END
-      Expect the first real run to surface this: an episode is only written
-      when the reply provider ALSO returns a task proposal. Asking for a task
-      is necessary but not sufficient. seed_episodic reports that as a
-      finding rather than letting it look like amnesia - but it is the most
-      likely episodic seed failure on day one.
-      NEEDS: Postgres running + both API keys, then one run.
+  NO ISOLATION PROBE - cross-tenant leakage is NOT measured here.
+      Seeding a second tenant is not wired. A probe asking for material
+      nobody seeded gets a refusal from an EMPTY STORE - it would read as a
+      passing tenancy check while proving nothing in either direction.
+      So it is not shipped.
+      Isolation IS covered, strictly and offline, by the memory-policy
+      unit tests. See SPEC 6.2 for why it may also never target semantic:
+      the company RAG corpus has no tenant field anywhere, by design.
 
-  #3  SEMANTIC HAS NO TENANT PARTITION           <-- production, not harness
-      The company RAG corpus has no tenant field anywhere: not on the chunk,
-      not in the retrieval filter, and load_corpus takes a tenant_id it never
-      reads. Company knowledge is corpus-wide BY DESIGN.
-      That is why isolation targets long_term instead - a semantic isolation
-      probe would report `dangerous` every single run while describing the
-      store's design rather than a regression.
-      NEEDS: a tenant field on KnowledgeChunk, a filter in
-             allowed_chunk_indices, and the ignored tenant_id wired to both.
+  THE LIVE TIER HAS NEVER EXECUTED END TO END.
+      Expect the first real run to surface episodic seeding: an episode is
+      written only when the reply provider ALSO returns a task proposal.
+      Asking for a task is necessary but not sufficient. seed_episodic
+      reports that as a finding rather than letting it look like amnesia.
 
-  #4  write_chat_summary HAS NO PRODUCTION CALLER
-      The port and the gateway method exist. No consolidation loop calls
-      them. So ChatSummaryEpisode is reachable in tests and unreachable in
-      the product, and the episodic scope measured here is TASK EPISODES
-      ONLY. Do not assume summary episodes are covered.
+  EPISODIC MEANS TASK EPISODES ONLY.
+      write_chat_summary has no production caller, so ChatSummaryEpisode is
+      reachable in tests and unreachable in the product. Do not assume
+      summary episodes are covered.
 
-  #5  THE LAUNCH GATE IS NOT FED BY THIS
+  THE LAUNCH GATE IS NOT FED BY THIS.
       evaluate_launch_gate still uses its hardcoded stand-in scorer.
       Bridging real outcomes into it needs a defensible outcome-to-score
-      mapping first. That is its own decision, not a wiring task.
+      mapping first - a decision, not a wiring task.
 
 
 -------------------------------------------------------------------------------
  WHERE TO GO NEXT
 -------------------------------------------------------------------------------
 
-  SPEC.md        the design, 16 sections, with a worked walkthrough
-  PLAN.md        offline tier, tasks 1-9, all shipped
-  PLAN-LIVE.md   live tier, tasks 1-10, all shipped
-                 -> section "Open work after Task 10" holds the list above
-  README.md      how to run it and how to read a report
+  SPEC.md     the design and the reason behind every decision above.
+              Section 16 holds the open list; section 6.2 the isolation
+              reasoning; section 8.3 why there is no judge model.
+  README.md   how to run it and how to read a report.
 
   Code:  src/cowork_agent/features/ai_chat/memory_eval/
   CLI:   scripts/evaluate_memory.py

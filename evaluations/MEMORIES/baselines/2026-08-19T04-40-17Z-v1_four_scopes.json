@@ -1,0 +1,170 @@
+{
+  "schema_version": "2.0.0",
+  "probe_set_id": "v1_four_scopes",
+  "probe_count": 8,
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "ran_at": "2026-08-19T04:38:34.026410+00:00",
+  "run_key": "b8122166f937",
+  "per_scope": {
+    "short_term": {
+      "probes": 2,
+      "pass": 1,
+      "stale": 1,
+      "invented": 0,
+      "miss": 0,
+      "dangerous": 1,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 0,
+      "earned_it": 1
+    },
+    "long_term": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    },
+    "episodic": {
+      "probes": 2,
+      "pass": 1,
+      "stale": 0,
+      "invented": 0,
+      "miss": 1,
+      "dangerous": 0,
+      "broken": 1,
+      "leaked": 0,
+      "did_nothing": 0,
+      "earned_it": 1
+    },
+    "semantic": {
+      "probes": 2,
+      "pass": 0,
+      "stale": 0,
+      "invented": 0,
+      "miss": 2,
+      "dangerous": 0,
+      "broken": 2,
+      "leaked": 0,
+      "did_nothing": 0,
+      "earned_it": 0
+    }
+  },
+  "verdicts": [
+    {
+      "probe": "st_update_01",
+      "targets": "short_term",
+      "test": "update",
+      "full": "stale",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "dangerous",
+      "certain": false,
+      "latency_ms": 4876
+    },
+    {
+      "probe": "ep_recall_01",
+      "targets": "episodic",
+      "test": "recall",
+      "full": "miss",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "broken",
+      "certain": true,
+      "latency_ms": 5627
+    },
+    {
+      "probe": "sem_recall_01",
+      "targets": "semantic",
+      "test": "recall",
+      "full": "miss",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "broken",
+      "certain": false,
+      "latency_ms": 4829
+    },
+    {
+      "probe": "sem_restraint_01",
+      "targets": "semantic",
+      "test": "restraint",
+      "full": "miss",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "broken",
+      "certain": false,
+      "latency_ms": 4333
+    },
+    {
+      "probe": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 5917
+    },
+    {
+      "probe": "ep_restraint_01",
+      "targets": "episodic",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": false,
+      "latency_ms": 4280
+    },
+    {
+      "probe": "lt_recall_01",
+      "targets": "long_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 6456
+    },
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 4516
+    }
+  ],
+  "leaked_probes": [],
+  "needs_reading": 5,
+  "seed_failures": [
+    "[ep_recall_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[ep_recall_01/full] episodic: the verification read came back empty",
+    "[ep_restraint_01/ablated] episodic: the verification read came back empty",
+    "[ep_restraint_01/full] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[lt_recall_01/ablated] episodic: the verification read came back empty",
+    "[lt_recall_01/full] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[lt_restraint_01/ablated] episodic: the verification read came back empty",
+    "[lt_restraint_01/full] episodic: the verification read came back empty",
+    "[sem_recall_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[sem_recall_01/full] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[sem_restraint_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[sem_restraint_01/full] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[st_recall_01/ablated] episodic: the verification read came back empty",
+    "[st_recall_01/full] episodic: the verification read came back empty",
+    "[st_update_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
+    "[st_update_01/ablated] short_term: the verification read came back empty",
+    "[st_update_01/full] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve"
+  ]
+}

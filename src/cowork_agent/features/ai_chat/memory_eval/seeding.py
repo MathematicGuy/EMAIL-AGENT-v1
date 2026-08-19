@@ -31,9 +31,22 @@ from .probes import SeedSpec
 
 @dataclass(frozen=True, slots=True)
 class SeedOutcome:
+    """What happened when one scope was seeded.
+
+    `seeded` is separate from `ok` because "nothing was declared for this scope"
+    is a success that must NOT be verified afterwards — there is nothing to read
+    back. Seed verification keys on this field rather than on the wording of
+    `reason`, which is prose for a human and free to change.
+    """
+
     scope: MemoryType
     ok: bool
     reason: str
+    seeded: bool = True
+
+    @classmethod
+    def nothing_declared(cls, scope: MemoryType) -> SeedOutcome:
+        return cls(scope, True, "nothing declared", seeded=False)
 
 
 def build_seed_profile(
@@ -81,7 +94,7 @@ async def seed_long_term(
     """
 
     if not spec.long_term:
-        return SeedOutcome(MemoryType.LONG_TERM, True, "nothing declared")
+        return SeedOutcome.nothing_declared(MemoryType.LONG_TERM)
     try:
         profile = build_seed_profile(scope, spec.long_term, now=now, profile_id=profile_id)
         await gateway.write_profile(

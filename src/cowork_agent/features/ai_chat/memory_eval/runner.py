@@ -14,7 +14,6 @@ from datetime import datetime
 from cowork_agent.domain.chat_contracts import MemoryType
 
 from .arms import Arm
-from .judge import NullRefusalJudge, RefusalJudge, reconcile
 from .probes import Probe, ProbeSet, SeedSpec
 from .report import ProbeRow, build_report
 from .scoring import Outcome, score
@@ -55,13 +54,10 @@ async def run_probe_set(
     provider: str,
     model: str,
     ran_at: datetime,
-    judge: RefusalJudge | None = None,
     seed_failures: Sequence[str] = (),
-    degraded_sources_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     """Ask every probe under all three arms and assemble the report."""
 
-    judge = judge or NullRefusalJudge()
     rows: list[ProbeRow] = []
 
     for probe in probe_set.probes:
@@ -79,10 +75,8 @@ async def run_probe_set(
 
             result = score(reply, probe)
             if not result.certain:
-                # Only refusal verdicts are uncertain, and only those are worth
-                # a judge call. An unreachable judge changes nothing.
-                result = reconcile(result, await judge.adjudicate(probe.question, reply))
-            if not result.certain:
+                # Only refusal verdicts are uncertain. One uncertain arm makes
+                # the whole row uncertain: the verdict is derived from all three.
                 certain = False
             outcomes[arm] = result.outcome
 
@@ -104,9 +98,7 @@ async def run_probe_set(
         rows,
         provider=provider,
         model=model,
-        judge_model=None if isinstance(judge, NullRefusalJudge) else model,
         run_key=run_key(probe_set.probe_set_id, model, probe_set.seed),
         ran_at=ran_at,
         seed_failures=seed_failures,
-        degraded_sources_seen=degraded_sources_seen,
     )

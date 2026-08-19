@@ -24,14 +24,19 @@ from cowork_agent.domain.chat_contracts import (
     MemoryType,
     SemanticMemoryQuery,
 )
+from cowork_agent.domain.target_contracts import (
+    RetrievalStatus,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
+)
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 from ..controller import ChatController
 from ..memory_gateway import MemoryGateway
-from .live_controller import ask_once, collect_reply
-from .live_env import ScopeAvailability
+from .live_controller import ask_once, collect_errors, collect_reply
+from .live_env import ScopeFinding
 from .probes import SeedSpec
 from .seeding import SeedOutcome
 
@@ -51,7 +56,7 @@ async def seed_short_term(
     """
 
     if not spec.short_term:
-        return SeedOutcome(MemoryType.SHORT_TERM, True, "nothing declared")
+        return SeedOutcome.nothing_declared(MemoryType.SHORT_TERM)
     try:
         for index, line in enumerate(spec.short_term):
             await ask_once(controller, session_id, line, f"{key_prefix}-st-{index}")
@@ -79,7 +84,7 @@ async def seed_episodic(
     """
 
     if not spec.episodic:
-        return SeedOutcome(MemoryType.EPISODIC, True, "nothing declared")
+        return SeedOutcome.nothing_declared(MemoryType.EPISODIC)
 
     approved = 0
     try:
@@ -88,11 +93,18 @@ async def seed_episodic(
             events = [event async for event in controller.stream_message(request)]
             _, episode_ids = collect_reply(events)
             if not episode_ids:
+                # Only the observed fact plus whatever the stream said. This
+                # used to assert `is_explicit_task_request` had rejected the
+                # phrasing, which it never checked — and for the shipped seed
+                # that function returns True, so the report named a cause that
+                # was not the cause.
+                errors = collect_errors(events)
+                detail = "; ".join(errors) if errors else "no error was reported"
                 return SeedOutcome(
                     MemoryType.EPISODIC,
                     False,
-                    f"no task episode created for seed {index}; "
-                    "is_explicit_task_request rejected the phrasing",
+                    f"no task episode was created for seed {index} ({detail}); "
+                    "the turn produced no episodic citation to approve",
                 )
             if entry.approve:
                 for episode_id in episode_ids:
@@ -123,7 +135,7 @@ async def seed_semantic(
     """
 
     if not spec.semantic_corpus_dir:
-        return SeedOutcome(MemoryType.SEMANTIC, True, "nothing declared"), None
+        return SeedOutcome.nothing_declared(MemoryType.SEMANTIC), None
     try:
         documents = load_corpus(corpus_root / spec.semantic_corpus_dir)
         with warnings.catch_warnings():
@@ -141,6 +153,28 @@ async def seed_semantic(
         SeedOutcome(MemoryType.SEMANTIC, True, f"indexed {len(documents)} documents"),
         SemanticChatMemoryAdapter(index),
     )
+
+
+class EmptySemanticMemory:
+    """A corpus that was never indexed: the read fires and finds nothing.
+
+    The control arm differs from the others by having no seed, never by having
+    a read switched off (SPEC §5.1). For semantic, the "seed" is the index the
+    read hits — so a control arm needs a semantic store that answers, and
+    answers with nothing. Handing it `semantic_memory=None` instead would make
+    the gateway fail closed, which is a disabled read wearing a control arm's
+    name, and every semantic probe would look leaked no matter what the system
+    did. `InRepoSemanticMemory` cannot serve here: it refuses an empty corpus
+    at construction, by design.
+    """
+
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
+        return SemanticRetrievalResponse(
+            query_id=request.run_id,
+            chunks=(),
+            retrieval_status=RetrievalStatus.NO_RESULTS,
+            latency_ms=0,
+        )
 
 
 def _verification_reads() -> MemoryReadOptions:
@@ -162,13 +196,23 @@ async def verify_seed(
     gateway: MemoryGateway,
     scope: ChatMemoryScope,
     expected_scopes: Sequence[MemoryType],
-) -> tuple[ScopeAvailability, ...]:
+) -> tuple[ScopeFinding, ...]:
     """Confirm each seeded scope actually reads back non-empty.
 
     Called on the `full` and `<target>_off` arms only. The `control` arm has no
     seed by definition, so verifying it would fail every scope every run.
 
     Our writes are transactional, so this is a single check rather than a poll.
+
+    What this can and cannot say: `short_term` and `long_term` are fetched
+    directly, so an empty read means an empty store. `episodic` and `semantic`
+    are RETRIEVALS, and a store can hold a record that the query does not
+    match — the SQLite episodic reader scores literal term overlap against the
+    episode text and drops anything scoring zero. So an empty read there means
+    "not retrievable by this query", which is not the same as "not written".
+    The gateway exposes no listing call, and the harness may not reach past it
+    into the repository, so the finding is worded for what was actually
+    observed rather than for a cause it cannot see.
     """
 
     if not expected_scopes:
@@ -177,11 +221,16 @@ async def verify_seed(
         session_id=scope.session_id, scope=scope, reads=_verification_reads()
     )
     try:
-        response = await gateway.read_context(request)
+        # Called through MemoryGateway explicitly, not through `gateway`. On an
+        # ablated arm the gateway IS an ArmScopedMemoryGateway, whose
+        # read_context masks the target scope — and that mask is a statement
+        # about what the PROBE may read, never about what the store holds.
+        # Verifying through it read the ablated arm's own target back as empty
+        # on every run, so a healthy store reported itself as amnesia.
+        response = await MemoryGateway.read_context(gateway, request)
     except Exception as error:  # noqa: BLE001 - an unreadable store is a finding
         return tuple(
-            ScopeAvailability(item, False, f"verification read failed: {error}")
-            for item in expected_scopes
+            ScopeFinding(item, f"verification read failed: {error}") for item in expected_scopes
         )
 
     populated = {
@@ -191,7 +240,7 @@ async def verify_seed(
         MemoryType.SEMANTIC: response.semantic_context is not None,
     }
     return tuple(
-        ScopeAvailability(item, False, f"{item.value} seed did not land: read back empty")
+        ScopeFinding(item, f"{item.value}: the verification read came back empty")
         for item in expected_scopes
         if not populated[item]
     )

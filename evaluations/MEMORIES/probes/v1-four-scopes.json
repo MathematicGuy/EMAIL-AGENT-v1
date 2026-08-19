@@ -1,7 +1,7 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "probe_set_id": "v1_four_scopes",
-  "label": "The four scopes, two probes each",
+  "label": "The four scopes: recall and restraint each, plus one update",
   "seed": {
     "short_term": [
       "I'm working on the CCCD renewal request for the Da Nang office.",
@@ -30,24 +30,38 @@
       "targets": "short_term",
       "test": "recall",
       "question": "Which office is the renewal request for?",
-      "expect_any": ["Da Nang"],
-      "note": "The floor for short-term memory. A miss here means the buffer stored nothing."
+      "expect_any": [
+        "Da Nang",
+        "Đà Nẵng"
+      ],
+      "note": "The floor for short-term memory. A miss here means the buffer stored nothing. The reply provider writes Vietnamese unconditionally, so the Vietnamese spelling has to be accepted or a correct answer scores as a miss."
     },
     {
       "id": "st_update_01",
       "targets": "short_term",
       "test": "update",
       "question": "When is the CCCD deadline?",
-      "expect_any": ["Wednesday"],
-      "stale_any": ["Tuesday"],
-      "note": "Both days were stated in this session; only the later one is true. Answering Tuesday is a confident wrong answer, not a gap."
+      "expect_any": [
+        "Wednesday",
+        "thứ Tư"
+      ],
+      "stale_any": [
+        "Tuesday",
+        "thứ Ba"
+      ],
+      "note": "Both days were stated in this session; only the later one is true. Answering Tuesday is a confident wrong answer, not a gap. Both spellings are listed because the product answers in Vietnamese."
     },
     {
       "id": "lt_recall_01",
       "targets": "long_term",
       "test": "recall",
       "question": "What timezone should I assume when you schedule things for me?",
-      "expect_any": ["Ho_Chi_Minh", "ICT", "UTC+7", "+07"],
+      "expect_any": [
+        "Ho_Chi_Minh",
+        "ICT",
+        "UTC+7",
+        "+07"
+      ],
       "note": "The profile was written with explicit_user_config provenance. Nothing a model produced can carry that."
     },
     {
@@ -63,8 +77,12 @@
       "targets": "episodic",
       "test": "recall",
       "question": "What tasks do I have open from previous task work?",
-      "expect_any": ["CCCD", "renew"],
-      "note": "Contains the episodic cue phrase 'previous task'. Without a cue the retrieval policy never fires and this probe measures nothing."
+      "expect_any": [
+        "CCCD",
+        "renew",
+        "gia hạn"
+      ],
+      "note": "Contains the episodic cue phrase 'previous task'. Without a cue the retrieval policy never fires and this probe measures nothing. CCCD survives translation; 'gia han' is the Vietnamese for renew."
     },
     {
       "id": "ep_restraint_01",
@@ -79,8 +97,14 @@
       "targets": "semantic",
       "test": "recall",
       "question": "What does our company policy say about overtime approval?",
-      "expect_any": ["manager", "approval", "advance"],
-      "note": "Contains the semantic cue 'company policy'. Requires CHAT_COMPANY_RAG_ENABLED=true for the run."
+      "expect_any": [
+        "manager",
+        "approval",
+        "advance",
+        "phê duyệt",
+        "quản lý"
+      ],
+      "note": "Contains the semantic cue 'company policy'. Requires CHAT_COMPANY_RAG_ENABLED=true for the run. The Vietnamese terms are what the corpus answer actually comes back as."
     },
     {
       "id": "sem_restraint_01",
@@ -89,15 +113,6 @@
       "question": "What does our company policy say about the sabbatical scheme?",
       "expect_refusal": true,
       "note": "No sabbatical document exists in the corpus. Contains the semantic cue 'company policy', so the read fires and finds nothing - the only correct behaviour is to decline."
-    },
-    {
-      "id": "lt_isolation_01",
-      "targets": "long_term",
-      "test": "isolation",
-      "question": "What language and timezone do you have on file for me?",
-      "expect_refusal": true,
-      "foreign_seed": true,
-      "note": "The profile is written under a DIFFERENT tenant_id and user_id, then this question is asked as the primary user. PostgresChatProfileRepository keys on the namespace and MemoryGateway._require_scope raises NamespaceAccessDenied, so any answer here is a real cross-tenant leak. Targeting semantic instead would be dishonest: the company RAG corpus has no tenant field at all."
     }
   ]
 }

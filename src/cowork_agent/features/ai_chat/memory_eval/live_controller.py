@@ -1,13 +1,13 @@
 """Driving the real ChatController under one arm (SPEC §7 step 6).
 
-PLAN.md Task 8 defined `AskProbe` and left the live implementation out. This is
-it. Nothing here judges anything — it asks a question and returns text, and the
-already-tested scoring layer decides what the text means.
+`runner.py` defines `AskProbe` and takes it as an argument; this is the live
+implementation of it. Nothing here judges anything — it asks a question and
+returns text, and the already-tested scoring layer decides what the text means.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import monotonic
 
@@ -66,6 +66,23 @@ def collect_reply(
     return "".join(chunks), tuple(episode_ids)
 
 
+def collect_errors(events: Iterable[ChatMessageStreamEvent]) -> tuple[str, ...]:
+    """Every error the stream reported, as `code: message`.
+
+    A turn that errors emits no DELTA, so `collect_reply` returns "" for it and
+    an errored turn is indistinguishable from a silent one. Scoring an empty
+    string grades the provider's outage as a memory result — a restraint probe
+    scores it INVENTED, the harness's headline failure. The reason has to
+    survive the stream or the report cannot be believed.
+    """
+
+    return tuple(
+        f"{event.code or 'error'}: {event.safe_message or ''}".strip()
+        for event in events
+        if event.event_type is ChatEventType.ERROR
+    )
+
+
 def build_arm_controller(
     scope: ChatMemoryScope,
     adapters: AdapterSet,
@@ -104,13 +121,17 @@ async def ask_once(
     session_id: str,
     question: str,
     idempotency_key: str,
-) -> tuple[str, int]:
-    """Ask one question and return (reply text, latency in ms).
+) -> tuple[str, int, tuple[str, ...]]:
+    """Ask one question and return (reply text, latency in ms, errors).
 
     `idempotency_key` must be unique per (probe, arm). The controller caches a
     completed turn by that key and replays it verbatim, so a shared key would
     hand every later arm the first arm's answer and silently produce a run in
     which ablation never changed anything.
+
+    The errors are returned rather than swallowed: an empty reply is scoreable
+    text, and whether it means "the model said nothing" or "the provider fell
+    over" is not something the grade can express.
     """
 
     request = ChatMessageRequest(session_id, question, idempotency_key)
@@ -118,10 +139,4 @@ async def ask_once(
     events = [event async for event in controller.stream_message(request)]
     latency_ms = int((monotonic() - started) * 1000)
     text, _ = collect_reply(events)
-    return text, latency_ms
-
-
-def episode_ids_from(events: Sequence[ChatMessageStreamEvent]) -> tuple[str, ...]:
-    """The episodic citation ids in `events`. Used by episodic seeding."""
-
-    return collect_reply(events)[1]
+    return text, latency_ms, collect_errors(events)

@@ -89,9 +89,14 @@ def test_build_arm_controller_masks_nothing_for_the_full_arm() -> None:
 def test_ask_once_returns_the_reply_text_and_a_latency() -> None:
     scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
     controller, _ = build_arm_controller(scope, AdapterSet(), _Reply(), masked_scope=None)
-    text, latency_ms = asyncio.run(ask_once(controller, "s", "which day?", "probe-1"))
+    text, latency_ms, errors = asyncio.run(ask_once(controller, "s", "which day?", "probe-1"))
     assert "Wednesday" in text
     assert latency_ms >= 0
+    # This gateway has no optional adapters, so the controller reports every
+    # optional scope as degraded. An error event does not imply a silent turn:
+    # the text arrived anyway. That is exactly why the errors are returned
+    # beside the text instead of being inferred from it being empty.
+    assert [item.split(":")[0] for item in errors] == ["optional_memory_degraded"]
 
 
 def test_each_ask_uses_a_distinct_idempotency_key() -> None:

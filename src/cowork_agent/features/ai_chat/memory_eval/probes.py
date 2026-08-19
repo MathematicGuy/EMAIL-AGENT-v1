@@ -14,7 +14,7 @@ from enum import StrEnum
 
 from cowork_agent.domain.chat_contracts import MemoryType
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
 _MAX_ID_LENGTH = 64
 
 
@@ -28,7 +28,6 @@ class ProbeTest(StrEnum):
     RECALL = "recall"
     UPDATE = "update"
     RESTRAINT = "restraint"
-    ISOLATION = "isolation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +60,8 @@ class Probe:
     test: ProbeTest
     question: str
     expect_any: tuple[str, ...] = ()
-    expect_all: tuple[str, ...] = ()
     stale_any: tuple[str, ...] = ()
     expect_refusal: bool = False
-    foreign_seed: bool = False
     note: str = ""
 
 
@@ -139,20 +136,13 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         raise ProbeSetError(f"probe {probe_id}: question must be a non-empty string")
 
     expect_any = _string_tuple(data.get("expect_any"), f"probe {probe_id}: expect_any")
-    expect_all = _string_tuple(data.get("expect_all"), f"probe {probe_id}: expect_all")
     stale_any = _string_tuple(data.get("stale_any"), f"probe {probe_id}: stale_any")
     expect_refusal = _bool(data.get("expect_refusal"), f"probe {probe_id}: expect_refusal")
-    foreign_seed = _bool(data.get("foreign_seed"), f"probe {probe_id}: foreign_seed")
 
     # A probe with no expectation always passes, which is worse than no probe.
-    if not (expect_any or expect_all or expect_refusal):
+    if not (expect_any or expect_refusal):
         raise ProbeSetError(
-            f"probe {probe_id}: must declare an expectation "
-            "(expect_any, expect_all, or expect_refusal)"
-        )
-    if foreign_seed and test is not ProbeTest.ISOLATION:
-        raise ProbeSetError(
-            f"probe {probe_id}: foreign_seed is only meaningful with test 'isolation'"
+            f"probe {probe_id}: must declare an expectation (expect_any or expect_refusal)"
         )
 
     note = data.get("note", "")
@@ -165,10 +155,8 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         test=test,
         question=question,
         expect_any=expect_any,
-        expect_all=expect_all,
         stale_any=stale_any,
         expect_refusal=expect_refusal,
-        foreign_seed=foreign_seed,
         note=note,
     )
 

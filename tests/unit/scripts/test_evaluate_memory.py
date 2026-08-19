@@ -13,7 +13,7 @@ from scripts.evaluate_memory import main
 
 def _probe_set_file(tmp_path: Path) -> Path:
     payload = {
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "probe_set_id": "unit",
         "label": "unit",
         "seed": {"short_term": ["a turn"], "long_term": {}, "episodic": [], "semantic": None},
@@ -55,7 +55,7 @@ def test_dry_run_writes_a_report_and_exits_zero(tmp_path: Path) -> None:
     )
     assert code == 0
     report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["schema_version"] == "1.0.0"
+    assert report["schema_version"] == "2.0.0"
     assert report["probe_set_id"] == "unit"
     assert len(report["verdicts"]) == 1
 

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.live_env import (
-    POSTGRES_DEFAULT_URL,
+    ALLOW_REMOTE_ENV_VAR,
+    UnsafeTargetError,
     probe_environment,
     run_with_selector_loop,
     unavailable_scopes,
@@ -13,7 +16,7 @@ from cowork_agent.features.ai_chat.memory_eval.live_env import (
 
 def _env(**overrides: str) -> dict[str, str]:
     base = {
-        "PG_TEST_URL": "postgresql://x/y",
+        "PG_TEST_URL": "postgresql://127.0.0.1/y",
         "GEMINI_API_KEY": "k",
         "JINA_API_KEY": "j",
     }
@@ -23,7 +26,7 @@ def _env(**overrides: str) -> dict[str, str]:
 
 def test_everything_present_reports_no_unavailable_scopes() -> None:
     env = probe_environment(_env(), postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://x/y"
+    assert env.postgres_url == "postgresql://127.0.0.1/y"
     assert env.gemini_ready is True
     assert env.jina_ready is True
     assert unavailable_scopes(env) == ()
@@ -31,35 +34,61 @@ def test_everything_present_reports_no_unavailable_scopes() -> None:
 
 def test_pg_test_url_wins_over_database_url() -> None:
     env = probe_environment(
-        _env(DATABASE_URL="postgresql://ignored/db"), postgres_probe=lambda url: True
+        _env(DATABASE_URL="postgresql://127.0.0.1/ignored"), postgres_probe=lambda url: True
     )
-    assert env.postgres_url == "postgresql://x/y"
+    assert env.postgres_url == "postgresql://127.0.0.1/y"
 
 
 def test_database_url_is_used_when_pg_test_url_is_absent() -> None:
     environ = _env()
     del environ["PG_TEST_URL"]
-    environ["DATABASE_URL"] = "postgresql://fallback/db"
+    environ["DATABASE_URL"] = "postgresql://127.0.0.1/fallback"
     env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://fallback/db"
+    assert env.postgres_url == "postgresql://127.0.0.1/fallback"
 
 
-def test_the_documented_default_is_used_when_neither_is_set() -> None:
+def test_postgres_mode_local_selects_the_local_url() -> None:
     environ = _env()
     del environ["PG_TEST_URL"]
-    seen: list[str] = []
+    environ["POSTGRES_MODE"] = "local"
+    environ["DATABASE_URL_LOCAL"] = "postgresql://127.0.0.1/local"
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+    assert env.postgres_url == "postgresql://127.0.0.1/local"
+
+
+def test_postgres_mode_off_selects_sqlite_and_dials_nothing() -> None:
+    # POSTGRES_MODE=off is a deliberate choice of SQLite, not an outage. app.py
+    # backs long_term and episodic with SQLiteChatRepository in exactly this
+    # case, so both scopes stay evaluable and no server is dialled. Reporting
+    # them unavailable here would describe a system the product is not running.
+    environ = _env()
+    del environ["PG_TEST_URL"]
+    environ["POSTGRES_MODE"] = "off"
+    dialled: list[str] = []
 
     def probe(url: str) -> bool:
-        seen.append(url)
+        dialled.append(url)
         return True
 
-    probe_environment(environ, postgres_probe=probe)
-    assert seen == [POSTGRES_DEFAULT_URL]
+    env = probe_environment(environ, postgres_probe=probe)
+    assert dialled == []
+    assert env.postgres_url is None
+    assert env.sqlite_path is not None
+    assert env.durable_memory_available is True
+    assert unavailable_scopes(env) == ()
 
 
-def test_an_unreachable_server_makes_the_two_sql_scopes_unavailable() -> None:
+def test_a_configured_but_unreachable_server_is_an_outage_not_a_sqlite_choice() -> None:
+    # A URL was set and did not answer. Silently falling back to SQLite would
+    # measure a different store than the one the run was pointed at.
     env = probe_environment(_env(), postgres_probe=lambda url: False)
     assert env.postgres_url is None
+    assert env.sqlite_path is None
+    assert env.durable_memory_available is False
+
+
+def test_an_unreachable_server_makes_the_two_durable_scopes_unavailable() -> None:
+    env = probe_environment(_env(), postgres_probe=lambda url: False)
     scopes = {item.scope for item in unavailable_scopes(env)}
     assert scopes == {MemoryType.LONG_TERM, MemoryType.EPISODIC}
 
@@ -86,9 +115,37 @@ def test_a_numbered_gemini_key_counts_as_ready() -> None:
     assert probe_environment(environ, postgres_probe=lambda url: True).gemini_ready is True
 
 
-def test_run_with_selector_loop_returns_the_coroutine_result() -> None:
-    async def work() -> str:
-        await asyncio.sleep(0)
-        return "done"
+def test_run_with_selector_loop_runs_on_a_selector_loop() -> None:
+    # The point of the helper, and the only part worth pinning: Windows defaults
+    # to ProactorEventLoop, which psycopg's async path does not support, so every
+    # database call in the live tier fails on a developer machine without this.
+    # Asserting only the return value would test asyncio.run, not our choice.
+    async def work() -> tuple[str, bool]:
+        return "done", isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
 
-    assert run_with_selector_loop(work()) == "done"
+    result, on_selector_loop = run_with_selector_loop(work())
+    assert result == "done"
+    assert on_selector_loop
+
+
+def test_a_remote_database_is_refused_rather_than_silently_evaluated() -> None:
+    # The harness seeds memory and then deletes it. Aimed at a shared or
+    # production database that is a write-and-delete against real data, so a
+    # remote host must be asked for explicitly rather than inferred from
+    # whatever .env happens to be in the working directory.
+    environ = _env(PG_TEST_URL="postgresql://u:p@db.example.com:5432/prod")
+    with pytest.raises(UnsafeTargetError, match="db.example.com"):
+        probe_environment(environ, postgres_probe=lambda url: True)
+
+
+def test_a_remote_database_runs_when_explicitly_allowed() -> None:
+    environ = _env(PG_TEST_URL="postgresql://u:p@db.example.com:5432/throwaway")
+    environ[ALLOW_REMOTE_ENV_VAR] = "1"
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+    assert env.postgres_url == "postgresql://u:p@db.example.com:5432/throwaway"
+
+
+def test_localhost_needs_no_opt_in() -> None:
+    for host in ("localhost", "127.0.0.1"):
+        environ = _env(PG_TEST_URL=f"postgresql://u:p@{host}:5432/throwaway")
+        assert probe_environment(environ, postgres_probe=lambda url: True).postgres_url

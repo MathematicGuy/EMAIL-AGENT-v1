@@ -9,6 +9,7 @@ from cowork_agent.features.ai_chat.memory_eval.live_runner import (
     LiveSession,
     ask_live,
     build_identity,
+    identity_for,
     needs_fresh_session,
     session_id_for,
     teardown,
@@ -34,7 +35,7 @@ def _probe(**overrides: object) -> Probe:
 
 
 def _probe_set() -> ProbeSet:
-    return ProbeSet("1.0.0", "unit", "unit", SeedSpec(("a",), {}, (), None), (_probe(),))
+    return ProbeSet("2.0.0", "unit", "unit", SeedSpec(("a",), {}, (), None), (_probe(),))
 
 
 def test_identity_is_namespaced_by_the_run_key() -> None:
@@ -51,13 +52,6 @@ def test_a_different_model_gets_a_different_tenant() -> None:
     first = build_identity(_probe_set(), "m1")
     second = build_identity(_probe_set(), "m2")
     assert first.tenant_id != second.tenant_id
-
-
-def test_the_foreign_identity_differs_from_the_primary() -> None:
-    # An isolation probe is meaningless if both identities collide.
-    identity = build_identity(_probe_set(), "m")
-    assert identity.foreign_tenant_id != identity.tenant_id
-    assert identity.foreign_user_id != identity.user_id
 
 
 def test_a_short_term_probe_keeps_its_session() -> None:
@@ -79,9 +73,7 @@ def test_session_ids_differ_across_arms() -> None:
     # Sharing a session across arms would leak the full arm's turns into control.
     identity = build_identity(_probe_set(), "m")
     probe = _probe(probe_id="ep_1")
-    assert session_id_for(identity, probe, Arm.FULL) != session_id_for(
-        identity, probe, Arm.CONTROL
-    )
+    assert session_id_for(identity, probe, Arm.FULL) != session_id_for(identity, probe, Arm.CONTROL)
 
 
 def test_session_ids_differ_across_probes() -> None:
@@ -190,3 +182,41 @@ def test_teardown_keeps_going_when_one_store_is_already_gone() -> None:
     gateways = [_Gateway(fail=True), _Gateway()]
     assert asyncio.run(teardown(gateways)) == 1  # type: ignore[arg-type]
     assert gateways[1].deleted == 1
+
+
+def test_each_arm_gets_its_own_tenant_and_user() -> None:
+    # long_term is keyed by tenant and user, and episodic is read across
+    # sessions on purpose. A run-wide tenant let the control arm read back what
+    # the full arm had just seeded, which turns the leak signal upside down.
+    identity = build_identity(_probe_set(), "m")
+    probe = _probe(probe_id="lt_1", targets=MemoryType.LONG_TERM)
+    full = identity_for(identity, probe, Arm.FULL)
+    control = identity_for(identity, probe, Arm.CONTROL)
+    assert full.tenant_id != control.tenant_id
+    assert full.user_id != control.user_id
+    assert full.run_key == control.run_key == identity.run_key
+
+
+def test_probes_do_not_share_a_tenant_either() -> None:
+    identity = build_identity(_probe_set(), "m")
+    first = identity_for(identity, _probe(probe_id="a"), Arm.FULL)
+    second = identity_for(identity, _probe(probe_id="b"), Arm.FULL)
+    assert first.tenant_id != second.tenant_id
+
+
+def test_the_control_arm_reads_an_empty_semantic_corpus() -> None:
+    # The corpus index is built once per run and has no tenant partition, so
+    # per-arm identities cannot empty it. Control must be handed a store that
+    # answers with nothing — not no store at all, which would be a disabled
+    # read wearing the control arm's name.
+    session = _session(_Reply())
+    session.adapters = AdapterSet(None, None, object())
+    control = session.adapters_for(Arm.CONTROL)
+    assert control.semantic_memory is not session.adapters.semantic_memory
+    assert control.semantic_memory is not None
+    assert session.adapters_for(Arm.FULL) is session.adapters
+
+
+def test_an_arm_with_no_semantic_adapter_is_left_alone() -> None:
+    session = _session(_Reply())
+    assert session.adapters_for(Arm.CONTROL) is session.adapters

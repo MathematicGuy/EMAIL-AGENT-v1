@@ -11,8 +11,10 @@ from cowork_agent.domain.chat_contracts import (
     MemoryProvenanceSource,
     MemoryType,
 )
+from cowork_agent.features.ai_chat.memory_eval.arms import ArmScopedMemoryGateway
 from cowork_agent.features.ai_chat.memory_eval.live_seeding import verify_seed
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
+from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 
 
 class _Declarative:
@@ -67,8 +69,7 @@ def test_an_empty_profile_is_reported_as_a_seed_that_did_not_land(
     gateway = memory_gateway_factory(declarative_memory=_Declarative(None))
     findings = asyncio.run(verify_seed(gateway, _scope(), (MemoryType.LONG_TERM,)))
     assert [item.scope for item in findings] == [MemoryType.LONG_TERM]
-    assert findings[0].available is False
-    assert "did not land" in findings[0].reason
+    assert "came back empty" in findings[0].reason
 
 
 def test_an_empty_short_term_buffer_is_reported(
@@ -101,3 +102,28 @@ def test_only_the_requested_scopes_are_checked(
     # An unseeded scope is not a failure — it was never declared.
     gateway = memory_gateway_factory(declarative_memory=_Declarative(None))
     assert asyncio.run(verify_seed(gateway, _scope(), ())) == ()
+
+
+def test_verification_ignores_the_arm_mask() -> None:
+    # The ablated arm masks its target scope out of the PROBE's read. Seed
+    # verification is not a probe read: it asks whether the store holds what was
+    # written. Verifying through the mask reported every ablated arm's target as
+    # "seed did not land", which is how a healthy store reads as amnesia.
+    gateway = ArmScopedMemoryGateway(
+        masked_scope=MemoryType.LONG_TERM,
+        scope=_scope(),
+        session_buffer=InMemoryChatSessionBuffer(max_turns=20, ttl_seconds=1800),
+        declarative_memory=_Declarative(_profile()),
+    )
+    assert asyncio.run(verify_seed(gateway, _scope(), (MemoryType.LONG_TERM,))) == ()
+
+
+def test_verification_still_reports_a_scope_that_really_is_empty() -> None:
+    gateway = ArmScopedMemoryGateway(
+        masked_scope=MemoryType.LONG_TERM,
+        scope=_scope(),
+        session_buffer=InMemoryChatSessionBuffer(max_turns=20, ttl_seconds=1800),
+        declarative_memory=_Declarative(None),
+    )
+    findings = asyncio.run(verify_seed(gateway, _scope(), (MemoryType.LONG_TERM,)))
+    assert [item.scope for item in findings] == [MemoryType.LONG_TERM]

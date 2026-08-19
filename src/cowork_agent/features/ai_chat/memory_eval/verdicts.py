@@ -45,7 +45,7 @@ def asserts_recall(probe: Probe) -> bool:
     flagging those would mark them in every run, forever, and mean nothing.
     """
 
-    return bool(probe.expect_any or probe.expect_all) and not probe.expect_refusal
+    return bool(probe.expect_any) and not probe.expect_refusal
 
 
 def derive_verdict(probe: Probe, full: Outcome, ablated: Outcome, control: Outcome) -> Verdict:

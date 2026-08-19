@@ -180,15 +180,18 @@ def test_an_unapproved_seed_is_written_but_never_transitioned() -> None:
     assert store.transitions == []
 
 
-def test_a_request_the_policy_rejects_is_a_finding_naming_the_phrasing() -> None:
+def test_a_turn_that_creates_no_episode_is_a_finding_stating_only_what_happened() -> None:
     # is_explicit_task_request refuses this phrasing, so no episode is created.
-    # That is a finding about the authorization policy, not a crash.
+    # That is a finding, not a crash — but the finding may not NAME that cause.
+    # A turn creates no episode when the provider errors too, and the reason
+    # used to assert the phrasing was rejected without ever checking.
     store = _EpisodicStore()
     controller, _ = _episodic_controller(store)
     spec = SeedSpec((), {}, (EpisodeSeed(request="what is the weather", approve=True),), None)
     outcome = asyncio.run(seed_episodic(controller, "s", spec, key_prefix="seed"))
     assert outcome.ok is False
     assert "no task episode" in outcome.reason
+    assert "is_explicit_task_request" not in outcome.reason
 
 
 def test_nothing_declared_is_a_skip() -> None:

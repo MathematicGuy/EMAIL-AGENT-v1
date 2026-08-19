@@ -7,15 +7,16 @@ other than memory, and each one names what it prevents.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
 from cowork_agent.domain.chat_contracts import ChatMemoryScope, MemoryType
+from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 
 from ..controller import ChatController
 from .arms import Arm, ArmScopedMemoryGateway
 from .live_controller import AdapterSet, ask_once, build_arm_controller
-from .live_seeding import seed_episodic, seed_short_term, verify_seed
+from .live_seeding import EmptySemanticMemory, seed_episodic, seed_short_term, verify_seed
 from .probes import Probe, ProbeSet, SeedSpec
 from .runner import run_key
 from .seeding import seed_long_term
@@ -23,13 +24,11 @@ from .seeding import seed_long_term
 
 @dataclass(frozen=True, slots=True)
 class RunIdentity:
-    """Throwaway identities for one run, plus the foreign one isolation uses."""
+    """The throwaway identity one run operates as."""
 
     run_key: str
     tenant_id: str
     user_id: str
-    foreign_tenant_id: str
-    foreign_user_id: str
 
 
 def build_identity(probe_set: ProbeSet, model: str) -> RunIdentity:
@@ -42,12 +41,28 @@ def build_identity(probe_set: ProbeSet, model: str) -> RunIdentity:
     """
 
     key = run_key(probe_set.probe_set_id, model, probe_set.seed)
+    return RunIdentity(run_key=key, tenant_id=f"memeval-{key}", user_id=f"memeval-{key}")
+
+
+def identity_for(identity: RunIdentity, probe: Probe, arm: Arm) -> RunIdentity:
+    """The tenant and user one arm operates as. Unique per (run, probe, arm).
+
+    A single run-wide tenant is not enough. `long_term` is keyed by tenant and
+    user, and `episodic` is read across sessions on purpose, so a control arm
+    sharing the run's tenant reads back the profile and the episodes the FULL
+    arm seeded moments earlier. Control would then be a seeded arm wearing the
+    control label, and the leak signal — the one thing that says "this probe
+    never needed memory" — would be reporting the opposite of the truth.
+
+    `run_key` is deliberately unchanged: it names the run, and the report and
+    the offline runner both key on it.
+    """
+
+    suffix = f"{probe.probe_id}-{arm.value}"
     return RunIdentity(
-        run_key=key,
-        tenant_id=f"memeval-{key}",
-        user_id=f"memeval-{key}",
-        foreign_tenant_id=f"memeval-foreign-{key}",
-        foreign_user_id=f"memeval-foreign-{key}",
+        run_key=identity.run_key,
+        tenant_id=f"{identity.tenant_id}-{suffix}",
+        user_id=f"{identity.user_id}-{suffix}",
     )
 
 
@@ -93,11 +108,30 @@ class LiveSession:
     gateways: list[ArmScopedMemoryGateway] = field(default_factory=list)
     seeded: set[str] = field(default_factory=set)
     seed_failures: list[str] = field(default_factory=list)
+    ask_errors: list[dict[str, object]] = field(default_factory=list)
+
+    def adapters_for(self, arm: Arm) -> AdapterSet:
+        """The adapters one arm reads through.
+
+        Only semantic differs. `long_term` and `episodic` are seeded per arm
+        into a per-arm tenant, so an unseeded arm finds an empty store on its
+        own. Semantic has no per-tenant partition at all — the corpus index is
+        built once for the whole run — so the control arm has to be handed a
+        store that answers with nothing, or it reads the same corpus the seeded
+        arms do and every semantic probe reports as leaked.
+        """
+
+        if arm is not Arm.CONTROL or self.adapters.semantic_memory is None:
+            return self.adapters
+        return replace(
+            self.adapters, semantic_memory=SemanticChatMemoryAdapter(EmptySemanticMemory())
+        )
 
 
 async def _seed_for(
     session: LiveSession,
     probe: Probe,
+    arm: Arm,
     scope: ChatMemoryScope,
     probe_controller: ChatController,
     probe_gateway: ArmScopedMemoryGateway,
@@ -160,18 +194,19 @@ async def _seed_for(
             )
         )
 
+    # Every failure names the arm it came from. The CLI folds these into a set,
+    # so an unattributed message from one arm is indistinguishable from the same
+    # message on all three — which is how three masked-arm artefacts once read
+    # as "all three scopes are empty".
+    where = f"[{probe.probe_id}/{arm.value}]"
     session.seed_failures.extend(
-        f"{outcome.scope.value}: {outcome.reason}" for outcome in outcomes if not outcome.ok
+        f"{where} {outcome.scope.value}: {outcome.reason}" for outcome in outcomes if not outcome.ok
     )
     # A scope that declared nothing was never seeded, so verifying it would
     # report a failure for memory nobody asked for.
-    landed = tuple(
-        outcome.scope
-        for outcome in outcomes
-        if outcome.ok and outcome.reason != "nothing declared"
-    )
+    landed = tuple(outcome.scope for outcome in outcomes if outcome.ok and outcome.seeded)
     session.seed_failures.extend(
-        finding.reason for finding in await verify_seed(probe_gateway, scope, landed)
+        f"{where} {finding.reason}" for finding in await verify_seed(probe_gateway, scope, landed)
     )
 
 
@@ -193,14 +228,15 @@ async def ask_live(
     leak signal.
     """
 
+    arm_identity = identity_for(session.identity, probe, arm)
     scope = ChatMemoryScope(
-        tenant_id=session.identity.tenant_id,
-        user_id=session.identity.user_id,
+        tenant_id=arm_identity.tenant_id,
+        user_id=arm_identity.user_id,
         session_id=session_id_for(session.identity, probe, arm),
     )
     controller, gateway = build_arm_controller(
         scope,
-        session.adapters,
+        session.adapters_for(arm),
         session.reply,
         masked_scope=masked,
         company_rag_enabled=session.company_rag_enabled,
@@ -210,11 +246,16 @@ async def ask_live(
 
     if arm is not Arm.CONTROL and scope.session_id not in session.seeded:
         session.seeded.add(scope.session_id)
-        await _seed_for(session, probe, scope, controller, gateway)
+        await _seed_for(session, probe, arm, scope, controller, gateway)
 
-    return await ask_once(
+    text, latency_ms, errors = await ask_once(
         controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
     )
+    if errors:
+        session.ask_errors.append(
+            {"probe": probe.probe_id, "arm": arm.value, "errors": list(errors)}
+        )
+    return text, latency_ms
 
 
 async def teardown(gateways: Sequence[ArmScopedMemoryGateway]) -> int:

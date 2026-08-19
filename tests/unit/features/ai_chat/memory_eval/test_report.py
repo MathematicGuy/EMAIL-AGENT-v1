@@ -18,7 +18,7 @@ _SECRET_QUESTION = "what is the unmistakable secret deadline"
 
 def _probe_set() -> ProbeSet:
     return ProbeSet(
-        schema_version="1.0.0",
+        schema_version="2.0.0",
         probe_set_id="unit",
         label="unit",
         seed=SeedSpec(("a seeded sentence",), {}, (), None),
@@ -55,7 +55,6 @@ def _report(**kwargs: object) -> dict[str, object]:
         [_row()],
         provider="gemini",
         model="model-id",
-        judge_model=None,
         run_key="a1b2c3d4e5f6",
         ran_at=datetime(2026, 8, 18, tzinfo=UTC),
         **kwargs,  # type: ignore[arg-type]
@@ -64,7 +63,7 @@ def _report(**kwargs: object) -> dict[str, object]:
 
 def test_report_carries_schema_version_and_provenance() -> None:
     report = _report()
-    assert report["schema_version"] == "1.0.0"
+    assert report["schema_version"] == "2.0.0"
     assert report["probe_set_id"] == "unit"
     assert report["provider"] == "gemini"
     assert report["model"] == "model-id"
@@ -101,24 +100,22 @@ def test_leaked_probes_are_named() -> None:
         [_row(control=Outcome.PASS)],
         provider="gemini",
         model="m",
-        judge_model=None,
         run_key="k",
         ran_at=datetime(2026, 8, 18, tzinfo=UTC),
     )
     assert report["leaked_probes"] == ["ep_recall_01"]
 
 
-def test_needs_judge_counts_uncertain_rows() -> None:
+def test_needs_reading_counts_uncertain_rows() -> None:
     report = build_report(
         _probe_set(),
         [_row(certain=False)],
         provider="gemini",
         model="m",
-        judge_model=None,
         run_key="k",
         ran_at=datetime(2026, 8, 18, tzinfo=UTC),
     )
-    assert report["needs_judge"] == 1
+    assert report["needs_reading"] == 1
 
 
 def test_verdicts_are_sorted_worst_first() -> None:
@@ -142,7 +139,6 @@ def test_verdicts_are_sorted_worst_first() -> None:
         [_row(), _row(probe_id="ep_recall_02", full=Outcome.STALE)],
         provider="gemini",
         model="m",
-        judge_model=None,
         run_key="k",
         ran_at=datetime(2026, 8, 18, tzinfo=UTC),
     )

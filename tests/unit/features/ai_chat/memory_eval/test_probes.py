@@ -12,7 +12,7 @@ from cowork_agent.features.ai_chat.memory_eval.probes import (
 
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "probe_set_id": "unit",
         "label": "unit probe set",
         "seed": {
@@ -44,10 +44,8 @@ def test_loads_a_minimal_probe_set() -> None:
     assert probe.targets is MemoryType.SHORT_TERM
     assert probe.test is ProbeTest.RECALL
     assert probe.expect_any == ("a turn",)
-    assert probe.expect_all == ()
     assert probe.stale_any == ()
     assert probe.expect_refusal is False
-    assert probe.foreign_seed is False
 
 
 def test_seed_is_parsed_into_typed_fields() -> None:
@@ -115,21 +113,6 @@ def test_unknown_scope_is_rejected() -> None:
 
 def test_unsupported_schema_version_is_rejected() -> None:
     with pytest.raises(ProbeSetError, match="schema_version"):
-        load_probe_set(_payload(schema_version="2.0.0"))
+        load_probe_set(_payload(schema_version="9.9.9"))
 
 
-def test_foreign_seed_requires_the_isolation_test_type() -> None:
-    payload = _payload(
-        probes=[
-            {
-                "id": "p",
-                "targets": "semantic",
-                "test": "recall",
-                "question": "q",
-                "expect_any": ["x"],
-                "foreign_seed": True,
-            }
-        ]
-    )
-    with pytest.raises(ProbeSetError, match="foreign_seed"):
-        load_probe_set(payload)

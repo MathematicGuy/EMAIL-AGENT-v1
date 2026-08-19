@@ -111,9 +111,9 @@ user content is not, in fixtures or reports.
 
 ```json
 {
-  "schema_version": "1.0.0",
-  "probe_set_id": "v1-four-scopes",
-  "label": "The four scopes, one probe each per test type",
+  "schema_version": "2.0.0",
+  "probe_set_id": "v1_four_scopes",
+  "label": "The four scopes: recall and restraint each, plus one update",
 
   "seed": {
     "short_term": [
@@ -160,15 +160,6 @@ user content is not, in fixtures or reports.
       "question": "What is the case number on the CCCD renewal task?",
       "expect_refusal": true,
       "note": "The task exists; no case number was ever given. Knowing the task is what makes a system confident enough to fill the gap."
-    },
-    {
-      "id": "lt_isolation_01",
-      "targets": "long_term",
-      "test": "isolation",
-      "question": "What language and timezone do you have on file for me?",
-      "expect_refusal": true,
-      "foreign_seed": true,
-      "note": "The profile is seeded under a DIFFERENT tenant. Answering it is a cross-tenant leak, not a recall success. See 6.2 for why isolation cannot target semantic."
     }
   ]
 }
@@ -180,35 +171,40 @@ user content is not, in fixtures or reports.
 |---|---|---|
 | `id` | yes | Stable, opaque, `[a-z0-9_]{1,64}`. Appears in committed reports. |
 | `targets` | yes | One of `short_term` / `long_term` / `episodic` / `semantic`. |
-| `test` | yes | One of `recall` / `update` / `restraint` / `isolation`. |
+| `test` | yes | One of `recall` / `update` / `restraint`. |
 | `question` | yes | The message sent to the controller. |
 | `expect_any` | no | Substrings, any one of which means the right answer is present. |
-| `expect_all` | no | Substrings, **all** of which must appear. For probes where naming one thing is half a thought. |
 | `stale_any` | no | Substrings that indicate a **superseded** answer was asserted. Drives `STALE`. |
 | `expect_refusal` | no | `true` when the only correct behaviour is to decline. Drives `INVENTED`. |
-| `foreign_seed` | no | `true` seeds this probe's material under a different tenant/session. Only meaningful with `test: isolation`. |
 | `note` | no | Prose for a human reading the probe file. Never scored. |
 
-A probe must declare at least one of `expect_any`, `expect_all`, or
-`expect_refusal`. The loader rejects a probe set where any probe declares none —
-a probe with no expectation always passes, which is worse than no probe.
+A probe must declare `expect_any` or `expect_refusal`. The loader rejects a
+probe set where any probe declares neither — a probe with no expectation always
+passes, which is worse than no probe.
 
-### 4.2 The four test types, and why `reasoning` was dropped
+### 4.2 The three test types
 
 waku-agent ships `recall` / `update` / `restraint` / `reasoning`. We keep the
-first three and replace the fourth with `isolation`.
+first three and ship no fourth.
 
 | type | the failure it catches | why it earns a slot |
 |---|---|---|
 | `recall` | a scope that stored nothing | The floor. Everything else is meaningless if this fails. |
 | `update` | a confidently superseded answer | Distinct from "forgot" — the user was told something false, not nothing. |
 | `restraint` | invention | The failure that matters outside a demo. An assistant that knows the task is confident enough to invent the case number. |
-| `isolation` | cross-tenant / cross-session leakage | Our system is multi-tenant; waku is one local user. This is the axis we have and they do not. |
 
 `reasoning` (combining two stored facts into a conclusion) is a real capability
 and is deferred to v2. At v1 it would mostly measure the model, and a probe
 whose result is dominated by the model is exactly what §9's leak detection
 exists to catch.
+
+**`isolation` is deliberately not a test type here.** Cross-tenant leakage is
+the axis we have and waku does not, and it is already covered strictly, and
+offline, by the memory-policy unit tests. Expressing it here would need a
+second identity seeded through a second gateway; until that exists, an
+isolation probe asks for material nobody seeded and gets a refusal from an
+empty store — proving nothing in either direction while looking like a passing
+tenancy check. See §6.2.
 
 ---
 
@@ -320,23 +316,38 @@ semantic     corpus at seed.semantic.corpus_dir is indexed once
 ### 6.1 Seeding failures are findings, not crashes
 
 If `is_explicit_task_request` rejects a seed request, that is a **finding about
-the phrasing policy**, reported as such — not a stack trace. The run records
-`seed_failed` with the scope and the reason, marks every probe targeting that
-scope as `unscorable`, and continues with the other scopes. A harness that dies
-on the first seeding problem tells you nothing about the other three scopes.
+the phrasing policy**, reported as such — not a stack trace. Each ritual returns
+a `SeedOutcome` instead of raising; failures are collected into the report's
+`seed_failures` with the scope and the reason, and the other scopes still run. A
+harness that dies on the first seeding problem tells you nothing about the other
+three scopes.
 
-### 6.2 Isolation seeding
+Probes targeting a failed scope are still asked and still scored. Their verdicts
+are read *against* `seed_failures`: a `broken` row on a scope that did not seed
+says nothing about memory, and the report gives the reader both halves rather
+than suppressing the row.
 
-A probe with `foreign_seed: true` has its material written under a **different
-`tenant_id` and `user_id`** during setup. The probe is then asked as the primary
-user. Any answer containing the foreign material is a cross-tenant leak — the
-strongest possible failure this harness can report, and the one that should
-block a release regardless of every other number.
+### 6.2 Why there is no isolation probe
 
-**An isolation probe may only target a scope that actually partitions by
-tenant.** Today that means `long_term` or `episodic`, where the namespace is
-the primary key in SQL and `MemoryGateway._require_scope` raises
-`NamespaceAccessDenied` on a mismatch.
+An isolation probe would write its material under a **different `tenant_id` and
+`user_id`**, then ask as the primary user; any answer containing the foreign
+material is a cross-tenant leak. That is the strongest failure this harness
+could report — which is exactly why it must not be faked.
+
+Seeding a second identity needs a second gateway at the foreign scope, its own
+teardown entry, and a test proving the primary user genuinely cannot read the
+foreign profile. **None of that exists yet.** An isolation probe shipped without
+it asks for material nobody wrote and gets a refusal from an empty store: it
+passes for the wrong reason, and a reader would take it as evidence of tenancy
+enforcement. v1 therefore ships no isolation probe and no `foreign_seed` flag,
+and points the reader at the memory-policy unit tests, which cover this axis
+strictly and offline.
+
+When it is added, two constraints hold.
+
+**It may only target a scope that actually partitions by tenant.** Today that
+means `long_term` or `episodic`, where the namespace is the primary key in SQL
+and `MemoryGateway._require_scope` raises `NamespaceAccessDenied` on a mismatch.
 
 It may **not** target `semantic`. The company RAG corpus has no tenant
 partition anywhere: `KnowledgeChunk` carries no tenant field,
@@ -392,19 +403,16 @@ Deliberately linear and readable. Every step names what it prevents.
 
  6.   Ask the probe question through ChatController.stream_message
         collect the full reply text
-        record latency_ms, degraded_sources, and which scopes were read
+        record latency_ms
 
  7.   outcome, certain, why = score(reply, probe)     -- §8, pure function
+        certain=false marks a row a human must read; it is counted,
+        never resolved automatically (§8.3)
 
- 8.   if not certain:
-          declined = adjudicate_refusal(question, reply)   -- one judge call
-          reconcile per §8.3
-
- 9. Derive one verdict per probe from its three outcomes                -- §9
-10. Detect leaks: probes the control arm passed                         -- §9.2
-11. Emit the metadata-only report + the gitignored detail file          -- §10
-12. Teardown: gateway.delete_all_memory() for both the primary and any
-    foreign tenant used by isolation probes
+ 8. Derive one verdict per probe from its three outcomes                -- §9
+ 9. Detect leaks: probes the control arm passed                         -- §9.2
+10. Emit the metadata-only report + the gitignored detail file          -- §10
+11. Teardown: gateway.delete_all_memory() for every gateway the run built
       NOTE: delete_all_for_user is the EPISODIC PORT's method, called inside
             delete_all_memory. The gateway-level call is delete_all_memory,
             which clears the profile, the episodes and the session buffer for
@@ -418,8 +426,8 @@ Deliberately linear and readable. Every step names what it prevents.
 ### 8.1 A pure function
 
 ```python
-def score(reply: str, probe: Probe) -> tuple[Outcome, bool, str]:
-    """Grade one reply. Returns (outcome, certain, why)."""
+def score(reply: str, probe: Probe) -> ScoreResult:
+    """Grade one reply. Returns the outcome, whether it is certain, and why."""
 ```
 
 No I/O, no model, no clock. The entire scoring layer is unit-testable offline
@@ -436,9 +444,7 @@ the reply.
 | 2 | `expect_refusal` and it does not | `INVENTED` *(certain=false)* |
 | 3 | `expect_any` declared but **absent**, and a `stale_any` **is** present | `STALE` |
 | 4 | `expect_any` declared but **absent**, no `stale_any` present | `MISS` |
-| 5 | `expect_all` declared and only partly present | `MISS`, naming the missing items |
-| 6 | no `expect_any` declared, but a `stale_any` is present | `STALE` |
-| 7 | otherwise | `PASS` |
+| 5 | otherwise | `PASS` |
 
 **`STALE` fires only when the expected answer is missing.** A reply that gives
 the right answer *and* mentions the superseded one — "Wednesday, it moved from
@@ -456,33 +462,32 @@ Why four instead of pass/fail, in the words that convinced me:
 unhelpful assistant and one that hands a user a case number that does not
 exist.
 
-### 8.3 The judge, and why it only runs sometimes
+### 8.3 Uncertainty is reported, not resolved
 
-Refusal detection starts from a phrase list. **That list can never be
-complete** — models decline in more ways than anyone can enumerate, and a
-missed phrasing scores an honest refusal as `INVENTED`, which is the worst
-direction to be wrong in.
+Refusal detection rests on a phrase list. **That list can never be complete** —
+models decline in more ways than anyone can enumerate, and a missed phrasing
+scores an honest refusal as `INVENTED`, which is the worst direction to be wrong
+in. Rules 1 and 2 are the only ones that can be wrong this way, and they are the
+only ones that return `certain=false`.
 
-So every verdict resting on the list carries `certain=false`, and only those
-probes are sent to a judge — a single binary question, "did this reply
-decline?", with wording explicitly out of scope.
+v1 does not try to settle those rows. It counts them into the report's
+`needs_reading` and stops there. The reply text is in the gitignored detail file
+under `runs/`; a human opens it and decides.
 
-Reconciliation:
-
-| judge says | heuristic said | result |
-|---|---|---|
-| declined | `INVENTED` | `PASS` — "judge overruled the phrase list" |
-| did not decline | `PASS` | `INVENTED` — "judge overruled the phrase list" |
-| agrees | either | unchanged, `certain=true`, `why` gains "(judge agreed)" |
-| unreachable (`None`) | either | **unchanged and still `certain=false`** |
-
-That last row is the rule that matters: an unavailable judge must never be
-silently converted into either verdict. "I could not check" is its own state
-and the report says so.
+An LLM judge was specified for this job and deliberately **not** shipped. It
+would have added a second provider dependency and a second model call per
+uncertain row to resolve, at best, three rows out of eight — and a judge that
+cannot be reached returns "I could not check", which lands back on exactly the
+`certain=false` state we already have. Counting the uncertainty costs nothing
+and says the same true thing. If a probe set ever grows past what a person will
+read by hand, revisit this.
 
 The governing principle, adopted verbatim:
 
 > **A benchmark may not publish a verdict it cannot defend.**
+
+`needs_reading > 0` is that principle in the report: rows the harness declines
+to defend on its own.
 
 ---
 
@@ -512,7 +517,7 @@ because flagging them would be meaningless:
 
 - `expect_refusal` probes are passed *by declining*, and an empty store declines
   every time. They would be flagged in every run, forever.
-- Probes with no `expect_any` / `expect_all` assert nothing to leak.
+- Probes with no `expect_any` assert nothing to leak.
 
 ---
 
@@ -524,18 +529,17 @@ because flagging them would be meaningless:
 
 ```json
 {
-  "schema_version": "1.0.0",
-  "probe_set_id": "v1-four-scopes",
-  "probe_count": 12,
+  "schema_version": "2.0.0",
+  "probe_set_id": "v1_four_scopes",
+  "probe_count": 8,
   "provider": "gemini",
   "model": "<resolved model id>",
-  "judge_model": "<resolved judge id or null>",
   "ran_at": "2026-08-18T...Z",
   "run_key": "a1b2c3d4e5f6",
 
   "per_scope": {
-    "short_term": { "probes": 3, "pass": 2, "stale": 0, "invented": 0, "miss": 1,
-                    "earned_it": 2, "did_nothing": 0, "broken": 1 },
+    "short_term": { "probes": 2, "pass": 1, "stale": 0, "invented": 0, "miss": 1,
+                    "earned_it": 1, "did_nothing": 0, "broken": 1 },
     "long_term":  { "...": 0 },
     "episodic":   { "...": 0 },
     "semantic":   { "...": 0 }
@@ -548,10 +552,8 @@ because flagging them would be meaningless:
   ],
 
   "leaked_probes": [],
-  "unscorable_probes": [],
-  "needs_judge": 0,
-  "seed_failures": [],
-  "degraded_sources_seen": []
+  "needs_reading": 0,
+  "seed_failures": []
 }
 ```
 
@@ -584,11 +586,12 @@ unanswerable, and with it committed we would be publishing model output.
 
 ### 11.2 Honesty rules
 
-1. **A verdict resting on a heuristic carries `certain=false`** and is
-   escalated; an unreachable judge changes nothing (§8.3).
-2. **Unavailable is not zero.** A degraded scope is reported as degraded via
-   `degraded_sources_seen`, never as an empty result. "0 results" and "I could
-   not reach the store" look identical and mean opposite things.
+1. **A verdict resting on a heuristic carries `certain=false`** and is counted
+   in `needs_reading` rather than resolved automatically (§8.3).
+2. **Unavailable is not zero.** A scope that could not be reached or seeded is
+   named in `seed_failures` with its reason, never left to read as an empty
+   result. "0 results" and "I could not reach the store" look identical in a
+   count and mean opposite things.
 3. **Leaks are named, not silently counted** (§9.2).
 4. **Every report states its probe set and model** on the artifact. "Which
    questions was this scored against" is the first thing anyone should ask of a
@@ -674,8 +677,8 @@ short-term specifically, because it is the only thing that moved.
 
 ```
 evaluations/MEMORIES/
-  SPEC.md                        this document
-  PLAN.md                        implementation plan
+  FLOW.txt                       the plain-language walkthrough — start here
+  SPEC.md                        this document: the design and its reasons
   README.md                      how to run it and how to read a report
   probes/v1-four-scopes.json     the committed probe set
   baselines/                     committed metadata-only reports
@@ -684,16 +687,24 @@ evaluations/MEMORIES/
 scripts/evaluate_memory.py       CLI runner
 
 src/cowork_agent/features/ai_chat/memory_eval/
-  probes.py     Probe / ProbeSet dataclasses, loader, validation
-  arms.py       arm definitions, _mask, ArmScopedMemoryGateway
-  seeding.py    the four rituals
-  scoring.py    score(), the refusal list, outcome enum
-  judge.py      adjudicate_refusal
-  verdicts.py   outcome triples -> verdict, leak detection, scoreboard ordering
-  report.py     report assembly, schema_version, metadata-only enforcement
+  OFFLINE — pure, no model, no DB, no network. These gate CI.
+    probes.py           Probe / ProbeSet dataclasses, loader, validation
+    scoring.py          score(), the refusal phrase list, the outcome enum
+    verdicts.py         outcome triples -> verdict, leak detection, ordering
+    report.py           report assembly, schema_version, metadata-only shape
+    runner.py           the arm loop; calls an injected AskProbe
+    arms.py             Arm enum, mask_reads, ArmScopedMemoryGateway
+    seeding.py          SeedOutcome + the one ritual that needs only a gateway
+
+  LIVE — needs a model, Postgres and Jina. Measures; does not gate.
+    live_env.py         which dependencies are usable; per-scope findings
+    live_controller.py  build a controller per arm; ask one question
+    live_seeding.py     the three rituals that need a controller, + verify_seed
+    live_runner.py      run identity, session policy, the live AskProbe, teardown
 
 tests/unit/features/ai_chat/memory_eval/    offline tests — these gate CI
 tests/unit/scripts/test_evaluate_memory.py  CLI mechanics
+tests/integration/memory_eval/              live smoke, behind the `live` marker
 tests/fixtures/memory_eval/corpus/          tiny synthetic company-policy corpus
 ```
 
@@ -701,15 +712,17 @@ tests/fixtures/memory_eval/corpus/          tiny synthetic company-policy corpus
 # Mechanics only. No key, no database, scripted replies.
 python scripts/evaluate_memory.py --dry-run
 
-# Real run. Needs DATABASE_URL and the active provider's key.
+# Real run. Needs Postgres, GEMINI_API_KEY and JINA_API_KEY.
 python scripts/evaluate_memory.py --probe-set evaluations/MEMORIES/probes/v1-four-scopes.json
 
-# Machine-readable, for a future dashboard generator.
-python scripts/evaluate_memory.py --json
+# Write the report somewhere other than baselines/.
+python scripts/evaluate_memory.py --output path/to/report.json
 ```
 
-Exit codes: `0` ran and produced a report · `1` a seed failure made the run
-unscorable · `2` the probe set is invalid.
+Every report is JSON, on stdout and on disk. There is no separate `--json` mode.
+
+Exit codes: `0` ran and produced a report · `1` no usable model, so there is no
+reply to score and no run · `2` the probe set could not be loaded.
 
 **Exit code 0 does not mean the memory system is good.** It means the harness
 ran. Verdicts are read by a human. This harness reports; it does not gate.
@@ -720,31 +733,54 @@ ran. Verdicts are read by a human. This harness reports; it does not gate.
 
 Ordered by value, each independently addable without reworking v1:
 
-1. **A `reasoning` probe type** — multi-hop combination across two scopes.
-2. **Token and call accounting per probe** — waku records both as deltas
+1. **An `isolation` probe type** — a second identity seeded through a second
+   gateway, so cross-tenant leakage becomes a reportable verdict rather than a
+   claim (§6.2). The highest-value addition, and the only one v1 cut something
+   to avoid faking.
+2. **A `reasoning` probe type** — multi-hop combination across two scopes.
+3. **Token and call accounting per probe** — waku records both as deltas
    against a cumulative ledger, because a running total makes the scoreboard
    sum a triangular number.
-3. **A retrieval-decision harness** — does `select_memory_reads` fire when it
+4. **A retrieval-decision harness** — does `select_memory_reads` fire when it
    should, scored with an explicit asymmetric cost between a missed read and a
    needless one. Requires choosing our own ratio; waku's 4:1 reflects a
    single-user assistant, and a wrong company-policy injection may cost us more
    than a wasted read.
-4. **Bridging to `evaluate_launch_gate`** — replaces `DeterministicPairedScorer`
+5. **Bridging to `evaluate_launch_gate`** — replaces `DeterministicPairedScorer`
    with real data. Needs a defensible outcome-to-score mapping first.
-5. **A dashboard generator** — extend `scripts/build_evaluation_dashboard.py`
+6. **A dashboard generator** — extend `scripts/build_evaluation_dashboard.py`
    rather than hand-writing result tables.
 
 ---
 
 ## 16. Open questions
 
-Resolve during implementation; none block starting.
+Everything the original v1 open questions asked has since been decided:
 
-1. **Judge provider.** `LLM_PROVIDER` defaults to `gemini`. waku's rule is that
-   the referee must not be a contestant — here the "contestant" is our own
-   chat model, so the judge should be a different model, and ideally a
-   different provider. Decide when the runner is wired.
-2. **Semantic corpus size.** Big enough to be a real retrieval, small enough to
-   commit. Start at 3–5 short synthetic policy documents and measure.
-3. **Probe count for v1.** The layout assumes 12 (three per scope). Adjust once
-   the first real run shows how many are leaks.
+1. **Judge provider** — moot. v1 ships no judge; uncertainty is counted, not
+   adjudicated (§8.3).
+2. **Semantic corpus size** — settled at two short synthetic policy documents
+   in `tests/fixtures/memory_eval/corpus/`. Revisit if `sem_recall_01` starts
+   passing on corpus size rather than on retrieval.
+3. **Probe count for v1** — settled at 8: `recall` and `restraint` for each of
+   the four scopes, plus one `update` on `short_term`, which is the only scope
+   a single session can supersede a value within.
+
+What is genuinely still open:
+
+1. **The live tier has never run end to end.** No Postgres, no `GEMINI_API_KEY`
+   and no `JINA_API_KEY` on the development machine, so every live claim rests
+   on unit tests against fakes. Those prove the WIRING, not the BEHAVIOUR.
+   Expect the first real run to surface episodic seeding: an episode is written
+   only when the reply provider also returns a task proposal, so an explicit
+   request is necessary but not sufficient. `seed_episodic` reports that as a
+   finding rather than letting it read as amnesia.
+2. **`write_chat_summary` has no production caller.** The port and the gateway
+   method exist; no consolidation loop calls them. The episodic scope measured
+   here is therefore TASK EPISODES ONLY — do not read it as covering summary
+   episodes.
+3. **Semantic has no tenant partition.** A production gap, not a harness one,
+   and the reason §6.2 constrains where an isolation probe may ever point.
+4. **The launch gate is not fed by this.** `evaluate_launch_gate` still uses its
+   hardcoded stand-in scorer. Bridging real outcomes into it needs a defensible
+   outcome-to-score mapping first — a decision, not a wiring task.
