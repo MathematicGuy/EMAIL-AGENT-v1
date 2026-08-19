@@ -78,7 +78,8 @@ def validate_candidate_dataset(
     )
     _require_int(top["schema_version"], "candidate dataset.schema_version", minimum=1)
     _require_timestamp(top["fetched_at"], "candidate dataset.fetched_at")
-    _require_nonempty_string(top["gmail_query"], "candidate dataset.gmail_query")
+    if top["gmail_query"] != "in:inbox":
+        raise ValueError("candidate dataset.gmail_query must be exactly 'in:inbox'")
     if top["ordering"] != "received_at_desc":
         raise ValueError("candidate dataset.ordering must be 'received_at_desc'")
     cases = _list(top["cases"], "candidate dataset.cases")
@@ -117,6 +118,15 @@ def validate_candidate_dataset(
         validated_cases.append(case)
     _require_unique(validated_cases, "case_id", "candidate dataset")
     _require_unique(validated_cases, "source_message_id", "candidate dataset")
+    received_at = [
+        _parse_timestamp(case["received_at"], f"candidate case {index}.received_at")
+        for index, case in enumerate(validated_cases, start=1)
+    ]
+    if any(
+        previous < current
+        for previous, current in zip(received_at, received_at[1:], strict=False)
+    ):
+        raise ValueError("candidate dataset cases must be ordered by received_at descending")
     return _copy_validated(top, validated_cases)
 
 
@@ -191,6 +201,8 @@ def validate_run_artifact(
 ) -> dict[str, object]:
     """Validate one metadata-only provider/model evaluation run."""
 
+    if maximum_cases > 50:
+        raise ValueError("run artifact maximum_cases cannot exceed 50")
     top = _top_level(
         value,
         {
@@ -513,11 +525,18 @@ def _require_number(value: object, location: str) -> float:
 
 def _require_timestamp(value: object, location: str) -> str:
     timestamp = _require_nonempty_string(value, location)
+    _parse_timestamp(timestamp, location)
+    return timestamp
+
+
+def _parse_timestamp(value: str, location: str) -> datetime:
     try:
-        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"{location} must be an ISO-8601 timestamp") from exc
-    return timestamp
+    if parsed.tzinfo is None:
+        raise ValueError(f"{location} must include a timezone")
+    return parsed
 
 
 def _copy_validated(

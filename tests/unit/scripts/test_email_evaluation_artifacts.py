@@ -29,14 +29,14 @@ def _ground_truth(*, route: str = "retrieve_rag") -> dict[str, object]:
     }
 
 
-def _candidate_case(index: int) -> dict[str, object]:
+def _candidate_case(index: int, case_count: int) -> dict[str, object]:
     return {
         "case_id": f"email_case_{index:03d}",
         "source_message_id": f"synthetic-message-{index}",
         "gmail_thread_id": f"synthetic-thread-{index}",
         "sender": "Synthetic Sender <synthetic@example.com>",
         "subject": f"Synthetic subject {index}",
-        "received_at": f"2026-08-19T00:00:{index:02d}Z",
+        "received_at": f"2026-08-19T00:{case_count - index + 1:02d}:00Z",
         "labels": ["INBOX"],
         "gmail_content": "Synthetic private body for contract testing.",
     }
@@ -49,7 +49,7 @@ def valid_candidates(case_count: int = 2) -> dict[str, object]:
         "gmail_query": "in:inbox",
         "ordering": "received_at_desc",
         "case_count": case_count,
-        "cases": [_candidate_case(index) for index in range(1, case_count + 1)],
+        "cases": [_candidate_case(index, case_count) for index in range(1, case_count + 1)],
     }
 
 
@@ -200,6 +200,25 @@ def test_candidate_metadata_and_content_are_strict() -> None:
         module.validate_candidate_dataset(candidate)
 
 
+def test_candidate_requires_the_fixed_inbox_query() -> None:
+    module = load_module()
+    candidate = valid_candidates(case_count=1)
+    candidate["gmail_query"] = "is:unread"
+
+    with pytest.raises(ValueError, match="gmail_query.*in:inbox"):
+        module.validate_candidate_dataset(candidate)
+
+
+def test_candidate_requires_newest_first_received_at_order() -> None:
+    module = load_module()
+    candidate = valid_candidates(case_count=2)
+    candidate["cases"][0]["received_at"] = "2026-08-18T00:00:00Z"
+    candidate["cases"][1]["received_at"] = "2026-08-19T00:00:00Z"
+
+    with pytest.raises(ValueError, match="received_at.*descending"):
+        module.validate_candidate_dataset(candidate, expected_count=2)
+
+
 def test_golden_rejects_prediction_and_private_content() -> None:
     module = load_module()
     golden = valid_golden(case_count=1)
@@ -243,6 +262,14 @@ def test_validators_enforce_fixed_enums_and_case_limits() -> None:
     oversized_run = valid_run(case_count=51)
     with pytest.raises(ValueError, match="maximum.*50"):
         module.validate_run_artifact(oversized_run)
+
+
+def test_run_validator_enforces_an_absolute_fifty_case_cap() -> None:
+    module = load_module()
+    run = valid_run(case_count=51)
+
+    with pytest.raises(ValueError, match="maximum.*50"):
+        module.validate_run_artifact(run, maximum_cases=51)
 
 
 def test_atomic_write_and_load_json_object_are_metadata_safe(tmp_path: Path) -> None:
