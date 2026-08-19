@@ -48,6 +48,7 @@ from cowork_agent.prompting import (
     RETRIEVED_CONTEXT_TAG,
     ROUTE_CONTEXT_TAG,
     UNTRUSTED_DATA_TAG,
+    reorder_u_shaped,
     wrap_json_block,
 )
 
@@ -458,7 +459,7 @@ def _build_generation_prompt(
                     "url": chunk.source_url,
                     "relevanceScore": chunk.relevance_score,
                 }
-                for chunk in retrieval.chunks
+                for chunk in reorder_u_shaped(retrieval.chunks)
             ]
         ),
     }

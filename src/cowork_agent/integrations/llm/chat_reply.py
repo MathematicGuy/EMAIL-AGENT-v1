@@ -16,6 +16,7 @@ from cowork_agent.features.ai_chat.generation_context import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
+from cowork_agent.prompting import reorder_u_shaped
 
 Completion = Callable[[dict[str, object]], Awaitable[Mapping[str, object]]]
 
@@ -312,7 +313,7 @@ def _company_evidence(context: GenerationContext) -> dict[str, object] | None:
         return None
     evidence = context.current_company_evidence.value
     return {
-        "chunks": [dict(chunk) for chunk in evidence.chunks],
+        "chunks": [dict(chunk) for chunk in reorder_u_shaped(evidence.chunks)],
         "citations": [dict(citation) for citation in evidence.citations],
         "scores": [dict(score) for score in evidence.scores],
         "retrieval_status": evidence.retrieval_status,
