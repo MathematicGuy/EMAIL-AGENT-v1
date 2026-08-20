@@ -51,6 +51,14 @@ frontend/.env
 **/update_corpus2skill.py
 .superpowers
 .worktrees/
+.playwright-mcp
+.playwright
+.pnpm-store
+.ruff_cache
+.runlogs
+.serena
+.mypy_cache
+.grok
 
 # Agent session artifacts (tracked skills under .claude/ stay tracked)
 .claude/.headroom_wrap_marker.json
@@ -69,3 +77,7 @@ evaluations/MEMORIES/reports/*.md
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/
+.mypy-cache-email-eval/
+.venv-codex/
+.uv-cache/
+.uv-cache-codex/
