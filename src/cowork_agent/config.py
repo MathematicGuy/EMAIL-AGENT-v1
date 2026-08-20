@@ -1,5 +1,6 @@
 """Runtime configuration loaded from environment variables."""
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -663,6 +664,7 @@ class OpenRouterSettings:
     max_emails_per_batch: int
     max_output_tokens: int
     timeout_seconds: int
+    allowed_models: tuple[str, ...]
 
     @classmethod
     def from_env(
@@ -690,7 +692,12 @@ class OpenRouterSettings:
             timeout_seconds=_bounded_positive_int(
                 environ, "OPENROUTER_TIMEOUT_SECONDS", 60, maximum=120
             ),
+            allowed_models=_openrouter_allowed_models(environ),
         )
+
+    def fallback_models(self) -> tuple[str, ...]:
+        """Allowed OpenRouter slugs excluding the configured primary, order preserved."""
+        return tuple(slug for slug in self.allowed_models if slug != self.model)
 
 
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
@@ -738,3 +745,32 @@ def _required_secret(environ: Mapping[str, str], name: str) -> str:
     if not value or value.startswith("replace-with-"):
         raise ValueError(f"{name} must be configured")
     return value
+
+
+def _openrouter_allowed_models(environ: Mapping[str, str]) -> tuple[str, ...]:
+    raw = environ.get("OPENROUTER_ALLOWED_MODELS", "").strip()
+    if not raw:
+        return ()
+    try:
+        parsed: object = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+        ) from exc
+    if not isinstance(parsed, list):
+        raise ValueError(
+            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+        )
+    models: list[str] = []
+    for item in parsed:
+        if not isinstance(item, str):
+            raise ValueError(
+                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+            )
+        slug = item.strip()
+        if not slug:
+            raise ValueError(
+                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+            )
+        models.append(slug)
+    return tuple(models)

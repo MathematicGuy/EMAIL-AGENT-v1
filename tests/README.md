@@ -28,7 +28,7 @@ which is what one route costs; the full suite is parallel.
 | R1 | `tests/unit/domain` | 172 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
 | R2 | `tests/unit/features` | 634 | 2.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
 | R3 | `tests/unit/integrations/rag` | 73 | 5.5 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 43 | 1.6 s | Prompt assembly, parsing, key rotation, classifiers. |
+| R4 | `tests/unit/integrations/llm` | 82 | 1.6 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
 | R5 | `tests/unit/integrations/gmail` | 19 | 0.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
 | R6 | `tests/unit/integrations` | 251 | 9.0 s | R3+R4+R5 plus bootstrap, Supabase. |
 | R7 | `tests/unit/persistence` | 19 | 1.3 s | Repository logic against fakes. |
@@ -115,6 +115,7 @@ absent, add the row when you add the test.
 | App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
 | `import cowork_agent` resolves to this checkout's `src`, not the venv editable install | `unit/test_xdist_harness.py` | — |
 | `-p no:xdist` must not usage-error; default run still fans out to 4 workers | `unit/test_xdist_harness.py` | — |
+| OpenRouter hops to Google Gemini only on `OpenRouterAPIError` (transport / unusable JSON), never on schema-invalid JSON after repair | `unit/integrations/llm/test_last_resort.py` + `unit/integrations/llm/test_openrouter.py` | chat_reply / chat_intent except one wire-up each |
 
 ### Two facts that break tests if you forget them
 

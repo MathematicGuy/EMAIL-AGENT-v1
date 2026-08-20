@@ -175,18 +175,42 @@ class FaucetChatReply(_ConfiguredChatReply):
 
 class OpenRouterChatReply(_ConfiguredChatReply):
     @classmethod
-    def from_settings(cls, settings: OpenRouterSettings) -> OpenRouterChatReply:
+    def from_settings(
+        cls,
+        settings: OpenRouterSettings,
+        last_resort: GeminiSettings | None = None,
+    ) -> OpenRouterChatReply:
+        from .last_resort import complete_with_gemini_last_resort, gemini_json_complete
         from .providers.openrouter import execute_chat_completion
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
-            return await execute_chat_completion(
-                settings.api_key,
-                settings.model,
-                cast(str, payload["system"]),
-                json.dumps(payload["context"], ensure_ascii=False),
-                _RESPONSE_SCHEMA,
-                settings.max_output_tokens,
-                settings.timeout_seconds,
+            prompt = json.dumps(payload["context"], ensure_ascii=False)
+            system_instruction = cast(str, payload["system"])
+
+            async def primary() -> Mapping[str, object]:
+                return await execute_chat_completion(
+                    settings.api_key,
+                    settings.model,
+                    system_instruction,
+                    prompt,
+                    _RESPONSE_SCHEMA,
+                    settings.max_output_tokens,
+                    settings.timeout_seconds,
+                    fallback_models=settings.fallback_models(),
+                )
+
+            async def fallback() -> Mapping[str, object]:
+                assert last_resort is not None
+                return await gemini_json_complete(
+                    last_resort,
+                    prompt,
+                    _RESPONSE_SCHEMA,
+                    system_instruction,
+                    timeout_seconds=settings.timeout_seconds,
+                )
+
+            return await complete_with_gemini_last_resort(
+                primary, fallback if last_resort else None
             )
 
         return cls(model=settings.model, complete=complete)
