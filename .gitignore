@@ -66,14 +66,3 @@ evaluations/CHAT/ingestion-latency/runs/*.json
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/
-
-# Memory evaluation detail files carry full probe questions and model replies,
-# and so do the write-ups under reports/. Committed reports under
-# evaluations/MEMORIES/baselines/ are metadata-only.
-evaluations/MEMORIES/runs/
-evaluations/MEMORIES/reports/
-
-/evaluations/EMAIL/gmail_candidates.json
-/evaluations/EMAIL/.gmail_candidates.json.tmp
-/evaluations/EMAIL/reviewed_annotations.json
-/evaluations/EMAIL/email-routes/

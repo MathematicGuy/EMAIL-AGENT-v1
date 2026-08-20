@@ -1,0 +1,76 @@
+{
+  "run_key": "75c3122250dd",
+  "nonce": "fd42939e",
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "ran_at": "2026-08-20T03:11:20.536728+00:00",
+  "seed_failures": [
+    "[st_recall_01/ablated] short_term: the verification read came back empty",
+    "[st_recall_01/full] short_term: the verification read came back empty",
+    "no GEMINI_API_KEY; corpus cannot be embedded"
+  ],
+  "arms": [
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "arm": "full",
+      "masked": null,
+      "question": "what did I say?",
+      "reply": "",
+      "outcome": "no_answer",
+      "certain": true,
+      "why": "no reply text: the turn produced nothing",
+      "latency_ms": 3,
+      "stream_errors": [
+        {
+          "probe": "st_recall_01",
+          "arm": "full",
+          "errors": [
+            "chat_provider_unavailable: Dịch vụ sinh câu trả lời hiện không khả dụng."
+          ]
+        }
+      ]
+    },
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "arm": "ablated",
+      "masked": "short_term",
+      "question": "what did I say?",
+      "reply": "",
+      "outcome": "no_answer",
+      "certain": true,
+      "why": "no reply text: the turn produced nothing",
+      "latency_ms": 5,
+      "stream_errors": [
+        {
+          "probe": "st_recall_01",
+          "arm": "ablated",
+          "errors": [
+            "chat_provider_unavailable: Dịch vụ sinh câu trả lời hiện không khả dụng."
+          ]
+        }
+      ]
+    },
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "arm": "control",
+      "masked": null,
+      "question": "what did I say?",
+      "reply": "",
+      "outcome": "no_answer",
+      "certain": true,
+      "why": "no reply text: the turn produced nothing",
+      "latency_ms": 2,
+      "stream_errors": [
+        {
+          "probe": "st_recall_01",
+          "arm": "control",
+          "errors": [
+            "chat_provider_unavailable: Dịch vụ sinh câu trả lời hiện không khả dụng."
+          ]
+        }
+      ]
+    }
+  ]
+}
