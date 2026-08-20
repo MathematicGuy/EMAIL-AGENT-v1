@@ -4,15 +4,16 @@ Measures whether each of our four memory scopes holds what was put in it, drops
 superseded values, and refuses to invent — with every result attributable to
 exactly one scope.
 
-Five documents, no overlap:
+Six companion documents, no overlap:
 
 | | |
 |---|---|
-| **[FLOW.txt](./FLOW.txt)** | What it measures and how, in plain language. **Read this first.** |
+| **[MEMORY_IN_A_NUTSHELL.md](./MEMORY_IN_A_NUTSHELL.md)** | **The Complete Overview & Mental Model.** Real-world analogies, 4 scopes, 3-arm attribution engine, and triage cheat sheet. **Read this first.** |
+| **[FLOW.txt](./FLOW.txt)** | What it measures and how, in plain language and deep ASCII. |
 | [WORKFLOW.md](./WORKFLOW.md) | The order you do things in, what each step is worth, and how to read a report without fooling yourself. |
 | **[RUNBOOK.md](./RUNBOOK.md)** | The operating procedure: pre-check every dependency, run, monitor, write up, validate a suspected defect. Also available as the `/run-memory-eval` skill. |
 | [SPEC-memory-evaluation.md](../../tasks/specs/SPEC-memory-evaluation.md) | The design and the reason behind each decision. The authority on intent. |
-| this file | How to run it and how to read what comes out. |
+| this file | How to run it, store configuration, and how to read what comes out. |
 
 ## Run it
 
