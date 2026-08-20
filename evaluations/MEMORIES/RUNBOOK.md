@@ -6,12 +6,6 @@ read what came back, and how to triage a bad result before touching anything.
 What any of it means is [MEMORY_IN_A_NUTSHELL.md](./MEMORY_IN_A_NUTSHELL.md);
 the commands and store configuration are [README.md](./README.md); the reasons
 are [SPEC-memory-evaluation.md](../../tasks/specs/SPEC-memory-evaluation.md).
-Written to be followed by a person or by a coding agent —
-`.agents/skills/run-memory-eval/SKILL.md` is this document as a prompt.
-
-Commands here are shell (the Bash tool). `cd` at the start of each script and
-assert where you are; the working directory has been observed to revert between
-calls.
 
 ---
 
@@ -176,16 +170,19 @@ Write it in Vietnamese — the questions, seeds and replies are Vietnamese, and 
 write-up in another language ends up translating its own evidence. Identifiers,
 field names, verdict labels and paths stay verbatim.
 
+Follow the standard report format and template defined in
+[REPORT_FORMAT.md](./reports/REPORT_FORMAT.md), which structures the report
+according to the Pyramid Principle (Executive Summary, Benchmark Dataset &
+Seed Ground Truth, Scope Scorecard, Qualitative 3-Arm Analysis, Action Items,
+and Technical Appendix).
+
+Automate all calculations, scorecard tables, and quote extraction using:
+
+```bash
+PYTHONPATH=src .venv/Scripts/python.exe scripts/build_memory_evaluation_report.py
 ```
-RUN         report / detail paths · provider/model · target host:port/db (no password)
-            probe set, run_key, nonce
-PRE-CHECK   one line per check, and anything that warned
-SEED        failures verbatim, or "none" — and which scopes therefore have no result
-VERDICTS    worst first: <probe> <targets> <verdict> full/ablated/control <certain?>
-READING     for each uncertain row: the reply, quoted, and what you concluded
-SUPPORTS    what this run is evidence for; what it is not; is a second run needed
-DEFECTS     see §5 — with the concern each belongs to, and the measurement if any
-```
+*(Optionally pass `--baseline <path>` and `--detail <path>` to target a specific run).*
+
 
 ---
 

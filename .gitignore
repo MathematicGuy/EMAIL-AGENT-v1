@@ -64,6 +64,8 @@ frontend/.env
 evaluations/CHAT/latency/runs/*.json
 evaluations/CHAT/ingestion-latency/runs/*.json
 evaluations/MEMORIES/runs/
+evaluations/MEMORIES/reports/*.md
+!evaluations/MEMORIES/reports/REPORT_FORMAT.md
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
-var/
+var/
