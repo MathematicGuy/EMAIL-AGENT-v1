@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from dotenv import load_dotenv
 
-load_dotenv(override=False)
+from cowork_agent.config import load_runtime_environment
+
+load_runtime_environment()
 
 # ==============================================================================
 # DATASET — mặc định lấy TẤT CẢ 240 items

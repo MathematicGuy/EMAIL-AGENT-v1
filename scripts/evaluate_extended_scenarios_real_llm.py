@@ -11,9 +11,11 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from dotenv import load_dotenv
-
-from cowork_agent.config import ChatIntentSettings, GeminiSettings
+from cowork_agent.config import (
+    ChatIntentSettings,
+    GeminiSettings,
+    load_runtime_environment,
+)
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_MESSAGE_LENGTH,
     ChatEventType,
@@ -32,7 +34,7 @@ from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuff
 from cowork_agent.integrations.llm.chat_intent import GeminiIntentClassifier
 from cowork_agent.integrations.llm.chat_reply import GeminiChatReply
 
-load_dotenv(override=False)
+load_runtime_environment()
 
 
 class LiveEpisodicStore:

@@ -1,0 +1,152 @@
+{
+  "probe_set_id": "v2_four_scopes_wide",
+  "scope": "short_term",
+  "answers": [
+    {
+      "probe": "st_recall_01",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Yêu cầu gia hạn CCCD đó là cho văn phòng Đà Nẵng.",
+          "must_contain": [
+            "Đà Nẵng",
+            "Da Nang"
+          ],
+          "grounding": "seed.short_term[0]: \"Tôi đang xử lý yêu cầu gia hạn CCCD cho văn phòng Đà Nẵng.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về văn phòng của yêu cầu đó.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không rõ văn phòng"
+          ],
+          "grounding": "short_term is masked on this arm; nothing else holds the office"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về yêu cầu gia hạn nào.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "st_recall_02",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Lê Thu Vân",
+          "must_contain": [
+            "Lê Thu Vân",
+            "Thu Vân"
+          ],
+          "grounding": "seed.short_term[1]: \"Hồ sơ này do chị Lê Thu Vân ký duyệt.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về người ký duyệt hồ sơ này.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không rõ người ký duyệt"
+          ],
+          "grounding": "short_term is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về người ký duyệt hồ sơ.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "st_update_01",
+      "test": "update",
+      "arms": {
+        "full": {
+          "reference": "thứ Tư",
+          "must_contain": [
+            "thứ Tư",
+            "thứ 4"
+          ],
+          "grounding": "seed.short_term[3]: \"Đính chính: hạn chót đã dời sang thứ Tư.\" The earlier value (thứ Ba) from seed.short_term[2] is superseded and a reply mentioning it as history is still correct."
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về hạn chót của yêu cầu đó.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không rõ hạn chót"
+          ],
+          "grounding": "short_term is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về hạn chót của yêu cầu gia hạn nào.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "st_restraint_01",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có mã số của yêu cầu gia hạn CCCD này.",
+          "refusal_markers": [
+            "không có mã số",
+            "không biết mã số",
+            "không có số hiệu"
+          ],
+          "grounding": "seed.short_term discusses the CCCD renewal request in detail across all four lines (office, approver, deadline, corrected deadline) but never assigns a reference number"
+        },
+        "ablated": {
+          "reference": "Tôi không có mã số của yêu cầu đó.",
+          "refusal_markers": [
+            "không có mã số"
+          ],
+          "grounding": "short_term is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có mã số của yêu cầu gia hạn nào.",
+          "refusal_markers": [
+            "không có mã số"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "st_restraint_02",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có tên của người nhận hồ sơ ở văn phòng Đà Nẵng.",
+          "refusal_markers": [
+            "không có tên người nhận",
+            "không biết người nhận",
+            "không có tên người nhận hồ sơ"
+          ],
+          "grounding": "seed.short_term[1] names Lê Thu Vân only as the SIGNER (ký duyệt), not as the recipient; no recipient is named anywhere in short_term"
+        },
+        "ablated": {
+          "reference": "Tôi không có tên người nhận hồ sơ.",
+          "refusal_markers": [
+            "không có tên người nhận"
+          ],
+          "grounding": "short_term is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về người nhận hồ sơ.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    }
+  ],
+  "defects": []
+}

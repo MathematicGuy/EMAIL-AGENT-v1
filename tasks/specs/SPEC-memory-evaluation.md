@@ -5,8 +5,9 @@
 **Companion:** [Waku-Memory-and-Evaluation-Comparison.md](../../docs/references/Waku-Memory-and-Evaluation-Comparison.md)
 
 This document explains **what the harness measures and why it was built this
-way**. To run it, see [README.md](./README.md). For a walkthrough in ordinary
-prose, see [FLOW.txt](./FLOW.txt).
+way**. For the plain-language walkthrough, see
+[MEMORY_IN_A_NUTSHELL.md](../../evaluations/MEMORIES/MEMORY_IN_A_NUTSHELL.md).
+To run it, see [README.md](../../evaluations/MEMORIES/README.md).
 
 **Reading order.** Section 0 is a name table. Sections 1–7 are the design, in
 the order the harness runs: what it measures, how it asks, how it fills memory,
@@ -966,12 +967,21 @@ row is their stated reason for a test that measures without blocking.
 ```
 tasks/specs/SPEC-memory-evaluation.md
                                  this document: the design and its reasons
+tasks/specs/SPEC-memory-eval-probe-set-v2.md
+                                 the wide probe set: what it adds and why
 
 evaluations/MEMORIES/
-  FLOW.txt                       the walkthrough in ordinary prose — start here
+  MEMORY_IN_A_NUTSHELL.md        the walkthrough in ordinary prose — start here
   README.md                      how to run it and how to read a report
   RUNBOOK.md                     the procedure: pre-check, run, monitor, write up
-  probes/v1-four-scopes.json     the committed test questions
+  probes/v1-four-scopes.json     8 questions; the default, and what every
+                                 committed baseline was graded against
+  probes/v2-four-scopes-wide.json
+                                 20 questions; its own corpus. NOT comparable
+                                 with v1 — different probe_set_id (§12.2 rule 5)
+  golden/                        prompts for authoring reference answers, and
+                                 the golden file they produce. Nothing in the
+                                 harness reads it yet.
   baselines/                     committed reports (facts only)
   runs/                          uncommitted detail files
 
@@ -998,10 +1008,14 @@ src/cowork_agent/features/ai_chat/memory_eval/
     default_project.py  PostgreSQL-only: writes the legacy project sentinel as NULL
 
 tests/unit/features/ai_chat/memory_eval/    offline tests — these block CI
+                                 the probe-set invariants are parametrized over
+                                 probes/*.json, so a new set inherits them
 tests/unit/features/ai_chat/test_retrieval_policy_vietnamese.py  the §2.2 guarantees
 tests/unit/scripts/test_evaluate_memory.py  CLI mechanics
 tests/integration/memory_eval/              live smoke test, behind the `live` marker
-tests/fixtures/memory_eval/corpus/          tiny made-up Vietnamese policy documents
+tests/fixtures/memory_eval/corpus/          tiny made-up Vietnamese policy documents (v1)
+tests/fixtures/memory_eval/corpus-v2/       five documents (v2); v1's is untouched
+                                 so v1 keeps reproducing
 ```
 
 Exit codes: `0` ran and produced a report · `1` no usable model, so there was
@@ -1163,6 +1177,49 @@ reads the conclusions. This harness reports; it does not gate.
     them. The matching detail file for that baseline is the one written at
     `18-32-36Z`. Any report written against artifacts at schema `2.0.0` has to
     pair them on `ran_at` by hand.
+
+15. **`update` cannot be measured on `long_term`, so no probe set ships one.**
+    §10.4 says `update` runs on `short_term` only, "the only scope where a single
+    conversation can replace a value". That is the reason it was not built; this
+    is the reason it cannot be, which is a stronger statement and belongs here
+    rather than being inferred.
+
+    An `update` probe needs the superseded value to exist somewhere the model
+    could reach, or it passes on every arm forever — a probe with no real
+    expectation, wearing a `stale_any`. `seed_long_term` performs a single
+    `write_profile`, and that write **overwrites** the row: seed v1 then v2 and
+    the old value is in no store at all. Every probe except a `short_term` one
+    gets a fresh conversation (§5.3), so the buffer cannot carry it either. No
+    path remains by which the stale value could reach the model.
+
+    Making it expressible means `seed.long_term` becoming a list of successive
+    writes — `probes.py`, `seeding.py`, the loader tests, and a
+    `schema_version` bump — to buy a probe that **still** could not observe a
+    stale profile value. Not built, and not worth building until the profile
+    itself keeps history.
+
+    `episodic` is the scope where supersession *is* measurable, because two
+    approved episodes are two live rows rather than one overwritten one.
+    `v2_four_scopes_wide` ships that probe; see
+    [SPEC-memory-eval-probe-set-v2.md](SPEC-memory-eval-probe-set-v2.md) §3.2.
+
+16. **The seed must fit the prompt window, and nothing used to check it.** A
+    `short_term` probe deliberately keeps its seeded session (§5.3), so
+    `live_runner` seeds `short_term` into that session, appends the `episodic`
+    seed turns on top, and then asks the probe.
+    `build_generation_context` keeps only the newest
+    `_MAX_ACTIVE_SESSION_TURNS = 8` turns of it. So
+    `len(seed.short_term) + len(seed.episodic) + 1` must not exceed 8, or the
+    **oldest** `short_term` seed line is evicted before any probe is asked — and
+    its recall probe fails on the `full` arm and is reported as a memory
+    failure. Nothing in the report would say the harness overran its own context
+    window.
+
+    `v1_four_scopes` sits at 5 and never met this.
+    `v2_four_scopes_wide` sits at exactly 8.
+    `test_the_seed_fits_the_prompt_window` now pins it for every committed probe
+    set, importing the constant rather than repeating the number, so a change to
+    the product moves the bound.
 
 ### 15.2 What to add next
 
