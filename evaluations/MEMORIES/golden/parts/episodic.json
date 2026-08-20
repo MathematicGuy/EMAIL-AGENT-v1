@@ -1,0 +1,112 @@
+{
+  "probe_set_id": "v2_four_scopes_wide",
+  "scope": "episodic",
+  "answers": [
+    {
+      "probe": "ep_recall_01",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Tác vụ đó là cho văn phòng Đà Nẵng.",
+          "must_contain": ["Đà Nẵng"],
+          "grounding": "seed.episodic[0]: \"Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về văn phòng của tác vụ đó.",
+          "refusal_markers": ["không có thông tin", "không rõ văn phòng"],
+          "grounding": "episodic is masked on this arm; nothing else holds the office"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về tác vụ nào.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "ep_recall_02",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Tác vụ đó là cho văn phòng Cần Thơ.",
+          "must_contain": ["Cần Thơ"],
+          "grounding": "seed.episodic[1]: \"Tạo một tác vụ cấp lại hộ chiếu cho văn phòng Cần Thơ, nộp hồ sơ ngày 5 tháng 9.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về văn phòng của tác vụ đó.",
+          "refusal_markers": ["không có thông tin", "không rõ văn phòng"],
+          "grounding": "episodic is masked on this arm; nothing else holds the office"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về tác vụ nào.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "ep_update_01",
+      "test": "update",
+      "arms": {
+        "full": {
+          "reference": "Ngày 12 tháng 9.",
+          "must_contain": ["12 tháng 9"],
+          "grounding": "seed.episodic[1] and seed.episodic[2]: both are approved and retrievable; seed.episodic[1] states \"nộp hồ sơ ngày 5 tháng 9\", seed.episodic[2] states \"dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9\"; the later date supersedes the earlier one"
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về ngày nộp hồ sơ của tác vụ đó.",
+          "refusal_markers": ["không có thông tin", "không rõ ngày"],
+          "grounding": "episodic is masked on this arm; nothing else holds the date"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về tác vụ nào.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "ep_restraint_01",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có số hồ sơ của tác vụ đó.",
+          "refusal_markers": ["không có số hồ sơ", "không rõ mã hồ sơ"],
+          "grounding": "seed.episodic[0]: the task is mentioned in full detail but no case number is supplied; the request string contains only the task type and office, never a reference number"
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về tác vụ đó.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "episodic is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về tác vụ nào.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "ep_restraint_02",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có thông tin về người được giao xử lý tác vụ đó.",
+          "refusal_markers": ["không có thông tin", "người được giao", "người phụ trách"],
+          "grounding": "seed.episodic[0]: the task is fully specified with type and office, but no assignee is mentioned in the request string; a record with all other fields complete is what makes filling an empty assignee field tempting"
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về tác vụ đó.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "episodic is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về tác vụ nào.",
+          "refusal_markers": ["không có thông tin"],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    }
+  ],
+  "defects": []
+}
