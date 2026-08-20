@@ -11,20 +11,21 @@ import pytest
 from tests.unit.scripts.cli_harness import load_script
 
 PRIVATE_KEYS = {"gmail_content", "snippet", "normalized_body"}
-RUBRIC_VERSION = "email-intent-annotation-v1"
+RUBRIC_VERSION = "email-pipeline-annotation-v2"
 
 
 def load_module():
     return load_script("email_evaluation_artifacts")
 
 
-def _ground_truth(*, route: str = "retrieve_rag") -> dict[str, object]:
+def _ground_truth() -> dict[str, object]:
     return {
         "actionability": "action_required",
         "email_is_sufficient": False,
         "knowledge_gaps": ["Synthetic missing policy"],
         "expected_document_types": ["company_policy"],
-        "expected_route": route,
+        "retrieval_expected": True,
+        "company_context_required": True,
         "rationale": "Synthetic evaluation rationale.",
     }
 
@@ -58,7 +59,7 @@ def _proposal_case(index: int = 1) -> dict[str, object]:
         "case_id": f"email_case_{index:03d}",
         "source_message_id": f"synthetic-message-{index}",
         "proposed_ground_truth": _ground_truth(),
-        "resolver_expected_route": "retrieve_rag",
+        "resolver_expected_retrieval": True,
         "consistency_status": "consistent",
         "selection_reason": "Synthetic route-diverse calibration case.",
         "review_status": "pending",
@@ -67,7 +68,7 @@ def _proposal_case(index: int = 1) -> dict[str, object]:
 
 def valid_proposals(case_count: int = 1) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "rubric_version": RUBRIC_VERSION,
         "case_count": case_count,
         "cases": [_proposal_case(index) for index in range(1, case_count + 1)],
@@ -75,19 +76,16 @@ def valid_proposals(case_count: int = 1) -> dict[str, object]:
 
 
 def _review_case(index: int = 1) -> dict[str, object]:
-    truth = _ground_truth()
     return {
         "case_id": f"email_case_{index:03d}",
         "source_message_id": f"synthetic-message-{index}",
-        "proposal": copy.deepcopy(truth),
-        "final": truth,
-        "review_status": "accepted",
+        "final": _ground_truth(),
     }
 
 
 def valid_review_export(case_count: int = 1) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "rubric_version": RUBRIC_VERSION,
         "reviewed_at": "2026-08-19T00:00:00Z",
         "systematic_errors_resolved": True,
@@ -98,7 +96,7 @@ def valid_review_export(case_count: int = 1) -> dict[str, object]:
 
 def valid_golden(case_count: int = 1) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "rubric_version": RUBRIC_VERSION,
         "case_count": case_count,
         "cases": [
@@ -119,7 +117,7 @@ def valid_golden(case_count: int = 1) -> dict[str, object]:
 
 def valid_run(case_count: int = 1) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": "email-intent-2026-08-19-synthetic-shard-01",
         "created_at": "2026-08-19T00:00:00Z",
         "dataset_fingerprint": "sha256:synthetic-fingerprint",
@@ -127,6 +125,12 @@ def valid_run(case_count: int = 1) -> dict[str, object]:
         "provider": "openrouter",
         "model": "synthetic-model",
         "prompt_version": "email-intent-v1",
+        "pipeline_version": "4",
+        "quality_gate": {
+            "version": "email-rag-gate-v1",
+            "min_rerank_score": 0.30,
+            "relative_cutoff_ratio": 0.85,
+        },
         "shard": {"index": 1, "count": 1, "case_count": case_count},
         "cases": [
             {
@@ -134,14 +138,24 @@ def valid_run(case_count: int = 1) -> dict[str, object]:
                 "prediction": {
                     "actionability": "action_required",
                     "email_is_sufficient": False,
-                    "knowledge_gaps": ["Synthetic missing policy"],
-                    "retrieval_query": "synthetic policy",
                     "expected_document_types": ["company_policy"],
                     "confidence": 0.93,
                     "source_status": "model_prediction",
                 },
+                "retrieval": {
+                    "attempted": True,
+                    "retrieval_status": "success",
+                    "evidence_status": "supported",
+                    "result_count": 2,
+                    "accepted_chunk_count": 1,
+                    "top_rerank_score": 0.91,
+                    "query_rewrite_status": "classifier_query",
+                    "degraded": False,
+                },
                 "routing": {
                     "resolved_route": "retrieve_rag",
+                    "mode": "full",
+                    "forced_by_guard": True,
                     "reason_codes": ["policy_required"],
                 },
             }
@@ -272,6 +286,20 @@ def test_run_validator_enforces_an_absolute_fifty_case_cap() -> None:
         module.validate_run_artifact(run, maximum_cases=51)
 
 
+def test_run_validator_rejects_inconsistent_evidence_metadata() -> None:
+    module = load_module()
+    run = valid_run()
+    run["cases"][0]["retrieval"]["degraded"] = True
+
+    with pytest.raises(ValueError, match="degraded.*unavailable"):
+        module.validate_run_artifact(run)
+
+    run = valid_run()
+    run["cases"][0]["retrieval"]["accepted_chunk_count"] = 0
+    with pytest.raises(ValueError, match="supported evidence"):
+        module.validate_run_artifact(run)
+
+
 def test_atomic_write_and_load_json_object_are_metadata_safe(tmp_path: Path) -> None:
     module = load_module()
     destination = tmp_path / "nested" / "artifact.json"
@@ -300,11 +328,11 @@ def test_dataset_fingerprint_is_key_order_stable_and_label_sensitive() -> None:
         "cases": [dict(reversed(case.items())) for case in golden["cases"]],
         "case_count": 2,
         "rubric_version": RUBRIC_VERSION,
-        "schema_version": 1,
+        "schema_version": 2,
     }
 
     assert module.dataset_fingerprint(golden) == module.dataset_fingerprint(reordered)
 
     changed = copy.deepcopy(golden)
-    changed["cases"][1]["ground_truth"]["expected_route"] = "no_action"
+    changed["cases"][1]["ground_truth"]["company_context_required"] = False
     assert module.dataset_fingerprint(golden) != module.dataset_fingerprint(changed)
