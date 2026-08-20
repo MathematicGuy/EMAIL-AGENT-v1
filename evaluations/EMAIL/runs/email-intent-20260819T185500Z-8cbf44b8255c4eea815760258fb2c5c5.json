@@ -1,0 +1,975 @@
+{
+  "schema_version": 1,
+  "run_id": "email-intent-20260819T185500Z-8cbf44b8255c4eea815760258fb2c5c5",
+  "created_at": "2026-08-19T18:55:00.779342Z",
+  "dataset_fingerprint": "sha256:6047acfdf4b4f7a2aade2f495cb7e72ffe1b4b15f1de226dbabb90fbb2b6d360",
+  "rubric_version": "email-intent-annotation-v1",
+  "provider": "openrouter",
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "prompt_version": "email-intent-v1",
+  "shard": {
+    "index": 1,
+    "count": 2,
+    "case_count": 50
+  },
+  "cases": [
+    {
+      "case_id": "email_case_001",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_002",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_003",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_004",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_005",
+      "prediction": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.8,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "direct_plan",
+        "reason_codes": [
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_006",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_007",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_008",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_009",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_010",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_011",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_012",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_013",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_014",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_015",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_016",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_017",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_018",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_019",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_020",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_021",
+      "prediction": {
+        "actionability": "action_required",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "Chi tiết của yêu cầu demo trong issue HEV-8",
+          "Quy trình xử lý/triage yêu cầu demo của công ty"
+        ],
+        "retrieval_query": "Quy trình xử lý yêu cầu demo trong Linear",
+        "expected_document_types": [
+          "procedure",
+          "guideline"
+        ],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "company_procedure_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_022",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_023",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_024",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_025",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_026",
+      "prediction": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "direct_plan",
+        "reason_codes": [
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_027",
+      "prediction": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "direct_plan",
+        "reason_codes": [
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_028",
+      "prediction": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "direct_plan",
+        "reason_codes": [
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_029",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_030",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_031",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_032",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_033",
+      "prediction": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "Thông tin chi tiết về yêu cầu, thời hạn nộp đơn và quy trình ứng tuyển cho từng vị trí thực tập."
+        ],
+        "retrieval_query": "quy trình ứng tuyển thực tập sinh tại BCG Techcombank Binance NewSky",
+        "expected_document_types": [
+          "procedure",
+          "guideline"
+        ],
+        "confidence": 0.8,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "company_procedure_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_034",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_035",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_036",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_037",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_038",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_039",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_040",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_041",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_042",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_043",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_044",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_045",
+      "prediction": {
+        "actionability": "unclear",
+        "email_is_sufficient": false,
+        "knowledge_gaps": [
+          "classifier output unavailable"
+        ],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.0,
+        "source_status": "classifier_fallback"
+      },
+      "routing": {
+        "resolved_route": "retrieve_rag",
+        "reason_codes": [
+          "domain_knowledge_required"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_046",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_047",
+      "prediction": {
+        "actionability": "informational",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action",
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_048",
+      "prediction": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.9,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "direct_plan",
+        "reason_codes": [
+          "email_self_contained"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_049",
+      "prediction": {
+        "actionability": "irrelevant",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    },
+    {
+      "case_id": "email_case_050",
+      "prediction": {
+        "actionability": "irrelevant",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "retrieval_query": null,
+        "expected_document_types": [],
+        "confidence": 0.95,
+        "source_status": "model_prediction"
+      },
+      "routing": {
+        "resolved_route": "no_action",
+        "reason_codes": [
+          "no_action"
+        ]
+      }
+    }
+  ]
+}
