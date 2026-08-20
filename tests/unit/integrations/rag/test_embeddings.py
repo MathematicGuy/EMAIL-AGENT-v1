@@ -92,22 +92,49 @@ def _patch(monkeypatch: pytest.MonkeyPatch, working_key: str) -> list[str]:
     return attempted
 
 
-def test_embed_rotates_past_an_exhausted_key(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def slept(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record backoff delays instead of serving them in real time.
+
+    The rotation paths await production backoff -- 2.0 s per exhausted Gemini
+    key, 0.2 s per Jina batch. Under ``--dist loadgroup`` one real sleep sets
+    the floor for the whole parallel run: these tests held ~10 s of a 19.8 s
+    suite doing nothing. Faking the clock at the seam keeps the delay itself
+    observable, so a test still fails if someone deletes the backoff.
+    """
+    delays: list[float] = []
+
+    async def record(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", record)
+    return delays
+
+
+def test_embed_rotates_past_an_exhausted_key(
+    monkeypatch: pytest.MonkeyPatch, slept: list[float]
+) -> None:
     attempted = _patch(monkeypatch, "key-3")
     adapter = GeminiEmbeddingAdapter(_settings())
     vectors = asyncio.run(adapter.embed(["xin chào"]))
     assert vectors == ((0.1, 0.2),)
+    # One backoff per rotation: rotating without it just moves the 429 to the
+    # next key instead of letting the quota window reopen.
+    assert slept == [2.0, 2.0]
     # Every key is tried until one succeeds: a single dead key must not take
     # the whole index down (the bug this covers degraded RAG to empty results).
     assert attempted == ["key-1", "key-2", "key-3"]
 
 
-def test_embed_raises_when_every_key_is_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_raises_when_every_key_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch, slept: list[float]
+) -> None:
     attempted = _patch(monkeypatch, "none-of-them")
     adapter = GeminiEmbeddingAdapter(_settings())
     with pytest.raises(Exception, match="quota exhausted"):
         asyncio.run(adapter.embed(["xin chào"]))
     assert len(attempted) == 3
+    assert slept == [2.0, 2.0, 2.0]
 
 
 def test_embed_does_not_rotate_when_rotation_is_disabled(
@@ -253,7 +280,7 @@ def _jina_settings() -> JinaEmbeddingSettings:
     )
 
 
-def test_jina_adapter_posts_v5_model_and_passage_task() -> None:
+def test_jina_adapter_posts_v5_model_and_passage_task(slept: list[float]) -> None:
     transport = _RecordingJinaTransport(
         {"data": [{"index": 0, "embedding": [0.1] * 1024}]}
     )
@@ -271,9 +298,10 @@ def test_jina_adapter_posts_v5_model_and_passage_task() -> None:
         "dimensions": 1024,
         "embedding_type": "float",
     }
+    assert slept == [0.2]
 
 
-def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit() -> None:
+def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit(slept: list[float]) -> None:
     settings = JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
     )
@@ -283,6 +311,7 @@ def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit() -> None:
 
     assert vectors == ((0.1,) * 1024,)
     assert transport.keys == ["Bearer key-1", "Bearer key-2"]
+    assert slept == [0.2]
 
 
 class _InsufficientBalanceThenOkTransport:
@@ -314,7 +343,7 @@ class _InsufficientBalanceThenOkTransport:
         return {"data": [{"index": 0, "embedding": [0.1] * 1024}]}
 
 
-def test_jina_adapter_rotates_past_a_key_with_insufficient_balance() -> None:
+def test_jina_adapter_rotates_past_a_key_with_insufficient_balance(slept: list[float]) -> None:
     settings = JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
     )
@@ -334,6 +363,8 @@ def test_jina_adapter_rotates_past_a_key_with_insufficient_balance() -> None:
     vectors2 = asyncio.run(adapter.embed(["second-doc"]))
     assert vectors2 == ((0.1,) * 1024,)
     assert transport.keys == ["Bearer key-2"]
+    # One pacing sleep per completed batch, not per key attempt.
+    assert slept == [0.2, 0.2]
 
 
 class _GenericForbiddenTransport:
