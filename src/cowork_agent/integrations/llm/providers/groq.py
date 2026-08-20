@@ -9,6 +9,8 @@ from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from langfuse import observe
+
 from cowork_agent.config import GroqSettings
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
@@ -31,6 +33,7 @@ from .gemini import (
     CLASSIFICATION_SCHEMA,
     CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
+    EMAIL_INTENT_PROMPT_VERSION,
     GENERATION_SCHEMA,
     GENERATOR_SYSTEM_INSTRUCTION,
     _build_generation_prompt,
@@ -38,6 +41,9 @@ from .gemini import (
     _classified_messages_for,
     _generate_with_schema_repair,
     _parse_action_plan_output,
+    _task_source_links,
+    _update_current_generation,
+    _update_current_span,
     _validated_decisions,
 )
 
@@ -97,6 +103,7 @@ class GroqActionPlanGenerator:
                     run_context=run_context,
                     candidate=candidate,
                     first_envelope=envelopes[0],
+                    source_links=_task_source_links(envelopes, candidate.source_message_ids),
                     current_time=current_time,
                 ),
             )
@@ -159,6 +166,12 @@ class GroqRouteClassifier:
     def __init__(self, settings: GroqSettings) -> None:
         self._settings = settings
 
+    @observe(
+        as_type="span",
+        name="classify-email-intent",
+        capture_input=False,
+        capture_output=False,
+    )
     async def classify(
         self,
         user_timezone: str,
@@ -167,6 +180,16 @@ class GroqRouteClassifier:
     ) -> ClassificationResult:
         classified: list[ClassifiedMessage] = []
         batch_count = 0
+        _update_current_span(
+            input_data={
+                "message_count": len(messages),
+                "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+            },
+            metadata={
+                "feature": "email-intent-router",
+                "provider": "groq",
+            },
+        )
         for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
             batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
             if not batch_ids:
@@ -175,7 +198,15 @@ class GroqRouteClassifier:
             classified.extend(
                 await self._classify_batch(user_timezone, current_time, batch, batch_ids)
             )
-        return ClassificationResult(tuple(classified), batch_count)
+        result = ClassificationResult(tuple(classified), batch_count)
+        _update_current_span(
+            output_data={
+                "classified_count": len(result.decisions),
+                "batch_count": result.batch_count,
+                "fallback_count": sum(1 for item in result.decisions if item.is_fallback),
+            },
+        )
+        return result
 
     async def _classify_batch(
         self,
@@ -186,12 +217,23 @@ class GroqRouteClassifier:
     ) -> tuple[ClassifiedMessage, ...]:
         expected = frozenset(batch_ids)
         prompt = _build_prompt(user_timezone, current_time, threads)
-        decisions = _validated_decisions(await self._complete(prompt), expected)
+        trace_input = {
+            "operation": "classify-email-intent",
+            "message_count": len(batch_ids),
+            "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+        }
+        decisions = _validated_decisions(
+            await self._complete(prompt, trace_input=trace_input), expected
+        )
         if not expected <= decisions.keys():
             # PRD-v1 §12.2: retry the same batch exactly once; the repair
             # instruction is appended for schema failures.
             repaired = _validated_decisions(
-                await self._complete(prompt + CLASSIFIER_REPAIR_INSTRUCTION), expected
+                await self._complete(
+                    prompt + CLASSIFIER_REPAIR_INSTRUCTION,
+                    trace_input={**trace_input, "repair_attempt": True},
+                ),
+                expected,
             )
             decisions = {**repaired, **decisions}
         if not expected <= decisions.keys():
@@ -204,11 +246,25 @@ class GroqRouteClassifier:
             )
         return _classified_messages_for(batch_ids, decisions)
 
-    async def _complete(self, prompt: str) -> Mapping[str, Any] | None:
+    @observe(
+        as_type="generation",
+        name="email-intent-llm-call",
+        capture_input=False,
+        capture_output=False,
+    )
+    async def _complete(
+        self,
+        prompt: str,
+        *,
+        trace_input: Mapping[str, object] | None = None,
+    ) -> Mapping[str, Any] | None:
         request_body: dict[str, object] = {
             "model": self._settings.model,
             "messages": [
-                {"role": "system", "content": CLASSIFIER_SYSTEM_INSTRUCTION},
+                {
+                    "role": "system",
+                    "content": CLASSIFIER_SYSTEM_INSTRUCTION,
+                },
                 {
                     "role": "user",
                     "content": (
@@ -248,7 +304,20 @@ class GroqRouteClassifier:
         if not isinstance(payload, Mapping):
             _CLASSIFIER_LOGGER.warning("Groq classifier response JSON must be an object")
             return None
-        return cast(Mapping[str, Any], payload)
+        typed_payload = cast(Mapping[str, Any], payload)
+        _update_current_generation(
+            input_data=trace_input,
+            output_data={
+                "response_type": "structured_json",
+                "top_level_fields": sorted(str(field) for field in typed_payload),
+            },
+            metadata={
+                "provider": "groq",
+                "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+            },
+            model=self._settings.model,
+        )
+        return typed_payload
 
 
 def _post_json(

@@ -269,7 +269,10 @@ def test_gmail_message_parser_preserves_html_action_links() -> None:
     )
 
     assert "Build failed for HR-Chatbot" in message.normalized_body
-    assert "View build logs [https://railway.app/project/build-123]" in message.normalized_body
+    assert "View build logs [link1]" in message.normalized_body
+    assert message.source_links[0].ref == "link1"
+    assert message.source_links[0].label == "View build logs"
+    assert message.source_links[0].url == "https://railway.app/project/build-123"
     assert message.body_format is BodyFormat.TEXT
     assert message.fetch_status is FetchStatus.COMPLETE
 
@@ -297,6 +300,323 @@ def test_gmail_message_parser_marks_html_only_bodies_as_html_converted() -> None
     assert "Thông báo bảo trì hệ thống" in message.normalized_body
     assert message.body_format is BodyFormat.HTML_CONVERTED
     assert message.fetch_status is FetchStatus.COMPLETE
+
+
+def test_gmail_message_parser_preserves_html_block_boundaries() -> None:
+    html_body = (
+        "<p>Overview</p>"
+        "<ul><li>First action</li><li>Second action</li></ul>"
+        '<p><a href="https://example.test/item">Open item</a></p>'
+    )
+    rich = base64.urlsafe_b64encode(html_body.encode()).decode()
+    message = _parse_message(
+        {
+            "id": "msg-blocks",
+            "threadId": "thread-blocks",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Overview",
+        "First action",
+        "Second action",
+        "Open item [link1]",
+    ]
+    assert message.body_format is BodyFormat.HTML_CONVERTED
+
+
+def test_gmail_message_parser_deduplicates_urls_and_keeps_bare_link_label_null() -> None:
+    html_body = (
+        '<p><a href="https://example.test/item">Open item</a></p>'
+        '<p><a href="https://example.test/item">Open again</a></p>'
+        '<p>Fallback https://example.test/bare</p>'
+    )
+    rich = base64.urlsafe_b64encode(html_body.encode()).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-links",
+            "threadId": "thread-links",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/html", "body": {"data": rich}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Open item [link1]",
+        "Open again [link1]",
+        "Fallback [link2]",
+    ]
+    assert [(link.ref, link.label, link.url) for link in message.source_links] == [
+        ("link1", "Open item", "https://example.test/item"),
+        ("link2", None, "https://example.test/bare"),
+    ]
+
+
+def test_gmail_message_parser_normalizes_wrapped_plain_urls_and_appends_each_url_once() -> None:
+    plain = base64.urlsafe_b64encode(b"Reference [https://example.test/plain]").decode()
+    rich = base64.urlsafe_b64encode(
+        b'<a href="https://example.test/extra">First label</a>'
+        b'<a href="https://example.test/extra">Second label</a>'
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-wrapped-links",
+            "threadId": "thread-wrapped-links",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain}},
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.count("[link1]") == 1
+    assert message.normalized_body.count("[link2]") == 1
+    assert [link.url for link in message.source_links] == [
+        "https://example.test/plain",
+        "https://example.test/extra",
+    ]
+
+
+def test_gmail_message_parser_keeps_one_primary_link_per_digest_card() -> None:
+    first_title = "A Practical Guide to Reliable Agent Workflows"
+    second_title = "Understanding Retrieval Quality in Production Systems"
+    plain = base64.urlsafe_b64encode(
+        f"Today's highlights\n{first_title}\n{second_title}".encode()
+    ).decode()
+    rich = base64.urlsafe_b64encode(
+        (
+            '<section class="card">'
+            f'<a href="https://example.test/posts/reliable-agent-workflows">'
+            f'<img alt="{first_title}"></a>'
+            f'<a href="https://example.test/posts/reliable-agent-workflows">'
+            f"{first_title}</a>"
+            '<a href="https://example.test/@author-one">'
+            '<img alt="Author profile"></a>'
+            "</section>"
+            '<section class="card">'
+            f'<a href="https://example.test/posts/retrieval-quality-production">'
+            f'<img alt="{second_title}"></a>'
+            "</section>"
+            '<footer><a href="https://example.test/unsubscribe">Unsubscribe</a>'
+            '<a href="https://example.test/privacy">Privacy Policy</a>'
+            '<a href="https://example.test/tracking"><img></a></footer>'
+        ).encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-digest",
+            "threadId": "thread-digest",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain}},
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.count("[link1]") == 1
+    assert message.normalized_body.count("[link3]") == 1
+    assert first_title + " [link1]" in message.normalized_body
+    assert second_title + " [link3]" in message.normalized_body
+    assert "Open link" not in message.normalized_body
+    assert "Author profile [link2]" not in message.normalized_body
+    assert "Unsubscribe [link4]" not in message.normalized_body
+    assert "Privacy Policy [link5]" not in message.normalized_body
+    assert "[link6]" not in message.normalized_body
+    assert [(link.ref, link.label) for link in message.source_links] == [
+        ("link1", first_title),
+        ("link2", "Author profile"),
+        ("link3", second_title),
+        ("link4", "Unsubscribe"),
+        ("link5", "Privacy Policy"),
+        ("link6", None),
+    ]
+
+
+def test_gmail_message_parser_hides_url_used_as_anchor_label() -> None:
+    url = "https://example.test/long-tracking-link"
+    rich = base64.urlsafe_b64encode(
+        f'<a href="{url}">https://display.example.test/item</a>'.encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-url-label",
+            "threadId": "thread-url-label",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/html", "body": {"data": rich}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == ""
+    assert message.source_links[0].label is None
+
+
+def test_gmail_message_parser_strips_artifact_controls_but_preserves_emoji_zwj() -> None:
+    plain = base64.urlsafe_b64encode(
+        "A\u200c\u034f\u00adB 👩\u200d💻 می\u200cروم".encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-controls",
+            "threadId": "thread-controls",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "AB 👩‍💻 می‌روم"
+
+
+def test_gmail_message_parser_normalizes_html_embedded_in_plain_mime() -> None:
+    plain_body = (
+        "<!-- rendering metadata -->"
+        "<v:rect><strong>Important</strong></v:rect>"
+        '<br><a href="https://example.test/item">Open item</a>&amp; continue'
+    )
+    plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-plain-html",
+            "threadId": "thread-plain-html",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Important",
+        "Open item [link1] & continue",
+    ]
+
+
+def test_gmail_message_parser_normalizes_markdown_links() -> None:
+    plain = base64.urlsafe_b64encode(
+        b"Review [the document](https://example.test/document)."
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-markdown-link",
+            "threadId": "thread-markdown-link",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "Review the document [link1]."
+    assert message.source_links[0].label == "the document"
+
+
+def test_gmail_message_parser_removes_only_whole_separator_lines() -> None:
+    plain = base64.urlsafe_b64encode(
+        b"Keep this\n----------------\n|-----|\n--\n000\n...\nKeep-this-inline"
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-separators",
+            "threadId": "thread-separators",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Keep this",
+        "000",
+        "...",
+        "Keep-this-inline",
+    ]
+
+
+def test_gmail_message_parser_unescapes_plain_entities() -> None:
+    plain = base64.urlsafe_b64encode(b"Terms &amp; conditions &ndash; review").decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-entities",
+            "threadId": "thread-entities",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "Terms & conditions – review"
+
+
+@pytest.mark.parametrize(
+    ("plain_body", "expected"),
+    [
+        (
+            "Review [item](https://example.test/one https://example.test/two",
+            "Review item [link1] [link2]",
+        ),
+        (
+            "Review [item](https://example.test/item\ntracking metadata)",
+            "Review item [link1]",
+        ),
+    ],
+)
+def test_gmail_message_parser_collapses_only_canonical_ref_wrappers(
+    plain_body: str,
+    expected: str,
+) -> None:
+    plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-ref-wrapper",
+            "threadId": "thread-ref-wrapper",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == expected
 
 
 def test_gmail_message_parser_marks_partial_fetch_without_usable_body() -> None:

@@ -85,6 +85,18 @@ describe('MailInboxView', () => {
                 gmail_message_id: 'message-1',
                 gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-1',
                 source_message_ids: ['message-1'],
+                source_links: [
+                  {
+                    ref: 'link1',
+                    label: 'Review document',
+                    url: 'https://docs.example.com/review',
+                  },
+                  {
+                    ref: 'link2',
+                    label: null,
+                    url: 'https://portal.example.com/open',
+                  },
+                ],
                 incident_key: null,
                 title: 'Gửi báo cáo',
                 request_summary: 'Hoàn thiện báo cáo tháng.',
@@ -108,6 +120,7 @@ describe('MailInboxView', () => {
                 gmail_message_id: 'message-2',
                 gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-2',
                 source_message_ids: ['message-2'],
+                source_links: [],
                 incident_key: null,
                 title: 'Nộp hồ sơ',
                 request_summary: 'Nộp hồ sơ đăng ký đúng hạn.',
@@ -141,6 +154,17 @@ describe('MailInboxView', () => {
     ).toBe('true');
     expect(screen.getByText('Kiểm tra số liệu')).toBeTruthy();
     expect(screen.queryByText('Chuẩn bị giấy tờ')).toBeNull();
+
+    const sourceLinks = screen.getByText('Source links (2)').closest('details');
+    expect(sourceLinks).not.toBeNull();
+    fireEvent.click(screen.getByText('Source links (2)'));
+    expect(sourceLinks?.hasAttribute('open')).toBe(true);
+    expect(screen.getByRole('link', { name: 'Review document' }).getAttribute('href')).toBe(
+      'https://docs.example.com/review'
+    );
+    expect(
+      screen.getByRole('link', { name: 'Open link — portal.example.com' }).getAttribute('href')
+    ).toBe('https://portal.example.com/open');
 
     fireEvent.click(screen.getByRole('button', { name: /Nộp hồ sơ/ }));
 

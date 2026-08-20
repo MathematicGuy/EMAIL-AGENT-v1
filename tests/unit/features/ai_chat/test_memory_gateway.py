@@ -759,9 +759,15 @@ def test_gateway_exposes_only_authorized_durable_write_operations() -> None:
         if callable(value) and not name.startswith("_")
     }
 
+    # `list_task_episodes` is a READ of the caller own episodes, scoped by the
+    # same namespace `read_context` uses, and is the read the frontend episode
+    # list already performs. It is on this list because asking "is a row
+    # stored" has to be possible without asking "can a query find it" - the two
+    # were reported as one number, and a full store read as an empty one.
     assert public_methods == {
         "append_turn",
         "read_context",
+        "list_task_episodes",
         "clear_session",
         "write_profile",
         "delete_profile",

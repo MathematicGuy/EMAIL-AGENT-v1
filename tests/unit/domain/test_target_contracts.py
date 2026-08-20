@@ -16,6 +16,7 @@ from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
     BodyFormat,
     EmailRouteDecision,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     ExpectedDocumentType,
     FetchStatus,
@@ -54,6 +55,9 @@ def _envelope() -> EphemeralEmailEnvelope:
         body_format=BodyFormat.TEXT,
         attachments_present=True,
         fetch_status=FetchStatus.COMPLETE,
+        source_links=(
+            EmailSourceLink("link1", "Open report", "https://portal.example.com/report"),
+        ),
     )
 
 
@@ -118,6 +122,9 @@ def _task() -> Task:
         generation_confidence=0.81,
         validation_status=ValidationStatus.SYSTEM_GENERATED,
         created_at=datetime(2026, 8, 7, 9, 35, tzinfo=UTC),
+        source_links=(
+            EmailSourceLink("link1", None, "https://portal.example.com/report"),
+        ),
     )
 
 
@@ -195,6 +202,16 @@ def test_attachments_processed_rejects_true():
     payload["attachments_processed"] = True
     with pytest.raises(ValueError, match="attachments_processed"):
         EphemeralEmailEnvelope.from_dict(payload)
+
+
+def test_source_links_default_to_empty_when_reading_older_payloads():
+    envelope_payload = _envelope().to_dict()
+    envelope_payload.pop("source_links")
+    assert EphemeralEmailEnvelope.from_dict(envelope_payload).source_links == ()
+
+    task_payload = _task().to_dict()
+    task_payload.pop("source_links")
+    assert Task.from_dict(task_payload).source_links == ()
 
 
 def test_actionability_values():
@@ -281,7 +298,7 @@ def test_frozen_rejects_mutation(build, field):
 
 
 def test_target_contracts_version():
-    assert TARGET_CONTRACTS_VERSION == "1.1.0"
+    assert TARGET_CONTRACTS_VERSION == "1.2.0"
 
 
 def test_trace_content_policy_constants():

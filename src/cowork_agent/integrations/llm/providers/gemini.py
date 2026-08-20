@@ -4,6 +4,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from google import genai
 from google.genai import errors, types
-from langfuse import observe
+from langfuse import get_client, observe
 
 from cowork_agent.config import GeminiSettings
 from cowork_agent.domain import Priority
@@ -21,6 +22,7 @@ from cowork_agent.domain.target_contracts import (
     Actionability,
     ActionPlanOutput,
     EmailRouteDecision,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     ExpectedDocumentType,
     PlanStep,
@@ -53,8 +55,74 @@ from cowork_agent.prompting import (
 )
 
 _Thread = tuple[EphemeralEmailEnvelope, ...]
+EMAIL_INTENT_PROMPT_VERSION = "email-intent-v1"
 
 _CLASSIFIER_LOGGER = logging.getLogger(__name__)
+
+
+def _langfuse_configured() -> bool:
+    tracing_enabled = os.getenv("LANGFUSE_TRACING_ENABLED", "true").strip().lower()
+    return bool(
+        tracing_enabled not in {"0", "false", "no", "off"}
+        and os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+        and os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    )
+
+
+def _update_current_generation(
+    *,
+    input_data: Mapping[str, object] | None = None,
+    output_data: Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+    model: str | None = None,
+    usage_details: Mapping[str, int] | None = None,
+) -> None:
+    """Update Langfuse with metadata-only, non-email classifier telemetry."""
+    if not _langfuse_configured():
+        return
+    try:
+        get_client().update_current_generation(
+            input=dict(input_data) if input_data is not None else None,
+            output=dict(output_data) if output_data is not None else None,
+            metadata=dict(metadata) if metadata is not None else None,
+            model=model,
+            usage_details=dict(usage_details) if usage_details is not None else None,
+        )
+    except Exception as exc:  # pragma: no cover - telemetry must never break routing
+        _CLASSIFIER_LOGGER.debug("Langfuse generation update failed: %s", type(exc).__name__)
+
+
+def _update_current_span(
+    *,
+    input_data: Mapping[str, object] | None = None,
+    output_data: Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+) -> None:
+    """Update the classifier span with metadata-only telemetry."""
+    if not _langfuse_configured():
+        return
+    try:
+        get_client().update_current_span(
+            input=dict(input_data) if input_data is not None else None,
+            output=dict(output_data) if output_data is not None else None,
+            metadata=dict(metadata) if metadata is not None else None,
+        )
+    except Exception as exc:  # pragma: no cover - telemetry must never break routing
+        _CLASSIFIER_LOGGER.debug("Langfuse span update failed: %s", type(exc).__name__)
+
+
+def _gemini_usage_details(usage: object) -> dict[str, int]:
+    details: dict[str, int] = {}
+    field_map = {
+        "prompt_token_count": "input_tokens",
+        "candidates_token_count": "output_tokens",
+        "cached_content_token_count": "cache_read_input_tokens",
+    }
+    for source, target in field_map.items():
+        value = getattr(usage, source, None)
+        if isinstance(value, int) and value >= 0:
+            details[target] = value
+    return details
 
 
 def _mask_api_key(key: str) -> str:
@@ -118,6 +186,9 @@ class GoogleGenAITransport:
                     response_json_schema=dict(schema),
                 ),
             )
+            usage_details = _gemini_usage_details(getattr(response, "usage_metadata", None))
+            if usage_details:
+                _update_current_generation(model=model, usage_details=usage_details)
         except errors.APIError as exc:
             if exc.code == 429:
                 raise GeminiRateLimitError("Gemini rate limit or quota exhausted") from exc
@@ -170,7 +241,12 @@ class GeminiActionPlanGenerator:
         """Create the production adapter from `.env` and process environment."""
         return cls(GeminiSettings.from_env())
 
-    @observe(as_type="generation", name="gemini_action_plan_generator")
+    @observe(
+        as_type="generation",
+        name="gemini_action_plan_generator",
+        capture_input=False,
+        capture_output=False,
+    )
     async def generate(
         self,
         *,
@@ -194,6 +270,7 @@ class GeminiActionPlanGenerator:
                     run_context=run_context,
                     candidate=candidate,
                     first_envelope=envelopes[0],
+                    source_links=_task_source_links(envelopes, candidate.source_message_ids),
                     current_time=current_time,
                 ),
             )
@@ -478,6 +555,7 @@ def _parse_action_plan_output(
     run_context: GenerationContext,
     candidate: TaskCandidate,
     first_envelope: EphemeralEmailEnvelope,
+    source_links: tuple[EmailSourceLink, ...],
     current_time: datetime,
 ) -> ActionPlanOutput:
     """Validate one generation payload into the §6.6 ActionPlanOutput.
@@ -526,7 +604,33 @@ def _parse_action_plan_output(
             ),
             validation_status=validation_status,
             created_at=current_time,
+            source_links=source_links,
         )
+    )
+
+
+def _task_source_links(
+    envelopes: Sequence[EphemeralEmailEnvelope], source_message_ids: Sequence[str]
+) -> tuple[EmailSourceLink, ...]:
+    """Merge candidate email links by exact URL and assign task-local refs."""
+
+    by_message_id = {envelope.gmail_message_id: envelope for envelope in envelopes}
+    ordered: list[tuple[str, str | None]] = []
+    positions: dict[str, int] = {}
+    for message_id in source_message_ids:
+        envelope = by_message_id.get(message_id)
+        if envelope is None:
+            continue
+        for link in envelope.source_links:
+            position = positions.get(link.url)
+            if position is None:
+                positions[link.url] = len(ordered)
+                ordered.append((link.url, link.label))
+            elif ordered[position][1] is None and link.label:
+                ordered[position] = (link.url, link.label)
+    return tuple(
+        EmailSourceLink(ref=f"link{index}", label=label, url=url)
+        for index, (url, label) in enumerate(ordered, start=1)
     )
 
 
@@ -587,17 +691,25 @@ class GeminiRouteClassifier:
         self,
         settings: GeminiSettings,
         transport: GeminiTransport | None = None,
+        *,
+        include_filtered_summary: bool = True,
     ) -> None:
         self._settings = settings
         self._transport = transport or GoogleGenAITransport()
         self._rotator = GeminiKeyRotator(settings.api_keys)
+        self._include_filtered_summary = include_filtered_summary
 
     @classmethod
     def from_env(cls) -> "GeminiRouteClassifier":
         """Create the production adapter from `.env` and process environment."""
         return cls(GeminiSettings.from_env())
 
-    @observe(as_type="generation", name="gemini_route_classifier")
+    @observe(
+        as_type="span",
+        name="classify-email-intent",
+        capture_input=False,
+        capture_output=False,
+    )
     async def classify(
         self,
         user_timezone: str,
@@ -606,6 +718,17 @@ class GeminiRouteClassifier:
     ) -> ClassificationResult:
         classified: list[ClassifiedMessage] = []
         batch_count = 0
+        _update_current_span(
+            input_data={
+                "message_count": len(messages),
+                "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+            },
+            metadata={
+                "feature": "email-intent-router",
+                "route_resolution": "deterministic",
+                "run_id": messages[0].run_id if messages else None,
+            },
+        )
         batches = batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch)
         for batch in batches:
             batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
@@ -615,11 +738,29 @@ class GeminiRouteClassifier:
             classified.extend(
                 await self._classify_batch(user_timezone, current_time, batch, batch_ids)
             )
-        return ClassificationResult(
+        result = ClassificationResult(
             tuple(classified),
             batch_count,
-            await self._summarize_filtered_messages(messages, classified),
+            (
+                await self._summarize_filtered_messages(messages, classified)
+                if self._include_filtered_summary
+                else None
+            ),
         )
+        _update_current_span(
+            output_data={
+                "classified_count": len(result.decisions),
+                "batch_count": result.batch_count,
+                "fallback_count": sum(1 for item in result.decisions if item.is_fallback),
+            },
+            metadata={
+                "route_counts": {
+                    route.value: sum(1 for item in result.decisions if item.decision.route is route)
+                    for route in Route
+                },
+            },
+        )
+        return result
 
     async def _summarize_filtered_messages(
         self,
@@ -629,7 +770,8 @@ class GeminiRouteClassifier:
         filtered_ids = {
             item.gmail_message_id
             for item in classified
-            if item.decision.actionability in {Actionability.INFORMATIONAL, Actionability.IRRELEVANT}
+            if item.decision.actionability
+            in {Actionability.INFORMATIONAL, Actionability.IRRELEVANT}
         }
         if not filtered_ids:
             return None
@@ -658,6 +800,11 @@ class GeminiRouteClassifier:
             prompt,
             schema=FILTERED_SUMMARY_SCHEMA,
             system_instruction=FILTERED_SUMMARY_SYSTEM_INSTRUCTION,
+            trace_input={
+                "operation": "filtered-email-summary",
+                "message_count": len(filtered_ids),
+                "prompt_version": "current",
+            },
         )
         summary = payload.get("filteredSummary") if payload is not None else None
         if not isinstance(summary, str):
@@ -674,12 +821,23 @@ class GeminiRouteClassifier:
     ) -> tuple[ClassifiedMessage, ...]:
         expected = frozenset(batch_ids)
         prompt = _build_prompt(user_timezone, current_time, threads)
-        decisions = _validated_decisions(await self._generate(prompt), expected)
+        trace_input = {
+            "operation": "classify-email-intent",
+            "message_count": len(batch_ids),
+            "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+        }
+        decisions = _validated_decisions(
+            await self._generate(prompt, trace_input=trace_input), expected
+        )
         if not expected <= decisions.keys():
             # PRD-v1 §12.2: retry the same batch exactly once; the repair
             # instruction is appended for schema failures.
             repaired = _validated_decisions(
-                await self._generate(prompt + CLASSIFIER_REPAIR_INSTRUCTION), expected
+                await self._generate(
+                    prompt + CLASSIFIER_REPAIR_INSTRUCTION,
+                    trace_input={**trace_input, "repair_attempt": True},
+                ),
+                expected,
             )
             decisions = {**repaired, **decisions}
         if not expected <= decisions.keys():
@@ -692,12 +850,19 @@ class GeminiRouteClassifier:
             )
         return _classified_messages_for(batch_ids, decisions)
 
+    @observe(
+        as_type="generation",
+        name="email-intent-llm-call",
+        capture_input=False,
+        capture_output=False,
+    )
     async def _generate(
         self,
         prompt: str,
         *,
         schema: Mapping[str, object] | None = None,
         system_instruction: str | None = None,
+        trace_input: Mapping[str, object] | None = None,
     ) -> Mapping[str, Any] | None:
         keys = await self._rotator.candidates(self._settings.max_attempts)
         for idx, key in enumerate(keys, 1):
@@ -709,7 +874,7 @@ class GeminiRouteClassifier:
                 self._settings.model,
             )
             try:
-                return await self._transport.generate(
+                payload = await self._transport.generate(
                     api_key=key,
                     model=self._settings.model,
                     prompt=prompt,
@@ -717,6 +882,19 @@ class GeminiRouteClassifier:
                     timeout_seconds=self._settings.timeout_seconds,
                     system_instruction=system_instruction or CLASSIFIER_SYSTEM_INSTRUCTION,
                 )
+                _update_current_generation(
+                    input_data=trace_input,
+                    output_data={
+                        "response_type": "structured_json",
+                        "top_level_fields": sorted(str(field) for field in payload),
+                    },
+                    metadata={
+                        "provider": "gemini",
+                        "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
+                    },
+                    model=self._settings.model,
+                )
+                return payload
             except GeminiRateLimitError:
                 _CLASSIFIER_LOGGER.warning(
                     "⚠️ [Classifier] Rate limit (429) on Gemini API Key %s, rotating to next key...",
@@ -975,7 +1153,11 @@ def _classified_messages_for(
 ) -> tuple[ClassifiedMessage, ...]:
     """Bind one decision per batch message; still-missing ids get the §12.2 fallback."""
     return tuple(
-        ClassifiedMessage(message_id, decisions.get(message_id, FALLBACK_ROUTE_DECISION))
+        ClassifiedMessage(
+            message_id,
+            decisions.get(message_id, FALLBACK_ROUTE_DECISION),
+            is_fallback=message_id not in decisions,
+        )
         for message_id in batch_ids
     )
 

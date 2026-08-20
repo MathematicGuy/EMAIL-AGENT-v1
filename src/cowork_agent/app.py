@@ -16,6 +16,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Requ
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
+import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
@@ -24,6 +25,7 @@ from cowork_agent.config import (
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
+    OpenRouterSettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
@@ -103,11 +105,13 @@ from cowork_agent.integrations.llm.chat_intent import (
     FaucetIntentClassifier,
     GeminiIntentClassifier,
     GroqIntentClassifier,
+    OpenRouterIntentClassifier,
 )
 from cowork_agent.integrations.llm.chat_reply import (
     FaucetChatReply,
     GeminiChatReply,
     GroqChatReply,
+    OpenRouterChatReply,
 )
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
@@ -120,6 +124,10 @@ from cowork_agent.integrations.llm.providers.gemini import (
 from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.openrouter import (
+    OpenRouterActionPlanGenerator,
+    OpenRouterRouteClassifier,
 )
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
@@ -552,6 +560,7 @@ def create_app() -> FastAPI:
                     "gemini": "Gemini",
                     "groq": "Groq",
                     "faucet": "Faucet",
+                    "openrouter": "OpenRouter",
                 }.get(provider, "LLM provider")
                 classifier: RouteClassifierPort
                 generator: ActionPlanGeneratorPort
@@ -592,8 +601,24 @@ def create_app() -> FastAPI:
                     generator = FaucetActionPlanGenerator(faucet_settings)
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
+                elif provider == "openrouter":
+                    openrouter_settings = OpenRouterSettings.from_env()
+                    intent_settings = ChatIntentSettings.from_env(
+                        default_model=openrouter_settings.model
+                    )
+                    intent_classifier = OpenRouterIntentClassifier.from_settings(
+                        openrouter_settings, intent_settings
+                    )
+                    classifier = OpenRouterRouteClassifier(openrouter_settings)
+                    generator = OpenRouterActionPlanGenerator(openrouter_settings)
+                    semantic_memory = NullSemanticMemory()
+                    app.state.chat_reply = OpenRouterChatReply.from_settings(
+                        openrouter_settings
+                    )
                 else:
-                    raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
+                    raise ValueError(
+                        "LLM_PROVIDER must be 'gemini', 'groq', 'faucet', or 'openrouter'"
+                    )
                 app.state.chat_intent_settings = intent_settings
                 app.state.chat_routing_service = (
                     ChatRoutingService(

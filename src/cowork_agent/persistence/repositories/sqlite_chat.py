@@ -535,6 +535,9 @@ class SQLiteChatRepository(ChatSessionRegistryPort):
     def _transition_task_episode_sync(self, transition: EpisodeTransition) -> TaskEpisode | None:
         namespace = transition.namespace
         _require_episode_namespace(namespace, mutable=True)
+        # source_id is the chat turn that produced the episode; mutable=True
+        # above has already established both it and record_id are present.
+        assert namespace.source_id is not None
         with self._connect() as database:
             row = database.execute(
                 """
@@ -542,7 +545,7 @@ class SQLiteChatRepository(ChatSessionRegistryPort):
                 WHERE tenant_id = ? AND user_id = ? AND feature = ? AND chat_session_id = ?
                     AND record_id = ? AND chat_turn_id = ? AND episode_id = ?
                 """,
-                (*_episode_identity(namespace), transition.episode_id),
+                (*_episode_identity(namespace), namespace.source_id, transition.episode_id),
             ).fetchone()
             if row is None or _expired(row[1]):
                 return None

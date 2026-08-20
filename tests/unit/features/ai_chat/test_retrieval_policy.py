@@ -80,7 +80,11 @@ def test_cue_matching_is_case_insensitive_and_whitespace_normalized() -> None:
 
     assert isinstance(reads.episodic, EpisodicMemoryQuery)
     assert isinstance(reads.semantic, SemanticMemoryQuery)
-    assert reads.episodic.query == "PREVIOUS TASK and COMPANY HANDBOOK"
+    # The cue matched through the capitals and the runs of spaces, which is what
+    # this asserts. The cue words themselves are not search terms - see
+    # test_episodic_search_text.py - so what is left is the rest, single-spaced.
+    assert reads.episodic.query == "COMPANY HANDBOOK"
+    assert reads.semantic.query == "PREVIOUS TASK and COMPANY HANDBOOK"
 
 
 def test_substrings_are_not_retrieval_intent_cues() -> None:
@@ -97,7 +101,10 @@ def test_enabled_query_is_capped_from_the_normalized_validated_message() -> None
     reads = select_memory_reads(_request(message))
 
     assert isinstance(reads.episodic, EpisodicMemoryQuery)
-    assert reads.episodic.query == message[:MAX_RETRIEVAL_QUERY_LENGTH]
+    # The cap is applied to the message before the cue words are dropped, so a
+    # long message cannot smuggle a long search string through the narrowing.
+    assert reads.episodic.query == message[:MAX_RETRIEVAL_QUERY_LENGTH].removeprefix(prefix)
+    assert len(reads.episodic.query) <= MAX_RETRIEVAL_QUERY_LENGTH
 
 
 def test_policy_limits_are_code_owned_and_within_contract_bounds() -> None:

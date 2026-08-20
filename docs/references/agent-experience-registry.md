@@ -107,3 +107,10 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 - **Failure state:** Frozen ordering contracts pass most runs yet intermittently flip on tie cases, producing non-reproducible legacy-shape diffs.
 - **Deploy when:** Relocating serialization/mapping from write to read path, or adding ORDER BY over rows with random producer ids.
 
+#### "Minimal means deleting inactive paths, not documenting their absence"
+- **Version:** v1 (2026-08-19)
+- **Pattern:** Remove obsolete artifacts, commands, validators, tests, and ignore rules when a workflow narrows; document only the active path.
+- **Evidence:** The Email evaluation workspace still described and validated a retired review flow after its private inputs and UI were deleted, obscuring the current candidate-to-route inspection workflow.
+- **Failure state:** Agents recreate retired artifacts, follow dead commands, or spend context distinguishing historical state from the work currently authorized.
+- **Deploy when:** Retiring workflow stages, narrowing evaluation scope, or cleaning generated-artifact contracts.
+

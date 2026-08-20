@@ -9,12 +9,14 @@ from typing import Protocol
 
 import httpx
 
+import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.config import (
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
+    OpenRouterSettings,
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
@@ -45,6 +47,10 @@ from cowork_agent.integrations.llm.providers.gemini import (
 from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.openrouter import (
+    OpenRouterActionPlanGenerator,
+    OpenRouterRouteClassifier,
 )
 from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
@@ -143,8 +149,15 @@ async def run_worker() -> None:
             classifier = FaucetRouteClassifier(faucet_settings)
             generator = FaucetActionPlanGenerator(faucet_settings)
             semantic_memory = NullSemanticMemory()
+        elif provider == "openrouter":
+            openrouter_settings = OpenRouterSettings.from_env()
+            classifier = OpenRouterRouteClassifier(openrouter_settings)
+            generator = OpenRouterActionPlanGenerator(openrouter_settings)
+            semantic_memory = NullSemanticMemory()
         else:
-            raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
+            raise ValueError(
+                "LLM_PROVIDER must be 'gemini', 'groq', 'faucet', or 'openrouter'"
+            )
         digest_worker = DigestWorker(
             runs,
             InMemoryResultRepository(),

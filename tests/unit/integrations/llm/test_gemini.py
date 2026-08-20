@@ -9,6 +9,7 @@ from cowork_agent.config import GeminiSettings
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     FetchStatus,
     Route,
@@ -128,6 +129,13 @@ def envelope(message_id: str) -> EphemeralEmailEnvelope:
         body_format=BodyFormat.TEXT,
         attachments_present=False,
         fetch_status=FetchStatus.COMPLETE,
+        source_links=(
+            EmailSourceLink(
+                ref="link1",
+                label="Review item",
+                url=f"https://portal.example.com/{message_id}",
+            ),
+        ),
     )
 
 
@@ -206,6 +214,7 @@ def test_generator_rotates_to_next_key_after_rate_limit() -> None:
         assert output.task.actionability is Actionability.ACTION_REQUIRED
         assert output.task.validation_status is ValidationStatus.SYSTEM_GENERATED
         assert output.task.route is Route.DIRECT_PLAN
+        assert output.task.source_links == envelope("msg-1").source_links
         assert transport.keys == ["key-one", "key-two"]
 
     asyncio.run(scenario())

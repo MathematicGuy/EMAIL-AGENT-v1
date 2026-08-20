@@ -13,6 +13,7 @@ from cowork_agent.config import (
     FaucetSettings,
     GeminiSettings,
     GroqSettings,
+    OpenRouterSettings,
 )
 from cowork_agent.domain.chat_contracts import (
     IntentClassifierInput,
@@ -183,6 +184,27 @@ class FaucetIntentClassifier(ConfiguredIntentClassifier):
                 max(1, ceil(intent.timeout_ms / 1000)),
             )
             return cast(Mapping[str, object], _completion_json(response))
+
+        return cls(complete)
+
+
+class OpenRouterIntentClassifier(ConfiguredIntentClassifier):
+    @classmethod
+    def from_settings(
+        cls, provider: OpenRouterSettings, intent: ChatIntentSettings
+    ) -> OpenRouterIntentClassifier:
+        from .providers.openrouter import execute_chat_completion
+
+        async def complete(prompt: str) -> Mapping[str, object]:
+            return await execute_chat_completion(
+                provider.api_key,
+                intent.model,
+                _SYSTEM_INSTRUCTION,
+                prompt,
+                INTENT_RESPONSE_SCHEMA,
+                provider.max_output_tokens,
+                max(1, ceil(intent.timeout_ms / 1000)),
+            )
 
         return cls(complete)
 

@@ -373,6 +373,26 @@ class MemoryGateway:
             raise NamespaceAccessDenied("task episode scope does not match the verified scope")
         return result
 
+    async def list_task_episodes(self, *, limit: int = 100) -> tuple[TaskEpisode, ...]:
+        """Every stored episode of the verified owner, without a search query.
+
+        `read_context` answers "can this query find an episode". That is a
+        different question from "is an episode stored", and the two were being
+        reported as one number. On Postgres the retrieval predicate is
+        `search_vector @@ plainto_tsquery('simple', ...)`, which ANDs every
+        token of the query text, so a whole natural-language question matches
+        nothing even when the row is there — and a healthy write path reported
+        itself as an empty store.
+
+        This is the read the frontend episode list already performs, exposed
+        here so callers can ask the storage question through the gateway
+        instead of reaching into the repository behind it.
+        """
+
+        namespace = self._namespace(MemoryType.EPISODIC)
+        episodes = await self._require_episodic_memory().list_episodes(namespace, limit=limit)
+        return tuple(episode for episode in episodes if episode.user_id == self._scope.user_id)
+
     async def transition_task_episode(
         self,
         *,

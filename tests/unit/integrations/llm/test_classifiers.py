@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
+from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings, OpenRouterSettings
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
@@ -30,6 +30,7 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+from cowork_agent.integrations.llm.providers.openrouter import OpenRouterRouteClassifier
 
 
 def environment(**overrides: str) -> dict[str, str]:
@@ -490,3 +491,57 @@ def test_faucet_classifier_parses_decision_and_requests_classification_schema(
     messages = captured[0]["messages"]
     assert isinstance(messages, list)
     assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in messages[1]["content"]
+
+
+def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cowork_agent.integrations.llm.providers import faucet, gemini, groq, openrouter
+
+    observed_versions: list[object] = []
+
+    def record(**kwargs: object) -> None:
+        for value in kwargs.values():
+            if isinstance(value, Mapping) and "prompt_version" in value:
+                observed_versions.append(value["prompt_version"])
+
+    for provider in (gemini, groq, faucet, openrouter):
+        monkeypatch.setattr(provider, "_update_current_span", record)
+        monkeypatch.setattr(provider, "_update_current_generation", record)
+
+    def response(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return {
+            "choices": [
+                {"message": {"content": json.dumps({"emails": [decision_payload("msg")]})}}
+            ]
+        }
+
+    monkeypatch.setattr(groq, "_post_json", response)
+    monkeypatch.setattr(faucet, "_post_json", response)
+    monkeypatch.setattr(openrouter, "_post_json", response)
+
+    async def scenario() -> None:
+        message = (envelope("msg"),)
+        await gemini_classifier(
+            ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
+        ).classify("UTC", datetime.now(UTC), message)
+        await GroqRouteClassifier(
+            GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
+        ).classify("UTC", datetime.now(UTC), message)
+        await FaucetRouteClassifier(
+            FaucetSettings.from_env(
+                {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"}, load_env_file=False
+            )
+        ).classify("UTC", datetime.now(UTC), message)
+        await OpenRouterRouteClassifier(
+            OpenRouterSettings.from_env(
+                {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "test-model"},
+                load_env_file=False,
+            )
+        ).classify("UTC", datetime.now(UTC), message)
+
+    asyncio.run(scenario())
+
+    assert observed_versions
+    assert set(observed_versions) == {"email-intent-v1"}
