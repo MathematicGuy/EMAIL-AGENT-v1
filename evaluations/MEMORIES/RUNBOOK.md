@@ -28,9 +28,7 @@ that reads as a fact and is not one.
 5. **`runs/` is gitignored and holds full reply text.** `baselines/` stays
    metadata-only; a test enforces it. Never paste reply text into a committed
    file.
-6. **Ask before committing.** A run produces artefacts; committing them is a
-   separate decision.
-7. **One run at a time.** Concurrent runs contend on the schema migration
+6. **One run at a time.** Concurrent runs contend on the schema migration
    advisory lock and wedge, and two live runs on one provider account draw far
    more dropouts than one.
 
@@ -63,7 +61,6 @@ evidence that a key works.
 
 | Check | The question it asks | On failure |
 |---|---|---|
-| `checkout` | Are we in a tree that holds this harness? | Wrong directory. |
 | `probe_set` | Does the question file load and validate? | Fix it before spending a single call. |
 | `target` | Which store would this write to, and is it allowed to? | Point `PG_TEST_URL` at a local throwaway. If the remote override is set, **unset it**. |
 | `postgres` | Does that database answer? | Start the server, or create `cowork_memeval`. |
@@ -120,10 +117,23 @@ POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
 Name `<name>` for what was measured, not when — the timestamp is inside the
 report.
 
-**Cost.** 8 questions × 3 arms = 24 asks, and seeding roughly doubles it:
+**Which question file.** Both commands above run the default, `v1-four-scopes`
+— the 8-question set every committed baseline was graded against. Add
+`--probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json` for the wide
+20-question set. Put the set in `<name>`: a v1 baseline and a v2 report are two
+different measurements, not two versions of one, and only `probe_set_id` inside
+the file says which is which.
+
+**Cost.** v1: 8 questions × 3 arms = 24 asks, and seeding roughly doubles it —
 about **52 model calls**, plus the corpus embedding and the two the pre-check
-spent. Single-digit minutes. Run it in the background and wait rather than
-polling.
+spent. Single-digit minutes.
+
+v2: 20 questions × 3 arms = 60 asks, and it seeds three episodes instead of one,
+so roughly **2.5×** v1. Budget the time and the quota accordingly, and keep to
+one run at a time — rule 6 above, and SPEC §15.1 item 10: two concurrent live
+runs drew far more dropouts than one, and more turns per run makes that worse.
+
+Run it in the background and wait rather than polling.
 
 **While it runs**, two things are worth reacting to:
 
@@ -254,7 +264,7 @@ is that check.
 ## 6. Afterwards
 
 - `baselines/<name>.json` is committable; the detail file under `runs/` is not,
-  and is already gitignored. **Ask before committing.**
+  and is already gitignored.
 - **Changing a question changes nothing the report records.** `run_key` hashes
   `(probe_set_id, model, seed)` — question text and `expect_any` are in none of
   them, and `probe_set_id` is set by hand. Two reports can carry identical

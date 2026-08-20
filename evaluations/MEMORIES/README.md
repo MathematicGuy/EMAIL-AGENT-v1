@@ -38,6 +38,35 @@ needs `GEMINI_API_KEY`, or `JINA_API_KEY` when
 
 **Exit code 0 means the harness ran**, not that memory is good.
 
+## Which probe set
+
+Two are committed. `--probe-set` selects one; the default is **v1**, and it stays
+v1 because every report in `baselines/` was graded against it and moving the
+default would silently change what a bare run means.
+
+| file | probes | probe turns per run | what it is |
+|---|---|---|---|
+| `probes/v1-four-scopes.json` | 8 | 24 | `recall` + `restraint` per scope, one `update`. What every committed baseline was graded against. |
+| `probes/v2-four-scopes-wide.json` | 20 | 60 | The wide set: 2–3 probes per scope, `update` on `episodic` as well, and near-miss restraint probes. Its own corpus, `tests/fixtures/memory_eval/corpus-v2/`. |
+
+```powershell
+.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter `
+  --probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json `
+  --output evaluations/MEMORIES/baselines/<name>.json
+```
+
+**The two are not comparable.** Different `probe_set_id`, different questions,
+different corpus — a v1 baseline and a v2 report are two different measurements
+and neither is a version of the other. See SPEC §12.2 rule 5.
+
+v2 costs roughly 2.5× v1 in model calls. SPEC §15.1 item 10 records that
+concurrent live runs draw far more `chat_provider_unavailable` dropouts than one
+does, and that one run at a time is the operating rule; more turns per run makes
+that matter more, not less.
+
+Why a second set exists rather than a wider v1:
+[SPEC-memory-eval-probe-set-v2.md](../../tasks/specs/SPEC-memory-eval-probe-set-v2.md).
+
 ## `POSTGRES_MODE` — SQLite vs PostgreSQL Decision Matrix
 
 `short_term` lives in-process and `semantic` is a static corpus, but `long_term` and
