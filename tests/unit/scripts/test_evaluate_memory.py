@@ -91,7 +91,8 @@ def test_a_live_run_without_a_gemini_key_exits_one(
     # into a real billed run against a real model.
     for name in [item for item in os.environ if item.startswith("GEMINI_API_KEY")]:
         monkeypatch.delenv(name, raising=False)
-    assert main(["--probe-set", str(_probe_set_file(tmp_path))]) == 1
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    assert main(["--provider", "gemini", "--probe-set", str(_probe_set_file(tmp_path))]) == 1
 
 
 def test_dry_run_still_works_after_the_live_path_lands(tmp_path: Path) -> None:
