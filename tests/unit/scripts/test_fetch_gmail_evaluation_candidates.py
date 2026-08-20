@@ -1,9 +1,8 @@
-"""Tests for the bounded Gmail evaluation-candidate export."""
+"""Tests for the fresh full-content Gmail evaluation-candidate export."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -13,6 +12,10 @@ import pytest
 
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
 from tests.unit.scripts.cli_harness import load_script
+
+NOW = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+OLD_TIME = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+NEW_TIME = datetime(2026, 8, 19, 11, 0, tzinfo=UTC)
 
 
 def load_module():
@@ -32,7 +35,13 @@ def test_help_runs_without_gmail_credentials() -> None:
     assert "--limit" in result.stdout
 
 
-def _envelope(message_id: str, thread_id: str, body: str):
+def _envelope(
+    message_id: str,
+    thread_id: str,
+    body: str,
+    *,
+    received_at: datetime = NOW,
+):
     from cowork_agent.domain.target_contracts import (
         BodyFormat,
         EphemeralEmailEnvelope,
@@ -49,7 +58,7 @@ def _envelope(message_id: str, thread_id: str, body: str):
         sender_email=f"{message_id}@example.com",
         recipients=(),
         subject=f"Subject {message_id}",
-        received_at=datetime(2026, 8, 18, tzinfo=UTC),
+        received_at=received_at,
         labels=("INBOX", "UNREAD"),
         normalized_body=body,
         body_format=BodyFormat.TEXT,
@@ -72,42 +81,143 @@ class FakeMailbox:
         return self.threads[thread_id]
 
 
-def test_fetch_candidates_paginates_to_the_cap_and_writes_metadata_only(tmp_path: Path) -> None:
+def test_fetch_candidates_keeps_complete_content_and_orders_newest_first() -> None:
     module = load_module()
-    first = _envelope("m1", "t1", "first body")
-    second = _envelope("m2", "t2", "x" * 500)
-    third = _envelope("m3", "t3", "third body")
+    older = _envelope("m1", "t1", "old body", received_at=OLD_TIME)
+    newer = _envelope("m2", "t2", "x" * 5000, received_at=NEW_TIME)
     mailbox = FakeMailbox(
         [
             SearchPage(
                 messages=(MessageRef("m1", "t1"), MessageRef("m2", "t2")),
+                next_cursor=None,
+                estimated_total=2,
+            )
+        ],
+        {"t1": (older,), "t2": (newer,)},
+    )
+
+    dataset = asyncio.run(
+        module.fetch_candidates(
+            mailbox,
+            "connection-1",
+            query="in:inbox",
+            limit=2,
+            fetched_at=NOW,
+        )
+    )
+
+    assert [case["source_message_id"] for case in dataset["cases"]] == ["m2", "m1"]
+    assert dataset["cases"][0]["case_id"] == "email_case_001"
+    assert dataset["cases"][1]["case_id"] == "email_case_002"
+    assert dataset["cases"][0]["gmail_content"] == "x" * 5000
+    assert "snippet" not in dataset["cases"][0]
+    assert dataset["case_count"] == 2
+    assert dataset["gmail_query"] == "in:inbox"
+    assert dataset["ordering"] == "received_at_desc"
+    assert dataset["fetched_at"] == NOW.isoformat()
+
+
+def test_candidate_record_removes_repeated_invisible_format_controls() -> None:
+    module = load_module()
+    message = _envelope(
+        "m1",
+        "t1",
+        "Readable\u200e\u200f\ufeff\u200b\u200c\u200d content",
+    )
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "Readable content"
+
+
+def test_candidate_record_replaces_line_boundaries_with_spaces() -> None:
+    module = load_module()
+    message = _envelope(
+        "m1",
+        "t1",
+        "Overview\n  First action  \n\nSecond action\nOpen item [link1]",
+    )
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == (
+        "Overview First action Second action Open item [link1]"
+    )
+
+
+def test_candidate_record_removes_grapheme_artifacts_but_preserves_emoji_zwj() -> None:
+    module = load_module()
+    message = _envelope("m1", "t1", "A\u200c\u034f\u00adB 👩\u200d💻 می\u200cروم")
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "AB 👩‍💻 می‌روم"
+
+
+def test_candidate_record_removes_only_whole_separator_lines() -> None:
+    module = load_module()
+    message = _envelope("m1", "t1", "Keep\n---------\n|----|\n--\n000\n...\nKeep-inline")
+
+    candidate = module._candidate_record(message, 1)
+
+    assert candidate["gmail_content"] == "Keep 000 ... Keep-inline"
+
+
+def test_fetch_candidates_deduplicates_message_ids_across_pages() -> None:
+    module = load_module()
+    first = _envelope("m1", "t1", "first body", received_at=OLD_TIME)
+    second = _envelope("m2", "t2", "second body", received_at=NEW_TIME)
+    mailbox = FakeMailbox(
+        [
+            SearchPage(
+                messages=(MessageRef("m1", "t1"),),
                 next_cursor="page-2",
-                estimated_total=3,
+                estimated_total=2,
             ),
             SearchPage(
-                messages=(MessageRef("m3", "t3"),),
+                messages=(MessageRef("m1", "t1"), MessageRef("m2", "t2")),
                 next_cursor=None,
-                estimated_total=3,
+                estimated_total=2,
             ),
         ],
-        {"t1": (first,), "t2": (second,), "t3": (third,)},
+        {"t1": (first,), "t2": (second,)},
     )
 
-    candidates = asyncio.run(
-        module.fetch_candidates(mailbox, "connection-1", query="is:unread in:inbox", limit=3)
+    dataset = asyncio.run(
+        module.fetch_candidates(
+            mailbox,
+            "connection-1",
+            query="in:inbox",
+            limit=2,
+            fetched_at=NOW,
+        )
     )
 
-    assert [candidate["gmail_message_id"] for candidate in candidates] == ["m1", "m2", "m3"]
-    assert len(candidates[1]["snippet"]) == 350
-    assert "normalized_body" not in candidates[1]
+    assert [case["source_message_id"] for case in dataset["cases"]] == ["m2", "m1"]
     assert mailbox.search_calls == [
-        ("connection-1", "is:unread in:inbox", 3, None),
-        ("connection-1", "is:unread in:inbox", 1, "page-2"),
+        ("connection-1", "in:inbox", 2, None),
+        ("connection-1", "in:inbox", 1, "page-2"),
     ]
 
-    output = tmp_path / "candidates.json"
-    module.write_candidates(candidates, output)
-    assert json.loads(output.read_text(encoding="utf-8")) == candidates
+
+def test_write_candidates_validates_before_replacing_existing_destination(tmp_path: Path) -> None:
+    module = load_module()
+    destination = tmp_path / "candidates.json"
+    original = b"original bytes\n"
+    destination.write_bytes(original)
+    invalid_dataset = {
+        "schema_version": 1,
+        "fetched_at": NOW.isoformat(),
+        "gmail_query": "in:inbox",
+        "ordering": "received_at_desc",
+        "case_count": 0,
+        "cases": [],
+    }
+
+    with pytest.raises(ValueError, match="requires exactly 2 cases"):
+        module.write_candidates(invalid_dataset, destination, expected_count=2)
+
+    assert destination.read_bytes() == original
 
 
 def test_limit_is_bounded_to_200() -> None:

@@ -26,14 +26,14 @@ from typing import Literal, Self, TypeVar
 
 from .models import Priority
 
-TARGET_CONTRACTS_VERSION = "1.1.0"
+TARGET_CONTRACTS_VERSION = "1.2.0"
 
 #: Pipeline version — fourth component of the idempotent task persistence key
 #: ``tenant_id:user_id:gmail_message_id:pipeline_version`` (V1-M4 T4.1).
 #: Bump whenever persisted Task semantics change so replays never collide
-#: with rows written by an older pipeline. "2": rows may now carry the
-#: system-injected FR-11 missing-context note (§15 gate remediation).
-TASK_PIPELINE_VERSION = "2"
+#: with rows written by an older pipeline. "3": tasks may now carry the
+#: deterministic source-link inventory extracted from their source emails.
+TASK_PIPELINE_VERSION = "3"
 
 
 class Actionability(StrEnum):
@@ -225,6 +225,26 @@ def _optional(value: object, parse: Callable[[object], _T]) -> _T | None:
 
 
 @dataclass(frozen=True, slots=True)
+class EmailSourceLink:
+    """One deterministic HTTP(S) link extracted from an email body."""
+
+    ref: str
+    label: str | None
+    url: str
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            ref=_as_str(data["ref"]),
+            label=_optional(data.get("label"), _as_str),
+            url=_as_str(data["url"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class EphemeralEmailEnvelope:
     """Ephemeral Envelope (§6.1): one normalized Gmail message.
 
@@ -248,8 +268,9 @@ class EphemeralEmailEnvelope:
     body_format: BodyFormat
     attachments_present: bool
     fetch_status: FetchStatus
+    source_links: tuple[EmailSourceLink, ...] = ()
     # Always False: attachment processing is out of scope (ADR-003); presence
-    # is recorded only. Kept last because it is the only defaulted field.
+    # is recorded only. Kept after the other defaulted field for compatibility.
     attachments_processed: Literal[False] = False
 
     def to_dict(self) -> dict[str, object]:
@@ -277,6 +298,10 @@ class EphemeralEmailEnvelope:
             body_format=_as_enum(data["body_format"], BodyFormat),
             attachments_present=_as_bool(data["attachments_present"]),
             fetch_status=_as_enum(data["fetch_status"], FetchStatus),
+            source_links=tuple(
+                EmailSourceLink.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("source_links", ()))
+            ),
         )
 
 
@@ -372,8 +397,8 @@ class SupportingDocument:
 class Task:
     """Task (§6.6): the minimal durable artifact per actionable result.
 
-    Carries the Gmail pointer, Action Plan, Citations, missing information,
-    and the qualified ``classifier_confidence`` / ``generation_confidence``.
+    Carries the Gmail pointer, extracted source links, Action Plan, Citations,
+    missing information, and the qualified confidence values.
     """
 
     task_id: str
@@ -395,6 +420,7 @@ class Task:
     generation_confidence: float | None
     validation_status: ValidationStatus
     created_at: datetime
+    source_links: tuple[EmailSourceLink, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -426,6 +452,10 @@ class Task:
             generation_confidence=_optional(data["generation_confidence"], _as_float),
             validation_status=_as_enum(data["validation_status"], ValidationStatus),
             created_at=_as_datetime(data["created_at"]),
+            source_links=tuple(
+                EmailSourceLink.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("source_links", ()))
+            ),
         )
 
 

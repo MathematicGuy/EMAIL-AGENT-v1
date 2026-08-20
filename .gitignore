@@ -72,3 +72,8 @@ var/
 # evaluations/MEMORIES/baselines/ are metadata-only.
 evaluations/MEMORIES/runs/
 evaluations/MEMORIES/reports/
+
+/evaluations/EMAIL/gmail_candidates.json
+/evaluations/EMAIL/.gmail_candidates.json.tmp
+/evaluations/EMAIL/reviewed_annotations.json
+/evaluations/EMAIL/email-routes/

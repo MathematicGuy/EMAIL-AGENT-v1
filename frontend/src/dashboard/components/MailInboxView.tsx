@@ -247,6 +247,18 @@ export const MailInboxView: React.FC = () => {
                 <div className="mx-auto max-w-4xl space-y-4">
                   {tasks.map((task) => {
                     const selected = selectedTask?.task_id === task.task_id;
+                    const sourceLinks = (task.source_links ?? []).flatMap((link) => {
+                      try {
+                        const parsed = new URL(link.url);
+                        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return [];
+                        return [{
+                          ...link,
+                          displayLabel: link.label?.trim() || `Open link — ${parsed.hostname}`,
+                        }];
+                      } catch {
+                        return [];
+                      }
+                    });
                     return (
                       <article
                         key={task.task_id}
@@ -329,6 +341,29 @@ export const MailInboxView: React.FC = () => {
                                 <strong>Thiếu thông tin:</strong>{' '}
                                 {task.missing_information.join('; ')}
                               </div>
+                            )}
+
+                            {sourceLinks.length > 0 && (
+                              <details className="mt-5 rounded-lg border border-zinc-700 bg-zinc-900/40">
+                                <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-zinc-300">
+                                  Source links ({sourceLinks.length})
+                                </summary>
+                                <ul className="space-y-2 border-t border-zinc-700 px-3 py-3">
+                                  {sourceLinks.map((link) => (
+                                    <li key={link.ref}>
+                                      <a
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1.5 break-all text-sm text-sky-300 hover:text-sky-200"
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                        {link.displayLabel}
+                                      </a>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
                             )}
 
                             <div className="mt-5 flex flex-wrap gap-4 text-sm">
