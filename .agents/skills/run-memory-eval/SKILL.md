@@ -58,8 +58,13 @@ cd /c/WORK/EMAIL-AGENT-v1/.worktrees/feat/agent-tool && test -f .git && pwd
 
 ### 2. Pre-check
 ```bash
+# PostgreSQL target:
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider <provider>
+
+# SQLite target (zero setup, no PostgreSQL required):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/memeval_preflight.py --provider <provider>
 ```
 Exit `1` means **stop**. Report which check failed and its detail — the script
@@ -80,10 +85,16 @@ Report failures; don't fix them as a side quest unless asked.
 
 ### 4. Run
 ```bash
+# PostgreSQL target:
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider <provider> --output evaluations/MEMORIES/baselines/<name>.json
+    --provider <provider> --output evaluations/MEMORIES/baselines/<name>-postgres.json
+
+# SQLite target (zero setup, scratch DB):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+  .venv/Scripts/python.exe scripts/evaluate_memory.py \
+    --provider <provider> --output evaluations/MEMORIES/baselines/<name>-sqlite.json
 ```
 About 52 model calls — 24 probe asks plus ~28 seeding turns — and single-digit
 minutes. **Run it in the background and wait for the completion notification**

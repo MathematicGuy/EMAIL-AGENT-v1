@@ -49,8 +49,13 @@ Execution Alias and fails.
 ## 1. Pre-check — prove every dependency answers
 
 ```bash
+# PostgreSQL target:
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+
+# SQLite target (zero setup, no PostgreSQL required):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
 ```
 
@@ -104,11 +109,18 @@ A dry run **measures nothing**. It proves the wiring assembles a report.
 ## 2. The run
 
 ```bash
+# PostgreSQL target:
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
     --provider openrouter \
-    --output evaluations/MEMORIES/baselines/<name>.json
+    --output evaluations/MEMORIES/baselines/<name>-postgres.json
+
+# SQLite target (zero setup, scratch DB):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+  .venv/Scripts/python.exe scripts/evaluate_memory.py \
+    --provider openrouter \
+    --output evaluations/MEMORIES/baselines/<name>-sqlite.json
 ```
 
 Name `<name>` for what was measured, not when — the timestamp is inside the

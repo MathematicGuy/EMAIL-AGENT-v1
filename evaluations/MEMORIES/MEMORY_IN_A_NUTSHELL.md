@@ -101,7 +101,7 @@ flowchart TD
 
     subgraph Setup ["Phase 1: Isolated Environment Setup"]
         ID["Generate Throwaway Run Identity<br/>(hash of probe set + model + seed)"]
-        DB["Connect to Disposable Test DB<br/>(cowork_mail_todo / SQLite scratch)"]
+        DB["Connect to Disposable Test DB<br/>(cowork_memeval / SQLite scratch)"]
     end
 
     subgraph ProbeLoop ["Phase 2: 3-Arm Execution (8 Probes x 3 Arms = 24 Calls)"]
@@ -538,7 +538,7 @@ The Cowork Agent supports dual persistence backends configured via `POSTGRES_MOD
 The evaluation harness seeds test rows and subsequently **purges/drops all data**. Running this against a shared staging or production database would wipe real user data.
 - The harness inspects the connection target host in `live_env.py`.
 - Any host other than `127.0.0.1`, `localhost`, or explicit throwaway test DBs triggers an immediate `UnsafeTargetError` crash.
-- **Never set `MEMEVAL_ALLOW_REMOTE_POSTGRES=1`**. Always point `PG_TEST_URL` at the disposable local database `cowork_mail_todo`.
+- **Never set `MEMEVAL_ALLOW_REMOTE_POSTGRES=1`**. Always point `PG_TEST_URL` at the disposable local database `cowork_memeval` (not `cowork_mail_todo`, which the integration test suite drops).
 
 ---
 

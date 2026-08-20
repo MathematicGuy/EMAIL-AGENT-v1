@@ -38,9 +38,9 @@ needs `GEMINI_API_KEY`, or `JINA_API_KEY` when
 
 **Exit code 0 means the harness ran**, not that memory is good.
 
-## `POSTGRES_MODE` — which store is under test
+## `POSTGRES_MODE` — SQLite vs PostgreSQL Decision Matrix
 
-`short_term` lives in-process and `semantic` is a corpus, but `long_term` and
+`short_term` lives in-process and `semantic` is a static corpus, but `long_term` and
 `episodic` are durable, and the product backs them with **two different
 implementations**. The harness follows the same resolution the app does
 (`cowork_agent/config.py::database_url`).
@@ -54,19 +54,69 @@ implementations**. The harness follows the same resolution the app does
 
 `PG_TEST_URL` overrides all of it.
 
-These are **not interchangeable and do not share bugs** — a defect has already
-been found in one path that the other never had. A clean SQLite run says nothing
-about Postgres. Evaluate whichever one you ship; run both if you ship both.
+### Is PostgreSQL Mandatory?
+
+**No.** PostgreSQL is not mandatory for running memory evaluations. SQLite (`POSTGRES_MODE=off`) is a fully-supported, zero-dependency persistence backend.
+
+Use the decision matrix below to choose the appropriate backend for your evaluation:
+
+| Dimension | SQLite (`POSTGRES_MODE=off`) | PostgreSQL (`POSTGRES_MODE=local` / `cloud`) |
+|---|---|---|
+| **Primary Scope** | Local dev loops, CI environments without Docker, prompt engineering, agent 3-arm attribution validation. | Release qualification, production database validation, PostgreSQL FTS verification. |
+| **`short_term` Memory** | `InMemoryChatSessionBuffer` (in-process, identical). | `InMemoryChatSessionBuffer` (in-process, identical). |
+| **`semantic` Memory** | Turbovec / `InRepoSemanticMemory` (in-process vector RAG, identical). | Turbovec / `InRepoSemanticMemory` (in-process vector RAG, identical). |
+| **`long_term` Memory** | `SQLiteChatRepository` (`chat_profiles` SQLite table, JSON serialization). | `PostgresChatProfileRepository` (Postgres table, SQL-level TTL & constraints). |
+| **`episodic` Retrieval** | In-memory Python term match ratio (`sum(term in searchable) / len(terms)`). | Native PostgreSQL Full-Text Search (`ts_rank_cd(search_vector, query)` with `simple` dictionary). |
+| **Infrastructure Setup** | **Zero setup.** Creates and deletes `evaluations/MEMORIES/runs/memeval-chat.db` automatically. | Requires running PostgreSQL instance + migrations applied to throwaway `cowork_memeval`. |
+| **Concurrency & Locks** | Completely isolated per run, zero advisory lock deadlocks. | Subject to `schema_migrations` advisory locks; killed runs may leave locks held. |
+| **Safety Profile** | Isolated scratch file in gitignored `runs/`; cannot overwrite real data. | Guarded by `is_local_postgres` and `looks_throwaway`; remote databases strictly blocked. |
+
+### When SQLite Suffices
+- **3-Arm Attribution & Masking Verification**: Testing whether the LLM responds to memory presence, ablation, and empty control baseline ($P, F, F$).
+- **Prompt & Context Engineering**: Verifying that system prompt injection, user profile formatting, and recent turn windows behave correctly.
+- **Fast Offline / CI Execution**: Running the evaluation harness in lightweight CI runners without spinning up Docker services.
+- **Episodic Lifecycle Gating**: Validating two-stage approval (`retrieval_eligible=False` $\to$ `True`) and Vietnamese episodic cue routing.
+
+### When PostgreSQL is Required
+- **Pre-Release Production Parity**: Proving that the exact SQL repositories (`PostgresChatProfileRepository`, `PostgresTaskEpisodeRepository`) perform under target database conditions.
+- **PostgreSQL Full-Text Search Tuning**: Evaluating PostgreSQL `tsquery` stemming, tokenization, or cover density ranking (`ts_rank_cd`) thresholds.
+- **Database-Level Expiration & Constraints**: Validating SQL-level `expires_at > now()` filtering and PostgreSQL unique constraint handling.
+- **Connection Pool & Async Driver Validation**: Exercising `psycopg` / `psycopg_pool` async query handling under concurrency.
+
+---
+
+## Execution Commands by Backend
+
+### 1. SQLite Mode (Recommended for Local Dev & Quick Checks)
 
 ```powershell
-# SQLite: no server, nothing to install, safe to run anywhere.
-$env:POSTGRES_MODE = "off"; .venv/Scripts/python.exe scripts/evaluate_memory.py
+# Pre-flight check (proves dependencies answer without dialing PostgreSQL)
+$env:POSTGRES_MODE="off"; $env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
+.venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter --no-live
 ```
 
 ```powershell
-# Postgres: throwaway database only. See the safety rule below.
-$env:PG_TEST_URL = "postgresql://<user>:<pw>@127.0.0.1:5432/cowork_memeval"
-.venv/Scripts/python.exe scripts/evaluate_memory.py
+# Live evaluation with SQLite scratch store
+$env:POSTGRES_MODE="off"; $env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
+.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter `
+  --output evaluations/MEMORIES/baselines/<name>-sqlite.json
+```
+
+### 2. PostgreSQL Mode (Production Store Parity)
+
+```powershell
+# Pre-flight check against local throwaway PostgreSQL
+$env:PG_TEST_URL="postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_memeval"
+$env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
+.venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+```
+
+```powershell
+# Live evaluation against local throwaway PostgreSQL
+$env:PG_TEST_URL="postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_memeval"
+$env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
+.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter `
+  --output evaluations/MEMORIES/baselines/<name>-postgres.json
 ```
 
 ## Never point this at a shared database
@@ -99,3 +149,4 @@ Two reports are comparable only at the same `probe_set_id` and
 `schema_version` — **and only if they ran against the same store.** The report
 does not record which store it used, so note it yourself until that is fixed
 (SPEC §15.1 item 8).
+
