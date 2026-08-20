@@ -5,8 +5,9 @@
 **Companion:** [Waku-Memory-and-Evaluation-Comparison.md](../../docs/references/Waku-Memory-and-Evaluation-Comparison.md)
 
 This document explains **what the harness measures and why it was built this
-way**. To run it, see [README.md](./README.md). For a walkthrough in ordinary
-prose, see [FLOW.txt](./FLOW.txt).
+way**. For the plain-language walkthrough, see
+[MEMORY_IN_A_NUTSHELL.md](../../evaluations/MEMORIES/MEMORY_IN_A_NUTSHELL.md).
+To run it, see [README.md](../../evaluations/MEMORIES/README.md).
 
 **Reading order.** Section 0 is a name table. Sections 1–7 are the design, in
 the order the harness runs: what it measures, how it asks, how it fills memory,
@@ -968,7 +969,7 @@ tasks/specs/SPEC-memory-evaluation.md
                                  this document: the design and its reasons
 
 evaluations/MEMORIES/
-  FLOW.txt                       the walkthrough in ordinary prose — start here
+  MEMORY_IN_A_NUTSHELL.md        the walkthrough in ordinary prose — start here
   README.md                      how to run it and how to read a report
   RUNBOOK.md                     the procedure: pre-check, run, monitor, write up
   probes/v1-four-scopes.json     the committed test questions
