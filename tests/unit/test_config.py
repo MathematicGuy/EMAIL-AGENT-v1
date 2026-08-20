@@ -4,6 +4,7 @@ import pytest
 
 from cowork_agent.config import (
     LOCAL_POSTGRES_DEFAULT_URL,
+    EmailRagQualitySettings,
     GeminiEmbeddingSettings,
     OpenRouterSettings,
     RerankerSettings,
@@ -295,3 +296,10 @@ def test_openrouter_fallback_models_omits_primary_preserving_order() -> None:
 
     assert settings.fallback_models() == ("openai/gpt",)
 
+def test_email_rag_quality_settings_default_and_bounds() -> None:
+    settings = EmailRagQualitySettings.from_env({}, load_env_file=False)
+    assert (settings.min_rerank_score, settings.relative_cutoff_ratio) == (0.30, 0.85)
+    with pytest.raises(ValueError, match="EMAIL_RAG_MIN_RERANK_SCORE"):
+        EmailRagQualitySettings.from_env(
+            {"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"}, load_env_file=False
+        )

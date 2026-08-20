@@ -1,4 +1,4 @@
-"""Null Semantic Memory adapter: structured ``no_results`` (V1-M3 T3.1)."""
+"""Null Semantic Memory adapter: structured unavailable retrieval result."""
 
 from uuid import uuid4
 
@@ -21,6 +21,6 @@ class NullSemanticMemory:
         return SemanticRetrievalResponse(
             query_id=f"q_{uuid4().hex}",
             chunks=(),
-            retrieval_status=RetrievalStatus.NO_RESULTS,
+            retrieval_status=RetrievalStatus.UNAVAILABLE,
             latency_ms=0,
         )

@@ -99,7 +99,7 @@ In addition to enterprise company knowledge, the project provides a dedicated ve
 
 ### 5.1 Email Action Plan Subsystem Integration
 
-When an incoming email is classified as `RETRIEVE_RAG` by `routing.py`, `ActionPlanWorkflow` invokes `SemanticMemoryPort.retrieve()`. Retrieved chunks carrying provenance citations (`document_id`, `section`, `relevance_score`) are injected into the Gemini/Groq LLM prompt to ground the generated Action Plan.
+Every non-`NO_ACTION` email candidate invokes `SemanticMemoryPort.retrieve()` once before its final route is selected. The Email RAG evidence gate accepts only Cohere-scored chunks at or above `max(min_rerank_score, top_score × relative_cutoff_ratio)`; only accepted chunks are injected into the generator. A healthy no-match can produce a direct plan, while unavailable retrieval produces a degraded partial RAG plan without citations.
 
 ### 5.2 AI Chat Subsystem Integration
 

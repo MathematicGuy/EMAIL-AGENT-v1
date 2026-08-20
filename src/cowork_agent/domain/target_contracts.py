@@ -26,14 +26,14 @@ from typing import Literal, Self, TypeVar
 
 from .models import Priority
 
-TARGET_CONTRACTS_VERSION = "1.2.0"
+TARGET_CONTRACTS_VERSION = "1.3.0"
 
 #: Pipeline version — fourth component of the idempotent task persistence key
 #: ``tenant_id:user_id:gmail_message_id:pipeline_version`` (V1-M4 T4.1).
 #: Bump whenever persisted Task semantics change so replays never collide
 #: with rows written by an older pipeline. "3": tasks may now carry the
 #: deterministic source-link inventory extracted from their source emails.
-TASK_PIPELINE_VERSION = "3"
+TASK_PIPELINE_VERSION = "4"
 
 
 class Actionability(StrEnum):
@@ -117,6 +117,7 @@ class RetrievalStatus(StrEnum):
     TIMEOUT = "timeout"
     AUTHORIZATION_DENIED = "authorization_denied"
     PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
 
 
 _T = TypeVar("_T")
@@ -524,6 +525,10 @@ class TraceEvent:
     generation_status: str | None
     validation_status: str | None
     latency_ms: TraceLatency
+    evidence_status: str | None = None
+    top_rerank_score: float | None = None
+    query_rewrite_status: str | None = None
+    gate_version: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -544,6 +549,10 @@ class TraceEvent:
             generation_status=_optional(data["generation_status"], _as_str),
             validation_status=_optional(data["validation_status"], _as_str),
             latency_ms=TraceLatency.from_dict(_as_mapping(data["latency_ms"])),
+            evidence_status=_optional(data.get("evidence_status"), _as_str),
+            top_rerank_score=_optional(data.get("top_rerank_score"), _as_float),
+            query_rewrite_status=_optional(data.get("query_rewrite_status"), _as_str),
+            gate_version=_optional(data.get("gate_version"), _as_str),
         )
 
 

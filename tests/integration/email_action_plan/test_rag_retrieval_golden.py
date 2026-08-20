@@ -15,6 +15,7 @@ would rebuild the blind spot this spec exists to remove.
 """
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,8 @@ from cowork_agent.domain.target_contracts import (
     EmailRouteDecision,
     ReasonCode,
     Route,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import CreateDigestRun, DigestWorker
@@ -99,7 +102,7 @@ def _parameters() -> list[ParameterSet]:
 
 
 @pytest.fixture(scope="module")
-def semantic_memory() -> InRepoSemanticMemory:
+def semantic_memory() -> "RerankedGoldenMemory":
     """One built index shared by every case; the corpus is static."""
     documents = tuple(
         document
@@ -108,7 +111,28 @@ def semantic_memory() -> InRepoSemanticMemory:
     )
     memory = InRepoSemanticMemory(documents, HashingEmbedder())
     asyncio.run(memory.build_index())
-    return memory
+    return RerankedGoldenMemory(memory)
+
+
+class RerankedGoldenMemory:
+    """Real corpus retrieval with deterministic Cohere-score test evidence."""
+
+    def __init__(self, memory: InRepoSemanticMemory) -> None:
+        self._memory = memory
+
+    @property
+    def _chunks(self):  # type: ignore[no-untyped-def]
+        return self._memory._chunks
+
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
+        response = await self._memory.retrieve(request)
+        return replace(
+            response,
+            chunks=tuple(
+                replace(chunk, rerank_score=0.99 - index * 0.01)
+                for index, chunk in enumerate(response.chunks)
+            ),
+        )
 
 
 def _decision(case: RetrievalCase) -> EmailRouteDecision:
@@ -127,7 +151,7 @@ def _decision(case: RetrievalCase) -> EmailRouteDecision:
 
 @pytest.mark.parametrize("case", _parameters())
 def test_email_retrieves_the_expected_corpus_document(
-    case: RetrievalCase, semantic_memory: InRepoSemanticMemory
+    case: RetrievalCase, semantic_memory: RerankedGoldenMemory
 ) -> None:
     async def scenario() -> None:
         assert case.email_body is not None
@@ -185,7 +209,7 @@ def test_email_cases_cover_exactly_the_legacy_email_documents() -> None:
 
 
 def test_email_e2e_memory_contains_only_the_legacy_six_document_corpus(
-    semantic_memory: InRepoSemanticMemory,
+    semantic_memory: RerankedGoldenMemory,
 ) -> None:
     indexed_document_ids = {chunk.document_id for chunk in semantic_memory._chunks}
     assert indexed_document_ids == LEGACY_EMAIL_DOCUMENT_IDS
