@@ -3,6 +3,8 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from cowork_agent.domain import Priority, RunStatus
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -28,6 +30,8 @@ from cowork_agent.persistence.repositories.local import (
     InMemoryRunRepository,
     InMemoryTaskRepository,
 )
+
+pytestmark = pytest.mark.extended
 
 BASE_TIME = datetime(2026, 8, 18, 10, 0, 0, tzinfo=UTC)
 

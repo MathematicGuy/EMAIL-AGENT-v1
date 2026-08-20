@@ -11,6 +11,8 @@ from cowork_agent.integrations.llm.chat_intent import (
 )
 from cowork_agent.integrations.llm.providers.gemini import GeminiRateLimitError
 
+pytestmark = pytest.mark.extended
+
 
 def test_configured_classifier_parses_strict_response() -> None:
     async def complete(prompt: str):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeTest
 from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
@@ -8,6 +10,8 @@ from cowork_agent.features.ai_chat.memory_eval.verdicts import (
     derive_verdict,
     verdict_rank,
 )
+
+pytestmark = pytest.mark.extended
 
 
 def _probe(**overrides: object) -> Probe:

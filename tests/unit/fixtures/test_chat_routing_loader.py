@@ -1,4 +1,8 @@
+import pytest
+
 from tests.fixtures.chat_routing.loader import ChatRoutingGroup, load_chat_routing_cases
+
+pytestmark = pytest.mark.extended
 
 
 def test_chat_routing_fixture_is_balanced_and_has_required_trap_groups() -> None:

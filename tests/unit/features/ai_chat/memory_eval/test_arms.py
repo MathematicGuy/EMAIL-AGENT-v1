@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     EpisodicMemoryQuery,
@@ -11,6 +13,8 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryRead,
 )
 from cowork_agent.features.ai_chat.memory_eval.arms import mask_reads, mask_request
+
+pytestmark = pytest.mark.extended
 
 
 def _reads() -> MemoryReadOptions:

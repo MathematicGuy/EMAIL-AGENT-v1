@@ -29,6 +29,8 @@ from cowork_agent.features.ai_chat.retrieval_policy import (
     select_memory_reads,
 )
 
+pytestmark = pytest.mark.extended
+
 _PROBE_SET = (
     Path(__file__).resolve().parents[5]
     / "evaluations"

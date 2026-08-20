@@ -10,6 +10,8 @@ from cowork_agent.features.ai_chat.evaluation_dataset import (
     DeterministicPairedScorer,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def test_dataset_version_constant() -> None:
     assert DATASET_VERSION == "1.0.0"

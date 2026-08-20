@@ -47,6 +47,8 @@ from cowork_agent.features.ai_chat.profile_policy import ProfileWriteRejected
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 from cowork_agent.persistence.repositories.postgres import PostgresChatProfileRepository
 
+pytestmark = pytest.mark.extended
+
 NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 

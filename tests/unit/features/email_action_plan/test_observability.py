@@ -21,6 +21,8 @@ from cowork_agent.features.email_action_plan.observability import (
 )
 from cowork_agent.orchestration.local import InMemoryOutbox
 
+pytestmark = pytest.mark.extended
+
 KEY = Fernet.generate_key().decode()
 
 PROD_ENV = {"APP_ENV": "production"}

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from fastapi import FastAPI, Request
 
 from cowork_agent.api.projects import create_project_router
@@ -15,6 +16,8 @@ from cowork_agent.persistence.repositories.projects import (
     Project,
     ProjectDocument,
 )
+
+pytestmark = pytest.mark.extended
 
 
 class Projects:

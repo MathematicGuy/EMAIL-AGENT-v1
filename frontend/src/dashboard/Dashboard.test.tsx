@@ -58,7 +58,7 @@ describe('Dashboard Project chat', () => {
   it('renders the main chat and allows typing', async () => {
     vi.stubGlobal('fetch', projectFetch());
     render(<Dashboard />);
-    const input = screen.getByPlaceholderText('How can I help you today?');
+    const input = screen.getByPlaceholderText('Tôi có thể giúp gì cho bạn hôm nay?');
     fireEvent.change(input, { target: { value: 'Xin chào AI' } });
     expect((input as HTMLTextAreaElement).value).toBe('Xin chào AI');
     expect((await screen.findAllByText('Default Project')).length).toBeGreaterThan(0);
@@ -88,10 +88,8 @@ describe('Dashboard Project chat', () => {
 
     render(<Dashboard />);
     // The sidebar renders expanded by default, where the global new-chat control
-    // is an untitled button labelled "New" (Taskbar.tsx). `title="New chat"`
-    // only exists on the collapsed rail, and `New chat in <project>` is a
-    // different handler (onNewChatInProject), so match the accessible name.
-    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    // is an untitled button labelled "Tạo mới" (Taskbar.tsx).
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo mới' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -139,9 +137,9 @@ describe('Dashboard Project chat', () => {
     window.localStorage.clear();
 
     render(<Dashboard />);
-    const input = screen.getByPlaceholderText('How can I help you today?');
+    const input = screen.getByPlaceholderText('Tôi có thể giúp gì cho bạn hôm nay?');
     fireEvent.change(input, { target: { value: 'Hello' } });
-    fireEvent.click(screen.getByTitle('Send message'));
+    fireEvent.click(screen.getByTitle('Gửi tin nhắn'));
 
     expect(await screen.findByText('Hello from the default project.')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -253,7 +251,7 @@ describe('Dashboard Project chat', () => {
     fireEvent.click(screen.getByLabelText('Close project documents'));
 
     // Switch to Mail view
-    fireEvent.click(screen.getByTitle('Mail Inbox'));
+    fireEvent.click(screen.getByTitle('Hộp thư'));
     expect(screen.queryByRole('button', { name: 'Project documents' })).toBeNull();
   });
 

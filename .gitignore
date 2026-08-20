@@ -52,8 +52,23 @@ frontend/.env
 .superpowers
 .worktrees/
 
-# Agent session artifacts (tracked skills under .claude/ stay tracked)
+# Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
+.claude/conversations/
+.claude/chats/
+.agents/*
+!.agents/skills/
+!.agents/seeds/
+!.agents/qa-project-context.md
+
+# Common agent communication & handoff artifacts
+BRIEFING.md
+DISPATCH.md
+ORIGINAL_REQUEST.md
+HANDOFF.md
+*handoff*.md
+.handoff/
+.subagents/
 
 # Playwright
 /test-results/
@@ -77,3 +92,6 @@ evaluations/MEMORIES/reports/
 /evaluations/EMAIL/.gmail_candidates.json.tmp
 /evaluations/EMAIL/reviewed_annotations.json
 /evaluations/EMAIL/email-routes/
+
+# Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
+.agents/skills/using-agent-skills/

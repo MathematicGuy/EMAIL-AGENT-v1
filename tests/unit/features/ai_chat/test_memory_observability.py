@@ -8,6 +8,8 @@ from cowork_agent.features.ai_chat.memory_observability import (
     RecordingMemoryOperationSink,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def test_metadata_only_event_never_exposes_sensitive_sentinels_and_bounds_counts() -> None:
     event = MemoryOperationEvent(

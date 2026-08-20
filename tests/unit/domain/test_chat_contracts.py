@@ -58,6 +58,8 @@ from cowork_agent.domain.chat_contracts import (
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
 
+pytestmark = pytest.mark.extended
+
 
 def _namespace(*, record_id: str | None = "record-1") -> MemoryNamespace:
     return MemoryNamespace(

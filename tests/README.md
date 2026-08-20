@@ -7,11 +7,15 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Whole suite: `uv run pytest -q` -> ~24 s, 1489 passed.** Defaults: 4 xdist
-workers with `--dist loadgroup`, `-m 'not live'`, `--strict-markers`. Worker
+**Core suite: `uv run pytest -q` -> ~26 s, 536 passed.** Defaults: 4 xdist
+workers with `--dist loadgroup`, `-m 'not live and not extended'`, `--strict-markers`. Worker
 flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
 is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
 route — that throws away the cores. Use `-n 0` only to debug a single failure.
+
+To run extended/nightly tests or full offline suite:
+- `uv run pytest -m extended -q` (runs non-core / PostgreSQL persistence / MemEval suite — 968 passed, ~23 s)
+- `uv run pytest -m 'not live' -q` (runs full 1,504 offline tests)
 
 The suite is **offline by construction** -- see §7. Do not undo that to make a
 test pass.
@@ -26,22 +30,22 @@ which is what one route costs; the full suite is parallel.
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
 | R1 | `tests/unit/domain` | 172 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 634 | 2.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 73 | 5.5 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
+| R2 | `tests/unit/features` | 562 | 2.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 73 | 4.0 s | BM25, RRF fusion, reranker, query guard, Turbovec memory. |
 | R4 | `tests/unit/integrations/llm` | 43 | 1.6 s | Prompt assembly, parsing, key rotation, classifiers. |
 | R5 | `tests/unit/integrations/gmail` | 19 | 0.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 251 | 9.0 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R6 | `tests/unit/integrations` | 251 | 7.0 s | R3+R4+R5 plus bootstrap, Supabase. |
 | R7 | `tests/unit/persistence` | 19 | 1.3 s | Repository logic against fakes. |
 | R8 | `tests/unit/orchestration` | 12 | 1.5 s | Workers, pollers, recovery. |
 | R9 | `tests/unit/scripts` | 66 | 10.4 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
 | R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
 | R11 | `tests/integration/api` | 25 | 5.5 s | FastAPI via in-process ASGI transport. |
 | R12 | `tests/integration/persistence` | 9 | 3.9 s | Real PostgreSQL. **Skips wholesale without a server.** One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
-| R13 | `tests/integration/email_action_plan` | 45 | 3.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 76 | 14.4 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 1244 | 29.3 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 1178 | 19 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(everything)* | 1311 | **24 s parallel** | `uv run pytest -q` |
+| R13 | `tests/integration/email_action_plan` | 37 | 3.0 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 68 | 13.0 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 974 | 22.0 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 908 | 14.0 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
+| — | *(core suite)* | 536 | **26 s parallel** | `uv run pytest -q` |
 
 ### Source -> route
 
@@ -69,8 +73,10 @@ Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 
 | Marker | Meaning | Default |
 |---|---|---|
-| `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
-| `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
+| `core` | **Test Não & Thuật toán**: Logic nghiệp vụ, contracts, security boundary (Fakes 100%, 0 I/O). | **Selected** by default. |
+| `extended` | **Test Kho chứa & Đánh giá**: Real PostgreSQL container, MemEval harness, evaluation datasets. | **Deselected.** `-m extended` to run (968 passed). |
+| `live` | **Test Thực địa ngoài đời**: Real Gmail OAuth, real Gemini API, real server subprocess. | **Deselected.** `-m live` to opt in (27 tests). |
+| `slow` | >1 s of wall clock on its own. | Selected. |
 | `serial` | Spawns a process or binds a fixed port. Auto-grouped onto one xdist worker (`xdist_group("serial")`). Do not disable xdist for these. | Selected. |
 | `xdist_group` | Same worker for tests that share a destructive resource. Persistence (R12) uses `pg-control-plane` so `DROP SCHEMA public CASCADE` never runs on two workers. | Selected. Requires `--dist loadgroup`. |
 
@@ -78,10 +84,12 @@ Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
 naming what the filter dropped. A green summary with that banner above it is
 *not* a fully verified suite.
 
-`tests/integration/api/test_e2e_frontend_api.py` is the only `live` module (24
-tests). It needs a real `mail-todo-api` subprocess plus completed Gmail OAuth.
-When the server will not boot it **skips behind a wall of `!!!!` explaining why**
-— it never errors, so it can never mask a real failure.
+The `live` tier modules for Software E2E integration (deselected by default, run with `-m live`):
+- `tests/integration/api/test_e2e_frontend_api.py` (24 tests): requires a real `mail-todo-api` subprocess + Gmail OAuth.
+- `tests/integration/memory_eval/test_live_smoke.py` (1 test): live smoke test against external PostgreSQL/memory services.
+- `tests/unit/scripts/test_evaluate_memory.py` (2 tests): live CLI evaluation harness.
+
+*(Note: AI Model Benchmarking with live LLM calls, such as the 240 Vietnamese Intent evaluation, is decoupled from pytest and executed via `scripts/evaluate_user_intent_real_llm.py` with artifacts stored in `evaluations/CHAT/`).*
 
 ---
 
@@ -149,6 +157,11 @@ absent, add the row when you add the test.
    `test_min_score_excludes_everything_below_the_threshold`, not
    `test_min_score_2`.
 7. **New external dependency? Mark it `live` and `serial`.**
+8. **Never sleep in unit tests.** Mock `asyncio.sleep` / backoff delays in test fixtures
+   so retry tests execute in milliseconds instead of seconds.
+9. **No mock dataset loops in pytest.** Benchmarking AI model accuracy against 100+ case
+   datasets belongs in standalone scripts (`scripts/evaluate_*_real_llm.py`). Pytest tests
+   deterministic contracts, parsing, and routing logic only.
 
 ### Pruning checklist
 
@@ -159,6 +172,7 @@ Delete a test when any of these holds:
   a stale *kwarg* means fix the call, a stale *purpose* means delete the test).
 - It re-tests framework behaviour (pydantic validation, FastAPI routing).
 - It only passes because a broad `except Exception` swallowed the real error.
+- It loops over a large static QA dataset with mock responses (move dataset benchmarking to `scripts/evaluate_*_real_llm.py`).
 
 ---
 

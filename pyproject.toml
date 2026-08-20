@@ -70,10 +70,12 @@ norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
 #   yellow banner naming whatever was deselected, so this cannot rot silently.
 # --strict-markers: an unregistered marker is a typo that would otherwise make a
 #   test silently vanish from every `-m` selection.
-addopts = "-p tests.xdist_plugin -m 'not live' --strict-markers"
+addopts = "-p tests.xdist_plugin -m 'not live and not extended' --strict-markers"
 markers = [
     "slow: >1s of wall clock on its own. Run with `-m slow`.",
     "live: needs a real external process/service. Deselected by default; skips loudly when absent.",
+    "extended: non-core test suite (evaluation datasets, synthetic benchmarks, extended QA). Deselected by default; run with `-m extended`.",
+    "core: primary technical system invariant tests.",
     "serial: must not run under xdist (spawns subprocesses or binds a fixed port).",
     "xdist_group(name): pin tests that share a destructive resource to one xdist worker.",
 ]

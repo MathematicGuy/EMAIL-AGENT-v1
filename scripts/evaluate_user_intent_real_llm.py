@@ -41,9 +41,7 @@ from cowork_agent.integrations.llm.chat_reply import GeminiChatReply
 
 load_dotenv(override=False)
 
-DATASET_PATH = Path("docs/qa-test/qa-chatbot-intent-dataset.json")
-if not DATASET_PATH.exists():
-    DATASET_PATH = Path("docs/qa-chatbot-intent-dataset.json")
+DATASET_PATH = Path("evaluations/CHAT/qa-test/qa-chatbot-intent-dataset.json")
 
 
 class LiveEpisodicStore:
@@ -313,7 +311,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/evaluations/CHAT/live-real-gemini-eval.json"),
+        default=Path("evaluations/CHAT/baselines/live-real-gemini-eval.json"),
         help="Đường dẫn file kết quả JSON.",
     )
     args = parser.parse_args()

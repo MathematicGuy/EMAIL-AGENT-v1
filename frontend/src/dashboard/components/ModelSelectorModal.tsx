@@ -47,7 +47,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
             id="model-selector-title"
             className="text-[13px] font-medium text-zinc-500"
           >
-            Model
+            Mô hình
           </h3>
         </div>
 
@@ -55,8 +55,8 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
           {AVAILABLE_MODELS.map((model) => {
             const isSelected = selectedModel.id === model.id;
             const speedLabel = model.id.startsWith('gemini')
-              ? 'Fast'
-              : 'Reasoning';
+              ? 'Nhanh'
+              : 'Suy luận';
 
             return (
               <button

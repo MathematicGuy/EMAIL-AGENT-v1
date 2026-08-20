@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+pytestmark = pytest.mark.extended
+
 
 class FakePurgePort:
     def __init__(self, count: int = 0, error: Exception | None = None) -> None:

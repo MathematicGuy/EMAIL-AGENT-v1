@@ -35,6 +35,8 @@ from cowork_agent.features.ai_chat.retrieval_policy import (
     select_memory_reads,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def _request(user_message: str) -> ChatMessageRequest:
     return ChatMessageRequest(

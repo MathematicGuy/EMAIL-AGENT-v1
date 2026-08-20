@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.memeval_preflight import (
     FAIL,
     OK,
@@ -22,6 +24,8 @@ from scripts.memeval_preflight import (
     looks_throwaway,
     render,
 )
+
+pytestmark = pytest.mark.extended
 
 
 def test_a_warning_does_not_stop_a_run_and_a_failure_does() -> None:

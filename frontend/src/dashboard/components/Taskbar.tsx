@@ -7,10 +7,11 @@ import {
   SlidersHorizontal,
   Mail,
   LoaderCircle,
-  Trash2
+  Trash2,
+  BookOpen
 } from 'lucide-react';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
-import type { ChatGenerationStatus, SidebarState, RecentChat } from '../types';
+import type { ChatGenerationStatus, SidebarState, RecentChat, ActiveDashboardView } from '../types';
 import type { Project } from '../types/projectTypes';
 
 const terminalLifecycleLabels: Partial<Record<ChatGenerationStatus, string>> = {
@@ -85,8 +86,8 @@ interface TaskbarProps {
   isHistoryLoading?: boolean;
   activeChatId?: string;
   onNavigateHome?: () => void;
-  activeView?: 'chat' | 'mail' | 'artifacts';
-  onChangeView?: (view: 'chat' | 'mail' | 'artifacts') => void;
+  activeView?: ActiveDashboardView;
+  onChangeView?: (view: ActiveDashboardView) => void;
   isGenerating?: boolean;
 }
 
@@ -136,7 +137,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
         <div className="flex flex-col items-center gap-3 w-full">
           <button
             onClick={onToggleSidebar}
-            title="Show sidebar (Click to expand)"
+            title="Hiện thanh bên"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
             <SidebarToggleIcon className="w-4 h-4" />
@@ -145,7 +146,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <button
             onClick={onNavigateHome}
             className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center bg-[#282623] border border-zinc-700/50 shadow-md hover:scale-105 transition-transform cursor-pointer"
-            title="Go to Landing Page"
+            title="Về trang chủ"
           >
             <img src="/images/f-cowork-icon.svg" alt="F-Cowork Icon" className="w-7 h-7 object-contain" />
           </button>
@@ -154,14 +155,14 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
           <button
             onClick={onNewChat}
-            title="New chat"
+            title="Đoạn chat mới"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
             <Plus className="w-4.5 h-4.5" />
           </button>
 
           <button
-            title="Chats"
+            title="Đoạn chat"
             onClick={() => onChangeView?.('chat')}
             className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
               activeView === 'chat' ? 'bg-[#2c2a26] text-white' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
@@ -171,7 +172,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Mail Inbox"
+            title="Hộp thư"
             onClick={() => onChangeView?.('mail')}
             className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
               activeView === 'mail' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
@@ -192,12 +193,22 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <GitBranch className="w-4 h-4" />
           </button>
 
-
+          <button
+            title="Tài liệu quy trình"
+            onClick={() => onChangeView?.('raw-documents')}
+            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+              activeView === 'raw-documents'
+                ? 'bg-[#2c2a26] text-[#d97757]'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex flex-col items-center gap-3 w-full">
           <button
-            title="steven (Pro plan)"
+            title="steven (Gói Pro)"
             className="w-8 h-8 rounded-full bg-[#35332f] hover:bg-[#423f3a] text-zinc-200 text-xs font-semibold flex items-center justify-center border border-zinc-700/40 transition-colors cursor-pointer"
           >
             s
@@ -214,7 +225,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <button
             onClick={onNavigateHome}
             className="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
-            title="Go to Landing Page"
+            title="Về trang chủ"
           >
             <img
               src="/images/f-cowork-logo-no-tagline.svg"
@@ -226,13 +237,13 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <div className="flex items-center gap-1 text-zinc-400">
             <button
               onClick={onToggleSidebar}
-              title="Hide sidebar (Click to collapse)"
+              title="Thu gọn thanh bên"
               className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
             >
               <SidebarToggleIcon className="w-4 h-4" />
             </button>
             <button
-              title="Search chats"
+              title="Tìm kiếm đoạn chat"
               className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
             >
               <Search className="w-4 h-4" />
@@ -245,7 +256,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
         >
           <Plus className="w-4 h-4 text-zinc-400" />
-          <span>New</span>
+          <span>Tạo mới</span>
         </button>
 
         <div className="flex flex-col gap-0.5 text-xs">
@@ -262,22 +273,34 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Mail Inbox"
+            title="Hộp thư"
             onClick={() => onChangeView?.('mail')}
             className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
               activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
             }`}
           >
             <Mail className="w-3.5 h-3.5 text-[#d97757]" />
-            <span>Mail Inbox</span>
+            <span>Hộp thư</span>
           </button>
 
+          <button
+            title="Tài liệu quy trình"
+            onClick={() => onChangeView?.('raw-documents')}
+            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
+              activeView === 'raw-documents'
+                ? 'bg-[#272522] text-[#d97757] font-semibold'
+                : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            }`}
+          >
+            <BookOpen className={`w-3.5 h-3.5 ${activeView === 'raw-documents' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
+            <span>Tài liệu quy trình</span>
+          </button>
         </div>
 
         <div className="mt-2 flex flex-col text-xs">
           <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
-            <span>PROJECTS</span>
-            <button onClick={onCreateProject} title="Create project" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100">
+            <span>DỰ ÁN</span>
+            <button onClick={onCreateProject} title="Tạo dự án" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100">
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -323,7 +346,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                         });
                         onNewChatInProject(project.id);
                       }}
-                      title={`New chat in ${project.name}`}
+                      title={`Đoạn chat mới trong ${project.name}`}
                       className="invisible rounded p-1 text-zinc-400 hover:bg-zinc-700/50 hover:text-white group-hover:visible cursor-pointer"
                     >
                       <Plus className="h-3 w-3" />
@@ -359,15 +382,15 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                               || (!chat.generationStatus && isGenerating && activeChatId === chat.id)
                             }
                             className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                            title={`Delete ${chat.title}`}
-                            aria-label={`Delete ${chat.title}`}
+                            title={`Xóa ${chat.title}`}
+                            aria-label={`Xóa ${chat.title}`}
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
                         </div>
                       ))}
                       {chats.length === 0 && (
-                        <p className="px-2 py-1 text-[11px] text-zinc-500 italic">No chats yet</p>
+                        <p className="px-2 py-1 text-[11px] text-zinc-500 italic">Chưa có cuộc trò chuyện nào</p>
                       )}
                     </div>
                   )}
@@ -379,7 +402,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
         <div className="mt-3 flex-1 flex flex-col min-h-0">
           <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
-            <span>Recents</span>
+            <span>Gần đây</span>
             <button className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer">
               <SlidersHorizontal className="w-3 h-3" />
             </button>
@@ -433,8 +456,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                       || (!chat.generationStatus && isGenerating && isActive)
                     }
                     className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                    title={`Delete ${chat.title}`}
-                    aria-label={`Delete ${chat.title}`}
+                    title={`Xóa ${chat.title}`}
+                    aria-label={`Xóa ${chat.title}`}
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>

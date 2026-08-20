@@ -52,7 +52,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   onSelectProject,
 }) => {
   const [greetingIndex, setGreetingIndex] = useState(0);
-  const greetings = ["Evening, steven", "Good afternoon, Dam Manh", "Let's noodle"];
+  const greetings = ["Chào buổi tối, steven", "Chào buổi chiều, Đàm Mạnh", "Cùng lên ý tưởng nào"];
 
   const toggleGreeting = () => {
     setGreetingIndex((prev) => (prev + 1) % greetings.length);
@@ -61,7 +61,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 -mt-6 select-text overflow-y-auto custom-scrollbar py-8">
       {/* Title & F-Cowork Icon Row matching image.png */}
-      <div className="flex items-center gap-3.5 mb-8 cursor-pointer group select-none" onClick={toggleGreeting} title="Click to toggle greeting">
+      <div className="flex items-center gap-3.5 mb-8 cursor-pointer group select-none" onClick={toggleGreeting} title="Nhấp để đổi lời chào">
         <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#282623] border border-[#383531] p-1.5 shadow-md group-hover:scale-105 transition-transform duration-200 flex items-center justify-center">
           <StarburstIcon className="w-full h-full" />
         </div>
@@ -91,7 +91,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
       {/* Ideas for you section matching image.png */}
       <div className="w-full max-w-3xl md:max-w-4xl mt-8 px-4 space-y-3">
-        <div className="text-xs font-medium text-zinc-500 select-none">Ideas for you</div>
+        <div className="text-xs font-medium text-zinc-500 select-none">Gợi ý cho bạn</div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           {IDEAS_FOR_YOU.map((idea) => (
             <button

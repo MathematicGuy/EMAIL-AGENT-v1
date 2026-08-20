@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.unit.scripts.cli_harness import load_script, run_cli
+
+pytestmark = pytest.mark.extended
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

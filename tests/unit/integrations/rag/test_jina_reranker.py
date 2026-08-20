@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 
+import pytest
+
 from cowork_agent.domain.target_contracts import SemanticChunk
 from cowork_agent.integrations.rag.jina_reranker import FakeJinaReranker, JinaRerankerAdapter
+
+pytestmark = pytest.mark.extended
 
 
 def _chunk(chunk_id: str, relevance_score: float) -> SemanticChunk:

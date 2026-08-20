@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     ChatTurn,
     IntentClassifierInput,
@@ -9,6 +11,8 @@ from cowork_agent.features.ai_chat.intent.prompt import (
     INTENT_PROMPT_VERSION,
     build_intent_prompt,
 )
+
+pytestmark = pytest.mark.extended
 
 
 def test_prompt_has_five_tiers_and_only_title_metadata() -> None:

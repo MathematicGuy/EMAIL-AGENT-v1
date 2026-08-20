@@ -1,6 +1,8 @@
 import asyncio
 from datetime import UTC, datetime
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     ChatIntent,
     ChatMemoryScope,
@@ -16,6 +18,8 @@ from cowork_agent.features.ai_chat.intent.service import (
     ChatRoutingService,
     IntentClassifierInvalidOutput,
 )
+
+pytestmark = pytest.mark.extended
 
 
 class Catalog:

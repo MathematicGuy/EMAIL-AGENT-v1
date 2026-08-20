@@ -17,6 +17,8 @@ from cowork_agent.integrations.rag.reranker import (
     RerankerSettings,
 )
 
+pytestmark = pytest.mark.extended
+
 
 class MockRerankerTransport:
     """Mock transport for capturing requests and returning canned responses."""

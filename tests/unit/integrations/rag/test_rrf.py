@@ -4,6 +4,8 @@ import pytest
 
 from cowork_agent.integrations.rag.rrf import ReciprocalRankFusion
 
+pytestmark = pytest.mark.extended
+
 
 def test_fuse_uses_one_based_ranks_and_sums_scores_across_ranked_lists() -> None:
     fused = ReciprocalRankFusion().fuse(

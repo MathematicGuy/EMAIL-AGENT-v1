@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatTurn,
@@ -15,6 +17,8 @@ from cowork_agent.features.ai_chat.memory_eval.arms import ArmScopedMemoryGatewa
 from cowork_agent.features.ai_chat.memory_eval.live_seeding import verify_seed
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+
+pytestmark = pytest.mark.extended
 
 
 class _Declarative:

@@ -14,6 +14,8 @@ from cowork_agent.integrations.llm.providers.faucet import (
     _post_json,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def test_faucet_settings_require_configured_key_and_model_without_exposing_key() -> None:
     with pytest.raises(ValueError, match="FAUCET_API_KEY"):

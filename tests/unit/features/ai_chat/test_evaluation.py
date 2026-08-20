@@ -9,6 +9,8 @@ from cowork_agent.features.ai_chat.evaluation import (
     evaluate_launch_gate,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def _case(case_id: str, disabled: float, enabled: float) -> PairedEvaluationCase:
     return PairedEvaluationCase(

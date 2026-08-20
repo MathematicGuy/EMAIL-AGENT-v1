@@ -59,6 +59,8 @@ from cowork_agent.persistence.repositories.postgres import (  # noqa: E402
     PostgresTaskEpisodeRepository,
 )
 
+pytestmark = pytest.mark.extended
+
 # ---------------------------------------------------------------------------
 # Skip guards
 # ---------------------------------------------------------------------------

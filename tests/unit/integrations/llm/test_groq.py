@@ -11,6 +11,8 @@ from cowork_agent.integrations.llm.providers.groq import (
     _post_json,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def test_groq_settings_default_to_requested_qwen_model() -> None:
     settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)

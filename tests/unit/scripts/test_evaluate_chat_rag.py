@@ -5,6 +5,8 @@ import pytest
 
 from tests.unit.scripts.cli_harness import load_script, run_cli
 
+pytestmark = pytest.mark.extended
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts/evaluate_chat_rag.py"
 LOCAL_ONLY_FIELDS = ("question", "answer", "contexts", "reference_answer")

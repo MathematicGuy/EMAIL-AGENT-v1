@@ -14,6 +14,8 @@ from cowork_agent.integrations.knowledge_ingestion.ocr import (
     normalize_ooxml,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def test_normalize_ooxml_reorders_content_types_entry() -> None:
     buffer = BytesIO()

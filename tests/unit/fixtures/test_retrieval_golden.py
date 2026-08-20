@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.extended
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "retrieval_golden.json"

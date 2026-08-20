@@ -10,6 +10,8 @@ import pytest
 
 from tests.unit.scripts.cli_harness import load_script
 
+pytestmark = pytest.mark.extended
+
 PRIVATE_KEYS = {"gmail_content", "snippet", "normalized_body"}
 RUBRIC_VERSION = "email-intent-annotation-v1"
 

@@ -15,6 +15,7 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.jina_reranker import FakeJinaReranker, JinaRerankerAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
+from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 
 
 class FixedEmbedder:
@@ -62,9 +63,18 @@ def _memory(*, reranker: object | None = None) -> tuple[HybridSemanticMemory, Fi
         ),
     )
     embedder = FixedEmbedder()
-    memory = HybridSemanticMemory(
-        (KnowledgeDocument("knowledge", "Knowledge", "knowledge.md", chunks),),
+    docs = (KnowledgeDocument("knowledge", "Knowledge", "knowledge.md", chunks),)
+    dense = TurbovecSemanticMemory(
+        docs,
         embedder,
+        bit_width=4,
+        top_k_default=5,
+        min_score_default=0.0,
+    )
+    memory = HybridSemanticMemory(
+        docs,
+        embedder,
+        dense=dense,
         reranker=reranker,
         min_score_default=0.0,
     )
@@ -213,7 +223,17 @@ def test_hybrid_retrieve_copies_document_date_onto_semantic_chunk() -> None:
         ),
     )
     documents = (KnowledgeDocument("b", "B", "b.md", chunks),)
-    memory = HybridSemanticMemory(documents, FixedEmbedder(), min_score_default=0.0)
+    embedder = FixedEmbedder()
+    dense = TurbovecSemanticMemory(
+        documents,
+        embedder,
+        bit_width=4,
+        top_k_default=5,
+        min_score_default=0.0,
+    )
+    memory = HybridSemanticMemory(
+        documents, embedder, dense=dense, min_score_default=0.0
+    )
     asyncio.run(memory.build_index())
 
     response = asyncio.run(memory.retrieve(_request()))

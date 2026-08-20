@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from docx import Document
 
 from cowork_agent.integrations.knowledge_ingestion.docx_extractor import DocxExtractor
+
+pytestmark = pytest.mark.extended
 
 
 def test_docx_extractor_preserves_headings_lists_and_tables_in_document_order(

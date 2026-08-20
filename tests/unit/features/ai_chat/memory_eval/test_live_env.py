@@ -13,6 +13,8 @@ from cowork_agent.features.ai_chat.memory_eval.live_env import (
     unavailable_scopes,
 )
 
+pytestmark = pytest.mark.extended
+
 
 def _env(**overrides: str) -> dict[str, str]:
     base = {

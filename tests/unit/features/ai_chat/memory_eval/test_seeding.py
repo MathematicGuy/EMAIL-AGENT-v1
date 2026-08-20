@@ -21,6 +21,8 @@ from cowork_agent.features.ai_chat.memory_eval.seeding import (
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 
+pytestmark = pytest.mark.extended
+
 
 class _Declarative:
     def __init__(self, *, fail: bool = False) -> None:

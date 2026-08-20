@@ -17,8 +17,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose }) =
           <div className="flex items-center gap-3">
             <img src="/images/f-cowork-logo.svg" alt="F-Cowork Logo" className="h-8 object-contain" />
             <div>
-              <h2 className="font-semibold text-lg text-zinc-100">Upgrade your Plan</h2>
-              <p className="text-xs text-zinc-400">Unlock higher limits, faster reasoning models, and advanced tools.</p>
+              <h2 className="font-semibold text-lg text-zinc-100">Nâng cấp gói dịch vụ</h2>
+              <p className="text-xs text-zinc-400">Mở khóa giới hạn cao hơn, mô hình suy luận mạnh mẽ và công cụ nâng cao.</p>
             </div>
           </div>
           <button
@@ -34,22 +34,22 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose }) =
           {/* Free Plan Card */}
           <div className="p-4 rounded-xl bg-[#1d1c1a] border border-[#33312d] flex flex-col justify-between">
             <div>
-              <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">Current Plan</div>
-              <div className="text-xl font-bold text-zinc-100 mb-1">Free</div>
-              <div className="text-2xl font-semibold text-zinc-300 mb-4">$0 <span className="text-xs font-normal text-zinc-500">/ month</span></div>
+              <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">Gói hiện tại</div>
+              <div className="text-xl font-bold text-zinc-100 mb-1">Miễn phí</div>
+              <div className="text-2xl font-semibold text-zinc-300 mb-4">0đ <span className="text-xs font-normal text-zinc-500">/ tháng</span></div>
 
               <ul className="space-y-2 text-xs text-zinc-300">
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Access to standard Sonnet 5</span>
+                  <span>Truy cập mô hình Gemini cơ bản</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Standard response speeds</span>
+                  <span>Tốc độ phản hồi tiêu chuẩn</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Basic context history window</span>
+                  <span>Cửa sổ ngữ cảnh lịch sử cơ bản</span>
                 </li>
               </ul>
             </div>
@@ -58,48 +58,48 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose }) =
               disabled
               className="mt-6 w-full py-2 bg-[#2c2a26] text-zinc-500 font-medium text-xs rounded-lg cursor-default"
             >
-              Current Active Plan
+              Gói đang sử dụng
             </button>
           </div>
 
           {/* Pro Plan Card */}
           <div className="p-4 rounded-xl bg-[#2b2925] border-2 border-[#d97757] flex flex-col justify-between relative shadow-lg">
             <span className="absolute -top-3 right-4 bg-[#d97757] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-              Recommended
+              Khuyên dùng
             </span>
             <div>
-              <div className="text-xs font-semibold text-[#d97757] uppercase tracking-wider mb-1">Pro Plan</div>
+              <div className="text-xs font-semibold text-[#d97757] uppercase tracking-wider mb-1">Gói Pro</div>
               <div className="text-xl font-bold text-zinc-100 mb-1">F-Cowork Pro</div>
-              <div className="text-2xl font-semibold text-zinc-100 mb-4">$20 <span className="text-xs font-normal text-zinc-400">/ month</span></div>
+              <div className="text-2xl font-semibold text-zinc-100 mb-4">20$ <span className="text-xs font-normal text-zinc-400">/ tháng</span></div>
 
               <ul className="space-y-2 text-xs text-zinc-200">
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-[#d97757]" />
-                  <span>5x more usage on Fable 5 & Sonnet 5</span>
+                  <span>Hạn mức gấp 5 lần cho mô hình suy luận cao cấp</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-[#d97757]" />
-                  <span>Priority access during peak traffic</span>
+                  <span>Ưu tiên xử lý trong giờ cao điểm</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-[#d97757]" />
-                  <span>Extended 200k token context window</span>
+                  <span>Cửa sổ ngữ cảnh mở rộng 200k token</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-3.5 h-3.5 text-[#d97757]" />
-                  <span>Early access to new experimental features</span>
+                  <span>Trải nghiệm sớm các tính năng thử nghiệm</span>
                 </li>
               </ul>
             </div>
 
             <button
               onClick={() => {
-                alert("Thank you for upgrading to F-Cowork Pro!");
+                alert("Cảm ơn bạn đã nâng cấp lên F-Cowork Pro!");
                 onClose();
               }}
               className="mt-6 w-full py-2.5 bg-[#d97757] hover:bg-[#c26748] text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-md"
             >
-              Subscribe to Pro
+              Đăng ký gói Pro
             </button>
           </div>
         </div>

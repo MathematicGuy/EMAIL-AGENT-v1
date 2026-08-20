@@ -4,8 +4,12 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import ProbeTest, load_probe_set
+
+pytestmark = pytest.mark.extended
 
 _PATH = Path("evaluations/MEMORIES/probes/v1-four-scopes.json")
 

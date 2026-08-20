@@ -693,6 +693,40 @@ class OpenRouterSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class OnlyOfficeSettings:
+    """Configuration for OnlyOffice Document Server integration."""
+
+    server_url: str
+    backend_url: str | None = None
+    jwt_secret: str | None = None
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "OnlyOfficeSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        server_url = (
+            environ.get("ONLYOFFICE_SERVER_URL", "http://localhost:8080").strip().rstrip("/")
+        )
+        if not server_url:
+            server_url = "http://localhost:8080"
+        backend_url = environ.get("ONLYOFFICE_BACKEND_URL", "").strip().rstrip("/") or None
+        jwt_secret = environ.get("ONLYOFFICE_JWT_SECRET", "").strip() or None
+        return cls(
+            server_url=server_url,
+            backend_url=backend_url,
+            jwt_secret=jwt_secret,
+        )
+
+
+
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
     value = int(environ.get(name, str(default)))
     if value <= 0:

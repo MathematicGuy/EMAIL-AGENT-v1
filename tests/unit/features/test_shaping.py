@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from cowork_agent.domain import ActionPlanStep, Confidence, DeadlineSource, EvidenceRef
 from cowork_agent.domain.target_contracts import (
     BodyFormat,
@@ -12,6 +14,8 @@ from cowork_agent.features.email_action_plan.shaping import (
     group_by_thread,
     merge_correlated_emails,
 )
+
+pytestmark = pytest.mark.extended
 
 
 def test_batch_messages_splits_threads_into_small_batches() -> None:

@@ -25,7 +25,7 @@ pie title Phân bổ mức độ ưu tiên rà soát luồng Chat
   - [`src/cowork_agent/features/ai_chat/intent/service.py`](../../src/cowork_agent/features/ai_chat/intent/service.py)
   - [`src/cowork_agent/features/ai_chat/intent/prompt.py`](../../src/cowork_agent/features/ai_chat/intent/prompt.py)
   - [`src/cowork_agent/features/ai_chat/intent/resolver.py`](../../src/cowork_agent/features/ai_chat/intent/resolver.py)
-  - [`docs/evaluations/CHAT/chat-routing-eval-2026-08-14.json`](../../docs/evaluations/CHAT/chat-routing-eval-2026-08-14.json)
+  - [`evaluations/CHAT/baselines/chat-routing-eval-2026-08-14.json`](../../evaluations/CHAT/baselines/chat-routing-eval-2026-08-14.json)
 * **Trọng tâm rà soát:**
   - **P95 Latency Threshold:** Báo cáo eval ghi nhận P95 = **2375ms** (vượt ngưỡng mục tiêu $\le 1500\text{ms}$ tại [`evaluation.py`](../../src/cowork_agent/features/ai_chat/intent/evaluation.py)). Cần tài liệu hóa nguyên nhân (thêm 1 round-trip LLM phân loại) và giải pháp tối ưu (fast-path heuristic hoặc nén prompt).
   - **Precondition Narrowing:** Logic tự động thu hẹp route `RAG` $\rightarrow$ `CHAT` khi catalog tài liệu dự án chưa có file sẵn sàng (`ReadyDocumentRef`).
@@ -93,7 +93,7 @@ pie title Phân bổ mức độ ưu tiên rà soát luồng Chat
 |---|---|---|---|
 | **B1** | Cập nhật Level 1 Architecture document cho AI Chat & Typed Memory | [MODIFY] [`docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md`](../../docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md) | Sẵn sàng |
 | **B2** | Viết tài liệu hướng dẫn kỹ thuật chi tiết luồng AI Chat (Deep-Dive & Runbook) | [NEW] [`docs/references/ai-chat-subsystem-guide.md`](../../docs/references/ai-chat-subsystem-guide.md) | Sẵn sàng |
-| **B3** | Cập nhật bảng chỉ số đánh giá và báo cáo latency intent classifier | [MODIFY] `docs/evaluations/CHAT/README.md` | Sẵn sàng |
+| **B3** | Cập nhật bảng chỉ số đánh giá và báo cáo latency intent classifier | [MODIFY] `evaluations/CHAT/README.md` | Sẵn sàng |
 | **B4** | Cập nhật Skill Tree tự động | [MODIFY] [`SKILL_TREE.md`](../../.agents/skills/corpus2skill/SKILL_TREE.md) | Sẵn sàng |
 
 ---

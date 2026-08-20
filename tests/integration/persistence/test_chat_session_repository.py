@@ -25,9 +25,11 @@ from cowork_agent.persistence.repositories.chat_history import PostgresChatHisto
 from cowork_agent.persistence.repositories.chat_sessions import PostgresChatSessionRegistry
 from cowork_agent.persistence.repositories.identity import PostgresIdentityRepository
 from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
-from tests.integration.persistence.pg_probe import server_available
+from tests.integration.persistence.pg_probe import DEFAULT_PG_TEST_URL, server_available
 
-DATABASE_URL = os.getenv("PG_TEST_URL", "")
+pytestmark = pytest.mark.extended
+
+DATABASE_URL = os.getenv("PG_TEST_URL", DEFAULT_PG_TEST_URL)
 
 
 def _server_available() -> bool:

@@ -20,9 +20,11 @@ from cowork_agent.persistence.repositories.identity import (
     PostgresMailboxConnectionRepository,
     PostgresSessionRepository,
 )
-from tests.integration.persistence.pg_probe import server_available
+from tests.integration.persistence.pg_probe import DEFAULT_PG_TEST_URL, server_available
 
-DATABASE_URL = os.getenv("PG_TEST_URL", "")
+pytestmark = pytest.mark.extended
+
+DATABASE_URL = os.getenv("PG_TEST_URL", DEFAULT_PG_TEST_URL)
 NOW = datetime(2026, 8, 12, 9, tzinfo=UTC)
 
 

@@ -16,6 +16,9 @@ from __future__ import annotations
 from functools import cache
 
 CONNECT_TIMEOUT_SECONDS = 3
+DEFAULT_PG_TEST_URL = (
+    "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_mail_todo"
+)
 
 
 @cache

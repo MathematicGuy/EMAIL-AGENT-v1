@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+import pytest
 
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
@@ -22,6 +23,9 @@ from cowork_agent.integrations.rag.query_transform import (
     LLMQueryTransformer,
     RuleBasedQueryTransformer,
 )
+from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
+
+pytestmark = pytest.mark.extended
 
 
 class FakeEmbedder:
@@ -136,10 +140,19 @@ def test_hybrid_with_multi_query_and_mmr() -> None:
     )
     embedder = FakeEmbedder()
     transformer = RuleBasedQueryTransformer(enable_hyde=True)
+    docs = (KnowledgeDocument("k", "K", "k.md", chunks),)
+    dense = TurbovecSemanticMemory(
+        docs,
+        embedder,
+        bit_width=4,
+        top_k_default=2,
+        min_score_default=0.0,
+    )
 
     memory = HybridSemanticMemory(
-        documents=(KnowledgeDocument("k", "K", "k.md", chunks),),
+        documents=docs,
         embedder=embedder,
+        dense=dense,
         query_transformer=transformer,
         enable_mmr=True,
         min_score_default=0.0,

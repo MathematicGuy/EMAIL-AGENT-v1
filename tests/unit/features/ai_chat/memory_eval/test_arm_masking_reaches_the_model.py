@@ -16,6 +16,8 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -34,6 +36,8 @@ from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuff
 # model, and anything short of the payload would be an assertion about an
 # intermediate object the model never sees.
 from cowork_agent.integrations.llm.chat_reply import _request_payload
+
+pytestmark = pytest.mark.extended
 
 # Verbatim from evaluations/MEMORIES/probes/v1-four-scopes.json - the seeded
 # long-term profile and the question `lt_recall_01` asks about it.

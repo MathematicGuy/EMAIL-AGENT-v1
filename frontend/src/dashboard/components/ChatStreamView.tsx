@@ -682,7 +682,7 @@ const CodeBlockItem: React.FC<CodeBlockItemProps> = React.memo(({
         <button
           onClick={() => onCopy(part.content, `${msgId}-code-${pIdx}`)}
           className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded transition-colors cursor-pointer"
-          title="Copy code"
+          title="Sao chép mã"
         >
           {copiedId === `${msgId}-code-${pIdx}` ? (
             <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -755,7 +755,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
 
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-200 text-xs">
-              {isUser ? 'You' : 'F-Cowork AI'}
+              {isUser ? 'Bạn' : 'F-Cowork AI'}
             </span>
             {!isUser && (
               <span className="text-[10px] font-medium bg-[#2a2825] text-[#d97757] px-2 py-0.5 rounded border border-[#3d3a36]">
@@ -912,7 +912,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
           <button
             onClick={() => onCopy(msg.content, msg.id)}
             className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-            title="Copy response"
+            title="Sao chép câu trả lời"
           >
             {copiedId === msg.id ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -923,14 +923,14 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
 
           <button
             className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-            title="Good response"
+            title="Phản hồi tốt"
           >
             <ThumbsUp className="w-3.5 h-3.5" />
           </button>
 
           <button
             className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-            title="Bad response"
+            title="Phản hồi chưa tốt"
           >
             <ThumbsDown className="w-3.5 h-3.5" />
           </button>
@@ -944,14 +944,14 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
               }
             }}
             className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-            title="Retry"
+            title="Thử lại"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
           <button
             className="p-1.5 hover:text-zinc-200 hover:bg-[#2a2824] rounded-lg transition-colors cursor-pointer"
-            title="Share conversation"
+            title="Chia sẻ cuộc trò chuyện"
           >
             <Share2 className="w-3.5 h-3.5" />
           </button>
@@ -1106,7 +1106,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
           <button
             onClick={scrollToBottom}
             className="p-2 bg-[#2c2a26] hover:bg-[#383632] text-zinc-200 border border-zinc-700/60 rounded-full shadow-lg transition-all cursor-pointer flex items-center justify-center"
-            title="Scroll to bottom"
+            title="Cuộn xuống dưới"
           >
             <ArrowDown className="w-4 h-4" />
           </button>
@@ -1121,7 +1121,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
             className="flex items-center gap-2 px-3.5 py-1.5 bg-[#2a2926] hover:bg-[#34322e] border border-[#3d3a36] rounded-full text-xs text-zinc-300 transition-colors shadow-md cursor-pointer"
           >
             <Square className="w-3 h-3 fill-current text-rose-400" />
-            <span>Stop generating</span>
+            <span>Dừng tạo phản hồi</span>
           </button>
         </div>
       )}

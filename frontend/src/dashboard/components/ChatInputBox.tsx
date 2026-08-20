@@ -124,13 +124,13 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                   <span className="max-w-48 truncate">{attachment.name}</span>
                   <span className="shrink-0 text-[10px] text-zinc-500">
                     {attachment.status === 'hashing'
-                      ? 'Hashing'
+                      ? 'Đang kiểm tra'
                       : attachment.status === 'uploading'
-                        ? 'Uploading'
+                        ? 'Đang tải lên'
                         : attachment.status === 'processing'
-                          ? 'Processing'
+                          ? 'Đang xử lý'
                           : attachment.status === 'error'
-                            ? 'Error'
+                            ? 'Lỗi'
                             : formatFileSize(attachment.sizeBytes)}
                   </span>
                   {onRemoveAttachment && (
@@ -190,7 +190,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               value={inputText}
               onChange={(e) => onChangeText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="How can I help you today?"
+              placeholder="Tôi có thể giúp gì cho bạn hôm nay?"
               rows={2}
               className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans"
             />
@@ -246,7 +246,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               {/* Mic Icon */}
               <button
                 onClick={onOpenVoiceModal}
-                title="Voice Mode"
+                title="Nhập bằng giọng nói"
                 className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#32302c] rounded-md transition-colors cursor-pointer"
               >
                 <Mic className="w-4 h-4" />
@@ -258,7 +258,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                   onClick={() => onSend()}
                   disabled={isGenerating || inputText.trim().length === 0 || hasPendingAttachment}
                   data-testid="chat-send"
-                  title="Send message"
+                  title="Gửi tin nhắn"
                   className="w-7 h-7 ml-1 flex items-center justify-center bg-zinc-200 hover:bg-white text-zinc-900 rounded-md transition-all shadow-sm cursor-pointer disabled:opacity-50"
                 >
                   <ArrowUp className="w-4 h-4 stroke-[2.5]" />
@@ -292,7 +292,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 ) : (
                   <>
                     <FolderKanban className="w-3 h-3 text-zinc-400" />
-                    <span>Project or folder</span>
+                    <span>Dự án hoặc thư mục</span>
                   </>
                 )}
                 <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
@@ -306,7 +306,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                   />
                   <div className="absolute left-0 bottom-full mb-1.5 w-52 bg-[#22201d] border border-[#383531] rounded-xl shadow-2xl z-50 py-1.5 text-xs select-none">
                     <div className="px-3 py-1 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-                      Select Project Context
+                      Chọn ngữ cảnh dự án
                     </div>
                     {projects?.map((project) => (
                       <button
@@ -343,7 +343,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
 
             <button className="flex items-center gap-1.5 px-2.5 py-1 bg-[#282623] hover:bg-[#32302c] rounded-lg text-zinc-300 transition-colors border border-zinc-700/50 cursor-pointer">
               <Hand className="w-3 h-3 text-zinc-400" />
-              <span>Manual</span>
+              <span>Thủ công</span>
               <ChevronDown className="w-3 h-3 text-zinc-500" />
             </button>
           </div>

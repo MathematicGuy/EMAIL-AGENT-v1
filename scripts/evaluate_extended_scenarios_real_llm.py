@@ -304,7 +304,7 @@ def main() -> None:
     if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
 
-    out_path = Path("docs/evaluations/CHAT/live-real-gemini-extended.json")
+    out_path = Path("evaluations/CHAT/baselines/live-real-gemini-extended.json")
     report = asyncio.run(run_extended_eval())
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")

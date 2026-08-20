@@ -2,7 +2,11 @@
 
 import inspect
 
+import pytest
+
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
+
+pytestmark = pytest.mark.extended
 
 
 def test_semantic_memory_port_is_retrieval_only() -> None:

@@ -20,6 +20,7 @@ export interface TaskWorkflow {
 }
 
 export type SidebarState = 'collapsed' | 'expanded';
+export type ActiveDashboardView = 'chat' | 'mail' | 'artifacts' | 'raw-documents';
 
 export interface ModelOption {
   id: AssistantModelId;
