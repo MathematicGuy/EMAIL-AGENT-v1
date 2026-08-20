@@ -36,6 +36,7 @@ from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailMailboxAdapter
+from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
     FaucetRouteClassifier,
@@ -151,8 +152,23 @@ async def run_worker() -> None:
             semantic_memory = NullSemanticMemory()
         elif provider == "openrouter":
             openrouter_settings = OpenRouterSettings.from_env()
-            classifier = OpenRouterRouteClassifier(openrouter_settings)
-            generator = OpenRouterActionPlanGenerator(openrouter_settings)
+            gemini_last_resort = load_optional_gemini_settings()
+            if gemini_last_resort is None:
+                logger.info(
+                    "OpenRouter Gemini last-resort is off; "
+                    "no numbered GEMINI_API_KEY_* configured"
+                )
+            else:
+                logger.info(
+                    "OpenRouter Gemini last-resort is on (%s)",
+                    gemini_last_resort.model,
+                )
+            classifier = OpenRouterRouteClassifier(
+                openrouter_settings, last_resort=gemini_last_resort
+            )
+            generator = OpenRouterActionPlanGenerator(
+                openrouter_settings, last_resort=gemini_last_resort
+            )
             semantic_memory = NullSemanticMemory()
         else:
             raise ValueError(

@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from langfuse import observe
 
-from cowork_agent.config import OpenRouterSettings
+from cowork_agent.config import GeminiSettings, OpenRouterSettings
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
     EphemeralEmailEnvelope,
@@ -67,8 +67,11 @@ class OpenRouterAPIError(RuntimeError):
 class OpenRouterActionPlanGenerator:
     """ActionPlanGeneratorPort adapter for the OpenRouter chat-completions API."""
 
-    def __init__(self, settings: OpenRouterSettings) -> None:
+    def __init__(
+        self, settings: OpenRouterSettings, last_resort: GeminiSettings | None = None
+    ) -> None:
         self._settings = settings
+        self._last_resort = last_resort
 
     async def generate(
         self,
@@ -104,22 +107,51 @@ class OpenRouterActionPlanGenerator:
             ) from exc
 
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
-        return await execute_chat_completion(
-            self._settings.api_key,
-            self._settings.model,
-            GENERATOR_SYSTEM_INSTRUCTION,
-            prompt,
-            GENERATION_SCHEMA,
-            self._settings.max_output_tokens,
-            self._settings.timeout_seconds,
+        from cowork_agent.integrations.llm.last_resort import (
+            complete_with_gemini_last_resort,
+            gemini_json_complete,
         )
+
+        async def primary() -> Mapping[str, Any]:
+            return await execute_chat_completion(
+                self._settings.api_key,
+                self._settings.model,
+                GENERATOR_SYSTEM_INSTRUCTION,
+                prompt,
+                GENERATION_SCHEMA,
+                self._settings.max_output_tokens,
+                self._settings.timeout_seconds,
+                fallback_models=self._settings.fallback_models(),
+            )
+
+        last_resort = self._last_resort
+        if last_resort is None:
+            fallback = None
+        else:
+
+            async def fallback(
+                _prompt: str = prompt,
+                _last_resort: GeminiSettings = last_resort,
+            ) -> Mapping[str, Any]:
+                return await gemini_json_complete(
+                    _last_resort,
+                    _prompt,
+                    GENERATION_SCHEMA,
+                    GENERATOR_SYSTEM_INSTRUCTION,
+                    timeout_seconds=self._settings.timeout_seconds,
+                )
+
+        return await complete_with_gemini_last_resort(primary, fallback)
 
 
 class OpenRouterRouteClassifier:
     """RouteClassifierPort adapter with the existing conservative fallback."""
 
-    def __init__(self, settings: OpenRouterSettings) -> None:
+    def __init__(
+        self, settings: OpenRouterSettings, last_resort: GeminiSettings | None = None
+    ) -> None:
         self._settings = settings
+        self._last_resort = last_resort
 
     @observe(
         as_type="span",
@@ -209,8 +241,13 @@ class OpenRouterRouteClassifier:
         *,
         trace_input: Mapping[str, object] | None = None,
     ) -> Mapping[str, Any] | None:
-        try:
-            payload = await execute_chat_completion(
+        from cowork_agent.integrations.llm.last_resort import (
+            complete_with_gemini_last_resort,
+            gemini_json_complete,
+        )
+
+        async def primary() -> Mapping[str, Any]:
+            return await execute_chat_completion(
                 self._settings.api_key,
                 self._settings.model,
                 CLASSIFIER_SYSTEM_INSTRUCTION,
@@ -218,7 +255,28 @@ class OpenRouterRouteClassifier:
                 CLASSIFICATION_SCHEMA,
                 self._settings.max_output_tokens,
                 self._settings.timeout_seconds,
+                fallback_models=self._settings.fallback_models(),
             )
+
+        last_resort = self._last_resort
+        if last_resort is None:
+            fallback = None
+        else:
+
+            async def fallback(
+                _prompt: str = prompt,
+                _last_resort: GeminiSettings = last_resort,
+            ) -> Mapping[str, Any]:
+                return await gemini_json_complete(
+                    _last_resort,
+                    _prompt,
+                    CLASSIFICATION_SCHEMA,
+                    CLASSIFIER_SYSTEM_INSTRUCTION,
+                    timeout_seconds=self._settings.timeout_seconds,
+                )
+
+        try:
+            payload = await complete_with_gemini_last_resort(primary, fallback)
         except OpenRouterAPIError as exc:
             _CLASSIFIER_LOGGER.warning("OpenRouter classifier transport failed: %s", exc.error_code)
             return None
@@ -245,12 +303,20 @@ async def execute_chat_completion(
     schema: Mapping[str, object],
     max_output_tokens: int,
     timeout_seconds: int,
+    fallback_models: Sequence[str] = (),
 ) -> Mapping[str, Any]:
     response = await asyncio.to_thread(
         _post_json,
         OPENROUTER_CHAT_COMPLETIONS_URL,
         api_key,
-        _request_body(model, system_instruction, prompt, schema, max_output_tokens),
+        _request_body(
+            model,
+            system_instruction,
+            prompt,
+            schema,
+            max_output_tokens,
+            fallback_models=fallback_models,
+        ),
         timeout_seconds,
     )
     return _completion_json(response)
@@ -262,8 +328,9 @@ def _request_body(
     prompt: str,
     schema: Mapping[str, object],
     max_output_tokens: int,
+    fallback_models: Sequence[str] = (),
 ) -> dict[str, object]:
-    return {
+    body: dict[str, object] = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_instruction},
@@ -279,6 +346,11 @@ def _request_body(
         "max_tokens": max_output_tokens,
         "response_format": {"type": "json_object"},
     }
+    if fallback_models:
+        # Native OpenRouter fallbacks: model=primary, models=fallback array.
+        # https://openrouter.ai/docs/guides/routing/model-fallbacks
+        body["models"] = list(fallback_models)
+    return body
 
 
 def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:

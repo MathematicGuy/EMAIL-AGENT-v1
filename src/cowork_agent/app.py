@@ -113,6 +113,7 @@ from cowork_agent.integrations.llm.chat_reply import (
     GroqChatReply,
     OpenRouterChatReply,
 )
+from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
     FaucetRouteClassifier,
@@ -599,17 +600,34 @@ def create_app() -> FastAPI:
                     app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
                 elif provider == "openrouter":
                     openrouter_settings = OpenRouterSettings.from_env()
+                    gemini_last_resort = load_optional_gemini_settings()
+                    if gemini_last_resort is None:
+                        logger.info(
+                            "OpenRouter Gemini last-resort is off; "
+                            "no numbered GEMINI_API_KEY_* configured"
+                        )
+                    else:
+                        logger.info(
+                            "OpenRouter Gemini last-resort is on (%s)",
+                            gemini_last_resort.model,
+                        )
                     intent_settings = ChatIntentSettings.from_env(
                         default_model=openrouter_settings.model
                     )
                     intent_classifier = OpenRouterIntentClassifier.from_settings(
-                        openrouter_settings, intent_settings
+                        openrouter_settings,
+                        intent_settings,
+                        last_resort=gemini_last_resort,
                     )
-                    classifier = OpenRouterRouteClassifier(openrouter_settings)
-                    generator = OpenRouterActionPlanGenerator(openrouter_settings)
+                    classifier = OpenRouterRouteClassifier(
+                        openrouter_settings, last_resort=gemini_last_resort
+                    )
+                    generator = OpenRouterActionPlanGenerator(
+                        openrouter_settings, last_resort=gemini_last_resort
+                    )
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = OpenRouterChatReply.from_settings(
-                        openrouter_settings
+                        openrouter_settings, last_resort=gemini_last_resort
                     )
                 else:
                     raise ValueError(
