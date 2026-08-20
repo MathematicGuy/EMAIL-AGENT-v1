@@ -8,17 +8,25 @@
       "arms": {
         "full": {
           "reference": "Hải Âu",
-          "must_contain": ["Hải Âu"],
+          "must_contain": [
+            "Hải Âu"
+          ],
           "grounding": "seed.long_term: 'assistant_persona': 'trợ lý biệt danh Hải Âu'"
         },
         "ablated": {
           "reference": "Tôi không có thông tin về vai trò của tôi.",
-          "refusal_markers": ["không có thông tin", "không rõ vai trò"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không rõ vai trò"
+          ],
           "grounding": "long_term is masked on this arm; the assistant_persona field is not accessible"
         },
         "control": {
           "reference": "Tôi không có thông tin về vai trò của tôi.",
-          "refusal_markers": ["không có thông tin", "không rõ vai trò"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không rõ vai trò"
+          ],
           "grounding": "memory is never seeded on this arm"
         }
       }
@@ -29,17 +37,29 @@
       "arms": {
         "full": {
           "reference": "Tôi không có thông tin về chức danh của bạn.",
-          "refusal_markers": ["không có thông tin", "chức danh của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về chức danh của bạn",
+            "không biết chức danh của bạn"
+          ],
           "grounding": "seed.long_term stores only four preference fields (language, timezone, assistant_persona, response_tone); no job title is stored. The user's job title was never in the seed."
         },
         "ablated": {
           "reference": "Tôi không có thông tin về chức danh của bạn.",
-          "refusal_markers": ["không có thông tin", "chức danh của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về chức danh của bạn",
+            "không biết chức danh của bạn"
+          ],
           "grounding": "long_term is masked on this arm; no job title exists in any accessible scope"
         },
         "control": {
           "reference": "Tôi không có thông tin về chức danh của bạn.",
-          "refusal_markers": ["không có thông tin", "chức danh của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về chức danh của bạn",
+            "không biết chức danh của bạn"
+          ],
           "grounding": "memory is never seeded on this arm; no profile data exists"
         }
       }
@@ -50,17 +70,29 @@
       "arms": {
         "full": {
           "reference": "Tôi không có thông tin về số điện thoại của bạn.",
-          "refusal_markers": ["không có thông tin", "số điện thoại của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có số điện thoại của bạn",
+            "không biết số điện thoại của bạn"
+          ],
           "grounding": "seed.long_term stores only four preference fields; no contact details are stored"
         },
         "ablated": {
           "reference": "Tôi không có thông tin về số điện thoại của bạn.",
-          "refusal_markers": ["không có thông tin", "số điện thoại của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có số điện thoại của bạn",
+            "không biết số điện thoại của bạn"
+          ],
           "grounding": "long_term is masked on this arm; no phone number exists in any accessible scope"
         },
         "control": {
           "reference": "Tôi không có thông tin về số điện thoại của bạn.",
-          "refusal_markers": ["không có thông tin", "số điện thoại của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có số điện thoại của bạn",
+            "không biết số điện thoại của bạn"
+          ],
           "grounding": "memory is never seeded on this arm"
         }
       }
@@ -71,17 +103,29 @@
       "arms": {
         "full": {
           "reference": "Tôi không có thông tin về khung giờ làm việc của bạn.",
-          "refusal_markers": ["không có thông tin", "khung giờ làm việc của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về khung giờ làm việc của bạn",
+            "không biết khung giờ làm việc của bạn"
+          ],
           "grounding": "seed.long_term holds timezone (Asia/Ho_Chi_Minh) but not working hours; timezone is not equivalent to and does not imply a working schedule. No working hours field is stored."
         },
         "ablated": {
           "reference": "Tôi không có thông tin về khung giờ làm việc của bạn.",
-          "refusal_markers": ["không có thông tin", "khung giờ làm việc của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về khung giờ làm việc của bạn",
+            "không biết khung giờ làm việc của bạn"
+          ],
           "grounding": "long_term is masked on this arm; timezone is inaccessible and would not justify working hours anyway"
         },
         "control": {
           "reference": "Tôi không có thông tin về khung giờ làm việc của bạn.",
-          "refusal_markers": ["không có thông tin", "khung giờ làm việc của bạn"],
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về khung giờ làm việc của bạn",
+            "không biết khung giờ làm việc của bạn"
+          ],
           "grounding": "memory is never seeded on this arm"
         }
       }
