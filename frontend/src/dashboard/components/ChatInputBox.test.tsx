@@ -128,4 +128,32 @@ describe('ChatInputBox mail mention', () => {
 
     expect(screen.queryByRole('option', { name: /mail/i })).toBeNull();
   });
+
+  it('renders worker error alert and error status badge when attachment fails', () => {
+    render(
+      <ChatInputBox
+        inputText=""
+        onChangeText={vi.fn()}
+        onSend={vi.fn()}
+        selectedModel={model}
+        onOpenModelModal={vi.fn()}
+        onOpenVoiceModal={vi.fn()}
+        attachmentError="Project document worker unavailable"
+        attachments={[{
+          id: 'upload-err',
+          name: '49_2019_QH14_402073.docx',
+          mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          sizeBytes: 2_048,
+          status: 'error',
+        }]}
+      />
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('Project document worker unavailable');
+    const attachment = screen.getByTestId('chat-attachment');
+    expect(attachment.textContent).toContain('49_2019_QH14_402073.docx');
+    expect(attachment.textContent).toContain('Lỗi');
+  });
 });
+

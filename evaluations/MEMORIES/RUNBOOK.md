@@ -41,15 +41,17 @@ Execution Alias and fails.
 ## 1. Pre-check — prove every dependency answers
 
 ```bash
-# PostgreSQL target:
+# PostgreSQL target (uses default provider from config, e.g. LLM_PROVIDER):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+  .venv/Scripts/python.exe scripts/memeval_preflight.py
 
 # SQLite target (zero setup, no PostgreSQL required):
 POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+  .venv/Scripts/python.exe scripts/memeval_preflight.py
 ```
+
+> **Provider & Model Configuration**: By default, the harness loads the provider and model configured in your environment / `.env` (`LLM_PROVIDER`, e.g., `gemini`). Only use the flexible `--provider <name>` (and `--model <model>`) flags when explicitly testing or comparing models for the [Model Memory Eval Leaderboard](../../docs/references/agent-memory/MODEL-MEMORY-EVAL-LEADERBOARD.md).
 
 Read the password out of `.env` like this rather than typing it. It must not
 appear in a command line, a log, or a report.
@@ -61,7 +63,7 @@ evidence that a key works.
 
 | Check | The question it asks | On failure |
 |---|---|---|
-| `probe_set` | Does the question file load and validate? | Fix it before spending a single call. |
+| `probe_set` | Does the latest question file load and validate? | Fix it before spending a single call. |
 | `target` | Which store would this write to, and is it allowed to? | Point `PG_TEST_URL` at a local throwaway. If the remote override is set, **unset it**. |
 | `postgres` | Does that database answer? | Start the server, or create `cowork_memeval`. |
 | `postgres_locks` | Did a killed run leave backends idle in transaction? | See §5, "the run hangs". |
@@ -100,38 +102,37 @@ A dry run **measures nothing**. It proves the wiring assembles a report.
 ## 2. The run
 
 ```bash
-# PostgreSQL target:
+# PostgreSQL target (uses default configured LLM_PROVIDER):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider openrouter \
     --output evaluations/MEMORIES/baselines/<name>-postgres.json
 
 # SQLite target (zero setup, scratch DB):
 POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider openrouter \
     --output evaluations/MEMORIES/baselines/<name>-sqlite.json
+```
+
+### Comparing Models / Leaderboard Runs
+When running benchmarks across different LLMs or providers for [MODEL-MEMORY-EVAL-LEADERBOARD.md](../../docs/references/agent-memory/MODEL-MEMORY-EVAL-LEADERBOARD.md), pass `--provider` and optional `--model` explicitly:
+```bash
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+  .venv/Scripts/python.exe scripts/evaluate_memory.py \
+    --provider openrouter --model <model-id> \
+    --output evaluations/MEMORIES/baselines/<name>-<model>.json
 ```
 
 Name `<name>` for what was measured, not when — the timestamp is inside the
 report.
 
-**Which question file.** Both commands above run the default, `v1-four-scopes`
-— the 8-question set every committed baseline was graded against. Add
-`--probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json` for the wide
-20-question set. Put the set in `<name>`: a v1 baseline and a v2 report are two
-different measurements, not two versions of one, and only `probe_set_id` inside
-the file says which is which.
+**Which eval dataset (probe set).** The harness automatically loads the **latest probe set** found under `evaluations/MEMORIES/probes/` (e.g. `v2-four-scopes-wide.json` or whichever highest version is present). You do not need to specify `--probe-set` unless you are explicitly pinning to an older/historical probe file for backward comparison.
 
-**Cost.** v1: 8 questions × 3 arms = 24 asks, and seeding roughly doubles it —
-about **52 model calls**, plus the corpus embedding and the two the pre-check
-spent. Single-digit minutes.
+**Cost.** The exact call volume depends on the latest probe set:
+- If running an 8-question probe set (e.g. v1): 8 questions × 3 arms = 24 asks, and seeding roughly doubles it — about **52 model calls**. Single-digit minutes.
+- If running a wide 20-question probe set (e.g. v2): 20 questions × 3 arms = 60 asks, plus multi-episode seeding — roughly **2.5×** (~130–150 calls).
 
-v2: 20 questions × 3 arms = 60 asks, and it seeds three episodes instead of one,
-so roughly **2.5×** v1. Budget the time and the quota accordingly, and keep to
-one run at a time — rule 6 above, and SPEC §15.1 item 10: two concurrent live
-runs drew far more dropouts than one, and more turns per run makes that worse.
+Budget the time and the quota accordingly, and keep to one run at a time — rule 6 above, and SPEC §15.1 item 10: two concurrent live runs drew far more dropouts than one, and more turns per run makes that worse.
 
 Run it in the background and wait rather than polling.
 

@@ -22,14 +22,19 @@ $env:PYTHONPATH="src"; .venv/Scripts/python.exe scripts/evaluate_memory.py --dry
 
 ```powershell
 # Prove every dependency answers before spending anything. Exit 1 = do not run.
+# Uses default provider from config (e.g. LLM_PROVIDER in .env).
 $env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
-.venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+.venv/Scripts/python.exe scripts/memeval_preflight.py
 ```
 
 ```powershell
-# The real thing. ~52 model calls, single-digit minutes.
-.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter `
+# The real thing. Uses default provider from config.
+.venv/Scripts/python.exe scripts/evaluate_memory.py `
   --output evaluations/MEMORIES/baselines/<name>.json
+
+# For model comparison / leaderboard runs (see MODEL-MEMORY-EVAL-LEADERBOARD.md):
+.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter --model <model-name> `
+  --output evaluations/MEMORIES/baselines/<name>-<model>.json
 ```
 
 `--provider` defaults to `$LLM_PROVIDER`, else gemini. Embedding the corpus
@@ -40,18 +45,17 @@ needs `GEMINI_API_KEY`, or `JINA_API_KEY` when
 
 ## Which probe set
 
-Two are committed. `--probe-set` selects one; the default is **v1**, and it stays
-v1 because every report in `baselines/` was graded against it and moving the
-default would silently change what a bare run means.
+By default, the harness automatically discovers and loads the **latest probe set** found in `evaluations/MEMORIES/probes/` (e.g., `v2-four-scopes-wide.json` or whichever highest version is present).
 
 | file | probes | probe turns per run | what it is |
 |---|---|---|---|
-| `probes/v1-four-scopes.json` | 8 | 24 | `recall` + `restraint` per scope, one `update`. What every committed baseline was graded against. |
+| `probes/v1-four-scopes.json` | 8 | 24 | `recall` + `restraint` per scope, one `update`. Historical v1 baseline. |
 | `probes/v2-four-scopes-wide.json` | 20 | 60 | The wide set: 2–3 probes per scope, `update` on `episodic` as well, and near-miss restraint probes. Its own corpus, `tests/fixtures/memory_eval/corpus-v2/`. |
 
 ```powershell
-.venv/Scripts/python.exe scripts/evaluate_memory.py --provider openrouter `
-  --probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json `
+# Pinning to a specific historical probe set (e.g. v1):
+.venv/Scripts/python.exe scripts/evaluate_memory.py `
+  --probe-set evaluations/MEMORIES/probes/v1-four-scopes.json `
   --output evaluations/MEMORIES/baselines/<name>.json
 ```
 

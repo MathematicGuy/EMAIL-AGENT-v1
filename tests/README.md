@@ -3,7 +3,7 @@
 A map for picking the **smallest** test route that covers a change, and a
 registry of which file owns which invariant so no duplicate tests are written.
 
-Always `uv run pytest`.
+Always `uv run pytest`. Avoid passing `--dist loadfile` explicitly so pytest uses the repository's optimized `--dist loadgroup` scheduler.
 
 **Whole suite: `uv run pytest -q` -> approximately 15–18 s; the count varies with optional integrations.** Defaults: 4 xdist
 workers (`--dist loadgroup`), `-m 'not live'`, `--strict-markers`.

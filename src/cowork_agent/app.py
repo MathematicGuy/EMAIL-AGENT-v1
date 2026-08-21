@@ -1512,6 +1512,7 @@ def create_app() -> FastAPI:
         return FileResponse(
             path=target_path,
             media_type=media_type,
+            filename=safe_name,
             content_disposition_type="inline",
         )
 

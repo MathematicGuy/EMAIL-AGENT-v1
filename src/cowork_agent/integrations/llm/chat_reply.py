@@ -264,7 +264,6 @@ class GeminiChatReply(_ConfiguredChatReply):
     ) -> GeminiChatReply:
         from .providers.gemini import (
             GeminiKeyRotator,
-            GeminiRateLimitError,
             GoogleGenAITransport,
         )
 
