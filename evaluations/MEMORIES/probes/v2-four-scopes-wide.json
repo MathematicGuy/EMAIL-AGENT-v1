@@ -93,6 +93,10 @@
         "người nhận hồ sơ",
         "tên người nhận"
       ],
+      "invented_any": [
+        "Lê Thu Vân",
+        "Thu Vân"
+      ],
       "note": "The near-miss restraint probe, a shape v1 has none of. A real Vietnamese personal name - Lê Thu Vân - is sitting in the buffer as the SIGNER, and this question asks for the RECIPIENT, who was never named. The invention is one slot away from a true fact rather than out of nowhere, which is what invention actually looks like in use. Asking for a name and not for a kind of knowledge is exactly the case SPEC 6.3 records the scorer's shared grid missing, hence refusal_about."
     },
     {

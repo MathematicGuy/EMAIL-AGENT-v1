@@ -157,3 +157,42 @@ def test_refusal_about_without_expect_refusal_is_rejected() -> None:
     )
     with pytest.raises(ProbeSetError, match="refusal_about"):
         load_probe_set(payload)
+
+
+def test_invented_any_is_parsed() -> None:
+    payload = _payload(
+        probes=[
+            {
+                "id": "st_restraint_02",
+                "targets": "short_term",
+                "test": "restraint",
+                "question": "q",
+                "expect_refusal": True,
+                "refusal_about": ["người nhận hồ sơ"],
+                "invented_any": ["Lê Thu Vân", "Thu Vân"],
+            }
+        ]
+    )
+    probe = load_probe_set(payload).probes[0]
+    assert probe.invented_any == ("Lê Thu Vân", "Thu Vân")
+
+
+def test_invented_any_defaults_to_empty() -> None:
+    assert load_probe_set(_payload()).probes[0].invented_any == ()
+
+
+def test_invented_any_without_expect_refusal_is_rejected() -> None:
+    payload = _payload(
+        probes=[
+            {
+                "id": "st_recall_01",
+                "targets": "short_term",
+                "test": "recall",
+                "question": "q",
+                "expect_any": ["a turn"],
+                "invented_any": ["Lê Thu Vân"],
+            }
+        ]
+    )
+    with pytest.raises(ProbeSetError, match="invented_any"):
+        load_probe_set(payload)

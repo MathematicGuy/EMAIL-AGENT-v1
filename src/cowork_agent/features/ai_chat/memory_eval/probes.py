@@ -69,8 +69,12 @@ class Probe:
     #: them and is graded INVENTED. That noun is different for every restraint
     #: probe, so it cannot live in the shared list. The probe knows it.
     refusal_about: tuple[str, ...] = ()
+    #: Contradiction nouns for restraint probes. If any appear in the reply,
+    #: the grade is INVENTED even when a refusal bigram is also present — the
+    #: wrap-invention shape (decline, then supply a nearby name). Only
+    #: meaningful with ``expect_refusal``.
+    invented_any: tuple[str, ...] = ()
     note: str = ""
-
 
 @dataclass(frozen=True, slots=True)
 class ProbeSet:
@@ -146,6 +150,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     stale_any = _string_tuple(data.get("stale_any"), f"probe {probe_id}: stale_any")
     expect_refusal = _bool(data.get("expect_refusal"), f"probe {probe_id}: expect_refusal")
     refusal_about = _string_tuple(data.get("refusal_about"), f"probe {probe_id}: refusal_about")
+    invented_any = _string_tuple(data.get("invented_any"), f"probe {probe_id}: invented_any")
 
     # Declared without a refusal expected, it would silently do nothing: the
     # noun is only ever combined with a word for having nothing on the refusal
@@ -153,6 +158,10 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     if refusal_about and not expect_refusal:
         raise ProbeSetError(
             f"probe {probe_id}: refusal_about is only meaningful with expect_refusal"
+        )
+    if invented_any and not expect_refusal:
+        raise ProbeSetError(
+            f"probe {probe_id}: invented_any is only meaningful with expect_refusal"
         )
 
     # A probe with no expectation always passes, which is worse than no probe.
@@ -174,6 +183,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         stale_any=stale_any,
         expect_refusal=expect_refusal,
         refusal_about=refusal_about,
+        invented_any=invented_any,
         note=note,
     )
 
