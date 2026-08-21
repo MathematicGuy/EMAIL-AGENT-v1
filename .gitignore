@@ -41,6 +41,7 @@ tmp_pytest/
 .cowork/evaluations/
 .playwright-cli/
 node_modules/
+memeval-chat.db
 
 # Frontend dependencies, build output, and local environment
 frontend/node_modules/
