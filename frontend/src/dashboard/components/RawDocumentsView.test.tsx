@@ -40,6 +40,12 @@ const mockRawDocs = [
 
 describe('RawDocumentsView', () => {
   beforeEach(() => {
+    if (!globalThis.URL.createObjectURL) {
+      globalThis.URL.createObjectURL = vi.fn(() => 'blob:http://localhost/mock-pdf-url');
+    }
+    if (!globalThis.URL.revokeObjectURL) {
+      globalThis.URL.revokeObjectURL = vi.fn();
+    }
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -67,6 +73,7 @@ describe('RawDocumentsView', () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve(mockRawDocs),
+            blob: () => Promise.resolve(new Blob(['dummy pdf content'], { type: 'application/pdf' })),
             arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
           });
         }
@@ -102,9 +109,11 @@ describe('RawDocumentsView', () => {
       expect(screen.getAllByText('01_2021_ND-CP_283247.docx').length).toBeGreaterThanOrEqual(1);
     });
 
-    const iframe = screen.getByTitle('pdf-preview-cap_lai_cccd.pdf');
-    expect(iframe).not.toBeNull();
-    expect(iframe.getAttribute('src')).toContain('cap_lai_cccd.pdf');
+    await waitFor(() => {
+      const iframe = screen.getByTitle('pdf-preview-cap_lai_cccd.pdf');
+      expect(iframe).not.toBeNull();
+      expect(iframe.getAttribute('src')).toBeTruthy();
+    });
   });
 
   it('filters documents by search query', async () => {

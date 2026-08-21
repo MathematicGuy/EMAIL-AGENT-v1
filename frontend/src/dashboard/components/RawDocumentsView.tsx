@@ -42,6 +42,9 @@ export const RawDocumentsView: React.FC = () => {
   const [extractedContent, setExtractedContent] = useState<string | null>(null);
   const [extractedFor, setExtractedFor] = useState<string | null>(null);
   const [isExtractLoading, setIsExtractLoading] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDocuments = async (selectDocName?: string) => {
@@ -73,6 +76,43 @@ export const RawDocumentsView: React.FC = () => {
     // Initial load only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!selectedDoc || selectedDoc.file_type !== 'pdf' || viewMode !== 'preview') {
+      setPdfBlobUrl(null);
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+    setIsPdfLoading(true);
+    setPdfError(null);
+
+    fetch(`${API_BASE_URL}/api/v1/raw-documents/${encodeURIComponent(selectedDoc.filename)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Không thể nạp tệp PDF');
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(objectUrl);
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setPdfError(err instanceof Error ? err.message : 'Lỗi khi nạp PDF');
+      })
+      .finally(() => {
+        if (active) setIsPdfLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [selectedDoc, viewMode]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -447,13 +487,26 @@ export const RawDocumentsView: React.FC = () => {
             {/* PREVIEW CONTAINER */}
             <div className="flex-1 overflow-hidden p-4">
               {viewMode === 'preview' && isPdf ? (
-                /* PDF VIEWER EMBED */
-                <div className="w-full h-full rounded-xl overflow-hidden border border-[#2d2b27] bg-[#141312] shadow-inner">
-                  <iframe
-                    src={getDocUrl(selectedDoc.filename)}
-                    title={`pdf-preview-${selectedDoc.filename}`}
-                    className="w-full h-full border-0 bg-[#2b2b2b]"
-                  />
+                /* PDF VIEWER EMBED (BLOB URL TRÁNH BỊ IDM/TRÌNH DUYỆT BẮT LINK TẢI) */
+                <div className="w-full h-full rounded-xl overflow-hidden border border-[#2d2b27] bg-[#141312] shadow-inner flex items-center justify-center">
+                  {isPdfLoading ? (
+                    <div className="flex flex-col items-center gap-3 text-zinc-400">
+                      <Loader2 className="w-7 h-7 animate-spin text-[#d97757]" />
+                      <p className="text-xs font-medium text-zinc-300">Đang nạp tài liệu PDF...</p>
+                    </div>
+                  ) : pdfError ? (
+                    <div className="flex flex-col items-center gap-3 text-zinc-400 p-8 text-center">
+                      <AlertCircle className="w-8 h-8 text-rose-400" />
+                      <p className="text-sm font-medium text-white">Không thể hiển thị tài liệu PDF</p>
+                      <p className="text-xs text-zinc-500">{pdfError}</p>
+                    </div>
+                  ) : pdfBlobUrl ? (
+                    <iframe
+                      src={pdfBlobUrl}
+                      title={`pdf-preview-${selectedDoc.filename}`}
+                      className="w-full h-full border-0 bg-[#2b2b2b]"
+                    />
+                  ) : null}
                 </div>
               ) : viewMode === 'preview' && isWordDoc ? (
                 /* DOCX VIEWER EMBED */
