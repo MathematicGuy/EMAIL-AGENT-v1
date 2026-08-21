@@ -21,7 +21,13 @@ const connection = {
 function baseFetch(input: string | URL | Request): Promise<Response> {
   const url = String(input);
   if (url.endsWith('/v1/mail-todo/connections')) {
-    return Promise.resolve(response({ connections: [connection] }));
+    return Promise.resolve(response({
+      connections: [connection],
+      providerAvailability: {
+        gmail: { enabled: true, reason: null },
+        outlook: { enabled: true, reason: null },
+      },
+    }));
   }
   if (url.includes('/v1/mail-todo/runs?')) {
     return Promise.resolve(response({ runs: [] }));
@@ -34,6 +40,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
+  window.localStorage.clear();
 });
 
 describe('MailInboxView', () => {
@@ -42,7 +49,7 @@ describe('MailInboxView', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<MailInboxView />);
 
-    expect(await screen.findByText('owner@example.com')).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Quét mail mới' })).toBeNull();
     expect(screen.queryByText('Chọn lịch sử quét')).toBeNull();
     expect(screen.getByText('Danh mục hành động (0)')).toBeTruthy();
@@ -146,7 +153,7 @@ describe('MailInboxView', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     render(<MailInboxView />);
-    await screen.findByText('owner@example.com');
+    await screen.findByRole('option', { name: 'Gmail · owner@example.com' });
 
     expect(await screen.findByText('Gửi báo cáo')).toBeTruthy();
     expect(
@@ -188,5 +195,41 @@ describe('MailInboxView', () => {
 
     expect(await screen.findByText('Đã kết nối Gmail thành công.')).toBeTruthy();
     await waitFor(() => expect(window.location.search).not.toContain('gmail='));
+  });
+
+  it('restores the provider selection and builds Outlook owner-bound connect URL', async () => {
+    window.localStorage.setItem('cowork.mail.selected.outlook', 'outlook-1');
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v1/mail-todo/connections')) return Promise.resolve(response({
+        connections: [
+          connection,
+          { ...connection, id: 'outlook-1', provider: 'outlook', emailAddress: 'owner@outlook.com' },
+        ],
+        providerAvailability: {
+          gmail: { enabled: true, reason: null },
+          outlook: { enabled: true, reason: null },
+        },
+      }));
+      if (url.includes('/v1/mail-todo/runs?')) return Promise.resolve(response({ runs: [] }));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<MailInboxView />);
+
+    const account = await screen.findByLabelText('Tài khoản email') as HTMLSelectElement;
+    expect(account.value).toBe('outlook-1');
+    expect(screen.getByRole('link', { name: 'Kết nối Outlook' }).getAttribute('href')).toContain(
+      'ownerConnectionId=mbx-1'
+    );
+  });
+
+  it('shows and clears an Outlook OAuth outcome marker', async () => {
+    window.history.replaceState(null, '', '/?view=mail&outlook=connected');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ connections: [] })));
+    render(<MailInboxView />);
+
+    expect(await screen.findByText('Đã kết nối Outlook thành công.')).toBeTruthy();
+    await waitFor(() => expect(window.location.search).not.toContain('outlook='));
   });
 });

@@ -179,6 +179,53 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
     asyncio.run(scenario())
 
 
+def test_outlook_envelope_uses_the_same_workflow_and_persists_namespaced_pointer() -> None:
+    async def scenario() -> None:
+        message_id = "outlook:message-1"
+        outlook_url = "https://outlook.office.com/mail/deeplink/read/message-1"
+        message = replace(
+            email(message_id, "outlook:conversation-1", "Review contract"),
+            gmail_url=outlook_url,
+        )
+        generated = replace(
+            task_for(message_id, "Review contract"),
+            gmail_url=outlook_url,
+            source_message_ids=(message_id,),
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        tasks = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="gmail-owner",
+            mailbox_connection_id="outlook-connection",
+            idempotency_key="outlook-workflow",
+            now=NOW,
+        )
+        classifier = FakeRouteClassifier()
+        generator = FakePlanGenerator((generated,))
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox((message,)),
+            SafeTextAttachmentExtractor(),
+            classifier,
+            generator,
+            ShortTermStore(),
+            task_repository=tasks,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert classifier.received_envelopes[0].gmail_message_id == message_id
+        assert generator.received_candidates[0].source_message_ids == (message_id,)
+        assert generator.received_candidates[0].gmail_thread_id == "outlook:conversation-1"
+        stored = await tasks.list_for_run(run.id)
+        assert stored[0].task.gmail_message_id == message_id
+        assert stored[0].task.gmail_url == outlook_url
+
+    asyncio.run(scenario())
+
+
 def test_validation_drops_generated_task_leaking_raw_email_body() -> None:
     leaked_body = "Vui lòng gửi báo cáo tài chính quý ba cho ban giám đốc trước thứ Sáu."
 

@@ -12,6 +12,14 @@ from dotenv import load_dotenv
 from cowork_agent.integrations.key_rotation import APIKeyRotator
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+MICROSOFT_MAIL_READ_SCOPE = "https://graph.microsoft.com/Mail.Read"
+MICROSOFT_DEFAULT_SCOPES = (
+    "openid",
+    "profile",
+    "email",
+    "offline_access",
+    MICROSOFT_MAIL_READ_SCOPE,
+)
 LOCAL_POSTGRES_DEFAULT_URL = "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork"
 _POSTGRES_MODES = frozenset({"local", "cloud", "off"})
 
@@ -379,6 +387,83 @@ class GmailSettings:
             fetch_concurrency=_bounded_positive_int(
                 environ, "GMAIL_FETCH_CONCURRENCY", 6, maximum=8
             ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OutlookSettings:
+    """Read-only Microsoft identity and Graph configuration.
+
+    Outlook is an optional mailbox connector. The composition root decides
+    whether the current persistence mode may enable it; settings validation
+    only owns credential, URL, and least-privilege scope validation.
+    """
+
+    client_id: str = field(repr=False)
+    client_secret: str = field(repr=False)
+    tenant: str
+    redirect_uri: str
+    frontend_url: str | None
+    scopes: tuple[str, ...]
+    token_encryption_key: str = field(repr=False)
+    oauth_state_secret: str = field(repr=False)
+    oauth_state_ttl_seconds: int
+    graph_base_url: str = "https://graph.microsoft.com/v1.0"
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "OutlookSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+
+        redirect_uri = environ.get(
+            "MICROSOFT_REDIRECT_URI",
+            "http://localhost:8000/v1/mail-todo/oauth/outlook/callback",
+        ).strip()
+        if not redirect_uri.startswith(("http://localhost", "https://")):
+            raise ValueError("MICROSOFT_REDIRECT_URI must use HTTPS, except for localhost")
+
+        frontend_url = environ.get("FRONTEND_URL", "").strip().rstrip("/") or None
+        if frontend_url is not None:
+            frontend_parts = urlsplit(frontend_url)
+            secure_remote = frontend_parts.scheme == "https" and bool(frontend_parts.hostname)
+            local_http = frontend_parts.scheme == "http" and frontend_parts.hostname in {
+                "localhost",
+                "127.0.0.1",
+            }
+            if not (secure_remote or local_http):
+                raise ValueError("FRONTEND_URL must use HTTPS, except for localhost")
+
+        scopes = tuple(
+            environ.get("MICROSOFT_SCOPES", " ".join(MICROSOFT_DEFAULT_SCOPES)).split()
+        )
+        if set(scopes) != set(MICROSOFT_DEFAULT_SCOPES) or len(scopes) != len(
+            MICROSOFT_DEFAULT_SCOPES
+        ):
+            raise ValueError(
+                "Outlook must use only Mail.Read and standard OIDC/offline scopes"
+            )
+
+        tenant = environ.get("MICROSOFT_TENANT", "common").strip() or "common"
+        if any(character in tenant for character in "/?#"):
+            raise ValueError("MICROSOFT_TENANT must be a tenant id, domain, or common")
+
+        return cls(
+            client_id=_required_secret(environ, "MICROSOFT_CLIENT_ID"),
+            client_secret=_required_secret(environ, "MICROSOFT_CLIENT_SECRET"),
+            tenant=tenant,
+            redirect_uri=redirect_uri,
+            frontend_url=frontend_url,
+            scopes=scopes,
+            token_encryption_key=_required_secret(environ, "TOKEN_ENCRYPTION_KEY"),
+            oauth_state_secret=_required_secret(environ, "OAUTH_STATE_SECRET"),
+            oauth_state_ttl_seconds=_positive_int(environ, "OAUTH_STATE_TTL_SECONDS", 600),
         )
 
 

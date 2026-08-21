@@ -9,7 +9,7 @@
 ## 1. System Overview Dashboard
 
 The Cowork Agent project consists of two primary product flows operating over a unified control plane and persistence engine:
-1. **Email Action Plan & RAG Subsystem (PRD-v1):** Standalone, single-turn, memory-free digest: unread Gmail (`gmail.readonly`), route resolver (`NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG`), optional company RAG. In-chat email capability operates via high-level `MailScanSummary` cards.
+1. **Email Action Plan & RAG Subsystem (PRD-v1):** Standalone, single-turn, memory-free digest over unread Gmail (`gmail.readonly`) or SQLite-linked Outlook (`Mail.Read`), with one provider-neutral route resolver (`NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG`) and optional company RAG. The React UI dispatches mail scans and persists one `MailScanSummary` card; mail is not an AI Chat tool.
 2. **AI Chat Assistant with Typed Memory (V2):** Multi-turn SSE chat with four memory scopes, chat-native `TaskEpisode` proposals ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)), and classifier-gated project documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). Company RAG in chat is flag-gated (`CHAT_COMPANY_RAG_ENABLED`, default false).
 
 ```mermaid
@@ -21,12 +21,11 @@ flowchart TB
     subgraph API["FastAPI Control Plane (app.py)"]
         EMAIL_API["Email Action Plan API<br/>(/v1/mail-todo/*)"]
         CHAT_API["AI Chat API & SSE Stream<br/>(/v1/cowork/chat/*)"]
-        PROJECT_API["Projects API<br/>(/v1/cowork/projects/*)"]
-        RAW_API["Raw Documents & Reports API<br/>(/api/v1/raw-documents/*)"]
+        DOC_API["Project / Raw Document APIs"]
     end
 
     subgraph SUBSYSTEMS["Core Subsystems"]
-        SUB_EMAIL["1. Email RAG Subsystem<br/>Gmail + Route Resolver + RAG"]
+        SUB_EMAIL["1. Email RAG Subsystem<br/>Gmail / Outlook + Router + RAG"]
         SUB_CHAT["2. AI Chat Subsystem<br/>Controller + Memory Gateway"]
         SUB_DOCS["3. User Documents Subsystem<br/>Project docs; OCR deferred"]
         SUB_RAW["4. Raw Documents Subsystem<br/>DOCX/PDF Viewer & Ingestion"]
@@ -41,8 +40,8 @@ flowchart TB
     CLIENTS --> API
     EMAIL_API --> SUB_EMAIL
     CHAT_API --> SUB_CHAT
-    PROJECT_API --> SUB_DOCS
-    RAW_API --> SUB_RAW
+    DOC_API --> SUB_DOCS
+    DOC_API --> SUB_RAW
     
     SUB_CHAT <--> SUB_DOCS
     SUB_EMAIL <--> VECTOR
@@ -58,16 +57,16 @@ flowchart TB
 
 | Module / Component | Implemented Scope | Status | Target Architecture Alignment | Authoritative Code Location |
 |---|---|---|---|---|
-| **Email Action Plan & RAG** | Standalone single-turn digest: unread Gmail, route resolver (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), attachment presence only ([ADR-003](../../../tasks/adr/ADR-003-attachment-retrieval-scope.md)), body-free plans | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md)) | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
-| **Enterprise RAG Store** | Hybrid Turbovec + BM25 + RRF over committed `data/extracted/*.md`; unknown / retired `qdrant` / failed provider → `NullSemanticMemory` | **Live / Implemented** | Fully Aligned | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
-| **AI Chat Controller** | Multi-turn SSE chat; in-process turn (`classify → retrieve → assemble → stream → persist`); mail scans integrated via `MailScanSummary` cards | **Live / Implemented** | Mostly Aligned ([TARGET-ARCHITECTURE.md §2](../TARGET-ARCHITECTURE.md)) — graph module not composed | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) |
-| **4-Type Memory Gateway** | Short-term in-process buffer, explicit declarative profile, episodic `TaskEpisodes` (`retrieval_eligible=false` until approved), flag-gated company RAG | **Live / Implemented** | Mostly Aligned ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)) — Redis unused; local mode uses SQLite stores | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) |
-| **User Documents Subsystem** | Project-scoped upload/index/retrieve (`/v1/cowork/projects/{id}/documents`); classifier-gated; OCR deferred (`ocr_unavailable`) | **Live / Implemented** | Mostly Aligned ([TARGET-ARCHITECTURE.md §3](../TARGET-ARCHITECTURE.md) & [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)) | [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
-| **Document Ingestion Pipeline** | Offline CLI: DOCX/PDF/TXT/MD conversion, SHA-256 hash manifest, symlink checks, NFC sanitization, YAML frontmatter, date harvesting, atomic Markdown generation | **Live / Implemented** | Fully Aligned ([TARGET-ARCHITECTURE.md §1 & §3](../TARGET-ARCHITECTURE.md)) | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
-| **DOCX Viewing & Raw Ingestion** | In-browser high-fidelity Word/PDF viewer (`DocxViewer`), direct upload to `data/raw/`, auto-extraction to `data/extracted/`, delete synchronization | **Live / Implemented** | Fully Aligned | [`frontend/src/dashboard/components/RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx) & [`app.py`](../../../src/cowork_agent/app.py) |
-| **Control Plane & Auth** | FastAPI `mail-todo-api` lifespan, Google OAuth, `VerifiedPrincipal`, Fernet token cipher, HttpOnly session cookie | **Live / Implemented** | Fully Aligned on identity & decoupling | [`app.py`](../../../src/cowork_agent/app.py) & [`identity.py`](../../../src/cowork_agent/identity.py) |
-| **Dual Persistence Engine** | `POSTGRES_MODE=off` → SQLite (8 database files in `.data/`) plus an in-process working buffer; with `DATABASE_URL` → Supabase Postgres (migrations 001–014) | **Live / Implemented** | Fully Aligned on dual-mode switch | [`repositories`](../../../src/cowork_agent/persistence/repositories) |
-| **Presentation Layers** | Production React 19 + Vite + Tailwind 4 SPA. Streamlit GUI is retired. | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
+| **Email Action Plan & RAG** | Unread Gmail or SQLite-linked Outlook; provider-neutral route resolver, attachment presence only, body-free plans | **Live / Implemented** | Aligned; Outlook is an additive variance | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
+| **Enterprise RAG Store** | Hybrid Turbovec + BM25 + RRF over committed `data/extracted/*.md` | **Live / Implemented** | Fully Aligned | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
+| **AI Chat Controller** | Multi-turn SSE chat with `MailScanSummary` cards | **Live / Implemented** | Mostly Aligned | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) |
+| **4-Type Memory Gateway** | Short-term, declarative, episodic, and flag-gated semantic memory | **Live / Implemented** | Mostly Aligned | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) |
+| **User Documents Subsystem** | Project-scoped upload, index, and retrieval | **Live / Implemented** | Mostly Aligned | [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
+| **Document Ingestion Pipeline** | Offline document conversion and committed Markdown generation | **Live / Implemented** | Fully Aligned | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) |
+| **DOCX Viewing & Raw Ingestion** | In-browser Word/PDF viewer and direct upload | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
+| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`app.py`](../../../src/cowork_agent/app.py) |
+| **Dual Persistence Engine** | SQLite local mode and Supabase Postgres mode | **Live / Implemented** | Fully Aligned | [`repositories`](../../../src/cowork_agent/persistence/repositories) |
+| **Presentation Layers** | React 19 + Vite + Tailwind 4 SPA | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
 
 ---
 
@@ -75,8 +74,9 @@ flowchart TB
 
 | System Aspect | Target Specification ([TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)) | Current Live Implementation | Diff / Variance Status |
 |---|---|---|---|
-| **Email & Chat Decoupling** | Standalone stateless Email Agent; AI Chat has decoupled email tool interface | Standalone `/v1/mail-todo` Email Agent; chat integrates email scan summaries via `MailScanSummary` cards (`/sessions/{id}/mail-scans`) without persisting raw email bodies in chat memory. | **0 Diff — 100% Aligned** |
-| **TaskEpisode Lifecycle** | Tasks proposed in chat start `retrieval_eligible=false` until explicit user approval | Created only on `is_explicit_task_request`; writes are `system_generated` / `retrieval_eligible=false`; eligibility follows `validation_status`. | **0 Diff — 100% Aligned ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md))** |
+| **Email & Chat Decoupling** | Standalone stateless Email Agent; AI Chat remains decoupled | The frontend recognizes `@email`, `@outlook`, and `@mail`, starts provider runs outside the AI Chat tool loop, and persists one body-free summary card. | **0 workflow-boundary diff** |
+| **Mailbox providers** | Gmail is the documented source | Gmail plus linked Microsoft Graph mailboxes share an envelope and workflow. Outlook is disabled in both Postgres modes and requires no migration. | **Additive variance — Outlook is SQLite-only** |
+| **TaskEpisode Lifecycle** | Tasks proposed in chat start `retrieval_eligible=false` until explicit user approval | Created only on explicit task requests; eligibility follows validation. | **0 Diff — aligned with [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)** |
 | **Company RAG Corpus** | Knowledge provider; copied chunks forbidden in persistent task outputs; chat retrieval flag-gated | Turbovec hybrid over `data/extracted/*.md`; citations are coordinates. Chat-side read gated by `CHAT_COMPANY_RAG_ENABLED` (default false). Retired `qdrant` degrades to null memory. | **0 Diff — 100% Aligned** |
 | **User Document Security** | Project-scoped documents; classifier is sole route origin; OCR deferred | Project API + classifier + readiness gate. OCR-required PDFs fail `ocr_unavailable`. Store is Postgres chunks + per-project `.tvim` with no company-index fallback. | **Mostly Aligned ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md))** — live path is `/v1/cowork/projects/{id}/documents` |
 | **Turn orchestration** | Small graph `classify → retrieve → assemble → generate → persist` | Same sequence lives in `ChatController.stream_message`. `features/ai_chat/graph/` exists but is not composed in `app.py`. | **Implementation variance — graph unused** |
@@ -89,13 +89,13 @@ flowchart TB
 
 For detailed Level 1 component boundaries, sequence flows, and data contracts, refer to the individual module documents:
 
-1. **[01-email-action-plan-and-rag.md](01-email-action-plan-and-rag.md):** Standalone Email Action Plan workflow, Gmail adapter, route resolver, and company Turbovec hybrid RAG. Audited 2026-08-21.
-2. **[02-ai-chat-and-typed-memory.md](02-ai-chat-and-typed-memory.md):** Multi-turn Chat Controller, 4 typed memories, chat-native `TaskEpisode` lifecycle, and classifier-gated project documents. Audited 2026-08-21.
-3. **[03-control-plane-persistence-and-uis.md](03-control-plane-persistence-and-uis.md):** FastAPI control plane, identity, SQLite vs Supabase Postgres (migrations 001–014), `mail-todo-worker`, React 19 SPA. Audited 2026-08-21.
-4. **[04-overall-architecture.md](04-overall-architecture.md):** Comprehensive Overall System Architecture, system inventory, decoupled product flows, and state/control ownership. Audited 2026-08-21.
-5. **[05-rag-architecture.md](05-rag-architecture.md):** Deep-dive Enterprise RAG & Vector Memory Subsystem architecture, corpus indexing interface, multi-backend retrieval ladder, and User Documents RAG engine. Audited 2026-08-21.
-6. **[06-knowledge-and-document-ingestion-pipeline.md](06-knowledge-and-document-ingestion-pipeline.md):** Standalone Document Ingestion Pipeline, DOCX/PDF/TXT/MD extractors, NFC sanitization, YAML frontmatter, binary date harvesting, SHA-256 hash manifest tracking, and atomic Markdown persistence. Audited 2026-08-20.
-7. **[07-docx-document-viewing-and-editing.md](07-docx-document-viewing-and-editing.md):** DOCX Document Viewing Subsystem, high-fidelity in-browser Word viewer (DocxViewer), direct upload/delete sync with extracted markdown. Audited 2026-08-21.
+1. **[01-email-action-plan-and-rag.md](01-email-action-plan-and-rag.md):** Provider-neutral Email Action Plan workflow, Gmail/Outlook adapters, route resolver, and company Turbovec hybrid RAG.
+2. **[02-ai-chat-and-typed-memory.md](02-ai-chat-and-typed-memory.md):** Multi-turn Chat Controller, typed memories, chat-native task lifecycle, and classifier-gated project documents.
+3. **[03-control-plane-persistence-and-uis.md](03-control-plane-persistence-and-uis.md):** FastAPI control plane, identity, SQLite versus Supabase Postgres, mail worker, and React SPA.
+4. **[04-overall-architecture.md](04-overall-architecture.md):** Overall system architecture, product flows, and state/control ownership.
+5. **[05-rag-architecture.md](05-rag-architecture.md):** Enterprise RAG and vector-memory architecture.
+6. **[06-knowledge-and-document-ingestion-pipeline.md](06-knowledge-and-document-ingestion-pipeline.md):** Document ingestion pipeline.
+7. **[07-docx-document-viewing-and-editing.md](07-docx-document-viewing-and-editing.md):** DOCX viewing and editing subsystem.
 
 > [!NOTE]
 > All architecture modules in `docs/architectures/current-architectures/` are verified against live code and synchronized with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md).

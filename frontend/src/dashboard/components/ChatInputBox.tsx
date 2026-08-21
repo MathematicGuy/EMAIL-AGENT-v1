@@ -48,6 +48,12 @@ function activeMentionQuery(value: string): string | null {
   return match ? match[1].toLowerCase() : null;
 }
 
+const MAIL_MENTIONS = [
+  { command: 'mail', label: 'Mail', description: 'Quét Gmail và Outlook đang chọn' },
+  { command: 'email', label: 'Email', description: 'Quét Gmail đang chọn' },
+  { command: 'outlook', label: 'Outlook', description: 'Quét Outlook đang chọn' },
+] as const;
+
 export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   inputText,
   onChangeText,
@@ -70,7 +76,10 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const hasPendingAttachment = attachments.some((item) => item.status !== 'ready');
   const mentionQuery = activeMentionQuery(inputText);
-  const showMailMention = mentionQuery !== null && 'mail'.startsWith(mentionQuery);
+  const matchingMailMentions = mentionQuery === null
+    ? []
+    : MAIL_MENTIONS.filter(({ command }) => command.startsWith(mentionQuery));
+  const showMailMention = matchingMailMentions.length > 0;
 
   // Auto resize textarea
   useEffect(() => {
@@ -89,9 +98,9 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     }
   };
 
-  const selectMailMention = () => {
+  const selectMailMention = (command: string) => {
     const mentionStart = inputText.lastIndexOf('@');
-    onChangeText(`${inputText.slice(0, mentionStart)}@mail `);
+    onChangeText(`${inputText.slice(0, mentionStart)}@${command} `);
     textareaRef.current?.focus();
   };
 
@@ -162,27 +171,30 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 aria-label="Gợi ý công cụ"
                 className="absolute bottom-full left-0 z-50 mb-3 w-full max-w-md overflow-hidden rounded-xl border border-[#45413b] bg-[#292724] py-1.5 shadow-2xl"
               >
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected="false"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={selectMailMention}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[#37342f]"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#5b493d] bg-[#392c24] text-[#e8a78f]">
-                    <Mail className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-100">Mail</span>
-                    <span className="block truncate text-xs text-zinc-400">
-                      Quét 10 email unread mới nhất
+                {matchingMailMentions.map((mention) => (
+                  <button
+                    key={mention.command}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectMailMention(mention.command)}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[#37342f]"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#5b493d] bg-[#392c24] text-[#e8a78f]">
+                      <Mail className="h-4 w-4" />
                     </span>
-                  </span>
-                  <span className="ml-auto rounded border border-[#4b4741] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
-                    @mail
-                  </span>
-                </button>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-zinc-100">{mention.label}</span>
+                      <span className="block truncate text-xs text-zinc-400">
+                        {mention.description}
+                      </span>
+                    </span>
+                    <span className="ml-auto rounded border border-[#4b4741] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                      @{mention.command}
+                    </span>
+                  </button>
+                ))}
               </div>
             )}
             <textarea

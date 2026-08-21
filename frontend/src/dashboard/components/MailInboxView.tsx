@@ -13,17 +13,37 @@ import {
   getDigestResult,
   getDigestTasks,
   getGmailConnectUrl,
+  getOutlookConnectUrl,
+  getSelectedMailboxId,
   listConnections,
   listDigestRuns,
+  setSelectedMailboxId,
   type DigestResult,
   type DigestRunView,
   type DigestTask,
   type MailboxConnection,
+  type MailProvider,
+  type ProviderAvailabilityMap,
 } from '../../modules/mail/api';
+
+const DEFAULT_AVAILABILITY: ProviderAvailabilityMap = {
+  gmail: { enabled: true, reason: null },
+  outlook: { enabled: false, reason: 'not_configured' },
+};
+
+function providerLabel(provider: MailProvider): string {
+  return provider === 'gmail' ? 'Gmail' : 'Outlook';
+}
+
+function availabilityReason(reason: string | null): string | null {
+  if (reason === 'not_configured') return 'Outlook chưa được cấu hình trên máy chủ.';
+  if (reason === 'sqlite_only') return 'Outlook hiện chỉ dùng được với SQLite.';
+  return reason;
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof MailApiError) {
-    if (error.status === 409) return `${error.message} Hãy kết nối lại Gmail nếu cần.`;
+    if (error.status === 409) return `${error.message} Hãy kết nối lại hộp thư nếu cần.`;
     if (error.status === 503) return `${error.message} Vui lòng thử lại sau.`;
     return error.message;
   }
@@ -31,15 +51,20 @@ function errorMessage(error: unknown): string {
 }
 
 function initialOAuthBanner(): string | null {
-  const outcome = new URLSearchParams(window.location.search).get('gmail');
-  if (outcome === 'connected') return 'Đã kết nối Gmail thành công.';
-  if (outcome === 'denied') return 'Bạn đã từ chối quyền kết nối Gmail.';
-  if (outcome === 'error') return 'Không thể hoàn tất kết nối Gmail. Vui lòng thử lại.';
+  const params = new URLSearchParams(window.location.search);
+  const provider: MailProvider | null = params.has('outlook') ? 'outlook' : params.has('gmail') ? 'gmail' : null;
+  if (!provider) return null;
+  const outcome = params.get(provider);
+  const label = providerLabel(provider);
+  if (outcome === 'connected') return `Đã kết nối ${label} thành công.`;
+  if (outcome === 'denied') return `Bạn đã từ chối quyền kết nối ${label}.`;
+  if (outcome === 'error') return `Không thể hoàn tất kết nối ${label}. Vui lòng thử lại.`;
   return null;
 }
 
 export const MailInboxView: React.FC = () => {
   const [connections, setConnections] = useState<MailboxConnection[]>([]);
+  const [providerAvailability, setProviderAvailability] = useState(DEFAULT_AVAILABILITY);
   const [selectedConnectionId, setSelectedConnectionId] = useState('');
   const [selectedRun, setSelectedRun] = useState<DigestRunView | null>(null);
   const [result, setResult] = useState<DigestResult | null>(null);
@@ -65,11 +90,19 @@ export const MailInboxView: React.FC = () => {
     setLoadingConnections(true);
     try {
       const loaded = await listConnections(signal);
-      const active = loaded.filter((connection) => connection.status === 'active');
+      const active = loaded.connections.filter((connection) => connection.status === 'active');
       setConnections(active);
-      setSelectedConnectionId((current) =>
-        active.some((connection) => connection.id === current) ? current : (active[0]?.id ?? '')
-      );
+      setProviderAvailability(loaded.providerAvailability);
+      setSelectedConnectionId((current) => {
+        if (active.some((connection) => connection.id === current)) return current;
+        const remembered = (['gmail', 'outlook'] as const)
+          .map((provider) => getSelectedMailboxId(provider))
+          .find((id) => active.some((connection) => connection.id === id));
+        const selectedId = remembered ?? active[0]?.id ?? '';
+        const selected = active.find((connection) => connection.id === selectedId);
+        if (selected) setSelectedMailboxId(selected.provider, selected.id);
+        return selectedId;
+      });
     } catch (cause) {
       if ((cause as { name?: string }).name !== 'AbortError') setError(errorMessage(cause));
     } finally {
@@ -117,9 +150,10 @@ export const MailInboxView: React.FC = () => {
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams(window.location.search);
-    const oauthOutcome = params.get('gmail');
-    if (oauthOutcome) {
+    const hasOAuthOutcome = params.has('gmail') || params.has('outlook');
+    if (hasOAuthOutcome) {
       params.delete('gmail');
+      params.delete('outlook');
       const query = params.toString();
       window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
     }
@@ -166,7 +200,17 @@ export const MailInboxView: React.FC = () => {
     setTasks([]);
     setSelectedTaskId(null);
     setSelectedConnectionId(connectionId);
+    const connection = connections.find((item) => item.id === connectionId);
+    if (connection) setSelectedMailboxId(connection.provider, connection.id);
   };
+
+  const gmailOwner = connections.find(
+    (connection) => connection.provider === 'gmail' && connection.status === 'active'
+  );
+  const outlookConnectEnabled = providerAvailability.outlook.enabled && Boolean(gmailOwner);
+  const outlookUnavailableReason = !gmailOwner
+    ? 'Hãy kết nối Gmail trước để liên kết Outlook.'
+    : availabilityReason(providerAvailability.outlook.reason);
 
   return (
     <section className="flex-1 overflow-auto bg-[#1b1a17] p-5 md:p-8">
@@ -176,18 +220,20 @@ export const MailInboxView: React.FC = () => {
             <h1 className="flex items-center gap-2 text-xl font-semibold">
               <Mail className="h-5 w-5 text-[#d97757]" /> Mail Inbox
             </h1>
-            <p className="mt-1 text-sm text-zinc-400">Gmail chỉ đọc · nội dung email không được lưu.</p>
+            <p className="mt-1 text-sm text-zinc-400">Gmail và Outlook chỉ đọc · nội dung email không được lưu.</p>
           </div>
           {connections.length > 0 && (
             <div className="flex items-center gap-2">
               <select
-                aria-label="Tài khoản Gmail"
+                aria-label="Tài khoản email"
                 value={selectedConnectionId}
                 onChange={(event) => handleConnectionChange(event.target.value)}
                 className="rounded-lg border border-zinc-700 bg-[#242320] px-3 py-2 text-sm"
               >
                 {connections.map((connection) => (
-                  <option key={connection.id} value={connection.id}>{connection.emailAddress}</option>
+                  <option key={connection.id} value={connection.id}>
+                    {providerLabel(connection.provider)} · {connection.emailAddress}
+                  </option>
                 ))}
               </select>
               <button
@@ -206,12 +252,31 @@ export const MailInboxView: React.FC = () => {
         {banner && <p role="status" className="rounded-lg border border-sky-800 bg-sky-950/40 px-4 py-3 text-sm text-sky-200">{banner}</p>}
         {error && <p role="alert" className="rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{error}</p>}
 
+        {!loadingConnections && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-700 bg-[#242320] p-3">
+            <a href={getGmailConnectUrl()} className="rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-[#d97757]">
+              Kết nối Gmail
+            </a>
+            {outlookConnectEnabled && gmailOwner ? (
+              <a href={getOutlookConnectUrl(gmailOwner.id)} className="rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-[#d97757]">
+                Kết nối Outlook
+              </a>
+            ) : (
+              <button type="button" disabled title={outlookUnavailableReason ?? undefined} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-500 opacity-60">
+                Kết nối Outlook
+              </button>
+            )}
+            {!outlookConnectEnabled && outlookUnavailableReason && (
+              <span className="text-xs text-zinc-500">{outlookUnavailableReason}</span>
+            )}
+          </div>
+        )}
+
         {!loadingConnections && connections.length === 0 && (
           <div className="rounded-xl border border-zinc-700 bg-[#242320] p-10 text-center">
             <Link2 className="mx-auto mb-3 h-8 w-8 text-[#d97757]" />
-            <h2 className="font-medium">Chưa có tài khoản Gmail</h2>
-            <p className="mt-2 text-sm text-zinc-400">Kết nối bằng quyền gmail.readonly để bắt đầu.</p>
-            <a href={getGmailConnectUrl()} className="mt-5 inline-block rounded-lg bg-[#d97757] px-4 py-2 text-sm font-medium text-white">Kết nối Gmail</a>
+            <h2 className="font-medium">Chưa có tài khoản email</h2>
+            <p className="mt-2 text-sm text-zinc-400">Kết nối Gmail bằng quyền chỉ đọc để bắt đầu.</p>
           </div>
         )}
 
