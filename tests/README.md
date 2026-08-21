@@ -15,7 +15,7 @@ route — that throws away the cores. Use `-n 0` only to debug a single failure.
 **Do not raise the worker count either** — see §5.
 
 The method these numbers come from is written up in
-[`docs/references/test-optimization.md`](../docs/references/test-optimization.md).
+[`docs/references/test-optimization/`](../docs/references/test-optimization/test-optimization.md).
 Refresh §1 with `--durations`; refresh nothing by guesswork.
 
 The suite is **offline by construction** -- see §7. Do not undo that to make a
@@ -235,6 +235,7 @@ That makes **import-time work the thing to attack**, not parallelism:
 | Find the next thing worth optimizing | `--durations=15` |
 | Stop at the first failure | `-x` |
 | Keep tracebacks cheap in context | `--tb=line` or `--tb=short` |
+| Opt-in line coverage (never in `addopts`) | `--cov=cowork_agent --cov-report=term-missing` (add `--cov-context=test -n 0` for a per-test map). Plugin is idle without `--cov`. |
 
 `--lf` and `--ff` read `.pytest_cache`. If you see
 `PytestCacheWarning: cache could not write path`, the cache is stale-locked and
