@@ -103,3 +103,42 @@ def test_dry_run_still_works_after_the_live_path_lands(tmp_path: Path) -> None:
         main(["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
         == 0
     )
+
+
+def test_dry_run_under_postgres_mode_off_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("POSTGRES_MODE", "off")
+    monkeypatch.delenv("PG_TEST_URL", raising=False)
+    output = tmp_path / "report.json"
+    code = main(
+        ["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)]
+    )
+    assert code == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["schema_version"] == "2.1.0"
+    assert report["probe_set_id"] == "unit"
+
+
+def test_dry_run_with_custom_provider_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("POSTGRES_MODE", "off")
+    monkeypatch.delenv("PG_TEST_URL", raising=False)
+    output = tmp_path / "report.json"
+    code = main(
+        [
+            "--dry-run",
+            "--provider",
+            "openrouter",
+            "--probe-set",
+            str(_probe_set_file(tmp_path)),
+            "--output",
+            str(output),
+        ]
+    )
+    assert code == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["provider"] == "dry-run"
+
+

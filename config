@@ -1,8 +1,124 @@
-# Non-secret feature flags. Copy this file to `config` for a local setup.
-# Keep credentials and connection strings in .env, never in this file.
-CHAT_INTENT_CLASSIFIER_ENABLED=true
-CHAT_COMPANY_RAG_ENABLED=false
-KNOWLEDGE_INGEST_OCR_ENABLED=false
+# Non-secret shared configuration and feature flags for EMAIL-AGENT-v1.
+# This file is tracked in git so all team members have consistent configuration.
+# Keep credentials, secrets, passwords, and private tokens in .env, never in this file.
+
+# Application & Server
+APP_ENV=development
+APP_LOG_LEVEL=INFO
+APP_API_WORKERS=1
+APP_HOST=127.0.0.1
+APP_PORT=8000
+APP_HOST_URL=http://localhost:8000
+FRONTEND_URL=http://localhost:5173
+MAIL_TODO_DEFAULT_TIMEZONE=Asia/Ho_Chi_Minh
+
+# Gmail OAuth & Local Transport Flags
+GMAIL_REDIRECT_URI=http://localhost:8000/v1/mail-todo/oauth/gmail/callback
+GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.readonly
+GMAIL_CONNECTION_DB_PATH=.data/mail_todo.db
+OAUTH_STATE_TTL_SECONDS=600
+OAUTHLIB_INSECURE_TRANSPORT=1
+
+# LLM Provider Selection (openrouter | gemini | groq | faucet)
+LLM_PROVIDER=openrouter
+
+# Gemini Action Extractor & Key Rotation Settings
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_KEY_ROTATION_STRATEGY=round_robin
+GEMINI_ROTATE_ON_RATE_LIMIT=true
+GEMINI_MAX_ATTEMPTS_PER_REQUEST=3
+GEMINI_MAX_EMAILS_PER_BATCH=5
+GEMINI_MAX_INPUT_TOKENS=40000
+GEMINI_TIMEOUT_SECONDS=60
+
+# Document Embeddings & Reranker Settings
+DOCUMENT_EMBEDDING_PROVIDER=gemini
+EMBEDDING_MODEL=jina-embeddings-v3
+EMBEDDING_DIMENSIONS=1024
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_EMBEDDING_DIMENSIONS=1024
+GEMINI_EMBEDDING_TIMEOUT_SECONDS=30
+GEMINI_EMBEDDING_BATCH_SIZE=100
+
+JINA_EMBEDDING_MODEL=jina-embeddings-v3
+JINA_EMBEDDING_DIMENSIONS=1024
+JINA_EMBEDDING_TIMEOUT_SECONDS=30
+JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT=true
+
+RERANKER_MODEL=rerank-v4.0-fast
+RERANKER_ROTATE_ON_RATE_LIMIT=true
+RERANKER_TIMEOUT_SECONDS=10
+
+# OpenRouter Configuration (LLM & AI Judge)
+OPENROUTER_MODEL=inclusionai/ling-3.0-flash
+OPENROUTER_ALLOWED_MODELS=["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash-0731", "inclusionai/ling-3.0-flash"]
+OPENROUTER_MAX_EMAILS_PER_BATCH=5
+OPENROUTER_MAX_OUTPUT_TOKENS=2048
+OPENROUTER_TIMEOUT_SECONDS=60
+
+# Groq Configuration
+GROQ_MODEL=qwen/qwen3.6-27b
+GROQ_MAX_EMAILS_PER_BATCH=5
+GROQ_TIMEOUT_SECONDS=60
+
+# Faucet Configuration
+FAUCET_MODEL=deepseek-v4-flash
+FAUCET_MAX_EMAILS_PER_BATCH=5
+FAUCET_MAX_OUTPUT_TOKENS=2048
+FAUCET_TIMEOUT_SECONDS=60
+
+# Company RAG & Vector Store (turbovec is default; Qdrant is remote/retired)
+RAG_STORE_PROVIDER=turbovec
 QDRANT_ENABLED=true
+QDRANT_URL=https://6e4af1c4-c453-4a43-b9e5-3580ab09f892.eu-west-1-0.aws.cloud.qdrant.io
+QDRANT_COLLECTION=company_knowledge
+QDRANT_ENDPOINT=https://6e4af1c4-c453-4a43-b9e5-3580ab09f892.eu-west-1-0.aws.cloud.qdrant.io
+USER_DOCUMENTS_QDRANT_COLLECTION=project_documents
+
+# Supabase & Database Mode
+POSTGRES_MODE=local
+SUPABASE_URL=https://seozkaeerwdysxoaftya.supabase.co
+SUPABASE_JWKS_URL=https://seozkaeerwdysxoaftya.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_STORAGE_BUCKET=documents
+
+# Session & Chat Memory (V2)
+APP_SESSION_COOKIE_NAME=cowork_session
+APP_SESSION_TTL_SECONDS=2592000
+CHAT_MEMORY_MAX_TURNS=20
+CHAT_MEMORY_TTL_SECONDS=1800
+CHAT_PROFILE_RETENTION_SECONDS=7776000
+CHAT_EPISODE_RETENTION_SECONDS=7776000
+
+# AI Chat Intent Routing & Feature Flags
+CHAT_INTENT_CLASSIFIER_ENABLED=true
+CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000
+CHAT_COMPANY_RAG_ENABLED=false
 USER_DOCUMENTS_ENABLED=true
 USER_DOCUMENTS_TOOL_AXIS_ENABLED=false
+
+# User Project Documents Plane
+USER_DOCUMENTS_INDEX_ROOT=var/project-indexes
+USER_DOCUMENTS_MAX_FILE_BYTES=26214400
+USER_DOCUMENTS_MAX_PAGES=100
+USER_DOCUMENTS_MAX_DOCUMENTS_PER_PROJECT=50
+USER_DOCUMENTS_MAX_PROJECT_BYTES=524288000
+USER_DOCUMENTS_RETENTION_DAYS=30
+USER_DOCUMENTS_TOP_K=8
+USER_DOCUMENTS_MIN_SCORE=0.6
+USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=10000
+
+# Streamlit GUI Settings
+STREAMLIT_POLL_INTERVAL_SECONDS=1.5
+STREAMLIT_POLL_BUFFER_SECONDS=30
+
+# Observability & Tracing (Langfuse)
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_DEBUG=false
+LANGFUSE_TRACING_ENABLED=true
+LANGFUSE_TRACING_ENVIRONMENT=development
+LANGFUSE_OBSERVE_DECORATOR_IO_CAPTURE_ENABLED=false
+
+# OCR & Document Extraction (Mistral)
+EXTRACTION_MODE=advance
+OCR_MODEL_ID=mistral-ocr-latest
+KNOWLEDGE_INGEST_OCR_ENABLED=true

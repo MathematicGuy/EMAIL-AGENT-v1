@@ -55,7 +55,7 @@
 | Provider / Integration | Usage in Architecture | Resilience & Fallback Controls |
 |---|---|---|
 | **Google OAuth 2.0 & Gmail API** | Mailbox authorization and unread thread retrieval. | Read-only scope (`gmail.readonly`). Ephemeral signed OAuth state with PKCE. |
-| **Gemini API / Groq API / Faucet API** | Structured email classification, action plan generation, and multi-turn chat replies. | Configured via `LLM_PROVIDER`. Automatic key rotation on HTTP 429 for Gemini. Fallback to unavailable error response if provider fails. |
+| **Gemini API / Groq API / Faucet API / OpenRouter** | Structured email classification, action plan generation, and multi-turn chat replies. | Configured via `LLM_PROVIDER`. Gemini: key rotation on HTTP 429. OpenRouter: native `models[]` from `OPENROUTER_ALLOWED_MODELS`, then Google Gemini last-resort on `OpenRouterAPIError` when Gemini keys exist (ADR-012). Schema-invalid JSON after repair does not hop. Both-fail keeps conservative `RETRIEVE_RAG` / unavailable errors. |
 | **Jina AI API** | Text embeddings (`v5`) & cross-encoder reranking (`jina-reranker-v2-base-multilingual`). | Used for company RAG ingestion and hybrid reranking. Fallbacks to dense matrix/BM25 if unconfigured. |
 | **Turbovec + Postgres FTS** | Company knowledge is a local `.tvim`; project documents are Postgres chunks + per-project `.tvim`. | Company RAG degrades to `NullSemanticMemory` if Turbovec setup fails. |
 | **Turbovec (TurboQuant 4-bit)** | Quantized in-process vector memory store (`.data/turbovec_index.tvim`). | Fast 4-bit quantized local vector search enabled via `RAG_STORE_PROVIDER=turbovec`. |

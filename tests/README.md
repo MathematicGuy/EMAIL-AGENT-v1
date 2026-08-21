@@ -7,15 +7,20 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Core suite: `uv run pytest -q` -> ~20 s, 1142 passed.** Defaults: 4 xdist
-workers with `--dist loadgroup`, `-m 'not live and not extended'`, `--strict-markers`. Worker
+**Whole suite: `uv run pytest -q` -> ~16 s, 1592 passed.** Defaults: 4 xdist
+workers with `--dist loadgroup`, `-m 'not live'`, `--strict-markers`. Worker
 flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
 is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
 route — that throws away the cores. Use `-n 0` only to debug a single failure.
+**Do not raise the worker count either** — see §5.
 
-To run extended/nightly tests or full offline suite:
-- `uv run pytest -m extended -q` (real PostgreSQL persistence + MemEval / evaluation harnesses — 383 passed, ~12 s)
-- `uv run pytest -m 'not live' -q` (runs the full 1,525 offline tests)
+The method these numbers come from is written up in
+[`docs/references/test-optimization.md`](../docs/references/test-optimization.md).
+Refresh §1 with `--durations`; refresh nothing by guesswork.
+
+There is **no `extended` tier**, deliberately — see §2. `pytest -q` is the whole
+offline suite; the PostgreSQL routes inside it skip in ~1 s when no server is
+configured. To add the live tier on top: `uv run pytest -m 'live or not live' -q`.
 
 The suite is **offline by construction** -- see §7. Do not undo that to make a
 test pass.
@@ -29,23 +34,26 @@ which is what one route costs; the full suite is parallel.
 
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 172 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 562 | 2.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 73 | 4.0 s | BM25, RRF fusion, reranker, query guard, Turbovec memory. |
-| R4 | `tests/unit/integrations/llm` | 43 | 1.6 s | Prompt assembly, parsing, key rotation, classifiers. |
-| R5 | `tests/unit/integrations/gmail` | 19 | 0.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 251 | 7.0 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 19 | 1.3 s | Repository logic against fakes. |
-| R8 | `tests/unit/orchestration` | 12 | 1.5 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 66 | 10.4 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
-| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 25 | 5.5 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 3.9 s | Real PostgreSQL. **Skips wholesale without a server.** One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
-| R13 | `tests/integration/email_action_plan` | 37 | 3.0 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 68 | 13.0 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 974 | 22.0 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 908 | 14.0 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(core suite)* | 1142 | **20 s parallel** | `uv run pytest -q` |
+| R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 577 | 2.3 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 102 | 3.0 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 76 | 1.3 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail` | 40 | 0.7 s | OAuth/PKCE, token cipher, mailbox adapter. |
+| R6 | `tests/unit/integrations` | 358 | 5.2 s | R3+R4+R5 plus bootstrap, Supabase, OnlyOffice callback tokens. |
+| R7 | `tests/unit/persistence` | 37 | 1.6 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 19 | 1.3 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 184 | 7.7 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
+| R10 | `tests/unit/fixtures` | 33 | 1.9 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 50 | 6.8 s | FastAPI via in-process ASGI transport, incl. raw-document endpoints. |
+| R12 | `tests/integration/persistence` | 9 | 0.9 s | Real PostgreSQL. **Skips wholesale without a server** (~1 s to decide; see §5). One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
+| R13 | `tests/integration/email_action_plan` | 37 | 2.6 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 88 | 8.8 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1504 | 16.6 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1320 | 10.4 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
+| — | *(everything)* | 1592 | **16 s parallel** | `uv run pytest -q` |
+
+Collection alone is ~2.5 s of that, and **every worker pays it in full** —
+which is why more workers do not help (§5).
 
 ### Source -> route
 
@@ -123,6 +131,9 @@ absent, add the row when you add the test.
 | App boot never reaches the embedding API (`RAG_STORE_PROVIDER` pinned) | `tests/conftest.py` | API/workflow tests |
 | `import cowork_agent` resolves to this checkout's `src`, not the venv editable install | `unit/test_xdist_harness.py` | — |
 | `-p no:xdist` must not usage-error; default run still fans out to 4 workers | `unit/test_xdist_harness.py` | — |
+| The Postgres pre-flight only ever makes a *negative* cheap; an unexpected socket error still falls through to `psycopg.connect` | `unit/test_pg_probe.py` | the persistence modules themselves |
+| Embedding key rotation backs off between attempts (2.0 s Gemini) and paces batches (0.2 s Jina) | `unit/integrations/rag/test_embeddings.py` (`slept` fixture) | — |
+| OpenRouter hops to Google Gemini only on `OpenRouterAPIError` (transport / unusable JSON), never on schema-invalid JSON after repair | `unit/integrations/llm/test_last_resort.py` + `unit/integrations/llm/test_openrouter.py` | chat_reply / chat_intent except one wire-up each |
 
 ### Two facts that break tests if you forget them
 
@@ -157,11 +168,16 @@ absent, add the row when you add the test.
    `test_min_score_excludes_everything_below_the_threshold`, not
    `test_min_score_2`.
 7. **New external dependency? Mark it `live` and `serial`.**
-8. **Never sleep in unit tests.** Mock `asyncio.sleep` / backoff delays in test fixtures
-   so retry tests execute in milliseconds instead of seconds.
-9. **No mock dataset loops in pytest.** Benchmarking AI model accuracy against 100+ case
-   datasets belongs in standalone scripts (`scripts/evaluate_*_real_llm.py`). Pytest tests
-   deterministic contracts, parsing, and routing logic only.
+8. **Never let a test wait on a real clock.** Production backoff is behaviour
+   worth asserting, but not worth *serving*. Fake the clock at the seam and
+   assert the delays that were requested -- see the `slept` fixture in
+   `unit/integrations/rag/test_embeddings.py`. Two rotation tests awaiting real
+   backoff held 10 s of a 19.8 s suite, and under `--dist loadgroup` one real
+   sleep sets the floor for every worker no matter how many there are.
+9. **No mock dataset loops in pytest.** Benchmarking model accuracy across 100+
+   case datasets belongs in a standalone script (`scripts/evaluate_*_real_llm.py`),
+   not in the suite. Pytest asserts deterministic contracts, parsing, and routing
+   logic. A dataset replay through a mock classifier measures the mock.
 
 ### Pruning checklist
 
@@ -190,6 +206,36 @@ uv run pytest tests/unit/integrations -q
 # 3. Full suite once, at the end.
 uv run pytest -q
 ```
+
+### Four workers is the ceiling. Measured, not assumed.
+
+This machine has 16 cores and the suite still runs fastest on 4:
+
+| Workers | Wall clock |
+|---|---|
+| `-n 4` (default) | **13.5 s** |
+| `-n 6` | 18.4 s |
+| `-n 8` | 19.6 s |
+| `-n 12` | 19.6 s |
+
+Worker count is not the lever because *test execution is not the bottleneck* —
+collection is. Every worker imports all 176 test modules before running its
+first test, so each additional worker adds a full collection pass while
+splitting an ever-smaller remainder of actual test time. Past 4, the new
+worker costs more than it takes away.
+
+That makes **import-time work the thing to attack**, not parallelism:
+
+- Nothing at module scope may talk to the network on a timeout. The Postgres
+  probe (`integration/persistence/pg_probe.py`) used to spend the full 3 s
+  `connect_timeout` proving a dead port, on all four workers, before a single
+  test ran. A TCP pre-flight settles a dead port in ~0.25 s. It is deliberately
+  optimistic — anything that answers falls through to the real `psycopg.connect`
+  — because a pre-flight that is too eager turns a live server into a silent
+  skip, and a skipped persistence tier looks exactly like a passing one.
+  `unit/test_pg_probe.py` owns that asymmetry.
+- A module-level constant that builds a corpus, opens a file, or imports
+  `langfuse` is paid four times over. Move it into a fixture.
 
 ### Avoiding repeated work
 
@@ -222,13 +268,16 @@ tests/
   conftest.py                       suite guards: SSL_CERT_FILE, offline RAG pin,
                                     outbound-socket block, deselect banner, log quiet
   unit/test_network_guard.py        proves the socket block actually blocks
+  unit/test_pg_probe.py             proves the Postgres pre-flight cannot
+                                    turn a live server into a silent skip
   fixtures/                         shared builders and golden-fixture loaders
   unit/                             no I/O, no app boot, fakes only
     scripts/cli_harness.py          in-process runner for scripts/*.py
   integration/
     api/                            FastAPI over in-process ASGI transport
     api/test_e2e_frontend_api.py    the only `live` module (real subprocess)
-    persistence/pg_probe.py         one cached Postgres reachability check
+    persistence/pg_probe.py         one cached Postgres reachability check,
+                                    TCP pre-flight first (see §5)
 ```
 
 Gate before handing work back:

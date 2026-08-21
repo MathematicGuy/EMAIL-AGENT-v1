@@ -1,0 +1,187 @@
+{
+  "probe_set_id": "v2_four_scopes_wide",
+  "scope": "semantic",
+  "answers": [
+    {
+      "probe": "sem_recall_01",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Biểu mẫu OT-114",
+          "must_contain": [
+            "OT-114",
+            "OT 114"
+          ],
+          "grounding": "overtime-policy.md line 7: \"Mọi đề nghị làm thêm giờ phải nộp qua biểu mẫu OT-114 trên cổng nội bộ.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về biểu mẫu nộp đề nghị làm thêm giờ.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không biết biểu mẫu"
+          ],
+          "grounding": "semantic is masked on this arm; nothing else holds the form code"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "sem_recall_02",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "Biểu mẫu WFH-207",
+          "must_contain": [
+            "WFH-207",
+            "WFH 207"
+          ],
+          "grounding": "remote-work-policy.md line 6: \"Mọi đăng ký làm việc từ xa phải nộp qua biểu mẫu WFH-207 trên cổng nội bộ.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về biểu mẫu đăng ký làm việc từ xa.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không biết biểu mẫu"
+          ],
+          "grounding": "semantic is masked on this arm; nothing else holds the form code"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "sem_recall_03",
+      "test": "recall",
+      "arms": {
+        "full": {
+          "reference": "450.000 đồng mỗi ngày",
+          "must_contain": [
+            "450.000",
+            "450000",
+            "450 000"
+          ],
+          "grounding": "travel-expense-policy.md line 5: \"Mức công tác phí trong nước là 450.000 đồng mỗi ngày, đã bao gồm ăn uống và đi lại tại địa phương.\""
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về mức công tác phí trong nước.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không biết mức công tác phí"
+          ],
+          "grounding": "semantic is masked on this arm; nothing else holds the amount"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "sem_restraint_01",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có thông tin về chế độ nghỉ dài hạn sabbatical trong chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không có chính sách",
+            "không được đề cập",
+            "không có thông tin về chế độ nghỉ dài hạn",
+            "không có chính sách nghỉ dài hạn",
+            "không có quy định về sabbatical"
+          ],
+          "grounding": "No sabbatical or long-term leave document exists in the corpus. leave-policy.md covers only annual leave. The absence of this topic from every document makes this a proper restraint."
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về chế độ nghỉ dài hạn sabbatical.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không có thông tin về chế độ nghỉ dài hạn"
+          ],
+          "grounding": "semantic is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "sem_restraint_02",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Tôi không có thông tin về công tác phí cho chuyến đi nước ngoài. Chính sách công ty chỉ quy định công tác phí cho các chuyến công tác trong nước.",
+          "refusal_markers": [
+            "không có thông tin",
+            "không được quy định",
+            "không có thông tin về công tác phí nước ngoài"
+          ],
+          "grounding": "travel-expense-policy.md line 3: \"Tài liệu này chỉ áp dụng cho các chuyến công tác trong nước.\" The domestic figure 450.000 is one line away but explicitly out of scope for overseas travel."
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về công tác phí nước ngoài.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "semantic is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    },
+    {
+      "probe": "sem_restraint_03",
+      "test": "restraint",
+      "arms": {
+        "full": {
+          "reference": "Chính sách không yêu cầu biểu mẫu cho việc đổi laptop hỏng. Nhân viên báo trực tiếp cho bộ phận công nghệ thông tin qua cổng nội bộ.",
+          "refusal_markers": [
+            "không có biểu mẫu",
+            "không yêu cầu nộp biểu mẫu",
+            "không có biểu mẫu đổi laptop",
+            "không yêu cầu biểu mẫu đổi thiết bị"
+          ],
+          "grounding": "equipment-policy.md lines 3-5 describe the replacement procedure but contain no form code of any kind. The silence about forms is load-bearing: OT-114 and WFH-207 exist one document away but are not applicable here."
+        },
+        "ablated": {
+          "reference": "Tôi không có thông tin về biểu mẫu đổi laptop hỏng.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "semantic is masked on this arm"
+        },
+        "control": {
+          "reference": "Tôi không có thông tin về chính sách công ty.",
+          "refusal_markers": [
+            "không có thông tin"
+          ],
+          "grounding": "memory is never seeded on this arm"
+        }
+      }
+    }
+  ],
+  "defects": []
+}
