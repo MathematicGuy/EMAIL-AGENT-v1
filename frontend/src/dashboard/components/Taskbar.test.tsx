@@ -60,7 +60,7 @@ describe('Taskbar', () => {
 
     expect(screen.getByText('Generating')).toBeTruthy();
     expect(
-      screen.getByRole<HTMLButtonElement>('button', { name: 'Delete Drafting launch plan' }).disabled,
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Xóa Drafting launch plan' }).disabled,
     ).toBe(true);
   });
 

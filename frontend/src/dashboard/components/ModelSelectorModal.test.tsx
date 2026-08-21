@@ -18,7 +18,7 @@ describe('ModelSelectorModal', () => {
       />
     );
 
-    expect(screen.getByText('Model')).toBeTruthy();
+    expect(screen.getByText('Mô hình')).toBeTruthy();
     expect(screen.getByText('Gemini 3.6 Flash')).toBeTruthy();
     expect(screen.queryByText(/\((High|Medium|Low)\)/)).toBeNull();
 

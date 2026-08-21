@@ -21,8 +21,8 @@
 - **Tổng số request gửi lên Gemini API thật:** **252 lượt**.
 - **Tổng số kiểm tra hợp lệ cục bộ:** **15 lượt**.
 - **File lưu trữ kết quả JSON thô:**
-  - Single-turn (240 câu): [`docs/evaluations/CHAT/live-real-gemini-eval-full.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/evaluations/CHAT/live-real-gemini-eval-full.json)
-  - Mở rộng (Multi-turn, Adversarial, Edge cases): [`docs/evaluations/CHAT/live-real-gemini-extended.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/evaluations/CHAT/live-real-gemini-extended.json)
+  - Single-turn (240 câu): [`evaluations/CHAT/baselines/live-real-gemini-eval-full.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/baselines/live-real-gemini-eval-full.json)
+  - Mở rộng (Multi-turn, Adversarial, Edge cases): [`evaluations/CHAT/baselines/live-real-gemini-extended.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/baselines/live-real-gemini-extended.json)
 
 ---
 

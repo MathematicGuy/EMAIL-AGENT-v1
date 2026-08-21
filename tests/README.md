@@ -18,6 +18,10 @@ The method these numbers come from is written up in
 [`docs/references/test-optimization/`](../docs/references/test-optimization/test-optimization.md).
 Refresh §1 with `--durations`; refresh nothing by guesswork.
 
+There is **no `extended` tier**, deliberately — see §2. `pytest -q` is the whole
+offline suite; the PostgreSQL routes inside it skip in ~1 s when no server is
+configured. To add the live tier on top: `uv run pytest -m 'live or not live' -q`.
+
 The suite is **offline by construction** -- see §7. Do not undo that to make a
 test pass.
 
@@ -48,7 +52,7 @@ workers (`-n 4 --dist loadfile`).
 | R16 | `tests/unit --ignore=tests/unit/scripts` | 1577 | 11.6 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
 | — | *(everything)* | 1838 | **14.4 s parallel** | `uv run pytest -q` |
 
-Collection alone is 2.5 s of that 14.4 s, and **every worker pays it in full** —
+Collection alone is 2.5 s of that 13.5 s, and **every worker pays it in full** —
 which is why more workers do not help (§5).
 
 ### Source -> route
@@ -77,8 +81,10 @@ Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 
 | Marker | Meaning | Default |
 |---|---|---|
-| `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
-| `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
+| `core` | **Test Não & Thuật toán**: Logic nghiệp vụ, contracts, security boundary (Fakes 100%, 0 I/O). | **Selected** by default. |
+| `extended` | **Test Kho chứa & Đánh giá**: Real PostgreSQL container, MemEval harness, evaluation datasets. A fast, fakes-only test of *production* behaviour is `core` — do not mark it `extended` just because it lives under `unit/scripts` or reads a fixture file. | **Deselected.** `-m extended` to run (383 passed). |
+| `live` | **Test Thực địa ngoài đời**: Real Gmail OAuth, real Gemini API, real server subprocess. | **Deselected.** `-m live` to opt in (27 tests). |
+| `slow` | >1 s of wall clock on its own. | Selected. |
 | `serial` | Spawns a process or binds a fixed port. Auto-grouped onto one xdist worker (`xdist_group("serial")`). Do not disable xdist for these. | Selected. |
 | `xdist_group` | Same worker for tests that share a destructive resource. Persistence (R12) uses `pg-control-plane` so `DROP SCHEMA public CASCADE` never runs on two workers. | Selected. Requires `--dist loadgroup`. |
 
@@ -86,10 +92,12 @@ Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
 naming what the filter dropped. A green summary with that banner above it is
 *not* a fully verified suite.
 
-`tests/integration/api/test_e2e_frontend_api.py` is the only `live` module (24
-tests). It needs a real `mail-todo-api` subprocess plus completed Gmail OAuth.
-When the server will not boot it **skips behind a wall of `!!!!` explaining why**
-— it never errors, so it can never mask a real failure.
+The `live` tier modules for Software E2E integration (deselected by default, run with `-m live`):
+- `tests/integration/api/test_e2e_frontend_api.py` (24 tests): requires a real `mail-todo-api` subprocess + Gmail OAuth.
+- `tests/integration/memory_eval/test_live_smoke.py` (1 test): live smoke test against external PostgreSQL/memory services.
+- `tests/unit/scripts/test_evaluate_memory.py` (2 tests): live CLI evaluation harness.
+
+*(Note: AI Model Benchmarking with live LLM calls, such as the 240 Vietnamese Intent evaluation, is decoupled from pytest and executed via `scripts/evaluate_user_intent_real_llm.py` with artifacts stored in `evaluations/CHAT/`).*
 
 ---
 
@@ -166,6 +174,10 @@ absent, add the row when you add the test.
    `unit/integrations/rag/test_embeddings.py`. Two rotation tests awaiting real
    backoff held 10 s of a 19.8 s suite, and under `--dist loadgroup` one real
    sleep sets the floor for every worker no matter how many there are.
+9. **No mock dataset loops in pytest.** Benchmarking model accuracy across 100+
+   case datasets belongs in a standalone script (`scripts/evaluate_*_real_llm.py`),
+   not in the suite. Pytest asserts deterministic contracts, parsing, and routing
+   logic. A dataset replay through a mock classifier measures the mock.
 
 ### Pruning checklist
 
@@ -176,6 +188,7 @@ Delete a test when any of these holds:
   a stale *kwarg* means fix the call, a stale *purpose* means delete the test).
 - It re-tests framework behaviour (pydantic validation, FastAPI routing).
 - It only passes because a broad `except Exception` swallowed the real error.
+- It loops over a large static QA dataset with mock responses (move dataset benchmarking to `scripts/evaluate_*_real_llm.py`).
 
 ---
 

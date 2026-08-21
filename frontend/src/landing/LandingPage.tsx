@@ -19,7 +19,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
   const [mousePos, setMousePos] = useState({ x: -1000, y: -1000 });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mousePosRef = useRef({ x: -1000, y: -1000 });
-  const fullPrompt = "Build a real-time analytics dashboard with React & Tailwind...";
+  const fullPrompt = "Xây dựng dashboard phân tích theo thời gian thực với React & Tailwind...";
 
   // Mouse position tracker for dynamic interactive spotlight & particle connections (Effect 1)
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -306,7 +306,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
           className="group relative inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#d97757] via-[#e08365] to-[#c76545] text-white text-xs font-semibold shadow-lg shadow-[#d97757]/25 hover:shadow-[#d97757]/50 hover:scale-105 transition-all duration-300 cursor-pointer overflow-hidden"
         >
           <span className="relative z-10 flex items-center gap-1.5">
-            <span>Launch Studio</span>
+            <span>Mở Không Gian Làm Việc</span>
             <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
           </span>
           <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -318,14 +318,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
         {/* Simplified Tagline Pill */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#23211e]/90 border border-[#383531] text-xs font-medium text-[#e89b82] mb-6 shadow-md backdrop-blur-md hover:border-[#d97757]/40 transition-colors">
           <Sparkles className="w-3.5 h-3.5 text-[#d97757] animate-spin duration-5000" />
-          <span>F-Cowork · AI Workspace</span>
+          <span>F-Cowork · Không Gian Làm Việc AI</span>
         </div>
 
         {/* Original Headline */}
         <h1 className="text-4xl sm:text-6xl md:text-7xl font-serif tracking-tight text-[#f3f2ef] leading-[1.1] mb-6 font-normal max-w-4xl drop-shadow-sm">
-          Transform Prompts into{' '}
+          Biến Yêu Cầu Thành{' '}
           <span className="bg-gradient-to-r from-[#f3f2ef] via-[#e89b82] to-[#d97757] bg-clip-text text-transparent italic font-light">
-            AI Workflows
+            Quy Trình AI
           </span>
         </h1>
 
@@ -337,7 +337,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
           >
             <span className="relative z-10 flex items-center gap-2.5">
               <Zap className="w-4 h-4 fill-current" />
-              <span>Try F-Cowork Free</span>
+              <span>Dùng Thử F-Cowork Miễn Phí</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </span>
             <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
@@ -355,7 +355,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
               <span className="ml-3 text-xs text-zinc-400 font-mono">F-Cowork Studio</span>
             </div>
             <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/40">
-              ● Live Ingest
+              ● Trực tiếp
             </span>
           </div>
 
@@ -367,7 +367,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
               <div className="flex items-center justify-between text-xs font-semibold text-[#d97757]">
                 <span className="flex items-center gap-2">
                   <Bot className="w-4 h-4" />
-                  <span>AI Workspace Ingest</span>
+                  <span>Thu nạp dữ liệu không gian AI</span>
                 </span>
               </div>
 
@@ -381,7 +381,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
                 <div className="p-3 rounded-xl bg-[#22201c]/90 border border-[#35332f] flex items-center justify-between text-xs hover:border-emerald-500/40 transition-colors">
                   <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Intake</span>
+                    <span>Tiếp nhận</span>
                   </span>
                   <span className="text-zinc-400 font-mono">100%</span>
                 </div>
@@ -389,7 +389,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
                 <div className="p-3 rounded-xl bg-[#22201c]/90 border border-[#35332f] flex items-center justify-between text-xs hover:border-amber-500/40 transition-colors">
                   <span className="flex items-center gap-1.5 font-semibold text-amber-300">
                     <Cpu className="w-3.5 h-3.5 animate-spin duration-3000" />
-                    <span>ExecPlan</span>
+                    <span>Kế hoạch</span>
                   </span>
                   <span className="text-zinc-400 font-mono">85%</span>
                 </div>
@@ -397,9 +397,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
                 <div className="p-3 rounded-xl bg-[#22201c]/90 border border-[#35332f] flex items-center justify-between text-xs hover:border-[#d97757]/40 transition-colors">
                   <span className="flex items-center gap-1.5 font-semibold text-[#d97757]">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Approval</span>
+                    <span>Phê duyệt</span>
                   </span>
-                  <span className="text-zinc-400 font-mono">Ready</span>
+                  <span className="text-zinc-400 font-mono">Sẵn sàng</span>
                 </div>
               </div>
             </div>
@@ -410,20 +410,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToDashboard 
         <section id="features" className="w-full grid grid-cols-1 sm:grid-cols-3 gap-4 mt-16 text-left">
           <div className="p-5 rounded-2xl bg-[#191816]/90 border border-[#2c2a26] hover:border-[#d97757]/50 hover:-translate-y-1 transition-all duration-300 shadow-md group backdrop-blur-sm">
             <Bot className="w-5 h-5 text-[#d97757] mb-3 group-hover:scale-110 transition-transform" />
-            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Multi-Model Chat</h3>
-            <p className="text-xs text-zinc-400">Claude 3.7, Fable 5 & GPT-4o with reasoning effort.</p>
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Trò chuyện Đa Mô hình</h3>
+            <p className="text-xs text-zinc-400">Gemini, Claude, DeepSeek với khả năng suy luận chuyên sâu.</p>
           </div>
 
           <div className="p-5 rounded-2xl bg-[#191816]/90 border border-[#2c2a26] hover:border-amber-400/50 hover:-translate-y-1 transition-all duration-300 shadow-md group backdrop-blur-sm">
             <Layers className="w-5 h-5 text-amber-400 mb-3 group-hover:scale-110 transition-transform" />
-            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Live Artifact Stage</h3>
-            <p className="text-xs text-zinc-400">Side-by-side real-time code and UI preview.</p>
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Xem trước Artifact Trực tiếp</h3>
+            <p className="text-xs text-zinc-400">Xem trước mã nguồn và giao diện thời gian thực song song.</p>
           </div>
 
           <div className="p-5 rounded-2xl bg-[#191816]/90 border border-[#2c2a26] hover:border-emerald-400/50 hover:-translate-y-1 transition-all duration-300 shadow-md group backdrop-blur-sm">
             <ShieldCheck className="w-5 h-5 text-emerald-400 mb-3 group-hover:scale-110 transition-transform" />
-            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Human Approval</h3>
-            <p className="text-xs text-zinc-400">Controlled execution with explicit approval gates.</p>
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Kiểm duyệt & Phê duyệt</h3>
+            <p className="text-xs text-zinc-400">Thực thi có kiểm soát với các cổng phê duyệt rõ ràng.</p>
           </div>
         </section>
       </main>

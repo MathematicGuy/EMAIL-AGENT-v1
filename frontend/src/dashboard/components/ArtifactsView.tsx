@@ -263,7 +263,7 @@ export const ArtifactsView: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Folder className="w-5 h-5 text-[#d97757]" />
-              <h2 className="text-sm font-semibold tracking-tight">Project Artifacts</h2>
+              <h2 className="text-sm font-semibold tracking-tight">Tài liệu Artifacts</h2>
             </div>
             <button
               onClick={handleCreateNew}
@@ -369,7 +369,7 @@ export const ArtifactsView: React.FC = () => {
                     </h1>
                     <p className="text-[10px] text-zinc-500 mt-1 flex items-center gap-3">
                       <span className="flex items-center gap-1">
-                        <HardDrive className="w-3 h-3" /> Size: {formatSize(selectedFile?.size || 0)}
+                        <HardDrive className="w-3 h-3" /> Dung lượng: {formatSize(selectedFile?.size || 0)}
                       </span>
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" /> Cập nhật: {selectedFile ? formatDate(selectedFile.updated_at) : ''}

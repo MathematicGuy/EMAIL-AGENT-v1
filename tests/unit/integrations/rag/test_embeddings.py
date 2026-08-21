@@ -31,6 +31,14 @@ def _settings(*, rotate: bool = True) -> GeminiSettings:
     )
 
 
+@pytest.fixture(autouse=True)
+def _instant_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _sleep(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr("cowork_agent.integrations.rag.embeddings.asyncio.sleep", _sleep)
+
+
 def _quota_error() -> errors.APIError:
     return errors.APIError(429, {"error": {"message": "RESOURCE_EXHAUSTED"}})
 

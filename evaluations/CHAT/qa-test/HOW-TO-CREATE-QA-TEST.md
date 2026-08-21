@@ -35,7 +35,7 @@ Hệ thống được thiết kế theo 2 tầng kiểm thử độc lập:
 Bạn có thể thêm các kịch bản mới vào 1 trong 4 trục dưới đây:
 
 ### Trục 1: Thêm Kịch bản Đơn Lượt (Single-turn) vào JSON Dataset
-Mở file [`docs/qa-test/qa-chatbot-intent-dataset.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/qa-test/qa-chatbot-intent-dataset.json) và thêm một JSON object theo mẫu:
+Mở file [`evaluations/CHAT/qa-test/qa-chatbot-intent-dataset.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/qa-test/qa-chatbot-intent-dataset.json) và thêm một JSON object theo mẫu:
 
 ```json
 {
@@ -123,7 +123,7 @@ VALID_EDGE_QUERIES = [
 
 ### 1. Chạy nhanh Unit Test Tầng 1 (267 Tests / ~5.6s, Không tốn API):
 ```bash
-uv run pytest tests/unit/features/ai_chat/test_user_intent_*.py -q
+uv run pytest tests/unit/features/ai_chat/test_user_intent_*.py -m "extended or not extended" -q
 ```
 
 ### 2. Chạy Live Test Tầng 2 với Gemini Thật (100% Real API, Không Mock):
@@ -148,9 +148,9 @@ Sau khi chạy xong, kết quả thực tế được lưu vào các file sau:
 
 | File lưu trữ | Nội dung |
 |---|---|
-| [`docs/qa-test/QA-TEST-RESULTS-REPORT.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/qa-test/QA-TEST-RESULTS-REPORT.md) | Báo cáo Markdown tổng hợp toàn bộ kết quả 5 trục và phân tích chi tiết các lỗi fail. |
-| [`docs/evaluations/CHAT/live-real-gemini-eval-full.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/evaluations/CHAT/live-real-gemini-eval-full.json) | Kết quả thô 240 câu hỏi từ Gemini (Intent, Route, Confidence, Phản hồi text thật, Task proposal thật, Latency). |
-| [`docs/evaluations/CHAT/live-real-gemini-extended.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/evaluations/CHAT/live-real-gemini-extended.json) | Kết quả thô 12 kịch bản mở rộng (Multi-turn, Adversarial, Edge cases) từ Gemini thật. |
+| [`evaluations/CHAT/qa-test/QA-TEST-RESULTS-REPORT.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/qa-test/QA-TEST-RESULTS-REPORT.md) | Báo cáo Markdown tổng hợp toàn bộ kết quả 5 trục và phân tích chi tiết các lỗi fail. |
+| [`evaluations/CHAT/baselines/live-real-gemini-eval-full.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/baselines/live-real-gemini-eval-full.json) | Kết quả thô 240 câu hỏi từ Gemini (Intent, Route, Confidence, Phản hồi text thật, Task proposal thật, Latency). |
+| [`evaluations/CHAT/baselines/live-real-gemini-extended.json`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/baselines/live-real-gemini-extended.json) | Kết quả thô 12 kịch bản mở rộng (Multi-turn, Adversarial, Edge cases) từ Gemini thật. |
 
 ---
 

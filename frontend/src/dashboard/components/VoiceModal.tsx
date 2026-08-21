@@ -14,9 +14,9 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({ isOpen, onClose, onSendT
   useEffect(() => {
     if (isOpen && isListening) {
       const phrases = [
-        "Analyzing prompt context...",
-        "Voice input activated...",
-        "How can I help you today?"
+        "Đang phân tích ngữ cảnh yêu cầu...",
+        "Đã kích hoạt thu âm giọng nói...",
+        "Tôi có thể giúp gì cho bạn hôm nay?"
       ];
       let i = 0;
       const interval = setInterval(() => {
@@ -41,8 +41,8 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({ isOpen, onClose, onSendT
 
         {/* Header */}
         <div>
-          <h3 className="font-semibold text-lg text-zinc-100">Live Voice Mode</h3>
-          <p className="text-xs text-zinc-400 mt-1">Speak naturally to converse with Sonnet 5</p>
+          <h3 className="font-semibold text-lg text-zinc-100">Chế độ Giọng nói Trực tiếp</h3>
+          <p className="text-xs text-zinc-400 mt-1">Nói tự nhiên để trò chuyện với AI</p>
         </div>
 
         {/* Animated Waveform Visualizer */}
@@ -56,7 +56,7 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({ isOpen, onClose, onSendT
 
         {/* Dynamic Transcription text */}
         <div className="min-h-[40px] text-sm text-zinc-300 font-medium italic px-4">
-          "{transcription || 'Listening...'}"
+          "{transcription || 'Đang lắng nghe...'}"
         </div>
 
         {/* Action Controls */}
@@ -82,7 +82,7 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({ isOpen, onClose, onSendT
           }}
           className="w-full py-2.5 bg-[#2c2a26] hover:bg-[#383632] text-zinc-200 text-xs font-semibold rounded-xl border border-zinc-700/50 transition-colors cursor-pointer"
         >
-          Send Recorded Text
+          Gửi văn bản đã ghi
         </button>
       </div>
     </div>

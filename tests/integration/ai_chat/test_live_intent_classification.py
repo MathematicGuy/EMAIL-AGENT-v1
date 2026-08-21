@@ -32,9 +32,17 @@ load_runtime_environment()
 # ==============================================================================
 
 _DATASET_PATH = (
-    Path(__file__).parents[3] / "docs" / "qa-test" / "qa-chatbot-intent-dataset.json"
+    Path(__file__).parents[3]
+    / "evaluations"
+    / "CHAT"
+    / "qa-test"
+    / "qa-chatbot-intent-dataset.json"
 )
-_ALL: list[dict[str, Any]] = json.loads(_DATASET_PATH.read_text(encoding="utf-8"))
+# Read at import time, so a missing dataset is a collection error for the whole
+# suite rather than a skip on the `live` tier this module belongs to.
+_ALL: list[dict[str, Any]] = (
+    json.loads(_DATASET_PATH.read_text(encoding="utf-8")) if _DATASET_PATH.is_file() else []
+)
 
 _SAMPLE_PER_BUCKET_ENV = os.environ.get("LIVE_INTENT_SAMPLE_PER_BUCKET", "")
 if _SAMPLE_PER_BUCKET_ENV.strip():

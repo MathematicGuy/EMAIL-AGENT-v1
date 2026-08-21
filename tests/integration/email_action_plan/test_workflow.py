@@ -53,7 +53,7 @@ from cowork_agent.integrations.llm.fakes import (
 from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
-from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
+from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
@@ -1641,7 +1641,7 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
 
     async def scenario() -> None:
         documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
-        memory = InRepoSemanticMemory(
+        memory = TurbovecSemanticMemory(
             documents, HashingEmbedder(), min_score_default=0.0
         )
         await memory.build_index()

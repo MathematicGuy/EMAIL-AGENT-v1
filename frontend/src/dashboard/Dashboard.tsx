@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { SidebarState, ModelOption, RecentChat } from './types';
+import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView } from './types';
 import { AVAILABLE_MODELS } from './data/mockData';
 import { useStreamingChat } from './hooks/useStreamingChat';
 import { Taskbar } from './components/Taskbar';
@@ -9,6 +9,7 @@ import { ChatStreamView } from './components/ChatStreamView';
 
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
+import { RawDocumentsView } from './components/RawDocumentsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { VoiceModal } from './components/VoiceModal';
 import { useProjects } from './hooks/useProjects';
@@ -22,9 +23,13 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
-  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'artifacts'>(() =>
-    new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
-  );
+  const [activeView, setActiveView] = useState<ActiveDashboardView>(() => {
+    const viewParam = new URLSearchParams(window.location.search).get('view');
+    if (viewParam === 'mail') return 'mail';
+    if (viewParam === 'artifacts') return 'artifacts';
+    if (viewParam === 'raw-documents' || viewParam === 'procedures') return 'raw-documents';
+    return 'chat';
+  });
   const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
   const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
   const [modelAnchor, setModelAnchor] = useState<Pick<
@@ -202,6 +207,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
         {activeView === 'artifacts' && (
           <ArtifactsView />
+        )}
+
+        {activeView === 'raw-documents' && (
+          <RawDocumentsView />
         )}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>

@@ -47,5 +47,5 @@ Hệ thống triển khai 5 trục kiểm thử bao phủ toàn diện:
   - 4 câu kiến thức ngoài lề phân loại `knowledge_query`.
 
 Toàn bộ tài liệu chi tiết:
-- Hướng dẫn tùy chỉnh: [`docs/qa-test/HOW-TO-CREATE-QA-TEST.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/qa-test/HOW-TO-CREATE-QA-TEST.md)
-- Báo cáo kết quả chi tiết: [`docs/qa-test/QA-TEST-RESULTS-REPORT.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/docs/qa-test/QA-TEST-RESULTS-REPORT.md)
+- Hướng dẫn tùy chỉnh: [`HOW-TO-CREATE-QA-TEST.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/qa-test/HOW-TO-CREATE-QA-TEST.md)
+- Báo cáo kết quả chi tiết: [`QA-TEST-RESULTS-REPORT.md`](file:///D:/User/ProjectGithub/hiepnguyenn-99/EMAIL-AGENT-v1/evaluations/CHAT/qa-test/QA-TEST-RESULTS-REPORT.md)

@@ -36,17 +36,17 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-3">
         {apiStatus === 'online' && (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-            <Wifi className="w-2.5 h-2.5" /> API Live
+            <Wifi className="w-2.5 h-2.5" /> API Hoạt động
           </span>
         )}
         {apiStatus === 'offline' && (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full">
-            <WifiOff className="w-2.5 h-2.5" /> API Offline
+            <WifiOff className="w-2.5 h-2.5" /> API Ngoại tuyến
           </span>
         )}
         {apiStatus === 'unknown' && (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-zinc-400 bg-zinc-500/10 border border-zinc-500/20 px-2 py-0.5 rounded-full">
-            <Loader2 className="w-2.5 h-2.5 animate-spin" /> Connecting…
+            <Loader2 className="w-2.5 h-2.5 animate-spin" /> Đang kết nối…
           </span>
         )}
 
@@ -56,7 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="flex items-center gap-1.5 px-2.5 py-1 bg-[#252320] hover:bg-[#2e2b27] border border-[#383531] rounded-lg text-xs font-medium text-zinc-200 transition-colors cursor-pointer shadow-xs"
-              title="Current active project"
+              title="Dự án hiện tại"
             >
               <Folder
                 className="w-3.5 h-3.5 shrink-0"
@@ -77,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
                 />
                 <div className="absolute left-0 mt-1 w-56 bg-[#22201d] border border-[#383531] rounded-xl shadow-2xl z-50 py-1.5 text-xs select-none">
                   <div className="px-3 py-1 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-                    Active Project
+                    Dự án hiện tại
                   </div>
                   {projects?.map((project) => (
                     <button

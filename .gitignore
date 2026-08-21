@@ -62,8 +62,25 @@ frontend/.env
 .mypy_cache
 .grok
 
-# Agent session artifacts (tracked skills under .claude/ stay tracked)
+# Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
+.claude/conversations/
+.claude/chats/
+.agents/*
+!.agents/skills/
+!.agents/seeds/
+!.agents/qa-project-context.md
+
+# Common agent communication & handoff artifacts. Anchored to the repo root on
+# purpose: an unanchored `*handoff*.md` matches at every depth and would silently
+# swallow real documents such as docs/deployment/oncall-handoff.md.
+/BRIEFING.md
+/DISPATCH.md
+/ORIGINAL_REQUEST.md
+/HANDOFF.md
+/handoff-*.md
+.handoff/
+.subagents/
 
 # Playwright
 /test-results/
@@ -83,3 +100,17 @@ var/
 .venv-codex/
 .uv-cache/
 .uv-cache-codex/
+
+# Memory evaluation detail files carry full probe questions and model replies.
+# The runs/ and reports/ rules live above -- deliberately `reports/*.md` and not
+# `reports/`, because excluding the directory itself would defeat the
+# `!evaluations/MEMORIES/reports/REPORT_FORMAT.md` negation (git cannot re-include
+# a file inside an excluded directory).
+
+/evaluations/EMAIL/gmail_candidates.json
+/evaluations/EMAIL/.gmail_candidates.json.tmp
+/evaluations/EMAIL/reviewed_annotations.json
+/evaluations/EMAIL/email-routes/
+
+# Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
+.agents/skills/using-agent-skills/

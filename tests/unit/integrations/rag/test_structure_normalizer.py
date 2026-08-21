@@ -1,3 +1,4 @@
+
 from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
 from cowork_agent.integrations.rag.structure_profile import DEFAULT_PROFILE
 

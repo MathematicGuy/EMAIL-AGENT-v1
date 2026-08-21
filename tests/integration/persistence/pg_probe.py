@@ -13,9 +13,13 @@ of the whole run, four times over -- and on this machine nothing answers
 so each probe burned the full ``connect_timeout``. Hence the TCP pre-flight
 below: a dead port is now settled in ~0.3 s instead of ~3.2 s.
 
-Each module keeps its own ``DATABASE_URL`` and its own skip message: the two
-that default to ``""`` mean "not configured" and must not start guessing at the
-dev container.
+Each module keeps its own ``DATABASE_URL`` and its own skip message. They all
+default to ``""``, which means "not configured" and must not start guessing at
+the dev container: several of these modules run ``DROP SCHEMA public CASCADE``
+in an autouse fixture, so a default that happened to reach the dev container
+would wipe a developer's database on a bare ``pytest -m extended``. There is
+deliberately no ``DEFAULT_PG_TEST_URL`` here -- ``PG_TEST_URL`` must name a
+throwaway database explicitly.
 """
 
 from __future__ import annotations

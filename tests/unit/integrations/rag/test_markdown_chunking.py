@@ -1,3 +1,4 @@
+
 from cowork_agent.domain._chat_contracts_memory import MAX_CHAT_RAG_SECTION_LENGTH
 from cowork_agent.integrations.rag.markdown_chunking import (
     MarkdownPage,
