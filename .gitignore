@@ -91,6 +91,7 @@ frontend/.env
 /playwright/.auth/
 evaluations/CHAT/latency/runs/*.json
 evaluations/CHAT/ingestion-latency/runs/*.json
+evaluations/MEMORIES/runs/memeval-chat.db
 evaluations/MEMORIES/runs/
 evaluations/MEMORIES/reports/*.md
 !evaluations/MEMORIES/reports/REPORT_FORMAT.md

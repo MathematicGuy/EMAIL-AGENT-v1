@@ -1,6 +1,8 @@
 # Cowork Agent (Email-to-Action-Plan)
 
-FastAPI service that turns unread Gmail into structured action plans, plus multi-turn AI Chat.
+FastAPI service that turns unread Gmail and Outlook mail into structured action plans, plus
+multi-turn AI Chat. Outlook is an optional, read-only SQLite-mode connector linked to an
+existing Gmail-owned local account.
 
 ---
 
@@ -36,7 +38,7 @@ Runs single-turn, stateless execution isolated from chat memory for privacy:
 
 ```text
 Trigger (Manual / API Request)
-└── Gmail Fetch (`gmail.readonly`) -> Ephemeral Envelope
+└── Mailbox Fetch (Gmail `gmail.readonly` / Outlook `Mail.Read`) -> Ephemeral Envelope
     └── Intent & Actionability Classification
         └── Route: [NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG]
             ├── (If RETRIEVE_RAG) Hybrid Search (Dense + BM25 + RRF)
@@ -83,7 +85,7 @@ src/cowork_agent/
 ├── api/                        # HTTP endpoints (mail-todo, chat SSE, projects)
 ├── domain/                     # Pure domain models (Task, ActionPlan, Chat, Project)
 ├── features/                   # Core business logic (email_action_plan workflow)
-├── integrations/               # Gmail OAuth, LLM providers (Gemini/Groq), RAG (Turbovec)
+├── integrations/               # Gmail/Outlook OAuth, LLM providers, RAG (Turbovec)
 ├── orchestration/              # Dispatchers & background workers (`mail-todo-worker`)
 └── persistence/                # SQLite & PostgreSQL repositories, SQL migrations
 
@@ -133,7 +135,23 @@ GMAIL_CLIENT_ID="your_gmail_client_id"
 GMAIL_CLIENT_SECRET="your_gmail_client_secret"
 TOKEN_ENCRYPTION_KEY="your_fernet_key"
 OAUTH_STATE_SECRET="your_oauth_state_secret"
+
+# Optional Microsoft delegated OAuth (POSTGRES_MODE=off only)
+MICROSOFT_CLIENT_ID="your_microsoft_client_id"
+MICROSOFT_CLIENT_SECRET="your_microsoft_client_secret"
+MICROSOFT_TENANT="common"
+MICROSOFT_REDIRECT_URI="http://localhost:8000/v1/mail-todo/oauth/outlook/callback"
 ```
+
+Microsoft app registration must grant only the standard OIDC/offline scopes plus delegated
+`Mail.Read`. Outlook connection and scanning are intentionally unavailable when the control
+plane uses local or cloud PostgreSQL; no PostgreSQL migration is included in this increment.
+Register the callback above as a Web redirect URI, enable delegated `Mail.Read`, and do not
+grant any mail write permission. Connect Gmail first in Mail Inbox, then link Outlook to that
+Gmail owner. The frontend commands are case-insensitive: `@email` scans the selected Gmail,
+`@outlook` scans the selected Outlook, and `@mail` runs both scans concurrently and displays
+one aggregated card. These commands dispatch the standalone mail workflow; they are not AI
+Chat tools and raw email is not added to chat memory.
 
 ### 4.3 Running Services
 

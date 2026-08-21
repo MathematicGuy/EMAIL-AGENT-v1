@@ -1,4 +1,4 @@
-"""Runnable FastAPI entry point for Gmail OAuth connection management."""
+"""Runnable FastAPI entry point for mailbox and Cowork workflows."""
 
 import json
 import logging
@@ -38,6 +38,7 @@ from cowork_agent.config import (
     JinaEmbeddingSettings,
     MistralSettings,
     OpenRouterSettings,
+    OutlookSettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
@@ -84,7 +85,6 @@ from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     MailboxConnectionRepository,
-    MailboxTemporaryError,
     RouteClassifierPort,
     RunRepository,
     SemanticMemoryPort,
@@ -110,8 +110,6 @@ from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
     GmailMailboxAdapter,
-    MailboxNotConnectedError,
-    MailboxReauthRequiredError,
 )
 from cowork_agent.integrations.llm.chat_intent import (
     GeminiIntentClassifier,
@@ -143,6 +141,14 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
+from cowork_agent.integrations.mailbox import (
+    MailboxNotConnectedError,
+    MailboxPermissionDeniedError,
+    MailboxReauthRequiredError,
+    MailboxTemporaryError,
+    ProviderRoutingMailboxAdapter,
+)
+from cowork_agent.integrations.outlook import OutlookConnectionService, OutlookMailboxAdapter
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_document_embedder,
@@ -194,7 +200,9 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 
     repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
     candidates = tuple(
-        connection for connection in await repository.list_all() if connection.status == "active"
+        connection
+        for connection in await repository.list_all()
+        if connection.status == "active" and connection.provider == "gmail"
     )
     if len(candidates) != 1:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
@@ -338,6 +346,25 @@ def create_app() -> FastAPI:
                 logger.warning("Corpus skill tree auto-update skipped: %s", exc)
 
             settings = GmailSettings.from_env()
+            control_plane_url = database_url()
+            outlook_settings: OutlookSettings | None = None
+            outlook_configuration_error: str | None = None
+            microsoft_credentials_present = bool(
+                os.getenv("MICROSOFT_CLIENT_ID", "").strip()
+                or os.getenv("MICROSOFT_CLIENT_SECRET", "").strip()
+            )
+            if microsoft_credentials_present:
+                try:
+                    outlook_settings = OutlookSettings.from_env()
+                except ValueError as exc:
+                    # Outlook is optional and must never prevent the Gmail/chat
+                    # application from booting. Keep only the safe validation
+                    # diagnostic server-side; the public capability uses a
+                    # stable reason code.
+                    outlook_configuration_error = str(exc)
+                    logger.warning("Outlook connector is unavailable: %s", exc)
+            else:
+                outlook_configuration_error = "Microsoft OAuth is not configured"
             session_settings = SessionSettings.from_env()
             repository: MailboxConnectionRepository = SQLiteMailboxConnectionRepository(
                 settings.connection_db_path
@@ -354,7 +381,7 @@ def create_app() -> FastAPI:
             task_repository: TaskRepository
             chat_session_registry: ChatSessionRegistryPort
             result_repository = InMemoryResultRepository()
-            if database_url():
+            if control_plane_url:
                 # V1-H T5.1 durable control plane: PostgreSQL is the source
                 # of truth for runs, tasks, and outbox events. Imports stay
                 # lazy so the app boots without the optional postgres extra.
@@ -385,7 +412,7 @@ def create_app() -> FastAPI:
                 )
 
                 pool = AsyncConnectionPool(
-                    database_url(),
+                    control_plane_url,
                     **control_plane_pool_kwargs(),
                 )
                 await pool.open(wait=True)
@@ -446,10 +473,11 @@ def create_app() -> FastAPI:
                 app.state.chat_opaque_session_repository = sqlite_chat_identity_repository
                 chat_session_registry = sqlite_chat_repository
             app.state.connection_repository = repository
+            mailbox_cipher = TokenCipher(settings.token_encryption_key)
             app.state.gmail_connections = GmailConnectionService(
                 settings,
                 repository,
-                TokenCipher(settings.token_encryption_key),
+                mailbox_cipher,
                 OAuthStateManager(
                     settings.oauth_state_secret,
                     settings.oauth_state_ttl_seconds,
@@ -463,11 +491,42 @@ def create_app() -> FastAPI:
             app.state.gmail_mailbox = GmailMailboxAdapter(
                 settings,
                 repository,
-                TokenCipher(settings.token_encryption_key),
+                mailbox_cipher,
             )
+            mailbox_adapters: dict[str, Any] = {"gmail": app.state.gmail_mailbox}
+            outlook_enabled = outlook_settings is not None and not control_plane_url
+            if outlook_enabled:
+                assert outlook_settings is not None
+                app.state.outlook_connections = OutlookConnectionService(
+                    outlook_settings,
+                    repository,
+                    mailbox_cipher,
+                    OAuthStateManager(
+                        outlook_settings.oauth_state_secret,
+                        outlook_settings.oauth_state_ttl_seconds,
+                    ),
+                )
+                app.state.outlook_mailbox = OutlookMailboxAdapter(
+                    outlook_settings,
+                    repository,
+                    mailbox_cipher,
+                )
+                mailbox_adapters["outlook"] = app.state.outlook_mailbox
+                outlook_reason: str | None = None
+            else:
+                app.state.outlook_connections = None
+                app.state.outlook_mailbox = None
+                outlook_reason = "sqlite_only" if outlook_settings is not None else "not_configured"
+            app.state.outlook_settings = outlook_settings
+            app.state.outlook_configuration_error = outlook_configuration_error
+            app.state.provider_availability = {
+                "gmail": {"enabled": True, "reason": None},
+                "outlook": {"enabled": outlook_enabled, "reason": outlook_reason},
+            }
+            app.state.mailbox = ProviderRoutingMailboxAdapter(repository, mailbox_adapters)
             user_documents_settings = UserDocumentsSettings.from_env()
             app.state.document_embeddings_configured = False
-            if database_url() and (
+            if control_plane_url and (
                 user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip()
             ):
                 try:
@@ -540,7 +599,7 @@ def create_app() -> FastAPI:
                 try:
                     embedder, vector_size = build_document_embedder()
                     app.state.document_embeddings_configured = True
-                    if database_url():
+                    if control_plane_url:
                         # The API only reads .tvim snapshots; mail-todo-worker owns
                         # writing them. Both sides exchange them through Supabase
                         # Storage, so a missing local file is pulled on demand.
@@ -710,7 +769,7 @@ def create_app() -> FastAPI:
                 app.state.digest_worker = DigestWorker(
                     run_repository,
                     result_repository,
-                    app.state.gmail_mailbox,
+                    app.state.mailbox,
                     SafeTextAttachmentExtractor(),
                     classifier,
                     generator,
@@ -888,6 +947,73 @@ def create_app() -> FastAPI:
             _set_session_cookie(response, _session_settings(request), token)
         return response
 
+    @app.get("/v1/mail-todo/oauth/outlook/connect")
+    async def connect_outlook(
+        request: Request,
+        owner_connection_id: str = Query(alias="ownerConnectionId", min_length=1),
+    ) -> RedirectResponse:
+        service = _outlook_connection_service(request)
+        if service is None:
+            reason = request.app.state.provider_availability["outlook"]["reason"]
+            raise HTTPException(
+                status_code=503,
+                detail=f"Outlook connection is unavailable: {reason}",
+            )
+        owner = await _owned_connection(
+            request, owner_connection_id, "Gmail owner connection not found"
+        )
+        if owner.provider != "gmail" or owner.status != "active":
+            raise HTTPException(status_code=400, detail="An active Gmail owner is required")
+        return RedirectResponse(service.begin(owner), status_code=302)
+
+    @app.get("/v1/mail-todo/oauth/outlook/callback", response_model=None)
+    async def outlook_callback(
+        request: Request,
+        state: str,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any] | Response:
+        service = _outlook_connection_service(request)
+        settings = _outlook_settings(request)
+        if service is None or settings is None:
+            raise HTTPException(status_code=503, detail="Outlook connection is unavailable")
+        if error:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(
+                    settings.frontend_url, "denied", provider="outlook"
+                )
+            raise HTTPException(status_code=400, detail="Microsoft OAuth was denied")
+        if not code:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "error", provider="outlook")
+            raise HTTPException(status_code=400, detail="Missing OAuth authorization code")
+        try:
+            connection = await service.complete(state, code)
+        except (
+            ValueError,
+            MailboxNotConnectedError,
+            MailboxReauthRequiredError,
+            MailboxPermissionDeniedError,
+        ) as exc:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "error", provider="outlook")
+            safe_message = getattr(exc, "safe_message", None)
+            raise HTTPException(
+                status_code=400,
+                detail=safe_message if isinstance(safe_message, str) else str(exc),
+            ) from exc
+        except MailboxTemporaryError as exc:
+            if settings.frontend_url:
+                return _frontend_mail_redirect(settings.frontend_url, "error", provider="outlook")
+            raise HTTPException(status_code=503, detail=exc.safe_message) from exc
+        if settings.frontend_url:
+            return _frontend_mail_redirect(settings.frontend_url, "connected", provider="outlook")
+        return {
+            "status": "connected",
+            "connection": _public_connection(connection),
+            "next": "Create a digest run with this mailbox connection ID.",
+        }
+
     @app.get("/v1/mail-todo/connections")
     async def list_connections(request: Request) -> dict[str, Any]:
         repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
@@ -899,15 +1025,19 @@ def create_app() -> FastAPI:
             if principal is not None
             else await cast(Any, repository).list_all()
         )
-        return {"connections": [_public_connection(item) for item in connections]}
+        return {
+            "connections": [_public_connection(item) for item in connections],
+            "providerAvailability": request.app.state.provider_availability,
+        }
 
     @app.delete("/v1/mail-todo/connections/{connection_id}")
-    async def disconnect_gmail(connection_id: str, request: Request) -> dict[str, bool]:
-        connection = await _owned_connection(request, connection_id, "Gmail connection not found")
+    async def disconnect_mailbox(connection_id: str, request: Request) -> dict[str, bool]:
+        connection = await _owned_connection(request, connection_id, "Mailbox connection not found")
         principal = await _connection_principal(request, connection)
-        deleted = await _connection_service(request).disconnect(connection_id, principal.user_id)
+        repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+        deleted = await repository.delete(connection_id, principal.user_id)
         if not deleted:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
+            raise HTTPException(status_code=404, detail="Mailbox connection not found")
         return {"disconnected": True}
 
     @app.get("/v1/mail-todo/connections/{connection_id}/unread-preview")
@@ -916,18 +1046,17 @@ def create_app() -> FastAPI:
         request: Request,
         limit: int = Query(default=10, ge=1, le=20),
     ) -> dict[str, Any]:
-        await _owned_connection(request, connection_id, "Gmail connection not found")
+        connection = await _owned_connection(request, connection_id, "Mailbox connection not found")
         try:
-            page = await _gmail_mailbox(request).search_unread(connection_id, DEFAULT_QUERY, limit)
+            mailbox = _mailbox(request)
+            page = await mailbox.search_unread(connection_id, DEFAULT_QUERY, limit)
             messages = []
             seen_threads: set[str] = set()
             for reference in page.messages:
                 if reference.thread_id in seen_threads:
                     continue
                 seen_threads.add(reference.thread_id)
-                thread = await _gmail_mailbox(request).get_thread(
-                    connection_id, reference.thread_id
-                )
+                thread = await mailbox.get_thread(connection_id, reference.thread_id)
                 if not thread:
                     continue
                 message = thread[-1]
@@ -949,11 +1078,22 @@ def create_app() -> FastAPI:
                 "nextCursor": page.next_cursor,
             }
         except MailboxNotConnectedError as exc:
-            raise HTTPException(status_code=404, detail="Gmail connection not found") from exc
+            raise HTTPException(status_code=404, detail="Mailbox connection not found") from exc
         except MailboxReauthRequiredError as exc:
-            raise HTTPException(status_code=409, detail="Gmail reauthorization required") from exc
+            raise HTTPException(
+                status_code=409,
+                detail=f"{connection.provider.title()} reauthorization required",
+            ) from exc
+        except MailboxPermissionDeniedError as exc:
+            raise HTTPException(
+                status_code=403,
+                detail=f"{connection.provider.title()} mailbox permission denied",
+            ) from exc
         except MailboxTemporaryError as exc:
-            raise HTTPException(status_code=503, detail="Gmail is temporarily unavailable") from exc
+            raise HTTPException(
+                status_code=503,
+                detail=f"{connection.provider.title()} is temporarily unavailable",
+            ) from exc
 
     @app.get("/v1/mail-todo/runs")
     async def list_digest_runs(
@@ -962,7 +1102,7 @@ def create_app() -> FastAPI:
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
         connection = await _owned_connection(
-            request, mailbox_connection_id, "Gmail connection not found"
+            request, mailbox_connection_id, "Mailbox connection not found"
         )
         principal = await _connection_principal(request, connection)
         repository = cast(RunRepository, request.app.state.run_repository)
@@ -981,7 +1121,7 @@ def create_app() -> FastAPI:
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
     ) -> dict[str, str]:
         connection = await _owned_connection(
-            request, payload.mailbox_connection_id, "Gmail connection not found"
+            request, payload.mailbox_connection_id, "Mailbox connection not found"
         )
         principal = await _connection_principal(request, connection)
         worker = _digest_worker(request)
@@ -1504,6 +1644,10 @@ def _connection_service(request: Request) -> GmailConnectionService:
     return cast(GmailConnectionService, request.app.state.gmail_connections)
 
 
+def _outlook_connection_service(request: Request) -> OutlookConnectionService | None:
+    return cast(OutlookConnectionService | None, request.app.state.outlook_connections)
+
+
 async def _authenticated_principal(
     request: Request, *, required: bool = True
 ) -> VerifiedPrincipal | None:
@@ -1572,6 +1716,10 @@ async def _connection_principal(
         principal = await _authenticated_principal(request)
         assert principal is not None
         return principal
+    if connection.provider == "outlook":
+        # Outlook is an auxiliary mailbox whose verified address may differ from
+        # the Gmail identity that owns it. The persisted user_id is that binding.
+        return VerifiedPrincipal(user_id=connection.user_id)
     return principal_for_connection(connection)
 
 
@@ -1621,12 +1769,16 @@ def _gmail_settings(request: Request) -> GmailSettings:
     return cast(GmailSettings, request.app.state.gmail_settings)
 
 
+def _outlook_settings(request: Request) -> OutlookSettings | None:
+    return cast(OutlookSettings | None, request.app.state.outlook_settings)
+
+
 def _session_settings(request: Request) -> SessionSettings:
     return cast(SessionSettings, request.app.state.session_settings)
 
 
-def _gmail_mailbox(request: Request) -> GmailMailboxAdapter:
-    return cast(GmailMailboxAdapter, request.app.state.gmail_mailbox)
+def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
+    return cast(ProviderRoutingMailboxAdapter, request.app.state.mailbox)
 
 
 def _digest_worker(request: Request) -> DigestWorker | None:
@@ -1668,10 +1820,12 @@ def _run_history_item(run: DigestRun) -> dict[str, Any]:
     }
 
 
-def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse:
+def _frontend_mail_redirect(
+    frontend_url: str, outcome: str, *, provider: str = "gmail"
+) -> RedirectResponse:
     parts = urlsplit(frontend_url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query.update({"page": "dashboard", "view": "mail", "gmail": outcome})
+    query.update({"page": "dashboard", "view": "mail", provider: outcome})
     location = urlunsplit(
         (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), "dashboard")
     )

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MailApiError,
   createDigestRun,
+  getOutlookConnectUrl,
   getUnreadPreview,
   listConnections,
   listDigestRuns,
@@ -26,13 +27,15 @@ describe('Mail API client', () => {
       .mockResolvedValueOnce(response({ emailsMatched: 0, messages: [], nextCursor: null }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await listConnections();
+    const listed = await listConnections();
     await getUnreadPreview('mbx/1', 20);
 
     expect(String(fetchMock.mock.calls[0][0])).toContain('/v1/mail-todo/connections');
     expect(String(fetchMock.mock.calls[1][0])).toContain(
       '/v1/mail-todo/connections/mbx%2F1/unread-preview?limit=20'
     );
+    expect(listed.providerAvailability.outlook).toEqual({ enabled: false, reason: 'not_configured' });
+    expect(getOutlookConnectUrl('owner/1')).toContain('ownerConnectionId=owner%2F1');
   });
 
   it('sends the selected mailbox, query, limit, and stable idempotency key', async () => {

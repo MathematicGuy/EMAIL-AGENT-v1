@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL } from '../../lib/apiConfig';
 import { DocxViewer } from './DocxViewer';
+import { PdfViewer } from './PdfViewer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -447,14 +448,11 @@ export const RawDocumentsView: React.FC = () => {
             {/* PREVIEW CONTAINER */}
             <div className="flex-1 overflow-hidden p-4">
               {viewMode === 'preview' && isPdf ? (
-                /* PDF VIEWER EMBED */
-                <div className="w-full h-full rounded-xl overflow-hidden border border-[#2d2b27] bg-[#141312] shadow-inner">
-                  <iframe
-                    src={getDocUrl(selectedDoc.filename)}
-                    title={`pdf-preview-${selectedDoc.filename}`}
-                    className="w-full h-full border-0 bg-[#2b2b2b]"
-                  />
-                </div>
+                /* PDF VIEWER EMBED (CANVAS-BASED PDF.JS VIEWER) */
+                <PdfViewer
+                  filename={selectedDoc.filename}
+                  onFallbackToMarkdown={() => setViewMode('extracted')}
+                />
               ) : viewMode === 'preview' && isWordDoc ? (
                 /* DOCX VIEWER EMBED */
                 <DocxViewer

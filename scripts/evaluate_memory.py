@@ -51,9 +51,32 @@ from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, lo
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
 from cowork_agent.features.ai_chat.memory_eval.scoring import score
 
-_DEFAULT_PROBE_SET = Path("evaluations/MEMORIES/probes/v2-four-scopes-wide.json")
+_DEFAULT_PROBES_DIR = Path("evaluations/MEMORIES/probes")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
 _DETAIL_DIR = Path("evaluations/MEMORIES/runs")
+
+
+def resolve_latest_probe_set(probes_dir: Path | None = None) -> Path:
+    """Find the highest version probe set JSON file in evaluations/MEMORIES/probes."""
+    base_dir = probes_dir or _DEFAULT_PROBES_DIR
+    if not base_dir.exists():
+        return base_dir / "v2-four-scopes-wide.json"
+    files = [f for f in base_dir.glob("*.json") if f.is_file()]
+    if not files:
+        return base_dir / "v2-four-scopes-wide.json"
+
+    def _version_key(path: Path) -> tuple[int, str]:
+        name = path.stem.lower()
+        if name.startswith("v"):
+            prefix = name[1:].split("-")[0].split("_")[0]
+            try:
+                return (int(prefix), str(path))
+            except ValueError:
+                pass
+        return (0, str(path))
+
+    return max(files, key=_version_key)
+
 
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
 _SUPPORTED_PROVIDERS = ("gemini", "openrouter", "groq", "mistral")
@@ -349,7 +372,12 @@ async def run_live(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--probe-set", type=Path, default=_DEFAULT_PROBE_SET)
+    parser.add_argument(
+        "--probe-set",
+        type=Path,
+        default=None,
+        help="Path to probe set JSON definition; defaults to the latest version found in probes/.",
+    )
     parser.add_argument("--output", type=Path, help="Report path; defaults under baselines/")
     parser.add_argument(
         "--dry-run",
@@ -368,8 +396,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     transcript: list[dict[str, object]] = []
 
+    probe_set_path = args.probe_set or resolve_latest_probe_set()
     try:
-        payload = json.loads(args.probe_set.read_text(encoding="utf-8"))
+        payload = json.loads(probe_set_path.read_text(encoding="utf-8"))
         probe_set = load_probe_set(payload)
     except (OSError, ValueError) as error:
         # ProbeSetError subclasses ValueError, so this catches both a missing

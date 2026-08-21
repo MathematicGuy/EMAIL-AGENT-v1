@@ -53,6 +53,8 @@ POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 RTK_DISABLED=1 \
   .venv/Scripts/python.exe scripts/memeval_preflight.py
 ```
 
+> **Provider & Model Configuration**: By default, the harness loads the provider and model configured in your environment / `.env` (`LLM_PROVIDER`, e.g., `gemini`). Only use the flexible `--provider <name>` (and `--model <model>`) flags when explicitly testing or comparing models for the [Model Memory Eval Leaderboard](../../docs/references/agent-memory/MODEL-MEMORY-EVAL-LEADERBOARD.md).
+
 Read the password out of `.env` like this rather than typing it. It must not
 appear in a command line, a log, or a report.
 
@@ -63,7 +65,7 @@ evidence that a key works.
 
 | Check | The question it asks | On failure |
 |---|---|---|
-| `probe_set` | Does the question file load and validate? | Fix it before spending a single call. |
+| `probe_set` | Does the latest question file load and validate? | Fix it before spending a single call. |
 | `target` | Which store would this write to, and is it allowed to? | Point `PG_TEST_URL` at a local throwaway. If the remote override is set, **unset it**. |
 | `postgres` | Does that database answer? | Start the server, or create `cowork_memeval`. |
 | `postgres_locks` | Did a killed run leave backends idle in transaction? | See §5, "the run hangs". |
