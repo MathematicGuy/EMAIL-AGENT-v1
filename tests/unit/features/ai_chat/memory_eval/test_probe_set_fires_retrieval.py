@@ -130,3 +130,31 @@ def test_recall_expectations_exist_somewhere_in_the_seed(probe_set_path: Path) -
             f"{probe['id']} expects {probe['expect_any']!r}, and none of those "
             f"appear anywhere in the seed - nothing put them in memory to recall"
         )
+
+
+def test_invented_any_phrases_exist_somewhere_in_the_seed(probe_set_path: Path) -> None:
+    # invented_any is a near-miss only if the neighbour was actually stored.
+    # A phrase that appears nowhere in this set's seed is a random string, and
+    # the grader cannot fairly call it invention-from-neighbour.
+    # Same material concatenation as recall-expectation grounding: this set's
+    # own corpus_dir, never a sibling set's documents.
+    data = _load(probe_set_path)
+    seed = data["seed"]
+    corpus_dir = REPO_ROOT / seed["semantic"]["corpus_dir"]
+    material = "\n".join(
+        [
+            *seed["short_term"],
+            *(str(value) for value in seed["long_term"].values()),
+            *(entry["request"] for entry in seed["episodic"]),
+            *(path.read_text(encoding="utf-8") for path in sorted(corpus_dir.iterdir())),
+        ]
+    ).casefold()
+
+    missing: list[str] = []
+    for probe in data["probes"]:
+        for phrase in probe.get("invented_any") or []:
+            if phrase.casefold() not in material:
+                missing.append(f"{probe['id']}:{phrase!r}")
+    assert not missing, (
+        f"{probe_set_path.name} invented_any phrases absent from seed: {missing}"
+    )
