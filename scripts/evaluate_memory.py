@@ -48,8 +48,54 @@ from cowork_agent.features.ai_chat.memory_eval.live_runner import (
 )
 from cowork_agent.features.ai_chat.memory_eval.live_seeding import seed_semantic
 from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, load_probe_set
+from cowork_agent.features.ai_chat.memory_eval.report import REPORT_SCHEMA_VERSION
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
 from cowork_agent.features.ai_chat.memory_eval.scoring import score
+
+_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES = "MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES"
+_DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES = 3
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"must be an integer >= 1, got {value!r}"
+        ) from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be an integer >= 1, got {value!r}")
+    return parsed
+
+
+def _resolve_max_consecutive_provider_failures(
+    cli_value: int | None, environ: Mapping[str, str]
+) -> int:
+    """CLI > env > 3. Rejects non-integers and values below 1."""
+
+    if cli_value is not None:
+        if cli_value < 1:
+            raise ValueError(
+                "--max-consecutive-provider-failures must be an integer >= 1, "
+                f"got {cli_value}"
+            )
+        return cli_value
+    raw = environ.get(_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES, "").strip()
+    if not raw:
+        return _DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES
+    try:
+        parsed = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, "
+            f"got {raw!r}"
+        ) from None
+    if parsed < 1:
+        raise ValueError(
+            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, "
+            f"got {raw!r}"
+        )
+    return parsed
 
 _DEFAULT_PROBES_DIR = Path("evaluations/MEMORIES/probes")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
@@ -264,6 +310,43 @@ async def _build_adapters(
     return AdapterSet(declarative, episodic, semantic), failures, pool
 
 
+def _attach_stream_errors(
+    session: LiveSession, recorded: list[dict[str, object]]
+) -> None:
+    for record in recorded:
+        record["stream_errors"] = [
+            item
+            for item in session.ask_errors
+            if item["probe"] == record["probe"] and item["arm"] == record["arm"]
+        ]
+
+
+def _aborted_report(
+    probe_set: ProbeSet,
+    *,
+    provider: str,
+    model: str,
+    identity: Any,
+    seed_failures: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "probe_set_id": probe_set.probe_set_id,
+        "probe_count": len(probe_set.probes),
+        "provider": provider,
+        "model": model,
+        "ran_at": datetime.now(UTC).isoformat(),
+        "run_key": identity.run_key,
+        "nonce": identity.nonce,
+        "per_scope": {},
+        "verdicts": [],
+        "leaked_probes": [],
+        "needs_reading": 0,
+        "seed_failures": sorted(seed_failures),
+        "aborted": True,
+    }
+
+
 async def run_live(
     probe_set: ProbeSet,
     env: LiveEnvironment,
@@ -272,6 +355,7 @@ async def run_live(
     provider: str,
     model: str,
     transcript: list[dict[str, object]] | None = None,
+    max_consecutive_provider_failures: int = 3,
 ) -> dict[str, object]:
     """Seed, probe under three arms, report, then delete everything created.
 
@@ -297,6 +381,7 @@ async def run_live(
         adapters=adapters,
         reply=reply,
         seed=probe_set.seed,
+        max_consecutive_provider_failures=max_consecutive_provider_failures,
     )
     recorded = transcript if transcript is not None else []
     call_idx = 0
@@ -338,6 +423,7 @@ async def run_live(
         )
         return text, latency_ms
 
+    report: dict[str, object] | None = None
     try:
         report = await run_probe_set(
             probe_set,
@@ -353,12 +439,19 @@ async def run_live(
         # above would capture an empty list on every run, because arguments are
         # evaluated before the call.
         report["seed_failures"] = sorted({*failures, *session.seed_failures})
-        for record in recorded:
-            record["stream_errors"] = [
-                item
-                for item in session.ask_errors
-                if item["probe"] == record["probe"] and item["arm"] == record["arm"]
-            ]
+        _attach_stream_errors(session, recorded)
+    except ExcessiveSeedFailuresError as error:
+        _attach_stream_errors(session, recorded)
+        if not recorded:
+            raise
+        print(f"ERROR: {error}", file=sys.stderr)
+        report = _aborted_report(
+            probe_set,
+            provider=provider,
+            model=model,
+            identity=identity,
+            seed_failures=sorted({*failures, *session.seed_failures}),
+        )
     finally:
         # Teardown runs even when a probe raised. A run that created stores must
         # not leave them behind, and a partial cleanup still beats none.
@@ -367,6 +460,7 @@ async def run_live(
         if pool is not None:
             await pool.close()
         print("[memeval] Teardown complete", file=sys.stderr, flush=True)
+    assert report is not None
     return report
 
 
@@ -393,7 +487,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--model",
         help="Model name override for the provider.",
     )
+    parser.add_argument(
+        "--max-consecutive-provider-failures",
+        type=_positive_int,
+        default=None,
+        help=(
+            "Abort after this many consecutive chat_provider_unavailable seed or "
+            "ask failures. Default 3; env "
+            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES}."
+        ),
+    )
     args = parser.parse_args(argv)
+    try:
+        max_consecutive = _resolve_max_consecutive_provider_failures(
+            args.max_consecutive_provider_failures, dict(os.environ)
+        )
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     transcript: list[dict[str, object]] = []
 
     probe_set_path = args.probe_set or resolve_latest_probe_set()
@@ -445,6 +556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     provider=provider,
                     model=model,
                     transcript=transcript,
+                    max_consecutive_provider_failures=max_consecutive,
                 )
             )
         except ExcessiveSeedFailuresError as error:
@@ -484,7 +596,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"detail written to {detail}", file=sys.stderr)
 
     print(json.dumps(report, indent=2))
-    return 0
+    return 1 if report.get("aborted") else 0
 
 
 if __name__ == "__main__":
