@@ -11,8 +11,8 @@ Tài liệu này định nghĩa cấu trúc chuẩn cho các báo cáo đánh gi
 
 - **Ngày thực hiện**: YYYY-MM-DD
 - **Probe Set ID**: `v1_four_scopes` (hoặc tên tập probe)
-- **Mô hình / Provider**: `provider/model-name`
 - **Backend lưu trữ**: SQLite scratch (`POSTGRES_MODE=off`) / PostgreSQL (`POSTGRES_MODE=local`)
+- **Provider / Model**: `provider/model-name`
 
 ---
 
@@ -67,23 +67,29 @@ Mô tả tập dữ liệu mẫu được nạp vào hệ thống (Seeded State)
 | `...` | `...` | recall / restraint / update | `...` | pass / miss / invented / no_answer | pass / miss | pass / miss / no_answer | true / false | XXs |
 
 ### 4.2. Giải trình chi tiết các trường hợp Bất thường / Cần xem xét (Needs Reading)
-*Trích dẫn nguyên văn phản hồi của các nhánh Full, Ablated, Control để làm rõ nguyên nhân gốc rễ.*
+*Trích dẫn nguyên văn phản hồi của các nhánh Full, Ablated, Control và chẩn đoán tự động 2 tầng.*
 
-- **Probe ID**: `[Tên Probe]`
-  - **Câu hỏi**: *"[Nội dung câu hỏi]"*
-  - **Phản hồi nhánh Full**: `"[Trích dẫn câu trả lời]"`
-  - **Phản hồi nhánh Ablated / Control**: `"[Trích dẫn]"`
-  - **Phân tích nguyên nhân**: [Đánh giá xem do Grader regex, do mạng, hay do Product]
+#### Probe `[Tên Probe]` (`targets: [scope]`, `verdict: [verdict]`, `certain: [true/false]`)
+- **Câu hỏi**: *"[Nội dung câu hỏi]"*
+- **Phản hồi Full Arm**:
+  > *"[Trích dẫn câu trả lời]"*
+- **Phản hồi Ablated Arm**:
+  > *"[Trích dẫn]"*
+- **Phản hồi Control Arm**:
+  > *"[Trích dẫn]"*
+- **Chẩn đoán (Deterministic Diagnosis)**: 🔴/🟡/🟢 `[Concern / Trạng thái]`
+  - *Tổng quan*: [Giải thích ngắn gọn 1 câu bằng tiếng Việt dễ hiểu cho người mới]
+  - *Chi tiết kỹ thuật*: [Giải thích cụ thể trace kỹ thuật cho kỹ sư và coding agent]
 
 ---
 
 ## 5. PHÂN LOẠI LỖI & ĐỀ XUẤT HÀNH ĐỘNG (DEFECTS & ACTION ITEMS)
 
 Phân loại theo 4 nhóm nguyên nhân tại RUNBOOK §5:
-- **Concern A (Grader)**: Cải tiến logic chấm điểm, mở rộng regex từ chối.
-- **Concern B (Question)**: Điều chỉnh câu hỏi nếu quá dễ đoán (guessable).
-- **Concern C (Plumbing/Harness)**: Kiểm tra cơ chế mask và seeding.
-- **Concern D (Product)**: Sửa đổi logic sản xuất nếu bộ nhớ không tìm thấy dữ liệu.
+- **Concern A (The Grader)**: Cải tiến logic chấm điểm, mở rộng regex từ chối.
+- **Concern B (The Question)**: Điều chỉnh câu hỏi nếu quá dễ đoán (guessable).
+- **Concern C (Plumbing / Harness)**: Kiểm tra cơ chế mask, seeding hoặc lỗi kết nối mạng Provider.
+- **Concern D (Product)**: Sửa đổi logic sản xuất nếu bộ nhớ không tìm thấy dữ liệu hoặc bị ảo giác.
 
 ---
 
@@ -92,14 +98,9 @@ Phân loại theo 4 nhóm nguyên nhân tại RUNBOOK §5:
 ### A.1. Thông số Thực thi (Run Artifacts)
 - **Baseline JSON**: `evaluations/MEMORIES/baselines/...`
 - **Detail Transcript**: `evaluations/MEMORIES/runs/...`
+- **Provider / Model**: `...`
+- **Target Backend**: `SQLite scratch` / `PostgreSQL`
 - **Run Key**: `...`
 - **Nonce**: `...`
-- **Target Connection**: `...` (không lưu mật khẩu)
-
-### A.2. Nhật ký Pre-Flight Check
-- `checkout`: PASS
-- `probe_set`: PASS
-- `target`: PASS / WARN
-- `embeddings`: PASS
-- `chat`: PASS
+- **Thời gian chạy**: `...`
 ```

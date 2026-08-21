@@ -16,9 +16,6 @@ that reads as a fact and is not one.
 
 1. **Never point the harness at a remote or production database.** It fills
    memory and then deletes it.
-2. **`.env` here carries a `DATABASE_URL_CLOUD` pointing at production
-   Supabase.** Always set `PG_TEST_URL` explicitly. Never rely on default
-   resolution being what you assumed.
 3. **Never set `MEMEVAL_ALLOW_REMOTE_POSTGRES=1`, and never weaken the guard in
    `live_env.probe_environment`.** A refused host is the guard working.
 4. **Never edit production code to make a report green.** Fixing a real defect
