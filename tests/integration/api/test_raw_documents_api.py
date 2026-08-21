@@ -146,6 +146,10 @@ async def test_manifest_entry_escaping_the_corpus_is_ignored(
     (corpus.parent / "extracted" / "ingestion-manifest.json").write_text(
         '{"procedure.pdf": {"output": "../outside.md"}}', encoding="utf-8"
     )
+    # Drop the legitimate match so only the escaping manifest entry could answer:
+    # otherwise the stem-matching fallback serves procedure.md and the assertion
+    # passes without ever exercising the containment check.
+    (corpus.parent / "extracted" / "procedure.md").unlink()
 
     async with _client(create_app()) as client:
         res = await client.get("/api/v1/raw-documents/procedure.pdf/extracted")
@@ -375,3 +379,99 @@ async def test_onlyoffice_callback_refuses_to_save_without_a_configured_secret(
     assert res.status_code == 503
     assert attempted == []
     assert target.read_bytes() == b"fake docx body"
+
+
+# --- Endpoints added on main: upload, direct save, delete -------------------
+# Ported onto the `corpus` fixture. The originals wrote `_test_*.docx` into the
+# tracked data/raw and data/extracted directories and removed them in a finally
+# block, so an interrupted run left stray files in the committed corpus.
+
+
+@pytest.mark.asyncio
+async def test_upload_stores_the_file_and_records_metadata(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("uploaded.docx", b"uploaded docx body", "application/octet-stream")},
+        )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "uploaded"
+    assert body["filename"] == "uploaded.docx"
+    assert body["file_type"] == "docx"
+    assert (corpus / "uploaded.docx").read_bytes() == b"uploaded docx body"
+    assert await repo.get("uploaded.docx") is not None
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_an_unsupported_extension(corpus: Path, tmp_path: Path) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("payload.exe", b"MZ", "application/octet-stream")},
+        )
+
+    assert res.status_code == 400
+    assert not (corpus / "payload.exe").exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_strips_directories_from_the_client_filename(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("../escaped.docx", b"body", "application/octet-stream")},
+        )
+
+    assert res.status_code == 200
+    assert res.json()["filename"] == "escaped.docx"
+    assert (corpus / "escaped.docx").is_file()
+    assert not (corpus.parent / "escaped.docx").exists()
+
+
+@pytest.mark.asyncio
+async def test_put_overwrites_the_document_and_bumps_the_version(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.put(
+            "/api/v1/raw-documents/decree.docx",
+            content=b"replaced body",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "saved"
+    assert (corpus / "decree.docx").read_bytes() == b"replaced body"
+    metadata = await repo.get("decree.docx")
+    assert metadata is not None and metadata.last_status == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_the_raw_file_and_its_extracted_markdown(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    extracted = corpus.parent / "extracted" / "procedure.md"
+    assert extracted.is_file()
+
+    async with _client(app) as client:
+        res = await client.delete("/api/v1/raw-documents/procedure.pdf")
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "deleted"
+    assert not (corpus / "procedure.pdf").exists()
+    assert not extracted.exists()
+    # Regression: `_raw_document_repo` is async, and the delete path used to call it
+    # without awaiting -- `hasattr(coroutine, "delete")` is False, so the metadata
+    # row silently survived the delete.
+    assert await repo.get("procedure.pdf") is None

@@ -1,4 +1,4 @@
-"""Split reviewed Email annotations and private Gmail content by final route."""
+"""Split reviewed Email annotations by retrieve-first evaluation bucket."""
 
 from __future__ import annotations
 
@@ -25,10 +25,15 @@ except ModuleNotFoundError:
         validate_review_export,
     )
 
-ROUTES = ("no_action", "direct_plan", "retrieve_rag")
+BUCKETS = (
+    "no_action",
+    "retrieve_first_context_optional",
+    "retrieve_first_context_required",
+)
 DEFAULT_INPUT = Path("evaluations/EMAIL/reviewed_annotations.json")
 DEFAULT_CANDIDATES = Path("evaluations/EMAIL/gmail_candidates.json")
 DEFAULT_OUTPUT_DIR = Path("evaluations/EMAIL/email-routes")
+LEGACY_ROUTE_FILES = ("direct_plan.json", "retrieve_rag.json")
 
 
 def sort_reviewed_annotations(
@@ -41,46 +46,44 @@ def sort_reviewed_annotations(
     validated_candidates = validate_candidate_dataset(candidates, expected_count=None)
     candidates_by_source_id = {
         str(candidate["source_message_id"]): candidate
-        for candidate in cast(
-            list[Mapping[str, object]], validated_candidates["cases"]
-        )
+        for candidate in cast(list[Mapping[str, object]], validated_candidates["cases"])
     }
-    grouped: dict[str, list[dict[str, object]]] = {route: [] for route in ROUTES}
+    grouped: dict[str, list[dict[str, object]]] = {bucket: [] for bucket in BUCKETS}
 
     for case in cast(list[Mapping[str, object]], validated["cases"]):
         source_message_id = str(case["source_message_id"])
         candidate = candidates_by_source_id.get(source_message_id)
         if candidate is None:
             raise ValueError(
-                "reviewed case has no candidate match for source_message_id: "
-                f"{source_message_id}"
+                f"reviewed case has no candidate match for source_message_id: {source_message_id}"
             )
         if candidate["case_id"] != case["case_id"]:
-            raise ValueError(
-                f"case_id mismatch for source_message_id: {source_message_id}"
-            )
+            raise ValueError(f"case_id mismatch for source_message_id: {source_message_id}")
 
         final = cast(Mapping[str, object], case["final"])
-        route = str(final["expected_route"])
-        if route not in grouped:
-            raise ValueError(f"unsupported final expected_route: {route}")
+        if not bool(final["retrieval_expected"]):
+            bucket = "no_action"
+        elif bool(final["company_context_required"]):
+            bucket = "retrieve_first_context_required"
+        else:
+            bucket = "retrieve_first_context_optional"
         enriched_case = {
             "case_id": case["case_id"],
             "source_message_id": source_message_id,
             "final": dict(final),
             "gmail_content": candidate["gmail_content"],
         }
-        grouped[route].append(enriched_case)
+        grouped[bucket].append(enriched_case)
 
     return {
-        route: {
-            "schema_version": 1,
+        bucket: {
+            "schema_version": 2,
             "rubric_version": RUBRIC_VERSION,
-            "expected_route": route,
+            "evaluation_bucket": bucket,
             "case_count": len(cases),
             "cases": cases,
         }
-        for route, cases in grouped.items()
+        for bucket, cases in grouped.items()
     }
 
 
@@ -90,15 +93,17 @@ def write_route_files(
 ) -> list[Path]:
     """Atomically replace all derived route files."""
 
-    paths = [output_dir / f"{route}.json" for route in ROUTES]
-    for route, path in zip(ROUTES, paths, strict=True):
-        atomic_write_json(grouped[route], path)
+    paths = [output_dir / f"{bucket}.json" for bucket in BUCKETS]
+    for bucket, path in zip(BUCKETS, paths, strict=True):
+        atomic_write_json(grouped[bucket], path)
+    for filename in LEGACY_ROUTE_FILES:
+        (output_dir / filename).unlink(missing_ok=True)
     return paths
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sort reviewed Email annotations by final expected route."
+        description="Sort reviewed Email annotations by retrieve-first eval bucket."
     )
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--candidates", type=Path, default=DEFAULT_CANDIDATES)
@@ -113,8 +118,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         candidates = load_json_object(args.candidates)
         grouped = sort_reviewed_annotations(reviewed, candidates)
         paths = write_route_files(grouped, args.output_dir)
-        for route, path in zip(ROUTES, paths, strict=True):
-            print(f"{route}: {grouped[route]['case_count']} -> {path}")
+        for bucket, path in zip(BUCKETS, paths, strict=True):
+            print(f"{bucket}: {grouped[bucket]['case_count']} -> {path}")
         return 0
     except (OSError, TypeError, ValueError) as exc:
         print(f"Email route sort failed: {exc}", file=sys.stderr)

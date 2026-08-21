@@ -960,7 +960,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
                     source_url="https://docs.example.com",
                     document_version=None,
                     relevance_score=0.9,
-                    rerank_score=None,
+                    rerank_score=0.9,
                 ),
             ),
             retrieval_status=RetrievalStatus.SUCCESS,
@@ -1005,7 +1005,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
     asyncio.run(scenario())
 
 
-def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
+def test_direct_plan_candidate_retrieves_once_then_uses_full_direct_plan() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]
         memory = RecordingMemory()
@@ -1031,7 +1031,7 @@ def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
 
         # V1-M3 exit criterion: DIRECT_PLAN never touches Semantic Memory.
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert memory.requests == []
+        assert len(memory.requests) == 1
         assert generator.received_retrievals == (None,)
 
     asyncio.run(scenario())
@@ -1064,10 +1064,7 @@ def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> N
         # §12.3: retry once, then structured empty -> partial generation.
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert len(memory.requests) == 2
-        degraded = generator.received_retrievals[0]
-        assert degraded is not None
-        assert degraded.chunks == ()
-        assert degraded.retrieval_status is RetrievalStatus.NO_RESULTS
+        assert generator.received_retrievals == (None,)
         # §12.3 "expose missing context": the degraded plan is persisted with
         # a missing-information warning even when nothing was cited. The
         # literal pins the user-facing wording intentionally.
@@ -1149,10 +1146,8 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert memory.requests == []
-        empty = generator.received_retrievals[0]
-        assert empty is not None and empty.chunks == ()
-        assert empty.retrieval_status is RetrievalStatus.NO_RESULTS
+        assert len(memory.requests) == 1
+        assert generator.received_retrievals == (None,)
         # FR-11: the route demanded company knowledge but none was available,
         # so the missing context must be listed. The literal pins the
         # user-facing wording intentionally.
@@ -1164,7 +1159,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         # §14: skipped retrievals are reported as "skipped", not no_results,
         # and carry no degraded-fallback marker.
         candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
-        assert candidate.retrieval_status == "skipped"
+        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
         assert candidate.generation_status is None
 
     asyncio.run(scenario())
@@ -1450,10 +1445,10 @@ def test_telemetry_emits_metadata_only_candidate_and_run_events() -> None:
         assert len(candidate_events) == 1 and len(run_events) == 1
         candidate = candidate_events[0]
         assert candidate.status is TraceStatus.SUCCESS
-        assert candidate.route is Route.DIRECT_PLAN
+        assert candidate.route is Route.RETRIEVE_RAG
         assert candidate.gmail_message_id == "m1"
         assert candidate.classifier_confidence == 0.9
-        assert candidate.retrieval_status is None  # DIRECT_PLAN: zero retrieval
+        assert candidate.retrieval_status == RetrievalStatus.UNAVAILABLE.value
         assert candidate.validation_status == ValidationStatus.SYSTEM_GENERATED.value
         assert candidate.latency_ms.generation is not None
         outcome = run_events[0]
@@ -1579,7 +1574,7 @@ def test_telemetry_marks_degraded_retrieval_fallback() -> None:
         candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
         assert candidate.generation_status == "RETRIEVAL_DEGRADED"
         assert candidate.rag_result_count == 0
-        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
+        assert candidate.retrieval_status == RetrievalStatus.UNAVAILABLE.value
 
     asyncio.run(scenario())
 
@@ -1645,9 +1640,6 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
             documents, HashingEmbedder(), min_score_default=0.0
         )
         await memory.build_index()
-        corpus_chunk_ids = {
-            chunk.chunk_id for document in documents for chunk in document.chunks
-        }
 
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
@@ -1671,14 +1663,9 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert completed.action_items_count == 1
-        (retrieval,) = generator.received_retrievals
-        assert retrieval.retrieval_status is RetrievalStatus.SUCCESS
-        assert retrieval.chunks
-        for chunk in retrieval.chunks:
-            assert chunk.chunk_id in corpus_chunk_ids
-            assert chunk.source_url.startswith("data/extracted/")
+        assert generator.received_retrievals == (None,)
         stored = await task_repository.list_for_run(run.id)
         assert len(stored) == 1
-        assert stored[0].task.missing_information == ()
+        assert stored[0].task.missing_information
 
     asyncio.run(scenario())

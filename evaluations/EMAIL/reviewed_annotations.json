@@ -1,1245 +1,1709 @@
 {
-  "schema_version": 1,
-  "rubric_version": "email-intent-annotation-v1",
-  "reviewed_at": "2026-08-19T16:23:58.711261Z",
-  "systematic_errors_resolved": true,
-  "case_count": 100,
-  "cases": [
-    {
-      "case_id": "email_case_001",
-      "source_message_id": "1a01a6b5d9a511ae",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert with useful reading content and no requested user action."
-      }
-    },
-    {
-      "case_id": "email_case_002",
-      "source_message_id": "1a01a6b5cb26961a",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert with useful reading content and no requested user action."
-      }
-    },
-    {
-      "case_id": "email_case_003",
-      "source_message_id": "1a01a6b5c6568c59",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Citation alert with useful reading content and no requested user action."
-      }
-    },
-    {
-      "case_id": "email_case_004",
-      "source_message_id": "1a0195206fb38753",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Editorial newsletter with reading content and no required user action."
-      }
-    },
-    {
-      "case_id": "email_case_005",
-      "source_message_id": "1a01926e2e40d10c",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional job recommendations do not create a clear user task."
-      }
-    },
-    {
-      "case_id": "email_case_006",
-      "source_message_id": "1a01909f49025183",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional enterprise newsletter with no user-specific task."
-      }
-    },
-    {
-      "case_id": "email_case_007",
-      "source_message_id": "1a018d86c192d7d6",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the security event was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional security remediation is presented, but authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_008",
-      "source_message_id": "1a018d8371fdc520",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the authentication attempt was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_009",
-      "source_message_id": "1a018d82e602156c",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the authentication attempt was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_010",
-      "source_message_id": "1a0185822537d4ff",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Past-due billing notice directly requests payment to avoid service restriction and provides execution steps."
-      }
-    },
-    {
-      "case_id": "email_case_011",
-      "source_message_id": "1a017e2f4b87f00d",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the account change was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_012",
-      "source_message_id": "1a017e2e85799529",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the account change was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_013",
-      "source_message_id": "1a017a486becf76f",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the access grant was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_014",
-      "source_message_id": "1a017a2c252b433f",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the authentication attempt was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "A verification challenge is provided without enough context to determine the required action."
-      }
-    },
-    {
-      "case_id": "email_case_015",
-      "source_message_id": "1a017a0dfce757df",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "whether the access grant was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
-      }
-    },
-    {
-      "case_id": "email_case_016",
-      "source_message_id": "1a01775f4a2caae3",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional content digest; no user action is required."
-      }
-    },
-    {
-      "case_id": "email_case_017",
-      "source_message_id": "1a0174d601a61305",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Payment-method confirmation; informational and does not request action."
-      }
-    },
-    {
-      "case_id": "email_case_018",
-      "source_message_id": "1a0174c6a8cddce1",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice states that no action is needed now."
-      }
-    },
-    {
-      "case_id": "email_case_019",
-      "source_message_id": "1a017283bd1fc9cc",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice states that no action is needed now."
-      }
-    },
-    {
-      "case_id": "email_case_020",
-      "source_message_id": "1a0151473ba366bf",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Mention notification offers an optional follow-up; acting is not required."
-      }
-    },
-    {
-      "case_id": "email_case_021",
-      "source_message_id": "1a01456d2839c649",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Explicit urgent triage task with a concrete next step assigned to the user."
-      }
-    },
-    {
-      "case_id": "email_case_022",
-      "source_message_id": "1a0142c833503b3e",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice states that no action is needed now."
-      }
-    },
-    {
-      "case_id": "email_case_023",
-      "source_message_id": "1a0140227c84ec41",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Security alert directs the user to verify activity and secure the account."
-      }
-    },
-    {
-      "case_id": "email_case_024",
-      "source_message_id": "1a013fd490ced48f",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice states that no action is needed now."
-      }
-    },
-    {
-      "case_id": "email_case_025",
-      "source_message_id": "1a013eabca146c9e",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional referral-reward message; no required action."
-      }
-    },
-    {
-      "case_id": "email_case_026",
-      "source_message_id": "1a013cbd7daba3d9",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional invitation; joining is optional and no required action is stated."
-      }
-    },
-    {
-      "case_id": "email_case_027",
-      "source_message_id": "1a013c8f92ec3f20",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional webinar invitation; registration is optional and no required action is stated."
-      }
-    },
-    {
-      "case_id": "email_case_028",
-      "source_message_id": "1a013196f8b593a9",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional webinar and admissions invitation; no required action is stated."
-      }
-    },
-    {
-      "case_id": "email_case_029",
-      "source_message_id": "1a012a40b69bea6d",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert provides article information without requesting action."
-      }
-    },
-    {
-      "case_id": "email_case_030",
-      "source_message_id": "1a012a40af9de36e",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert provides article information without requesting action."
-      }
-    },
-    {
-      "case_id": "email_case_031",
-      "source_message_id": "1a012a40adeab533",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated academic alert with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_032",
-      "source_message_id": "1a012a40a6c0e8e8",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated academic digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_033",
-      "source_message_id": "1a0129e46c35d546",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved."
-      }
-    },
-    {
-      "case_id": "email_case_034",
-      "source_message_id": "1a0125017d066c23",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Personalized media digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_035",
-      "source_message_id": "1a01247e9176d689",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Content recommendation digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_036",
-      "source_message_id": "1a012390ad2cfb19",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Software marketing message with no required user action."
-      }
-    },
-    {
-      "case_id": "email_case_037",
-      "source_message_id": "1a011d60dc85fc5f",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated marketplace digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_038",
-      "source_message_id": "1a011867ec2e7abf",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Product newsletter with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_039",
-      "source_message_id": "1a01153e821c36bf",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Subscription status notification; no further action is required."
-      }
-    },
-    {
-      "case_id": "email_case_040",
-      "source_message_id": "1a01128a976e6a0c",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Reward credit confirmation; no further action is required."
-      }
-    },
-    {
-      "case_id": "email_case_041",
-      "source_message_id": "1a010cff35b2d44d",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Security notification requires reviewing the sign-in and securing the account if it was not authorized."
-      }
-    },
-    {
-      "case_id": "email_case_042",
-      "source_message_id": "1a010c72885422c2",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account creation confirmation with support information and no explicit required task."
-      }
-    },
-    {
-      "case_id": "email_case_043",
-      "source_message_id": "1a010c7243304ebe",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account data-sharing notice explicitly indicates that no action is needed now."
-      }
-    },
-    {
-      "case_id": "email_case_044",
-      "source_message_id": "1a010bff34a2d596",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved."
-      }
-    },
-    {
-      "case_id": "email_case_045",
-      "source_message_id": "1a010b9b82738af5",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account data-sharing notice with no required action."
-      }
-    },
-    {
-      "case_id": "email_case_046",
-      "source_message_id": "1a010b5ec2e90c3d",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notification explicitly indicates that no action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_047",
-      "source_message_id": "1a010b3245a4b93a",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notification explicitly indicates that no action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_048",
-      "source_message_id": "1a010b2da3301eff",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Welcome message confirms account creation and provides optional access details without requiring action."
-      }
-    },
-    {
-      "case_id": "email_case_049",
-      "source_message_id": "1a01016b5d714318",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Social-media digest is unrelated promotional or community content with no user task."
-      }
-    },
-    {
-      "case_id": "email_case_050",
-      "source_message_id": "1a0100cb76630b85",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Professional-network digest contains feed updates and recommendations, not a user task."
-      }
-    },
-    {
-      "case_id": "email_case_051",
-      "source_message_id": "1a00ffa9aea8fcb6",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Group-membership approval is a status notification and does not require action."
-      }
-    },
-    {
-      "case_id": "email_case_052",
-      "source_message_id": "1a00f36064f927bc",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Community trending-post digest is unrelated content with no actionable request."
-      }
-    },
-    {
-      "case_id": "email_case_053",
-      "source_message_id": "1a00f2de80d13466",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Referenced sandbox triage procedure and complete workflow details"
-        ],
-        "expected_document_types": [
-          "procedure"
-        ],
-        "expected_route": "retrieve_rag",
-        "rationale": "The task is explicit, but execution depends on a referenced sandbox procedure and workflow details that are not fully available in the message."
-      }
-    },
-    {
-      "case_id": "email_case_054",
-      "source_message_id": "1a00f0eddb4a58a6",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notification explicitly indicates that no action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_055",
-      "source_message_id": "1a00ee7e6569ce38",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Product welcome message offers optional onboarding and security guidance without a required user action."
-      }
-    },
-    {
-      "case_id": "email_case_056",
-      "source_message_id": "1a00ed90675c6951",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional trial offer and unsubscribe options are not a user-required task."
-      }
-    },
-    {
-      "case_id": "email_case_057",
-      "source_message_id": "1a00ec80ee908daa",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Service-status notification reports the end of a trial and resulting feature limits without requiring action."
-      }
-    },
-    {
-      "case_id": "email_case_058",
-      "source_message_id": "1a00eb04ed98fa47",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Signup confirmation provides optional sign-in access and does not require action."
-      }
-    },
-    {
-      "case_id": "email_case_059",
-      "source_message_id": "1a00eafff49281a6",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notification explicitly indicates that no action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_060",
-      "source_message_id": "1a00e8aa285edec7",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Product marketing message promotes an optional integration and contains no user-required task."
-      }
-    },
-    {
-      "case_id": "email_case_061",
-      "source_message_id": "1a00e76e8fd5bd1e",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated job-recommendation digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_062",
-      "source_message_id": "1a00dacb17782c57",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Account sign-in alert gives a conditional security-review step and provides the review path."
-      }
-    },
-    {
-      "case_id": "email_case_063",
-      "source_message_id": "1a00d77e9b803bb3",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated job-alert digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_064",
-      "source_message_id": "1a00d293f8208cee",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Newsletter digest of reading recommendations with no required task."
-      }
-    },
-    {
-      "case_id": "email_case_065",
-      "source_message_id": "1a00ca85392d98c9",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated market-news digest with no requested or necessary action."
-      }
-    },
-    {
-      "case_id": "email_case_066",
-      "source_message_id": "1a00c8e7df72f0e5",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert containing article summaries and no requested action."
-      }
-    },
-    {
-      "case_id": "email_case_067",
-      "source_message_id": "1a00c8e7d52dcf55",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert containing article summaries and no requested action."
-      }
-    },
-    {
-      "case_id": "email_case_068",
-      "source_message_id": "1a00c8e7cc3512ff",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Citation alert containing research summaries and no requested action."
-      }
-    },
-    {
-      "case_id": "email_case_069",
-      "source_message_id": "1a00c8e7c68d63c9",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Citation alert containing a research summary and no requested action."
-      }
-    },
-    {
-      "case_id": "email_case_070",
-      "source_message_id": "1a00ba37702f501d",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Automated job-alert digest with no user-directed task."
-      }
-    },
-    {
-      "case_id": "email_case_071",
-      "source_message_id": "1a00b6a6f7162d63",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Account-login security alert gives a conditional account-security step and provides the help path."
-      }
-    },
-    {
-      "case_id": "email_case_072",
-      "source_message_id": "1a00b6a512e74292",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Account-login security alert gives a conditional account-security step and provides the help path."
-      }
-    },
-    {
-      "case_id": "email_case_073",
-      "source_message_id": "1a00b6319a843646",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Account sign-in security alert gives a conditional activity-review step and provides the review path."
-      }
-    },
-    {
-      "case_id": "email_case_074",
-      "source_message_id": "1a00b6306dbd12d0",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "New passkey security alert directs account review if unrecognized and provides the review path."
-      }
-    },
-    {
-      "case_id": "email_case_075",
-      "source_message_id": "1a00b46b7101dde9",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Verification message directly requests email confirmation and provides the needed verification method."
-      }
-    },
-    {
-      "case_id": "email_case_076",
-      "source_message_id": "1a00ae9a205604b6",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Social-media digest with no user-specific action."
-      }
-    },
-    {
-      "case_id": "email_case_077",
-      "source_message_id": "1a00ae25c5c8469e",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Newsletter content and promotions provide information without a required user action."
-      }
-    },
-    {
-      "case_id": "email_case_078",
-      "source_message_id": "1a00ae022058b940",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "External terms update presents an optional accept-or-discontinue decision; no internal knowledge is needed."
-      }
-    },
-    {
-      "case_id": "email_case_079",
-      "source_message_id": "1a00a8a724a7545a",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice explicitly indicates that no immediate action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_080",
-      "source_message_id": "1a00a7191e11aacc",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the sign-in was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context."
-      }
-    },
-    {
-      "case_id": "email_case_081",
-      "source_message_id": "1a00a44fd904931a",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Account-sharing notice explicitly indicates that no immediate action is needed."
-      }
-    },
-    {
-      "case_id": "email_case_082",
-      "source_message_id": "1a00a42940036fd0",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the login was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Login alert makes remediation conditional on whether the activity is recognized."
-      }
-    },
-    {
-      "case_id": "email_case_083",
-      "source_message_id": "1a00a0b43566d9fc",
-      "final": {
-        "actionability": "action_required",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Underlying task details and referenced internal usage guidance"
-        ],
-        "expected_document_types": [
-          "procedure"
-        ],
-        "expected_route": "retrieve_rag",
-        "rationale": "Action summary identifies assigned security and project work, but the underlying details and referenced guidance are incomplete."
-      }
-    },
-    {
-      "case_id": "email_case_084",
-      "source_message_id": "1a009f16ec3e4e9b",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the sign-in was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context."
-      }
-    },
-    {
-      "case_id": "email_case_085",
-      "source_message_id": "1a009efde8c8043c",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the sign-in was authorized"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security notice makes remediation conditional on whether the activity is recognized."
-      }
-    },
-    {
-      "case_id": "email_case_086",
-      "source_message_id": "1a009ef8c23fa0b5",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the sign-in was initiated by the user"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated."
-      }
-    },
-    {
-      "case_id": "email_case_087",
-      "source_message_id": "1a009ef87db5192d",
-      "final": {
-        "actionability": "unclear",
-        "email_is_sufficient": false,
-        "knowledge_gaps": [
-          "Whether the sign-in was initiated by the user"
-        ],
-        "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated."
-      }
-    },
-    {
-      "case_id": "email_case_088",
-      "source_message_id": "1a00851890c96d3e",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Job alert offers optional applications with listing and application paths included."
-      }
-    },
-    {
-      "case_id": "email_case_089",
-      "source_message_id": "1a00802e0798ad6f",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Personalized reading digest provides information without a required action."
-      }
-    },
-    {
-      "case_id": "email_case_090",
-      "source_message_id": "1a007ec0f98b983b",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Product tips invite optional settings changes and provide the relevant path."
-      }
-    },
-    {
-      "case_id": "email_case_091",
-      "source_message_id": "1a007dcaac933998",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional marketing message with no user obligation or actionable task."
-      }
-    },
-    {
-      "case_id": "email_case_092",
-      "source_message_id": "1a007778fa49d352",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "News digest provides information without requesting or requiring user action."
-      }
-    },
-    {
-      "case_id": "email_case_093",
-      "source_message_id": "1a006ea57255f190",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Promotional retail message with optional purchase prompts and no required action."
-      }
-    },
-    {
-      "case_id": "email_case_094",
-      "source_message_id": "1a006a3e3c872d56",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Job-alert notification presents optional opportunities; reviewing or applying is user-directed and needs no company knowledge."
-      }
-    },
-    {
-      "case_id": "email_case_095",
-      "source_message_id": "1a0069279e2dd853",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert contains reference information with no requested or necessary user action."
-      }
-    },
-    {
-      "case_id": "email_case_096",
-      "source_message_id": "1a00692796545376",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Research alert contains reference information with no requested or necessary user action."
-      }
-    },
-    {
-      "case_id": "email_case_097",
-      "source_message_id": "1a0069278f75bf86",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Citation alert is informational and does not request or require an action."
-      }
-    },
-    {
-      "case_id": "email_case_098",
-      "source_message_id": "1a0069278492179f",
-      "final": {
-        "actionability": "informational",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Citation digest is informational and does not request or require an action."
-      }
-    },
-    {
-      "case_id": "email_case_099",
-      "source_message_id": "1a005bea69f58fed",
-      "final": {
-        "actionability": "irrelevant",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "no_action",
-        "rationale": "Noisy social-media digest with no clear user-specific task or obligation."
-      }
-    },
-    {
-      "case_id": "email_case_100",
-      "source_message_id": "1a00559ad93cce82",
-      "final": {
-        "actionability": "action_suggested",
-        "email_is_sufficient": true,
-        "knowledge_gaps": [],
-        "expected_document_types": [],
-        "expected_route": "direct_plan",
-        "rationale": "Notification reports a new message; reviewing or responding is optional and can be initiated from the notification."
-      }
-    }
-  ]
+    "schema_version":  2,
+    "rubric_version":  "email-pipeline-annotation-v2",
+    "reviewed_at":  "2026-08-19T16:23:58.711261Z",
+    "systematic_errors_resolved":  true,
+    "case_count":  100,
+    "cases":  [
+                  {
+                      "case_id":  "email_case_001",
+                      "source_message_id":  "1a01a6b5d9a511ae",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert with useful reading content and no requested user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_002",
+                      "source_message_id":  "1a01a6b5cb26961a",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert with useful reading content and no requested user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_003",
+                      "source_message_id":  "1a01a6b5c6568c59",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Citation alert with useful reading content and no requested user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_004",
+                      "source_message_id":  "1a0195206fb38753",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Editorial newsletter with reading content and no required user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_005",
+                      "source_message_id":  "1a01926e2e40d10c",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional job recommendations do not create a clear user task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_006",
+                      "source_message_id":  "1a01909f49025183",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional enterprise newsletter with no user-specific task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_007",
+                      "source_message_id":  "1a018d86c192d7d6",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the security event was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Conditional security remediation is presented, but authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_008",
+                      "source_message_id":  "1a018d8371fdc520",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the authentication attempt was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Authentication instructions are conditional, and the user\u0027s authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_009",
+                      "source_message_id":  "1a018d82e602156c",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the authentication attempt was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Authentication instructions are conditional, and the user\u0027s authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_010",
+                      "source_message_id":  "1a0185822537d4ff",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Past-due billing notice directly requests payment to avoid service restriction and provides execution steps.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_011",
+                      "source_message_id":  "1a017e2f4b87f00d",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the account change was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Conditional account-security remediation is presented, but authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_012",
+                      "source_message_id":  "1a017e2e85799529",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the account change was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Conditional account-security remediation is presented, but authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_013",
+                      "source_message_id":  "1a017a486becf76f",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the access grant was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Conditional account-security remediation is presented, but authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_014",
+                      "source_message_id":  "1a017a2c252b433f",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the authentication attempt was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "A verification challenge is provided without enough context to determine the required action.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_015",
+                      "source_message_id":  "1a017a0dfce757df",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "whether the access grant was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Conditional account-security remediation is presented, but authorization status is unknown.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_016",
+                      "source_message_id":  "1a01775f4a2caae3",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional content digest; no user action is required.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_017",
+                      "source_message_id":  "1a0174d601a61305",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Payment-method confirmation; informational and does not request action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_018",
+                      "source_message_id":  "1a0174c6a8cddce1",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice states that no action is needed now.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_019",
+                      "source_message_id":  "1a017283bd1fc9cc",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice states that no action is needed now.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_020",
+                      "source_message_id":  "1a0151473ba366bf",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Mention notification offers an optional follow-up; acting is not required.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_021",
+                      "source_message_id":  "1a01456d2839c649",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Explicit urgent triage task with a concrete next step assigned to the user.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_022",
+                      "source_message_id":  "1a0142c833503b3e",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice states that no action is needed now.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_023",
+                      "source_message_id":  "1a0140227c84ec41",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Security alert directs the user to verify activity and secure the account.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_024",
+                      "source_message_id":  "1a013fd490ced48f",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice states that no action is needed now.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_025",
+                      "source_message_id":  "1a013eabca146c9e",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional referral-reward message; no required action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_026",
+                      "source_message_id":  "1a013cbd7daba3d9",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional invitation; joining is optional and no required action is stated.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_027",
+                      "source_message_id":  "1a013c8f92ec3f20",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional webinar invitation; registration is optional and no required action is stated.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_028",
+                      "source_message_id":  "1a013196f8b593a9",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional webinar and admissions invitation; no required action is stated.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_029",
+                      "source_message_id":  "1a012a40b69bea6d",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert provides article information without requesting action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_030",
+                      "source_message_id":  "1a012a40af9de36e",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert provides article information without requesting action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_031",
+                      "source_message_id":  "1a012a40adeab533",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated academic alert with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_032",
+                      "source_message_id":  "1a012a40a6c0e8e8",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated academic digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_033",
+                      "source_message_id":  "1a0129e46c35d546",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_034",
+                      "source_message_id":  "1a0125017d066c23",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Personalized media digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_035",
+                      "source_message_id":  "1a01247e9176d689",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Content recommendation digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_036",
+                      "source_message_id":  "1a012390ad2cfb19",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Software marketing message with no required user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_037",
+                      "source_message_id":  "1a011d60dc85fc5f",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated marketplace digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_038",
+                      "source_message_id":  "1a011867ec2e7abf",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Product newsletter with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_039",
+                      "source_message_id":  "1a01153e821c36bf",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Subscription status notification; no further action is required.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_040",
+                      "source_message_id":  "1a01128a976e6a0c",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Reward credit confirmation; no further action is required.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_041",
+                      "source_message_id":  "1a010cff35b2d44d",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Security notification requires reviewing the sign-in and securing the account if it was not authorized.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_042",
+                      "source_message_id":  "1a010c72885422c2",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account creation confirmation with support information and no explicit required task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_043",
+                      "source_message_id":  "1a010c7243304ebe",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account data-sharing notice explicitly indicates that no action is needed now.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_044",
+                      "source_message_id":  "1a010bff34a2d596",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_045",
+                      "source_message_id":  "1a010b9b82738af5",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account data-sharing notice with no required action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_046",
+                      "source_message_id":  "1a010b5ec2e90c3d",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notification explicitly indicates that no action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_047",
+                      "source_message_id":  "1a010b3245a4b93a",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notification explicitly indicates that no action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_048",
+                      "source_message_id":  "1a010b2da3301eff",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Welcome message confirms account creation and provides optional access details without requiring action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_049",
+                      "source_message_id":  "1a01016b5d714318",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Social-media digest is unrelated promotional or community content with no user task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_050",
+                      "source_message_id":  "1a0100cb76630b85",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Professional-network digest contains feed updates and recommendations, not a user task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_051",
+                      "source_message_id":  "1a00ffa9aea8fcb6",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Group-membership approval is a status notification and does not require action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_052",
+                      "source_message_id":  "1a00f36064f927bc",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Community trending-post digest is unrelated content with no actionable request.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_053",
+                      "source_message_id":  "1a00f2de80d13466",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Referenced sandbox triage procedure and complete workflow details"
+                                                       ],
+                                    "expected_document_types":  [
+                                                                    "procedure"
+                                                                ],
+                                    "rationale":  "The task is explicit, but execution depends on a referenced sandbox procedure and workflow details that are not fully available in the message.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_054",
+                      "source_message_id":  "1a00f0eddb4a58a6",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notification explicitly indicates that no action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_055",
+                      "source_message_id":  "1a00ee7e6569ce38",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Product welcome message offers optional onboarding and security guidance without a required user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_056",
+                      "source_message_id":  "1a00ed90675c6951",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional trial offer and unsubscribe options are not a user-required task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_057",
+                      "source_message_id":  "1a00ec80ee908daa",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Service-status notification reports the end of a trial and resulting feature limits without requiring action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_058",
+                      "source_message_id":  "1a00eb04ed98fa47",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Signup confirmation provides optional sign-in access and does not require action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_059",
+                      "source_message_id":  "1a00eafff49281a6",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notification explicitly indicates that no action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_060",
+                      "source_message_id":  "1a00e8aa285edec7",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Product marketing message promotes an optional integration and contains no user-required task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_061",
+                      "source_message_id":  "1a00e76e8fd5bd1e",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated job-recommendation digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_062",
+                      "source_message_id":  "1a00dacb17782c57",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account sign-in alert gives a conditional security-review step and provides the review path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_063",
+                      "source_message_id":  "1a00d77e9b803bb3",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated job-alert digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_064",
+                      "source_message_id":  "1a00d293f8208cee",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Newsletter digest of reading recommendations with no required task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_065",
+                      "source_message_id":  "1a00ca85392d98c9",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated market-news digest with no requested or necessary action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_066",
+                      "source_message_id":  "1a00c8e7df72f0e5",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert containing article summaries and no requested action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_067",
+                      "source_message_id":  "1a00c8e7d52dcf55",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert containing article summaries and no requested action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_068",
+                      "source_message_id":  "1a00c8e7cc3512ff",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Citation alert containing research summaries and no requested action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_069",
+                      "source_message_id":  "1a00c8e7c68d63c9",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Citation alert containing a research summary and no requested action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_070",
+                      "source_message_id":  "1a00ba37702f501d",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Automated job-alert digest with no user-directed task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_071",
+                      "source_message_id":  "1a00b6a6f7162d63",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-login security alert gives a conditional account-security step and provides the help path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_072",
+                      "source_message_id":  "1a00b6a512e74292",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-login security alert gives a conditional account-security step and provides the help path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_073",
+                      "source_message_id":  "1a00b6319a843646",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account sign-in security alert gives a conditional activity-review step and provides the review path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_074",
+                      "source_message_id":  "1a00b6306dbd12d0",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "New passkey security alert directs account review if unrecognized and provides the review path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_075",
+                      "source_message_id":  "1a00b46b7101dde9",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Verification message directly requests email confirmation and provides the needed verification method.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_076",
+                      "source_message_id":  "1a00ae9a205604b6",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Social-media digest with no user-specific action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_077",
+                      "source_message_id":  "1a00ae25c5c8469e",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Newsletter content and promotions provide information without a required user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_078",
+                      "source_message_id":  "1a00ae022058b940",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "External terms update presents an optional accept-or-discontinue decision; no internal knowledge is needed.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_079",
+                      "source_message_id":  "1a00a8a724a7545a",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice explicitly indicates that no immediate action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_080",
+                      "source_message_id":  "1a00a7191e11aacc",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the sign-in was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Security alert leaves authorization status unresolved; the next step depends on user context.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_081",
+                      "source_message_id":  "1a00a44fd904931a",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Account-sharing notice explicitly indicates that no immediate action is needed.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_082",
+                      "source_message_id":  "1a00a42940036fd0",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the login was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Login alert makes remediation conditional on whether the activity is recognized.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_083",
+                      "source_message_id":  "1a00a0b43566d9fc",
+                      "final":  {
+                                    "actionability":  "action_required",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Underlying task details and referenced internal usage guidance"
+                                                       ],
+                                    "expected_document_types":  [
+                                                                    "procedure"
+                                                                ],
+                                    "rationale":  "Action summary identifies assigned security and project work, but the underlying details and referenced guidance are incomplete.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_084",
+                      "source_message_id":  "1a009f16ec3e4e9b",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the sign-in was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Security alert leaves authorization status unresolved; the next step depends on user context.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_085",
+                      "source_message_id":  "1a009efde8c8043c",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the sign-in was authorized"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Security notice makes remediation conditional on whether the activity is recognized.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_086",
+                      "source_message_id":  "1a009ef8c23fa0b5",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the sign-in was initiated by the user"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Authentication message supports different actions depending on whether the sign-in was user-initiated.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_087",
+                      "source_message_id":  "1a009ef87db5192d",
+                      "final":  {
+                                    "actionability":  "unclear",
+                                    "email_is_sufficient":  false,
+                                    "knowledge_gaps":  [
+                                                           "Whether the sign-in was initiated by the user"
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Authentication message supports different actions depending on whether the sign-in was user-initiated.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  true
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_088",
+                      "source_message_id":  "1a00851890c96d3e",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Job alert offers optional applications with listing and application paths included.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_089",
+                      "source_message_id":  "1a00802e0798ad6f",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Personalized reading digest provides information without a required action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_090",
+                      "source_message_id":  "1a007ec0f98b983b",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Product tips invite optional settings changes and provide the relevant path.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_091",
+                      "source_message_id":  "1a007dcaac933998",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional marketing message with no user obligation or actionable task.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_092",
+                      "source_message_id":  "1a007778fa49d352",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "News digest provides information without requesting or requiring user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_093",
+                      "source_message_id":  "1a006ea57255f190",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Promotional retail message with optional purchase prompts and no required action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_094",
+                      "source_message_id":  "1a006a3e3c872d56",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Job-alert notification presents optional opportunities; reviewing or applying is user-directed and needs no company knowledge.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_095",
+                      "source_message_id":  "1a0069279e2dd853",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert contains reference information with no requested or necessary user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_096",
+                      "source_message_id":  "1a00692796545376",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Research alert contains reference information with no requested or necessary user action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_097",
+                      "source_message_id":  "1a0069278f75bf86",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Citation alert is informational and does not request or require an action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_098",
+                      "source_message_id":  "1a0069278492179f",
+                      "final":  {
+                                    "actionability":  "informational",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Citation digest is informational and does not request or require an action.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_099",
+                      "source_message_id":  "1a005bea69f58fed",
+                      "final":  {
+                                    "actionability":  "irrelevant",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Noisy social-media digest with no clear user-specific task or obligation.",
+                                    "retrieval_expected":  false,
+                                    "company_context_required":  false
+                                }
+                  },
+                  {
+                      "case_id":  "email_case_100",
+                      "source_message_id":  "1a00559ad93cce82",
+                      "final":  {
+                                    "actionability":  "action_suggested",
+                                    "email_is_sufficient":  true,
+                                    "knowledge_gaps":  [
+
+                                                       ],
+                                    "expected_document_types":  [
+
+                                                                ],
+                                    "rationale":  "Notification reports a new message; reviewing or responding is optional and can be initiated from the notification.",
+                                    "retrieval_expected":  true,
+                                    "company_context_required":  false
+                                }
+                  }
+              ]
 }

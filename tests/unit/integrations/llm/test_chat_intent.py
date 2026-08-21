@@ -63,7 +63,7 @@ def test_gemini_classifier_rotates_key_after_rate_limit(monkeypatch) -> None:
                 "tool_name": None,
                 "needs_clarification": False,
                 "retrieval_query": None,
-                "confidence": 1.0,
+                "confidence": 0.95,
                 "reason_codes": ["general_chat"],
             }
 
@@ -71,6 +71,7 @@ def test_gemini_classifier_rotates_key_after_rate_limit(monkeypatch) -> None:
         "cowork_agent.integrations.llm.providers.gemini.GoogleGenAITransport",
         FakeTransport,
     )
+
     provider = GeminiSettings(
         api_keys=("key-a", "key-b"),
         model="gemini-test",

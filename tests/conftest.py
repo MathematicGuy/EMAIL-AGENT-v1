@@ -84,6 +84,7 @@ def _isolate_control_plane_target(config: pytest.Config) -> None:
     """
     os.environ["POSTGRES_MODE"] = "off"
     os.environ.pop("DATABASE_URL", None)
+    os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
 
 
 def _pin_offline_rag_provider(config: pytest.Config) -> None:

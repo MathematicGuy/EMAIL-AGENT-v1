@@ -88,6 +88,7 @@ For detailed Level 1 component boundaries, sequence flows, and data contracts, r
 4. **[04-overall-architecture.md](04-overall-architecture.md):** Comprehensive Overall System Architecture, system inventory, decoupled product flows, and state/control ownership.
 5. **[05-rag-architecture.md](05-rag-architecture.md):** Deep-dive Enterprise RAG & Vector Memory Subsystem architecture, corpus indexing interface, multi-backend retrieval ladder, and User Documents RAG engine.
 6. **[06-knowledge-and-document-ingestion-pipeline.md](06-knowledge-and-document-ingestion-pipeline.md):** Standalone Document Ingestion Pipeline, DOCX/PDF/TXT/MD extractors, NFC sanitization, YAML frontmatter, binary date harvesting, SHA-256 hash manifest tracking, and atomic Markdown persistence. Audited 2026-08-20.
+7. **[07-docx-document-viewing-and-editing.md](07-docx-document-viewing-and-editing.md):** DOCX Document Viewing Subsystem, high-fidelity in-browser Word viewer (DocxViewer), A4 page-by-page layout, zoom/fullscreen controls, and extracted markdown preview. Audited 2026-08-21.
 
 > [!NOTE]
-> Streams 01–03 and 06 have been verified and synchronized with live code. Documents 04–05 remain useful Level 1 references and will be updated in subsequent sync passes.
+> Streams 01–03, 06, 07 and this dashboard were audited against live source. Documents 04–05 remain useful Level 1 references and will be updated in subsequent sync passes.

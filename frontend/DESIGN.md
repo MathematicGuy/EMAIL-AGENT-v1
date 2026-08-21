@@ -28,7 +28,7 @@ An ultra-refined, warm dark-mode AI Chat workspace inspired by modern AI interfa
 
 ## Typography & Fonts
 
-- **Display Serif**: `Instrument Serif` / `Playfair Display` (Used for "Let's noodle" logo title)
+- **Display Serif**: `Newsreader` / `Lora` / `Playfair Display` (Used for logo title & greetings with full Vietnamese diacritics support)
 - **UI Sans**: `Geist` / `Inter` / System Sans (Used for workspace controls, menus, inputs)
 - **Code Mono**: `Geist Mono` / `JetBrains Mono` (Used for code blocks and technical data)
 

@@ -7,17 +7,43 @@ import asyncio
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-from cowork_agent.domain.target_contracts import BodyFormat, EphemeralEmailEnvelope, FetchStatus
-from cowork_agent.features.email_action_plan.routing import resolve_route
+from cowork_agent.config import EmailRagQualitySettings
+from cowork_agent.domain.target_contracts import (
+    BodyFormat,
+    EphemeralEmailEnvelope,
+    FetchStatus,
+    RetrievalFilters,
+    RetrievalLimits,
+    RetrievalStatus,
+    SemanticRetrievalRequest,
+    SemanticRetrievalResponse,
+)
+from cowork_agent.features.email_action_plan.correlation import TaskCandidate
+from cowork_agent.features.email_action_plan.evidence import (
+    GATE_VERSION,
+    EvidenceStatus,
+    assess_retrieval_evidence,
+)
+from cowork_agent.features.email_action_plan.query_rewrite import (
+    RetrievalQueryRewriterPort,
+    build_query_rewrite_input,
+    deterministic_query,
+)
+from cowork_agent.features.email_action_plan.routing import (
+    candidate_requires_processing,
+    resolve_candidate_after_retrieval,
+)
 
 try:
     from scripts.email_evaluation_artifacts import (
+        PIPELINE_VERSION,
         PROMPT_VERSION,
         atomic_write_json,
         dataset_fingerprint,
@@ -28,6 +54,7 @@ try:
     )
 except ModuleNotFoundError:
     from email_evaluation_artifacts import (  # type: ignore[no-redef]
+        PIPELINE_VERSION,
         PROMPT_VERSION,
         atomic_write_json,
         dataset_fingerprint,
@@ -42,6 +69,16 @@ DEFAULT_CANDIDATES = REPO_ROOT / "evaluations" / "EMAIL" / "gmail_candidates.jso
 DEFAULT_GOLDEN = REPO_ROOT / "evaluations" / "EMAIL" / "golden_dataset.json"
 DEFAULT_RUNS_DIR = REPO_ROOT / "evaluations" / "EMAIL" / "runs"
 MAX_CASES = 50
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRuntime:
+    classifier: Any
+    semantic_memory: Any
+    query_rewriter: RetrievalQueryRewriterPort | None
+    quality_settings: EmailRagQualitySettings
+    provider: str
+    model: str
 
 
 def load_envelopes_from_candidates(
@@ -92,30 +129,84 @@ def select_shard(
     return [dict(candidate) for candidate in candidates[start:end]]
 
 
-def _prediction_and_routing(
-    decision: Any, *, is_fallback: bool
-) -> tuple[dict[str, object], dict[str, object]]:
+def _prediction(decision: Any, *, is_fallback: bool) -> dict[str, object]:
+    return {
+        "actionability": decision.actionability.value,
+        "email_is_sufficient": decision.email_is_sufficient,
+        "expected_document_types": [item.value for item in decision.expected_document_types],
+        "confidence": decision.confidence,
+        "source_status": "classifier_fallback" if is_fallback else "model_prediction",
+    }
+
+
+def _candidate(message: EphemeralEmailEnvelope, decision: Any) -> TaskCandidate:
+    return TaskCandidate(
+        candidate_key=message.gmail_message_id,
+        gmail_thread_id=message.gmail_thread_id,
+        incident_key=None,
+        source_message_ids=(message.gmail_message_id,),
+        decisions=((message.gmail_message_id, decision),),
+    )
+
+
+async def _retrieve_candidate(
+    message: EphemeralEmailEnvelope,
+    candidate: TaskCandidate,
+    semantic_memory: Any,
+    query_rewriter: RetrievalQueryRewriterPort | None,
+) -> tuple[SemanticRetrievalResponse, str]:
+    decision = candidate.decisions[0][1]
+    gaps = tuple(decision.knowledge_gaps)
+    rewrite_input = build_query_rewrite_input(
+        candidate_action_items=(decision.candidate_action_item,),
+        knowledge_gaps=gaps,
+        messages=((message.subject, message.normalized_body),),
+    )
+    query = decision.retrieval_query
+    rewrite_status = "classifier_query" if query else "fallback"
+    if query is None and query_rewriter is not None:
+        try:
+            query = await query_rewriter.rewrite(rewrite_input)
+            rewrite_status = "rewritten" if query else "fallback"
+        except Exception:
+            query = None
+    if not query:
+        query = deterministic_query(rewrite_input)
+        rewrite_status = "fallback"
+    request = SemanticRetrievalRequest(
+        run_id="email-evaluation",
+        user_id="",
+        query=query,
+        knowledge_gaps=gaps,
+        filters=RetrievalFilters(document_status=("ready",)),
+        limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
+    )
+    for _attempt in (1, 2):
+        try:
+            return await semantic_memory.retrieve(request), rewrite_status
+        except Exception:
+            continue
     return (
-        {
-            "actionability": decision.actionability.value,
-            "email_is_sufficient": decision.email_is_sufficient,
-            "knowledge_gaps": list(decision.knowledge_gaps),
-            "retrieval_query": decision.retrieval_query,
-            "expected_document_types": [item.value for item in decision.expected_document_types],
-            "confidence": decision.confidence,
-            "source_status": "classifier_fallback" if is_fallback else "model_prediction",
-        },
-        {
-            "resolved_route": resolve_route(decision).route.value,
-            "reason_codes": [code.value for code in decision.reason_codes],
-        },
+        SemanticRetrievalResponse(
+            query_id=f"q_eval_{message.gmail_message_id}",
+            chunks=(),
+            retrieval_status=RetrievalStatus.UNAVAILABLE,
+            latency_ms=0,
+        ),
+        rewrite_status,
     )
 
 
 async def evaluate(
-    messages: Sequence[EphemeralEmailEnvelope], classifier: Any, current_time: datetime
+    messages: Sequence[EphemeralEmailEnvelope],
+    classifier: Any,
+    current_time: datetime,
+    *,
+    semantic_memory: Any,
+    query_rewriter: RetrievalQueryRewriterPort | None,
+    quality_settings: EmailRagQualitySettings,
 ) -> dict[str, object]:
-    """Classify ephemeral inputs and retain only prediction and routing metadata."""
+    """Run classifier, retrieval, evidence gate, and final resolver metadata-only."""
 
     classify = classifier.classify
     unwrapped = getattr(classify, "__wrapped__", None)
@@ -137,13 +228,48 @@ async def evaluate(
         if classified is None:
             missing_ids.append(message.gmail_message_id)
             continue
-        prediction, routing = _prediction_and_routing(
-            classified.decision, is_fallback=classified.is_fallback
-        )
+        decision = classified.decision
+        candidate = _candidate(message, decision)
+        prediction = _prediction(decision, is_fallback=classified.is_fallback)
+        if candidate_requires_processing(candidate):
+            response, rewrite_status = await _retrieve_candidate(
+                message, candidate, semantic_memory, query_rewriter
+            )
+            evidence = assess_retrieval_evidence(response, quality_settings)
+            resolution = resolve_candidate_after_retrieval(candidate, evidence.status)
+            retrieval = {
+                "attempted": True,
+                "retrieval_status": response.retrieval_status.value,
+                "evidence_status": evidence.status.value,
+                "result_count": len(response.chunks),
+                "accepted_chunk_count": len(evidence.response.chunks),
+                "top_rerank_score": evidence.top_rerank_score,
+                "query_rewrite_status": rewrite_status,
+                "degraded": evidence.status is EvidenceStatus.UNAVAILABLE,
+            }
+        else:
+            resolution = resolve_candidate_after_retrieval(candidate, EvidenceStatus.UNSUPPORTED)
+            retrieval = {
+                "attempted": False,
+                "retrieval_status": None,
+                "evidence_status": None,
+                "result_count": 0,
+                "accepted_chunk_count": 0,
+                "top_rerank_score": None,
+                "query_rewrite_status": None,
+                "degraded": False,
+            }
+        routing = {
+            "resolved_route": resolution.route.value,
+            "mode": resolution.mode,
+            "forced_by_guard": resolution.forced_by_guard,
+            "reason_codes": [code.value for code in resolution.reason_codes],
+        }
         results.append(
             {
                 "source_message_id": message.gmail_message_id,
                 "prediction": prediction,
+                "retrieval": retrieval,
                 "routing": routing,
             }
         )
@@ -176,6 +302,7 @@ def build_run_artifact(
     selected_candidates: Sequence[Mapping[str, object]],
     provider: str,
     model: str,
+    quality_settings: EmailRagQualitySettings,
     run_at: datetime,
     shard_index: int,
     shard_count: int,
@@ -193,13 +320,17 @@ def build_run_artifact(
             raise ValueError("evaluation summary.results must contain objects")
         source_message_id = raw_result.get("source_message_id")
         prediction = raw_result.get("prediction")
+        retrieval = raw_result.get("retrieval")
         routing = raw_result.get("routing")
         if (
             not isinstance(source_message_id, str)
             or not isinstance(prediction, Mapping)
+            or not isinstance(retrieval, Mapping)
             or not isinstance(routing, Mapping)
         ):
-            raise ValueError("evaluation summary result must include prediction and routing")
+            raise ValueError(
+                "evaluation summary result must include prediction, retrieval, and routing"
+            )
         results_by_source_id[source_message_id] = raw_result
 
     cases: list[dict[str, object]] = []
@@ -212,6 +343,7 @@ def build_run_artifact(
             {
                 "case_id": str(candidate["case_id"]),
                 "prediction": dict(cast(Mapping[str, object], result["prediction"])),
+                "retrieval": dict(cast(Mapping[str, object], result["retrieval"])),
                 "routing": dict(cast(Mapping[str, object], result["routing"])),
             }
         )
@@ -222,14 +354,20 @@ def build_run_artifact(
 
     created_at = run_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
     run = {
-        "schema_version": 1,
-        "run_id": f"email-intent-{run_at.astimezone(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex}",
+        "schema_version": 2,
+        "run_id": f"email-pipeline-{run_at.astimezone(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex}",
         "created_at": created_at,
         "dataset_fingerprint": dataset_fingerprint(validated_golden),
         "rubric_version": validated_golden["rubric_version"],
         "provider": provider,
         "model": model,
         "prompt_version": PROMPT_VERSION,
+        "pipeline_version": PIPELINE_VERSION,
+        "quality_gate": {
+            "version": GATE_VERSION,
+            "min_rerank_score": quality_settings.min_rerank_score,
+            "relative_cutoff_ratio": quality_settings.relative_cutoff_ratio,
+        },
         "shard": {"index": shard_index, "count": shard_count, "case_count": len(cases)},
         "cases": cases,
     }
@@ -273,6 +411,45 @@ def build_live_classifier() -> tuple[Any, str, str]:
     raise ValueError(f"unsupported LLM_PROVIDER for email evaluation: {provider}")
 
 
+async def build_live_runtime() -> EvaluationRuntime:
+    """Compose the same company retrieval and fixed-Gemini rewrite providers."""
+    from cowork_agent.config import GeminiSettings, JinaEmbeddingSettings
+    from cowork_agent.integrations.llm.providers.gemini import (
+        GeminiRetrievalQueryRewriter,
+    )
+    from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
+
+    classifier, provider, model = build_live_classifier()
+    quality_settings = EmailRagQualitySettings.from_env()
+    semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
+    query_rewriter = GeminiRetrievalQueryRewriter(GeminiSettings.from_env())
+    return EvaluationRuntime(
+        classifier=classifier,
+        semantic_memory=semantic_memory,
+        query_rewriter=query_rewriter,
+        quality_settings=quality_settings,
+        provider=provider,
+        model=model,
+    )
+
+
+async def run_live_evaluation(
+    messages: Sequence[EphemeralEmailEnvelope], run_at: datetime
+) -> tuple[EvaluationRuntime, dict[str, object]]:
+    """Build and exercise async providers on one event loop."""
+
+    runtime = await build_live_runtime()
+    summary = await evaluate(
+        messages,
+        runtime.classifier,
+        run_at,
+        semantic_memory=runtime.semantic_memory,
+        query_rewriter=runtime.query_rewriter,
+        quality_settings=runtime.quality_settings,
+    )
+    return runtime, summary
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write an immutable Email Intent evaluation run.")
     parser.add_argument("--candidates", type=Path, default=DEFAULT_CANDIDATES)
@@ -294,16 +471,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         _validated_selected_case_ids(golden, selected)
         run_at = datetime.now(UTC)
-        classifier, provider, model = build_live_classifier()
-        summary = asyncio.run(
-            evaluate(load_envelopes_from_candidates(selected), classifier, run_at)
+        runtime, summary = asyncio.run(
+            run_live_evaluation(load_envelopes_from_candidates(selected), run_at)
         )
         run = build_run_artifact(
             summary,
             golden=golden,
             selected_candidates=selected,
-            provider=provider,
-            model=model,
+            provider=runtime.provider,
+            model=runtime.model,
+            quality_settings=runtime.quality_settings,
             run_at=run_at,
             shard_index=args.shard_index,
             shard_count=args.shard_count,

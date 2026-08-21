@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
-  "rubric_version": "email-intent-annotation-v1",
-  "expected_route": "retrieve_rag",
+  "schema_version": 2,
+  "rubric_version": "email-pipeline-annotation-v2",
+  "evaluation_bucket": "retrieve_first_context_required",
   "case_count": 16,
   "cases": [
     {
@@ -14,8 +14,9 @@
           "whether the security event was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional security remediation is presented, but authorization status is unknown."
+        "rationale": "Conditional security remediation is presented, but authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Your Mozilla account was used to sign in Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Wednesday, Aug 19, 2026 2:07:11 PM (+07) Not you? Change your password: [link1] Manage account: [link2] This is an automated email. If you received it by mistake, you don’t need to do anything. For more info, visit Mozilla Support: [link3]. Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link4] Mozilla Accounts Terms of Service [link5]"
     },
@@ -29,8 +30,9 @@
           "whether the authentication attempt was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown."
+        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Did you sign in to Mozilla? Help us keep your account safe by approving your sign-in on: Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Wednesday, Aug 19, 2026 2:06:57 PM (+07) If yes, here is your authorization code: 195957 It expires in 5 minutes. If you didn’t take this action, change your password right away: [link1] For more info, visit Mozilla Support: [link2] Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link3] Mozilla Accounts Terms of Service [link4]"
     },
@@ -44,8 +46,9 @@
           "whether the authentication attempt was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown."
+        "rationale": "Authentication instructions are conditional, and the user's authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Did you sign in to Firefox? Help us keep your account safe by approving your sign-in on: Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Wednesday, Aug 19, 2026 2:06:55 PM (+07) If yes, here is your authorization code: 195957 It expires in 5 minutes. If you didn’t take this action, change your password right away: [link1] For more info, visit Mozilla Support: [link2] Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link3] Mozilla Accounts Terms of Service [link4]"
     },
@@ -59,8 +62,9 @@
           "whether the account change was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
+        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Hi 8285891169 ! Your Xiaomi Account 8285891169 has been connected with a new account. You can use this third-party account to sign in to your Xiaomi Account. Details are as follows: Location: Vietnam IP address: 101.99.23.84 If this wasn''t you, click the following link to change: If you''re not able to connect by clicking the link, copy and paste it into your browser instead. Xiaomi Account Team This email was sent automatically, please don''t reply to it. If you have any trouble, feel free to drop us a line at support.global@support.mi.com and we''ll get back to you as soon as we can."
     },
@@ -74,8 +78,9 @@
           "whether the account change was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
+        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Hi 8285891169 ! The password for your Xiaomi Account 8285891169 has been set. Details: Location: Vietnam IP address: 101.99.23.84 If this wasn''t you, reset your password at id.mi.com [link1] . Xiaomi Account team This security notification was sent automatically, so please don''t reply to it. If you have any questions, contact us at ."
     },
@@ -89,8 +94,9 @@
           "whether the access grant was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
+        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "This is a copy of a security alert sent to nhatthanhdinh482@gmail.com. dinhnhatthanh248@gmail.com is the recovery email for this account. If you don't recognise this account, remove [link1] it. [image: Google] Superhuman was granted access to your linked Google account nhatthanhdinh482@gmail.com If you did not grant access, you should check this activity and secure your account. Check activity [link2] You can also see security activity at [link3] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
     },
@@ -104,8 +110,9 @@
           "whether the authentication attempt was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "A verification challenge is provided without enough context to determine the required action."
+        "rationale": "A verification challenge is provided without enough context to determine the required action.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Verification code This code will expire in 10 minutes and can only be used once. Never share this code with anyone. 779426 Don't recognise this? If you believe you are receiving this email in error, visit support ([link1]. One Wilton Park, Wilton Place, Dublin 2 D02 FX04, Ireland Terms ([link2] Privacy ([link3] Liên kết trong email: Link [link4] visit support [link5]"
     },
@@ -119,8 +126,9 @@
           "whether the access grant was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown."
+        "rationale": "Conditional account-security remediation is presented, but authorization status is unknown.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "[image: Google] You allowed Superhuman access to some of your Google Account data dinhnhatthanh248@gmail.com If you didn't allow Superhuman access to some of your Google Account data, someone else may be trying to access your Google Account data. Take a moment now to check your account activity and secure your account. Check activity [link1] To make changes at any time to the access that Superhuman has to your data, go to your Google Account [link2] You can also see security activity at [link3] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
     },
@@ -136,8 +144,9 @@
         "expected_document_types": [
           "procedure"
         ],
-        "expected_route": "retrieve_rag",
-        "rationale": "The task is explicit, but execution depends on a referenced sandbox procedure and workflow details that are not fully available in the message."
+        "rationale": "The task is explicit, but execution depends on a referenced sandbox procedure and workflow details that are not fully available in the message.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Task Extractor is ready Linear Demo tasks urgent triage [link1] Action items & next steps (from recent Linear Demo notes/issues; recent Gmail is mostly promotional/sign-up/security/job/scholar alerts with no clear task owners or priorities) All open items live in the Linear Demo project (learning sandbox). Owner is Dih Nhật Thành (you). The document How to use the Linear Demo sandbox defines the intended flow: needs-triage → needs-info → ready-for-agent → ready-for-human, then move issues through Backlog → Todo → In Progress → In Review → Done. Do not pull in real GitHub/EMAIL-AGENT-v1 data. Extracted action items | ID | Title | Status / Label | Priority | Owner | Suggested next step | | HEV-8 | Demo: triage an incoming request | Backlog / needs-triage | Urgent | Dih Nhật Thành | Decide: accept, clarify, delegate, or cancel the fake request. Move out of b ... Continue reading [link1] © 2026 X.AI LLC Unsubscribe [link2]"
     },
@@ -151,8 +160,9 @@
           "Whether the sign-in was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context."
+        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "This is a copy of a security alert sent to nhatthanhdinh482@gmail.com. dinhnhatthanh248@gmail.com is the recovery email for this account. If you don't recognise this account, remove [link1] it. [image: Google] A new sign-in on Windows nhatthanhdinh482@gmail.com We noticed a new sign-in to your Google Account on a Windows device. If this was you, you don’t need to do anything. If not, we’ll help you secure your account. Check activity [link2] You can also see security activity at [link3] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
     },
@@ -166,8 +176,9 @@
           "Whether the login was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Login alert makes remediation conditional on whether the activity is recognized."
+        "rationale": "Login alert makes remediation conditional on whether the activity is recognized.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Your SpaceXAI account has been accessed from a new IP address We've noticed a new login Hi Adoft Putin, We're notifying you by email of a new login to your SpaceXAI account: Time: Sun, 16 Aug 2026 11:08:49 +0000 IP address: 171.224.83.226 Location: Hanoi, VN Browser: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0 If you notice any suspicious activity on your account, please change your password [link1] and enable two-factor authentication. SpaceXAI Team © 2026 X.AI LLC For questions contact support@x.ai"
     },
@@ -183,8 +194,9 @@
         "expected_document_types": [
           "procedure"
         ],
-        "expected_route": "retrieve_rag",
-        "rationale": "Action summary identifies assigned security and project work, but the underlying details and referenced guidance are incomplete."
+        "rationale": "Action summary identifies assigned security and project work, but the underlying details and referenced guidance are incomplete.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Task Extractor is ready Termius security & Linear demo ready [link1] Action items extracted from recent Gmail (last ~7–14 days) and Linear notes/issues Most recent email activity is security/sign-in alerts (Google Account on Windows, Mozilla/Firefox sign-in from Hanoi), job alerts (LinkedIn, Glassdoor), research alerts (Google Scholar), product digests/promotions (Medium, Warp, Educative, Epic Games, etc.), and a prior Grok summary email. These generally require no action if the activity was authorized by you. The clear actionable items come from Termius and the Linear Demo sandbox project (created/updated 15 Aug 2026, assigned to you / Dih Nhật Thành). There is also a related Linear document: “How to use the Linear Demo sandbox.” Priority 1 — Security / Account (do soon) | Action Item | Source | Owner | Suggested Priority | Notes / Next Step | | Change Termius Master Password immediatel ... Continue reading [link1] © 2026 X.AI LLC Unsubscribe [link2]"
     },
@@ -198,8 +210,9 @@
           "Whether the sign-in was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context."
+        "rationale": "Security alert leaves authorization status unresolved; the next step depends on user context.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "[image: Google] A new sign-in on Windows dinhnhatthanh248@gmail.com We noticed a new sign-in to your Google Account on a Windows device. If this was you, you don’t need to do anything. If not, we’ll help you secure your account. Check activity [link1] You can also see security activity at [link2] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
     },
@@ -213,8 +226,9 @@
           "Whether the sign-in was authorized"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Security notice makes remediation conditional on whether the activity is recognized."
+        "rationale": "Security notice makes remediation conditional on whether the activity is recognized.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Your Mozilla account was used to sign in Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Sunday, Aug 16, 2026 4:38:29 PM (+07) Not you? Change your password: [link1] Manage account: [link2] This is an automated email. If you received it by mistake, you don’t need to do anything. For more info, visit Mozilla Support: [link3]. Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link4] Mozilla Accounts Terms of Service [link5]"
     },
@@ -228,8 +242,9 @@
           "Whether the sign-in was initiated by the user"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated."
+        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Did you sign in to Mozilla? Help us keep your account safe by approving your sign-in on: Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Sunday, Aug 16, 2026 4:38:08 PM (+07) If yes, here is your authorization code: 057121 It expires in 5 minutes. If you didn’t take this action, change your password right away: [link1] For more info, visit Mozilla Support: [link2] Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link3] Mozilla Accounts Terms of Service [link4]"
     },
@@ -243,8 +258,9 @@
           "Whether the sign-in was initiated by the user"
         ],
         "expected_document_types": [],
-        "expected_route": "retrieve_rag",
-        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated."
+        "rationale": "Authentication message supports different actions depending on whether the sign-in was user-initiated.",
+        "retrieval_expected": true,
+        "company_context_required": true
       },
       "gmail_content": "Did you sign in to Firefox? Help us keep your account safe by approving your sign-in on: Firefox on Windows 10 Hanoi, HN, Vietnam (estimated) Sunday, Aug 16, 2026 4:38:06 PM (+07) If yes, here is your authorization code: 057121 It expires in 5 minutes. If you didn’t take this action, change your password right away: [link1] For more info, visit Mozilla Support: [link2] Mozilla. 149 New Montgomery St, 4th Floor, San Francisco, CA 94105 Mozilla Accounts Privacy Notice [link3] Mozilla Accounts Terms of Service [link4]"
     }

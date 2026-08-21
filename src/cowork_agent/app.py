@@ -3,17 +3,27 @@
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
@@ -21,6 +31,7 @@ import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  
 from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
+    EmailRagQualitySettings,
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
@@ -122,6 +133,7 @@ from cowork_agent.integrations.llm.providers.faucet import (
 )
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
+    GeminiRetrievalQueryRewriter,
     GeminiRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.groq import (
@@ -601,6 +613,7 @@ def create_app() -> FastAPI:
                 generator: ActionPlanGeneratorPort
                 intent_classifier: IntentClassifierPort
                 generation_concurrency = 1
+                query_rewriter = None
                 if provider == "gemini":
                     gemini_settings = GeminiSettings.from_env()
                     generation_concurrency = gemini_settings.action_plan_concurrency
@@ -612,6 +625,7 @@ def create_app() -> FastAPI:
                     )
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
+                    query_rewriter = GeminiRetrievalQueryRewriter(gemini_settings)
                     semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
@@ -706,6 +720,8 @@ def create_app() -> FastAPI:
                     ShortTermStore(),
                     task_repository,
                     semantic_memory=semantic_memory,
+                    query_rewriter=query_rewriter,
+                    quality_settings=EmailRagQualitySettings.from_env(),
                     trace_sink=LoggingTraceSink(),
                     dev_trace=dev_trace_sink_from_env(
                         settings.connection_db_path.parent, settings.token_encryption_key
@@ -1205,21 +1221,112 @@ def create_app() -> FastAPI:
             logger.warning("Failed to load ingestion-manifest.json: %s", exc)
             return {}
 
+    def _find_associated_extracted_docs(filename: str, manifest: dict[str, str]) -> list[Path]:
+        """Find all extracted markdown files associated with a raw document."""
+        if not EXTRACTED_DIR.exists():
+            return []
+
+        matches: list[Path] = []
+        manifest_target = manifest.get(filename)
+        if manifest_target:
+            # The manifest is generated locally today, but its `output` values are
+            # still data: a `../` or absolute entry would otherwise let /extracted
+            # read -- and DELETE, via the delete endpoint -- files outside the
+            # extracted corpus.
+            p = (EXTRACTED_DIR / manifest_target).resolve()
+            if p.is_file() and p.is_relative_to(EXTRACTED_DIR.resolve()):
+                matches.append(p)
+
+        raw_key = re.sub(r"[^a-z0-9]", "", Path(filename).stem.lower())
+        if raw_key:
+            for item in EXTRACTED_DIR.iterdir():
+                if (
+                    item.is_file()
+                    and item.suffix.lower() == ".md"
+                    and item.name != "ingestion-manifest.json"
+                    and item not in matches
+                ):
+                    if re.sub(r"[^a-z0-9]", "", item.stem.lower()) == raw_key:
+                        matches.append(item)
+        return matches
+
     def _resolve_extracted_doc(filename: str, manifest: dict[str, str]) -> str | None:
-        extracted = manifest.get(filename)
-        if not extracted:
-            candidate = Path(filename).stem.replace("_", "-").lower() + ".md"
-            if (EXTRACTED_DIR / candidate).is_file():
-                extracted = candidate
-        if not extracted:
-            return None
-        # The manifest is generated locally today, but its `output` values are still
-        # data: a `../` or absolute entry would otherwise read files outside the
-        # extracted corpus and hand them to any caller of /extracted.
-        target = (EXTRACTED_DIR / extracted).resolve()
-        if not target.is_relative_to(EXTRACTED_DIR.resolve()) or not target.is_file():
-            return None
-        return extracted
+        matches = _find_associated_extracted_docs(filename, manifest)
+        return matches[0].name if matches else None
+
+    @app.post("/api/v1/raw-documents/upload")
+    async def upload_raw_document(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+    ) -> dict[str, Any]:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Filename required")
+
+        safe_name = Path(file.filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        ext = Path(safe_name).suffix.lower().lstrip(".")
+        if ext not in ("pdf", "docx", "doc"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Định dạng không được hỗ trợ: .{ext}. Chỉ chấp nhận .pdf, .docx, .doc",
+            )
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Tệp rỗng")
+
+        target_raw.write_bytes(content)
+        repo = await _raw_document_repo(request)
+        await repo.record_save(safe_name, status=2)
+        logger.info("Uploaded raw document %s into data/raw/ (%d bytes)", safe_name, len(content))
+
+        # Auto-extract markdown into data/extracted/
+        has_extracted = False
+        extracted_name: str | None = None
+        if ext in ("docx", "doc"):
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.docx_extractor import (
+                    DocxExtractor,
+                )
+
+                extracted = DocxExtractor().extract(target_raw)
+                stem = target_raw.stem.lower().replace("_", "-").replace(" ", "-")
+                extracted_name = f"{stem}.md"
+                target_extracted = EXTRACTED_DIR / extracted_name
+                target_extracted.write_text(extracted.markdown, encoding="utf-8")
+                has_extracted = True
+                logger.info("Extracted markdown for %s -> %s", safe_name, extracted_name)
+            except Exception as extract_err:
+                logger.warning("Could not extract markdown for %s: %s", safe_name, extract_err)
+        elif ext == "pdf":
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.pdf_inspector import (
+                    PdfInspector,
+                )
+
+                inspection = PdfInspector().inspect(target_raw)
+                pdf_text = "\n\n".join(inspection.native_markdown_by_page.values()).strip()
+                if pdf_text:
+                    stem = target_raw.stem.lower().replace("_", "-").replace(" ", "-")
+                    extracted_name = f"{stem}.md"
+                    target_extracted = EXTRACTED_DIR / extracted_name
+                    target_extracted.write_text(pdf_text, encoding="utf-8")
+                    has_extracted = True
+                    logger.info("Extracted PDF text for %s -> %s", safe_name, extracted_name)
+            except Exception as extract_err:
+                logger.warning("Could not extract PDF text for %s: %s", safe_name, extract_err)
+
+        return {
+            "status": "uploaded",
+            "filename": safe_name,
+            "size": len(content),
+            "file_type": ext,
+            "has_extracted_md": has_extracted,
+            "extracted_md_name": extracted_name,
+        }
 
     @app.get("/api/v1/raw-documents")
     async def list_raw_documents() -> list[dict[str, Any]]:
@@ -1228,7 +1335,11 @@ def create_app() -> FastAPI:
 
         manifest = _load_raw_manifest()
         documents: list[dict[str, Any]] = []
-        for item in sorted(RAW_DOCS_DIR.iterdir(), key=lambda p: p.name.lower()):
+        for item in sorted(
+            RAW_DOCS_DIR.iterdir(),
+            key=lambda p: p.stat().st_mtime if p.is_file() else 0,
+            reverse=True,
+        ):
             if not item.is_file() or item.name.startswith("."):
                 continue
             try:
@@ -1346,7 +1457,6 @@ def create_app() -> FastAPI:
     async def post_raw_document_onlyoffice_callback(
         filename: str, request: Request
     ) -> dict[str, int]:
-        safe_name = Path(filename).name
         safe_name, target_raw = _resolve_raw_document(filename)
         oo_settings = _onlyoffice_settings(request)
 
@@ -1437,6 +1547,87 @@ def create_app() -> FastAPI:
             return {"error": 1}
 
         return {"error": 0}
+
+    @app.put("/api/v1/raw-documents/{filename}")
+    async def put_raw_document(
+        filename: str, request: Request
+    ) -> dict[str, Any]:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        if not target_raw.is_file():
+            raise HTTPException(status_code=404, detail="Raw document not found")
+
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty document payload")
+
+        target_raw.write_bytes(content)
+        repo = await _raw_document_repo(request)
+        await repo.record_save(safe_name, status=2)
+        logger.info("Saved raw document %s directly (%d bytes)", safe_name, len(content))
+
+        # Re-extract markdown if it was a docx file
+        ext = target_raw.suffix.lower().lstrip(".")
+        if ext in ("docx", "doc"):
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.docx_extractor import (
+                    DocxExtractor,
+                )
+
+                extracted = DocxExtractor().extract(target_raw)
+                extracted_md_name = _resolve_extracted_doc(safe_name, _load_raw_manifest())
+                if extracted_md_name:
+                    target_extracted = EXTRACTED_DIR / extracted_md_name
+                    target_extracted.write_text(extracted.markdown, encoding="utf-8")
+                    logger.info("Updated extracted markdown for %s", safe_name)
+            except Exception as extract_err:
+                logger.warning("Could not re-extract markdown for %s: %s", safe_name, extract_err)
+
+        return {"status": "saved", "filename": safe_name, "size": len(content)}
+
+    @app.delete("/api/v1/raw-documents/{filename}")
+    async def delete_raw_document(
+        filename: str, request: Request
+    ) -> dict[str, Any]:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        if not target_raw.is_file():
+            raise HTTPException(status_code=404, detail="Raw document not found")
+
+        try:
+            target_raw.unlink(missing_ok=True)
+            logger.info("Deleted raw document %s", safe_name)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
+
+        repo = await _raw_document_repo(request)
+        if hasattr(repo, "delete"):
+            try:
+                await repo.delete(safe_name)
+            except Exception as repo_err:
+                logger.warning("Could not delete metadata for %s: %s", safe_name, repo_err)
+
+        manifest = _load_raw_manifest()
+        deleted_extracted: list[str] = []
+        for target_extracted in _find_associated_extracted_docs(safe_name, manifest):
+            try:
+                target_extracted.unlink(missing_ok=True)
+                deleted_extracted.append(target_extracted.name)
+                logger.info(
+                    "Deleted extracted markdown %s for %s", target_extracted.name, safe_name
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not delete extracted markdown %s: %s", target_extracted.name, exc
+                )
+
+        return {"status": "deleted", "filename": safe_name, "deleted_extracted": deleted_extracted}
 
     return app
 

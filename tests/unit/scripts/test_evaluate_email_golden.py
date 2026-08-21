@@ -9,19 +9,23 @@ from pathlib import Path
 
 import pytest
 
+from cowork_agent.config import EmailRagQualitySettings
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
     EmailRouteDecision,
     FetchStatus,
     ReasonCode,
+    RetrievalStatus,
     Route,
+    SemanticChunk,
+    SemanticRetrievalResponse,
 )
 from cowork_agent.features.email_action_plan.schemas import ClassificationResult, ClassifiedMessage
 from tests.unit.scripts.cli_harness import load_script, run_cli
 
 NOW = datetime(2026, 8, 19, tzinfo=UTC)
-RUBRIC_VERSION = "email-intent-annotation-v1"
+RUBRIC_VERSION = "email-pipeline-annotation-v2"
 
 
 def load_module():
@@ -34,7 +38,8 @@ def _ground_truth() -> dict[str, object]:
         "email_is_sufficient": False,
         "knowledge_gaps": ["Synthetic missing policy"],
         "expected_document_types": ["company_policy"],
-        "expected_route": "retrieve_rag",
+        "retrieval_expected": True,
+        "company_context_required": True,
         "rationale": "Synthetic human-reviewed rationale.",
     }
 
@@ -65,7 +70,7 @@ def candidates(case_count: int) -> dict[str, object]:
 
 def golden(case_count: int) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "rubric_version": RUBRIC_VERSION,
         "case_count": case_count,
         "cases": [
@@ -99,18 +104,60 @@ def _decision() -> EmailRouteDecision:
 
 
 class FakeClassifier:
+    def __init__(self, decision: EmailRouteDecision | None = None) -> None:
+        self.decision = decision or _decision()
+
     async def classify(self, user_timezone, current_time, messages):
         del user_timezone, current_time
         return ClassificationResult(
-            tuple(ClassifiedMessage(message.gmail_message_id, _decision()) for message in messages),
+            tuple(
+                ClassifiedMessage(message.gmail_message_id, self.decision) for message in messages
+            ),
             batch_count=1,
+        )
+
+
+class FakeMemory:
+    def __init__(self, response: SemanticRetrievalResponse | None = None) -> None:
+        self.calls = 0
+        self.response = response
+
+    async def retrieve(self, request):
+        del request
+        self.calls += 1
+        return self.response or SemanticRetrievalResponse(
+            query_id="q-test",
+            chunks=(
+                SemanticChunk(
+                    chunk_id="c1",
+                    document_id="d1",
+                    document_title="Synthetic policy",
+                    section=None,
+                    text="Synthetic evidence",
+                    source_url="data/extracted/synthetic.md",
+                    document_version=None,
+                    relevance_score=0.9,
+                    rerank_score=0.9,
+                ),
+            ),
+            retrieval_status=RetrievalStatus.SUCCESS,
+            latency_ms=1,
         )
 
 
 def _summary(selected_candidates: list[dict[str, object]]) -> dict[str, object]:
     module = load_module()
     messages = module.load_envelopes_from_candidates(selected_candidates)
-    return asyncio.run(module.evaluate(messages, FakeClassifier(), NOW))
+    return asyncio.run(
+        module.evaluate(
+            messages,
+            FakeClassifier(),
+            NOW,
+            semantic_memory=FakeMemory(),
+            query_rewriter=None,
+            quality_settings=EmailRagQualitySettings(),
+        )
+    )
 
 
 def test_build_run_artifact_uses_explicit_shard_and_immutable_versions() -> None:
@@ -127,6 +174,7 @@ def test_build_run_artifact_uses_explicit_shard_and_immutable_versions() -> None
         selected_candidates=selected,
         provider="openrouter",
         model="test-model",
+        quality_settings=EmailRagQualitySettings(),
         run_at=NOW,
         shard_index=2,
         shard_count=4,
@@ -135,6 +183,13 @@ def test_build_run_artifact_uses_explicit_shard_and_immutable_versions() -> None
     assert run["prompt_version"] == "email-intent-v1"
     assert run["shard"] == {"index": 2, "count": 4, "case_count": 50}
     assert run["cases"][0]["case_id"] == "email_case_051"
+    assert run["cases"][0]["retrieval"]["evidence_status"] == "supported"
+    assert run["cases"][0]["routing"] == {
+        "resolved_route": "retrieve_rag",
+        "mode": "full",
+        "forced_by_guard": True,
+        "reason_codes": ["policy_required"],
+    }
     assert "ground_truth" not in run["cases"][0]
     assert "gmail_content" not in json.dumps(run)
 
@@ -168,6 +223,7 @@ def test_build_run_artifact_rejects_selected_candidate_and_golden_id_mismatch() 
             selected_candidates=selected,
             provider="gemini",
             model="test-model",
+            quality_settings=EmailRagQualitySettings(),
             run_at=NOW,
             shard_index=1,
             shard_count=1,
@@ -185,9 +241,17 @@ def test_cli_writes_only_a_metadata_safe_run_and_never_writes_golden(
     golden_value = golden(1)
     golden_path.write_text(json.dumps(golden_value), encoding="utf-8")
 
-    monkeypatch.setattr(
-        module, "build_live_classifier", lambda: (FakeClassifier(), "gemini", "test")
-    )
+    async def build_runtime():
+        return module.EvaluationRuntime(
+            FakeClassifier(),
+            FakeMemory(),
+            None,
+            EmailRagQualitySettings(),
+            "gemini",
+            "test",
+        )
+
+    monkeypatch.setattr(module, "build_live_runtime", build_runtime)
     original_write_text = Path.write_text
 
     def write_text(path: Path, *args: object, **kwargs: object) -> int:
@@ -217,7 +281,10 @@ def test_cli_writes_only_a_metadata_safe_run_and_never_writes_golden(
     assert result.returncode == 0
     assert golden_path.read_text(encoding="utf-8") == json.dumps(golden_value)
     assert len(run_paths) == 1
-    assert "gmail_content" not in run_paths[0].read_text(encoding="utf-8")
+    run_text = run_paths[0].read_text(encoding="utf-8")
+    assert "gmail_content" not in run_text
+    assert "Synthetic missing policy" not in run_text
+    assert "synthetic policy" not in run_text
     assert "gmail_content" not in result.stdout
     assert not list(tmp_path.glob("*.md"))
 
@@ -247,12 +314,19 @@ def test_cli_rejects_invalid_selected_identity_before_constructing_or_calling_cl
             classified = True
             raise AssertionError("invalid selected identities must not be classified")
 
-    def build_unexpected_classifier():
+    async def build_unexpected_runtime():
         nonlocal constructed
         constructed = True
-        return UnexpectedClassifier(), "gemini", "test"
+        return module.EvaluationRuntime(
+            UnexpectedClassifier(),
+            FakeMemory(),
+            None,
+            EmailRagQualitySettings(),
+            "gemini",
+            "test",
+        )
 
-    monkeypatch.setattr(module, "build_live_classifier", build_unexpected_classifier)
+    monkeypatch.setattr(module, "build_live_runtime", build_unexpected_runtime)
 
     result = run_cli(
         "evaluate_email_golden",
@@ -287,3 +361,71 @@ def test_build_envelopes_loads_candidate_content_only_into_ephemeral_messages() 
     assert envelopes[0].gmail_message_id == "synthetic-message-001"
     assert envelopes[0].body_format is BodyFormat.TEXT
     assert envelopes[0].fetch_status is FetchStatus.COMPLETE
+
+
+def test_evaluate_skips_only_no_action_and_marks_unscored_results_unavailable() -> None:
+    module = load_module()
+    candidate_cases = candidates(1)["cases"]
+    assert isinstance(candidate_cases, list)
+    messages = module.load_envelopes_from_candidates(candidate_cases)
+
+    no_action = EmailRouteDecision(
+        actionability=Actionability.INFORMATIONAL,
+        route=Route.NO_ACTION,
+        candidate_action_item=None,
+        email_is_sufficient=True,
+        knowledge_gaps=(),
+        retrieval_query=None,
+        expected_document_types=(),
+        reason_codes=(ReasonCode.NO_ACTION,),
+        confidence=0.9,
+    )
+    memory = FakeMemory()
+    no_action_summary = asyncio.run(
+        module.evaluate(
+            messages,
+            FakeClassifier(no_action),
+            NOW,
+            semantic_memory=memory,
+            query_rewriter=None,
+            quality_settings=EmailRagQualitySettings(),
+        )
+    )
+    assert memory.calls == 0
+    assert no_action_summary["results"][0]["retrieval"]["attempted"] is False
+
+    unscored = SemanticRetrievalResponse(
+        query_id="q-unscored",
+        chunks=(
+            SemanticChunk(
+                chunk_id="c1",
+                document_id="d1",
+                document_title="Synthetic",
+                section=None,
+                text="Synthetic",
+                source_url="data/extracted/synthetic.md",
+                document_version=None,
+                relevance_score=0.8,
+                rerank_score=None,
+            ),
+        ),
+        retrieval_status=RetrievalStatus.SUCCESS,
+        latency_ms=1,
+    )
+    memory = FakeMemory(unscored)
+    unavailable_summary = asyncio.run(
+        module.evaluate(
+            messages,
+            FakeClassifier(),
+            NOW,
+            semantic_memory=memory,
+            query_rewriter=None,
+            quality_settings=EmailRagQualitySettings(),
+        )
+    )
+    result = unavailable_summary["results"][0]
+    assert memory.calls == 1
+    assert result["retrieval"]["evidence_status"] == "unavailable"
+    assert result["retrieval"]["degraded"] is True
+    assert result["routing"]["resolved_route"] == "retrieve_rag"
+    assert result["routing"]["mode"] == "partial"

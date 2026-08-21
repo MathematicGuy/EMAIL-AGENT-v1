@@ -21,10 +21,15 @@ OAUTHLIB_INSECURE_TRANSPORT=1
 
 # LLM Provider Selection (openrouter | gemini | groq | faucet)
 LLM_PROVIDER=gemini
-DOCUMENT_EMBEDDING_PROVIDER=gemini
 
 # Gemini Action Extractor & Key Rotation Settings
-GEMINI_MODEL=gemini-3.5-flash-lite #    
+# Candidate Models for Memory Evaluation:
+# - gemini-3.5-flash-lite (Gemini 3.5 Flash Lite - Evaluated: 80% Pass, 45% Earned-It, 4.6s)
+# - gemini-3.5-flash (Gemini 3.5 Flash)
+# - gemini-3.6-flash (Gemini 3.6 Flash)
+# - antigravity (Google Antigravity Agentic Model / Engine)
+# - gemma-4-31b (Gemma 4 31B)
+GEMINI_MODEL=gemini-3.5-flash-lite
 GEMINI_KEY_ROTATION_STRATEGY=round_robin
 GEMINI_ROTATE_ON_RATE_LIMIT=true
 GEMINI_MAX_ATTEMPTS_PER_REQUEST=3
@@ -33,6 +38,7 @@ GEMINI_MAX_INPUT_TOKENS=40000
 GEMINI_TIMEOUT_SECONDS=60
 
 # Document Embeddings & Reranker Settings
+DOCUMENT_EMBEDDING_PROVIDER=gemini
 EMBEDDING_MODEL=jina-embeddings-v3
 EMBEDDING_DIMENSIONS=1024
 GEMINI_EMBEDDING_MODEL=gemini-embedding-2
@@ -49,9 +55,13 @@ RERANKER_MODEL=rerank-v4.0-fast
 RERANKER_ROTATE_ON_RATE_LIMIT=true
 RERANKER_TIMEOUT_SECONDS=10
 
+# Email RAG evidence gate (moved here from .env.example: not secrets).
+EMAIL_RAG_MIN_RERANK_SCORE=0.30
+EMAIL_RAG_RELATIVE_CUTOFF_RATIO=0.85
+
 # OpenRouter Configuration (LLM & AI Judge)
-OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
-OPENROUTER_ALLOWED_MODELS=["deepseek/deepseek-v4-flash-0731"]
+OPENROUTER_MODEL=inclusionai/ling-3.0-flash
+OPENROUTER_ALLOWED_MODELS=["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash-0731", "inclusionai/ling-3.0-flash"]
 OPENROUTER_MAX_EMAILS_PER_BATCH=5
 OPENROUTER_MAX_OUTPUT_TOKENS=2048
 OPENROUTER_TIMEOUT_SECONDS=60

@@ -66,3 +66,15 @@ def test_a_non_object_payload_is_rejected() -> None:
     ).digest()
     with pytest.raises(OnlyOfficeTokenError):
         decode(f"{header}.{body}.{seg(signature)}", SECRET)
+
+
+def test_a_non_ascii_segment_is_a_token_error_not_a_crash() -> None:
+    # The signing input is rebuilt from the raw segments, so a non-ASCII body
+    # reaches .encode("ascii"). That raises UnicodeEncodeError -- a sibling of
+    # UnicodeDecodeError, not a subclass -- which used to escape decode() as a 500.
+    from base64 import urlsafe_b64encode
+
+    header = urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').rstrip(b"=").decode()
+
+    with pytest.raises(OnlyOfficeTokenError):
+        decode(f"{header}.payéload.{header}", SECRET)

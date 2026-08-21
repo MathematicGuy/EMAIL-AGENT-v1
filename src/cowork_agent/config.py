@@ -588,6 +588,38 @@ class RerankerSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EmailRagQualitySettings:
+    """Evidence-gate settings for company Email RAG."""
+
+    min_rerank_score: float = 0.30
+    relative_cutoff_ratio: float = 0.85
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "EmailRagQualitySettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        return cls(
+            min_rerank_score=_bounded_float(
+                environ, "EMAIL_RAG_MIN_RERANK_SCORE", 0.30, minimum=0.0, maximum=1.0
+            ),
+            relative_cutoff_ratio=_bounded_float(
+                environ,
+                "EMAIL_RAG_RELATIVE_CUTOFF_RATIO",
+                0.85,
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+
+
 
 @dataclass(frozen=True, slots=True)
 class GroqSettings:
@@ -768,6 +800,15 @@ def _bounded_positive_int(
     value = _positive_int(environ, name, default)
     if value > maximum:
         raise ValueError(f"{name} must not exceed {maximum}")
+    return value
+
+
+def _bounded_float(
+    environ: Mapping[str, str], name: str, default: float, *, minimum: float, maximum: float
+) -> float:
+    value = float(environ.get(name, str(default)))
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
 
 
