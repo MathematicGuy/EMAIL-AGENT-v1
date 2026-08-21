@@ -138,3 +138,48 @@ the floor for the whole run no matter how many workers exist. Two key-rotation
 tests held ~10 s of a 19.8 s wall clock by awaiting production backoff in real
 time. Fix at the seam (fake clock, still assert the backoff was requested), not
 by deleting the test and not by shrinking the production delay.
+
+---
+
+## 9. Impacted-subset tooling (evaluated, not adopted)
+
+Step 4 of the source guide wants an impacted subset. This repo already has one:
+the source→route map in `tests/README.md` §1. `pytest-testmon` 2.2.0 was
+measured as a dynamic alternative and **rejected**.
+
+Why, in one load-bearing fact: this suite always sets `-m 'not live'` in
+addopts. Testmon treats any `markexpr` as “do not select” unless
+`--testmon-forceselect` is also passed. A copied `pytest --testmon` therefore
+instruments every test (first run ~41 s vs ~13.5 s default) and still executes
+the full suite. `--testmon-forceselect` then injects stub items into
+`pytest_deselected` that are not `pytest.Item`, which INTERNALERRORs this
+harness. Module-level Postgres skips still collect. Selection was not
+mutation-tested, so a smaller selected set is not evidence those tests were
+redundant.
+
+Do not add the package. A configure-time harness refuse was prototyped and
+**dropped**: it does not change default `uv run pytest -q` wall clock. The
+route table remains the selection tool. Do not prune tests from these
+measurements. Other levers: `--lf` (already documented; silent if the cache
+cannot write) and import cost (§5 of the README).
+
+---
+
+## 10. Import-cost attempt (Langfuse)
+
+| Idea | Baseline → result | Verdict | Why |
+|---|---|---|---|
+| Lazy `langfuse.observe` behind `integrations.llm.observe` | `import cowork_agent` 1019 ms → 510 ms; serial collect-only 3.85 s → 2.18 s | **dropped** | Collection improved; default 4-worker `pytest -q` wall did not (~15.5 s → 16.0 / 16.0 / 17.1 s). Each worker still imports Langfuse on first `@observe`. |
+| Same change, full `pytest -q` wall | this session ~15.5 s → 16.0 / 16.0 / 17.1 s | **no suite-wall win** | Cost moved, did not vanish. Reverted to `from langfuse import observe`. |
+
+Do not try "eager Langfuse at package import" again. Do not re-land the lazy proxy unless a later measurement shows execution import is the new critical path.
+
+---
+
+## 11. Pruning workstream B (in progress)
+
+Coverage tooling is an **idle** `dev` extra (`coverage` 7.15.4, `pytest-cov` 7.1.0). Default `uv run pytest -q` does not trace. Opt-in: `--cov=cowork_agent --cov-report=term-missing` (see `tests/README.md` §5).
+
+Ledger: [`test-pruning-ledger.md`](test-pruning-ledger.md). **0 tests deleted** pending human marks. Instrumented map (2026-08-21, `-n 0`): 1840 passed in 60.19s (two harness tests for the later-dropped A+C work were in that count).
+
+A (testmon refuse) and C (lazy Langfuse) were dropped: they did not reduce default-suite wall clock.
