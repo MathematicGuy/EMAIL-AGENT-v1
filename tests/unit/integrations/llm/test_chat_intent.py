@@ -70,7 +70,7 @@ def test_gemini_classifier_rotates_key_after_rate_limit(monkeypatch) -> None:
     provider = GeminiSettings(
         api_keys=("key-a", "key-b"),
         model="gemini-test",
-        enabled=True,
+        rotate_on_rate_limit=True,
         max_attempts=2,
         max_emails_per_batch=5,
         max_input_tokens=40_000,
