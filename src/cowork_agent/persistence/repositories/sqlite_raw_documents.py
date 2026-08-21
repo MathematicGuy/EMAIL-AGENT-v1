@@ -1,4 +1,4 @@
-"""SQLite repository for raw document metadata and OnlyOffice tracking."""
+"""SQLite repository for raw document metadata: version and save history."""
 
 from __future__ import annotations
 
@@ -77,52 +77,6 @@ class SQLiteRawDocumentRepository:
 
     async def get(self, filename: str) -> RawDocumentMetadata | None:
         return await asyncio.to_thread(self._get, filename)
-
-    def _get_or_create(
-        self, filename: str, fallback_mtime_iso: str | None = None
-    ) -> RawDocumentMetadata:
-        with closing(self._connect()) as conn, conn as db:
-            row = db.execute(
-                """
-                SELECT filename, doc_key, version, last_saved_at, last_status
-                FROM raw_document_metadata
-                WHERE filename = ?
-                """,
-                (filename,),
-            ).fetchone()
-            if row is not None:
-                return RawDocumentMetadata(
-                    filename=row["filename"],
-                    doc_key=row["doc_key"],
-                    version=row["version"],
-                    last_saved_at=row["last_saved_at"],
-                    last_status=row["last_status"],
-                )
-
-            now_iso = fallback_mtime_iso or datetime.now(UTC).isoformat()
-            key_raw = f"{filename}:{now_iso}:{uuid4().hex[:8]}"
-            initial_key = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()[:20]
-
-            db.execute(
-                """
-                INSERT INTO raw_document_metadata (
-                    filename, doc_key, version, last_saved_at, last_status
-                ) VALUES (?, ?, 1, ?, NULL)
-                """,
-                (filename, initial_key, now_iso),
-            )
-            return RawDocumentMetadata(
-                filename=filename,
-                doc_key=initial_key,
-                version=1,
-                last_saved_at=now_iso,
-                last_status=None,
-            )
-
-    async def get_or_create(
-        self, filename: str, fallback_mtime_iso: str | None = None
-    ) -> RawDocumentMetadata:
-        return await asyncio.to_thread(self._get_or_create, filename, fallback_mtime_iso)
 
     def _record_save(self, filename: str, status: int) -> RawDocumentMetadata:
         with closing(self._connect()) as conn, conn as db:

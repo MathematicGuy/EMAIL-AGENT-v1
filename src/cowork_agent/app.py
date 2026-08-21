@@ -37,7 +37,6 @@ from cowork_agent.config import (
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
-    OnlyOfficeSettings,
     OpenRouterSettings,
     SessionSettings,
     SupabaseStorageSettings,
@@ -144,7 +143,6 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
-from cowork_agent.integrations.onlyoffice import jwt as onlyoffice_jwt
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_document_embedder,
@@ -537,7 +535,6 @@ def create_app() -> FastAPI:
             )
             await raw_doc_repo.initialize()
             app.state.raw_document_repository = raw_doc_repo
-            app.state.onlyoffice_settings = OnlyOfficeSettings.from_env()
 
             if user_documents_settings.enabled and app.state.project_repository is not None:
                 try:
@@ -1396,158 +1393,6 @@ def create_app() -> FastAPI:
             "content": content,
         }
 
-    @app.get("/api/v1/raw-documents/{filename}/onlyoffice-config")
-    async def get_raw_document_onlyoffice_config(
-        filename: str, request: Request
-    ) -> dict[str, Any]:
-        safe_name, target_raw = _resolve_raw_document(filename)
-
-        ext = target_raw.suffix.lower().lstrip(".")
-        oo_settings = _onlyoffice_settings(request)
-        repo = await _raw_document_repo(request)
-
-        stat = target_raw.stat()
-        mtime_iso = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-        metadata = await repo.get_or_create(safe_name, fallback_mtime_iso=mtime_iso)
-
-        if oo_settings.backend_url:
-            base_url = oo_settings.backend_url.rstrip("/")
-        else:
-            base_url = str(request.base_url).rstrip("/")
-
-        doc_url = f"{base_url}/api/v1/raw-documents/{safe_name}"
-        callback_url = f"{base_url}/api/v1/raw-documents/{safe_name}/onlyoffice-callback"
-
-        document_type = "word"
-        if ext in ("xls", "xlsx", "csv"):
-            document_type = "cell"
-        elif ext in ("ppt", "pptx"):
-            document_type = "slide"
-
-        editor_config: dict[str, Any] = {
-            "document": {
-                "fileType": ext,
-                "key": metadata.doc_key,
-                "title": safe_name,
-                "url": doc_url,
-            },
-            "documentType": document_type,
-            "editorConfig": {
-                "callbackUrl": callback_url,
-                "lang": "vi",
-                "user": {
-                    "id": "local-user",
-                    "name": "Cowork User",
-                },
-                "customization": {
-                    "forcesave": True,
-                    "autosave": True,
-                },
-            },
-        }
-        if oo_settings.jwt_secret:
-            # Document Server rejects an unsigned config once JWT is enabled, and it
-            # signs its callbacks with the same secret -- see the callback handler.
-            editor_config["token"] = onlyoffice_jwt.encode(
-                editor_config, oo_settings.jwt_secret
-            )
-        return {**editor_config, "documentServerUrl": oo_settings.server_url}
-
-    @app.post("/api/v1/raw-documents/{filename}/onlyoffice-callback")
-    async def post_raw_document_onlyoffice_callback(
-        filename: str, request: Request
-    ) -> dict[str, int]:
-        safe_name, target_raw = _resolve_raw_document(filename)
-        oo_settings = _onlyoffice_settings(request)
-
-        try:
-            body = await request.json()
-        except Exception:
-            return {"error": 0}
-
-        # This endpoint overwrites a file in the tracked corpus, so it must prove the
-        # request came from our Document Server before it does anything. Without a
-        # configured secret there is no way to prove that, and we refuse rather than
-        # accept writes from anyone who can reach the port.
-        if not oo_settings.jwt_secret:
-            logger.error(
-                "Refusing OnlyOffice callback for %s: ONLYOFFICE_JWT_SECRET is not set, "
-                "so the callback cannot be authenticated. Set it on both this service "
-                "and the Document Server to enable saving.",
-                safe_name,
-            )
-            raise HTTPException(status_code=503, detail="OnlyOffice callbacks are not configured")
-
-        token = body.get("token")
-        if not token:
-            header = request.headers.get("Authorization", "")
-            token = header[7:] if header.startswith("Bearer ") else None
-        try:
-            if not token:
-                raise onlyoffice_jwt.OnlyOfficeTokenError("Missing OnlyOffice callback token")
-            claims = onlyoffice_jwt.decode(token, oo_settings.jwt_secret)
-        except onlyoffice_jwt.OnlyOfficeTokenError as exc:
-            logger.warning("Rejected OnlyOffice callback for %s: %s", safe_name, exc)
-            raise HTTPException(
-                status_code=403, detail="Invalid OnlyOffice callback token"
-            ) from exc
-
-        # Document Server nests the real payload under `payload` when it signs the
-        # Authorization header, and signs the body inline otherwise.
-        nested = claims.get("payload")
-        payload: dict[str, Any] = nested if isinstance(nested, dict) else claims
-        status = payload.get("status", body.get("status"))
-        if status not in (2, 6):
-            return {"error": 0}
-
-        download_url = payload.get("url")
-        if not download_url:
-            return {"error": 0}
-
-        parts = urlsplit(str(download_url))
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            logger.warning(
-                "Rejected OnlyOffice download URL for %s: unsupported scheme %r",
-                safe_name,
-                parts.scheme,
-            )
-            return {"error": 1}
-        if parts.hostname.lower() not in oo_settings.allowed_download_hosts:
-            logger.warning(
-                "Rejected OnlyOffice download URL for %s: host %r is not among %s",
-                safe_name,
-                parts.hostname,
-                oo_settings.allowed_download_hosts,
-            )
-            return {"error": 1}
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
-                resp = await client.get(download_url)
-            if resp.status_code != 200:
-                logger.error(
-                    "OnlyOffice download for %s returned HTTP %s", safe_name, resp.status_code
-                )
-                return {"error": 1}
-            target_raw.write_bytes(resp.content)
-            repo = await _raw_document_repo(request)
-            await repo.record_save(safe_name, status=status)
-            logger.info(
-                "Saved document %s from OnlyOffice callback (status=%s)",
-                safe_name,
-                status,
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to download document %s from %s: %s",
-                safe_name,
-                download_url,
-                exc,
-            )
-            return {"error": 1}
-
-        return {"error": 0}
-
     @app.put("/api/v1/raw-documents/{filename}")
     async def put_raw_document(
         filename: str, request: Request
@@ -1640,7 +1485,7 @@ async def _raw_document_repo(request: Request) -> Any:
         )
 
         # Mirror the startup path's location so a request that arrives before (or
-        # without) lifespan startup still reads the same doc_key/version history.
+        # without) lifespan startup still reads the same version history.
         settings = getattr(request.app.state, "gmail_settings", None)
         parent = (
             settings.connection_db_path.parent
@@ -1653,14 +1498,6 @@ async def _raw_document_repo(request: Request) -> Any:
         await repo.initialize()
         request.app.state.raw_document_repository = repo
     return repo
-
-
-def _onlyoffice_settings(request: Request) -> OnlyOfficeSettings:
-    settings = getattr(request.app.state, "onlyoffice_settings", None)
-    if not isinstance(settings, OnlyOfficeSettings):
-        settings = OnlyOfficeSettings.from_env()
-        request.app.state.onlyoffice_settings = settings
-    return settings
 
 
 def _connection_service(request: Request) -> GmailConnectionService:
