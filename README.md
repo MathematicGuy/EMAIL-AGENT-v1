@@ -1,360 +1,165 @@
 # Cowork Agent (Email-to-Action-Plan)
 
-## Knowledge ingestion (`mail-todo-ingest-knowledge`)
-
-The company RAG corpus is Markdown under `data/extracted/`. Administrators
-convert approved source files from a separate directory with the
-`mail-todo-ingest-knowledge` CLI. This is the **company CLI plane** only
-([capability map](tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md)): it
-stops at `data/extracted/*.md`. It is not the project-document upload plane
-and it never ingests email or email attachments (ADR-003).
-
-The CLI discovers `.pdf`, `.docx`, `.txt`, and `.md`. Suffix wins before any
-OCR branch: `.txt` / `.md` are UTF-8 text (or Markdown body) and are never
-sent to Mistral OCR.
-
-### Prerequisites
-
-Install the Python project with `uv`, then install the local Rust PDF utility.
-The PDF adapter calls `detect-pdf` and `pdf2md`.
-
-```powershell
-uv sync --extra dev
-cargo install pdf-inspector
-
-# Optional: both commands must be on PATH for PDF work.
-detect-pdf --help
-pdf2md --help
-```
-
-`cargo` is supplied by the [Rust toolchain](https://rustup.rs/). Restart the
-shell after installation if Cargo's bin directory is not yet on `PATH`.
-`.txt` / `.md` ingestion does not need `pdf-inspector`.
-
-### Ingest documents
-
-Place administrator-approved sources in `data/raw/` (or another directory
-outside the output). The CLI rejects symlinks, writes stable Markdown names,
-NFC-sanitizes body text, wraps a closed frontmatter header, and records
-hash/status (plus optional `document_date` harvested from PDF/DOCX binaries)
-in `data/extracted/ingestion-manifest.json`.
-
-```powershell
-# Inspect what would be processed without writing files.
-uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --dry-run
-
-# Convert changed files. Unchanged files are skipped by manifest hash.
-uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted
-
-# Re-extract every source file, replacing its generated Markdown output.
-uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --force
-```
-
-What the command does after extract (live, post capability-map modules):
-
-| Step | Behaviour |
-|---|---|
-| Discover | `.pdf` / `.docx` / `.txt` / `.md`; text never goes to OCR |
-| Persist | NFC + closed frontmatter; PDF/OCR pages keep `<!-- Page N -->` |
-| Manifest | operational fields plus optional `document_date` (ISO or empty) |
-| Later load | `load_corpus()` strips YAML, sets `page_start` / `page_end`, joins date by stem |
-| Later retrieve | optional `document_ids` / `years` / `months` allowlist; no `category` |
-
-PDFs are classified by `pdf-inspector`. Native-text pages convert locally.
-A scanned or mixed PDF that needs OCR reports `mistral_not_configured` and
-writes no partial document unless a Mistral OCR backend is actually
-configured. Do not treat `KNOWLEDGE_INGEST_OCR_ENABLED=true` as an enabled
-OCR backend by itself.
-
-After successful ingestion, restart the API/worker so Turbovec rebuilds
-`.data/turbovec_index.tvim` from the committed Markdown. See
-[`docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`](docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md).
+FastAPI service that turns unread Gmail into structured action plans, plus multi-turn AI Chat.
 
 ---
 
-## 1. Quy trình xử lý cốt lõi (Core Workflows) — KIẾN TRÚC MỤC TIÊU & RUNTIME
+## 1. Core Architecture & Workflows
 
-Kiến trúc hệ thống phân tách thành **2 quy trình độc lập (2 separate workflows)**:
+The system separates into **two decoupled workflows**:
 
-### 1.1 Workflow 1: AI Chat Assistant & Hệ thống Bộ nhớ 4 Loại (Multi-Turn Conversational)
+### 1.1 Multi-Turn AI Chat Assistant & 4-Tier Memory
 
-Quy trình trò chuyện đa lượt (multi-turn AI Chat) do **Chat Controller** làm chủ, kết nối trực tiếp với hệ thống bộ nhớ 4 loại để duy trì ngữ cảnh, sở thích người dùng và lịch sử tác vụ sinh từ chat (chat-native tasks) qua các phiên hội thoại:
+Managed by the **Chat Controller** with a unified 4-tier memory gateway:
 
 ```text
 User Message (React web UI)
 └── Chat Controller (Session Management & SSE Streaming)
-    └── Memory Gateway (Namespace: tenant_id / user_id / session_id / feature: ai_chat)
+    └── Memory Gateway (tenant_id / user_id / session_id / feature: ai_chat)
         ├── 1. Short-Term Working Memory (Chat Session Buffer - Ephemeral TTL)
-        ├── 2. Long-Term Declarative Memory (User Persona, Tone, Output Preferences)
-        ├── 3. Long-Term Episodic Memory (Validated Task Episodes & Chat Summaries)
+        ├── 2. Declarative Memory (User Persona, Tone, Output Preferences)
+        ├── 3. Episodic Memory (Validated Task Episodes & Chat Summaries)
         └── 4. Semantic Memory (Enterprise RAG Corpus Access)
-            └── Context Assembly & LLM Assistant Invocation
-                ├── Direct Response (Streaming Tokens to Chat Thread)
-                └── OR Explicit Task Proposal Request (Render Chat Task Proposal)
-                    └── Record Turn & TaskEpisode (system_generated, retrieval_eligible=false)
+            └── LLM Invocation -> SSE Stream / Task Proposals
 ```
 
-**Đặc điểm chính của Chat Memory Workflow:**
-- **Short-Term Working Memory**: Lưu trữ lịch sử câu hỏi/trả lời trong phiên hội thoại (`session_id`).
-- **Declarative Profile**: Áp dụng quy tắc persona, phong cách trả lời và cấu hình cá nhân của người dùng.
-- **Episodic Memory**: Lưu vết tóm tắt hội thoại và các tác vụ sinh trực tiếp từ chat (chat-native tasks) dưới dạng `TaskEpisode` (`system_generated`, `retrieval_eligible = false`). Khi người dùng bấm `Approve` hoặc `Complete` trên UI Chat, trạng thái chuyển thành `retrieval_eligible = true` để phục vụ truy hồi cho các câu hỏi hội thoại sau này.
-- **Chat-Native Task Proposals**: Các đề xuất tác vụ được sinh ra khi người dùng yêu cầu trực tiếp trong phiên chat, hỗ trợ nút bấm thao tác (`Approve`, `Complete`, `Reject`) ngay trên luồng hội thoại.
+- **Working Memory**: In-process chat buffer for the active session.
+- **Declarative Memory**: User persona, tone, and formatting preferences.
+- **Episodic Memory**: Validated task episodes & summaries. Chat-generated tasks start with `retrieval_eligible=false` until explicitly approved on the UI.
+- **Semantic Memory**: Enterprise knowledge retrieval via Turbovec hybrid search.
 
 ---
 
-### 1.2 Workflow 2: Standalone Email RAG Pipeline (Single-Turn Stateless) — ĐÃ TRIỂN KHAI LOCAL V1-M3
+### 1.2 Standalone Email RAG Pipeline (Single-Turn, Stateless)
 
-Quy trình xử lý email vận hành theo dạng **đơn lượt (single-turn), không trạng thái (stateless)** và **hoàn toàn độc lập với hệ thống bộ nhớ 4 loại** nhằm đảm bảo tính riêng tư tuyệt đối cho dữ liệu email:
+Runs single-turn, stateless execution isolated from chat memory for privacy:
 
 ```text
 Trigger (Manual / API Request)
-└── Gmail Fetch & Provider Normalization (Ephemeral Envelope)
-    └── Batch Correlation & Intent Classification
-        └── Route Decision: [NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG]
-            ├── (If RETRIEVE_RAG) Hybrid Semantic Memory Retrieval (Dense + BM25 + RRF + Jina)
-            └── Action Item & Action Plan Generation (Agent Core)
-                └── Output Schema & Grounding Validation
-                    └── Persist Task DTO
-                        └── Cleanup Temporary Email Envelope & Ephemeral Memory (Raw email deleted)
+└── Gmail Fetch (`gmail.readonly`) -> Ephemeral Envelope
+    └── Intent & Actionability Classification
+        └── Route: [NO_ACTION | DIRECT_PLAN | RETRIEVE_RAG]
+            ├── (If RETRIEVE_RAG) Hybrid Search (Dense + BM25 + RRF)
+            └── Action Plan Generation & Citation Validation
+                └── Persist Task DTO & Purge Raw Email Body
 ```
 
-**Đã triển khai trong local V1-M3:**
-- **Fetch & Normalization**: Lấy email chưa đọc từ Gmail API (`gmail.readonly`) và chuyển thành `EphemeralEmailEnvelope`.
-- **Classification & Routing**: Phân loại tính hành động (`actionability`) cùng độ đủ thông tin (`knowledge_sufficiency`), từ đó đưa ra quyết định chuyển hướng không đổi (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`).
-- **Hybrid Retrieval**: Truy hồi tri thức doanh nghiệp từ `data/extracted/*.md` qua truy vấn song song Dense Vector + BM25 lexical, hợp nhất bằng thuật toán RRF (Reciprocal Rank Fusion) và rerank tùy chọn qua Jina AI.
-- **Validation & Cleanup**: Ràng buộc citation grounding, lưu thông tin Task DTO, và **xóa sạch (purge)** toàn bộ nội dung thư gốc khỏi bộ nhớ tạm ngay sau khi kết thúc lượt chạy.
+- **Privacy Invariant**: Raw emails and attachments are transient and deleted after execution. Never stored in long-term memory or semantic vector stores.
+- **No Chat `@Email` Tool**: Email RAG and Chat remain strictly decoupled (ADR-004).
 
 ---
 
-## 2. Cấu trúc dự án (Project Structure) — HIỆN TRẠNG
+## 2. Knowledge Ingestion CLI (`mail-todo-ingest-knowledge`)
+
+Converts approved company documents from `data/raw/` into committed Markdown in `data/extracted/`.
+
+```powershell
+# Prerequisites: Rust toolchain for PDF parser
+cargo install pdf-inspector
+
+# Dry-run inspection
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --dry-run
+
+# Convert changed files (skips unchanged via manifest hash)
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted
+
+# Force re-extract all files
+uv run mail-todo-ingest-knowledge --source data/raw --output data/extracted --force
+```
+
+- Supported types: `.pdf`, `.docx`, `.txt`, `.md`.
+- Output: NFC-sanitized Markdown with closed frontmatter and `ingestion-manifest.json`.
+
+---
+
+## 3. Project Structure
 
 ```text
-email-agent-v1/
-├── pyproject.toml
-├── README.md
-├── AGENTS.md
-├── .env.example
-│
-├── src/
-│   └── cowork_agent/
-│       ├── __init__.py
-│       ├── app.py                      # FastAPI composition root; entry point `mail-todo-api`
-│       ├── config.py                   # Environment settings loaders
-│       ├── identity.py                 # Tenant & User identity context management
-│       ├── ingestion_cli.py            # Knowledge ingestion CLI entry point `mail-todo-ingest-knowledge`
-│       ├── api/                        # HTTP handlers & API endpoints
-│       │   ├── handlers.py             # Mail-todo endpoints
-│       │   ├── chat.py                 # Multi-turn chat & SSE streaming endpoints
-│       │   └── projects.py             # Project & document management endpoints
-│       ├── domain/                     # Pure business domain models & contracts
-│       │   ├── models.py               # Domain entities (Task, ActionPlan, EmailEnvelope)
-│       │   ├── target_contracts.py     # Target V2 contracts (Memory, TaskEpisode)
-│       │   ├── chat_contracts.py       # Chat memory scope & SSE stream contracts
-│       │   └── project_documents.py    # User/project document domain models
-│       ├── features/                   # Core business features
-│       │   └── email_action_plan/      # Classifier, routing, RAG retrieval & plan workflow
-│       │       ├── workflow.py         # Main pipeline orchestrator
-│       │       ├── routing.py          # Deterministic router logic
-│       │       ├── policies.py         # Planning & decision policies
-│       │       ├── ports.py            # Feature interfaces (LLM, RAG, Gmail, Repositories)
-│       │       ├── schemas.py          # Feature DTOs & Pydantic models
-│       │       ├── shaping.py          # Prompt & context shaping utilities
-│       │       ├── validation.py       # Grounding & citation validation engine
-│       │       ├── citation_accuracy.py# Citation scoring & verification
-│       │       ├── correlation.py      # Thread correlation & batch grouping
-│       │       ├── observability.py    # Execution trace logging & latency metrics
-│       │       ├── short_term.py       # Transient run-state memory buffer
-│       │       └── compat_mapper.py    # V1 ↔ V2 DTO compatibility adapters
-│       ├── integrations/               # External service boundaries & adapters
-│       │   ├── gmail/                  # OAuth flow, Gmail API adapter, deterministic fakes
-│       │   ├── llm/                    # Gemini, Groq, Faucet LLM providers & fakes
-│       │   ├── rag/                    # Dense + BM25 + Turbovec hybrid semantic memory
-│       │   ├── knowledge_ingestion/    # Company CLI: PDF/DOCX/TXT/MD → Markdown corpus
-│       │   ├── project_documents/      # Encrypted document store & media sniffing
-│       │   ├── storage/                # Supabase private storage adapter
-│       │   └── key_rotation.py         # API key rotation manager
-│       ├── orchestration/              # Dispatchers & background workers
-│       │   ├── local.py                # In-process local execution dispatcher
-│       │   └── worker.py               # Background worker process entry point `mail-todo-worker`
-│       ├── persistence/                # Database repositories & storage adapters
-│       │   ├── repositories/           # SQLite & Supabase Postgres repositories
-│       │   └── migrations/             # SQL schema migration scripts
-│       └── security/                   # Auth & security utilities
-│
-├── frontend/                           # React 19 + Vite + Tailwind 4 frontend (pnpm)
-│
-├── frontend/                            # React/Vite web application
-│
-├── tests/
-│   ├── unit/                           # Unit tests (policies, providers, RAG)
-│   ├── integration/                    # Integration tests (server, full workflow)
-│   └── compatibility/                  # Contract & DTO compatibility tests
-│
-└── docs/                               # Documentation & Specifications
-    ├── architectures/                  # Target architecture specs
-    ├── PRD-v1-Core-Email-and-RAG.md    # Product requirements for V1 Email RAG
-    ├── PRD-v2-Memory-Extension.md      # Product requirements for V2 Chat Memory System
-    └── references/                     # Detailed technical specs & experience registry
-```
+src/cowork_agent/
+├── app.py                      # FastAPI composition root; entry point `mail-todo-api`
+├── config.py                   # Environment settings loaders
+├── identity.py                 # Tenant & User identity context management
+├── ingestion_cli.py            # Knowledge ingestion CLI `mail-todo-ingest-knowledge`
+├── api/                        # HTTP endpoints (mail-todo, chat SSE, projects)
+├── domain/                     # Pure domain models (Task, ActionPlan, Chat, Project)
+├── features/                   # Core business logic (email_action_plan workflow)
+├── integrations/               # Gmail OAuth, LLM providers (Gemini/Groq), RAG (Turbovec)
+├── orchestration/              # Dispatchers & background workers (`mail-todo-worker`)
+└── persistence/                # SQLite & PostgreSQL repositories, SQL migrations
 
-**Tóm tắt trạng thái triển khai:**
-- **Đã hoàn thành trong Runtime Local V1-M3:** Email RAG pipeline (`features/email_action_plan/`), Hybrid RAG (`integrations/rag/`), Gmail OAuth, Gemini/Groq providers, SQLite persistence, và React frontend (`frontend/`).
-- **Kiến trúc mục tiêu đang di cư (Target Roadmap):** Khung Chat API Controller, SSE token streaming handler, Logical Memory Gateway cho AI Chat (`feature: ai_chat`, `session_id`), và giao diện AI Chat UI tập trung hỗ trợ các tác vụ sinh trực tiếp từ chat (chat-native tasks).
+frontend/                       # React 19 + Vite + Tailwind 4 web application
+tests/                          # Unit & integration test suite (offline by construction)
+docs/                           # Architecture specs, PRDs, and reference documentation
+```
 
 ---
 
-## 3. Nguyên tắc kiến trúc & Phụ thuộc (Architecture Boundaries)
+## 4. Getting Started
 
-- **Phân tách 2 Luồng nghiệp vụ (Decoupled Dual-Workflow Architecture):**
-  - **AI Chat Assistant (Multi-Turn):** Quản lý phiên hội thoại (`session_id`), kết nối trực tiếp với hệ thống Bộ nhớ 4 loại (Working Memory, User Profile, Episodic Task Memory, Semantic Document RAG).
-  - **Standalone Email RAG Pipeline (Single-Turn):** Hoạt động độc lập, không trạng thái (stateless), không tích hợp bộ nhớ 4 loại. Không còn công cụ thực thi `@Email` trong chat (đã bãi bỏ theo ADR-004).
-- **Định hướng phụ thuộc (Dependency Direction):**
-  $$\text{domain} \leftarrow \text{features} \leftarrow \text{integrations / orchestration / persistence} \leftarrow \text{app entry points}$$
-  `domain` giữ sự thuần khiết tuyệt đối, không chứa import từ bất kỳ thư viện framework, database, Gmail SDK hay LLM provider nào.
-- **Phân định trách nhiệm rõ ràng trong Email Pipeline:**
-  - **Classifier**: Phân loại tính hành động (`actionability`) và tính đầy đủ thông tin (`knowledge_sufficiency`).
-  - **Router**: Đưa ra quyết định định tuyến không đổi (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`).
-  - **Agent Core**: Làm chủ việc tổng hợp và sinh Action Plan cuối cùng; RAG chỉ đóng vai trò cung cấp ngữ cảnh bổ trợ và trích dẫn (citations).
-- **Quyền riêng tư & Bảo vệ dữ liệu (Data Privacy First):**
-  - Thư gốc (raw email) và nội dung chưa chuẩn hóa **chỉ tồn tại dưới dạng transient state** trong quá trình xử lý email và phải được **xóa sạch khỏi bộ nhớ** ngay sau khi hoàn tất (`cleanup`).
-  - Tuyệt đối **không lưu trữ raw email** vào Long-term Profile, Episodic Memory hay Semantic Vector index.
-  - Các `TaskEpisode` sinh ra từ chat (chat-native tasks) chỉ lưu trạng thái ban đầu `validation_status = system_generated` và `retrieval_eligible = false` cho tới khi có thao tác xác nhận người dùng (`Approve` / `Complete`) trên giao diện Chat.
+### 4.1 Installation & Environment Setup
 
----
+Always use `uv` for environment management:
 
-## 4. Hướng dẫn khởi chạy (Getting Started)
+```powershell
+# Install dependencies
+uv sync --extra dev --extra postgres
 
-### 4.1 Cài đặt môi trường
-
-```bash
-# Tạo môi trường ảo Python
-python3 -m venv .venv
-# Hoặc với uv: uv venv --python 3.12 .venv
-
-# Kích hoạt môi trường ảo (Linux / Ubuntu / macOS)
-source .venv/bin/activate
-
-# Kích hoạt môi trường ảo (Windows PowerShell)
-# .\.venv\Scripts\activate
-
-# Cài đặt package ở chế độ editable cùng dev dependencies
-pip install -e ".[dev]"
+# Copy configuration files
+Copy-Item .env.example .env
+Copy-Item config.example config
 ```
 
-### 4.2 Cấu hình môi trường (`.env`)
-
-Tạo file `.env` từ `.env.example` và thiết lập các biến môi trường quan trọng. `JINA_API_KEY` là tùy chọn: để trống thì retrieval giữ nguyên thứ tự RRF; lỗi/response không hợp lệ từ Jina cũng fallback an toàn theo cùng thứ tự. Sao chép `config.example` thành `config` để thiết lập các feature flag không chứa secret; giữ credential và connection string trong `.env`.
-
-Default local development uses SQLite for Gmail connections, email runs, tasks,
-chat sessions/history, profile memory, and task episodic memory. Set
-`POSTGRES_MODE=off`; any existing `DATABASE_URL` is ignored. The bounded
-short-term chat buffer remains in-process. With `USER_DOCUMENTS_ENABLED=true`,
-Project Documents use the same local mode: SQLite stores projects, document
-jobs, and chunk text; source files and Turbovec indexes stay under `.data/`;
-Gemini remains the embedding provider.
-
-To opt back into durable Postgres, use `POSTGRES_MODE=local` with the local
-Docker database, or `POSTGRES_MODE=cloud` with hosted Supabase.
-Local and cloud are **separate databases** — flipping the flag does not
-copy rows. Persistence tests use the sibling `cowork_mail_todo` database
-and drop it.
+### 4.2 Key Environment Variables (`.env`)
 
 ```env
-# Default local persistence: SQLite files under .data/.
+# Persistence: "off" (SQLite under .data/), "local" (Docker Postgres), "cloud" (Supabase)
 POSTGRES_MODE=off
 
-# Semantic Memory Store Provider — one factory for Email RAG and Chat Type 4
+# Semantic Memory Store (Email RAG and Chat Type 4)
 RAG_STORE_PROVIDER=turbovec
 
 # Feature Flags
 USER_DOCUMENTS_ENABLED="false"
 
-# Key xoay vòng Gemini (hoặc Groq)
+# LLM Providers (Key Rotation)
 GEMINI_API_KEY_1="your_key_1"
 GEMINI_API_KEY_2="your_key_2"
-GEMINI_API_KEY_3="your_key_3"
 
-# Jina embeddings power RAG indexing and retrieval; the same key enables reranking.
+# Jina Embeddings (Optional reranking & dense retrieval)
 JINA_API_KEY="your_jina_api_key"
-JINA_EMBEDDING_MODEL="jina-embeddings-v5-omni-small"
-JINA_EMBEDDING_DIMENSIONS=1024
-JINA_EMBEDDING_TIMEOUT_SECONDS=30
 
-# Gmail OAuth Credentials
+# Gmail OAuth Credentials & Secrets
 GMAIL_CLIENT_ID="your_gmail_client_id"
 GMAIL_CLIENT_SECRET="your_gmail_client_secret"
-
-# Secret Keys mã hóa
 TOKEN_ENCRYPTION_KEY="your_fernet_key"
 OAUTH_STATE_SECRET="your_oauth_state_secret"
 ```
 
-### 4.3 Khởi chạy dịch vụ
-
-#### Local development: API and document worker
-
-With the default SQLite mode and Project Documents enabled, start both
-processes from the repository root:
+### 4.3 Running Services
 
 ```powershell
+# Start both API and Background Worker (Dev Mode)
 uv run mail-todo-dev
+
+# Or run separately:
+uv run mail-todo-api      # FastAPI Server (http://127.0.0.1:8000)
+uv run mail-todo-worker   # Document queue worker
+
+# Start Frontend (http://localhost:5173)
+cd frontend
+pnpm install
+pnpm dev
 ```
-
-Set `APP_HOST` and `APP_PORT` in `.env` when the default API address
-(`127.0.0.1:8000`) is unsuitable. In SQLite mode, email runs execute in the
-API process; `mail-todo-worker` polls only the local Project Document queue.
-It remains idle when `USER_DOCUMENTS_ENABLED=false`.
-
-To run the processes separately, use two terminals:
-
-```powershell
-# Terminal 1
-uv run mail-todo-api
-
-# Terminal 2
-uv run mail-todo-worker
-```
-
-- **Chạy riêng API Server (FastAPI, không chạy worker):**
-  - *Linux / Ubuntu:*
-    ```bash
-    .venv/bin/mail-todo-api
-    ```
-  - *Windows PowerShell:*
-    ```powershell
-    .\.venv\Scripts\mail-todo-api.exe
-    ```
-
-- **Chạy React frontend:**
-  ```powershell
-  cd frontend
-  corepack enable
-  pnpm install
-  Copy-Item .env.example .env.local
-  pnpm dev
-  ```
-  Giao diện sẽ khởi chạy tại `http://localhost:5173`.
 
 ---
 
-## 5. Kiểm tra chất lượng & Testing (Quality Assurance)
+## 5. Quality Assurance & Verification
 
-Chạy bộ công cụ kiểm tra chất lượng mã nguồn:
+```powershell
+# Backend checks (Fast gate)
+uv run pytest -q ; uv run ruff check . ; uv run mypy src
 
-```bash
-# Kiểm tra linter & code style (Backend)
-python -m ruff check .
-
-# Kiểm tra kiểu tĩnh (Static Type Check - Backend)
-python -m mypy src
-
-# Chạy toàn bộ Unit, Integration và Contract tests
-python -m pytest -q
-
-# Chạy E2E Frontend-API Integration tests (Linux / Ubuntu & Windows)
-python -m pytest tests/integration/api/test_e2e_frontend_api.py -v
-
-# Kiểm tra linter, typecheck & unit test cho Frontend (folder frontend/)
+# Frontend checks
 cd frontend
 pnpm test
 pnpm check-types
@@ -363,9 +168,9 @@ pnpm lint
 
 ---
 
-## 6. Tài liệu tham khảo (References)
-- **Kiến trúc mục tiêu:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
-- **Company ingestion capability map:** [`tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md`](tasks/specs/CAPABILITY-MAP-ingestion-pipeline.md)
-- **Product Requirements:** [`tasks/prds/PRD-v1-Core-Email-and-RAG.md`](tasks/prds/PRD-v1-Core-Email-and-RAG.md) và [`tasks/prds/PRD-v2-Memory-Extension.md`](tasks/prds/PRD-v2-Memory-Extension.md)
-- **Experience Registry cho coding agents:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
+## 6. Authoritative References
 
+- **Target Architecture:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
+- **Test Routing Index:** [`tests/README.md`](tests/README.md)
+- **Experience Registry:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
+- **PRDs:** [`tasks/prds/PRD-v1-Core-Email-and-RAG.md`](tasks/prds/PRD-v1-Core-Email-and-RAG.md) · [`tasks/prds/PRD-v2-Memory-Extension.md`](tasks/prds/PRD-v2-Memory-Extension.md)

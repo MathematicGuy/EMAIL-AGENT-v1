@@ -1,13 +1,11 @@
 # Test Routing Index
 
 A map for picking the **smallest** test route that covers a change, and a
-registry of which file owns which invariant so no one writes a test that
-already exists.
+registry of which file owns which invariant so no duplicate tests are written.
 
-Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
-interpreter on this machine and fails with unrelated `ssl` errors.
+Always `uv run pytest`.
 
-**Whole suite: `uv run pytest -q` -> ~14.4 s, 1838 passed.** Defaults: 4 xdist
+**Whole suite: `uv run pytest -q` -> ~15 s, 1616 tests, 9 skipped.** Defaults: 4 xdist
 workers with `--dist loadgroup`, `-m 'not live'`, `--strict-markers`. Worker
 flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
 is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
@@ -32,7 +30,7 @@ test pass.
 Pick the narrowest row that contains your change. Times are **serial** (`-p no:xdist`),
 which is what one route costs on its own; the whole-suite row is parallel.
 
-| # | Route | Tests | Serial | Covers |
+| # | Route | Tests | Time (-n 4) | Covers |
 |---|---|---|---|---|
 | R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
 | R2 | `tests/unit/features` | 588 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
@@ -55,7 +53,7 @@ which is what one route costs on its own; the whole-suite row is parallel.
 Collection alone is ~2.5 s of that, and **every worker pays it in full** —
 which is why more workers do not help (§5).
 
-### Source -> route
+### Source -> Route Mapping
 
 | Edited under `src/cowork_agent/` | Run |
 |---|---|
@@ -63,7 +61,7 @@ which is why more workers do not help (§5).
 | `features/ai_chat/` | R2 |
 | `features/email_action_plan/` | R2 + R13 |
 | `integrations/rag/` | R3 (+ R6 if `bootstrap.py` or `project_documents.py`) |
-| `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` if `load_corpus` changed |
+| `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
 | `persistence/` | R7 + R12 |
@@ -77,12 +75,8 @@ which is why more workers do not help (§5).
 
 ## 2. Markers
 
-Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
-
 | Marker | Meaning | Default |
 |---|---|---|
-| `core` | **Test Não & Thuật toán**: Logic nghiệp vụ, contracts, security boundary (Fakes 100%, 0 I/O). | **Selected** by default. |
-| `extended` | **Test Kho chứa & Đánh giá**: Real PostgreSQL container, MemEval harness, evaluation datasets. A fast, fakes-only test of *production* behaviour is `core` — do not mark it `extended` just because it lives under `unit/scripts` or reads a fixture file. | **Deselected.** `-m extended` to run (383 passed). |
 | `live` | **Test Thực địa ngoài đời**: Real Gmail OAuth, real Gemini API, real server subprocess. | **Deselected.** `-m live` to opt in (27 tests). |
 | `slow` | >1 s of wall clock on its own. | Selected. |
 | `serial` | Spawns a process or binds a fixed port. Auto-grouped onto one xdist worker (`xdist_group("serial")`). Do not disable xdist for these. | Selected. |
@@ -103,18 +97,16 @@ The `live` tier modules for Software E2E integration (deselected by default, run
 
 ## 3. Invariant Ownership
 
-**Before writing a test, find its invariant here.** If a row already exists, add
-a case to the owning file instead of starting a new one. If the invariant is
-absent, add the row when you add the test.
+Before writing a test, check if its invariant is already owned.
 
 | Invariant | Owned by | Do not re-assert in |
 |---|---|---|
-| Legacy `/result` JSON key set, `nextActions` slice, empty-state message, item ordering | `unit/features/email_action_plan/test_compat_mapper.py` | any API-level test |
+| Legacy `/result` JSON schema, `nextActions` slice, empty-state message | `unit/features/email_action_plan/test_compat_mapper.py` | API-level tests |
 | `processedEmails` is development-only | `integration/api/test_principal_boundary.py` | — |
-| Run creation is idempotent per `(user, Idempotency-Key)` | `integration/email_action_plan/test_workflow.py` | API tests (they get it transitively) |
-| Persisted tasks survive a replayed run without duplicating | `integration/email_action_plan/test_workflow.py` | — |
-| Postgres migrations apply once and are idempotent | `integration/persistence/test_postgres_repositories.py` | — |
-| No raw email body reaches any API response | `integration/api/test_principal_boundary.py` | workflow/repository tests |
+| Run creation idempotency `(user, Idempotency-Key)` | `integration/email_action_plan/test_workflow.py` | API tests |
+| Persisted tasks survive replayed run | `integration/email_action_plan/test_workflow.py` | — |
+| Postgres migrations idempotent | `integration/persistence/test_postgres_repositories.py` | — |
+| No raw email body reaches API responses | `integration/api/test_principal_boundary.py` | workflow/repository tests |
 | No raw email body reaches chat memory | `unit/domain/test_chat_contracts.py` | gateway tests |
 | Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/rag/test_turbovec_memory.py` | integration tests |
 | Binary `document_date` harvest (PDF `/Info`, DOCX props; never mtime) | `unit/integrations/knowledge_ingestion/test_date_harvest.py` | service tests except one wire-up |
@@ -135,19 +127,13 @@ absent, add the row when you add the test.
 | Embedding key rotation backs off between attempts (2.0 s Gemini) and paces batches (0.2 s Jina) | `unit/integrations/rag/test_embeddings.py` (`slept` fixture) | — |
 | OpenRouter hops to Google Gemini only on `OpenRouterAPIError` (transport / unusable JSON), never on schema-invalid JSON after repair | `unit/integrations/llm/test_last_resort.py` + `unit/integrations/llm/test_openrouter.py` | chat_reply / chat_intent except one wire-up each |
 
-### Two facts that break tests if you forget them
-
-- **`HashingEmbedder` carries no semantics.** It buckets tokens by hash. Never
-  assert *which* document ranks first under it — only counts, ordering by score,
-  thresholds, and status codes.
-- **`tenant_id` is gone from the retrieval/email contracts** (single-user app).
-  It still exists on `VerifiedPrincipal` and the chat-memory schema. Do not add
-  it to `KnowledgeChunk`, `SemanticRetrievalRequest/Response`,
-  `EphemeralEmailEnvelope`, `GenerationContext`, or `load_corpus`.
+### Critical Invariants
+- **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.
+- **`tenant_id` removed**: Do not reintroduce to single-user domain/email/retrieval contracts.
 
 ---
 
-## 4. Rules for Adding Tests
+## 4. Rules for Adding & Pruning Tests
 
 1. **One invariant, one owner.** Check §3 first. A second assertion of the same
    fact at a different layer is a deletion candidate, not coverage.
@@ -192,19 +178,11 @@ Delete a test when any of these holds:
 
 ---
 
-## 5. Route Optimization
+## 5. Verification & Fast Gates
 
-Do **not** open with the full suite. The sequence:
-
+Before submitting changes, run:
 ```bash
-# 1. Narrowest route from §1 (seconds).
-uv run pytest tests/unit/integrations/rag -q
-
-# 2. Widen one level only if step 1 passes.
-uv run pytest tests/unit/integrations -q
-
-# 3. Full suite once, at the end.
-uv run pytest -q
+uv run pytest -q ; uv run ruff check . ; uv run mypy src
 ```
 
 ### Four workers is the ceiling. Measured, not assumed.
