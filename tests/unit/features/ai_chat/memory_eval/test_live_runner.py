@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
@@ -22,8 +20,6 @@ from cowork_agent.features.ai_chat.memory_eval.probes import (
     ProbeTest,
     SeedSpec,
 )
-
-pytestmark = pytest.mark.extended
 
 
 def _probe(**overrides: object) -> Probe:

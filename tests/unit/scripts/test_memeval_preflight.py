@@ -26,8 +26,6 @@ from scripts.memeval_preflight import (
     render,
 )
 
-pytestmark = pytest.mark.extended
-
 
 def test_a_warning_does_not_stop_a_run_and_a_failure_does() -> None:
     assert exit_code([Check("a", OK, ""), Check("b", WARN, "")]) == 0

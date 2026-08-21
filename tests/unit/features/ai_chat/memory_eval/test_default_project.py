@@ -21,13 +21,9 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from cowork_agent.features.ai_chat.memory_eval.default_project import (
     NullDefaultProjectEpisodes,
 )
-
-pytestmark = pytest.mark.extended
 
 
 @dataclass(frozen=True)

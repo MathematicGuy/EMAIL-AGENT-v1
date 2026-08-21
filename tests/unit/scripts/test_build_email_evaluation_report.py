@@ -10,8 +10,6 @@ import pytest
 
 from tests.unit.scripts.cli_harness import load_script, run_cli
 
-pytestmark = pytest.mark.extended
-
 RUBRIC_VERSION = "email-intent-annotation-v1"
 
 

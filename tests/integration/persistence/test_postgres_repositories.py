@@ -76,8 +76,6 @@ from cowork_agent.persistence.repositories.postgres import (  # noqa: E402
     PostgresTaskRepository,
 )
 
-pytestmark = pytest.mark.extended
-
 NOW = datetime(2026, 8, 8, 9, tzinfo=UTC)
 SECRET_BODY = "Nội dung email tuyệt mật không được rò rỉ."
 

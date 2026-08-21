@@ -9,8 +9,6 @@ from cowork_agent.features.ai_chat.memory_eval.probes import (
     load_probe_set,
 )
 
-pytestmark = pytest.mark.extended
-
 
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {

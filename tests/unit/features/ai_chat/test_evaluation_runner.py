@@ -18,8 +18,6 @@ from cowork_agent.features.ai_chat.evaluation_runner import (
     run_paired_evaluation,
 )
 
-pytestmark = pytest.mark.extended
-
 # ---------------------------------------------------------------------------
 # Thresholds fixture
 # ---------------------------------------------------------------------------

@@ -10,8 +10,6 @@ from cowork_agent.features.ai_chat.memory_eval.probes import SeedSpec
 from cowork_agent.features.ai_chat.memory_eval.runner import run_key
 from scripts.evaluate_memory import main
 
-pytestmark = pytest.mark.extended
-
 
 def _probe_set_file(tmp_path: Path) -> Path:
     payload = {

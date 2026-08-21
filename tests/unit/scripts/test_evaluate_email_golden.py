@@ -20,8 +20,6 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.email_action_plan.schemas import ClassificationResult, ClassifiedMessage
 from tests.unit.scripts.cli_harness import load_script, run_cli
 
-pytestmark = pytest.mark.extended
-
 NOW = datetime(2026, 8, 19, tzinfo=UTC)
 RUBRIC_VERSION = "email-intent-annotation-v1"
 

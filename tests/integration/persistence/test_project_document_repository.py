@@ -18,8 +18,6 @@ from cowork_agent.persistence.repositories.identity import PostgresIdentityRepos
 from cowork_agent.persistence.repositories.projects import PostgresProjectRepository
 from tests.integration.persistence.pg_probe import server_available
 
-pytestmark = pytest.mark.extended
-
 DATABASE_URL = os.getenv("PG_TEST_URL", "")
 
 
