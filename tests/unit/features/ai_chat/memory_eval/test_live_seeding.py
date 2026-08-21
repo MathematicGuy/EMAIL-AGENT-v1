@@ -306,6 +306,32 @@ def test_semantic_cache_misses_when_embedder_identity_changes(tmp_path: Path) ->
     assert "retrieval.passage" in other.tasks
 
 
+class _PrivateIdentityEmbedder:
+    """Bag-of-words embedder whose identity is only on private Gemini-style attrs."""
+
+    def __init__(self, *, model: str = "fake", dimensions: object = "") -> None:
+        self._model = model
+        self._dimensions = dimensions
+        self.tasks: list[str] = []
+
+    async def embed(self, texts: tuple[str, ...], *, task: str = "") -> list[list[float]]:
+        self.tasks.append(task)
+        vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
+        return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
+
+
+def test_semantic_cache_misses_when_private_embedder_model_changes(tmp_path: Path) -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    asyncio.run(
+        seed_semantic(
+            spec, _PrivateIdentityEmbedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path
+        )
+    )
+    other = _PrivateIdentityEmbedder(model="b")
+    asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
+    assert "retrieval.passage" in other.tasks
+
+
 def test_corrupt_cache_rebuilds_instead_of_failing_seed(tmp_path: Path) -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
     asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path("."), cache_dir=tmp_path))

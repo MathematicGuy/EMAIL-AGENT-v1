@@ -182,8 +182,10 @@ def _cache_key(corpus_dir: Path, embedder: object, documents: Sequence[Knowledge
     hasher = hashlib.sha256()
     _update_len_prefixed(hasher, _CACHE_FORMAT_VERSION.encode("utf-8"))
     _update_len_prefixed(hasher, type(embedder).__name__.encode("utf-8"))
-    _update_len_prefixed(hasher, str(getattr(embedder, "model", "")).encode("utf-8"))
-    _update_len_prefixed(hasher, str(getattr(embedder, "dimensions", "")).encode("utf-8"))
+    _update_len_prefixed(hasher, _embedder_attr(embedder, "model", "_model").encode("utf-8"))
+    _update_len_prefixed(
+        hasher, _embedder_attr(embedder, "dimensions", "_dimensions").encode("utf-8")
+    )
     _update_len_prefixed(hasher, b"task=retrieval.passage")
     for path in sorted(corpus_dir.glob("*.md")):
         _update_len_prefixed(hasher, path.relative_to(corpus_dir).as_posix().encode("utf-8"))
@@ -194,6 +196,13 @@ def _cache_key(corpus_dir: Path, embedder: object, documents: Sequence[Knowledge
         for chunk in document.chunks:
             _update_len_prefixed(hasher, chunk.text.encode("utf-8"))
     return hasher.hexdigest()
+
+
+def _embedder_attr(embedder: object, public_name: str, private_name: str) -> str:
+    value = getattr(embedder, public_name, None)
+    if value is None or value == "":
+        value = getattr(embedder, private_name, "")
+    return str(value)
 
 
 def _update_len_prefixed(hasher: hashlib._Hash, data: bytes) -> None:
