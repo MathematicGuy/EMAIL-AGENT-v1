@@ -51,7 +51,7 @@ from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, lo
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
 from cowork_agent.features.ai_chat.memory_eval.scoring import score
 
-_DEFAULT_PROBE_SET = Path("evaluations/MEMORIES/probes/v1-four-scopes.json")
+_DEFAULT_PROBE_SET = Path("evaluations/MEMORIES/probes/v2-four-scopes-wide.json")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
 _DETAIL_DIR = Path("evaluations/MEMORIES/runs")
 
@@ -459,6 +459,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     # Loaded here rather than inside main(): without it the harness reads an
     # empty environment and reports "no GEMINI_API_KEY" on a machine with six
     # configured. Keeping it out of main() leaves the process environment
@@ -467,3 +472,4 @@ if __name__ == "__main__":
     # checkout, which would turn that unit test into a real billed run.
     load_runtime_environment()
     raise SystemExit(main())
+

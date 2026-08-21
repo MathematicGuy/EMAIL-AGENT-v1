@@ -305,7 +305,7 @@ def render(checks: Sequence[Check]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--probe-set", type=Path, default=Path("evaluations/MEMORIES/probes/v1-four-scopes.json")
+        "--probe-set", type=Path, default=Path("evaluations/MEMORIES/probes/v2-four-scopes-wide.json")
     )
     parser.add_argument("--provider", help="Chat provider to check; defaults to LLM_PROVIDER.")
     parser.add_argument(

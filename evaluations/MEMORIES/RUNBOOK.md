@@ -31,24 +31,26 @@ that reads as a fact and is not one.
 6. **One run at a time.** Concurrent runs contend on the schema migration
    advisory lock and wedge, and two live runs on one provider account draw far
    more dropouts than one.
+7. **DO NOT use rtk when run memory eval (use `rtk proxy` or set `RTK_DISABLED=1`).**
 
-Everything below assumes `PYTHONPATH=src`, `PYTHONIOENCODING=utf-8`, and the
+Everything below assumes `PYTHONPATH=src`, `PYTHONIOENCODING=utf-8`, `RTK_DISABLED=1`, and the
 interpreter `.venv/Scripts/python.exe` — bare `python` hits the Windows App
-Execution Alias and fails.
+Execution Alias and fails. The eval provider/model is loaded from configuration
+(`LLM_PROVIDER` in `.env`, e.g. `gemini`) by default.
 
 ---
 
 ## 1. Pre-check — prove every dependency answers
 
 ```bash
-# PostgreSQL target:
+# PostgreSQL target (loads provider from config by default):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
-PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 RTK_DISABLED=1 \
+  .venv/Scripts/python.exe scripts/memeval_preflight.py
 
-# SQLite target (zero setup, no PostgreSQL required):
-POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/memeval_preflight.py --provider openrouter
+# SQLite target (zero setup, scratch DB):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 RTK_DISABLED=1 \
+  .venv/Scripts/python.exe scripts/memeval_preflight.py
 ```
 
 Read the password out of `.env` like this rather than typing it. It must not
@@ -98,40 +100,40 @@ A dry run **measures nothing**. It proves the wiring assembles a report.
 ---
 
 ## 2. The run
-
 ```bash
-# PostgreSQL target:
+# PostgreSQL target (loads provider from config by default):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider openrouter \
     --output evaluations/MEMORIES/baselines/<name>-postgres.json
 
 # SQLite target (zero setup, scratch DB):
 POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider openrouter \
     --output evaluations/MEMORIES/baselines/<name>-sqlite.json
 ```
+
+The provider and model are loaded from configuration (`LLM_PROVIDER`, e.g. `gemini`)
+by default. Pass `--provider <name>` (e.g. `--provider openrouter`) only when
+explicitly overriding the configured provider.
 
 Name `<name>` for what was measured, not when — the timestamp is inside the
 report.
 
-**Which question file.** Both commands above run the default, `v1-four-scopes`
-— the 8-question set every committed baseline was graded against. Add
-`--probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json` for the wide
-20-question set. Put the set in `<name>`: a v1 baseline and a v2 report are two
-different measurements, not two versions of one, and only `probe_set_id` inside
-the file says which is which.
+**Which question file.** Both commands above run the latest default,
+`v2-four-scopes-wide` — the wide 20-question set (`evaluations/MEMORIES/probes/v2-four-scopes-wide.json`).
+Pass `--probe-set evaluations/MEMORIES/probes/v1-four-scopes.json` if explicitly
+targeting the legacy 8-question v1 set. Put the set in `<name>`: a v1 baseline
+and a v2 report are two different measurements, not two versions of one, and
+only `probe_set_id` inside the file says which is which.
 
-**Cost.** v1: 8 questions × 3 arms = 24 asks, and seeding roughly doubles it —
-about **52 model calls**, plus the corpus embedding and the two the pre-check
-spent. Single-digit minutes.
+**Cost.** v2 (default): 20 questions × 3 arms = 60 asks, and it seeds three
+episodes instead of one, roughly **130 model calls**. Single-digit minutes.
+Budget the time and the quota accordingly, and keep to one run at a time — rule 6
+above, and SPEC §15.1 item 10: two concurrent live runs drew far more dropouts
+than one, and more turns per run makes that worse.
 
-v2: 20 questions × 3 arms = 60 asks, and it seeds three episodes instead of one,
-so roughly **2.5×** v1. Budget the time and the quota accordingly, and keep to
-one run at a time — rule 6 above, and SPEC §15.1 item 10: two concurrent live
-runs drew far more dropouts than one, and more turns per run makes that worse.
+v1 (legacy): 8 questions × 3 arms = 24 asks, ~52 model calls.
 
 Run it in the background and wait rather than polling.
 

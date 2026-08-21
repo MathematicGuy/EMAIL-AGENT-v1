@@ -197,28 +197,36 @@ def build_markdown_report(
         f"Ghi nhận trên `{provider}` qua 3 arms |"
     )
     seed_fail_str = ", ".join(seed_failures) if seed_failures else "none"
+    seed_eval_str = (
+        "Toàn bộ các phạm vi bộ nhớ nạp dữ liệu hoàn chỉnh"
+        if not seed_failures
+        else f"{len(seed_failures)} lỗi trong quá trình nạp dữ liệu seed"
+    )
     lines.append(
         f"| **Lỗi Seeding (Seed Failures)** | **{len(seed_failures)} ({seed_fail_str})** | "
-        f"Toàn bộ các phạm vi bộ nhớ nạp dữ liệu hoàn chỉnh |\n"
+        f"{seed_eval_str} |\n"
     )
 
     lines.append("### 1.2. Kết luận Cốt lõi (Bottom-line Verdict)")
+    lines.append(
+        "- _[Agent Review: Tóm tắt 2-3 điểm mấu chốt về năng lực bộ nhớ, cơ chế masking "
+        "và độ tin cậy của run này]_"
+    )
     if total_earned_it > 0:
         lines.append(
-            f"- **Cơ chế nạp và che mặt nạ (3-Arm Attribution & Masking)**: Có {total_earned_it} "
-            "probe đạt chuẩn `scope_earned_it` $(P, F, F)$, chứng minh bộ nhớ thực sự "
-            "cung cấp thông tin."
+            f"- **Quy gán bộ nhớ (3-Arm Attribution)**: Có {total_earned_it} probe đạt chuẩn "
+            "`scope_earned_it` $(P, F, F)$, chứng minh bộ nhớ thực sự cung cấp thông tin."
         )
     if total_dangerous > 0:
         lines.append(
             f"- **Cảnh báo Grader / Dangerous**: Có {total_dangerous} probe bị đánh dấu "
-            "`dangerous` (cần kiểm tra transcript để phân biệt giữa hallucination thực tế "
+            "`dangerous` (cần Agent đọc transcript để phân biệt giữa hallucination thực tế "
             "và lỗi regex của Grader)."
         )
     if total_unreadable > 0:
         lines.append(
             f"- **Tính ổn định của Provider**: Có {total_unreadable} probe ghi nhận "
-            "`unreadable` do lỗi kết nối mạng / timeout từ API gateway."
+            "`unreadable` do lỗi kết nối mạng / timeout (`no_answer`)."
         )
     lines.append("\n---\n")
 
@@ -344,24 +352,11 @@ def build_markdown_report(
             lines.append(f"- **Phản hồi Full Arm**:\n  > *\"{full_reply}\"*")
             lines.append(f"- **Phản hồi Ablated Arm**:\n  > *\"{abl_reply}\"*")
             lines.append(f"- **Phản hồi Control Arm**:\n  > *\"{ctl_reply}\"*")
-
-            # Explanation synthesis
-            if verdict == "dangerous":
-                lines.append(
-                    "- **Nhận định**: Model có thể đã giải thích ngữ cảnh phủ định "
-                    "chi tiết thay vì từ chối bằng mẫu câu ngắn. "
-                    "Cần xem xét Grader regex (Concern A)."
-                )
-            elif verdict == "unreadable":
-                lines.append(
-                    "- **Nhận định**: Nhánh Control gặp lỗi provider (`no_answer`), "
-                    "trong khi nhánh Full trả lời đầy đủ."
-                )
-            elif verdict == "scope_did_nothing":
-                lines.append(
-                    "- **Nhận định**: Cả 3 nhánh đều từ chối trả lời an toàn khi không có dữ liệu, "
-                    "không có hành vi bịa đặt."
-                )
+            lines.append(
+                "- **Phân tích nguyên nhân & Nhận định**: _[Coding Agent đọc transcript ở trên "
+                "và điền nhận định: do Concern A (Grader), Concern B (Question), "
+                "Concern C (Plumbing/Network) hay Concern D (Product)]_"
+            )
             lines.append("")
         lines.append("---\n")
 
@@ -373,14 +368,21 @@ def build_markdown_report(
     )
     lines.append("1. **Concern A (The Grader)**:")
     lines.append(
-        "   - Cập nhật thêm các mẫu câu phủ định kèm giải thích bối cảnh vào "
-        "danh sách `refusal_about` để hạn chế false positive `dangerous`."
+        "   - _[Agent điền đánh giá về Grader regex, false positives/negatives "
+        "hoặc cần mở rộng refusal patterns]_"
     )
-    lines.append("2. **Concern C (Plumbing / Harness)**:")
-    lines.append("   - Cơ chế nạp dữ liệu và che mặt nạ (Masking) hoạt động chính xác.")
-    lines.append("3. **Concern D (Product)**:")
+    lines.append("2. **Concern B (The Question)**:")
     lines.append(
-        "   - Toàn bộ 4 hệ thống lưu trữ bộ nhớ hoạt động ổn định và đáp ứng đúng thiết kế."
+        "   - _[Agent điền đánh giá nếu câu hỏi quá dễ suy đoán hoặc bị rò rỉ context]_"
+    )
+    lines.append("3. **Concern C (Plumbing / Harness)**:")
+    lines.append(
+        "   - _[Agent điền đánh giá về cơ chế seeding, masking, gateway timeout "
+        "hoặc gián đoạn API provider]_"
+    )
+    lines.append("4. **Concern D (Product)**:")
+    lines.append(
+        "   - _[Agent điền đánh giá về logic bộ nhớ, retrieval chất lượng thực tế của sản phẩm]_"
     )
     lines.append("\n---\n")
 
@@ -423,8 +425,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--probe-set",
         type=Path,
-        default=_DEFAULT_PROBES_DIR / "v1-four-scopes.json",
-        help="Path to probe set JSON definition.",
+        help="Path to probe set JSON definition. If omitted, automatically resolves matching probe set from baseline metadata.",
     )
     parser.add_argument(
         "--output",
@@ -457,11 +458,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # 3. Resolve Probe Set
     probe_set = None
-    if args.probe_set and args.probe_set.exists():
+    probe_set_path = args.probe_set
+    if probe_set_path is None:
+        probe_set_id = baseline_data.get("probe_set_id", "")
+        if "v2" in probe_set_id or "wide" in probe_set_id:
+            probe_set_path = _DEFAULT_PROBES_DIR / "v2-four-scopes-wide.json"
+        elif "v1" in probe_set_id:
+            probe_set_path = _DEFAULT_PROBES_DIR / "v1-four-scopes.json"
+        else:
+            probe_set_path = _DEFAULT_PROBES_DIR / "v2-four-scopes-wide.json"
+
+    if probe_set_path and probe_set_path.exists():
         try:
-            probe_set = load_probe_set(json.loads(args.probe_set.read_text(encoding="utf-8")))
+            probe_set = load_probe_set(json.loads(probe_set_path.read_text(encoding="utf-8")))
         except Exception as e:
-            print(f"WARN: Could not load probe set {args.probe_set}: {e}", file=sys.stderr)
+            print(f"WARN: Could not load probe set {probe_set_path}: {e}", file=sys.stderr)
 
     # 4. Generate Markdown
     report_md = build_markdown_report(
