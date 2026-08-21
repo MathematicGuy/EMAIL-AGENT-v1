@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
@@ -16,11 +18,13 @@ from cowork_agent.features.ai_chat.memory_eval.live_runner import (
     teardown,
 )
 from cowork_agent.features.ai_chat.memory_eval.probes import (
+    EpisodeSeed,
     Probe,
     ProbeSet,
     ProbeTest,
     SeedSpec,
 )
+from cowork_agent.features.ai_chat.memory_eval.seeding import SeedOutcome
 
 
 def _probe(**overrides: object) -> Probe:
@@ -203,6 +207,60 @@ def test_a_short_term_probe_is_asked_in_the_seeded_session() -> None:
     assert session.last_gateway is not None
     turns = session.last_gateway._read_active_turns()
     assert any("a seeded line" in (turn.user_message or "") for turn in turns)
+
+
+def test_a_long_term_probe_still_calls_seed_episodic_in_a_foreign_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions: list[str] = []
+
+    async def fake_episodic(controller, session_id, spec, *, key_prefix):
+        del controller, spec, key_prefix
+        sessions.append(session_id)
+        return SeedOutcome(MemoryType.EPISODIC, True, "ok")
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        fake_episodic,
+    )
+    session = _session(
+        _Reply(),
+        SeedSpec((), {"language": "vi"}, (EpisodeSeed("Tạo một tác vụ.", True),), None),
+    )
+    asyncio.run(ask_live(session, _probe(targets=MemoryType.LONG_TERM), Arm.FULL, None))
+    assert sessions
+    assert all(item.endswith("-seed") for item in sessions)
+
+
+def test_control_still_never_calls_seed_episodic(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = []
+
+    async def fake_episodic(controller, session_id, spec, *, key_prefix):
+        called.append(session_id)
+        return SeedOutcome(MemoryType.EPISODIC, True, "ok")
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        fake_episodic,
+    )
+    session = _session(_Reply(), SeedSpec((), {}, (EpisodeSeed("Tạo một tác vụ.", True),), None))
+    asyncio.run(ask_live(session, _probe(targets=MemoryType.LONG_TERM), Arm.CONTROL, None))
+    assert called == []
+
+
+def test_short_term_probe_buffer_does_not_contain_episodic_seed_text() -> None:
+    seed = SeedSpec(
+        ("a seeded line",),
+        {},
+        (EpisodeSeed("Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.", True),),
+        None,
+    )
+    session = _session(_Reply(), seed)
+    asyncio.run(ask_live(session, _probe(targets=MemoryType.SHORT_TERM), Arm.FULL, None))
+    assert session.last_gateway is not None
+    turns = session.last_gateway._read_active_turns()
+    assert any("a seeded line" in (turn.user_message or "") for turn in turns)
+    assert not any("Tạo một tác vụ" in (turn.user_message or "") for turn in turns)
 
 
 def test_teardown_deletes_every_gateway_it_is_given() -> None:

@@ -174,16 +174,19 @@ async def _seed_for(
 
     Where each ritual runs matters, and for two different reasons.
 
-    `short_term` runs through the PROBE controller. The buffer lives on the
-    gateway instance, so seeding through a second controller would fill a
-    different buffer and the turns would never reach the probe.
+    `short_term` runs through the PROBE controller, and only when the probe
+    targets the buffer. The buffer lives on the gateway instance, so seeding
+    through a second controller would fill a different buffer and the turns
+    would never reach the probe. Non-short-term probes must not fill it:
+    those facts would sit in the recent-turn window and the scope under test
+    would never be read.
 
-    `episodic` runs through a SEPARATE controller, because requesting a task is
-    itself a chat turn. Running it in the probing session would leave the task
-    text in the recent-turn window and an episodic probe could answer from the
-    prompt without episodic memory being read at all (SPEC §7 step 5). Episodes
-    are keyed by tenant and user, not by session, so a foreign seeding session
-    is still readable — verified against read_episodes' WHERE clause.
+    `episodic` always runs through a SEPARATE controller, because requesting a
+    task is itself a chat turn. Running it in the probing session would leave
+    the task text in the recent-turn window — including on a short_term probe,
+    where that text would contaminate the buffer under test. Episodes are
+    keyed by tenant and user, not by session, so a foreign seeding session is
+    still readable — verified against read_episodes' WHERE clause.
 
     `long_term` needs only a gateway; the profile is per-user.
     """
@@ -198,32 +201,26 @@ async def _seed_for(
         )
     ]
 
-    if needs_fresh_session(probe):
-        seed_session_id = f"{scope.session_id}-seed"
-        seed_scope = ChatMemoryScope(
-            tenant_id=scope.tenant_id, user_id=scope.user_id, session_id=seed_session_id
+    seed_session_id = f"{scope.session_id}-seed"
+    seed_scope = ChatMemoryScope(
+        tenant_id=scope.tenant_id, user_id=scope.user_id, session_id=seed_session_id
+    )
+    seed_controller, seed_gateway = build_arm_controller(
+        seed_scope,
+        session.adapters,
+        session.reply,
+        masked_scope=None,
+        company_rag_enabled=session.company_rag_enabled,
+    )
+    session.gateways.append(seed_gateway)
+    outcomes.append(
+        await seed_episodic(
+            seed_controller, seed_session_id, session.seed, key_prefix=seed_session_id
         )
-        seed_controller, seed_gateway = build_arm_controller(
-            seed_scope,
-            session.adapters,
-            session.reply,
-            masked_scope=None,
-            company_rag_enabled=session.company_rag_enabled,
-        )
-        session.gateways.append(seed_gateway)
-        outcomes.append(
-            await seed_episodic(
-                seed_controller, seed_session_id, session.seed, key_prefix=seed_session_id
-            )
-        )
-    else:
+    )
+    if probe.targets is MemoryType.SHORT_TERM:
         outcomes.append(
             await seed_short_term(
-                probe_controller, scope.session_id, session.seed, key_prefix=scope.session_id
-            )
-        )
-        outcomes.append(
-            await seed_episodic(
                 probe_controller, scope.session_id, session.seed, key_prefix=scope.session_id
             )
         )
