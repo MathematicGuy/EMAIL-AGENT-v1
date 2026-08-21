@@ -1205,9 +1205,16 @@ def create_app() -> FastAPI:
     def _resolve_extracted_doc(filename: str, manifest: dict[str, str]) -> str | None:
         extracted = manifest.get(filename)
         if not extracted:
-            candidate = Path(filename).stem.replace("_", "-").lower() + ".md"
+            stem_hyphen = Path(filename).stem.lower().replace("_", "-").replace(" ", "-")
+            candidate = f"{stem_hyphen}.md"
             if (EXTRACTED_DIR / candidate).is_file():
                 extracted = candidate
+            else:
+                candidate_raw = Path(filename).stem.replace("_", "-").lower() + ".md"
+                if (EXTRACTED_DIR / candidate_raw).is_file():
+                    extracted = candidate_raw
+                elif (EXTRACTED_DIR / f"{Path(filename).stem}.md").is_file():
+                    extracted = f"{Path(filename).stem}.md"
         return extracted if extracted and (EXTRACTED_DIR / extracted).is_file() else None
 
     @app.post("/api/v1/raw-documents/upload")
@@ -1521,18 +1528,58 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
 
+        repo = _raw_document_repo(request)
+        if hasattr(repo, "delete"):
+            try:
+                await repo.delete(safe_name)
+            except Exception as repo_err:
+                logger.warning("Could not delete metadata for %s: %s", safe_name, repo_err)
+
         manifest = _load_raw_manifest()
-        extracted_md = _resolve_extracted_doc(safe_name, manifest)
-        if extracted_md:
-            target_extracted = EXTRACTED_DIR / extracted_md
+        extracted_candidates: set[str] = set()
+        resolved = _resolve_extracted_doc(safe_name, manifest)
+        if resolved:
+            extracted_candidates.add(resolved)
+
+        raw_stem = Path(safe_name).stem
+        stems_to_try = {
+            raw_stem,
+            raw_stem.lower(),
+            raw_stem.replace("_", "-"),
+            raw_stem.replace(" ", "-"),
+            raw_stem.lower().replace("_", "-").replace(" ", "-"),
+            raw_stem.lower().replace(" ", "-"),
+            raw_stem.lstrip("_").lower().replace("_", "-").replace(" ", "-"),
+            f"_{raw_stem.lstrip('_').lower().replace('_', '-').replace(' ', '-')}",
+        }
+        for s in stems_to_try:
+            extracted_candidates.add(f"{s}.md")
+
+        import re
+        norm_key = re.sub(r"[^a-z0-9]", "", raw_stem.lower())
+        if norm_key and EXTRACTED_DIR.exists():
+            for item in EXTRACTED_DIR.iterdir():
+                if (
+                    item.is_file()
+                    and item.suffix.lower() == ".md"
+                    and item.name != "ingestion-manifest.json"
+                ):
+                    item_norm = re.sub(r"[^a-z0-9]", "", item.stem.lower())
+                    if item_norm == norm_key:
+                        extracted_candidates.add(item.name)
+
+        deleted_extracted: list[str] = []
+        for cand in extracted_candidates:
+            target_extracted = EXTRACTED_DIR / cand
             if target_extracted.is_file():
                 try:
                     target_extracted.unlink(missing_ok=True)
-                    logger.info("Deleted extracted markdown %s for %s", extracted_md, safe_name)
+                    deleted_extracted.append(cand)
+                    logger.info("Deleted extracted markdown %s for %s", cand, safe_name)
                 except Exception as exc:
-                    logger.warning("Could not delete extracted markdown %s: %s", extracted_md, exc)
+                    logger.warning("Could not delete extracted markdown %s: %s", cand, exc)
 
-        return {"status": "deleted", "filename": safe_name}
+        return {"status": "deleted", "filename": safe_name, "deleted_extracted": deleted_extracted}
 
     return app
 

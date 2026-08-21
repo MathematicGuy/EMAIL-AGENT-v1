@@ -162,3 +162,16 @@ class SQLiteRawDocumentRepository:
 
     async def record_save(self, filename: str, status: int) -> RawDocumentMetadata:
         return await asyncio.to_thread(self._record_save, filename, status)
+
+    def _delete(self, filename: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                DELETE FROM raw_document_metadata WHERE filename = ?
+                """,
+                (filename,),
+            )
+            return cursor.rowcount > 0
+
+    async def delete(self, filename: str) -> bool:
+        return await asyncio.to_thread(self._delete, filename)

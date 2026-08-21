@@ -217,6 +217,10 @@ async def test_put_and_delete_raw_document_endpoint(tmp_path):
     target_raw = RAW_DOCS_DIR / test_filename
     target_raw.write_bytes(b"initial content")
 
+    from cowork_agent.app import EXTRACTED_DIR
+    target_extracted = EXTRACTED_DIR / "_test-put-delete.md"
+    target_extracted.write_text("# Extracted Markdown Test", encoding="utf-8")
+
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -236,8 +240,11 @@ async def test_put_and_delete_raw_document_endpoint(tmp_path):
             assert res_del.status_code == 200
             assert res_del.json()["status"] == "deleted"
             assert not target_raw.exists()
+            assert not target_extracted.exists()
     finally:
         if target_raw.exists():
             target_raw.unlink()
+        if target_extracted.exists():
+            target_extracted.unlink()
 
 
