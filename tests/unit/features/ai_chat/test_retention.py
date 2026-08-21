@@ -5,8 +5,6 @@ import pytest
 
 from cowork_agent.features.ai_chat.retention import MemoryPurgeCoordinator, MemoryPurgeReport
 
-pytestmark = pytest.mark.extended
-
 
 class Store:
     def __init__(self, counts: list[int]) -> None:

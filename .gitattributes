@@ -1,0 +1,37 @@
+# Line endings are normalised to LF in the repository so that a Windows checkout
+# cannot re-commit an entire directory as CRLF. That churn hides real edits in
+# review and turns any concurrent branch touching the same files into a
+# whole-file merge conflict.
+* text=auto eol=lf
+
+# Shell scripts and lockfiles must stay LF even in the working tree.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows-native scripts want CRLF on disk.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touch these.
+*.pdf binary
+*.docx binary
+*.doc binary
+*.xlsx binary
+*.pptx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text eol=lf
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.tvim binary
+*.parquet binary
+*.zip binary
+*.gz binary

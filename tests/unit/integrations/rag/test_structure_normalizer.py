@@ -1,9 +1,6 @@
-import pytest
 
 from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
 from cowork_agent.integrations.rag.structure_profile import DEFAULT_PROFILE
-
-pytestmark = pytest.mark.extended
 
 
 def test_promotes_plain_text_article_to_its_own_depth() -> None:

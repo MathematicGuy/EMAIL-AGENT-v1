@@ -700,6 +700,7 @@ class OnlyOfficeSettings:
     server_url: str
     backend_url: str | None = None
     jwt_secret: str | None = None
+    allowed_download_hosts: tuple[str, ...] = ()
 
     @classmethod
     def from_env(
@@ -719,10 +720,20 @@ class OnlyOfficeSettings:
             server_url = "http://localhost:8080"
         backend_url = environ.get("ONLYOFFICE_BACKEND_URL", "").strip().rstrip("/") or None
         jwt_secret = environ.get("ONLYOFFICE_JWT_SECRET", "").strip() or None
+        # A save callback tells us where to fetch the edited file from. That URL is
+        # attacker-controlled input until proven otherwise, so it may only point at
+        # the Document Server we configured (plus any host an operator adds here for
+        # split deployments where the cache lives elsewhere).
+        hosts = {urlsplit(server_url).hostname or ""}
+        for extra in environ.get("ONLYOFFICE_ALLOWED_DOWNLOAD_HOSTS", "").split(","):
+            candidate = extra.strip().lower()
+            if candidate:
+                hosts.add(urlsplit(f"//{candidate}").hostname or candidate)
         return cls(
             server_url=server_url,
             backend_url=backend_url,
             jwt_secret=jwt_secret,
+            allowed_download_hosts=tuple(sorted(h for h in hosts if h)),
         )
 
 

@@ -7,7 +7,6 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-import pytest
 
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
@@ -24,8 +23,6 @@ from cowork_agent.integrations.rag.query_transform import (
     RuleBasedQueryTransformer,
 )
 from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
-
-pytestmark = pytest.mark.extended
 
 
 class FakeEmbedder:

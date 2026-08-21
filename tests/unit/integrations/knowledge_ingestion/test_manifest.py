@@ -12,8 +12,6 @@ from cowork_agent.integrations.knowledge_ingestion.manifest import (
 )
 from cowork_agent.integrations.knowledge_ingestion.models import ManifestEntry
 
-pytestmark = pytest.mark.extended
-
 
 def test_manifest_skips_only_successful_unchanged_source(tmp_path: Path) -> None:
     store = ManifestStore(tmp_path / "manifest.json")

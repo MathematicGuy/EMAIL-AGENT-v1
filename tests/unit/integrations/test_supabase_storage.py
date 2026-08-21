@@ -2,11 +2,8 @@ import asyncio
 from pathlib import Path
 
 import httpx
-import pytest
 
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
-
-pytestmark = pytest.mark.extended
 
 
 def test_signed_urls_use_server_secret_and_canonical_private_object_path() -> None:

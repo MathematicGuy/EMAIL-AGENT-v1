@@ -35,6 +35,7 @@ export const RawDocumentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'extracted'>('preview');
   const [extractedContent, setExtractedContent] = useState<string | null>(null);
+  const [extractedFor, setExtractedFor] = useState<string | null>(null);
   const [isExtractLoading, setIsExtractLoading] = useState(false);
 
   const fetchDocuments = async () => {
@@ -63,6 +64,7 @@ export const RawDocumentsView: React.FC = () => {
 
   const loadExtractedText = async (filename: string) => {
     setIsExtractLoading(true);
+    setExtractedFor(filename);
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/v1/raw-documents/${encodeURIComponent(filename)}/extracted`
@@ -83,19 +85,34 @@ export const RawDocumentsView: React.FC = () => {
   const handleSelectDoc = (doc: RawDocumentItem) => {
     setSelectedDoc(doc);
     setExtractedContent(null);
+    setExtractedFor(null);
     setViewMode('preview');
   };
 
   const handleToggleExtracted = () => {
-    if (viewMode === 'preview') {
-      setViewMode('extracted');
-      if (selectedDoc && !extractedContent && selectedDoc.has_extracted_md) {
-        void loadExtractedText(selectedDoc.filename);
-      }
-    } else {
-      setViewMode('preview');
-    }
+    setViewMode((mode) => (mode === 'preview' ? 'extracted' : 'preview'));
   };
+
+  // The extracted pane is reached three ways: the toggle, the OnlyOffice fallback
+  // button, and simply selecting a non-PDF/non-Word file that has extracted text.
+  // Deriving one flag and loading from an effect keeps "is the pane visible" and
+  // "did we fetch" from drifting apart -- the toggle-only trigger used to leave the
+  // third path showing "no extracted text" for documents that had it.
+  const isPdf = selectedDoc?.file_type === 'pdf';
+  const isWordDoc = selectedDoc?.file_type === 'docx' || selectedDoc?.file_type === 'doc';
+  const showsExtractedPane =
+    !!selectedDoc &&
+    !(viewMode === 'preview' && (isPdf || isWordDoc)) &&
+    (viewMode === 'extracted' || selectedDoc.has_extracted_md);
+
+  useEffect(() => {
+    if (!selectedDoc || !showsExtractedPane) return;
+    if (!selectedDoc.has_extracted_md) return;
+    // extractedFor is set before the request resolves, so a failed fetch reports
+    // "no extracted text" instead of retrying on every render.
+    if (extractedFor === selectedDoc.filename) return;
+    void loadExtractedText(selectedDoc.filename);
+  }, [selectedDoc, showsExtractedPane, extractedFor]);
 
   const filteredDocs = documents.filter((doc) => {
     const query = searchQuery.toLowerCase();
@@ -311,7 +328,7 @@ export const RawDocumentsView: React.FC = () => {
 
             {/* PREVIEW CONTAINER */}
             <div className="flex-1 overflow-hidden p-4">
-              {viewMode === 'preview' && selectedDoc.file_type === 'pdf' ? (
+              {viewMode === 'preview' && isPdf ? (
                 /* PDF VIEWER EMBED */
                 <div className="w-full h-full rounded-xl overflow-hidden border border-[#2d2b27] bg-[#141312] shadow-inner">
                   <iframe
@@ -320,19 +337,13 @@ export const RawDocumentsView: React.FC = () => {
                     className="w-full h-full border-0 bg-[#2b2b2b]"
                   />
                 </div>
-              ) : viewMode === 'preview' &&
-                (selectedDoc.file_type === 'docx' || selectedDoc.file_type === 'doc') ? (
+              ) : viewMode === 'preview' && isWordDoc ? (
                 /* ONLYOFFICE DOC EDITOR EMBED */
                 <OnlyOfficeDocEditor
                   filename={selectedDoc.filename}
-                  onFallbackToMarkdown={() => {
-                    setViewMode('extracted');
-                    if (!extractedContent && selectedDoc.has_extracted_md) {
-                      void loadExtractedText(selectedDoc.filename);
-                    }
-                  }}
+                  onFallbackToMarkdown={() => setViewMode('extracted')}
                 />
-              ) : viewMode === 'extracted' || selectedDoc.has_extracted_md ? (
+              ) : showsExtractedPane ? (
                 /* MARKDOWN EXTRACTED PREVIEW */
                 <div className="h-full overflow-y-auto custom-scrollbar">
                   <div className="max-w-4xl mx-auto">

@@ -10,8 +10,6 @@ from cowork_agent.domain.chat_contracts import (
 )
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 
-pytestmark = pytest.mark.extended
-
 START = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 

@@ -6,8 +6,6 @@ import pytest
 
 from cowork_agent.integrations.knowledge_ingestion.text_extractor import TextExtractor
 
-pytestmark = pytest.mark.extended
-
 
 def test_utf8_txt_returns_body_and_page_count_one(tmp_path: Path) -> None:
     path = tmp_path / "note.txt"

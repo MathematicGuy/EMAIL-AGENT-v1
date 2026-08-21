@@ -1,8 +1,6 @@
 from dataclasses import fields
 from datetime import UTC, datetime
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import (
     ChatMessageRequest,
     ChatTurn,
@@ -18,8 +16,6 @@ from cowork_agent.features.ai_chat.generation_context import (
     GenerationContext,
     assemble_generation_context,
 )
-
-pytestmark = pytest.mark.extended
 
 NOW = datetime(2026, 8, 10, tzinfo=UTC)
 

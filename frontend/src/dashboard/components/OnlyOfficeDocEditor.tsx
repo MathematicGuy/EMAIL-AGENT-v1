@@ -23,6 +23,9 @@ interface OnlyOfficeDocConfig {
       autosave?: boolean;
     };
   };
+  /** HS256 signature over the config, present when ONLYOFFICE_JWT_SECRET is set.
+   *  Document Server rejects an unsigned config once JWT is enabled. */
+  token?: string;
   documentServerUrl: string;
 }
 
@@ -132,6 +135,7 @@ export const OnlyOfficeDocEditor: React.FC<OnlyOfficeDocEditorProps> = ({
             document: config.document,
             documentType: config.documentType,
             editorConfig: config.editorConfig,
+            ...(config.token ? { token: config.token } : {}),
           } as unknown as DocumentEditorProps['config']
         }
         height="100%"

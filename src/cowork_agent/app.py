@@ -131,6 +131,7 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
+from cowork_agent.integrations.onlyoffice import jwt as onlyoffice_jwt
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_document_embedder,
@@ -191,6 +192,22 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 
 RAW_DOCS_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
+
+
+def _resolve_raw_document(filename: str) -> tuple[str, Path]:
+    """Map a request path segment onto a real file directly inside ``RAW_DOCS_DIR``.
+
+    ``Path(...).name`` strips any directory part, and the containment check then
+    rejects a symlink inside the corpus that points somewhere else. Raises the HTTP
+    error the four raw-document handlers all want, so they stay identical.
+    """
+    safe_name = Path(filename).name
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    target = RAW_DOCS_DIR / safe_name
+    if not target.is_file() or not target.resolve().is_relative_to(RAW_DOCS_DIR.resolve()):
+        raise HTTPException(status_code=404, detail="Raw document not found")
+    return safe_name, target
 
 
 class CreateRunRequest(BaseModel):
@@ -1095,7 +1112,8 @@ def create_app() -> FastAPI:
     # ── Artifacts / Reports endpoints for chat-generated document display ──
 
     REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
-    EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
+    # EXTRACTED_DIR is module-level. A local copy here silently shadowed it for every
+    # closure in create_app, including the raw-document handlers further down.
 
     @app.get("/api/v1/reports")
     async def list_reports() -> list[dict[str, Any]]:
@@ -1151,8 +1169,8 @@ def create_app() -> FastAPI:
         return {"status": "success", "message": f"Deleted {safe_name}"}
 
     # ── Raw process documents (data/raw) endpoints for procedure viewer ──
-
-    RAW_DOCS_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
+    # RAW_DOCS_DIR / EXTRACTED_DIR are module-level so tests and handlers agree on
+    # one location; do not shadow them with a local copy here.
 
     def _load_raw_manifest() -> dict[str, str]:
         manifest_file = EXTRACTED_DIR / "ingestion-manifest.json"
@@ -1175,7 +1193,15 @@ def create_app() -> FastAPI:
             candidate = Path(filename).stem.replace("_", "-").lower() + ".md"
             if (EXTRACTED_DIR / candidate).is_file():
                 extracted = candidate
-        return extracted if extracted and (EXTRACTED_DIR / extracted).is_file() else None
+        if not extracted:
+            return None
+        # The manifest is generated locally today, but its `output` values are still
+        # data: a `../` or absolute entry would otherwise read files outside the
+        # extracted corpus and hand them to any caller of /extracted.
+        target = (EXTRACTED_DIR / extracted).resolve()
+        if not target.is_relative_to(EXTRACTED_DIR.resolve()) or not target.is_file():
+            return None
+        return extracted
 
     @app.get("/api/v1/raw-documents")
     async def list_raw_documents() -> list[dict[str, Any]]:
@@ -1206,12 +1232,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/raw-documents/{filename}")
     async def get_raw_document(filename: str) -> FileResponse:
-        safe_name = Path(filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        target_path = RAW_DOCS_DIR / safe_name
-        if not target_path.is_file():
-            raise HTTPException(status_code=404, detail="Raw document not found")
+        safe_name, target_path = _resolve_raw_document(filename)
 
         ext = target_path.suffix.lower()
         media_types = {
@@ -1231,13 +1252,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/raw-documents/{filename}/extracted")
     async def get_raw_document_extracted_text(filename: str) -> dict[str, Any]:
-        safe_name = Path(filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-
-        target_raw = RAW_DOCS_DIR / safe_name
-        if not target_raw.is_file():
-            raise HTTPException(status_code=404, detail="Raw document not found")
+        safe_name, _ = _resolve_raw_document(filename)
 
         extracted_md = _resolve_extracted_doc(safe_name, _load_raw_manifest())
         if not extracted_md:
@@ -1256,17 +1271,11 @@ def create_app() -> FastAPI:
     async def get_raw_document_onlyoffice_config(
         filename: str, request: Request
     ) -> dict[str, Any]:
-        safe_name = Path(filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-
-        target_raw = RAW_DOCS_DIR / safe_name
-        if not target_raw.is_file():
-            raise HTTPException(status_code=404, detail="Raw document not found")
+        safe_name, target_raw = _resolve_raw_document(filename)
 
         ext = target_raw.suffix.lower().lstrip(".")
         oo_settings = _onlyoffice_settings(request)
-        repo = _raw_document_repo(request)
+        repo = await _raw_document_repo(request)
 
         stat = target_raw.stat()
         mtime_iso = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
@@ -1286,7 +1295,7 @@ def create_app() -> FastAPI:
         elif ext in ("ppt", "pptx"):
             document_type = "slide"
 
-        return {
+        editor_config: dict[str, Any] = {
             "document": {
                 "fileType": ext,
                 "key": metadata.doc_key,
@@ -1306,64 +1315,132 @@ def create_app() -> FastAPI:
                     "autosave": True,
                 },
             },
-            "documentServerUrl": oo_settings.server_url,
         }
+        if oo_settings.jwt_secret:
+            # Document Server rejects an unsigned config once JWT is enabled, and it
+            # signs its callbacks with the same secret -- see the callback handler.
+            editor_config["token"] = onlyoffice_jwt.encode(
+                editor_config, oo_settings.jwt_secret
+            )
+        return {**editor_config, "documentServerUrl": oo_settings.server_url}
 
     @app.post("/api/v1/raw-documents/{filename}/onlyoffice-callback")
     async def post_raw_document_onlyoffice_callback(
         filename: str, request: Request
     ) -> dict[str, int]:
         safe_name = Path(filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-
-        target_raw = RAW_DOCS_DIR / safe_name
-        if not target_raw.is_file():
-            raise HTTPException(status_code=404, detail="Raw document not found")
+        safe_name, target_raw = _resolve_raw_document(filename)
+        oo_settings = _onlyoffice_settings(request)
 
         try:
             body = await request.json()
         except Exception:
             return {"error": 0}
 
-        status = body.get("status")
-        if status in (2, 6):
-            download_url = body.get("url")
-            if download_url:
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.get(download_url)
-                        if resp.status_code == 200:
-                            target_raw.write_bytes(resp.content)
-                            repo = _raw_document_repo(request)
-                            await repo.record_save(safe_name, status=status)
-                            logger.info(
-                                "Saved document %s from OnlyOffice callback (status=%s)",
-                                safe_name,
-                                status,
-                            )
-                except Exception as exc:
-                    logger.error(
-                        "Failed to download document %s from %s: %s",
-                        safe_name,
-                        download_url,
-                        exc,
-                    )
+        # This endpoint overwrites a file in the tracked corpus, so it must prove the
+        # request came from our Document Server before it does anything. Without a
+        # configured secret there is no way to prove that, and we refuse rather than
+        # accept writes from anyone who can reach the port.
+        if not oo_settings.jwt_secret:
+            logger.error(
+                "Refusing OnlyOffice callback for %s: ONLYOFFICE_JWT_SECRET is not set, "
+                "so the callback cannot be authenticated. Set it on both this service "
+                "and the Document Server to enable saving.",
+                safe_name,
+            )
+            raise HTTPException(status_code=503, detail="OnlyOffice callbacks are not configured")
+
+        token = body.get("token")
+        if not token:
+            header = request.headers.get("Authorization", "")
+            token = header[7:] if header.startswith("Bearer ") else None
+        try:
+            if not token:
+                raise onlyoffice_jwt.OnlyOfficeTokenError("Missing OnlyOffice callback token")
+            claims = onlyoffice_jwt.decode(token, oo_settings.jwt_secret)
+        except onlyoffice_jwt.OnlyOfficeTokenError as exc:
+            logger.warning("Rejected OnlyOffice callback for %s: %s", safe_name, exc)
+            raise HTTPException(
+                status_code=403, detail="Invalid OnlyOffice callback token"
+            ) from exc
+
+        # Document Server nests the real payload under `payload` when it signs the
+        # Authorization header, and signs the body inline otherwise.
+        payload = claims.get("payload") if isinstance(claims.get("payload"), dict) else claims
+        status = payload.get("status", body.get("status"))
+        if status not in (2, 6):
+            return {"error": 0}
+
+        download_url = payload.get("url")
+        if not download_url:
+            return {"error": 0}
+
+        parts = urlsplit(str(download_url))
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            logger.warning(
+                "Rejected OnlyOffice download URL for %s: unsupported scheme %r",
+                safe_name,
+                parts.scheme,
+            )
+            return {"error": 1}
+        if parts.hostname.lower() not in oo_settings.allowed_download_hosts:
+            logger.warning(
+                "Rejected OnlyOffice download URL for %s: host %r is not among %s",
+                safe_name,
+                parts.hostname,
+                oo_settings.allowed_download_hosts,
+            )
+            return {"error": 1}
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+                resp = await client.get(download_url)
+            if resp.status_code != 200:
+                logger.error(
+                    "OnlyOffice download for %s returned HTTP %s", safe_name, resp.status_code
+                )
+                return {"error": 1}
+            target_raw.write_bytes(resp.content)
+            repo = await _raw_document_repo(request)
+            await repo.record_save(safe_name, status=status)
+            logger.info(
+                "Saved document %s from OnlyOffice callback (status=%s)",
+                safe_name,
+                status,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to download document %s from %s: %s",
+                safe_name,
+                download_url,
+                exc,
+            )
+            return {"error": 1}
 
         return {"error": 0}
 
     return app
 
 
-def _raw_document_repo(request: Request) -> Any:
+async def _raw_document_repo(request: Request) -> Any:
     repo = getattr(request.app.state, "raw_document_repository", None)
     if repo is None:
         from cowork_agent.persistence.repositories.sqlite_raw_documents import (
             SQLiteRawDocumentRepository,
         )
 
-        db_path = Path.cwd() / "data" / "raw_documents.db"
-        repo = SQLiteRawDocumentRepository(db_path)
+        # Mirror the startup path's location so a request that arrives before (or
+        # without) lifespan startup still reads the same doc_key/version history.
+        settings = getattr(request.app.state, "gmail_settings", None)
+        parent = (
+            settings.connection_db_path.parent
+            if settings is not None
+            else Path.cwd() / "data"
+        )
+        repo = SQLiteRawDocumentRepository(parent / "raw_documents.db")
+        # Without this the table is never created and every query raises
+        # "no such table: raw_document_metadata".
+        await repo.initialize()
         request.app.state.raw_document_repository = repo
     return repo
 

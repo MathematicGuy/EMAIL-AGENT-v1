@@ -1,4 +1,3 @@
-import pytest
 
 from cowork_agent.domain._chat_contracts_memory import MAX_CHAT_RAG_SECTION_LENGTH
 from cowork_agent.integrations.rag.markdown_chunking import (
@@ -8,8 +7,6 @@ from cowork_agent.integrations.rag.markdown_chunking import (
     split_markdown_pages,
 )
 from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
-
-pytestmark = pytest.mark.extended
 
 
 def test_chunks_by_section_and_prefixes_each_with_its_breadcrumb() -> None:

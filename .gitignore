@@ -61,12 +61,14 @@ frontend/.env
 !.agents/seeds/
 !.agents/qa-project-context.md
 
-# Common agent communication & handoff artifacts
-BRIEFING.md
-DISPATCH.md
-ORIGINAL_REQUEST.md
-HANDOFF.md
-*handoff*.md
+# Common agent communication & handoff artifacts. Anchored to the repo root on
+# purpose: an unanchored `*handoff*.md` matches at every depth and would silently
+# swallow real documents such as docs/deployment/oncall-handoff.md.
+/BRIEFING.md
+/DISPATCH.md
+/ORIGINAL_REQUEST.md
+/HANDOFF.md
+/handoff-*.md
 .handoff/
 .subagents/
 

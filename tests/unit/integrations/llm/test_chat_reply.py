@@ -31,8 +31,6 @@ from cowork_agent.integrations.llm.chat_reply import (
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 
-pytestmark = pytest.mark.extended
-
 
 def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal() -> None:
     received: list[dict[str, object]] = []

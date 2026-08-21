@@ -8,8 +8,6 @@ import pytest
 
 from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
 
-pytestmark = pytest.mark.extended
-
 
 class FakeIndex:
     def write(self, path: str) -> None:

@@ -6,9 +6,9 @@ per run spent proving the same negative nine times -- longer than the entire
 unit suite. The verdict is now cached per URL, so a distinct connection string
 is attempted at most once per process.
 
-Each module keeps its own ``DATABASE_URL`` and its own skip message: the two
-that default to ``""`` mean "not configured" and must not start guessing at the
-dev container.
+Each module keeps its own ``DATABASE_URL`` and its own skip message. They all
+default to ``""``, which means "not configured" and must not start guessing at the
+dev container -- several of them drop and recreate the ``public`` schema.
 """
 
 from __future__ import annotations
@@ -16,9 +16,11 @@ from __future__ import annotations
 from functools import cache
 
 CONNECT_TIMEOUT_SECONDS = 3
-DEFAULT_PG_TEST_URL = (
-    "postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_mail_todo"
-)
+
+# Deliberately no DEFAULT_PG_TEST_URL. Several of these modules run
+# ``DROP SCHEMA public CASCADE`` in an autouse fixture, so a default that happens to
+# reach the dev container would wipe a developer's database on a bare
+# ``pytest -m extended``. ``PG_TEST_URL`` must name a throwaway database explicitly.
 
 
 @cache
