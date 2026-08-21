@@ -51,7 +51,7 @@ machine and fails with unrelated `ssl` errors.
 
 - Install: `uv sync --extra dev --extra postgres` (drop `postgres` and the
   `tests/integration/persistence` route skips)
-- Test: `uv run pytest -q` (~25 s, 536 passed; defaults in `pyproject.toml`)
+- Test: `uv run pytest -q` (~15 s, 1617 passed; defaults in `pyproject.toml`)
 - Lint: `uv run ruff check .`
 - Types: `uv run mypy src` (strict)
 - Run API: `mail-todo-api` (host/port via `APP_HOST` / `APP_PORT`)

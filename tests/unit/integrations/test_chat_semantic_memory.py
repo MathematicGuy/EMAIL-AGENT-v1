@@ -25,8 +25,6 @@ from cowork_agent.features.ai_chat.memory_gateway import (
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 
-pytestmark = pytest.mark.extended
-
 
 def _namespace(*, memory_type: MemoryType = MemoryType.SEMANTIC) -> MemoryNamespace:
     return MemoryNamespace(

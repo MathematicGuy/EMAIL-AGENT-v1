@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import (
     Probe,
@@ -14,8 +12,6 @@ from cowork_agent.features.ai_chat.memory_eval.probes import (
 )
 from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow, build_report
 from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
-
-pytestmark = pytest.mark.extended
 
 _SECRET_QUESTION = "what is the unmistakable secret deadline"
 

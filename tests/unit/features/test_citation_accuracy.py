@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from cowork_agent.domain.target_contracts import (
     Actionability,
     PlanStep,
@@ -15,8 +13,6 @@ from cowork_agent.domain.target_contracts import (
     ValidationStatus,
 )
 from cowork_agent.features.email_action_plan.citation_accuracy import inspect_citation_accuracy
-
-pytestmark = pytest.mark.extended
 
 _NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 

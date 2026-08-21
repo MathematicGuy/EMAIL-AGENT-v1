@@ -1,250 +1,477 @@
+"""Raw process-document endpoints, including the OnlyOffice save callback.
+
+These build their own corpus under ``tmp_path`` rather than asserting against the
+tracked ``data/raw`` fixtures: the endpoints' behaviour is the subject, and coupling
+to whichever documents happen to be checked in makes the suite fail on curation and
+tempts tests into writing into a tracked directory.
+"""
+
+from pathlib import Path
+
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import cowork_agent.app as app_module
 from cowork_agent.app import create_app
+from cowork_agent.config import OnlyOfficeSettings
+from cowork_agent.integrations.onlyoffice import jwt as onlyoffice_jwt
+from cowork_agent.persistence.repositories.sqlite_raw_documents import (
+    SQLiteRawDocumentRepository,
+)
 
-pytestmark = pytest.mark.extended
+JWT_SECRET = "test-onlyoffice-secret"
+DOC_SERVER = "http://docserver.test:8080"
+
+
+@pytest.fixture
+def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the endpoints at a throwaway data/raw + data/extracted pair."""
+    raw_dir = tmp_path / "raw"
+    extracted_dir = tmp_path / "extracted"
+    raw_dir.mkdir()
+    extracted_dir.mkdir()
+
+    (raw_dir / "procedure.pdf").write_bytes(b"%PDF-1.4 fake pdf body")
+    (raw_dir / "decree.docx").write_bytes(b"fake docx body")
+    (raw_dir / "notes.txt").write_text("plain notes", encoding="utf-8")
+    (extracted_dir / "procedure.md").write_text("# Procedure\nextracted body", encoding="utf-8")
+    (extracted_dir / "notes.md").write_text("# Notes\nextracted notes", encoding="utf-8")
+    (extracted_dir / "ingestion-manifest.json").write_text(
+        '{"procedure.pdf": {"output": "procedure.md"}, "notes.txt": {"output": "notes.md"}}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app_module, "RAW_DOCS_DIR", raw_dir)
+    monkeypatch.setattr(app_module, "EXTRACTED_DIR", extracted_dir)
+    return raw_dir
+
+
+async def _app_with_repo(tmp_path: Path, *, jwt_secret: str | None = JWT_SECRET):
+    app = create_app()
+    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
+    await repo.initialize()
+    app.state.raw_document_repository = repo
+    app.state.onlyoffice_settings = OnlyOfficeSettings.from_env(
+        {
+            "ONLYOFFICE_SERVER_URL": DOC_SERVER,
+            **({"ONLYOFFICE_JWT_SECRET": jwt_secret} if jwt_secret else {}),
+        },
+        load_env_file=False,
+    )
+    return app, repo
+
+
+def _client(app) -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 @pytest.mark.asyncio
-async def test_list_raw_documents_endpoint():
-    app = create_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+async def test_list_raw_documents_reports_extraction_status(corpus: Path) -> None:
+    async with _client(create_app()) as client:
         res = await client.get("/api/v1/raw-documents")
-        assert res.status_code == 200
-        docs = res.json()
-        assert isinstance(docs, list)
-        assert len(docs) >= 15
 
-        # Check structure of items
-        for doc in docs:
-            assert "filename" in doc
-            assert "file_type" in doc
-            assert "size" in doc
-            assert "updated_at" in doc
-            assert "has_extracted_md" in doc
+    assert res.status_code == 200
+    by_name = {doc["filename"]: doc for doc in res.json()}
+    assert set(by_name) == {"procedure.pdf", "decree.docx", "notes.txt"}
+    assert by_name["procedure.pdf"]["file_type"] == "pdf"
+    assert by_name["procedure.pdf"]["has_extracted_md"] is True
+    assert by_name["procedure.pdf"]["extracted_md_name"] == "procedure.md"
+    assert by_name["decree.docx"]["has_extracted_md"] is False
+    assert by_name["procedure.pdf"]["size"] > 0
+    assert by_name["procedure.pdf"]["updated_at"]
 
 
 @pytest.mark.asyncio
-async def test_get_raw_document_pdf_inline():
-    app = create_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        res = await client.get("/api/v1/raw-documents/cap_lai_cccd.pdf")
-        assert res.status_code == 200
-        assert "application/pdf" in res.headers.get("content-type", "")
-        assert "inline" in res.headers.get("content-disposition", "")
-        assert len(res.content) > 0
+async def test_get_raw_document_serves_pdf_inline(corpus: Path) -> None:
+    async with _client(create_app()) as client:
+        res = await client.get("/api/v1/raw-documents/procedure.pdf")
+
+    assert res.status_code == 200
+    assert "application/pdf" in res.headers.get("content-type", "")
+    assert "inline" in res.headers.get("content-disposition", "")
+    assert res.content == b"%PDF-1.4 fake pdf body"
 
 
 @pytest.mark.asyncio
-async def test_get_raw_document_extracted_markdown():
-    app = create_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        res = await client.get("/api/v1/raw-documents/cap_lai_cccd.pdf/extracted")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["filename"] == "cap_lai_cccd.pdf"
-        assert "content" in data
-        assert len(data["content"]) > 0
+async def test_get_extracted_markdown(corpus: Path) -> None:
+    async with _client(create_app()) as client:
+        res = await client.get("/api/v1/raw-documents/procedure.pdf/extracted")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["filename"] == "procedure.pdf"
+    assert body["extracted_md_name"] == "procedure.md"
+    assert "extracted body" in body["content"]
 
 
 @pytest.mark.asyncio
-async def test_get_raw_document_not_found_and_traversal():
-    app = create_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        res = await client.get("/api/v1/raw-documents/non_existent_file.pdf")
-        assert res.status_code == 404
+async def test_get_extracted_markdown_missing_is_404(corpus: Path) -> None:
+    async with _client(create_app()) as client:
+        res = await client.get("/api/v1/raw-documents/decree.docx/extracted")
 
-        res_traversal = await client.get("/api/v1/raw-documents/..%2Fsecrets.txt")
-        assert res_traversal.status_code in (400, 404)
+    assert res.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_onlyoffice_config(tmp_path):
-    app = create_app()
-    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-        SQLiteRawDocumentRepository,
+async def test_unknown_document_is_404(corpus: Path) -> None:
+    async with _client(create_app()) as client:
+        res = await client.get("/api/v1/raw-documents/nope.pdf")
+
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_directory_traversal_cannot_escape_the_corpus(
+    corpus: Path, tmp_path: Path
+) -> None:
+    (tmp_path / "secrets.txt").write_text("do not serve me", encoding="utf-8")
+
+    async with _client(create_app()) as client:
+        encoded = await client.get("/api/v1/raw-documents/..%2Fsecrets.txt")
+        dotted = await client.get("/api/v1/raw-documents/..")
+
+    assert encoded.status_code in (400, 404)
+    assert dotted.status_code in (400, 404)
+    # The point of the assertion is that the sibling file never leaves the box.
+    assert b"do not serve me" not in encoded.content
+    assert b"do not serve me" not in dotted.content
+
+
+@pytest.mark.asyncio
+async def test_manifest_entry_escaping_the_corpus_is_ignored(
+    corpus: Path, tmp_path: Path
+) -> None:
+    (tmp_path / "outside.md").write_text("secret outside the corpus", encoding="utf-8")
+    (corpus.parent / "extracted" / "ingestion-manifest.json").write_text(
+        '{"procedure.pdf": {"output": "../outside.md"}}', encoding="utf-8"
+    )
+    # Drop the legitimate match so only the escaping manifest entry could answer:
+    # otherwise the stem-matching fallback serves procedure.md and the assertion
+    # passes without ever exercising the containment check.
+    (corpus.parent / "extracted" / "procedure.md").unlink()
+
+    async with _client(create_app()) as client:
+        res = await client.get("/api/v1/raw-documents/procedure.pdf/extracted")
+
+    assert res.status_code == 404
+    assert b"secret outside the corpus" not in res.content
+
+
+@pytest.mark.asyncio
+async def test_onlyoffice_config_is_signed_when_a_secret_is_set(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+
+    async with _client(app) as client:
+        res = await client.get("/api/v1/raw-documents/decree.docx/onlyoffice-config")
+
+    assert res.status_code == 200
+    config = res.json()
+    assert config["document"]["fileType"] == "docx"
+    assert config["document"]["title"] == "decree.docx"
+    assert config["document"]["key"]
+    assert config["documentType"] == "word"
+    assert config["documentServerUrl"] == DOC_SERVER
+    assert config["editorConfig"]["callbackUrl"].endswith(
+        "/api/v1/raw-documents/decree.docx/onlyoffice-callback"
     )
 
-    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
-    await repo.initialize()
-    app.state.raw_document_repository = repo
+    claims = onlyoffice_jwt.decode(config["token"], JWT_SECRET)
+    assert claims["document"]["key"] == config["document"]["key"]
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        res = await client.get(
-            "/api/v1/raw-documents/01_2021_ND-CP_283247.docx/onlyoffice-config"
+
+@pytest.mark.asyncio
+async def test_onlyoffice_config_without_a_secret_carries_no_token(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, _ = await _app_with_repo(tmp_path, jwt_secret=None)
+
+    async with _client(app) as client:
+        res = await client.get("/api/v1/raw-documents/decree.docx/onlyoffice-config")
+
+    assert res.status_code == 200
+    assert "token" not in res.json()
+
+
+@pytest.mark.asyncio
+async def test_onlyoffice_config_works_without_lifespan_startup(corpus: Path) -> None:
+    """The lazy repository fallback must create its schema, not blow up on first query."""
+    app = create_app()
+    assert getattr(app.state, "raw_document_repository", None) is None
+
+    async with _client(app) as client:
+        res = await client.get("/api/v1/raw-documents/decree.docx/onlyoffice-config")
+
+    assert res.status_code == 200
+    assert res.json()["document"]["key"]
+
+
+def _mock_download(monkeypatch: pytest.MonkeyPatch, body: bytes) -> list[str]:
+    """Replace httpx's GET and record every URL the callback tried to fetch."""
+    attempted: list[str] = []
+
+    class _Response:
+        status_code = 200
+        content = body
+
+    async def _get(self, url, **kwargs):  # noqa: ANN001, ANN202
+        attempted.append(str(url))
+        return _Response()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _get)
+    return attempted
+
+
+@pytest.mark.asyncio
+async def test_onlyoffice_callback_saves_a_signed_request(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"edited docx body")
+
+    payload = {"status": 2, "key": "k", "url": f"{DOC_SERVER}/cache/files/edited.docx"}
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, JWT_SECRET)},
         )
-        assert res.status_code == 200
-        config = res.json()
-        assert "document" in config
-        assert config["document"]["fileType"] == "docx"
-        assert config["document"]["title"] == "01_2021_ND-CP_283247.docx"
-        assert "key" in config["document"]
-        assert len(config["document"]["key"]) > 0
-        assert "url" in config["document"]
-        assert "editorConfig" in config
-        assert "callbackUrl" in config["editorConfig"]
-        assert "documentServerUrl" in config
+
+    assert res.status_code == 200
+    assert res.json() == {"error": 0}
+    assert attempted == [f"{DOC_SERVER}/cache/files/edited.docx"]
+    assert target.read_bytes() == b"edited docx body"
+    metadata = await repo.get("decree.docx")
+    assert metadata is not None
+    assert metadata.last_status == 2
+    assert metadata.version == 1
+
+    # OnlyOffice caches by document key, so each save must mint a fresh one or the
+    # editor reopens the pre-edit copy.
+    async with _client(app) as client:
+        await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, JWT_SECRET)},
+        )
+    second = await repo.get("decree.docx")
+    assert second is not None
+    assert second.version == 2
+    assert second.doc_key != metadata.doc_key
 
 
 @pytest.mark.asyncio
-async def test_post_onlyoffice_callback_save(tmp_path, monkeypatch):
-    app = create_app()
-    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-        SQLiteRawDocumentRepository,
-    )
+async def test_onlyoffice_callback_ignores_non_save_statuses(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"should not be written")
 
-    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
-    await repo.initialize()
-    app.state.raw_document_repository = repo
+    payload = {"status": 4, "key": "k", "url": f"{DOC_SERVER}/cache/files/edited.docx"}
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, JWT_SECRET)},
+        )
 
-    # Create dummy raw doc file for testing
-    from cowork_agent.app import RAW_DOCS_DIR
-
-    test_file = RAW_DOCS_DIR / "_test_dummy_doc.docx"
-    test_file.write_bytes(b"initial doc content")
-
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            # Test callback with status 4 (no changes)
-            res_no_change = await client.post(
-                "/api/v1/raw-documents/_test_dummy_doc.docx/onlyoffice-callback",
-                json={"status": 4, "key": "some_key"},
-            )
-            assert res_no_change.status_code == 200
-            assert res_no_change.json() == {"error": 0}
-
-            # Test callback with status 2 (ready for save)
-            # Simulate external download URL
-            class MockResponse:
-                status_code = 200
-                content = b"modified doc binary from onlyoffice"
-
-            async def mock_get(self, url, **kwargs):
-                return MockResponse()
-
-            monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-
-            res_save = await client.post(
-                "/api/v1/raw-documents/_test_dummy_doc.docx/onlyoffice-callback",
-                json={
-                    "status": 2,
-                    "key": "test_key",
-                    "url": "http://fake-onlyoffice/download/doc.docx",
-                },
-            )
-            assert res_save.status_code == 200
-            assert res_save.json() == {"error": 0}
-            assert test_file.read_bytes() == b"modified doc binary from onlyoffice"
-
-            # Check SQLite metadata updated
-            meta = await repo.get("_test_dummy_doc.docx")
-            assert meta is not None
-            assert meta.last_status == 2
-            assert meta.version >= 1
-    finally:
-        if test_file.exists():
-            test_file.unlink()
+    assert res.status_code == 200
+    assert res.json() == {"error": 0}
+    assert attempted == []
+    assert target.read_bytes() == b"fake docx body"
 
 
 @pytest.mark.asyncio
-async def test_upload_raw_document_endpoint(tmp_path):
-    app = create_app()
-    from cowork_agent.app import RAW_DOCS_DIR
-    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-        SQLiteRawDocumentRepository,
-    )
+async def test_onlyoffice_callback_rejects_an_unsigned_request(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"attacker content")
 
-    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
-    await repo.initialize()
-    app.state.raw_document_repository = repo
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={"status": 2, "url": f"{DOC_SERVER}/cache/files/edited.docx"},
+        )
 
-    test_filename = "_test_upload_sample.docx"
-    target_raw = RAW_DOCS_DIR / test_filename
-    if target_raw.exists():
-        target_raw.unlink()
-
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            files = {
-                "file": (
-                    test_filename,
-                    b"test docx file binary content",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-            }
-            res = await client.post("/api/v1/raw-documents/upload", files=files)
-            assert res.status_code == 200
-            data = res.json()
-            assert data["status"] == "uploaded"
-            assert data["filename"] == test_filename
-            assert data["file_type"] == "docx"
-            assert target_raw.exists()
-            assert target_raw.read_bytes() == b"test docx file binary content"
-    finally:
-        if target_raw.exists():
-            target_raw.unlink()
+    assert res.status_code == 403
+    assert attempted == []
+    assert target.read_bytes() == b"fake docx body"
 
 
 @pytest.mark.asyncio
-async def test_put_and_delete_raw_document_endpoint(tmp_path):
-    app = create_app()
-    from cowork_agent.app import RAW_DOCS_DIR
-    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-        SQLiteRawDocumentRepository,
-    )
+async def test_onlyoffice_callback_rejects_a_forged_signature(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"attacker content")
 
-    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
-    await repo.initialize()
-    app.state.raw_document_repository = repo
+    payload = {"status": 2, "url": f"{DOC_SERVER}/cache/files/edited.docx"}
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, "wrong-secret")},
+        )
 
-    test_filename = "_test_put_delete.docx"
-    target_raw = RAW_DOCS_DIR / test_filename
-    target_raw.write_bytes(b"initial content")
-
-    from cowork_agent.app import EXTRACTED_DIR
-    target_extracted = EXTRACTED_DIR / "_test-put-delete.md"
-    target_extracted.write_text("# Extracted Markdown Test", encoding="utf-8")
-
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            # PUT update
-            res_put = await client.put(
-                f"/api/v1/raw-documents/{test_filename}",
-                content=b"updated content directly via put",
-                headers={"Content-Type": "application/octet-stream"},
-            )
-            assert res_put.status_code == 200
-            assert res_put.json()["status"] == "saved"
-            assert target_raw.read_bytes() == b"updated content directly via put"
-
-            # DELETE
-            res_del = await client.delete(f"/api/v1/raw-documents/{test_filename}")
-            assert res_del.status_code == 200
-            assert res_del.json()["status"] == "deleted"
-            assert not target_raw.exists()
-            assert not target_extracted.exists()
-    finally:
-        if target_raw.exists():
-            target_raw.unlink()
-        if target_extracted.exists():
-            target_extracted.unlink()
+    assert res.status_code == 403
+    assert attempted == []
+    assert target.read_bytes() == b"fake docx body"
 
 
+@pytest.mark.asyncio
+async def test_onlyoffice_callback_refuses_a_foreign_download_host(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A correctly signed request still may not aim the fetch at an arbitrary host."""
+    app, _ = await _app_with_repo(tmp_path)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"attacker content")
+
+    payload = {"status": 2, "url": "http://169.254.169.254/latest/meta-data/"}
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, JWT_SECRET)},
+        )
+
+    assert res.status_code == 200
+    assert res.json() == {"error": 1}
+    assert attempted == []
+    assert target.read_bytes() == b"fake docx body"
+
+
+@pytest.mark.asyncio
+async def test_onlyoffice_callback_refuses_a_non_http_download_url(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    attempted = _mock_download(monkeypatch, b"attacker content")
+
+    payload = {"status": 2, "url": "file:///etc/passwd"}
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={**payload, "token": onlyoffice_jwt.encode(payload, JWT_SECRET)},
+        )
+
+    assert res.json() == {"error": 1}
+    assert attempted == []
+
+
+@pytest.mark.asyncio
+async def test_onlyoffice_callback_refuses_to_save_without_a_configured_secret(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No secret means no way to authenticate the caller, so writes are refused."""
+    app, _ = await _app_with_repo(tmp_path, jwt_secret=None)
+    target = corpus / "decree.docx"
+    attempted = _mock_download(monkeypatch, b"attacker content")
+
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/decree.docx/onlyoffice-callback",
+            json={"status": 2, "url": f"{DOC_SERVER}/cache/files/edited.docx"},
+        )
+
+    assert res.status_code == 503
+    assert attempted == []
+    assert target.read_bytes() == b"fake docx body"
+
+
+# --- Endpoints added on main: upload, direct save, delete -------------------
+# Ported onto the `corpus` fixture. The originals wrote `_test_*.docx` into the
+# tracked data/raw and data/extracted directories and removed them in a finally
+# block, so an interrupted run left stray files in the committed corpus.
+
+
+@pytest.mark.asyncio
+async def test_upload_stores_the_file_and_records_metadata(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("uploaded.docx", b"uploaded docx body", "application/octet-stream")},
+        )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "uploaded"
+    assert body["filename"] == "uploaded.docx"
+    assert body["file_type"] == "docx"
+    assert (corpus / "uploaded.docx").read_bytes() == b"uploaded docx body"
+    assert await repo.get("uploaded.docx") is not None
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_an_unsupported_extension(corpus: Path, tmp_path: Path) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("payload.exe", b"MZ", "application/octet-stream")},
+        )
+
+    assert res.status_code == 400
+    assert not (corpus / "payload.exe").exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_strips_directories_from_the_client_filename(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, _ = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.post(
+            "/api/v1/raw-documents/upload",
+            files={"file": ("../escaped.docx", b"body", "application/octet-stream")},
+        )
+
+    assert res.status_code == 200
+    assert res.json()["filename"] == "escaped.docx"
+    assert (corpus / "escaped.docx").is_file()
+    assert not (corpus.parent / "escaped.docx").exists()
+
+
+@pytest.mark.asyncio
+async def test_put_overwrites_the_document_and_bumps_the_version(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    async with _client(app) as client:
+        res = await client.put(
+            "/api/v1/raw-documents/decree.docx",
+            content=b"replaced body",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "saved"
+    assert (corpus / "decree.docx").read_bytes() == b"replaced body"
+    metadata = await repo.get("decree.docx")
+    assert metadata is not None and metadata.last_status == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_the_raw_file_and_its_extracted_markdown(
+    corpus: Path, tmp_path: Path
+) -> None:
+    app, repo = await _app_with_repo(tmp_path)
+    extracted = corpus.parent / "extracted" / "procedure.md"
+    assert extracted.is_file()
+
+    async with _client(app) as client:
+        res = await client.delete("/api/v1/raw-documents/procedure.pdf")
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "deleted"
+    assert not (corpus / "procedure.pdf").exists()
+    assert not extracted.exists()
+    # Regression: `_raw_document_repo` is async, and the delete path used to call it
+    # without awaiting -- `hasattr(coroutine, "delete")` is False, so the metadata
+    # row silently survived the delete.
+    assert await repo.get("procedure.pdf") is None

@@ -5,7 +5,7 @@ registry of which file owns which invariant so no duplicate tests are written.
 
 Always `uv run pytest`.
 
-**Whole suite: `uv run pytest -q` -> ~14.4 s, 1838 passed.** Defaults: 4 xdist
+**Whole suite: `uv run pytest -q` -> ~15 s, 1617 passed, 9 skipped.** Defaults: 4 xdist
 workers (`--dist loadgroup`), `-m 'not live'`, `--strict-markers`.
 Detailed optimization notes: [`docs/references/test-optimization/`](../docs/references/test-optimization/test-optimization.md).
 
@@ -13,27 +13,28 @@ Detailed optimization notes: [`docs/references/test-optimization/`](../docs/refe
 
 ## 1. Route Index
 
-Pick the narrowest row containing your change. Times measured with 4 workers (`-n 4 --dist loadfile`).
+Pick the narrowest row containing your change. Times are serial (`-p no:xdist`) --
+what one route costs alone; the whole-suite row is parallel.
 
-| # | Route | Tests | Time (-n 4) | Covers |
+| # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 179 | 2.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 844 | 5.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 102 | 5.3 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 76 | 4.1 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
-| R5 | `tests/unit/integrations/gmail` | 40 | 2.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 348 | 5.4 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 37 | 4.1 s | Repository logic against fakes. |
-| R8 | `tests/unit/orchestration` | 19 | 4.0 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 184 | 8.9 s | `scripts/*.py` eval CLIs. |
-| R10 | `tests/unit/fixtures` | 33 | 4.3 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 33 | 9.7 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 3.4 s | Real PostgreSQL (skips without server; `pg-control-plane` xdist group). |
-| R13 | `tests/integration/email_action_plan` | 48 | 4.6 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 91 | 11.5 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 1761 | 16.0 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 1577 | 11.6 s | R15 minus eval CLIs (default during regular development). |
-| — | *(everything)* | 1838 | **14.4 s** | `uv run pytest -q` |
+| R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 588 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 102 | 4.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 77 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail` | 40 | 0.7 s | OAuth/PKCE, token cipher, mailbox adapter. |
+| R6 | `tests/unit/integrations` | 361 | 6.2 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 37 | 1.8 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 19 | 1.7 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 188 | 8.3 s | `scripts/*.py` eval CLIs. |
+| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 55 | 6.4 s | FastAPI via in-process ASGI transport. |
+| R12 | `tests/integration/persistence` | 9 | 1.0 s | Real PostgreSQL (skips without server; `pg-control-plane` xdist group). |
+| R13 | `tests/integration/email_action_plan` | 37 | 2.8 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 93 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1524 | 14.1 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1336 | 9.1 s | R15 minus eval CLIs (default during regular development). |
+| — | *(everything)* | 1617 | **15 s parallel** | `uv run pytest -q` |
 
 ### Source -> Route Mapping
 

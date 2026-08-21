@@ -29,7 +29,7 @@ LLM_PROVIDER=gemini
 # - gemini-3.6-flash (Gemini 3.6 Flash)
 # - antigravity (Google Antigravity Agentic Model / Engine)
 # - gemma-4-31b (Gemma 4 31B)
-GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_MODEL=gemini-3.6-flash
 GEMINI_KEY_ROTATION_STRATEGY=round_robin
 GEMINI_ROTATE_ON_RATE_LIMIT=true
 GEMINI_MAX_ATTEMPTS_PER_REQUEST=3
@@ -54,6 +54,10 @@ JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT=true
 RERANKER_MODEL=rerank-v4.0-fast
 RERANKER_ROTATE_ON_RATE_LIMIT=true
 RERANKER_TIMEOUT_SECONDS=10
+
+# Email RAG evidence gate (moved here from .env.example: not secrets).
+EMAIL_RAG_MIN_RERANK_SCORE=0.30
+EMAIL_RAG_RELATIVE_CUTOFF_RATIO=0.85
 
 # OpenRouter Configuration (LLM & AI Judge)
 OPENROUTER_MODEL=inclusionai/ling-3.0-flash

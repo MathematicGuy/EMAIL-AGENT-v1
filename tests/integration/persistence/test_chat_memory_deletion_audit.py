@@ -47,8 +47,6 @@ from cowork_agent.persistence.repositories.postgres import (  # noqa: E402
     PostgresTaskEpisodeRepository,
 )
 
-pytestmark = pytest.mark.extended
-
 NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 

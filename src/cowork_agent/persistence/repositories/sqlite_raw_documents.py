@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,13 +26,18 @@ class SQLiteRawDocumentRepository:
         self._path = path
 
     def _connect(self) -> sqlite3.Connection:
+        """Open a connection. Callers must wrap it in ``closing``.
+
+        ``with connection`` only commits or rolls back the transaction -- it leaves
+        the handle open -- so on its own it leaks a file descriptor per call.
+        """
         conn = sqlite3.connect(self._path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
+        with closing(self._connect()) as conn, conn as db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS raw_document_metadata (
@@ -50,7 +56,7 @@ class SQLiteRawDocumentRepository:
         await asyncio.to_thread(self._initialize)
 
     def _get(self, filename: str) -> RawDocumentMetadata | None:
-        with self._connect() as db:
+        with closing(self._connect()) as conn, conn as db:
             row = db.execute(
                 """
                 SELECT filename, doc_key, version, last_saved_at, last_status
@@ -75,7 +81,7 @@ class SQLiteRawDocumentRepository:
     def _get_or_create(
         self, filename: str, fallback_mtime_iso: str | None = None
     ) -> RawDocumentMetadata:
-        with self._connect() as db:
+        with closing(self._connect()) as conn, conn as db:
             row = db.execute(
                 """
                 SELECT filename, doc_key, version, last_saved_at, last_status
@@ -119,7 +125,7 @@ class SQLiteRawDocumentRepository:
         return await asyncio.to_thread(self._get_or_create, filename, fallback_mtime_iso)
 
     def _record_save(self, filename: str, status: int) -> RawDocumentMetadata:
-        with self._connect() as db:
+        with closing(self._connect()) as conn, conn as db:
             now_iso = datetime.now(UTC).isoformat()
             raw_data = f"{filename}:{now_iso}:{uuid4().hex}".encode()
             new_key = hashlib.sha256(raw_data).hexdigest()[:20]

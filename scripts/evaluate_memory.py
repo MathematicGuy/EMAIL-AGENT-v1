@@ -123,6 +123,16 @@ def _scripted_ask(probe: Probe, arm: Arm, masked: object) -> tuple[str, int]:
 
 
 async def _dry_run(probe_set: object) -> dict[str, object]:
+    from cowork_agent.features.ai_chat.memory_eval.probes import ProbeSet
+
+    if isinstance(probe_set, ProbeSet):
+        print(
+            f"[memeval-dry] Starting dry run: {probe_set.probe_set_id} "
+            f"({len(probe_set.probes)} probes, {len(probe_set.probes) * 3} calls)",
+            file=sys.stderr,
+            flush=True,
+        )
+
     async def ask(probe: Probe, arm: Arm, masked: object) -> tuple[str, int]:
         return _scripted_ask(probe, arm, masked)
 
@@ -170,6 +180,7 @@ async def _build_adapters(
         # any episode is written. `task_episodes.project_id` is `uuid`, so the
         # sentinel would fail every write here. See `default_project`.
         episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
+        print("[memeval] Initialized PostgreSQL repositories", file=sys.stderr, flush=True)
     elif env.sqlite_path is not None:
         # The product backs long_term and episodic with SQLite whenever
         # database_url() is empty, and one SQLiteChatRepository serves both
@@ -182,6 +193,11 @@ async def _build_adapters(
         await sqlite_chat.initialize()
         declarative = sqlite_chat
         episodic = sqlite_chat
+        print(
+            f"[memeval] Initialized SQLite repository at {env.sqlite_path}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     semantic: object | None = None
     if env.embeddings_ready:
@@ -192,6 +208,7 @@ async def _build_adapters(
         # the "same system as shipped" rule in SPEC 12.1.
         from cowork_agent.integrations.rag.bootstrap import build_document_embedder
 
+        print("[memeval] Seeding semantic memory corpus...", file=sys.stderr, flush=True)
         embedder, _dimensions = build_document_embedder()
         outcome, adapter = await seed_semantic(
             probe_set.seed,
@@ -200,8 +217,14 @@ async def _build_adapters(
         )
         if outcome.ok:
             semantic = adapter
+            print("[memeval] Semantic memory seeded successfully", file=sys.stderr, flush=True)
         else:
             failures.append(f"semantic: {outcome.reason}")
+            print(
+                f"[memeval] Semantic memory seeding failed: {outcome.reason}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     return AdapterSet(declarative, episodic, semantic), failures, pool
 
@@ -222,6 +245,15 @@ async def run_live(
     human has to read to resolve an uncertain refusal do not survive the run.
     """
 
+    total_calls = len(probe_set.probes) * 3
+    print(
+        f"[memeval] Starting evaluation run: probe_set={probe_set.probe_set_id} "
+        f"({len(probe_set.probes)} probes, {total_calls} calls) | "
+        f"provider={provider} | model={model}",
+        file=sys.stderr,
+        flush=True,
+    )
+
     identity = build_identity(probe_set, model)
     adapters, failures, pool = await _build_adapters(env, probe_set)
     failures.extend(item.reason for item in unavailable_scopes(env))
@@ -232,10 +264,29 @@ async def run_live(
         seed=probe_set.seed,
     )
     recorded = transcript if transcript is not None else []
+    call_idx = 0
 
     async def ask(probe: Probe, arm: Arm, masked: Any) -> tuple[str, int]:
+        nonlocal call_idx
+        call_idx += 1
+        current_idx = call_idx
+        target_name = probe.targets.value
+        arm_name = arm.value
+        print(
+            f"[{current_idx:02d}/{total_calls:02d}] Asking probe '{probe.probe_id}' "
+            f"(target: {target_name}, arm: {arm_name})...",
+            file=sys.stderr,
+            flush=True,
+        )
         text, latency_ms = await ask_live(session, probe, arm, masked)
         result = score(text, probe)
+        certainty = "certain" if result.certain else "uncertain"
+        print(
+            f"[{current_idx:02d}/{total_calls:02d}] Done probe '{probe.probe_id}' "
+            f"[{arm_name}] -> outcome: {result.outcome.value} ({certainty}) [{latency_ms}ms]",
+            file=sys.stderr,
+            flush=True,
+        )
         recorded.append(
             {
                 "probe": probe.probe_id,
@@ -276,9 +327,11 @@ async def run_live(
     finally:
         # Teardown runs even when a probe raised. A run that created stores must
         # not leave them behind, and a partial cleanup still beats none.
+        print("[memeval] Tearing down evaluation stores...", file=sys.stderr, flush=True)
         await teardown(session.gateways)
         if pool is not None:
             await pool.close()
+        print("[memeval] Teardown complete", file=sys.stderr, flush=True)
     return report
 
 

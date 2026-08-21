@@ -15,6 +15,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.testmondata
+.testmondata-*
 .mypy_cache/
 .ruff_cache/
 build/
@@ -69,12 +71,14 @@ frontend/.env
 !.agents/seeds/
 !.agents/qa-project-context.md
 
-# Common agent communication & handoff artifacts
-BRIEFING.md
-DISPATCH.md
-ORIGINAL_REQUEST.md
-HANDOFF.md
-*handoff*.md
+# Common agent communication & handoff artifacts. Anchored to the repo root on
+# purpose: an unanchored `*handoff*.md` matches at every depth and would silently
+# swallow real documents such as docs/deployment/oncall-handoff.md.
+/BRIEFING.md
+/DISPATCH.md
+/ORIGINAL_REQUEST.md
+/HANDOFF.md
+/handoff-*.md
 .handoff/
 .subagents/
 
@@ -92,11 +96,16 @@ evaluations/MEMORIES/reports/*.md
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/
-# Memory evaluation detail files carry full probe questions and model replies,
-# and so do the write-ups under reports/. Committed reports under
-# evaluations/MEMORIES/baselines/ are metadata-only.
-evaluations/MEMORIES/runs/
-evaluations/MEMORIES/reports/
+.mypy-cache-email-eval/
+.venv-codex/
+.uv-cache/
+.uv-cache-codex/
+
+# Memory evaluation detail files carry full probe questions and model replies.
+# The runs/ and reports/ rules live above -- deliberately `reports/*.md` and not
+# `reports/`, because excluding the directory itself would defeat the
+# `!evaluations/MEMORIES/reports/REPORT_FORMAT.md` negation (git cannot re-include
+# a file inside an excluded directory).
 
 /evaluations/EMAIL/gmail_candidates.json
 /evaluations/EMAIL/.gmail_candidates.json.tmp
@@ -105,9 +114,3 @@ evaluations/MEMORIES/reports/
 
 # Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
 .agents/skills/using-agent-skills/
-
-.mypy-cache-email-eval/
-.venv-codex/
-.uv-cache/
-.uv-cache-codex/
-

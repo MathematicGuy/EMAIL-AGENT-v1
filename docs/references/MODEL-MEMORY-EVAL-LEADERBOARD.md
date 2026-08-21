@@ -12,6 +12,7 @@ Sorted by overall capability, reliability, and strict attribution $(P, F, F)$:
 |:---:|---|---|:---:|:---:|:---:|:---:|:---:|---|
 | **1** | **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | Google Gemini | **80.0%** (16/20) | **45.0%** (9/20) | 70.0% (7/10) | **4.6s** | **0** (100% clean) | 🟢 **Primary Production Recommendation** (ultra-fast, zero dropouts, high reasoning) |
 | **2** | **DeepSeek V4 Flash** (`deepseek/deepseek-v4-flash-0731`) | OpenRouter | **80.0%** (16/20) | **40.0%** (8/20) | **100.0%** (10/10) | 17.5s | 8 (gateway rate-limits) | 🟢 **Best Fallback Candidate** (superior restraint & clean refusals, slower than Gemini) |
+| **3** | **Gemini 3.5 Flash** (`gemini-3.5-flash`) | Google Gemini | **55.0%** (11/20) | **20.0%** (4/20) | **100.0%** (10/10) | 25.6s | 27 (API rate-limiting during seeding) | 🟡 **Competent but Throttled** (100% short/long-term pass, perfect restraint, throttled on episodic) |
 
 ---
 
@@ -39,17 +40,19 @@ Models that failed basic viability due to poor reasoning, excessive latency, or 
 - **`episodic` (4/5 - 80%)**: 2 Earned-It, 1 Did Nothing, 1 Dangerous (`ep_update_01`), 1 Unreadable.
 - **`semantic` (3/6 - 50%)**: 2 Earned-It, 1 Did Nothing, 3 Unreadable (OpenRouter 60s read timeout on full arm).
 
+### Gemini 3.5 Flash (`gemini-3.5-flash`)
+- **`short_term` (5/5 - 100%)**: 3 Earned-It, 2 Did Nothing (safe refusal), 0 errors. Flawless in-session conversational state tracking.
+- **`long_term` (4/4 - 100%)**: 1 Earned-It, 3 Did Nothing (safe refusal), 0 errors. Perfect persona attribution and safe refusal.
+- **`episodic` (0/5 - 0%)**: 5 Unreadable due to provider throttling during turn generation in seeding.
+- **`semantic` (2/6 - 33%)**: 2 Pass on Recall, 4 Unreadable due to provider throttling. Restraint maintained perfectly.
+
 ---
 
 ## 4. Candidate Models for Next Evaluation Sessions
 
-Configured in [`config`](../../config) under `# Candidate Models for Memory Evaluation`:
-
-1. **Gemini 3.5 Flash** (`gemini-3.5-flash`): Full-tier version of 3.5 Flash with larger parameter capacity.
-2. **Gemini 3.6 Flash** (`gemini-3.6-flash`): Next-generation Google Gemini Flash architecture.
-3. **Antigravity** (`antigravity`): Google Antigravity Agentic Runtime / Model.
-   > **Note for Next Session**: Perform research about Antigravity capabilities (agentic loops, tools, execution sandbox, and context management) before starting its memory evaluation.
-4. **Gemma 4 31B** (`gemma-4-31b` / `gemma-4-31b-it`): Google open-weights instruction-tuned flagship model.
+1. **Gemini 3.6 Flash** (`gemini-3.6-flash`): Next-generation Google Gemini Flash architecture.
+2. **Antigravity** (`antigravity`): Google Antigravity Agentic Runtime / Model.
+3. **Gemma 4 31B** (`gemma-4-31b` / `gemma-4-31b-it`): Google open-weights instruction-tuned flagship model.
 
 ---
 

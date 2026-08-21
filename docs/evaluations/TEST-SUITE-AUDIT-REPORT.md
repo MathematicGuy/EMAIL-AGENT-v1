@@ -2,6 +2,10 @@
 
 **Phạm vi:** Đã rà soát và tối ưu trên toàn bộ 3 tầng: `core`, `extended`, `live` — *đã tách rời benchmark LLM thật `scripts/evaluate_user_intent_real_llm.py`*.
 
+> **Lưu ý khi đọc:** §1–§3 là ảnh chụp của lần kiểm toán ban đầu, khi suite còn
+> chia ba tầng. Marker `extended` **đã bị gỡ bỏ** — mọi lệnh `-m extended` trong
+> §1–§3 nay là lỗi `--strict-markers`. Trạng thái hiện hành nằm ở **§4**.
+
 ---
 
 ## 1. Tổng quan phân bổ sau khi tối giản
@@ -70,4 +74,65 @@ uv run ruff check .
 
 uv run mypy src
 # Success: no issues found in 157 source files
+```
+
+---
+
+## 4. Đính chính sau code review (post-review correction)
+
+Bản kiểm toán ở trên đã đánh dấu `extended` cho 89/158 module test, trong đó có
+**46 module là unit test thuần của logic production** (fakes 100%, 0 I/O, dưới 1 s):
+`test_bm25`, `test_rrf`, `test_query_guard`, `test_markdown_chunking`,
+`test_retention`, `test_memory_gateway`, `test_chat_reply`, `test_intent_service`,
+`test_ports`, `test_routing`, `test_citation_accuracy`, toàn bộ
+`knowledge_ingestion/*`, `integrations/llm/*`, `integrations/rag/*` …
+
+Những module đó chính là "toàn bộ invariant nghiệp vụ, bảo mật, contracts" mà bảng
+ở §1 mô tả cho tầng **Core** — nhưng lại bị **bỏ chọn mặc định**, nên một hồi quy
+trong BM25, RRF, query guard hay retention policy sẽ merge xanh mà không ai biết.
+
+**Đã sửa (bước 1):** 46 module này được trả về tầng core.
+
+**Đã sửa (bước 2 — gỡ bỏ hẳn tầng `extended`):** sau khi merge với `dev`, marker
+`extended` đã bị **xóa hoàn toàn**. Đo trên cây đã merge:
+
+| Cách chạy | Số lượng test | Thời gian |
+|---|:---:|:---:|
+| Một suite duy nhất (`uv run pytest -q`) | **1.592** | **~16 s** |
+| Có tách tầng: mặc định | 1.210 | 14,4 s |
+| Có tách tầng: `-m extended` | 382 | 10,9 s |
+| Có tách tầng: **tổng cộng** | 1.592 | **25,3 s** |
+
+Việc tách tầng chỉ tiết kiệm 1,5 s cho lần chạy mặc định, nhưng khiến chạy đủ hai
+nửa tốn 25,3 s — trong khi vẫn để 382 test rơi ra ngoài lần chạy mặc định, nên một
+hồi quy nằm trong đó vẫn có thể merge xanh. Các module Postgres mà tầng này định
+hoãn lại vốn đã tự skip trong ~1 s khi không có server (xem §5 của
+`tests/README.md`). Kết luận: **giữ một suite duy nhất**; nếu thứ gì đó thực sự
+chậm thì làm cho nó nhanh lên, đừng giấu nó đi.
+
+| Tầng | Số lượng test | Thời gian | Trạng thái mặc định |
+|---|:---:|:---:|---|
+| **Mặc định** (tất cả trừ `live`) | **1.592** | **~16 s** | Selected |
+| **Live** | 27 | Tùy network | Deselected (`-m 'not live'`) |
+
+```bash
+uv run pytest -q
+# 1592 passed, 9 skipped in 15.76s
+```
+
+### Đính chính hành động §2.4 (URL mặc định Postgres)
+
+`DEFAULT_PG_TEST_URL` **đã được gỡ bỏ**. Ba module persistence quay lại
+`os.getenv("PG_TEST_URL", "")`.
+
+Lý do: các module này có autouse fixture chạy `DROP SCHEMA public CASCADE`. Khi URL
+mặc định trỏ tới container dev, chạy pytest không kèm `PG_TEST_URL` sẽ
+**xóa sạch database dev của lập trình viên** thay vì skip như trước. Docstring của
+`pg_probe.py` vốn đã ghi rõ điều này ("must not start guessing at the dev
+container") nhưng không được cập nhật theo thay đổi.
+
+Muốn chạy tầng persistence, hãy trỏ `PG_TEST_URL` tới một database dùng-một-lần:
+
+```bash
+PG_TEST_URL=postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_test uv run pytest tests/integration/persistence -q
 ```

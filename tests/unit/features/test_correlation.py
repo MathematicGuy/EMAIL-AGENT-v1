@@ -20,8 +20,6 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.email_action_plan.correlation import correlate_candidates
 
-pytestmark = pytest.mark.extended
-
 _RECEIVED_AT = datetime(2026, 8, 7, 9, 0, tzinfo=UTC)
 
 

@@ -1,15 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from cowork_agent.domain.target_contracts import (
     BodyFormat,
     EphemeralEmailEnvelope,
     FetchStatus,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
-
-pytestmark = pytest.mark.extended
 
 START = datetime(2026, 8, 3, 8, tzinfo=UTC)
 
