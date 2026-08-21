@@ -20,9 +20,15 @@ OAUTH_STATE_TTL_SECONDS=600
 OAUTHLIB_INSECURE_TRANSPORT=1
 
 # LLM Provider Selection (openrouter | gemini | groq | faucet)
-LLM_PROVIDER=openrouter
+LLM_PROVIDER=gemini
 
 # Gemini Action Extractor & Key Rotation Settings
+# Candidate Models for Memory Evaluation:
+# - gemini-3.5-flash-lite (Gemini 3.5 Flash Lite - Evaluated: 80% Pass, 45% Earned-It, 4.6s)
+# - gemini-3.5-flash (Gemini 3.5 Flash)
+# - gemini-3.6-flash (Gemini 3.6 Flash)
+# - antigravity (Google Antigravity Agentic Model / Engine)
+# - gemma-4-31b (Gemma 4 31B)
 GEMINI_MODEL=gemini-3.5-flash-lite
 GEMINI_KEY_ROTATION_STRATEGY=round_robin
 GEMINI_ROTATE_ON_RATE_LIMIT=true
