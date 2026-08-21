@@ -8,6 +8,7 @@ from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_runner import (
+    ExcessiveSeedFailuresError,
     LiveSession,
     ask_live,
     build_identity,
@@ -325,4 +326,125 @@ def test_control_does_not_reset_consecutive_provider_failures() -> None:
     session.consecutive_provider_failures = 2
     asyncio.run(ask_live(session, _probe(), Arm.CONTROL, None))
     assert session.consecutive_provider_failures == 2
+
+
+def test_consecutive_provider_seed_failures_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail_ep(controller, session_id, spec, *, key_prefix):
+        del controller, session_id, spec, key_prefix
+        return SeedOutcome(
+            MemoryType.EPISODIC,
+            False,
+            "no task episode was created for seed 0 (chat_provider_unavailable: down)",
+        )
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        fail_ep,
+    )
+    session = _session(_Reply(), SeedSpec((), {}, (EpisodeSeed("Tạo một tác vụ.", True),), None))
+    session.max_consecutive_provider_failures = 3
+    probe = _probe(targets=MemoryType.EPISODIC)
+    with pytest.raises(ExcessiveSeedFailuresError):
+        for _ in range(3):
+            session.seeded.clear()
+            asyncio.run(ask_live(session, probe, Arm.FULL, None))
+
+
+def test_isolated_success_between_provider_failures_does_not_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def maybe_fail_ep(controller, session_id, spec, *, key_prefix):
+        del controller, session_id, key_prefix
+        if spec.episodic:
+            return SeedOutcome(
+                MemoryType.EPISODIC,
+                False,
+                "no task episode was created for seed 0 (chat_provider_unavailable: down)",
+            )
+        return SeedOutcome(MemoryType.EPISODIC, True, "ok", seeded=False)
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        maybe_fail_ep,
+    )
+    fail_seed = SeedSpec((), {}, (EpisodeSeed("Tạo một tác vụ.", True),), None)
+    session = _session(_Reply(), fail_seed)
+    session.max_consecutive_provider_failures = 3
+    probe = _probe(targets=MemoryType.EPISODIC)
+    for _ in range(2):
+        session.seeded.clear()
+        text, _ = asyncio.run(ask_live(session, probe, Arm.FULL, None))
+        assert text == ""
+    session.seed = SeedSpec((), {}, (), None)
+    session.seeded.clear()
+    text, _ = asyncio.run(ask_live(session, probe, Arm.FULL, None))
+    assert text == "an answer"
+    session.seed = fail_seed
+    for _ in range(2):
+        session.seeded.clear()
+        text, _ = asyncio.run(ask_live(session, probe, Arm.FULL, None))
+        assert text == ""
+    assert session.consecutive_provider_failures == 2
+
+
+def test_provider_class_seed_failure_skips_ask_under_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_ep(controller, session_id, spec, *, key_prefix):
+        del controller, session_id, spec, key_prefix
+        return SeedOutcome(
+            MemoryType.EPISODIC,
+            False,
+            "no task episode was created for seed 0 (chat_provider_unavailable: down)",
+        )
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        fail_ep,
+    )
+    reply = _Reply()
+    session = _session(reply, SeedSpec((), {}, (EpisodeSeed("Tạo một tác vụ.", True),), None))
+    session.max_consecutive_provider_failures = 3
+    text, latency_ms = asyncio.run(
+        ask_live(session, _probe(targets=MemoryType.EPISODIC), Arm.FULL, None)
+    )
+    assert text == ""
+    assert latency_ms == 0
+    assert reply.questions == []
+    assert session.consecutive_provider_failures == 1
+    assert session.ask_errors
+    assert any("chat_provider_unavailable" in str(item["errors"]) for item in session.ask_errors)
+
+
+def test_verify_seed_findings_do_not_increment_consecutive_provider_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_verify(gateway, scope, landed):
+        del gateway, scope, landed
+        return (type("Finding", (), {"reason": "the verification read came back empty"})(),)
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.verify_seed",
+        fake_verify,
+    )
+    session = _session(_Reply())
+    asyncio.run(ask_live(session, _probe(targets=MemoryType.EPISODIC), Arm.FULL, None))
+    assert any("verification read came back empty" in line for line in session.seed_failures)
+    assert session.consecutive_provider_failures == 0
+
+
+def test_consecutive_ask_once_provider_failures_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail_ask(controller, session_id, question, idempotency_key):
+        del controller, session_id, question, idempotency_key
+        return "", 0, ("chat_provider_unavailable: down",)
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.ask_once",
+        fail_ask,
+    )
+    session = _session(_Reply())
+    session.max_consecutive_provider_failures = 3
+    with pytest.raises(ExcessiveSeedFailuresError):
+        for index in range(3):
+            asyncio.run(ask_live(session, _probe(probe_id=f"p{index}"), Arm.FULL, None))
 

@@ -22,9 +22,26 @@ from .probes import Probe, ProbeSet, SeedSpec
 from .runner import run_key
 from .seeding import seed_long_term
 
+_PROVIDER_CLASS = "chat_provider_unavailable"
+
 
 class ExcessiveSeedFailuresError(RuntimeError):
     """The evaluation run encountered too many consecutive provider-class failures."""
+
+
+def _is_provider_class(text: str) -> bool:
+    return _PROVIDER_CLASS in text
+
+
+def _note_provider_failure(session: LiveSession) -> None:
+    session.consecutive_provider_failures += 1
+    if session.consecutive_provider_failures >= session.max_consecutive_provider_failures:
+        raise ExcessiveSeedFailuresError(
+            f"Seeding failed {session.consecutive_provider_failures} consecutive "
+            f"provider-class times (>= {session.max_consecutive_provider_failures}); "
+            f"aborting evaluation for model '{session.identity.run_key}' immediately "
+            f"to prevent wasting calls on an unavailable or failing provider."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +186,7 @@ async def _seed_for(
     scope: ChatMemoryScope,
     probe_controller: ChatController,
     probe_gateway: ArmScopedMemoryGateway,
-) -> None:
+) -> list[str]:
     """Seed one arm's store before the probe is asked.
 
     Where each ritual runs matters, and for two different reasons.
@@ -230,15 +247,20 @@ async def _seed_for(
     # message on all three — which is how three masked-arm artefacts once read
     # as "all three scopes are empty".
     where = f"[{probe.probe_id}/{arm.value}]"
-    session.seed_failures.extend(
-        f"{where} {outcome.scope.value}: {outcome.reason}" for outcome in outcomes if not outcome.ok
-    )
+    ritual_failures = [
+        f"{where} {outcome.scope.value}: {outcome.reason}"
+        for outcome in outcomes
+        if not outcome.ok
+    ]
+    session.seed_failures.extend(ritual_failures)
     # A scope that declared nothing was never seeded, so verifying it would
-    # report a failure for memory nobody asked for.
+    # report a failure for memory nobody asked for. Verify findings are eval
+    # results: they never trip the provider circuit breaker.
     landed = tuple(outcome.scope for outcome in outcomes if outcome.ok and outcome.seeded)
     session.seed_failures.extend(
         f"{where} {finding.reason}" for finding in await verify_seed(probe_gateway, scope, landed)
     )
+    return ritual_failures
 
 
 async def ask_live(
@@ -275,9 +297,32 @@ async def ask_live(
     session.last_gateway = gateway
     session.gateways.append(gateway)
 
-    if arm is not Arm.CONTROL and scope.session_id not in session.seeded:
+    if arm is Arm.CONTROL:
+        text, latency_ms, errors = await ask_once(
+            controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
+        )
+        if errors:
+            session.ask_errors.append(
+                {"probe": probe.probe_id, "arm": arm.value, "errors": list(errors)}
+            )
+        return text, latency_ms
+
+    skip_reset = False
+    if scope.session_id not in session.seeded:
         session.seeded.add(scope.session_id)
-        await _seed_for(session, probe, arm, scope, controller, gateway)
+        ritual_failures = await _seed_for(session, probe, arm, scope, controller, gateway)
+        if any(_is_provider_class(line) for line in ritual_failures):
+            _note_provider_failure(session)
+            session.ask_errors.append(
+                {
+                    "probe": probe.probe_id,
+                    "arm": arm.value,
+                    "errors": [line for line in ritual_failures if _is_provider_class(line)],
+                }
+            )
+            return "", 0
+        if ritual_failures:
+            skip_reset = True
 
     text, latency_ms, errors = await ask_once(
         controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
@@ -286,6 +331,11 @@ async def ask_live(
         session.ask_errors.append(
             {"probe": probe.probe_id, "arm": arm.value, "errors": list(errors)}
         )
+        if any(_is_provider_class(item) for item in errors):
+            _note_provider_failure(session)
+            return text, latency_ms
+    if not skip_reset:
+        session.consecutive_provider_failures = 0
     return text, latency_ms
 
 
