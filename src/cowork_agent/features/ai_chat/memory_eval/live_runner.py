@@ -22,6 +22,12 @@ from .probes import Probe, ProbeSet, SeedSpec
 from .runner import run_key
 from .seeding import seed_long_term
 
+MAX_ALLOWED_SEED_FAILURES = 3
+
+
+class ExcessiveSeedFailuresError(RuntimeError):
+    """The evaluation run encountered too many seed failures and was aborted early."""
+
 
 @dataclass(frozen=True, slots=True)
 class RunIdentity:
@@ -275,6 +281,13 @@ async def ask_live(
     if arm is not Arm.CONTROL and scope.session_id not in session.seeded:
         session.seeded.add(scope.session_id)
         await _seed_for(session, probe, arm, scope, controller, gateway)
+        if len(session.seed_failures) > MAX_ALLOWED_SEED_FAILURES:
+            failures_count = len(session.seed_failures)
+            raise ExcessiveSeedFailuresError(
+                f"Seeding failed {failures_count} times (> {MAX_ALLOWED_SEED_FAILURES}); "
+                f"aborting evaluation for model '{session.identity.run_key}' immediately "
+                f"to prevent wasting calls on an unavailable or failing provider."
+            )
 
     text, latency_ms, errors = await ask_once(
         controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"

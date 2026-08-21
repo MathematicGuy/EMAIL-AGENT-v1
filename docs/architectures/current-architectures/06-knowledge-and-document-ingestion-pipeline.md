@@ -220,3 +220,5 @@ uv run mail-todo-ingest-knowledge --source ./data/source --output ./data/extract
 | **Corpus Privacy Boundary** | Raw email and attachments excluded from knowledge | Strictly enforced: email pipeline is stateless; attachment content is never ingested (ADR-003, ADR-004) | **0 Diff — 100% Aligned** |
 | **Metadata & Date Filtering** | Binary date harvesting for temporal query filtering | `date_harvest.py` extracts ISO creation/modification dates recorded in manifest for RAG year/month filters | **0 Diff — 100% Aligned** |
 
+ta & Date Filtering** | Binary date harvesting for temporal query filtering | `date_harvest.py` extracts ISO creation/modification dates recorded in manifest for RAG year/month filters | **0 Diff — 100% Aligned** |
+

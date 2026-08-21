@@ -2,8 +2,8 @@
 
 **Architecture level:** Level 1 — Comprehensive High-Level System Overview  
 **Status:** Live / Implemented  
-**Primary Owner:** [`src/cowork_agent/`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent)  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
+**Primary Owner:** [`src/cowork_agent/`](../../../src/cowork_agent)  
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---
 
@@ -13,14 +13,14 @@
 
 | Category | Implemented Component | Runtime Responsibility | Authoritative Code Location |
 |---|---|---|---|
-| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, and API route mounts. | [`src/cowork_agent/app.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/app.py) |
-| **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan) |
-| **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes`), and Semantic memory scopes. | [`features/ai_chat`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/ai_chat) |
-| **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/project_documents.py) |
-| **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/ingestion_cli.py) |
-| **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Turbovec 4-bit + BM25 + RRF over committed Markdown (`data/extracted/*.md`). | [`integrations/rag`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag) |
-| **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set. | [`persistence/repositories`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/persistence/repositories) |
-| **Presentation Clients** | React 19 Web SPA | Production React 19 + Vite + Tailwind SPA frontend application. | [`frontend/`](file:///C:/WORK/EMAIL-AGENT-v1/frontend) |
+| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, and API route mounts. | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) |
+| **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
+| **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes`), and Semantic memory scopes. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
+| **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
+| **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
+| **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Turbovec 4-bit + BM25 + RRF over committed Markdown (`data/extracted/*.md`). | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
+| **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set. | [`persistence/repositories`](../../../src/cowork_agent/persistence/repositories) |
+| **Presentation Clients** | React 19 Web SPA | Production React 19 + Vite + Tailwind SPA frontend application. | [`frontend/`](../../../frontend) |
 
 ### 1.2 State, Queues, Workers, and Persistence
 
@@ -56,7 +56,7 @@
 | Provider / Integration | Usage in Architecture | Resilience & Fallback Controls |
 |---|---|---|
 | **Google OAuth 2.0 & Gmail API** | Mailbox authorization and unread thread retrieval. | Read-only scope (`gmail.readonly`). Ephemeral signed OAuth state with PKCE. |
-| **Gemini API / Groq API / Faucet API / OpenRouter** | Structured email classification, action plan generation, and multi-turn chat replies. | Configured via `LLM_PROVIDER`. Gemini: key rotation on HTTP 429. OpenRouter: native `models[]` from `OPENROUTER_ALLOWED_MODELS`, then Google Gemini last-resort on `OpenRouterAPIError` when Gemini keys exist ([ADR-012](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-012-openrouter-provider-resilience-and-gemini-fallback.md)). Schema-invalid JSON after repair does not hop. Both-fail keeps conservative `RETRIEVE_RAG` / unavailable errors. |
+| **Gemini API / Groq API / Mistral API / OpenRouter** | Structured email classification, action plan generation, and multi-turn chat replies. | Configured via `LLM_PROVIDER`. Gemini: key rotation on HTTP 429. OpenRouter: native `models[]` from `OPENROUTER_ALLOWED_MODELS`, then Google Gemini last-resort on `OpenRouterAPIError` when Gemini keys exist ([ADR-012](../../../tasks/adr/ADR-012-openrouter-gemini-last-resort.md)). Schema-invalid JSON after repair does not hop. Both-fail keeps conservative `RETRIEVE_RAG` / unavailable errors. |
 | **Jina AI API** | Text embeddings (`v5`) & cross-encoder reranking (`jina-reranker-v2-base-multilingual`). | Used for company RAG ingestion and hybrid reranking. Fallbacks to dense matrix/BM25 if unconfigured. |
 | **Turbovec + Postgres FTS** | Company knowledge is a local `.tvim`; project documents are Postgres chunks + per-project `.tvim`. | Company RAG degrades to `NullSemanticMemory` if Turbovec setup fails. |
 | **Turbovec (TurboQuant 4-bit)** | Quantized in-process vector memory store (`.data/turbovec_index.tvim`). | Fast 4-bit quantized local vector search enabled via `RAG_STORE_PROVIDER=turbovec`. |
@@ -128,16 +128,16 @@ flowchart TB
 2. **Context Assembly:** `ChatController` requests memory context via `MemoryGateway`:
    - **Short-Term:** Fetches active conversation turns from `InMemoryChatSessionBuffer`.
    - **Declarative:** Loads user preferences and persona attributes.
-   - **Episodic:** Fetches recent chat session summaries and task episodes (`retrieval_eligible=false` until explicit user approval per [ADR-004](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md)).
+   - **Episodic:** Fetches recent chat session summaries and task episodes (`retrieval_eligible=false` until explicit user approval per [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)).
    - **Semantic:** Retrieves verified facts from enterprise company RAG.
-3. **Intent Routing & User Documents:** If enabled, `ChatRoutingService` evaluates prompt intent to query project-scoped user documents ([ADR-007](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
+3. **Intent Routing & User Documents:** If enabled, `ChatRoutingService` evaluates prompt intent to query project-scoped user documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
 4. **Streaming Reply:** `ChatReplyPort` streams response chunks over SSE while managing working memory updates.
 
 ---
 
 ## 4. Architectural Boundaries & Decoupling Compliance
 
-1. **Email & Chat Decoupling ([ADR-004](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. In-chat email integration is implemented via high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory.
+1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. In-chat email integration is implemented via high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory.
 2. **TaskEpisode Security:** System-proposed tasks created during chat interactions are marked `retrieval_eligible=false` to prevent unverified tasks from contaminating semantic memory context.
 3. **Transient Data Isolation:** Gmail contents and user attachments are processed ephemerally in-memory and are never stored in company vector indices or long-term databases.
 4. **Dual Persistence Strategy:** Zero-friction local development using SQLite plus an in-process bounded working-memory buffer; seamless production scaling using Supabase PostgreSQL when `DATABASE_URL` is supplied.

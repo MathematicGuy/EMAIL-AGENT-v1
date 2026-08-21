@@ -10,9 +10,9 @@ from typing import cast
 
 from cowork_agent.config import (
     ChatIntentSettings,
-    FaucetSettings,
     GeminiSettings,
     GroqSettings,
+    MistralSettings,
     OpenRouterSettings,
 )
 from cowork_agent.domain.chat_contracts import (
@@ -162,17 +162,22 @@ class GroqIntentClassifier(ConfiguredIntentClassifier):
         return cls(complete)
 
 
-class FaucetIntentClassifier(ConfiguredIntentClassifier):
+class MistralIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: FaucetSettings, intent: ChatIntentSettings
-    ) -> FaucetIntentClassifier:
-        from .providers.faucet import _completion_json, _post_json, _request_body
+        cls, provider: MistralSettings, intent: ChatIntentSettings
+    ) -> MistralIntentClassifier:
+        from .providers.mistral import (
+            MISTRAL_CHAT_COMPLETIONS_URL,
+            _completion_json,
+            _post_json,
+            _request_body,
+        )
 
         async def complete(prompt: str) -> Mapping[str, object]:
             response = await asyncio.to_thread(
                 _post_json,
-                "https://freetokenfaucet.com/v1/chat/completions",
+                MISTRAL_CHAT_COMPLETIONS_URL,
                 provider.api_key,
                 _request_body(
                     intent.model,

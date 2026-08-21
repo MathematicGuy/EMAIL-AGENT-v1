@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
+from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings
 from cowork_agent.domain import Priority
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -24,7 +24,6 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.email_action_plan.correlation import TaskCandidate
 from cowork_agent.features.email_action_plan.routing import RouteResolution
 from cowork_agent.features.email_action_plan.schemas import GenerationContext
-from cowork_agent.integrations.llm.providers.faucet import FaucetActionPlanGenerator, FaucetAPIError
 from cowork_agent.integrations.llm.providers.gemini import (
     GENERATION_SCHEMA,
     GENERATOR_REPAIR_INSTRUCTION,
@@ -33,6 +32,10 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GenerationSchemaError,
 )
 from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator, GroqAPIError
+from cowork_agent.integrations.llm.providers.mistral import (
+    MistralActionPlanGenerator,
+    MistralAPIError,
+)
 
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
 RUN_CONTEXT = GenerationContext(run_id="run-9", user_id="user-1")
@@ -407,7 +410,7 @@ def test_groq_generator_repair_retry_recovers_then_fails_safely(
     asyncio.run(scenario())
 
 
-def test_faucet_generator_parses_output_repairs_once_and_fails_safely(
+def test_mistral_generator_parses_output_repairs_once_and_fails_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payloads: list[dict[str, object]] = [
@@ -426,12 +429,14 @@ def test_faucet_generator_parses_output_repairs_once_and_fails_safely(
         captured.append(body)
         return {"choices": [{"message": {"content": json.dumps(payloads.pop(0))}}]}
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet._post_json", fake_post_json)
-    settings = FaucetSettings.from_env(
-        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral._post_json", fake_post_json
+    )
+    settings = MistralSettings.from_env(
+        {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
         load_env_file=False,
     )
-    generator = FaucetActionPlanGenerator(settings)
+    generator = MistralActionPlanGenerator(settings)
 
     async def generate_once() -> None:
         await generator.generate(
@@ -456,7 +461,7 @@ def test_faucet_generator_parses_output_repairs_once_and_fails_safely(
         )
         assert output.task.priority is Priority.URGENT
         await generate_once()
-        with pytest.raises(FaucetAPIError) as excinfo:
+        with pytest.raises(MistralAPIError) as excinfo:
             await generate_once()
         assert "body-msg-1" not in excinfo.value.safe_message
 

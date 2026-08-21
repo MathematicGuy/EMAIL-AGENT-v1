@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 
-from cowork_agent.config import ChatIntentSettings, FaucetSettings, GeminiSettings, GroqSettings
+from cowork_agent.config import ChatIntentSettings, GeminiSettings, GroqSettings, MistralSettings
 from cowork_agent.domain.chat_contracts import (
     ChatIntent,
     ChatMemoryScope,
@@ -32,9 +32,9 @@ from cowork_agent.features.ai_chat.intent.evaluation import (
 from cowork_agent.features.ai_chat.intent.prompt import INTENT_PROMPT_VERSION
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.integrations.llm.chat_intent import (
-    FaucetIntentClassifier,
     GeminiIntentClassifier,
     GroqIntentClassifier,
+    MistralIntentClassifier,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -146,11 +146,11 @@ def build_live_classifier():
         provider = GroqSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
         return GroqIntentClassifier.from_settings(provider, intent), intent.model
-    if provider_name == "faucet":
-        provider = FaucetSettings.from_env()
+    if provider_name == "mistral":
+        provider = MistralSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return FaucetIntentClassifier.from_settings(provider, intent), intent.model
-    raise ValueError("LLM_PROVIDER must be gemini, groq, or faucet")
+        return MistralIntentClassifier.from_settings(provider, intent), intent.model
+    raise ValueError("LLM_PROVIDER must be gemini, groq, or mistral")
 
 
 def build_report(

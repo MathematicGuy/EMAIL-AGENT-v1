@@ -396,12 +396,12 @@ def build_live_classifier() -> tuple[Any, str, str]:
 
         settings = GroqSettings.from_env()
         return GroqRouteClassifier(settings), provider, settings.model
-    if provider == "faucet":
-        from cowork_agent.config import FaucetSettings
-        from cowork_agent.integrations.llm.providers.faucet import FaucetRouteClassifier
+    if provider == "mistral":
+        from cowork_agent.config import MistralSettings
+        from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
 
-        settings = FaucetSettings.from_env()
-        return FaucetRouteClassifier(settings), provider, settings.model
+        settings = MistralSettings.from_env()
+        return MistralRouteClassifier(settings), provider, settings.model
     if provider == "openrouter":
         from cowork_agent.config import OpenRouterSettings
         from cowork_agent.integrations.llm.providers.openrouter import OpenRouterRouteClassifier

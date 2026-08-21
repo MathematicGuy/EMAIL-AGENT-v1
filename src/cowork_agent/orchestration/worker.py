@@ -11,11 +11,11 @@ import httpx
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.config import (
-    FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
+    MistralSettings,
     OpenRouterSettings,
     UserDocumentsSettings,
     database_url,
@@ -37,10 +37,6 @@ from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailMailboxAdapter
 from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
-from cowork_agent.integrations.llm.providers.faucet import (
-    FaucetActionPlanGenerator,
-    FaucetRouteClassifier,
-)
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRouteClassifier,
@@ -48,6 +44,10 @@ from cowork_agent.integrations.llm.providers.gemini import (
 from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.mistral import (
+    MistralActionPlanGenerator,
+    MistralRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
@@ -145,10 +145,10 @@ async def run_worker() -> None:
             classifier = GroqRouteClassifier(groq_settings)
             generator = GroqActionPlanGenerator(groq_settings)
             semantic_memory = NullSemanticMemory()
-        elif provider == "faucet":
-            faucet_settings = FaucetSettings.from_env()
-            classifier = FaucetRouteClassifier(faucet_settings)
-            generator = FaucetActionPlanGenerator(faucet_settings)
+        elif provider == "mistral":
+            mistral_settings = MistralSettings.from_env()
+            classifier = MistralRouteClassifier(mistral_settings)
+            generator = MistralActionPlanGenerator(mistral_settings)
             semantic_memory = NullSemanticMemory()
         elif provider == "openrouter":
             openrouter_settings = OpenRouterSettings.from_env()
@@ -172,7 +172,7 @@ async def run_worker() -> None:
             semantic_memory = NullSemanticMemory()
         else:
             raise ValueError(
-                "LLM_PROVIDER must be 'gemini', 'groq', 'faucet', or 'openrouter'"
+                "LLM_PROVIDER must be 'gemini', 'groq', 'mistral', or 'openrouter'"
             )
         digest_worker = DigestWorker(
             runs,

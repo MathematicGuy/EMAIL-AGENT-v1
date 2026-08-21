@@ -6,6 +6,7 @@ from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_runner import (
+    ExcessiveSeedFailuresError,
     LiveSession,
     ask_live,
     build_identity,
@@ -253,3 +254,16 @@ def test_the_control_arm_reads_an_empty_semantic_corpus() -> None:
 def test_an_arm_with_no_semantic_adapter_is_left_alone() -> None:
     session = _session(_Reply())
     assert session.adapters_for(Arm.CONTROL) is session.adapters
+
+
+def test_excessive_seed_failures_aborts_run() -> None:
+    import pytest
+
+    session = _session(_Reply())
+    # Pre-populate 4 seed failures to simulate unstable provider
+    session.seed_failures = ["err1", "err2", "err3", "err4"]
+    probe = _probe(targets=MemoryType.EPISODIC)
+
+    with pytest.raises(ExcessiveSeedFailuresError, match="Seeding failed"):
+        asyncio.run(ask_live(session, probe, Arm.FULL, None))
+

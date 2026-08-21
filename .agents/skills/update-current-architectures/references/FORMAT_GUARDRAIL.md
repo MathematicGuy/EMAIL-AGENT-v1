@@ -15,7 +15,7 @@ Every sub-module document MUST begin with this exact 4-key metadata block:
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/path/to/module`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §N](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §N](../TARGET-ARCHITECTURE.md)
 ```
 
 ### Rule 2: Mermaid Diagrams
@@ -25,10 +25,14 @@ Every sub-module document MUST begin with this exact 4-key metadata block:
   *Incorrect:* `API[Chat API / SSE Stream]`
 - Keep node count under 12 nodes per Level 1 diagram for minimum complexity.
 
-### Rule 3: Clickable Links
-- All file and directory references MUST use clickable markdown links with the `file:///` scheme.  
-  *Correct:* `[workflow.py](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py)`  
-  *Incorrect:* `workflow.py` or [`workflow.py`](path/to/workflow.py)
+### Rule 3: Relative Path Links
+- All file and directory references MUST use clean, standard relative markdown links to ensure native rendering and file navigation in Markdown previewers and on GitHub/GitLab.
+  *Correct (from `docs/architectures/current-architectures/`):*
+  - Source files: `[workflow.py](../../../src/cowork_agent/features/email_action_plan/workflow.py)`
+  - Target architecture: `[TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md)`
+  - ADRs: `[ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)`
+  - Sibling docs: `[01-email-action-plan-and-rag.md](01-email-action-plan-and-rag.md)`
+  *Incorrect:* `file:///...` (hardcodes machine drives and breaks Markdown preview) or unlinked filenames.
 
 ### Rule 4: GitHub Alert Callouts
 Use standard alert blocks for historical notices, warnings, or architectural constraints:
@@ -36,9 +40,9 @@ Use standard alert blocks for historical notices, warnings, or architectural con
 - `> [!WARNING]` for superseded / historical documentation notices.
 - `> [!IMPORTANT]` for security or architectural boundary constraints.
 
-### Rule 5: Architecture Decoupling Rule
-- Never describe Email Action Plan as an in-chat `@Email` tool.
-- Adhere strictly to ADR-004: Email Agent is a standalone PRD-v1 product flow.
+### Rule 5: Architecture Decoupling & Integration Rule
+- Describe the standalone Email Agent as a separate PRD-v1 product flow.
+- Describe chat-side email capabilities accurately (e.g., `MailScanSummary` cards via dedicated API endpoints) while preserving raw email body privacy invariants.
 
 ---
 
@@ -48,19 +52,19 @@ Use standard alert blocks for historical notices, warnings, or architectural con
 ```markdown
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **Component Name** | `src/cowork_agent/path/file.py` | Brief description of Level 1 responsibility. |
+| **Component Name** | [`file.py`](../../../src/cowork_agent/path/file.py) | Brief description of Level 1 responsibility. |
 ```
 
 ### Dashboard Module Status Matrix (`README.md`)
 ```markdown
 | Module / Component | Implemented Scope | Status | Target Architecture Alignment | Authoritative Code Location |
 |---|---|---|---|---|
-| **Module Name** | Brief scope description | **Live / Implemented** | Fully Aligned | [folder](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/src/cowork_agent/path) |
+| **Module Name** | Brief scope description | **Live / Implemented** | Fully Aligned | [`path`](../../../src/cowork_agent/path) |
 ```
 
 ### Dashboard Architecture Diff Matrix (`README.md`)
 ```markdown
-| System Aspect | Target Specification ([TARGET-ARCHITECTURE.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)) | Current Live Implementation | Diff / Variance Status |
+| System Aspect | Target Specification ([TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)) | Current Live Implementation | Diff / Variance Status |
 |---|---|---|---|
 | **Aspect Name** | Target capability | Actual live implementation | **0 Diff — 100% Aligned** |
 ```
@@ -75,7 +79,7 @@ Use standard alert blocks for historical notices, warnings, or architectural con
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
 **Primary Owner:** `src/cowork_agent/features/module_name`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---
 
@@ -94,7 +98,7 @@ flowchart LR
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **[Name]** | `src/cowork_agent/...` | [Responsibility] |
+| **[Name]** | [`file.py`](../../../src/cowork_agent/...) | [Responsibility] |
 
 ---
 

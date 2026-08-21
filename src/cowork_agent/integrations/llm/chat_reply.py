@@ -8,9 +8,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
 from cowork_agent.config import (
-    FaucetSettings,
     GeminiSettings,
     GroqSettings,
+    MistralSettings,
     OpenRouterSettings,
 )
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, EpisodeCitation
@@ -149,15 +149,20 @@ def _safe_evidence_message(*, unavailable: bool) -> str:
     return "Không tìm thấy thông tin trả lời trong các tài liệu đã chọn."
 
 
-class FaucetChatReply(_ConfiguredChatReply):
+class MistralChatReply(_ConfiguredChatReply):
     @classmethod
-    def from_settings(cls, settings: FaucetSettings) -> FaucetChatReply:
-        from .providers.faucet import _completion_json, _post_json, _request_body
+    def from_settings(cls, settings: MistralSettings) -> MistralChatReply:
+        from .providers.mistral import (
+            MISTRAL_CHAT_COMPLETIONS_URL,
+            _completion_json,
+            _post_json,
+            _request_body,
+        )
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
             response = await asyncio.to_thread(
                 _post_json,
-                "https://freetokenfaucet.com/v1/chat/completions",
+                MISTRAL_CHAT_COMPLETIONS_URL,
                 settings.api_key,
                 _request_body(
                     settings.model,

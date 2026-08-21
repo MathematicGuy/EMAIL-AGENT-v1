@@ -1,13 +1,13 @@
 """LLM contracts and provider adapters."""
 
 from .chat_intent import (
-    FaucetIntentClassifier,
     GeminiIntentClassifier,
     GroqIntentClassifier,
+    MistralIntentClassifier,
 )
 
 __all__ = [
-    "FaucetIntentClassifier",
     "GeminiIntentClassifier",
     "GroqIntentClassifier",
+    "MistralIntentClassifier",
 ]

@@ -18,6 +18,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ from cowork_agent.features.ai_chat.memory_eval.live_env import (
     unavailable_scopes,
 )
 from cowork_agent.features.ai_chat.memory_eval.live_runner import (
+    ExcessiveSeedFailuresError,
     LiveSession,
     ask_live,
     build_identity,
@@ -54,7 +56,7 @@ _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
 _DETAIL_DIR = Path("evaluations/MEMORIES/runs")
 
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
-_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "groq", "faucet")
+_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "groq", "mistral")
 
 
 def _default_provider(environ: Mapping[str, str]) -> str:
@@ -67,7 +69,9 @@ def _default_provider(environ: Mapping[str, str]) -> str:
     return environ.get("LLM_PROVIDER", "").strip().lower() or "gemini"
 
 
-def _build_chat_reply(provider: str, environ: Mapping[str, str]) -> tuple[Any, str, str]:
+def _build_chat_reply(
+    provider: str, environ: Mapping[str, str], model: str | None = None
+) -> tuple[Any, str, str]:
     """Build the chat reply adapter for `provider`, with the model it will use.
 
     Returns the model name the provider actually answers with rather than a
@@ -84,25 +88,33 @@ def _build_chat_reply(provider: str, environ: Mapping[str, str]) -> tuple[Any, s
         from cowork_agent.integrations.llm.chat_reply import GeminiChatReply
 
         gemini = GeminiSettings.from_env(environ)
+        if model:
+            gemini = replace(gemini, model=model)
         return GeminiChatReply.from_settings(gemini), provider, gemini.model
     if provider == "openrouter":
         from cowork_agent.config import OpenRouterSettings
         from cowork_agent.integrations.llm.chat_reply import OpenRouterChatReply
 
         openrouter = OpenRouterSettings.from_env(environ)
+        if model:
+            openrouter = replace(openrouter, model=model, allowed_models=(model,))
         return OpenRouterChatReply.from_settings(openrouter), provider, openrouter.model
     if provider == "groq":
         from cowork_agent.config import GroqSettings
         from cowork_agent.integrations.llm.chat_reply import GroqChatReply
 
         groq = GroqSettings.from_env(environ)
+        if model:
+            groq = replace(groq, model=model)
         return GroqChatReply.from_settings(groq), provider, groq.model
-    if provider == "faucet":
-        from cowork_agent.config import FaucetSettings
-        from cowork_agent.integrations.llm.chat_reply import FaucetChatReply
+    if provider == "mistral":
+        from cowork_agent.config import MistralSettings
+        from cowork_agent.integrations.llm.chat_reply import MistralChatReply
 
-        faucet = FaucetSettings.from_env(environ)
-        return FaucetChatReply.from_settings(faucet), provider, faucet.model
+        mistral = MistralSettings.from_env(environ)
+        if model:
+            mistral = replace(mistral, model=model)
+        return MistralChatReply.from_settings(mistral), provider, mistral.model
     raise ValueError(f"unsupported provider for memory evaluation: {provider!r}")
 
 
@@ -349,6 +361,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=_SUPPORTED_PROVIDERS,
         help="Chat provider to evaluate against; defaults to LLM_PROVIDER, else gemini.",
     )
+    parser.add_argument(
+        "--model",
+        help="Model name override for the provider.",
+    )
     args = parser.parse_args(argv)
     transcript: list[dict[str, object]] = []
 
@@ -382,23 +398,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1
         try:
-            reply, provider, model = _build_chat_reply(provider, dict(os.environ))
+            reply, provider, model = _build_chat_reply(
+                provider, dict(os.environ), model=args.model
+            )
         except ValueError as error:
             # A provider is selected but unusable - a missing key, an unset
             # model, or a name this harness cannot drive. The same outcome as no
             # model at all, said differently so it is not mistaken for one.
             print(f"ERROR: {provider} is configured but unusable: {error}", file=sys.stderr)
             return 1
-        report = run_with_selector_loop(
-            run_live(
-                probe_set,
-                env,
-                reply,
-                provider=provider,
-                model=model,
-                transcript=transcript,
+        try:
+            report = run_with_selector_loop(
+                run_live(
+                    probe_set,
+                    env,
+                    reply,
+                    provider=provider,
+                    model=model,
+                    transcript=transcript,
+                )
             )
-        )
+        except ExcessiveSeedFailuresError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
 
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     output = args.output

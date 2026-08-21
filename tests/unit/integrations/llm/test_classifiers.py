@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings, OpenRouterSettings
+from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings, OpenRouterSettings
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
@@ -18,7 +18,6 @@ from cowork_agent.domain.target_contracts import (
     ReasonCode,
     Route,
 )
-from cowork_agent.integrations.llm.providers.faucet import FaucetRouteClassifier
 from cowork_agent.integrations.llm.providers.gemini import (
     CLASSIFICATION_SCHEMA,
     CLASSIFIER_REPAIR_INSTRUCTION,
@@ -423,9 +422,11 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
     assert "<untrusted_data>" in user_content
 
 
-def test_faucet_malformed_transport_json_falls_back_without_logging_email_body(
+def test_mistral_malformed_transport_json_falls_back_without_logging_email_body(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
+
     class FakeResponse:
         def __enter__(self) -> "FakeResponse":
             return self
@@ -440,14 +441,14 @@ def test_faucet_malformed_transport_json_falls_back_without_logging_email_body(
         del args, kwargs
         return FakeResponse()
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet.urlopen", fake_urlopen)
-    settings = FaucetSettings.from_env(
-        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mistral.urlopen", fake_urlopen)
+    settings = MistralSettings.from_env(
+        {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
         load_env_file=False,
     )
 
     async def scenario() -> None:
-        result = await FaucetRouteClassifier(settings).classify(
+        result = await MistralRouteClassifier(settings).classify(
             "UTC", datetime.now(UTC), (envelope("msg-1"),)
         )
         assert result.decisions[0].decision == FALLBACK_ROUTE_DECISION
@@ -456,9 +457,11 @@ def test_faucet_malformed_transport_json_falls_back_without_logging_email_body(
     assert "body-msg-1" not in caplog.text
 
 
-def test_faucet_classifier_parses_decision_and_requests_classification_schema(
+def test_mistral_classifier_parses_decision_and_requests_classification_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
+
     captured: list[dict[str, object]] = []
 
     def fake_post_json(
@@ -472,14 +475,16 @@ def test_faucet_classifier_parses_decision_and_requests_classification_schema(
             ]
         }
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.faucet._post_json", fake_post_json)
-    settings = FaucetSettings.from_env(
-        {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"},
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral._post_json", fake_post_json
+    )
+    settings = MistralSettings.from_env(
+        {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
         load_env_file=False,
     )
 
     async def scenario() -> None:
-        result = await FaucetRouteClassifier(settings).classify(
+        result = await MistralRouteClassifier(settings).classify(
             "UTC", datetime.now(UTC), (envelope("msg-1"),)
         )
         assert result.decisions[0].decision.candidate_action_item == "Handle msg-1"
@@ -496,7 +501,8 @@ def test_faucet_classifier_parses_decision_and_requests_classification_schema(
 def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cowork_agent.integrations.llm.providers import faucet, gemini, groq, openrouter
+    from cowork_agent.integrations.llm.providers import gemini, groq, mistral, openrouter
+    from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
 
     observed_versions: list[object] = []
 
@@ -505,7 +511,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
             if isinstance(value, Mapping) and "prompt_version" in value:
                 observed_versions.append(value["prompt_version"])
 
-    for provider in (gemini, groq, faucet, openrouter):
+    for provider in (gemini, groq, mistral, openrouter):
         monkeypatch.setattr(provider, "_update_current_span", record)
         monkeypatch.setattr(provider, "_update_current_generation", record)
 
@@ -518,7 +524,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         }
 
     monkeypatch.setattr(groq, "_post_json", response)
-    monkeypatch.setattr(faucet, "_post_json", response)
+    monkeypatch.setattr(mistral, "_post_json", response)
     monkeypatch.setattr(openrouter, "_post_json", response)
 
     async def scenario() -> None:
@@ -529,9 +535,9 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await GroqRouteClassifier(
             GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
         ).classify("UTC", datetime.now(UTC), message)
-        await FaucetRouteClassifier(
-            FaucetSettings.from_env(
-                {"FAUCET_API_KEY": "test-key", "FAUCET_MODEL": "test-model"}, load_env_file=False
+        await MistralRouteClassifier(
+            MistralSettings.from_env(
+                {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}, load_env_file=False
             )
         ).classify("UTC", datetime.now(UTC), message)
         await OpenRouterRouteClassifier(

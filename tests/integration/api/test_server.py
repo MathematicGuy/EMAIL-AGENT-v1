@@ -134,12 +134,12 @@ def test_sqlite_fallback_bootstraps_a_guest_chat_session(
     asyncio.run(scenario())
 
 
-def test_server_starts_with_faucet_provider(tmp_path: Path, monkeypatch: object) -> None:
+def test_server_starts_with_mistral_provider(tmp_path: Path, monkeypatch: object) -> None:
     values = {
         "DATABASE_URL": "",
-        "LLM_PROVIDER": "faucet",
-        "FAUCET_API_KEY": "test-key",
-        "FAUCET_MODEL": "test-model",
+        "LLM_PROVIDER": "mistral",
+        "MISTRAL_API_KEY": "test-key",
+        "MISTRAL_MODEL": "mistral-small-2603",
         "GMAIL_CLIENT_ID": "test.apps.googleusercontent.com",
         "GMAIL_CLIENT_SECRET": "test-secret",
         "GMAIL_REDIRECT_URI": "http://localhost:8000/v1/mail-todo/oauth/gmail/callback",
@@ -161,14 +161,14 @@ def test_server_starts_with_faucet_provider(tmp_path: Path, monkeypatch: object)
     asyncio.run(scenario())
 
 
-def test_invalid_faucet_configuration_returns_provider_accurate_safe_503(
+def test_invalid_mistral_configuration_returns_provider_accurate_safe_503(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     values = {
         "DATABASE_URL": "",
-        "LLM_PROVIDER": "faucet",
-        "FAUCET_API_KEY": "must-not-appear-in-error",
-        "FAUCET_MODEL": "replace-with-faucet-model",
+        "LLM_PROVIDER": "mistral",
+        "MISTRAL_API_KEY": "must-not-appear-in-error",
+        "MISTRAL_MODEL": "replace-with-mistral-model",
         "GMAIL_CLIENT_ID": "test.apps.googleusercontent.com",
         "GMAIL_CLIENT_SECRET": "test-secret",
         "GMAIL_REDIRECT_URI": "http://localhost:8000/v1/mail-todo/oauth/gmail/callback",
@@ -186,7 +186,7 @@ def test_invalid_faucet_configuration_returns_provider_accurate_safe_503(
             now = datetime.now(UTC)
             await app.state.connection_repository.upsert(
                 MailboxConnection(
-                    id="mbx-faucet-invalid",
+                    id="mbx-mistral-invalid",
                     user_id="owner@example.com",
                     provider="gmail",
                     external_account_id="owner@example.com",
@@ -202,12 +202,12 @@ def test_invalid_faucet_configuration_returns_provider_accurate_safe_503(
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
                     "/v1/mail-todo/runs",
-                    json={"mailboxConnectionId": "mbx-faucet-invalid"},
-                    headers={"Idempotency-Key": "faucet-invalid"},
+                    json={"mailboxConnectionId": "mbx-mistral-invalid"},
+                    headers={"Idempotency-Key": "mistral-invalid"},
                 )
                 assert response.status_code == 503
                 assert response.json()["detail"] == (
-                    "Faucet is not configured: FAUCET_MODEL must be a real Faucet model name"
+                    "Mistral is not configured: MISTRAL_MODEL must be a real Mistral model name"
                 )
                 assert "must-not-appear-in-error" not in response.text
 

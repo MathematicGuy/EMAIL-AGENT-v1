@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings, OpenRouterSettings
+from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings, OpenRouterSettings
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -25,9 +25,9 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
 from cowork_agent.features.ai_chat.generation_context import assemble_generation_context
 from cowork_agent.integrations.llm.chat_reply import (
-    FaucetChatReply,
     GeminiChatReply,
     GroqChatReply,
+    MistralChatReply,
     OpenRouterChatReply,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
@@ -60,14 +60,14 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
             degraded=False, degraded_sources=(),
         ),
     )
-    reply = FaucetChatReply(model="faucet-model", complete=complete)
+    reply = MistralChatReply(model="mistral-small-2603", complete=complete)
 
     chunks = asyncio.run(_collect(reply, request, context))
 
     assert chunks[0].text == "I prepared the requested plan."
     assert chunks[0].task_proposal is not None
     assert chunks[0].task_proposal.task_title == "Prepare quarterly report"
-    assert chunks[0].task_proposal.model_id == "faucet-model"
+    assert chunks[0].task_proposal.model_id == "mistral-small-2603"
     assert chunks[0].conversation_title == "Quarterly report plan"
     assert received[0]["context"]["current_instruction"] == "Create a task for the report."
     assert "email" not in str(received[0]).casefold()
@@ -84,8 +84,8 @@ def test_configured_provider_settings_select_the_matching_chat_reply_adapter() -
         GroqChatReply.from_settings(GroqSettings("key", "model", 1, 1)), GroqChatReply
     )
     assert isinstance(
-        FaucetChatReply.from_settings(FaucetSettings("key", "model", 1, 1, 1)),
-        FaucetChatReply,
+        MistralChatReply.from_settings(MistralSettings("key", "model", 1, 1, 1)),
+        MistralChatReply,
     )
 
 
@@ -121,7 +121,7 @@ def test_configured_reply_keeps_company_evidence_and_advisory_episodes_separate(
             degraded_sources=(),
         ),
     )
-    reply = FaucetChatReply(model="faucet-model", complete=complete)
+    reply = MistralChatReply(model="mistral-small-2603", complete=complete)
 
     asyncio.run(_collect(reply, request, context))
 
@@ -166,7 +166,7 @@ def test_configured_reply_allows_only_current_company_evidence_citations() -> No
             ]
         )
 
-    allowed = FaucetChatReply(model="faucet-model", complete=allowed_response)
+    allowed = MistralChatReply(model="mistral-small-2603", complete=allowed_response)
     chunks = asyncio.run(_collect(allowed, request, context))
 
     assert chunks[0].task_proposal is not None
@@ -187,7 +187,7 @@ def test_configured_reply_allows_only_current_company_evidence_citations() -> No
             ]
         )
 
-    fabricated = FaucetChatReply(model="faucet-model", complete=fabricated_response)
+    fabricated = MistralChatReply(model="mistral-small-2603", complete=fabricated_response)
     with pytest.raises(ChatReplyUnavailable):
         asyncio.run(_collect(fabricated, request, context))
 
@@ -215,7 +215,7 @@ def test_configured_reply_rejects_citations_without_current_company_evidence() -
             ]
         )
 
-    reply = FaucetChatReply(model="faucet-model", complete=response)
+    reply = MistralChatReply(model="mistral-small-2603", complete=response)
     with pytest.raises(ChatReplyUnavailable):
         asyncio.run(_collect(reply, request, context))
 
@@ -258,7 +258,7 @@ def test_configured_reply_projects_real_semantic_adapter_citations_to_task_coord
             ]
         )
 
-    reply = FaucetChatReply(model="faucet-model", complete=response)
+    reply = MistralChatReply(model="mistral-small-2603", complete=response)
     chunks = asyncio.run(_collect(reply, request, context))
 
     assert chunks[0].task_proposal is not None

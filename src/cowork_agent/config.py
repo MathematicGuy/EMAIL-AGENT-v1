@@ -651,8 +651,8 @@ class GroqSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class FaucetSettings:
-    """Fixed-endpoint configuration for the Faucet chat-completions provider."""
+class MistralSettings:
+    """Configuration for the Mistral chat-completions provider."""
 
     api_key: str = field(repr=False)
     model: str
@@ -666,23 +666,23 @@ class FaucetSettings:
         environ: Mapping[str, str] | None = None,
         *,
         load_env_file: bool = True,
-    ) -> "FaucetSettings":
+    ) -> "MistralSettings":
         if environ is None:
             if load_env_file:
                 load_runtime_environment()
             environ = os.environ
-        model = environ.get("FAUCET_MODEL", "").strip()
+        model = environ.get("MISTRAL_MODEL", "mistral-small-2603").strip()
         if not model or model.startswith("replace-with-"):
-            raise ValueError("FAUCET_MODEL must be a real Faucet model name")
+            raise ValueError("MISTRAL_MODEL must be a real Mistral model name")
         return cls(
-            api_key=_required_secret(environ, "FAUCET_API_KEY"),
+            api_key=_required_secret(environ, "MISTRAL_API_KEY"),
             model=model,
-            max_emails_per_batch=_positive_int(environ, "FAUCET_MAX_EMAILS_PER_BATCH", 5),
+            max_emails_per_batch=_positive_int(environ, "MISTRAL_MAX_EMAILS_PER_BATCH", 5),
             max_output_tokens=_bounded_positive_int(
-                environ, "FAUCET_MAX_OUTPUT_TOKENS", 2048, maximum=4096
+                environ, "MISTRAL_MAX_OUTPUT_TOKENS", 2048, maximum=4096
             ),
             timeout_seconds=_bounded_positive_int(
-                environ, "FAUCET_TIMEOUT_SECONDS", 60, maximum=120
+                environ, "MISTRAL_TIMEOUT_SECONDS", 60, maximum=120
             ),
         )
 

@@ -32,11 +32,11 @@ from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
     EmailRagQualitySettings,
-    FaucetSettings,
     GeminiSettings,
     GmailSettings,
     GroqSettings,
     JinaEmbeddingSettings,
+    MistralSettings,
     OpenRouterSettings,
     SessionSettings,
     SupabaseStorageSettings,
@@ -114,22 +114,18 @@ from cowork_agent.integrations.gmail.provider import (
     MailboxReauthRequiredError,
 )
 from cowork_agent.integrations.llm.chat_intent import (
-    FaucetIntentClassifier,
     GeminiIntentClassifier,
     GroqIntentClassifier,
+    MistralIntentClassifier,
     OpenRouterIntentClassifier,
 )
 from cowork_agent.integrations.llm.chat_reply import (
-    FaucetChatReply,
     GeminiChatReply,
     GroqChatReply,
+    MistralChatReply,
     OpenRouterChatReply,
 )
 from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
-from cowork_agent.integrations.llm.providers.faucet import (
-    FaucetActionPlanGenerator,
-    FaucetRouteClassifier,
-)
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRetrievalQueryRewriter,
@@ -138,6 +134,10 @@ from cowork_agent.integrations.llm.providers.gemini import (
 from cowork_agent.integrations.llm.providers.groq import (
     GroqActionPlanGenerator,
     GroqRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.mistral import (
+    MistralActionPlanGenerator,
+    MistralRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
@@ -603,7 +603,7 @@ def create_app() -> FastAPI:
                 provider_label = {
                     "gemini": "Gemini",
                     "groq": "Groq",
-                    "faucet": "Faucet",
+                    "mistral": "Mistral",
                     "openrouter": "OpenRouter",
                 }.get(provider, "LLM provider")
                 classifier: RouteClassifierPort
@@ -635,18 +635,18 @@ def create_app() -> FastAPI:
                     generator = GroqActionPlanGenerator(groq_settings)
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
-                elif provider == "faucet":
-                    faucet_settings = FaucetSettings.from_env()
+                elif provider == "mistral":
+                    mistral_settings = MistralSettings.from_env()
                     intent_settings = ChatIntentSettings.from_env(
-                        default_model=faucet_settings.model
+                        default_model=mistral_settings.model
                     )
-                    intent_classifier = FaucetIntentClassifier.from_settings(
-                        faucet_settings, intent_settings
+                    intent_classifier = MistralIntentClassifier.from_settings(
+                        mistral_settings, intent_settings
                     )
-                    classifier = FaucetRouteClassifier(faucet_settings)
-                    generator = FaucetActionPlanGenerator(faucet_settings)
+                    classifier = MistralRouteClassifier(mistral_settings)
+                    generator = MistralActionPlanGenerator(mistral_settings)
                     semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
+                    app.state.chat_reply = MistralChatReply.from_settings(mistral_settings)
                 elif provider == "openrouter":
                     openrouter_settings = OpenRouterSettings.from_env()
                     gemini_last_resort = load_optional_gemini_settings()
@@ -680,7 +680,7 @@ def create_app() -> FastAPI:
                     )
                 else:
                     raise ValueError(
-                        "LLM_PROVIDER must be 'gemini', 'groq', 'faucet', or 'openrouter'"
+                        "LLM_PROVIDER must be 'gemini', 'groq', 'mistral', or 'openrouter'"
                     )
                 app.state.chat_intent_settings = intent_settings
                 app.state.chat_routing_service = (

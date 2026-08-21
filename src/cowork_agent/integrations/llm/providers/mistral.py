@@ -1,4 +1,4 @@
-"""Faucet OpenAI-compatible adapters for classification and action plans."""
+"""Mistral OpenAI-compatible adapters for classification and action plans."""
 
 import asyncio
 import json
@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from langfuse import observe
 
-from cowork_agent.config import FaucetSettings
+from cowork_agent.config import MistralSettings
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
     EphemeralEmailEnvelope,
@@ -44,29 +44,29 @@ from .gemini import (
     _validated_decisions,
 )
 
-FAUCET_CHAT_COMPLETIONS_URL = "https://freetokenfaucet.com/v1/chat/completions"
-FAUCET_USER_AGENT = "module-mail/0.1.0"
+MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions"
+MISTRAL_USER_AGENT = "module-mail/0.1.0"
 
 _CLASSIFIER_LOGGER = logging.getLogger(__name__)
 _Thread = tuple[EphemeralEmailEnvelope, ...]
 
 
-class FaucetAPIError(RuntimeError):
-    """Faucet returned an error or an unusable completion."""
+class MistralAPIError(RuntimeError):
+    """Mistral returned an error or an unusable completion."""
 
-    error_code = "FAUCET_API_ERROR"
+    error_code = "MISTRAL_API_ERROR"
 
     def __init__(self, detail: str, *, safe_message: str | None = None) -> None:
         super().__init__(detail)
         self.safe_message = safe_message or (
-            "Faucet không thể phân tích email. Vui lòng kiểm tra cấu hình model và thử lại."
+            "Mistral không thể phân tích email. Vui lòng kiểm tra cấu hình model và thử lại."
         )
 
 
-class FaucetActionPlanGenerator:
-    """ActionPlanGeneratorPort adapter for the Faucet chat-completions API."""
+class MistralActionPlanGenerator:
+    """ActionPlanGeneratorPort adapter for the Mistral chat-completions API."""
 
-    def __init__(self, settings: FaucetSettings) -> None:
+    def __init__(self, settings: MistralSettings) -> None:
         self._settings = settings
 
     async def generate(
@@ -97,10 +97,10 @@ class FaucetActionPlanGenerator:
                 ),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise FaucetAPIError(
-                "Faucet response did not match the generation schema",
+            raise MistralAPIError(
+                "Mistral response did not match the generation schema",
                 safe_message=(
-                    "Faucet trả về dữ liệu không đúng cấu trúc task yêu cầu. "
+                    "Mistral trả về dữ liệu không đúng cấu trúc task yêu cầu. "
                     "Vui lòng thử lại hoặc kiểm tra schema generation."
                 ),
             ) from exc
@@ -108,7 +108,7 @@ class FaucetActionPlanGenerator:
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
         response = await asyncio.to_thread(
             _post_json,
-            FAUCET_CHAT_COMPLETIONS_URL,
+            MISTRAL_CHAT_COMPLETIONS_URL,
             self._settings.api_key,
             _request_body(
                 self._settings.model,
@@ -122,10 +122,10 @@ class FaucetActionPlanGenerator:
         return _completion_json(response)
 
 
-class FaucetRouteClassifier:
-    """RouteClassifierPort adapter with the existing conservative fallback."""
+class MistralRouteClassifier:
+    """RouteClassifierPort adapter with conservative fallback."""
 
-    def __init__(self, settings: FaucetSettings) -> None:
+    def __init__(self, settings: MistralSettings) -> None:
         self._settings = settings
 
     @observe(
@@ -149,7 +149,7 @@ class FaucetRouteClassifier:
             },
             metadata={
                 "feature": "email-intent-router",
-                "provider": "faucet",
+                "provider": "mistral",
             },
         )
         for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
@@ -198,7 +198,7 @@ class FaucetRouteClassifier:
             decisions = {**repaired, **decisions}
         if not expected <= decisions.keys():
             _CLASSIFIER_LOGGER.warning(
-                "Faucet classifier fallback for %d of %d batch messages",
+                "Mistral classifier fallback for %d of %d batch messages",
                 len(expected - decisions.keys()),
                 len(batch_ids),
             )
@@ -219,7 +219,7 @@ class FaucetRouteClassifier:
         try:
             response = await asyncio.to_thread(
                 _post_json,
-                FAUCET_CHAT_COMPLETIONS_URL,
+                MISTRAL_CHAT_COMPLETIONS_URL,
                 self._settings.api_key,
                 _request_body(
                     self._settings.model,
@@ -238,14 +238,14 @@ class FaucetRouteClassifier:
                     "top_level_fields": sorted(str(field) for field in payload),
                 },
                 metadata={
-                    "provider": "faucet",
+                    "provider": "mistral",
                     "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
                 },
                 model=self._settings.model,
             )
             return payload
-        except FaucetAPIError as exc:
-            _CLASSIFIER_LOGGER.warning("Faucet classifier transport failed: %s", exc.error_code)
+        except MistralAPIError as exc:
+            _CLASSIFIER_LOGGER.warning("Mistral classifier transport failed: %s", exc.error_code)
             return None
 
 
@@ -256,19 +256,30 @@ def _request_body(
     schema: Mapping[str, object],
     max_output_tokens: int,
 ) -> dict[str, object]:
+    task_requested = (
+        '"task_proposal_requested": true' in prompt
+        or '"task_proposal_requested":true' in prompt
+    )
+    if task_requested:
+        user_content = (
+            f"{prompt}\n"
+            "CRITICAL: Since task_proposal_requested is true, "
+            "you MUST populate task_proposal with a full object (NOT null).\n"
+            f"Return only a valid JSON object matching this schema exactly:\n"
+            f"{json.dumps(schema, ensure_ascii=False)}"
+        )
+    else:
+        user_content = (
+            f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
+            f"{json.dumps(schema, ensure_ascii=False)}"
+        )
     return {
         "model": model,
         "messages": [
             {"role": "system", "content": system_instruction},
-            {
-                "role": "user",
-                "content": (
-                    f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
-                    f"{json.dumps(schema, ensure_ascii=False)}"
-                ),
-            },
+            {"role": "user", "content": user_content},
         ],
-        "temperature": 0.7,
+        "temperature": 0.0,
         "max_tokens": max_output_tokens,
         "response_format": {"type": "json_object"},
     }
@@ -278,13 +289,13 @@ def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:
     try:
         content = response["choices"][0]["message"]["content"]
     except (IndexError, KeyError, TypeError) as exc:
-        raise FaucetAPIError("Faucet response did not contain a chat completion") from exc
+        raise MistralAPIError("Mistral response did not contain a chat completion") from exc
     try:
         payload = json.loads(str(content))
     except json.JSONDecodeError as exc:
-        raise FaucetAPIError("Faucet response was not valid JSON") from exc
+        raise MistralAPIError("Mistral response was not valid JSON") from exc
     if not isinstance(payload, Mapping):
-        raise FaucetAPIError("Faucet response JSON must be an object")
+        raise MistralAPIError("Mistral response JSON must be an object")
     return cast(Mapping[str, Any], payload)
 
 
@@ -298,7 +309,7 @@ def _post_json(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": FAUCET_USER_AGENT,
+            "User-Agent": MISTRAL_USER_AGENT,
         },
         method="POST",
     )
@@ -306,21 +317,21 @@ def _post_json(
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 -- fixed HTTPS URL
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise FaucetAPIError(
-            f"Faucet API returned HTTP {exc.code}",
+        raise MistralAPIError(
+            f"Mistral API returned HTTP {exc.code}",
             safe_message=(
-                f"Faucet từ chối yêu cầu (HTTP {exc.code}). Vui lòng kiểm tra model rồi thử lại."
+                f"Mistral từ chối yêu cầu (HTTP {exc.code}). Vui lòng kiểm tra model rồi thử lại."
             ),
         ) from exc
     except (TimeoutError, URLError) as exc:
-        raise FaucetAPIError(
-            "Faucet API request failed",
+        raise MistralAPIError(
+            "Mistral API request failed",
             safe_message=(
-                "Không thể kết nối tới Faucet hoặc yêu cầu đã hết thời gian chờ. Vui lòng thử lại."
+                "Không thể kết nối tới Mistral hoặc yêu cầu đã hết thời gian chờ. Vui lòng thử lại."
             ),
         ) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise FaucetAPIError("Faucet API response was not valid JSON") from exc
+        raise MistralAPIError("Mistral API response was not valid JSON") from exc
     if not isinstance(payload, Mapping):
-        raise FaucetAPIError("Faucet API response must be a JSON object")
+        raise MistralAPIError("Mistral API response must be a JSON object")
     return cast(Mapping[str, Any], payload)
