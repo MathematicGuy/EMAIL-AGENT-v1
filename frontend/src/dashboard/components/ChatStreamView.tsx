@@ -73,7 +73,7 @@ const MailScanCard: React.FC<{
   const denominator = Math.max(scan.emailsToProcess, 1);
   const percentage = Math.min(100, Math.round((scan.emailsProcessed / denominator) * 100));
   const label = {
-    connecting: 'Đang kết nối Gmail',
+    connecting: 'Đang kết nối hộp thư',
     queued: 'Đang chờ quét',
     running: 'Đang quét email',
     succeeded: 'Quét hoàn tất',

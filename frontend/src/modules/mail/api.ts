@@ -2,9 +2,23 @@ import { API_BASE_URL } from '../../lib/apiConfig';
 
 export type DigestRunStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
 
+export type MailProvider = 'gmail' | 'outlook';
+
+export interface ProviderAvailability {
+  enabled: boolean;
+  reason: string | null;
+}
+
+export type ProviderAvailabilityMap = Record<MailProvider, ProviderAvailability>;
+
+export interface MailboxConnectionsResponse {
+  connections: MailboxConnection[];
+  providerAvailability: ProviderAvailabilityMap;
+}
+
 export interface MailboxConnection {
   id: string;
-  provider: 'gmail';
+  provider: MailProvider;
   emailAddress: string;
   scopes: string[];
   status: string;
@@ -163,18 +177,45 @@ export function getGmailConnectUrl(): string {
   return `${API_BASE_URL}/v1/mail-todo/oauth/gmail/connect`;
 }
 
+export function getOutlookConnectUrl(ownerConnectionId: string): string {
+  const params = new URLSearchParams({ ownerConnectionId });
+  return `${API_BASE_URL}/v1/mail-todo/oauth/outlook/connect?${params}`;
+}
+
+export const MAILBOX_SELECTION_KEYS: Record<MailProvider, string> = {
+  gmail: 'cowork.mail.selected.gmail',
+  outlook: 'cowork.mail.selected.outlook',
+};
+
+export function getSelectedMailboxId(provider: MailProvider): string | null {
+  return window.localStorage.getItem(MAILBOX_SELECTION_KEYS[provider]);
+}
+
+export function setSelectedMailboxId(provider: MailProvider, connectionId: string): void {
+  window.localStorage.setItem(MAILBOX_SELECTION_KEYS[provider], connectionId);
+}
+
 export function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? `mail_${crypto.randomUUID()}`
     : `mail_${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
 }
 
-export async function listConnections(signal?: AbortSignal): Promise<MailboxConnection[]> {
-  const body = await request<{ connections: MailboxConnection[] }>(
+export async function listConnections(signal?: AbortSignal): Promise<MailboxConnectionsResponse> {
+  const body = await request<{
+    connections: MailboxConnection[];
+    providerAvailability?: Partial<ProviderAvailabilityMap>;
+  }>(
     '/v1/mail-todo/connections',
     { signal }
   );
-  return body.connections;
+  return {
+    connections: body.connections,
+    providerAvailability: {
+      gmail: body.providerAvailability?.gmail ?? { enabled: true, reason: null },
+      outlook: body.providerAvailability?.outlook ?? { enabled: false, reason: 'not_configured' },
+    },
+  };
 }
 
 export async function disconnectConnection(connectionId: string): Promise<void> {

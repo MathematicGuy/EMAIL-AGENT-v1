@@ -1,10 +1,11 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useStreamingChat, validateAttachmentFile } from './useStreamingChat';
+import { mailCommandProviders, useStreamingChat, validateAttachmentFile } from './useStreamingChat';
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 function json(payload: unknown, status = 200): Response {
@@ -22,6 +23,13 @@ function sse(events: unknown[]): Response {
 }
 
 describe('useStreamingChat Project chat client', () => {
+  it('parses mail commands case-insensitively with provider union semantics', () => {
+    expect(mailCommandProviders('please @EMAIL then @Outlook')).toEqual(['gmail', 'outlook']);
+    expect(mailCommandProviders('@MAIL')).toEqual(['gmail', 'outlook']);
+    expect(mailCommandProviders('@outlook only')).toEqual(['outlook']);
+    expect(mailCommandProviders('ordinary chat')).toEqual([]);
+  });
+
   it('keeps chat A streaming when New is opened and chat B is submitted', async () => {
     const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
     let created = 0;
@@ -230,7 +238,7 @@ describe('useStreamingChat Project chat client', () => {
     });
   });
 
-  it('runs @mail against the ten newest unread emails and reports its result', async () => {
+  it('runs @email against the selected Gmail inbox and reports its result', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
@@ -238,7 +246,7 @@ describe('useStreamingChat Project chat client', () => {
         return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
       }
       if (url.endsWith('/v1/mail-todo/connections')) {
-        return Promise.resolve(json({ connections: [{ id: 'mailbox-1', status: 'active' }] }));
+        return Promise.resolve(json({ connections: [{ id: 'mailbox-1', provider: 'gmail', status: 'active' }] }));
       }
       if (url.endsWith('/v1/mail-todo/runs') && init?.method === 'POST') {
         expect(JSON.parse(String(init.body))).toEqual({
@@ -264,8 +272,8 @@ describe('useStreamingChat Project chat client', () => {
       if (url.endsWith('/sessions/session-1/mail-scans') && init?.method === 'POST') {
         expect(JSON.parse(String(init.body))).toMatchObject({
           turn_id: expect.stringMatching(/^assistant-/),
-          user_message: '@mail quét giúp tôi',
-          assistant_message: 'Đã quét xong: đã quét 4 email và tạo 2 action item.\n\nLưu ý: LLM xác định email còn lại là bản tin cập nhật.',
+          user_message: '@email quét giúp tôi',
+          assistant_message: 'Gmail: Đã quét xong: đã quét 4 email và tạo 2 action item. Lưu ý: LLM xác định email còn lại là bản tin cập nhật.',
           mail_scan: {
             status: 'succeeded', emails_matched: 4, emails_processed: 4,
             emails_to_process: 4, action_items_count: 2,
@@ -279,14 +287,14 @@ describe('useStreamingChat Project chat client', () => {
     const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
     await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
 
-    await act(async () => result.current.sendMessage('@mail quét giúp tôi'));
+    await act(async () => result.current.sendMessage('@email quét giúp tôi'));
 
     expect(fetchMock.mock.calls.some(([url, init]) =>
       String(url).endsWith('/sessions/session-1/mail-scans') && (init as RequestInit).method === 'POST'
     )).toBe(true);
     expect(result.current.messages.at(-1)).toMatchObject({
       role: 'assistant',
-      content: 'Đã quét xong: đã quét 4 email và tạo 2 action item.\n\nLưu ý: LLM xác định email còn lại là bản tin cập nhật.',
+      content: 'Gmail: Đã quét xong: đã quét 4 email và tạo 2 action item. Lưu ý: LLM xác định email còn lại là bản tin cập nhật.',
       isStreaming: false,
       mailScan: { status: 'succeeded', emailsProcessed: 4, actionItemsCount: 2 },
     });
@@ -309,7 +317,7 @@ describe('useStreamingChat Project chat client', () => {
     const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
     await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
 
-    await act(async () => result.current.sendMessage('@mail'));
+    await act(async () => result.current.sendMessage('@email'));
 
     expect(result.current.messages.at(-1)).toMatchObject({
       role: 'assistant',
@@ -317,6 +325,48 @@ describe('useStreamingChat Project chat client', () => {
       mailScan: { status: 'failed' },
     });
     expect(result.current.messages.at(-1)?.content).toContain('Chưa có tài khoản Gmail');
+  });
+
+  it('marks @mail partial when Gmail succeeds and Outlook is missing', async () => {
+    let persisted = 0;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=')) return Promise.resolve(json({ sessions: [] }));
+      if (url.endsWith('/v1/cowork/chat/sessions') && init?.method === 'POST') {
+        return Promise.resolve(json({ session_id: 'session-1', project_id: 'project-1' }, 201));
+      }
+      if (url.endsWith('/v1/mail-todo/connections')) return Promise.resolve(json({
+        connections: [{ id: 'gmail-1', provider: 'gmail', status: 'active' }],
+      }));
+      if (url.endsWith('/v1/mail-todo/runs') && init?.method === 'POST') {
+        return Promise.resolve(json({ id: 'gmail-run', status: 'queued', statusUrl: '/runs/gmail-run' }, 202));
+      }
+      if (url.endsWith('/v1/mail-todo/runs/gmail-run')) return Promise.resolve(json({
+        id: 'gmail-run', status: 'succeeded',
+        progress: { emailsMatched: 2, emailsProcessed: 2, emailsToProcess: 2, maxEmails: 10 },
+        error: null,
+      }));
+      if (url.endsWith('/v1/mail-todo/runs/gmail-run/tasks')) {
+        return Promise.resolve(json({ tasks: [{ task_id: 'task-1' }] }));
+      }
+      if (url.endsWith('/sessions/session-1/mail-scans') && init?.method === 'POST') {
+        persisted += 1;
+        return Promise.resolve(json({ turn_id: 'mail-turn-1' }, 201));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.isHistoryLoading).toBe(false));
+
+    await act(async () => result.current.sendMessage('@MAIL'));
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      isStreaming: false,
+      mailScan: { status: 'partial', emailsProcessed: 2, actionItemsCount: 1 },
+    });
+    expect(result.current.messages.at(-1)?.content).toContain('Outlook: Chưa có tài khoản Outlook');
+    expect(persisted).toBe(1);
   });
 
   it('attaches completed RAG evidence to the streamed assistant message', async () => {

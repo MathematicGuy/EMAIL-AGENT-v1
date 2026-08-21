@@ -2,14 +2,15 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
+**Last Updated:** 2026-08-21
 **Primary Owner:** `src/cowork_agent/persistence` & `src/cowork_agent/app.py`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md)
+**Target Alignment:** Core control plane is aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md); linked Outlook is an additive SQLite-only provider variance.
 
 ---
 
 ## 1. Subsystem Overview
 
-The Control Plane orchestrates HTTP and SSE request routes, manages tenant/user identity and opaque session security, provides dual-mode data persistence (SQLite/Local vs Supabase Postgres), dispatches background digest and document workers, and serves the React 19 web application. Email operations are served on `/v1/mail-todo`, while AI Chat and Project Document operations are served on `/v1/cowork/*`.
+The Control Plane orchestrates HTTP and SSE request routes, manages tenant/user identity and opaque session security, provides dual-mode data persistence (SQLite/Local vs Supabase Postgres), dispatches background digest and document workers, and serves the React 19 web application. Email operations are served on `/v1/mail-todo`; Gmail remains the identity owner and an optional Outlook mailbox is linked to that owner in SQLite mode. AI Chat and Project Document operations remain on `/v1/cowork/*`.
 
 ```mermaid
 flowchart TB
@@ -49,11 +50,12 @@ flowchart TB
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root: lifespan wiring (Postgres connection pool or local SQLite repositories, LLM provider routing, semantic indices, private storage clients), mounting `/v1/mail-todo/*`, `/v1/cowork/chat/*`, `/v1/cowork/projects/*`, `/api/v1/raw-documents/*`, and `/api/v1/reports/*`. |
-| **Identity & Security** | [`identity.py`](../../../src/cowork_agent/identity.py) & [`config.py`](../../../src/cowork_agent/config.py) | Resolves `VerifiedPrincipal` (`tenant_id` / `user_id`; `workspace_id` aliases tenant). Local MVP uses `LOCAL_TENANT_ID = "local"`. Postgres mode and SQLite chat identity issue hashed opaque session tokens on an HttpOnly cookie (`APP_SESSION_COOKIE_NAME`, default `cowork_session`). Central ownership guard enforces authorization. |
-| **Persistence Repositories** | [`repositories`](../../../src/cowork_agent/persistence/repositories) | Dual storage adapters: In-memory test fakes in [`local.py`](../../../src/cowork_agent/persistence/repositories/local.py); SQLite adapters for connections ([`mailbox_connections.py`](../../../src/cowork_agent/persistence/repositories/mailbox_connections.py)), runs ([`runs.py`](../../../src/cowork_agent/persistence/repositories/runs.py)), tasks ([`tasks.py`](../../../src/cowork_agent/persistence/repositories/tasks.py)), chat history & memory ([`sqlite_chat.py`](../../../src/cowork_agent/persistence/repositories/sqlite_chat.py)), guest identity ([`sqlite_chat_identity.py`](../../../src/cowork_agent/persistence/repositories/sqlite_chat_identity.py)), projects ([`sqlite_projects.py`](../../../src/cowork_agent/persistence/repositories/sqlite_projects.py)), document chunks ([`sqlite_project_document_chunks.py`](../../../src/cowork_agent/persistence/repositories/sqlite_project_document_chunks.py)), and raw documents ([`sqlite_raw_documents.py`](../../../src/cowork_agent/persistence/repositories/sqlite_raw_documents.py)); Postgres adapters in [`postgres.py`](../../../src/cowork_agent/persistence/repositories/postgres.py), [`identity.py`](../../../src/cowork_agent/persistence/repositories/identity.py), [`chat_sessions.py`](../../../src/cowork_agent/persistence/repositories/chat_sessions.py), [`chat_history.py`](../../../src/cowork_agent/persistence/repositories/chat_history.py), [`projects.py`](../../../src/cowork_agent/persistence/repositories/projects.py), and [`project_document_chunks.py`](../../../src/cowork_agent/persistence/repositories/project_document_chunks.py). |
-| **Orchestration Workers** | [`orchestration`](../../../src/cowork_agent/orchestration) | In-process `DigestWorker` via FastAPI `BackgroundTasks` when no database queue is configured. `mail-todo-worker` ([`worker.py`](../../../src/cowork_agent/orchestration/worker.py)) polls durable Postgres jobs (email digest runs, project document extraction/indexing via [`project_document_worker.py`](../../../src/cowork_agent/orchestration/project_document_worker.py), and document cleanup), executes recovery sweeps ([`recovery.py`](../../../src/cowork_agent/orchestration/recovery.py), [`document_recovery.py`](../../../src/cowork_agent/orchestration/document_recovery.py)), and publishes outbox lifecycle events. In SQLite mode, `run_sqlite_worker()` polls the local project document queue. |
-| **React 19 Web SPA** | [`frontend/`](../../../frontend) | Modern React 19 + Vite + Tailwind 4 Single-Page Application providing responsive interfaces for Gmail mailbox management, multi-turn AI Chat with SSE streaming, mail scan summaries, TaskEpisode proposal cards, raw document viewing and editing, and markdown reports. |
+| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root for persistence, LLM routing, semantic indexes, storage, and the mail/chat/project/document APIs. |
+| **Identity & Security** | [`identity.py`](../../../src/cowork_agent/identity.py) & [`config.py`](../../../src/cowork_agent/config.py) | Resolves `VerifiedPrincipal`; session cookies and central ownership guards enforce authorization. |
+| **Mailbox OAuth & Availability** | [`app.py`](../../../src/cowork_agent/app.py), [`outlook/provider.py`](../../../src/cowork_agent/integrations/outlook/provider.py) | Gmail OAuth plus optional Microsoft OAuth with PKCE, signed one-time owner state, encrypted rotating refresh tokens, and `Mail.Read` only. `/connections` exposes stable availability; Outlook is `not_configured` or `sqlite_only` when unavailable and never creates a user/session or changes the login cookie. |
+| **Persistence Repositories** | [`repositories`](../../../src/cowork_agent/persistence/repositories) | In-memory test fakes, SQLite adapters for local mode, and Postgres adapters for durable cloud/local control-plane mode. |
+| **Orchestration Workers** | [`orchestration`](../../../src/cowork_agent/orchestration) | In-process digest worker and durable recovery/document workers. |
+| **React 19 Web SPA** | [`frontend/`](../../../frontend) | Manages Gmail/Outlook accounts, remembers one selection per provider, and dispatches `@email`, `@outlook`, and `@mail` without making mail an AI Chat tool or persisting raw mail into chat memory. |
 
 ---
 
@@ -72,6 +74,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
   - `project_chunks.db` (private document chunk text and full-text search index)
   - `raw_documents.db` (raw document metadata, versioning, and save history)
   - Local document files are saved in `.data/project-documents` via `LocalPrivateStorage`. Results, outbox events, and active working memory stay in-process (`InMemoryResultRepository`, `InMemoryOutbox`, `InMemoryChatSessionBuffer`).
+  - Outlook connections share the mailbox-connection repository with their Gmail owner. This is the only mode in which the Outlook adapter and OAuth routes are enabled.
 
 - **Cloud Mode (`POSTGRES_MODE=cloud`):**
   Uses `psycopg_pool.AsyncConnectionPool` to connect to hosted Supabase PostgreSQL via `DATABASE_URL_CLOUD` (session or direct `:5432`). Lifespan startup and `mail-todo-worker` boot run idempotent migrations in filename order from `001_mail_todo.sql` through `014_project_chunk_fts_simple.sql` using PostgreSQL advisory locks (`pg_advisory_lock`). Source files and index snapshots are stored in private Supabase Storage buckets.
@@ -88,3 +91,4 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
 - **Security & Identity Isolation:** OAuth tokens are stored encrypted using Fernet (`TokenCipher`). Session cookies are opaque, HttpOnly, and hashed at rest. Caller-supplied tenant/user identifiers are never trusted for authorization; all operations derive tenancy from `VerifiedPrincipal`.
 - **Memory & Durability Alignment:** Bounded short-term chat context resides in-process (`InMemoryChatSessionBuffer`), while durable long-term declarative profiles, episodic TaskEpisodes, chat turns, and document chunks are persisted in PostgreSQL (or isolated local SQLite files).
 - **Presentation Layer:** Production React 19 + Vite + Tailwind 4 web application is the authoritative user interface. Legacy Streamlit developer GUI has been retired.
+- **Provider Variance:** PostgreSQL modes remain Gmail-only because the existing SQL provider constraint was deliberately left unchanged. Outlook reports `sqlite_only`; this implementation contains no SQL migration.

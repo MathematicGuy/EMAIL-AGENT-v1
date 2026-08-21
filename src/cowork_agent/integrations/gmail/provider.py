@@ -33,23 +33,26 @@ from cowork_agent.domain.target_contracts import (
     EphemeralEmailEnvelope,
     FetchStatus,
 )
-from cowork_agent.features.email_action_plan.ports import (
-    MailboxConnectionRepository,
-    MailboxTemporaryError,
-)
+from cowork_agent.features.email_action_plan.ports import MailboxConnectionRepository
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
 from cowork_agent.identity import VerifiedPrincipal
+from cowork_agent.integrations.mailbox.errors import (
+    MailboxNotConnectedError,
+    MailboxTemporaryError,
+)
+from cowork_agent.integrations.mailbox.errors import (
+    MailboxReauthRequiredError as ProviderMailboxReauthRequiredError,
+)
+from cowork_agent.integrations.mailbox.normalization import normalize_body
 
 from .auth import OAuthStateManager, TokenCipher
 
 logger = logging.getLogger(__name__)
 
 
-class MailboxNotConnectedError(LookupError):
-    pass
+class MailboxReauthRequiredError(ProviderMailboxReauthRequiredError):
+    """Backward-compatible Gmail error with provider-neutral ancestry."""
 
-
-class MailboxReauthRequiredError(RuntimeError):
     error_code = "GMAIL_REAUTH_REQUIRED"
     safe_message = "Gmail access needs to be reconnected. Reconnect Gmail and retry."
 
@@ -477,30 +480,7 @@ def _extract_text(
             visit(cast(Mapping[str, Any], child))
 
     visit(part)
-    links = _LinkCollector()
-    if plain:
-        plain_text = "\n".join(plain).strip()
-        plain_urls = set(_iter_urls(plain_text))
-        normalized = _plain_to_text(plain_text, links)
-        rich_urls = {
-            url for rich_part in rich for url, _ in _extract_html_links(rich_part, links)
-        }
-        missing_links = [
-            link
-            for link in links.as_tuple()
-            if link.url in rich_urls
-            and link.url not in plain_urls
-            and _include_in_llm_link_appendix(link)
-        ]
-        if missing_links:
-            normalized += "\n\nLiên kết trong email:\n" + "\n".join(
-                f"{link.label} [{link.ref}]" for link in missing_links
-            )
-        return _remove_separator_lines(normalized), BodyFormat.TEXT, links.as_tuple()
-    if not rich:
-        return "", BodyFormat.TEXT, ()
-    normalized = _html_to_text("\n".join(rich), links).strip()
-    return _remove_separator_lines(normalized), BodyFormat.HTML_CONVERTED, links.as_tuple()
+    return normalize_body(plain, rich)
 
 
 def _has_attachments(part: Mapping[str, Any]) -> bool:

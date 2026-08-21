@@ -74,7 +74,7 @@ describe('ChatInputBox mail mention', () => {
     expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('shows Mail when the user types @ and inserts @mail when selected', () => {
+  it('shows Mail, Email, and Outlook when the user types @', () => {
     const onChangeText = vi.fn();
     render(
       <ChatInputBox
@@ -87,11 +87,31 @@ describe('ChatInputBox mail mention', () => {
       />
     );
 
-    expect(screen.getByRole('option', { name: /mail/i })).not.toBeNull();
+    expect(screen.getByRole('option', { name: /^Mail/ })).not.toBeNull();
+    expect(screen.getByRole('option', { name: /^Email/ })).not.toBeNull();
+    expect(screen.getByRole('option', { name: /^Outlook/ })).not.toBeNull();
     expect(screen.getByRole('listbox', { name: 'Gợi ý công cụ' }).closest('.overflow-visible'))
       .not.toBeNull();
-    fireEvent.click(screen.getByRole('option', { name: /mail/i }));
-    expect(onChangeText).toHaveBeenCalledWith('@mail ');
+    fireEvent.click(screen.getByRole('option', { name: /^Email/ }));
+    expect(onChangeText).toHaveBeenCalledWith('@email ');
+  });
+
+  it('filters mentions and inserts the selected provider command', () => {
+    const onChangeText = vi.fn();
+    render(
+      <ChatInputBox
+        inputText="Please scan @out"
+        onChangeText={onChangeText}
+        onSend={vi.fn()}
+        selectedModel={model}
+        onOpenModelModal={vi.fn()}
+        onOpenVoiceModal={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('option', { name: /^Outlook/ }));
+    expect(onChangeText).toHaveBeenCalledWith('Please scan @outlook ');
   });
 
   it('hides the Mail suggestion for a non-matching mention', () => {

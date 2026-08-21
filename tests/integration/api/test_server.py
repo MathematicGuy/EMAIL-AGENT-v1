@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import pytest
 from cryptography.fernet import Fernet
 
 from cowork_agent.app import create_app
@@ -10,6 +11,19 @@ from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, ChatTurnStatus
 from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
+
+
+@pytest.fixture(autouse=True)
+def disable_optional_outlook(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep Gmail-only API tests independent of a developer's local .env."""
+    for name in (
+        "MICROSOFT_CLIENT_ID",
+        "MICROSOFT_CLIENT_SECRET",
+        "MICROSOFT_TENANT",
+        "MICROSOFT_REDIRECT_URI",
+        "MICROSOFT_SCOPES",
+    ):
+        monkeypatch.setenv(name, "")
 
 
 def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch: object) -> None:
@@ -40,7 +54,13 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
                 assert response.headers["location"].startswith("https://accounts.google.com/")
                 assert "gmail.readonly" in response.headers["location"]
                 connections = await client.get("/v1/mail-todo/connections")
-                assert connections.json() == {"connections": []}
+                assert connections.json() == {
+                    "connections": [],
+                    "providerAvailability": {
+                        "gmail": {"enabled": True, "reason": None},
+                        "outlook": {"enabled": False, "reason": "not_configured"},
+                    },
+                }
 
     asyncio.run(scenario())
 
