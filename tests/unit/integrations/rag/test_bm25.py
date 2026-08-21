@@ -1,11 +1,8 @@
 """Unit tests for the BM25 lexical search adapter."""
 
-import pytest
 
 from cowork_agent.integrations.rag.bm25 import BM25SearchAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk
-
-pytestmark = pytest.mark.extended
 
 
 def _chunk(chunk_id: str, text: str) -> KnowledgeChunk:

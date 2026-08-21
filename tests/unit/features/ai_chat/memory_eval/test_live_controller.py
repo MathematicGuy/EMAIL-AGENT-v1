@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageStreamEvent,
@@ -16,8 +14,6 @@ from cowork_agent.features.ai_chat.memory_eval.live_controller import (
     build_arm_controller,
     collect_reply,
 )
-
-pytestmark = pytest.mark.extended
 
 
 class _Reply:

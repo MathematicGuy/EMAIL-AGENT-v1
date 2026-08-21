@@ -16,8 +16,6 @@ from cowork_agent.features.ai_chat.profile_policy import (
     authorize_profile_write,
 )
 
-pytestmark = pytest.mark.extended
-
 NOW = datetime(2026, 8, 10, 9, tzinfo=UTC)
 
 

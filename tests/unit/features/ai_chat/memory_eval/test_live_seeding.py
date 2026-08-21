@@ -4,8 +4,6 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     EpisodeSourceType,
@@ -25,8 +23,6 @@ from cowork_agent.features.ai_chat.memory_eval.live_seeding import (
 )
 from cowork_agent.features.ai_chat.memory_eval.probes import EpisodeSeed, SeedSpec
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
-
-pytestmark = pytest.mark.extended
 
 _CORPUS = "tests/fixtures/memory_eval/corpus"
 

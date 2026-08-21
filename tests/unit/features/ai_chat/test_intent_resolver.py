@@ -10,8 +10,6 @@ from cowork_agent.domain.chat_contracts import (
 )
 from cowork_agent.features.ai_chat.intent.resolver import finalize_route, resolve_route
 
-pytestmark = pytest.mark.extended
-
 
 @pytest.mark.parametrize(
     ("needs_rag", "needs_tool", "needs_clarification", "expected"),

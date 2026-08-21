@@ -13,8 +13,6 @@ import pytest
 from cowork_agent.features.email_action_plan.schemas import MessageRef, SearchPage
 from tests.unit.scripts.cli_harness import load_script
 
-pytestmark = pytest.mark.extended
-
 NOW = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
 OLD_TIME = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
 NEW_TIME = datetime(2026, 8, 19, 11, 0, tzinfo=UTC)

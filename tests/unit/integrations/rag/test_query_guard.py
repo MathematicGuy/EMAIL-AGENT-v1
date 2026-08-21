@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 
-import pytest
-
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -18,8 +16,6 @@ from cowork_agent.integrations.rag.jina_reranker import FakeJinaReranker
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from cowork_agent.integrations.rag.query_guard import is_retrieval_query
 from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
-
-pytestmark = pytest.mark.extended
 
 
 class DummyEmbedder:

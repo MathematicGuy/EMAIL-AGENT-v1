@@ -4,8 +4,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.extended
-
 _LOADER_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "routing" / "loader.py"
 _spec = importlib.util.spec_from_file_location("routing_fixture_loader", _LOADER_PATH)
 assert _spec is not None and _spec.loader is not None

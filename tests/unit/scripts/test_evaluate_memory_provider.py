@@ -16,8 +16,6 @@ import pytest
 
 from scripts.evaluate_memory import _build_chat_reply, _default_provider
 
-pytestmark = pytest.mark.extended
-
 
 def _probe_set_file(tmp_path: Path) -> Path:
     payload = {

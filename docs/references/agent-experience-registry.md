@@ -82,6 +82,14 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 - **Failure state:** Every agent run is serial, so a 24 s suite and a 2 s route both pay one core.
 - **Deploy when:** Writing pytest commands in a plan, handoff, or TDD loop.
 
+#### "Markexpr turns testmon into a full instrumented suite"
+- **Version:** v1 (2026-08-21)
+- **Pattern:** Do not add pytest-testmon; this suite's `-m 'not live'` disables its selection, so `--testmon` reruns everything under coverage tracing.
+- **Evidence:** pytest-testmon 2.2.0 `_get_noselect_reasons` returns `-m was used` whenever markexpr is set; a no-change `--testmon` still executed 1838 tests in ~41–55 s. `--testmon-forceselect` then INTERNALERRORed `pytest_deselected` via `FakeItemFromTestmon`.
+- **Failure state:** Agents copy `--testmon`, pay a 3x suite, and believe they are running an impacted subset.
+- **Deploy when:** Tempted to add coverage-keyed test selection or to copy `pytest --testmon` from upstream docs.
+- **Not in the harness:** a configure-time refuse was prototyped and dropped; it does not speed the default suite. The seed is "do not add the package", not "keep a refuse hook".
+
 ---
 
 ### 2. ArchSeeds (Structural Integrity & System Invariants)

@@ -8,8 +8,6 @@ import pytest
 from cowork_agent.integrations.knowledge_ingestion.models import PdfKind
 from cowork_agent.integrations.knowledge_ingestion.pdf_inspector import PdfInspector
 
-pytestmark = pytest.mark.extended
-
 
 def test_inspector_maps_mixed_pages_and_native_markdown(tmp_path: Path) -> None:
     path = tmp_path / "policy.pdf"

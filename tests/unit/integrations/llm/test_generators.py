@@ -34,8 +34,6 @@ from cowork_agent.integrations.llm.providers.gemini import (
 )
 from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator, GroqAPIError
 
-pytestmark = pytest.mark.extended
-
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
 RUN_CONTEXT = GenerationContext(run_id="run-9", user_id="user-1")
 

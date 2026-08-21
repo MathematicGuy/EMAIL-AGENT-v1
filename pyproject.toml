@@ -31,9 +31,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "coverage>=7",
   "mypy>=1.14",
   "pytest>=8",
   "pytest-asyncio>=0.24",
+  "pytest-cov>=6",
   "pytest-xdist>=3.5",
   "ruff>=0.9",
 ]
@@ -70,12 +72,15 @@ norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
 #   yellow banner naming whatever was deselected, so this cannot rot silently.
 # --strict-markers: an unregistered marker is a typo that would otherwise make a
 #   test silently vanish from every `-m` selection.
-addopts = "-p tests.xdist_plugin -m 'not live and not extended' --strict-markers"
+# There is deliberately no `extended` tier. Splitting the suite deselected 382
+#   tests to save 1.5 s on the default run (15.9 s -> 14.4 s) while making the two
+#   halves cost 25.3 s together, so a regression in anything it hid could merge
+#   green. The Postgres modules it was meant to defer already skip in ~1 s without
+#   a server. Keep one suite; if something is genuinely too slow, make it faster.
+addopts = "-p tests.xdist_plugin -m 'not live' --strict-markers"
 markers = [
     "slow: >1s of wall clock on its own. Run with `-m slow`.",
     "live: needs a real external process/service. Deselected by default; skips loudly when absent.",
-    "extended: non-core test suite (evaluation datasets, synthetic benchmarks, extended QA). Deselected by default; run with `-m extended`.",
-    "core: primary technical system invariant tests.",
     "serial: must not run under xdist (spawns subprocesses or binds a fixed port).",
     "xdist_group(name): pin tests that share a destructive resource to one xdist worker.",
 ]

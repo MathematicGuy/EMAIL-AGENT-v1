@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import unicodedata
 
-import pytest
-
 from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import (
     FRONTMATTER_KEYS,
     build_frontmatter,
@@ -11,8 +9,6 @@ from cowork_agent.integrations.knowledge_ingestion.text_sanitizer import (
     sanitize_text,
     split_frontmatter,
 )
-
-pytestmark = pytest.mark.extended
 
 _NFD_VIETNAMESE_E = "e\u0302\u0301"
 

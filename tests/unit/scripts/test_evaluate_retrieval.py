@@ -18,8 +18,6 @@ import pytest
 from tests.unit.scripts.cli_harness import CliResult, load_script
 from tests.unit.scripts.cli_harness import run_cli as harness_run_cli
 
-pytestmark = pytest.mark.extended
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "evaluate_retrieval.py"
 CORPUS_DIR = REPO_ROOT / "data" / "extracted"
