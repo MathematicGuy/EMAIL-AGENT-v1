@@ -46,13 +46,16 @@ def decode(token: str, secret: str) -> dict[str, Any]:
         header_text, body_text, signature_text = token.split(".")
         header = json.loads(_b64url_decode(header_text))
         signature = _b64url_decode(signature_text)
-    except (AttributeError, ValueError, UnicodeDecodeError) as exc:
+    except (AttributeError, ValueError, UnicodeError) as exc:
         raise OnlyOfficeTokenError("Malformed OnlyOffice token") from exc
 
     if not isinstance(header, dict) or header.get("alg") != "HS256":
         raise OnlyOfficeTokenError("Unsupported OnlyOffice token algorithm")
 
-    signing_input = f"{header_text}.{body_text}".encode("ascii")
+    try:
+        signing_input = f"{header_text}.{body_text}".encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise OnlyOfficeTokenError("Malformed OnlyOffice token") from exc
     expected = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
     if not hmac.compare_digest(signature, expected):
         raise OnlyOfficeTokenError("OnlyOffice token signature mismatch")

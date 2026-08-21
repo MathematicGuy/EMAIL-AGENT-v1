@@ -1457,7 +1457,6 @@ def create_app() -> FastAPI:
     async def post_raw_document_onlyoffice_callback(
         filename: str, request: Request
     ) -> dict[str, int]:
-        safe_name = Path(filename).name
         safe_name, target_raw = _resolve_raw_document(filename)
         oo_settings = _onlyoffice_settings(request)
 
