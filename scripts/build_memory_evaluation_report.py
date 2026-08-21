@@ -10,6 +10,7 @@ can focus entirely on synthesizing insights rather than calculating numbers.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -18,7 +19,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cowork_agent.features.ai_chat.memory_eval.probes import ProbeSet, load_probe_set
+from cowork_agent.features.ai_chat.memory_eval.probes import (
+    ProbeSet,
+    ProbeSetError,
+    find_probe_set_file,
+    load_probe_set,
+)
 
 _DEFAULT_BASELINES_DIR = Path("evaluations/MEMORIES/baselines")
 _DEFAULT_RUNS_DIR = Path("evaluations/MEMORIES/runs")
@@ -651,23 +657,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as e:
             print(f"WARN: Could not load detail file {detail_path}: {e}", file=sys.stderr)
 
-    # 3. Resolve Probe Set
-    probe_set = None
+    # 3. Resolve Probe Set by id (never "latest on disk").
     probe_set_path = args.probe_set
     if probe_set_path is None:
-        probe_set_id = baseline_data.get("probe_set_id", "")
-        if "v2" in probe_set_id or "wide" in probe_set_id:
-            probe_set_path = _DEFAULT_PROBES_DIR / "v2-four-scopes-wide.json"
-        elif "v1" in probe_set_id:
-            probe_set_path = _DEFAULT_PROBES_DIR / "v1-four-scopes.json"
-        else:
-            probe_set_path = _DEFAULT_PROBES_DIR / "v2-four-scopes-wide.json"
-
-    if probe_set_path and probe_set_path.exists():
+        probe_set_id = str(baseline_data.get("probe_set_id") or "").strip()
+        if not probe_set_id:
+            print(
+                "ERROR: baseline has no probe_set_id; cannot resolve probe set.",
+                file=sys.stderr,
+            )
+            return 1
         try:
-            probe_set = load_probe_set(json.loads(probe_set_path.read_text(encoding="utf-8")))
-        except Exception as e:
-            print(f"WARN: Could not load probe set {probe_set_path}: {e}", file=sys.stderr)
+            probe_set_path = find_probe_set_file(_DEFAULT_PROBES_DIR, probe_set_id)
+        except ProbeSetError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+
+    if probe_set_path is None or not probe_set_path.exists():
+        print(f"ERROR: probe set file not found: {probe_set_path}", file=sys.stderr)
+        return 1
+
+    try:
+        file_bytes = probe_set_path.read_bytes()
+        expected_hash = baseline_data.get("probe_set_sha256")
+        if expected_hash:
+            actual_hash = hashlib.sha256(file_bytes).hexdigest()
+            if actual_hash != str(expected_hash):
+                print(
+                    f"ERROR: probe set sha256 mismatch for {probe_set_path}: "
+                    f"baseline {expected_hash} != file {actual_hash}",
+                    file=sys.stderr,
+                )
+                return 1
+        probe_set = load_probe_set(json.loads(file_bytes))
+    except (OSError, ValueError) as error:
+        print(f"ERROR: Could not load probe set {probe_set_path}: {error}", file=sys.stderr)
+        return 1
 
     # 4. Generate Markdown
     report_md = build_markdown_report(

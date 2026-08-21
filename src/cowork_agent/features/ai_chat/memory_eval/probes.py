@@ -8,9 +8,11 @@ question text would make every verdict an opinion.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from cowork_agent.domain.chat_contracts import MemoryType
 
@@ -253,3 +255,34 @@ def load_probe_set(payload: Mapping[str, object]) -> ProbeSet:
         seed=_load_seed(_mapping(payload.get("seed", {}), "seed")),
         probes=probes,
     )
+
+
+def find_probe_set_file(probes_dir: Path, probe_set_id: str) -> Path:
+    """Return the JSON file whose loaded ``probe_set_id`` matches ``probe_set_id``.
+
+    Scans ``probes_dir/*.json``. Zero matches or more than one match raise
+    ``ProbeSetError``. Unreadable or unloadable files are skipped so a stray
+    JSON next to a valid set does not hide an id match.
+    """
+
+    matches: list[Path] = []
+    for path in probes_dir.glob("*.json"):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping):
+                continue
+            loaded = load_probe_set(payload)
+        except (OSError, ValueError):
+            continue
+        if loaded.probe_set_id == probe_set_id:
+            matches.append(path)
+    if not matches:
+        raise ProbeSetError(f"no probe set file with probe_set_id {probe_set_id!r}")
+    if len(matches) > 1:
+        names = ", ".join(path.name for path in matches)
+        raise ProbeSetError(
+            f"multiple probe set files with probe_set_id {probe_set_id!r}: {names}"
+        )
+    return matches[0]

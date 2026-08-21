@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -60,6 +61,30 @@ def test_dry_run_writes_a_report_and_exits_zero(tmp_path: Path) -> None:
     assert report["schema_version"] == "2.1.0"
     assert report["probe_set_id"] == "unit"
     assert len(report["verdicts"]) == 1
+
+
+def test_dry_run_stamps_probe_set_path_and_sha256(tmp_path: Path) -> None:
+    probe_path = _probe_set_file(tmp_path)
+    output = tmp_path / "report.json"
+    code = main(
+        ["--dry-run", "--probe-set", str(probe_path), "--output", str(output)]
+    )
+    assert code == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["probe_set_sha256"] == hashlib.sha256(probe_path.read_bytes()).hexdigest()
+    stamped = str(report["probe_set_path"])
+    assert "\\" not in stamped
+    assert probe_path.name in stamped
+
+
+def test_resolve_latest_probe_set_returns_v3_path(tmp_path: Path) -> None:
+    from scripts.evaluate_memory import resolve_latest_probe_set
+
+    v2 = tmp_path / "v2-four-scopes-wide.json"
+    v3 = tmp_path / "v3-50-probes.json"
+    v2.write_text("{}", encoding="utf-8")
+    v3.write_text("{}", encoding="utf-8")
+    assert resolve_latest_probe_set(tmp_path) == v3
 
 
 def test_dry_run_report_contains_no_probe_text(tmp_path: Path) -> None:

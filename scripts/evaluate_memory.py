@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -122,6 +123,18 @@ def resolve_latest_probe_set(probes_dir: Path | None = None) -> Path:
         return (0, str(path))
 
     return max(files, key=_version_key)
+
+
+def _stamp_probe_set_identity(report: dict[str, object], probe_set_path: Path) -> None:
+    """Record which probe file produced this baseline (SPEC §7.2)."""
+
+    resolved = probe_set_path.resolve()
+    try:
+        stamped_path = resolved.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        stamped_path = resolved.as_posix()
+    report["probe_set_path"] = stamped_path
+    report["probe_set_sha256"] = hashlib.sha256(probe_set_path.read_bytes()).hexdigest()
 
 
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
@@ -562,6 +575,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ExcessiveSeedFailuresError as error:
             print(f"ERROR: {error}", file=sys.stderr)
             return 1
+
+    _stamp_probe_set_identity(report, probe_set_path)
 
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     output = args.output

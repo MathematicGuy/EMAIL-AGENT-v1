@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import (
     ProbeSetError,
     ProbeTest,
+    find_probe_set_file,
     load_probe_set,
 )
 
@@ -196,3 +200,30 @@ def test_invented_any_without_expect_refusal_is_rejected() -> None:
     )
     with pytest.raises(ProbeSetError, match="invented_any"):
         load_probe_set(payload)
+
+
+def _minimal_probe_json(probe_set_id: str) -> str:
+    return json.dumps(_payload(probe_set_id=probe_set_id))
+
+
+def test_find_probe_set_file_matches_id(tmp_path: Path) -> None:
+    v2 = tmp_path / "v2-four-scopes-wide.json"
+    v3 = tmp_path / "v3-50-probes.json"
+    v2.write_text(_minimal_probe_json("v2_four_scopes_wide"), encoding="utf-8")
+    v3.write_text(_minimal_probe_json("v3_50_probes"), encoding="utf-8")
+    assert find_probe_set_file(tmp_path, "v2_four_scopes_wide") == v2
+
+
+def test_find_probe_set_file_unknown_id_fails(tmp_path: Path) -> None:
+    (tmp_path / "v2-four-scopes-wide.json").write_text(
+        _minimal_probe_json("v2_four_scopes_wide"), encoding="utf-8"
+    )
+    with pytest.raises(ProbeSetError, match="v3_50_probes"):
+        find_probe_set_file(tmp_path, "v3_50_probes")
+
+
+def test_find_probe_set_file_duplicate_id_fails(tmp_path: Path) -> None:
+    (tmp_path / "a.json").write_text(_minimal_probe_json("unit"), encoding="utf-8")
+    (tmp_path / "b.json").write_text(_minimal_probe_json("unit"), encoding="utf-8")
+    with pytest.raises(ProbeSetError, match="unit"):
+        find_probe_set_file(tmp_path, "unit")
