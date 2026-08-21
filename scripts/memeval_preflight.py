@@ -303,9 +303,14 @@ def render(checks: Sequence[Check]) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from scripts.evaluate_memory import resolve_latest_probe_set
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--probe-set", type=Path, default=Path("evaluations/MEMORIES/probes/v1-four-scopes.json")
+        "--probe-set",
+        type=Path,
+        default=None,
+        help="Path to probe set JSON definition; defaults to the latest version found in probes/.",
     )
     parser.add_argument("--provider", help="Chat provider to check; defaults to LLM_PROVIDER.")
     parser.add_argument(
@@ -316,10 +321,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="Machine-readable output.")
     args = parser.parse_args(argv)
 
+    probe_set_path = args.probe_set or resolve_latest_probe_set()
     checks = run_checks(
         os.environ,
         root=Path.cwd(),
-        probe_set=args.probe_set,
+        probe_set=probe_set_path,
         provider=args.provider,
         live=not args.no_live,
     )

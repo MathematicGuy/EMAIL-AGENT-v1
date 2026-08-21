@@ -273,7 +273,7 @@ class GeminiChatReply(_ConfiguredChatReply):
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
             keys = await rotator.candidates(settings.max_attempts)
-            last_error: GeminiRateLimitError | None = None
+            last_error: Exception | None = None
             for key in keys:
                 try:
                     return await resolved_transport.generate(
@@ -284,10 +284,11 @@ class GeminiChatReply(_ConfiguredChatReply):
                         timeout_seconds=settings.timeout_seconds,
                         system_instruction=cast(str, payload["system"]),
                     )
-                except GeminiRateLimitError as error:
+                except Exception as error:
                     last_error = error
                     if not settings.rotate_on_rate_limit:
                         raise
+                    await asyncio.sleep(0.5)
             raise last_error or ChatReplyUnavailable("no Gemini API key was attempted")
 
         return cls(model=settings.model, complete=complete)
