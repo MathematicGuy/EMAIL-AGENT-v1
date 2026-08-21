@@ -7,15 +7,15 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Core suite: `uv run pytest -q` -> ~26 s, 536 passed.** Defaults: 4 xdist
+**Core suite: `uv run pytest -q` -> ~20 s, 1142 passed.** Defaults: 4 xdist
 workers with `--dist loadgroup`, `-m 'not live and not extended'`, `--strict-markers`. Worker
 flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
 is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
 route — that throws away the cores. Use `-n 0` only to debug a single failure.
 
 To run extended/nightly tests or full offline suite:
-- `uv run pytest -m extended -q` (runs non-core / PostgreSQL persistence / MemEval suite — 968 passed, ~23 s)
-- `uv run pytest -m 'not live' -q` (runs full 1,504 offline tests)
+- `uv run pytest -m extended -q` (real PostgreSQL persistence + MemEval / evaluation harnesses — 383 passed, ~12 s)
+- `uv run pytest -m 'not live' -q` (runs the full 1,525 offline tests)
 
 The suite is **offline by construction** -- see §7. Do not undo that to make a
 test pass.
@@ -45,7 +45,7 @@ which is what one route costs; the full suite is parallel.
 | R14 | `tests/integration` | 68 | 13.0 s | R11+R12+R13 plus corpus-backed workflow. |
 | R15 | `tests/unit` | 974 | 22.0 s | Everything above the integration line. |
 | R16 | `tests/unit --ignore=tests/unit/scripts` | 908 | 14.0 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(core suite)* | 536 | **26 s parallel** | `uv run pytest -q` |
+| — | *(core suite)* | 1142 | **20 s parallel** | `uv run pytest -q` |
 
 ### Source -> route
 
@@ -74,7 +74,7 @@ Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
 | Marker | Meaning | Default |
 |---|---|---|
 | `core` | **Test Não & Thuật toán**: Logic nghiệp vụ, contracts, security boundary (Fakes 100%, 0 I/O). | **Selected** by default. |
-| `extended` | **Test Kho chứa & Đánh giá**: Real PostgreSQL container, MemEval harness, evaluation datasets. | **Deselected.** `-m extended` to run (968 passed). |
+| `extended` | **Test Kho chứa & Đánh giá**: Real PostgreSQL container, MemEval harness, evaluation datasets. A fast, fakes-only test of *production* behaviour is `core` — do not mark it `extended` just because it lives under `unit/scripts` or reads a fixture file. | **Deselected.** `-m extended` to run (383 passed). |
 | `live` | **Test Thực địa ngoài đời**: Real Gmail OAuth, real Gemini API, real server subprocess. | **Deselected.** `-m live` to opt in (27 tests). |
 | `slow` | >1 s of wall clock on its own. | Selected. |
 | `serial` | Spawns a process or binds a fixed port. Auto-grouped onto one xdist worker (`xdist_group("serial")`). Do not disable xdist for these. | Selected. |

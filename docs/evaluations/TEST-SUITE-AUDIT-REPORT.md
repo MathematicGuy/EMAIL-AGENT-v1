@@ -71,3 +71,55 @@ uv run ruff check .
 uv run mypy src
 # Success: no issues found in 157 source files
 ```
+
+---
+
+## 4. Đính chính sau code review (post-review correction)
+
+Bản kiểm toán ở trên đã đánh dấu `extended` cho 89/158 module test, trong đó có
+**46 module là unit test thuần của logic production** (fakes 100%, 0 I/O, dưới 1 s):
+`test_bm25`, `test_rrf`, `test_query_guard`, `test_markdown_chunking`,
+`test_retention`, `test_memory_gateway`, `test_chat_reply`, `test_intent_service`,
+`test_ports`, `test_routing`, `test_citation_accuracy`, toàn bộ
+`knowledge_ingestion/*`, `integrations/llm/*`, `integrations/rag/*` …
+
+Những module đó chính là "toàn bộ invariant nghiệp vụ, bảo mật, contracts" mà bảng
+ở §1 mô tả cho tầng **Core** — nhưng lại bị **bỏ chọn mặc định**, nên một hồi quy
+trong BM25, RRF, query guard hay retention policy sẽ merge xanh mà không ai biết.
+
+**Đã sửa:** 46 module này được trả về tầng core. Định nghĩa marker `extended` được
+thu hẹp lại thành *"cần PostgreSQL thật, hoặc chạy harness đánh giá/benchmark chứ
+không phải mã production"*.
+
+### Phân bổ sau đính chính
+
+| Tầng | Số lượng test | Thời gian | Trạng thái mặc định |
+|---|:---:|:---:|---|
+| **Core** | **1.142** *(từ 536)* | **~20 s** | Selected |
+| **Extended** | **383** *(từ 968)* | **~12 s** | Deselected (`-m extended`) |
+| **Live** | 27 | Tùy network | Deselected (`-m live`) |
+
+```bash
+uv run pytest -q
+# 1142 passed, 9 skipped in 19.83s
+
+uv run pytest -m extended -q
+# 383 passed, 10 skipped in 12.40s
+```
+
+### Đính chính hành động §2.4 (URL mặc định Postgres)
+
+`DEFAULT_PG_TEST_URL` **đã được gỡ bỏ**. Ba module persistence quay lại
+`os.getenv("PG_TEST_URL", "")`.
+
+Lý do: các module này có autouse fixture chạy `DROP SCHEMA public CASCADE`. Khi URL
+mặc định trỏ tới container dev, `pytest -m extended` không kèm `PG_TEST_URL` sẽ
+**xóa sạch database dev của lập trình viên** thay vì skip như trước. Docstring của
+`pg_probe.py` vốn đã ghi rõ điều này ("must not start guessing at the dev
+container") nhưng không được cập nhật theo thay đổi.
+
+Muốn chạy tầng persistence, hãy trỏ `PG_TEST_URL` tới một database dùng-một-lần:
+
+```bash
+PG_TEST_URL=postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_test uv run pytest -m extended -q
+```

@@ -1366,7 +1366,8 @@ def create_app() -> FastAPI:
 
         # Document Server nests the real payload under `payload` when it signs the
         # Authorization header, and signs the body inline otherwise.
-        payload = claims.get("payload") if isinstance(claims.get("payload"), dict) else claims
+        nested = claims.get("payload")
+        payload: dict[str, Any] = nested if isinstance(nested, dict) else claims
         status = payload.get("status", body.get("status"))
         if status not in (2, 6):
             return {"error": 0}

@@ -33,6 +33,15 @@ const mockRawDocs = [
     has_extracted_md: true,
     extracted_md_name: '01-2021-nd-cp-283247.md',
   },
+  {
+    // Neither PDF nor Word: this one lands straight in the extracted pane.
+    filename: 'huong_dan.txt',
+    file_type: 'txt',
+    size: 812,
+    updated_at: '2026-08-20T07:00:00Z',
+    has_extracted_md: true,
+    extracted_md_name: 'huong-dan.md',
+  },
 ];
 
 describe('RawDocumentsView', () => {
@@ -153,5 +162,51 @@ describe('RawDocumentsView', () => {
       expect(screen.getByText('Extracted Procedure')).not.toBeNull();
       expect(screen.getByText('Detail content...')).not.toBeNull();
     });
+  });
+
+  it('loads extracted text when a non-PDF, non-Word document opens straight into that pane', async () => {
+    // Regression: the extracted pane rendered for these files, but only the toggle
+    // triggered the fetch -- so selecting one showed "no extracted text" for a
+    // document that had it.
+    render(<RawDocumentsView />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('huong_dan.txt').length).toBeGreaterThanOrEqual(1);
+    });
+
+    fireEvent.click(screen.getAllByText('huong_dan.txt')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Extracted Procedure')).not.toBeNull();
+    });
+    expect(screen.queryByText('Không có văn bản trích xuất cho tài liệu này.')).toBeNull();
+  });
+
+  it('reports missing extracted text without retrying forever', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/extracted')) {
+          return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockRawDocs) });
+      })
+    );
+
+    render(<RawDocumentsView />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('huong_dan.txt').length).toBeGreaterThanOrEqual(1);
+    });
+    fireEvent.click(screen.getAllByText('huong_dan.txt')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Không có văn bản trích xuất cho tài liệu này.')).not.toBeNull();
+    });
+
+    const extractedCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([url]) => String(url).includes('/extracted')
+    );
+    expect(extractedCalls.length).toBe(1);
   });
 });
