@@ -63,8 +63,8 @@ def test_gemini_classifier_rotates_key_after_rate_limit(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.gemini.AsyncGeminiHttpTransport",
-        lambda *args, **kwargs: FakeTransport(),
+        "cowork_agent.integrations.llm.providers.gemini.GoogleGenAITransport",
+        FakeTransport,
     )
 
     provider = GeminiSettings(
