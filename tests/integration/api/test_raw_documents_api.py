@@ -159,3 +159,85 @@ async def test_post_onlyoffice_callback_save(tmp_path, monkeypatch):
         if test_file.exists():
             test_file.unlink()
 
+
+@pytest.mark.asyncio
+async def test_upload_raw_document_endpoint(tmp_path):
+    app = create_app()
+    from cowork_agent.app import RAW_DOCS_DIR
+    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
+        SQLiteRawDocumentRepository,
+    )
+
+    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
+    await repo.initialize()
+    app.state.raw_document_repository = repo
+
+    test_filename = "_test_upload_sample.docx"
+    target_raw = RAW_DOCS_DIR / test_filename
+    if target_raw.exists():
+        target_raw.unlink()
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            files = {
+                "file": (
+                    test_filename,
+                    b"test docx file binary content",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            }
+            res = await client.post("/api/v1/raw-documents/upload", files=files)
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "uploaded"
+            assert data["filename"] == test_filename
+            assert data["file_type"] == "docx"
+            assert target_raw.exists()
+            assert target_raw.read_bytes() == b"test docx file binary content"
+    finally:
+        if target_raw.exists():
+            target_raw.unlink()
+
+
+@pytest.mark.asyncio
+async def test_put_and_delete_raw_document_endpoint(tmp_path):
+    app = create_app()
+    from cowork_agent.app import RAW_DOCS_DIR
+    from cowork_agent.persistence.repositories.sqlite_raw_documents import (
+        SQLiteRawDocumentRepository,
+    )
+
+    repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
+    await repo.initialize()
+    app.state.raw_document_repository = repo
+
+    test_filename = "_test_put_delete.docx"
+    target_raw = RAW_DOCS_DIR / test_filename
+    target_raw.write_bytes(b"initial content")
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # PUT update
+            res_put = await client.put(
+                f"/api/v1/raw-documents/{test_filename}",
+                content=b"updated content directly via put",
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            assert res_put.status_code == 200
+            assert res_put.json()["status"] == "saved"
+            assert target_raw.read_bytes() == b"updated content directly via put"
+
+            # DELETE
+            res_del = await client.delete(f"/api/v1/raw-documents/{test_filename}")
+            assert res_del.status_code == 200
+            assert res_del.json()["status"] == "deleted"
+            assert not target_raw.exists()
+    finally:
+        if target_raw.exists():
+            target_raw.unlink()
+
+

@@ -8,12 +8,21 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
@@ -1177,6 +1186,80 @@ def create_app() -> FastAPI:
                 extracted = candidate
         return extracted if extracted and (EXTRACTED_DIR / extracted).is_file() else None
 
+    @app.post("/api/v1/raw-documents/upload")
+    async def upload_raw_document(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+    ) -> dict[str, Any]:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="Filename required")
+
+        safe_name = Path(file.filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        ext = Path(safe_name).suffix.lower().lstrip(".")
+        if ext not in ("pdf", "docx", "doc"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Định dạng không được hỗ trợ: .{ext}. Chỉ chấp nhận .pdf, .docx, .doc",
+            )
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Tệp rỗng")
+
+        target_raw.write_bytes(content)
+        repo = _raw_document_repo(request)
+        await repo.record_save(safe_name, status=2)
+        logger.info("Uploaded raw document %s into data/raw/ (%d bytes)", safe_name, len(content))
+
+        # Auto-extract markdown into data/extracted/
+        has_extracted = False
+        extracted_name: str | None = None
+        if ext in ("docx", "doc"):
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.docx_extractor import (
+                    DocxExtractor,
+                )
+
+                extracted = DocxExtractor().extract(target_raw)
+                stem = target_raw.stem.lower().replace("_", "-").replace(" ", "-")
+                extracted_name = f"{stem}.md"
+                target_extracted = EXTRACTED_DIR / extracted_name
+                target_extracted.write_text(extracted.markdown, encoding="utf-8")
+                has_extracted = True
+                logger.info("Extracted markdown for %s -> %s", safe_name, extracted_name)
+            except Exception as extract_err:
+                logger.warning("Could not extract markdown for %s: %s", safe_name, extract_err)
+        elif ext == "pdf":
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.pdf_inspector import (
+                    PdfInspector,
+                )
+
+                inspection = PdfInspector().inspect(target_raw)
+                pdf_text = "\n\n".join(inspection.native_markdown_by_page.values()).strip()
+                if pdf_text:
+                    stem = target_raw.stem.lower().replace("_", "-").replace(" ", "-")
+                    extracted_name = f"{stem}.md"
+                    target_extracted = EXTRACTED_DIR / extracted_name
+                    target_extracted.write_text(pdf_text, encoding="utf-8")
+                    has_extracted = True
+                    logger.info("Extracted PDF text for %s -> %s", safe_name, extracted_name)
+            except Exception as extract_err:
+                logger.warning("Could not extract PDF text for %s: %s", safe_name, extract_err)
+
+        return {
+            "status": "uploaded",
+            "filename": safe_name,
+            "size": len(content),
+            "file_type": ext,
+            "has_extracted_md": has_extracted,
+            "extracted_md_name": extracted_name,
+        }
+
     @app.get("/api/v1/raw-documents")
     async def list_raw_documents() -> list[dict[str, Any]]:
         if not RAW_DOCS_DIR.exists():
@@ -1184,7 +1267,11 @@ def create_app() -> FastAPI:
 
         manifest = _load_raw_manifest()
         documents: list[dict[str, Any]] = []
-        for item in sorted(RAW_DOCS_DIR.iterdir(), key=lambda p: p.name.lower()):
+        for item in sorted(
+            RAW_DOCS_DIR.iterdir(),
+            key=lambda p: p.stat().st_mtime if p.is_file() else 0,
+            reverse=True,
+        ):
             if not item.is_file() or item.name.startswith("."):
                 continue
             try:
@@ -1351,6 +1438,77 @@ def create_app() -> FastAPI:
                     )
 
         return {"error": 0}
+
+    @app.put("/api/v1/raw-documents/{filename}")
+    async def put_raw_document(
+        filename: str, request: Request
+    ) -> dict[str, Any]:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        if not target_raw.is_file():
+            raise HTTPException(status_code=404, detail="Raw document not found")
+
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty document payload")
+
+        target_raw.write_bytes(content)
+        repo = _raw_document_repo(request)
+        await repo.record_save(safe_name, status=2)
+        logger.info("Saved raw document %s directly (%d bytes)", safe_name, len(content))
+
+        # Re-extract markdown if it was a docx file
+        ext = target_raw.suffix.lower().lstrip(".")
+        if ext in ("docx", "doc"):
+            try:
+                from cowork_agent.integrations.knowledge_ingestion.docx_extractor import (
+                    DocxExtractor,
+                )
+
+                extracted = DocxExtractor().extract(target_raw)
+                extracted_md_name = _resolve_extracted_doc(safe_name, _load_raw_manifest())
+                if extracted_md_name:
+                    target_extracted = EXTRACTED_DIR / extracted_md_name
+                    target_extracted.write_text(extracted.markdown, encoding="utf-8")
+                    logger.info("Updated extracted markdown for %s", safe_name)
+            except Exception as extract_err:
+                logger.warning("Could not re-extract markdown for %s: %s", safe_name, extract_err)
+
+        return {"status": "saved", "filename": safe_name, "size": len(content)}
+
+    @app.delete("/api/v1/raw-documents/{filename}")
+    async def delete_raw_document(
+        filename: str, request: Request
+    ) -> dict[str, Any]:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        target_raw = RAW_DOCS_DIR / safe_name
+        if not target_raw.is_file():
+            raise HTTPException(status_code=404, detail="Raw document not found")
+
+        try:
+            target_raw.unlink(missing_ok=True)
+            logger.info("Deleted raw document %s", safe_name)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
+
+        manifest = _load_raw_manifest()
+        extracted_md = _resolve_extracted_doc(safe_name, manifest)
+        if extracted_md:
+            target_extracted = EXTRACTED_DIR / extracted_md
+            if target_extracted.is_file():
+                try:
+                    target_extracted.unlink(missing_ok=True)
+                    logger.info("Deleted extracted markdown %s for %s", extracted_md, safe_name)
+                except Exception as exc:
+                    logger.warning("Could not delete extracted markdown %s: %s", extracted_md, exc)
+
+        return {"status": "deleted", "filename": safe_name}
 
     return app
 

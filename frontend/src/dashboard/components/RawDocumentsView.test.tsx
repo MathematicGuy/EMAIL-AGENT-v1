@@ -2,16 +2,10 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { RawDocumentsView } from './RawDocumentsView';
 
-vi.mock('@onlyoffice/document-editor-react', () => ({
-  DocumentEditor: ({
-    config,
-    id,
-  }: {
-    config?: { document?: { title?: string } };
-    id: string;
-  }) => (
-    <div data-testid="onlyoffice-editor" id={id}>
-      OnlyOffice Editor: {config?.document?.title}
+vi.mock('./DocxViewer', () => ({
+  DocxViewer: ({ filename }: { filename: string }) => (
+    <div data-testid="docx-viewer">
+      Docx Viewer: {filename}
     </div>
   ),
 }));
@@ -39,30 +33,32 @@ describe('RawDocumentsView', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockImplementation((url: string) => {
-        if (url.includes('/api/v1/raw-documents') && !url.includes('/extracted') && !url.includes('/onlyoffice-config')) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve(mockRawDocs),
-          });
-        }
-        if (url.includes('/onlyoffice-config')) {
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.includes('/api/v1/raw-documents/upload') && init?.method === 'POST') {
           return Promise.resolve({
             ok: true,
             json: () =>
               Promise.resolve({
-                document: {
-                  fileType: 'docx',
-                  key: 'mock_key_123',
-                  title: '01_2021_ND-CP_283247.docx',
-                  url: 'http://test/api/v1/raw-documents/01_2021_ND-CP_283247.docx',
-                },
-                documentType: 'word',
-                editorConfig: {
-                  callbackUrl: 'http://test/callback',
-                },
-                documentServerUrl: 'http://localhost:8080',
+                filename: 'new_proc.docx',
+                file_type: 'docx',
+                size: 1024,
+                updated_at: '2026-08-21T00:00:00Z',
+                has_extracted_md: true,
+                extracted_md_name: 'new-proc.md',
               }),
+          });
+        }
+        if (init?.method === 'DELETE') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ status: 'deleted', filename: 'cap_lai_cccd.pdf' }),
+          });
+        }
+        if (url.includes('/api/v1/raw-documents') && !url.includes('/extracted')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockRawDocs),
+            arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
           });
         }
         if (url.includes('/extracted')) {
@@ -97,7 +93,7 @@ describe('RawDocumentsView', () => {
       expect(screen.getAllByText('01_2021_ND-CP_283247.docx').length).toBeGreaterThanOrEqual(1);
     });
 
-    const iframe = screen.getByTitle('cap_lai_cccd.pdf');
+    const iframe = screen.getByTitle('pdf-preview-cap_lai_cccd.pdf');
     expect(iframe).not.toBeNull();
     expect(iframe.getAttribute('src')).toContain('cap_lai_cccd.pdf');
   });
@@ -130,7 +126,7 @@ describe('RawDocumentsView', () => {
     expect(screen.getAllByText('01_2021_ND-CP_283247.docx').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('switches to docx document and loads OnlyOffice editor in preview mode', async () => {
+  it('switches to docx document and loads DocxViewer in preview mode', async () => {
     render(<RawDocumentsView />);
 
     await waitFor(() => {
@@ -141,8 +137,8 @@ describe('RawDocumentsView', () => {
     fireEvent.click(docxItem);
 
     await waitFor(() => {
-      expect(screen.getByTestId('onlyoffice-editor')).not.toBeNull();
-      expect(screen.getByText('OnlyOffice Editor: 01_2021_ND-CP_283247.docx')).not.toBeNull();
+      expect(screen.getByTestId('docx-viewer')).not.toBeNull();
+      expect(screen.getByText('Docx Viewer: 01_2021_ND-CP_283247.docx')).not.toBeNull();
     });
 
     // Toggle to Markdown extracted view
@@ -152,6 +148,29 @@ describe('RawDocumentsView', () => {
     await waitFor(() => {
       expect(screen.getByText('Extracted Procedure')).not.toBeNull();
       expect(screen.getByText('Detail content...')).not.toBeNull();
+    });
+  });
+
+  it('handles file upload button click and triggers upload request', async () => {
+    render(<RawDocumentsView />);
+
+    const uploadBtn = screen.getByTitle('Tải lên tài liệu quy trình (.pdf, .docx)');
+    expect(uploadBtn).not.toBeNull();
+  });
+
+  it('deletes document when delete button is clicked and confirmed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<RawDocumentsView />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('cap_lai_cccd.pdf').length).toBeGreaterThanOrEqual(1);
+    });
+
+    const deleteBtns = screen.getAllByTitle('Xóa tài liệu');
+    fireEvent.click(deleteBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText('cap_lai_cccd.pdf')).toBeNull();
     });
   });
 });
