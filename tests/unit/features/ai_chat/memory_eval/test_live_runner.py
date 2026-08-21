@@ -8,7 +8,6 @@ from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
 from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_runner import (
-    ExcessiveSeedFailuresError,
     LiveSession,
     ask_live,
     build_identity,
@@ -314,14 +313,16 @@ def test_an_arm_with_no_semantic_adapter_is_left_alone() -> None:
     assert session.adapters_for(Arm.CONTROL) is session.adapters
 
 
-def test_excessive_seed_failures_aborts_run() -> None:
-    import pytest
-
+def test_leftover_seed_failure_strings_do_not_abort() -> None:
     session = _session(_Reply())
-    # Pre-populate 4 seed failures to simulate unstable provider
     session.seed_failures = ["err1", "err2", "err3", "err4"]
-    probe = _probe(targets=MemoryType.EPISODIC)
+    text, _ = asyncio.run(ask_live(session, _probe(targets=MemoryType.EPISODIC), Arm.FULL, None))
+    assert text == "an answer"
 
-    with pytest.raises(ExcessiveSeedFailuresError, match="Seeding failed"):
-        asyncio.run(ask_live(session, probe, Arm.FULL, None))
+
+def test_control_does_not_reset_consecutive_provider_failures() -> None:
+    session = _session(_Reply())
+    session.consecutive_provider_failures = 2
+    asyncio.run(ask_live(session, _probe(), Arm.CONTROL, None))
+    assert session.consecutive_provider_failures == 2
 
