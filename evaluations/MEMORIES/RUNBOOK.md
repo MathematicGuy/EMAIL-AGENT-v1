@@ -192,7 +192,7 @@ Automate all calculations, scorecard tables, and quote extraction using:
 ```bash
 PYTHONPATH=src .venv/Scripts/python.exe scripts/build_memory_evaluation_report.py
 ```
-*(Optionally pass `--baseline <path>` and `--detail <path>` to target a specific run).*
+*(Optionally pass `--baseline <path>` and `--detail <path>` to target a specific run. With no `--probe-set`, the builder binds `baseline["probe_set_id"]` + hash — not the latest file. An `"aborted": true` baseline is still a reportable run.)*
 
 
 ---

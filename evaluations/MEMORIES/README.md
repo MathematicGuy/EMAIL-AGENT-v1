@@ -37,15 +37,18 @@ $env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
   --output evaluations/MEMORIES/baselines/<name>-<model>.json
 ```
 
-`--provider` defaults to `$LLM_PROVIDER`, else gemini. Embedding the corpus
-needs `GEMINI_API_KEY`, or `JINA_API_KEY` when
-`DOCUMENT_EMBEDDING_PROVIDER=jina`.
+`--provider` defaults to `$LLM_PROVIDER`, else gemini. Memory-eval embeddings
+are Gemini (`GEMINI_API_KEY`). `JINA_API_KEY` is only required if you
+deliberately set `DOCUMENT_EMBEDDING_PROVIDER=jina` — that is not the eval default.
 
-**Exit code 0 means the harness ran**, not that memory is good.
+**Exit code 0 means the run finished**, not that memory is good. Exit **1** is no usable model, or a consecutive `chat_provider_unavailable` abort (default 3; `--max-consecutive-provider-failures`). If the output JSON has `"aborted": true`, baseline + detail were still written — build the report from them. Exit **2** is cannot start (probe set, args, unsafe target).
 
 ## Which probe set
 
-By default, the harness automatically discovers and loads the **latest probe set** found in `evaluations/MEMORIES/probes/` (e.g., `v2-four-scopes-wide.json` or whichever highest version is present).
+**Launch and report are different jobs.** Do not share “latest file on disk.”
+
+- **Launch** (`evaluate_memory.py` with no `--probe-set`): among `evaluations/MEMORIES/probes/*.json`, pick the maximum integer prefix after a leading `v` (`v2-four-scopes-wide.json` → `2`). Pin a historical set with `--probe-set`.
+- **Report** (`build_memory_evaluation_report.py` with no `--probe-set`): load the file whose `probe_set_id` equals `baseline["probe_set_id"]`, then verify `probe_set_sha256` when present. Unknown id or hash mismatch → exit 1, no markdown. A v2 baseline stays v2 after a v3 file is added.
 
 | file | probes | probe turns per run | what it is |
 |---|---|---|---|
