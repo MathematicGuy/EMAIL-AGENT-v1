@@ -62,6 +62,7 @@ frontend/.env
 .serena
 .mypy_cache
 .grok
+scratch
 
 # Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
