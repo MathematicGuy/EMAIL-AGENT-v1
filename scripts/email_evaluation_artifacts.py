@@ -15,6 +15,20 @@ ACTIONABILITIES = frozenset(
     {"action_required", "action_suggested", "informational", "irrelevant", "unclear"}
 )
 ROUTES = frozenset({"no_action", "direct_plan", "retrieve_rag"})
+ROUTE_MODES = frozenset({"full", "partial"})
+EVIDENCE_STATUSES = frozenset({"supported", "unsupported", "unavailable"})
+QUERY_REWRITE_STATUSES = frozenset({"classifier_query", "rewritten", "fallback"})
+RETRIEVAL_STATUSES = frozenset(
+    {
+        "success",
+        "no_results",
+        "timeout",
+        "authorization_denied",
+        "partial",
+        "failed",
+        "unavailable",
+    }
+)
 DOCUMENT_TYPES = frozenset(
     {
         "company_policy",
@@ -26,8 +40,10 @@ DOCUMENT_TYPES = frozenset(
     }
 )
 PRIVATE_CONTENT_KEYS = frozenset({"gmail_content", "snippet", "normalized_body"})
-RUBRIC_VERSION = "email-intent-annotation-v1"
+RUBRIC_VERSION = "email-pipeline-annotation-v2"
 PROMPT_VERSION = "email-intent-v1"
+PIPELINE_VERSION = "4"
+GATE_VERSION = "email-rag-gate-v1"
 
 _ANNOTATION_SOURCES = frozenset({"human_reviewed", "calibrated_labeling_agent"})
 _CONSISTENCY_STATUSES = frozenset({"consistent", "needs_review"})
@@ -52,9 +68,7 @@ def atomic_write_json(value: Mapping[str, object], path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
 
 
@@ -105,16 +119,12 @@ def validate_candidate_dataset(
         _require_nonempty_string(
             case["source_message_id"], f"candidate case {index}.source_message_id"
         )
-        _require_nonempty_string(
-            case["gmail_thread_id"], f"candidate case {index}.gmail_thread_id"
-        )
+        _require_nonempty_string(case["gmail_thread_id"], f"candidate case {index}.gmail_thread_id")
         _require_nonempty_string(case["sender"], f"candidate case {index}.sender")
         _require_nonempty_string(case["subject"], f"candidate case {index}.subject")
         _require_timestamp(case["received_at"], f"candidate case {index}.received_at")
         _require_string_list(case["labels"], f"candidate case {index}.labels")
-        _require_nonempty_string(
-            case["gmail_content"], f"candidate case {index}.gmail_content"
-        )
+        _require_nonempty_string(case["gmail_content"], f"candidate case {index}.gmail_content")
         validated_cases.append(case)
     _require_unique(validated_cases, "case_id", "candidate dataset")
     _require_unique(validated_cases, "source_message_id", "candidate dataset")
@@ -123,16 +133,13 @@ def validate_candidate_dataset(
         for index, case in enumerate(validated_cases, start=1)
     ]
     if any(
-        previous < current
-        for previous, current in zip(received_at, received_at[1:], strict=False)
+        previous < current for previous, current in zip(received_at, received_at[1:], strict=False)
     ):
         raise ValueError("candidate dataset cases must be ordered by received_at descending")
     return _copy_validated(top, validated_cases)
 
 
-def validate_proposal_batch(
-    value: object, *, expected_count: int = 70
-) -> dict[str, object]:
+def validate_proposal_batch(value: object, *, expected_count: int = 70) -> dict[str, object]:
     """Validate the proposal batch, which contains no Gmail content."""
 
     top = _top_level(
@@ -149,9 +156,7 @@ def validate_proposal_batch(
     return _copy_validated(top, validated_cases)
 
 
-def validate_review_export(
-    value: object, *, expected_count: int = 70
-) -> dict[str, object]:
+def validate_review_export(value: object, *, expected_count: int = 70) -> dict[str, object]:
     """Validate the browser-exported human review artifact."""
 
     top = _top_level(
@@ -196,9 +201,7 @@ def validate_golden_dataset(
     return _copy_validated(top, validated_cases)
 
 
-def validate_run_artifact(
-    value: object, *, maximum_cases: int = 50
-) -> dict[str, object]:
+def validate_run_artifact(value: object, *, maximum_cases: int = 50) -> dict[str, object]:
     """Validate one metadata-only provider/model evaluation run."""
 
     if maximum_cases > 50:
@@ -214,12 +217,15 @@ def validate_run_artifact(
             "provider",
             "model",
             "prompt_version",
+            "pipeline_version",
+            "quality_gate",
             "shard",
             "cases",
         },
         "run artifact",
     )
-    _require_int(top["schema_version"], "run artifact.schema_version", minimum=1)
+    if _require_int(top["schema_version"], "run artifact.schema_version", minimum=1) != 2:
+        raise ValueError("run artifact.schema_version must be 2")
     _require_nonempty_string(top["run_id"], "run artifact.run_id")
     _require_timestamp(top["created_at"], "run artifact.created_at")
     fingerprint = _require_nonempty_string(
@@ -232,6 +238,19 @@ def validate_run_artifact(
     _require_nonempty_string(top["model"], "run artifact.model")
     if top["prompt_version"] != PROMPT_VERSION:
         raise ValueError("run artifact.prompt_version must be 'email-intent-v1'")
+    if top["pipeline_version"] != PIPELINE_VERSION:
+        raise ValueError(f"run artifact.pipeline_version must be '{PIPELINE_VERSION}'")
+    quality_gate = _top_level(
+        top["quality_gate"],
+        {"version", "min_rerank_score", "relative_cutoff_ratio"},
+        "run artifact.quality_gate",
+    )
+    if quality_gate["version"] != GATE_VERSION:
+        raise ValueError(f"run artifact.quality_gate.version must be '{GATE_VERSION}'")
+    for field in ("min_rerank_score", "relative_cutoff_ratio"):
+        score = _require_number(quality_gate[field], f"run artifact.quality_gate.{field}")
+        if not 0 <= score <= 1:
+            raise ValueError(f"run artifact.quality_gate.{field} must be between 0 and 1")
     shard = _top_level(
         top["shard"],
         {"index", "count", "case_count"},
@@ -247,7 +266,7 @@ def validate_run_artifact(
     _require_case_count(shard["case_count"], len(cases), None, "run artifact.shard")
     validated_cases = [_validate_run_case(item, index) for index, item in enumerate(cases)]
     _require_unique(validated_cases, "case_id", "run artifact")
-    return _copy_validated(top, validated_cases, shard=dict(shard))
+    return _copy_validated(top, validated_cases, shard=dict(shard), quality_gate=dict(quality_gate))
 
 
 def dataset_fingerprint(golden: Mapping[str, object]) -> str:
@@ -332,7 +351,8 @@ def _require_case_count(
 
 
 def _validate_version_fields(mapping: Mapping[str, object], location: str) -> None:
-    _require_int(mapping["schema_version"], f"{location}.schema_version", minimum=1)
+    if _require_int(mapping["schema_version"], f"{location}.schema_version", minimum=1) != 2:
+        raise ValueError(f"{location}.schema_version must be 2")
     _require_rubric_version(mapping, location)
 
 
@@ -349,7 +369,7 @@ def _validate_proposal_case(value: object, index: int) -> dict[str, object]:
             "case_id",
             "source_message_id",
             "proposed_ground_truth",
-            "resolver_expected_route",
+            "resolver_expected_retrieval",
             "consistency_status",
             "selection_reason",
             "review_status",
@@ -359,7 +379,7 @@ def _validate_proposal_case(value: object, index: int) -> dict[str, object]:
     _require_nonempty_string(case["case_id"], f"{location}.case_id")
     _require_nonempty_string(case["source_message_id"], f"{location}.source_message_id")
     _validate_ground_truth(case["proposed_ground_truth"], f"{location}.proposed_ground_truth")
-    _require_enum(case["resolver_expected_route"], ROUTES, f"{location}.resolver_expected_route")
+    _require_bool(case["resolver_expected_retrieval"], f"{location}.resolver_expected_retrieval")
     _require_enum(
         case["consistency_status"], _CONSISTENCY_STATUSES, f"{location}.consistency_status"
     )
@@ -372,14 +392,12 @@ def _validate_review_case(value: object, index: int) -> dict[str, object]:
     location = f"review export.cases[{index}]"
     case = _top_level(
         value,
-        {"case_id", "source_message_id", "proposal", "final", "review_status"},
+        {"case_id", "source_message_id", "final"},
         location,
     )
     _require_nonempty_string(case["case_id"], f"{location}.case_id")
     _require_nonempty_string(case["source_message_id"], f"{location}.source_message_id")
-    _validate_ground_truth(case["proposal"], f"{location}.proposal")
     _validate_ground_truth(case["final"], f"{location}.final")
-    _require_enum(case["review_status"], _REVIEW_STATUSES, f"{location}.review_status")
     return case
 
 
@@ -406,15 +424,13 @@ def _validate_golden_case(value: object, index: int) -> dict[str, object]:
 
 def _validate_run_case(value: object, index: int) -> dict[str, object]:
     location = f"run artifact.cases[{index}]"
-    case = _top_level(value, {"case_id", "prediction", "routing"}, location)
+    case = _top_level(value, {"case_id", "prediction", "retrieval", "routing"}, location)
     _require_nonempty_string(case["case_id"], f"{location}.case_id")
     prediction = _top_level(
         case["prediction"],
         {
             "actionability",
             "email_is_sufficient",
-            "knowledge_gaps",
-            "retrieval_query",
             "expected_document_types",
             "confidence",
             "source_status",
@@ -425,11 +441,6 @@ def _validate_run_case(value: object, index: int) -> dict[str, object]:
         prediction["actionability"], ACTIONABILITIES, f"{location}.prediction.actionability"
     )
     _require_bool(prediction["email_is_sufficient"], f"{location}.prediction.email_is_sufficient")
-    _require_string_list(prediction["knowledge_gaps"], f"{location}.prediction.knowledge_gaps")
-    if prediction["retrieval_query"] is not None:
-        _require_nonempty_string(
-            prediction["retrieval_query"], f"{location}.prediction.retrieval_query"
-        )
     _require_document_types(
         prediction["expected_document_types"], f"{location}.prediction.expected_document_types"
     )
@@ -439,12 +450,83 @@ def _validate_run_case(value: object, index: int) -> dict[str, object]:
     _require_enum(
         prediction["source_status"], _RUN_SOURCE_STATUSES, f"{location}.prediction.source_status"
     )
+    retrieval = _top_level(
+        case["retrieval"],
+        {
+            "attempted",
+            "retrieval_status",
+            "evidence_status",
+            "result_count",
+            "accepted_chunk_count",
+            "top_rerank_score",
+            "query_rewrite_status",
+            "degraded",
+        },
+        f"{location}.retrieval",
+    )
+    attempted = _require_bool(retrieval["attempted"], f"{location}.retrieval.attempted")
+    degraded = _require_bool(retrieval["degraded"], f"{location}.retrieval.degraded")
+    if attempted:
+        _require_enum(
+            retrieval["retrieval_status"],
+            RETRIEVAL_STATUSES,
+            f"{location}.retrieval.retrieval_status",
+        )
+        _require_enum(
+            retrieval["evidence_status"],
+            EVIDENCE_STATUSES,
+            f"{location}.retrieval.evidence_status",
+        )
+        _require_enum(
+            retrieval["query_rewrite_status"],
+            QUERY_REWRITE_STATUSES,
+            f"{location}.retrieval.query_rewrite_status",
+        )
+    elif any(
+        retrieval[field] is not None
+        for field in (
+            "retrieval_status",
+            "evidence_status",
+            "top_rerank_score",
+            "query_rewrite_status",
+        )
+    ):
+        raise ValueError(f"{location}.retrieval unattempted fields must be null")
+    result_count = _require_int(
+        retrieval["result_count"], f"{location}.retrieval.result_count", minimum=0
+    )
+    accepted_count = _require_int(
+        retrieval["accepted_chunk_count"],
+        f"{location}.retrieval.accepted_chunk_count",
+        minimum=0,
+    )
+    if accepted_count > result_count:
+        raise ValueError(f"{location}.retrieval.accepted_chunk_count cannot exceed result_count")
+    if retrieval["top_rerank_score"] is not None:
+        score = _require_number(
+            retrieval["top_rerank_score"], f"{location}.retrieval.top_rerank_score"
+        )
+        if not 0 <= score <= 1:
+            raise ValueError(f"{location}.retrieval.top_rerank_score must be between 0 and 1")
+    evidence_status = retrieval["evidence_status"]
+    if not attempted and (result_count != 0 or accepted_count != 0 or degraded):
+        raise ValueError(f"{location}.retrieval unattempted counts must be zero and not degraded")
+    if evidence_status == "supported" and (
+        accepted_count == 0 or retrieval["top_rerank_score"] is None
+    ):
+        raise ValueError(f"{location}.retrieval supported evidence requires accepted scored chunks")
+    if evidence_status in {"unsupported", "unavailable"} and accepted_count != 0:
+        raise ValueError(f"{location}.retrieval rejected evidence cannot have accepted chunks")
+    if degraded != (evidence_status == "unavailable"):
+        raise ValueError(f"{location}.retrieval degraded must match unavailable evidence")
     routing = _top_level(
         case["routing"],
-        {"resolved_route", "reason_codes"},
+        {"resolved_route", "mode", "forced_by_guard", "reason_codes"},
         f"{location}.routing",
     )
     _require_enum(routing["resolved_route"], ROUTES, f"{location}.routing.resolved_route")
+    _require_enum(routing["mode"], ROUTE_MODES, f"{location}.routing.mode")
+    _require_bool(routing["forced_by_guard"], f"{location}.routing.forced_by_guard")
     _require_string_list(routing["reason_codes"], f"{location}.routing.reason_codes")
     return case
 
@@ -457,7 +539,8 @@ def _validate_ground_truth(value: object, location: str) -> None:
             "email_is_sufficient",
             "knowledge_gaps",
             "expected_document_types",
-            "expected_route",
+            "retrieval_expected",
+            "company_context_required",
             "rationale",
         },
         location,
@@ -468,7 +551,20 @@ def _validate_ground_truth(value: object, location: str) -> None:
     _require_document_types(
         ground_truth["expected_document_types"], f"{location}.expected_document_types"
     )
-    _require_enum(ground_truth["expected_route"], ROUTES, f"{location}.expected_route")
+    retrieval_expected = _require_bool(
+        ground_truth["retrieval_expected"], f"{location}.retrieval_expected"
+    )
+    context_required = _require_bool(
+        ground_truth["company_context_required"],
+        f"{location}.company_context_required",
+    )
+    actionable = ground_truth["actionability"] not in {"informational", "irrelevant"}
+    if retrieval_expected != actionable:
+        raise ValueError(
+            f"{location}.retrieval_expected must be true exactly for non-NO_ACTION cases"
+        )
+    if context_required and not actionable:
+        raise ValueError(f"{location}.company_context_required cannot be true for NO_ACTION cases")
     _require_nonempty_string(ground_truth["rationale"], f"{location}.rationale")
 
 
@@ -544,9 +640,12 @@ def _copy_validated(
     cases: Sequence[Mapping[str, object]],
     *,
     shard: dict[str, object] | None = None,
+    quality_gate: dict[str, object] | None = None,
 ) -> dict[str, object]:
     copied = dict(top)
     copied["cases"] = [dict(case) for case in cases]
     if shard is not None:
         copied["shard"] = shard
+    if quality_gate is not None:
+        copied["quality_gate"] = quality_gate
     return copy.deepcopy(copied)

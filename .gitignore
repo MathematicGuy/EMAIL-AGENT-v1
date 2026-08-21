@@ -51,6 +51,14 @@ frontend/.env
 **/update_corpus2skill.py
 .superpowers
 .worktrees/
+.playwright-mcp
+.playwright
+.pnpm-store
+.ruff_cache
+.runlogs
+.serena
+.mypy_cache
+.grok
 
 # Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
@@ -78,10 +86,12 @@ HANDOFF.md
 /playwright/.auth/
 evaluations/CHAT/latency/runs/*.json
 evaluations/CHAT/ingestion-latency/runs/*.json
+evaluations/MEMORIES/runs/
+evaluations/MEMORIES/reports/*.md
+!evaluations/MEMORIES/reports/REPORT_FORMAT.md
 
 # Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
 var/
-
 # Memory evaluation detail files carry full probe questions and model replies,
 # and so do the write-ups under reports/. Committed reports under
 # evaluations/MEMORIES/baselines/ are metadata-only.
@@ -95,3 +105,9 @@ evaluations/MEMORIES/reports/
 
 # Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
 .agents/skills/using-agent-skills/
+
+.mypy-cache-email-eval/
+.venv-codex/
+.uv-cache/
+.uv-cache-codex/
+

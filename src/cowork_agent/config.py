@@ -1,5 +1,6 @@
 """Runtime configuration loaded from environment variables."""
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -587,6 +588,38 @@ class RerankerSettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EmailRagQualitySettings:
+    """Evidence-gate settings for company Email RAG."""
+
+    min_rerank_score: float = 0.30
+    relative_cutoff_ratio: float = 0.85
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "EmailRagQualitySettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        return cls(
+            min_rerank_score=_bounded_float(
+                environ, "EMAIL_RAG_MIN_RERANK_SCORE", 0.30, minimum=0.0, maximum=1.0
+            ),
+            relative_cutoff_ratio=_bounded_float(
+                environ,
+                "EMAIL_RAG_RELATIVE_CUTOFF_RATIO",
+                0.85,
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+
+
 
 @dataclass(frozen=True, slots=True)
 class GroqSettings:
@@ -663,6 +696,7 @@ class OpenRouterSettings:
     max_emails_per_batch: int
     max_output_tokens: int
     timeout_seconds: int
+    allowed_models: tuple[str, ...]
 
     @classmethod
     def from_env(
@@ -690,7 +724,12 @@ class OpenRouterSettings:
             timeout_seconds=_bounded_positive_int(
                 environ, "OPENROUTER_TIMEOUT_SECONDS", 60, maximum=120
             ),
+            allowed_models=_openrouter_allowed_models(environ),
         )
+
+    def fallback_models(self) -> tuple[str, ...]:
+        """Allowed OpenRouter slugs excluding the configured primary, order preserved."""
+        return tuple(slug for slug in self.allowed_models if slug != self.model)
 
 
 @dataclass(frozen=True, slots=True)
@@ -753,6 +792,15 @@ def _bounded_positive_int(
     return value
 
 
+def _bounded_float(
+    environ: Mapping[str, str], name: str, default: float, *, minimum: float, maximum: float
+) -> float:
+    value = float(environ.get(name, str(default)))
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
 def _boolean(environ: Mapping[str, str], name: str, default: bool) -> bool:
     value = environ.get(name, str(default)).strip().lower()
     if value not in {"true", "false"}:
@@ -772,3 +820,32 @@ def _required_secret(environ: Mapping[str, str], name: str) -> str:
     if not value or value.startswith("replace-with-"):
         raise ValueError(f"{name} must be configured")
     return value
+
+
+def _openrouter_allowed_models(environ: Mapping[str, str]) -> tuple[str, ...]:
+    raw = environ.get("OPENROUTER_ALLOWED_MODELS", "").strip()
+    if not raw:
+        return ()
+    try:
+        parsed: object = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+        ) from exc
+    if not isinstance(parsed, list):
+        raise ValueError(
+            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+        )
+    models: list[str] = []
+    for item in parsed:
+        if not isinstance(item, str):
+            raise ValueError(
+                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+            )
+        slug = item.strip()
+        if not slug:
+            raise ValueError(
+                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
+            )
+        models.append(slug)
+    return tuple(models)

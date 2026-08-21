@@ -14,15 +14,16 @@ from cowork_agent.domain.target_contracts import (
     Route,
 )
 from cowork_agent.features.email_action_plan.correlation import TaskCandidate
+from cowork_agent.features.email_action_plan.evidence import EvidenceStatus
 from cowork_agent.features.email_action_plan.routing import (
     GUARD_REASON_BY_DOCUMENT_TYPE,
     RouteResolution,
     apply_policy_guards,
+    candidate_requires_processing,
+    resolve_candidate_after_retrieval,
     resolve_candidate_route,
     resolve_route,
 )
-
-pytestmark = pytest.mark.extended
 
 _LOADER_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "routing" / "loader.py"
 _spec = importlib.util.spec_from_file_location("routing_fixture_loader", _LOADER_PATH)
@@ -349,6 +350,50 @@ def test_candidate_route_all_no_action() -> None:
     resolution = resolve_candidate_route(candidate)
     assert resolution.route is Route.NO_ACTION
     assert resolution.forced_by_guard is False
+
+
+@pytest.mark.parametrize(
+    ("evidence", "route", "mode"),
+    [
+        (EvidenceStatus.SUPPORTED, Route.RETRIEVE_RAG, "full"),
+        (EvidenceStatus.UNSUPPORTED, Route.DIRECT_PLAN, "full"),
+        (EvidenceStatus.UNAVAILABLE, Route.RETRIEVE_RAG, "partial"),
+    ],
+)
+def test_post_retrieval_route_matrix_for_self_sufficient_candidate(
+    evidence: EvidenceStatus, route: Route, mode: str
+) -> None:
+    resolution = resolve_candidate_after_retrieval(_candidate(_decision()), evidence)
+    assert (resolution.route, resolution.mode) == (route, mode)
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        _decision(email_is_sufficient=False),
+        _decision(confidence=0.5),
+        _decision(
+            expected_document_types=(ExpectedDocumentType.COMPANY_POLICY,),
+            reason_codes=(ReasonCode.POLICY_REQUIRED,),
+        ),
+        _decision(actionability=Actionability.UNCLEAR),
+    ],
+)
+def test_unsupported_evidence_produces_partial_direct_plan_when_not_safe_for_full(
+    decision: EmailRouteDecision,
+) -> None:
+    resolution = resolve_candidate_after_retrieval(
+        _candidate(decision), EvidenceStatus.UNSUPPORTED
+    )
+    assert resolution.route is Route.DIRECT_PLAN
+    assert resolution.mode == "partial"
+
+
+def test_candidate_processing_filter_keeps_unclear_and_drops_only_no_action() -> None:
+    assert candidate_requires_processing(_candidate(_decision(actionability=Actionability.UNCLEAR)))
+    assert not candidate_requires_processing(
+        _candidate(_decision(actionability=Actionability.INFORMATIONAL))
+    )
 
 
 def test_candidate_route_propagates_guard_and_partial_mode() -> None:

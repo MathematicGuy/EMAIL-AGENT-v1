@@ -298,7 +298,7 @@ def test_frozen_rejects_mutation(build, field):
 
 
 def test_target_contracts_version():
-    assert TARGET_CONTRACTS_VERSION == "1.2.0"
+    assert TARGET_CONTRACTS_VERSION == "1.3.0"
 
 
 def test_trace_content_policy_constants():
@@ -357,6 +357,7 @@ def test_retrieval_status_values():
         "timeout",
         "authorization_denied",
         "partial",
+        "unavailable",
     }
 
 

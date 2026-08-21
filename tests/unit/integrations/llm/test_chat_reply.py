@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings
+from cowork_agent.config import FaucetSettings, GeminiSettings, GroqSettings, OpenRouterSettings
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -28,10 +28,9 @@ from cowork_agent.integrations.llm.chat_reply import (
     FaucetChatReply,
     GeminiChatReply,
     GroqChatReply,
+    OpenRouterChatReply,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
-
-pytestmark = pytest.mark.extended
 
 
 def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal() -> None:
@@ -414,3 +413,115 @@ def test_gemini_chat_reply_rotates_past_rate_limited_key() -> None:
     chunks = asyncio.run(_collect(reply, request, context))
     assert chunks[0].text == "Rotated reply"
     assert attempted_keys == ["key-1", "key-2"]
+
+
+def test_openrouter_chat_reply_hops_to_gemini_on_openrouter_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cowork_agent.integrations.llm.providers.openrouter import OpenRouterAPIError
+
+    gemini_calls: list[object] = []
+
+    async def fake_execute(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        raise OpenRouterAPIError("upstream down")
+
+    async def fake_gemini(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        gemini_calls.append(True)
+        return {
+            "assistant_text": "Gemini last-resort reply",
+            "conversation_title": "Last resort",
+            "citation_ids": [],
+            "task_proposal": None,
+        }
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.openrouter.execute_chat_completion",
+        fake_execute,
+    )
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.last_resort.gemini_json_complete",
+        fake_gemini,
+    )
+    reply = OpenRouterChatReply.from_settings(
+        _openrouter_settings(), GeminiSettings(("key",), "model", True, 1, 1, 1, 1)
+    )
+    request = ChatMessageRequest("session-1", "Hello", "idem-hop")
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+    )
+
+    chunks = asyncio.run(_collect(reply, request, context))
+
+    assert chunks[0].text == "Gemini last-resort reply"
+    assert gemini_calls == [True]
+
+
+def test_openrouter_chat_reply_does_not_hop_on_schema_invalid_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gemini_calls: list[object] = []
+
+    async def fake_execute(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return {"assistant_text": "x"}
+
+    async def fake_gemini(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        gemini_calls.append(True)
+        return {
+            "assistant_text": "should not be used",
+            "conversation_title": "Unused",
+            "citation_ids": [],
+            "task_proposal": None,
+        }
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.openrouter.execute_chat_completion",
+        fake_execute,
+    )
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.last_resort.gemini_json_complete",
+        fake_gemini,
+    )
+    reply = OpenRouterChatReply.from_settings(
+        _openrouter_settings(), GeminiSettings(("key",), "model", True, 1, 1, 1, 1)
+    )
+    request = ChatMessageRequest("session-1", "Hello", "idem-schema")
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+    )
+
+    with pytest.raises(ChatReplyUnavailable):
+        asyncio.run(_collect(reply, request, context))
+    assert gemini_calls == []
+
+
+def test_openrouter_chat_reply_from_settings_without_last_resort() -> None:
+    assert isinstance(
+        OpenRouterChatReply.from_settings(_openrouter_settings()), OpenRouterChatReply
+    )
+
+
+def _openrouter_settings() -> OpenRouterSettings:
+    return OpenRouterSettings.from_env(
+        {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "deepseek/x"},
+        load_env_file=False,
+    )

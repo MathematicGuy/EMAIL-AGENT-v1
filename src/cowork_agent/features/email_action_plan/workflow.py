@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from langfuse import observe
 
+from cowork_agent.config import EmailRagQualitySettings
 from cowork_agent.domain import (
     DigestCompletedEvent,
     DigestRun,
@@ -25,7 +26,6 @@ from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
     RetrievalStatus,
-    Route,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     Task,
@@ -43,6 +43,7 @@ from cowork_agent.identity import LOCAL_TENANT_ID
 
 from .compat_mapper import legacy_result_shape
 from .correlation import TaskCandidate, correlate_candidates
+from .evidence import GATE_VERSION, EvidenceAssessment, EvidenceStatus, assess_retrieval_evidence
 from .observability import EncryptedDevTraceSink, TraceSink
 from .ports import (
     TERMINAL_STATUSES,
@@ -59,7 +60,16 @@ from .ports import (
     TaskPointer,
     TaskRepository,
 )
-from .routing import RouteResolution, resolve_candidate_route
+from .query_rewrite import (
+    RetrievalQueryRewriterPort,
+    build_query_rewrite_input,
+    deterministic_query,
+)
+from .routing import (
+    RouteResolution,
+    candidate_requires_processing,
+    resolve_candidate_after_retrieval,
+)
 from .schemas import ExtractionLimits, GenerationContext, MessageRef
 from .validation import validate_action_plan
 
@@ -137,7 +147,7 @@ class _RetrievalOutcome(NamedTuple):
     """§12.3 outcome of the zero-or-one retrieval for one candidate."""
 
     response: SemanticRetrievalResponse
-    skipped: bool  # nothing queryable (no query/knowledge gaps)
+    query_rewrite_status: str
     degraded: bool  # structured empty after the bounded retry ladder failed
 
 
@@ -147,7 +157,8 @@ class _GeneratedCandidate(NamedTuple):
 
     candidate: TaskCandidate
     resolution: RouteResolution
-    retrieval: _RetrievalOutcome | None
+    retrieval: _RetrievalOutcome
+    evidence: EvidenceAssessment
     envelopes: tuple[EphemeralEmailEnvelope, ...]
     output: ActionPlanOutput
     retrieval_ms: int | None
@@ -212,6 +223,8 @@ class DigestWorker:
         task_repository: TaskRepository,
         *,
         semantic_memory: SemanticMemoryPort | None = None,
+        query_rewriter: RetrievalQueryRewriterPort | None = None,
+        quality_settings: EmailRagQualitySettings | None = None,
         trace_sink: TraceSink | None = None,
         dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
@@ -225,6 +238,8 @@ class DigestWorker:
         self._runs, self._results, self._mailbox = runs, results, mailbox
         self._classifier, self._generator = classifier, generator
         self._semantic_memory = semantic_memory
+        self._query_rewriter = query_rewriter
+        self._quality_settings = quality_settings or EmailRagQualitySettings()
         self._task_repository = task_repository
         self._short_term = short_term
         self._trace_sink = trace_sink
@@ -323,25 +338,23 @@ class DigestWorker:
             run_context = GenerationContext(
                 run_id=run.id, user_id=run.user_id
             )
-            actionable_candidates: list[tuple[TaskCandidate, RouteResolution]] = []
+            actionable_candidates: list[TaskCandidate] = []
             for task_candidate in candidates:
-                resolution = resolve_candidate_route(task_candidate)
                 logger.info(
                     "  ├─ Candidate '%s' -> Route: %s",
                     task_candidate.candidate_key,
-                    resolution.route.value.upper(),
+                    "PENDING_RETRIEVAL",
                 )
-                if resolution.route is Route.NO_ACTION:
+                if not candidate_requires_processing(task_candidate):
                     continue
-                actionable_candidates.append((task_candidate, resolution))
+                actionable_candidates.append(task_candidate)
             generation_started = time.monotonic()
             outputs = await _bounded_fail_fast(
                 actionable_candidates,
                 limit=self._generation_concurrency,
                 operation=lambda item: self._generate_candidate(
                     run,
-                    item[0],
-                    item[1],
+                    item,
                     messages,
                     run_context,
                     user_timezone,
@@ -391,7 +404,10 @@ class DigestWorker:
                     )
                     continue
                 task = validation.task
-                if generated.retrieval is not None and not generated.retrieval.response.chunks:
+                if (
+                    generated.resolution.mode == "partial"
+                    and generated.evidence.status is not EvidenceStatus.SUPPORTED
+                ):
                     task = replace(
                         task,
                         missing_information=task.missing_information + (_NO_COMPANY_CONTEXT_NOTE,),
@@ -610,28 +626,28 @@ class DigestWorker:
         self,
         run: DigestRun,
         task_candidate: TaskCandidate,
-        resolution: RouteResolution,
         messages: dict[str, EphemeralEmailEnvelope],
         run_context: GenerationContext,
         user_timezone: str,
         clock: datetime,
     ) -> _GeneratedCandidate:
-        """Retrieve (when needed) and generate one independent candidate."""
+        """Retrieve exactly once, gate evidence, then generate one candidate."""
         candidate_envelopes = tuple(
             messages[message_id] for message_id in task_candidate.source_message_ids
         )
-        retrieval: _RetrievalOutcome | None = None
         retrieval_ms: int | None = None
-        if resolution.route is Route.RETRIEVE_RAG:
+        if True:
             logger.info("  ├─ 🔍 Querying internal RAG knowledge base...")
             retrieval_started = time.monotonic()
-            retrieval = await self._retrieve_for_candidate(run, task_candidate)
+            retrieval = await self._retrieve_for_candidate(run, task_candidate, candidate_envelopes)
             retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
             logger.info(
                 "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
                 len(retrieval.response.chunks),
                 retrieval_ms,
             )
+        evidence = assess_retrieval_evidence(retrieval.response, self._quality_settings)
+        resolution = resolve_candidate_after_retrieval(task_candidate, evidence.status)
         generation_started = time.monotonic()
         logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
         output = await self._generator.generate(
@@ -641,7 +657,7 @@ class DigestWorker:
             candidate=task_candidate,
             envelopes=candidate_envelopes,
             resolution=resolution,
-            retrieval=retrieval.response if retrieval is not None else None,
+            retrieval=evidence.response if evidence.status is EvidenceStatus.SUPPORTED else None,
         )
         generation_ms = int((time.monotonic() - generation_started) * 1000)
         logger.info("  └─ ✍️ Action Plan generated (%d ms)", generation_ms)
@@ -649,6 +665,7 @@ class DigestWorker:
             task_candidate,
             resolution,
             retrieval,
+            evidence,
             candidate_envelopes,
             output,
             retrieval_ms,
@@ -656,7 +673,10 @@ class DigestWorker:
         )
 
     async def _retrieve_for_candidate(
-        self, run: DigestRun, candidate: TaskCandidate
+        self,
+        run: DigestRun,
+        candidate: TaskCandidate,
+        envelopes: Sequence[EphemeralEmailEnvelope],
     ) -> _RetrievalOutcome:
         """Zero-or-one semantic retrieval per RETRIEVE_RAG candidate (§12.3).
 
@@ -670,7 +690,7 @@ class DigestWorker:
                 gap for _, decision in candidate.decisions for gap in decision.knowledge_gaps
             )
         )
-        query = next(
+        classifier_query = next(
             (
                 decision.retrieval_query
                 for _, decision in candidate.decisions
@@ -678,15 +698,33 @@ class DigestWorker:
             ),
             None,
         )
+        rewrite_payload = build_query_rewrite_input(
+            candidate_action_items=tuple(
+                decision.candidate_action_item for _message_id, decision in candidate.decisions
+            ),
+            knowledge_gaps=gaps,
+            messages=tuple((envelope.subject, envelope.normalized_body) for envelope in envelopes),
+        )
+        query = classifier_query
+        rewrite_status = "classifier_query" if query else "fallback"
+        if query is None and self._query_rewriter is not None:
+            try:
+                query = await self._query_rewriter.rewrite(rewrite_payload)
+                rewrite_status = "rewritten" if query else "fallback"
+            except Exception as exc:
+                logger.warning("Run %s query rewrite failed: %s", run.id, type(exc).__name__)
+        if not query:
+            query = deterministic_query(rewrite_payload)
+            rewrite_status = "fallback"
         if self._semantic_memory is None:
             # §12.3 module failure: no semantic adapter is wired.
-            return _RetrievalOutcome(_empty_retrieval(), skipped=False, degraded=True)
-        if query is None and not gaps:
-            return _RetrievalOutcome(_empty_retrieval(), skipped=True, degraded=False)
+            return _RetrievalOutcome(
+                _empty_retrieval(RetrievalStatus.UNAVAILABLE), rewrite_status, degraded=True
+            )
         request = SemanticRetrievalRequest(
             run_id=run.id,
             user_id=run.user_id,
-            query=query or "; ".join(gaps),
+            query=query,
             knowledge_gaps=gaps,
             filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
@@ -694,7 +732,7 @@ class DigestWorker:
         for attempt in (1, 2):
             try:
                 response = await self._semantic_memory.retrieve(request)
-                return _RetrievalOutcome(response, skipped=False, degraded=False)
+                return _RetrievalOutcome(response, rewrite_status, degraded=False)
             except Exception as exc:
                 # §12.3: metadata only, never email content.
                 logger.warning(
@@ -703,7 +741,9 @@ class DigestWorker:
                     attempt,
                     type(exc).__name__,
                 )
-        return _RetrievalOutcome(_empty_retrieval(), skipped=False, degraded=True)
+        return _RetrievalOutcome(
+            _empty_retrieval(RetrievalStatus.UNAVAILABLE), rewrite_status, degraded=True
+        )
 
     def _emit_candidate_trace(
         self,
@@ -716,7 +756,7 @@ class DigestWorker:
         """FR-16: one metadata-only §6.8 event per generated candidate."""
         if self._trace_sink is None:
             return
-        retrieval = generated.retrieval.response if generated.retrieval is not None else None
+        retrieval = generated.retrieval.response
         decisions = tuple(decision for _, decision in generated.candidate.decisions)
         reason_codes = tuple(
             dict.fromkeys(code.value for decision in decisions for code in decision.reason_codes)
@@ -728,14 +768,14 @@ class DigestWorker:
         )
         # FR-16 fallback marker: §12.3 degraded retrieval (empty result after
         # the retry ladder) must be distinguishable from a genuine no_results.
-        degraded = generated.retrieval is not None and generated.retrieval.degraded
-        if generated.retrieval is None:
+        degraded = generated.retrieval.degraded
+        if False:
             retrieval_status: str | None = None
-        elif generated.retrieval.skipped:
+        elif False:
             # §14: keep skipped retrievals out of the no-result rate.
             retrieval_status = "skipped"
         else:
-            retrieval_status = retrieval.retrieval_status.value if retrieval else None
+            retrieval_status = retrieval.retrieval_status.value
         validation_status = (
             task.validation_status.value if task is not None else ";".join(violation_codes)
         )
@@ -749,13 +789,17 @@ class DigestWorker:
                 route=generated.resolution.route,
                 reason_codes=reason_codes,
                 classifier_confidence=classifier_confidence,
-                rag_result_count=len(retrieval.chunks) if retrieval is not None else None,
+                rag_result_count=len(retrieval.chunks),
                 retrieval_status=retrieval_status,
                 generation_status="RETRIEVAL_DEGRADED" if degraded else None,
                 validation_status=validation_status,
                 latency_ms=TraceLatency(
                     rag=generated.retrieval_ms, generation=generated.generation_ms
                 ),
+                evidence_status=generated.evidence.status.value,
+                top_rerank_score=generated.evidence.top_rerank_score,
+                query_rewrite_status=generated.retrieval.query_rewrite_status,
+                gate_version=GATE_VERSION,
             )
         )
 
@@ -806,12 +850,14 @@ class DigestWorker:
             logger.warning("Development trace write failed for run %s (%s)", run_id, kind)
 
 
-def _empty_retrieval() -> SemanticRetrievalResponse:
+def _empty_retrieval(
+    status: RetrievalStatus = RetrievalStatus.NO_RESULTS,
+) -> SemanticRetrievalResponse:
     """Structured empty retrieval result (§12.3 degraded path)."""
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
         chunks=(),
-        retrieval_status=RetrievalStatus.NO_RESULTS,
+        retrieval_status=status,
         latency_ms=0,
     )
 

@@ -130,14 +130,22 @@ def api_server(pytestconfig: pytest.Config) -> Generator[subprocess.Popen[bytes]
 
     env = {**os.environ, "APP_PORT": str(_PORT), "APP_HOST": "127.0.0.1"}
 
-    # Load .env manually so we can pass it into the subprocess without
-    # importing python-dotenv (it is already a project dependency).
+    # Load .env and config manually so we can pass them into the subprocess
+    _config_file = _REPO_ROOT / "config"
+    if _config_file.exists():
+        for raw_line in _config_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env.setdefault(key.strip(), value.strip())
+
     for raw_line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        env.setdefault(key.strip(), value.strip())
+        env[key.strip()] = value.strip()
 
     # Override port so we don't clash with a manually-running dev server
     env["APP_PORT"] = str(_PORT)

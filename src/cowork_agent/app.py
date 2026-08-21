@@ -30,6 +30,7 @@ import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  
 from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
+    EmailRagQualitySettings,
     FaucetSettings,
     GeminiSettings,
     GmailSettings,
@@ -124,12 +125,14 @@ from cowork_agent.integrations.llm.chat_reply import (
     GroqChatReply,
     OpenRouterChatReply,
 )
+from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
 from cowork_agent.integrations.llm.providers.faucet import (
     FaucetActionPlanGenerator,
     FaucetRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
+    GeminiRetrievalQueryRewriter,
     GeminiRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.groq import (
@@ -592,6 +595,7 @@ def create_app() -> FastAPI:
                 generator: ActionPlanGeneratorPort
                 intent_classifier: IntentClassifierPort
                 generation_concurrency = 1
+                query_rewriter = None
                 if provider == "gemini":
                     gemini_settings = GeminiSettings.from_env()
                     generation_concurrency = gemini_settings.action_plan_concurrency
@@ -603,6 +607,7 @@ def create_app() -> FastAPI:
                     )
                     classifier = GeminiRouteClassifier(gemini_settings)
                     generator = GeminiActionPlanGenerator(gemini_settings)
+                    query_rewriter = GeminiRetrievalQueryRewriter(gemini_settings)
                     semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
                 elif provider == "groq":
@@ -629,17 +634,34 @@ def create_app() -> FastAPI:
                     app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
                 elif provider == "openrouter":
                     openrouter_settings = OpenRouterSettings.from_env()
+                    gemini_last_resort = load_optional_gemini_settings()
+                    if gemini_last_resort is None:
+                        logger.info(
+                            "OpenRouter Gemini last-resort is off; "
+                            "no numbered GEMINI_API_KEY_* configured"
+                        )
+                    else:
+                        logger.info(
+                            "OpenRouter Gemini last-resort is on (%s)",
+                            gemini_last_resort.model,
+                        )
                     intent_settings = ChatIntentSettings.from_env(
                         default_model=openrouter_settings.model
                     )
                     intent_classifier = OpenRouterIntentClassifier.from_settings(
-                        openrouter_settings, intent_settings
+                        openrouter_settings,
+                        intent_settings,
+                        last_resort=gemini_last_resort,
                     )
-                    classifier = OpenRouterRouteClassifier(openrouter_settings)
-                    generator = OpenRouterActionPlanGenerator(openrouter_settings)
+                    classifier = OpenRouterRouteClassifier(
+                        openrouter_settings, last_resort=gemini_last_resort
+                    )
+                    generator = OpenRouterActionPlanGenerator(
+                        openrouter_settings, last_resort=gemini_last_resort
+                    )
                     semantic_memory = NullSemanticMemory()
                     app.state.chat_reply = OpenRouterChatReply.from_settings(
-                        openrouter_settings
+                        openrouter_settings, last_resort=gemini_last_resort
                     )
                 else:
                     raise ValueError(
@@ -680,6 +702,8 @@ def create_app() -> FastAPI:
                     ShortTermStore(),
                     task_repository,
                     semantic_memory=semantic_memory,
+                    query_rewriter=query_rewriter,
+                    quality_settings=EmailRagQualitySettings.from_env(),
                     trace_sink=LoggingTraceSink(),
                     dev_trace=dev_trace_sink_from_env(
                         settings.connection_db_path.parent, settings.token_encryption_key

@@ -292,7 +292,7 @@ def test_ranking_min_score_and_top_k() -> None:
 
 def test_null_semantic_memory_returns_structured_no_results() -> None:
     response = asyncio.run(NullSemanticMemory().retrieve(_request()))
-    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
+    assert response.retrieval_status is RetrievalStatus.UNAVAILABLE
     assert response.chunks == ()
     assert response.query_id.startswith("q_")
 

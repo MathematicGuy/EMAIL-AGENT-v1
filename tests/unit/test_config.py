@@ -4,7 +4,9 @@ import pytest
 
 from cowork_agent.config import (
     LOCAL_POSTGRES_DEFAULT_URL,
+    EmailRagQualitySettings,
     GeminiEmbeddingSettings,
+    OpenRouterSettings,
     RerankerSettings,
     SessionSettings,
     SupabaseStorageSettings,
@@ -216,3 +218,88 @@ def test_reranker_settings_jina_model_from_env() -> None:
     assert settings.rotator.provider_name == "Jina"
     assert settings.rotator.keys == ("jina-key-1",)
 
+
+_OPENROUTER_BASE = {
+    "OPENROUTER_API_KEY": "test-key",
+    "OPENROUTER_MODEL": "deepseek/x",
+}
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [
+        _OPENROUTER_BASE,
+        {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": ""},
+        {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": "   "},
+    ],
+)
+def test_openrouter_allowed_models_missing_is_empty(environ: dict[str, str]) -> None:
+    settings = OpenRouterSettings.from_env(environ, load_env_file=False)
+
+    assert settings.allowed_models == ()
+    assert settings.fallback_models() == ()
+
+
+def test_openrouter_allowed_models_parses_json_list_in_order() -> None:
+    settings = OpenRouterSettings.from_env(
+        {
+            **_OPENROUTER_BASE,
+            "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", "deepseek/x"]',
+        },
+        load_env_file=False,
+    )
+
+    assert settings.allowed_models == ("openai/gpt", "deepseek/x")
+
+
+def test_openrouter_allowed_models_reject_invalid_json() -> None:
+    with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
+        OpenRouterSettings.from_env(
+            {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": "not-json"},
+            load_env_file=False,
+        )
+
+
+def test_openrouter_allowed_models_reject_non_list() -> None:
+    with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
+        OpenRouterSettings.from_env(
+            {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '{"openai/gpt": true}'},
+            load_env_file=False,
+        )
+
+
+def test_openrouter_allowed_models_reject_empty_entry() -> None:
+    with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
+        OpenRouterSettings.from_env(
+            {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", ""]'},
+            load_env_file=False,
+        )
+
+
+def test_openrouter_allowed_models_reject_non_string() -> None:
+    with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
+        OpenRouterSettings.from_env(
+            {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", 1]'},
+            load_env_file=False,
+        )
+
+
+def test_openrouter_fallback_models_omits_primary_preserving_order() -> None:
+    settings = OpenRouterSettings.from_env(
+        {
+            "OPENROUTER_API_KEY": "test-key",
+            "OPENROUTER_MODEL": "deepseek/x",
+            "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", "deepseek/x"]',
+        },
+        load_env_file=False,
+    )
+
+    assert settings.fallback_models() == ("openai/gpt",)
+
+def test_email_rag_quality_settings_default_and_bounds() -> None:
+    settings = EmailRagQualitySettings.from_env({}, load_env_file=False)
+    assert (settings.min_rerank_score, settings.relative_cutoff_ratio) == (0.30, 0.85)
+    with pytest.raises(ValueError, match="EMAIL_RAG_MIN_RERANK_SCORE"):
+        EmailRagQualitySettings.from_env(
+            {"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"}, load_env_file=False
+        )

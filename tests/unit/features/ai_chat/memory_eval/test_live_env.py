@@ -13,8 +13,6 @@ from cowork_agent.features.ai_chat.memory_eval.live_env import (
     unavailable_scopes,
 )
 
-pytestmark = pytest.mark.extended
-
 
 def _env(**overrides: str) -> dict[str, str]:
     base = {
@@ -185,3 +183,23 @@ def test_localhost_needs_no_opt_in() -> None:
     for host in ("localhost", "127.0.0.1"):
         environ = _env(PG_TEST_URL=f"postgresql://u:p@{host}:5432/throwaway")
         assert probe_environment(environ, postgres_probe=lambda url: True).postgres_url
+
+
+def test_postgres_mode_off_wins_over_database_url_in_live_env() -> None:
+    environ = _env(POSTGRES_MODE="off", DATABASE_URL="postgresql://127.0.0.1/ignored")
+    del environ["PG_TEST_URL"]
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+    assert env.postgres_url is None
+    assert env.sqlite_path is not None
+    assert env.durable_memory_available is True
+
+
+def test_pg_test_url_overrides_postgres_mode_off_in_live_env() -> None:
+    environ = _env(
+        POSTGRES_MODE="off",
+        PG_TEST_URL="postgresql://127.0.0.1:5432/cowork_memeval",
+    )
+    env = probe_environment(environ, postgres_probe=lambda url: True)
+    assert env.postgres_url == "postgresql://127.0.0.1:5432/cowork_memeval"
+    assert env.sqlite_path is None
+    assert env.durable_memory_available is True

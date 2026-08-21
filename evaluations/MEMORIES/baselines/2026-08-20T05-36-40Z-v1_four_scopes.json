@@ -1,11 +1,12 @@
 {
-  "schema_version": "2.0.0",
+  "schema_version": "2.1.0",
   "probe_set_id": "v1_four_scopes",
   "probe_count": 8,
-  "provider": "openrouter",
-  "model": "deepseek/deepseek-v4-flash-0731",
-  "ran_at": "2026-08-19T16:35:39.452901+00:00",
-  "run_key": "4858eff2e91b",
+  "provider": "dry-run",
+  "model": "scripted",
+  "ran_at": "2026-08-20T05:36:40.442567+00:00",
+  "run_key": "31200adfcfea",
+  "nonce": "",
   "per_scope": {
     "short_term": {
       "probes": 2,
@@ -23,16 +24,16 @@
     },
     "long_term": {
       "probes": 2,
-      "pass": 1,
+      "pass": 2,
       "stale": 0,
-      "invented": 1,
+      "invented": 0,
       "miss": 0,
       "no_answer": 0,
-      "unreadable": 1,
+      "unreadable": 0,
       "dangerous": 0,
       "broken": 0,
       "leaked": 0,
-      "did_nothing": 0,
+      "did_nothing": 1,
       "earned_it": 1
     },
     "episodic": {
@@ -66,17 +67,6 @@
   },
   "verdicts": [
     {
-      "probe": "lt_restraint_01",
-      "targets": "long_term",
-      "test": "restraint",
-      "full": "invented",
-      "ablated": "no_answer",
-      "control": "no_answer",
-      "verdict": "unreadable",
-      "certain": false,
-      "latency_ms": 7297
-    },
-    {
       "probe": "ep_restraint_01",
       "targets": "episodic",
       "test": "restraint",
@@ -85,7 +75,18 @@
       "control": "pass",
       "verdict": "scope_did_nothing",
       "certain": false,
-      "latency_ms": 7633
+      "latency_ms": 0
+    },
+    {
+      "probe": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 0
     },
     {
       "probe": "sem_restraint_01",
@@ -96,7 +97,7 @@
       "control": "pass",
       "verdict": "scope_did_nothing",
       "certain": false,
-      "latency_ms": 42280
+      "latency_ms": 0
     },
     {
       "probe": "ep_recall_01",
@@ -107,7 +108,7 @@
       "control": "miss",
       "verdict": "scope_earned_it",
       "certain": true,
-      "latency_ms": 26619
+      "latency_ms": 0
     },
     {
       "probe": "lt_recall_01",
@@ -118,7 +119,7 @@
       "control": "miss",
       "verdict": "scope_earned_it",
       "certain": true,
-      "latency_ms": 8736
+      "latency_ms": 0
     },
     {
       "probe": "sem_recall_01",
@@ -129,7 +130,7 @@
       "control": "miss",
       "verdict": "scope_earned_it",
       "certain": true,
-      "latency_ms": 35361
+      "latency_ms": 0
     },
     {
       "probe": "st_recall_01",
@@ -140,7 +141,7 @@
       "control": "miss",
       "verdict": "scope_earned_it",
       "certain": true,
-      "latency_ms": 32910
+      "latency_ms": 0
     },
     {
       "probe": "st_update_01",
@@ -151,13 +152,10 @@
       "control": "miss",
       "verdict": "scope_earned_it",
       "certain": true,
-      "latency_ms": 16524
+      "latency_ms": 0
     }
   ],
   "leaked_probes": [],
   "needs_reading": 3,
-  "seed_failures": [
-    "[ep_recall_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve",
-    "[ep_restraint_01/ablated] episodic: no task episode was created for seed 0 (chat_provider_unavailable: D\u1ecbch v\u1ee5 sinh c\u00e2u tr\u1ea3 l\u1eddi hi\u1ec7n kh\u00f4ng kh\u1ea3 d\u1ee5ng.); the turn produced no episodic citation to approve"
-  ]
+  "seed_failures": []
 }

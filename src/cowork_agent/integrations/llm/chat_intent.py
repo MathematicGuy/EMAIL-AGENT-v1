@@ -191,19 +191,41 @@ class FaucetIntentClassifier(ConfiguredIntentClassifier):
 class OpenRouterIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: OpenRouterSettings, intent: ChatIntentSettings
+        cls,
+        provider: OpenRouterSettings,
+        intent: ChatIntentSettings,
+        last_resort: GeminiSettings | None = None,
     ) -> OpenRouterIntentClassifier:
+        from .last_resort import complete_with_gemini_last_resort, gemini_json_complete
         from .providers.openrouter import execute_chat_completion
 
+        timeout_seconds = max(1, ceil(intent.timeout_ms / 1000))
+
         async def complete(prompt: str) -> Mapping[str, object]:
-            return await execute_chat_completion(
-                provider.api_key,
-                intent.model,
-                _SYSTEM_INSTRUCTION,
-                prompt,
-                INTENT_RESPONSE_SCHEMA,
-                provider.max_output_tokens,
-                max(1, ceil(intent.timeout_ms / 1000)),
+            async def primary() -> Mapping[str, object]:
+                return await execute_chat_completion(
+                    provider.api_key,
+                    intent.model,
+                    _SYSTEM_INSTRUCTION,
+                    prompt,
+                    INTENT_RESPONSE_SCHEMA,
+                    provider.max_output_tokens,
+                    timeout_seconds,
+                    fallback_models=provider.fallback_models(),
+                )
+
+            async def fallback() -> Mapping[str, object]:
+                assert last_resort is not None
+                return await gemini_json_complete(
+                    last_resort,
+                    prompt,
+                    INTENT_RESPONSE_SCHEMA,
+                    _SYSTEM_INSTRUCTION,
+                    timeout_seconds=timeout_seconds,
+                )
+
+            return await complete_with_gemini_last_resort(
+                primary, fallback if last_resort else None
             )
 
         return cls(complete)

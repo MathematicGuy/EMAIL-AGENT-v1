@@ -1,0 +1,260 @@
+{
+  "schema_version": 2,
+  "rubric_version": "email-pipeline-annotation-v2",
+  "evaluation_bucket": "retrieve_first_context_optional",
+  "case_count": 18,
+  "cases": [
+    {
+      "case_id": "email_case_010",
+      "source_message_id": "1a0185822537d4ff",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Past-due billing notice directly requests payment to avoid service restriction and provides execution steps.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "AWS logo [link1] Hello from Amazon Web Services, Account Number: 058264270904 Your AWS account has a past due balance that requires your immediate attention. If we do not receive your payment, your account may be restricted or suspended. To pay past due via Payments Dashboard [link2] , select your past due invoices, and complete the payment. You can also pay your past due invoices with a cheque or wire transfer using the remittance information on your invoice. Please make sure to pay all balances that are past due to avoid any restrictions or suspension on the account. If your account becomes restricted, you will experience limited ability to buy new resources, expand usage, or link new accounts. If your account is suspended, you will not be able to access your AWS Management Console, manage existing resources, or buy any new resources. Helpful Links: Make a payment now from Payments Dashboard [link3] Update [link4] your default payment method Learn more [link5] about your default payment method Learn how to add a new [link6] payment method If you would like to see a complete breakdown of your charges and view the printable PDF copies of your invoices, review your AWS Billing Dashboard [link7] . If you have any questions, contact AWS Customer Service [link8] . Thank You, Amazon Web Services Amazon Web Services, Inc. is a subsidiary of Amazon.com, Inc. Amazon.com is a registered trademark of Amazon.com. This message was produced and distributed by Amazon Web Services, Inc. or its affiliates [link9] , 410 Terry Ave. North, Seattle, WA 98109. © 2026, Amazon Web Services, Inc. or its affiliates. All rights reserved. Read our Privacy Notice [link10] ."
+    },
+    {
+      "case_id": "email_case_020",
+      "source_message_id": "1a0151473ba366bf",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Mention notification offers an optional follow-up; acting is not required.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Dear Adoft, “A. Putin” was mentioned by “Magdalena Bas”. Follow the link below to see all of your mentions: [link1] Follow the link below to disable these notifications: [link2] Academia.edu, 580 California St., Suite 400, San Francisco, CA, 94104 Liên kết trong email: Academia.edu [link3] This is not me [link4]"
+    },
+    {
+      "case_id": "email_case_021",
+      "source_message_id": "1a01456d2839c649",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Explicit urgent triage task with a concrete next step assigned to the user.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Task Extractor is ready Linear demo triage urgent [link1] Summary of recent activity (last ~7 days) I reviewed your connected Gmail (recent/unread messages) and Linear (issues + the demo document). There is little substantive personal correspondence; most email is onboarding, security notices, promotions, Scholar alerts, and one webinar invite. The clearest structured notes and action items live in the Linear Demo sandbox (workspace note: this is a learning sandbox; real GitHub Issues remain the source of truth for EMAIL-AGENT-v1). Extracted action items from Linear (all assigned to you: Dih Nhật Thành) | Issue | Status | Priority | Key next step | Suggested priority | | HEV-8 – Demo: triage an incoming request | Backlog | Urgent | Decide: accept / clarify / delegate / cancel the fake request; update status & labels accordingly | Highest (Urg ... Continue reading [link1] © 2026 X.AI LLC Unsubscribe [link2]"
+    },
+    {
+      "case_id": "email_case_023",
+      "source_message_id": "1a0140227c84ec41",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Security alert directs the user to verify activity and secure the account.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "[image: Google] You allowed Superhuman access to some of your Google Account data dinhnhatthanh248@gmail.com If you didn't allow Superhuman access to some of your Google Account data, someone else may be trying to access your Google Account data. Take a moment now to check your account activity and secure your account. Check activity [link1] To make changes at any time to the access that Superhuman has to your data, go to your Google Account [link2] You can also see security activity at [link3] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
+    },
+    {
+      "case_id": "email_case_033",
+      "source_message_id": "1a0129e46c35d546",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Your job alert for Intern in Hanoi Capital Region New jobs match your preferences. Consultant, Internship, Vietnam Boston Consulting Group (BCG) Hanoi This company is actively hiring View job: [link1] HR Intern Techcombank (TCB) Hanoi Capital Region This company is actively hiring Apply with resume & profile View job: [link2] Binance Accelerator Program - Research On Chain Data Analyst Binance Hanoi This company is actively hiring View job: [link3] TUYỂN THỰC TẬP NGÀNH TIẾNG ANH NewSky Tân Sơn View job: [link4] See all jobs on LinkedIn: [link5] Stand out and let hirers know when a role they’ve posted is your top choice. [link6] This email was intended for D. NhatThanh (Student at CMC University) Learn why we included this: [link7] You are receiving Job Alert emails. Manage your job alerts: [link8] Unsubscribe: [link9] · Help: [link10] © 2026 LinkedIn Corporation, 1zwnj000 West Maude Avenue, Sunnyvale, CA 94085. LinkedIn and the LinkedIn logo are registered trademarks of LinkedIn. Liên kết trong email: LinkedIn [link11] Messaging icon [link12] Mynetwork icon [link13] Notifications icon [link14] Your job alert for Intern [link15] Boston Consulting Group (BCG) [link16] Consultant, Internship, Vietnam [link17] Techcombank (TCB) [link18] HR Intern [link19] Binance [link20] Binance Accelerator Program - Research On Chain Data Analyst [link21] NewSky [link22] TUYỂN THỰC TẬP NGÀNH TIẾNG ANH [link23] See all jobs [link24] Premium icon [link25] Try Premium for ₫0 [link26] Install LinkedIn Widgets Stay updated at a glance Add widget [link27] Learn why we included this. [link28] Manage job alerts [link29] Help [link30] LinkedIn [link31]"
+    },
+    {
+      "case_id": "email_case_041",
+      "source_message_id": "1a010cff35b2d44d",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Security notification requires reviewing the sign-in and securing the account if it was not authorized.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "This is a copy of a security alert sent to nhatthanhdinh482@gmail.com. dinhnhatthanh248@gmail.com is the recovery email for this account. If you don't recognise this account, remove [link1] it. [image: Google] A new sign-in on Windows nhatthanhdinh482@gmail.com We noticed a new sign-in to your Google Account on a Windows device. If this was you, you don’t need to do anything. If not, we’ll help you secure your account. Check activity [link2] You can also see security activity at [link3] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
+    },
+    {
+      "case_id": "email_case_044",
+      "source_message_id": "1a010bff34a2d596",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Optional job opportunities are presented for review or application; no obligation or internal knowledge is involved.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Tether Operations Limited is hiring Job alert: Machine Learning Engineer Intern Your job listings for August 17, 2026 Machine Learning Engineer Intern Hanoi Công Ty Cổ Phần Đầu Tư Finpros AI Quantitative Researcher Intern 11d [link1] Công Ty Cổ Phần Đầu Tư Finpros Data Science Intern 11d [link2] CÔNG TY TNHH TEENUP Head of AI Engineer (Machine Learning, Generative AI) 6d [link3] Công Ty Trách Nhiệm Hữu Hạn Avepoint Việt Nam Junior AI Engineer 4d [link4] Tether Operations Limited AI Research Engineer (Pre-training - LLM & Multi-Modal) - 100% Remote Worldwide 6d [link5] Apple Advanced Manufacturing Engineer, Core Tech 6d [link6] Apple Product Quality Engineer 6d [link7] Apple Manufacturing AI Application Engineer 6d [link8] VinSmart Future AI Engineer (Agentic AI) 10d [link9] Công Ty Cổ Phần Công Nghệ Tài Chính Bino AI Researcher 5d [link10] Tổng Công Ty Cổ Phần Bưu Chính Viettel DevOps Engineer 7d [link11] ITviec Recruitment Consulting System Maintenance & Operation Engineer 3d [link12] Apple Advanced Manufacturing Engineer 6d [link13] See more jobs [link14] Want more listings like these? Similar jobs can have different titles. Create job alerts for related roles. machine learning intern Create [link15] machine learning internship Create [link16] machine learning researcher intern Create [link17] Looking for something a little different? You can edit your job alert here. Machine Learning Engineer Intern Hanoi Sent Daily Edit [link18] This message was sent to dinhnhatthanh248@gmail.com Privacy Policy [link19] | Manage Settings [link20] | Unsubscribe [link21] Glassdoor [link22] 200 West 6th Street, Floor 36, Austin, TX 78701 Copyright © 2008-2026, Indeed, Inc. “Glassdoor,” “Worklife Pro,” “Bowls,” and logo are proprietary trademarks of Indeed, Inc."
+    },
+    {
+      "case_id": "email_case_062",
+      "source_message_id": "1a00dacb17782c57",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Account sign-in alert gives a conditional security-review step and provides the review path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "New sign-in to your OpenAI account New sign-in details for your OpenAI account. Hello, We noticed a new sign-in to your OpenAI account. App : Codex Time : August 17, 2026 at 10:03 AM (+07) Approximate location : Việt Trì, VN Device : Firefox on Windows If this was you, no action is needed. If you don't recognize this activity, please review your account security [link1] right away. Best, OpenAI If you have any questions please contact us through our help center [link2]"
+    },
+    {
+      "case_id": "email_case_071",
+      "source_message_id": "1a00b6a6f7162d63",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Account-login security alert gives a conditional account-security step and provides the help path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "This wasn't me [link1] Hi D., Security alert: login near Phùng Khoang on a new device Hi D., Someone just logged in to your Facebook account near Phùng Khoang, Vietnam on Firefox on Windows. If this wasn't you, we're here to help you take some simple steps to secure your account. Was this you? Thanks, The Facebook team If this was you, you can ignore this email. Wondering if this email is really from us? Visit the Help Centre to confirm: www.facebook.com/help/check-email To improve your account security, we've enabled login alerts. We'll continue to notify you whenever your username and password are used to log in from a new browser or device. Thanks, Facebook security This message was sent to dinhnhatthanh248@gmail.com. If you don't want to receive these emails from Meta in the future, please follow the link below to unsubscribe. [link2] Meta Platforms, Inc., Attention: Community Support, 1 Meta Way, Menlo Park, CA 94025 To help keep your profile secure, please don't forward this email. Follow the link below to learn more. [link3] Liên kết trong email: www.facebook.com/help/check-email [link5] Learn more [link6]"
+    },
+    {
+      "case_id": "email_case_072",
+      "source_message_id": "1a00b6a512e74292",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Account-login security alert gives a conditional account-security step and provides the help path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "This wasn't me [link1] Hi D., Security alert: login near Phùng Khoang on a new device Hi D., Someone just logged in to your Facebook account near Phùng Khoang, Vietnam on Firefox on Windows. If this wasn't you, we're here to help you take some simple steps to secure your account. Was this you? Thanks, The Facebook team If this was you, you can ignore this email. Wondering if this email is really from us? Visit the Help Centre to confirm: www.facebook.com/help/check-email To improve your account security, we've enabled login alerts. We'll continue to notify you whenever your username and password are used to log in from a new browser or device. Thanks, Facebook security This message was sent to dinhnhatthanh248@gmail.com. If you don't want to receive these emails from Meta in the future, please follow the link below to unsubscribe. [link2] Meta Platforms, Inc., Attention: Community Support, 1 Meta Way, Menlo Park, CA 94025 To help keep your profile secure, please don't forward this email. Follow the link below to learn more. [link3] Liên kết trong email: www.facebook.com/help/check-email [link5] Learn more [link6]"
+    },
+    {
+      "case_id": "email_case_073",
+      "source_message_id": "1a00b6319a843646",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Account sign-in security alert gives a conditional activity-review step and provides the review path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "[image: Google] New signin to your account dinhnhatthanh248@gmail.com We noticed a new sign-in to your Google Account. If this was you, you don’t need to do anything. If not, we’ll help you secure your account. Check activity [link1] You can also see security activity at [link2] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
+    },
+    {
+      "case_id": "email_case_074",
+      "source_message_id": "1a00b6306dbd12d0",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "New passkey security alert directs account review if unrecognized and provides the review path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "[image: Google] New passkey added to your account dinhnhatthanh248@gmail.com If you didn’t add a passkey, someone might be using your account. Check and secure your account now. Check activity [link1] You can also see security activity at [link2] You received this email to let you know about important changes to your Google Account and services. © 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
+    },
+    {
+      "case_id": "email_case_075",
+      "source_message_id": "1a00b46b7101dde9",
+      "final": {
+        "actionability": "action_required",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Verification message directly requests email confirmation and provides the needed verification method.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "X Confirm your email address Confirm [link1] You can use this code as a backup, just in case: 856003 Thanks, X Liên kết trong email: Confirm [link1] X [link2] Help [link3] Email security tips [link4]"
+    },
+    {
+      "case_id": "email_case_078",
+      "source_message_id": "1a00ae022058b940",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "External terms update presents an optional accept-or-discontinue decision; no internal knowledge is needed.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "*Your Services Agreement made clearer* Hello, You’re receiving this email because we are updating the Microsoft Services Agreement, which applies to one or more Microsoft products or services you use. We’re making these updates to clarify our terms and ensure that they remain transparent for you, as well as to cover new Microsoft products, services and features. The Microsoft Services Agreement is an agreement between you and Microsoft (or one of its affiliates) that governs your use of Microsoft consumer online products and services. You can read the entire Microsoft Services Agreement [here][link1]. You can also learn more about these updates on our FAQ page [here][link2], including a summary of the most notable changes. The updates to the Microsoft Services Agreement will take effect on September 30, 2026. If you continue to use our products and services on or after September 30, 2026, you are agreeing to the updated Microsoft Services Agreement. If you do not agree, you can choose to discontinue using the products and services, and close your Microsoft account before these terms become effective. If you are a parent or guardian, you are responsible for your child’s or teenager’s use of Microsoft products and services, including purchases. Thank you for using Microsoft products and services. [Microsoft Services Agreement] [link1] [Microsoft Privacy Statement] [link3] [Frequently Asked Questions] [link2] This email was sent from an unmonitored mailbox. [Privacy Statement] [link4] Microsoft Corporation, One Microsoft Way, Redmond, WA 98052 USA [Microsoft] [link5]"
+    },
+    {
+      "case_id": "email_case_088",
+      "source_message_id": "1a00851890c96d3e",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Job alert offers optional applications with listing and application paths included.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Your job alert for Data Scientist in Quận Cầu Giấy New jobs match your preferences. Manage alerts: [link1] Data Analyst/Data Scientist ( Banking, Fintech ) VietCredit Hanoi Capital Region This company is actively hiring Apply with resume & profile View job: [link2] Senior Data Analyst (Banking/Financial Services) Asian Technology Solutions (Vietnam) Hanoi Capital Region Apply with resume & profile View job: [link3] See all jobs on LinkedIn: [link4] New jobs from your other alerts Intern jobs in Hanoi Capital Region LLM/AI Agentic Engineer (Intern-Middle) BlueOC Tech Careers Hanoi Apply with resume & profile View job: [link5] Intern (40000154) Techcombank (TCB) Hanoi This company is actively hiring View job: [link6] See all jobs [link7] Edit alert [link8] Stand out and let hirers know when a role they’ve posted is your top choice. [link9] This email was intended for D. NhatThanh (Student at CMC University) Learn why we included this: [link10] You are receiving Job Alert emails. Manage your job alerts: [link11] Unsubscribe: [link12] · Help: [link13] © 2026 LinkedIn Corporation, 1zwnj000 West Maude Avenue, Sunnyvale, CA 94085. LinkedIn and the LinkedIn logo are registered trademarks of LinkedIn. Liên kết trong email: LinkedIn [link14] Messaging icon [link15] Mynetwork icon [link16] Notifications icon [link17] Your job alert for Data Scientist [link18] Manage alerts [link19] VietCredit [link20] Data Analyst/Data Scientist ( Banking, Fintech ) [link21] Asian Technology Solutions (Vietnam) [link22] Senior Data Analyst (Banking/Financial Services) [link23] See all jobs [link24] Intern jobs in Hanoi Capital Region [link25] BlueOC Tech Careers [link26] LLM/AI Agentic Engineer (Intern-Middle) [link27] Techcombank (TCB) [link28] Intern (40000154) [link29] See all jobs [link30] Edit alert [link31] Premium icon [link32] Try Premium for ₫0 [link33] Install LinkedIn Widgets Stay updated at a glance Add widget [link34] Learn why we included this. [link35] Manage job alerts [link36] Help [link37] LinkedIn [link38]"
+    },
+    {
+      "case_id": "email_case_090",
+      "source_message_id": "1a007ec0f98b983b",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Product tips invite optional settings changes and provide the relevant path.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "How to make Warp look and feel just the way you like it Hey there, Warp is deeply customizable. Here are a few things you can configure, and there's a lot more to make it look and feel just the way you like it. Choose your layout Horizontal or vertical tabs. Choose what fits how you work, and how much detail you want to see. You can also hide the top bar, so the layout feels just right. Show what matters in your prompt Add the things you actually care about, git branch, directory, node version, and remove the rest. Configure deeply in settings Themes, vim keybindings, default mode for new tabs, your preferred AI model, tab colors, and a hundred other things, just a toggle away to make Warp feel right. Open Settings and customize ( [link1] ) Warp logo Warp builds AI-native developer tools, including an agentic development environment and Oz, an orchestration platform for cloud agents. X/Twitter logo ( [link2] ) LinkedIn ( [link3] ) YouTube logo ( [link4] ) GitHub logo ( [link5] ) Slack logo ( [link6] ) 740 Broadway Suite 802 New York NY 10003 Change your preferences Unsubscribe ( [link7] ) Liên kết trong email: Open Settings and customize [link8] X/Twitter logo [link9] LinkedIn [link10] YouTube logo [link11] GitHub logo [link12] Slack logo [link13]"
+    },
+    {
+      "case_id": "email_case_094",
+      "source_message_id": "1a006a3e3c872d56",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Job-alert notification presents optional opportunities; reviewing or applying is user-directed and needs no company knowledge.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "Công Ty Trách Nhiệm Hữu Hạn Avepoint Việt Nam is hiring Job alert: Machine Learning Engineer Intern Your job listings for August 15, 2026 Machine Learning Engineer Intern Hanoi CÔNG TY TNHH TEENUP Head of AI Engineer (Machine Learning, Generative AI) 4d [link1] Apple Advanced Manufacturing Engineer, Core Tech 4d [link2] Apple Product Quality Engineer 4d [link3] Công Ty Trách Nhiệm Hữu Hạn Avepoint Việt Nam Junior AI Engineer 2d [link4] Tether Operations Limited AI Research Engineer (Pre-training - LLM & Multi-Modal) - 100% Remote Worldwide 4d [link5] Công Ty Cổ Phần Công Nghệ Tài Chính Bino AI Researcher 3d [link6] ITviec Recruitment Consulting System Maintenance & Operation Engineer 1d [link7] Apple Manufacturing AI Application Engineer 4d [link8] Tổng Công Ty Cổ Phần Bưu Chính Viettel DevOps Engineer 5d [link9] Apple Manufacturing Quality Engineer, Beats 4d [link10] Apple Advanced Manufacturing Engineer 4d [link11] Apple Manufacturing Quality Engineer, Mac 4d [link12] Apple Brittles Manufacturing Design Engineer 4d [link13] See more jobs [link14] Want more listings like these? Similar jobs can have different titles. Create job alerts for related roles. machine learning intern Create [link15] machine learning internship Create [link16] machine learning researcher intern Create [link17] Looking for something a little different? You can edit your job alert here. Machine Learning Engineer Intern Hanoi Sent Daily Edit [link18] This message was sent to dinhnhatthanh248@gmail.com Privacy Policy [link19] | Manage Settings [link20] | Unsubscribe [link21] Glassdoor [link22] 200 West 6th Street, Floor 36, Austin, TX 78701 Copyright © 2008-2026, Indeed, Inc. “Glassdoor,” “Worklife Pro,” “Bowls,” and logo are proprietary trademarks of Indeed, Inc."
+    },
+    {
+      "case_id": "email_case_100",
+      "source_message_id": "1a00559ad93cce82",
+      "final": {
+        "actionability": "action_suggested",
+        "email_is_sufficient": true,
+        "knowledge_gaps": [],
+        "expected_document_types": [],
+        "rationale": "Notification reports a new message; reviewing or responding is optional and can be initiated from the notification.",
+        "retrieval_expected": true,
+        "company_context_required": false
+      },
+      "gmail_content": "You have 1 new message View messages:[link1] Minh-Huy Mai-Duc posted: My first co-author Comment:[link2] Minh-Huy Mai-Duc reshared a post Comment:[link3] Moe Thiri Zun commented on Irlyvara Nandini’s post: Congratulations Irly Amazing work 🥳🥳 See post:[link4] This email was intended for D. NhatThanh (Student at CMC University) Learn why we included this: [link5] You are receiving LinkedIn notification emails. Unsubscribe: [link6] Help: [link7] © 2026 LinkedIn Corporation, 1zwnj000 West Maude Avenue, Sunnyvale, CA 94085. LinkedIn and the LinkedIn logo are registered trademarks of LinkedIn. Liên kết trong email: LinkedIn [link8] Messaging icon [link9] Mynetwork icon [link10] Notifications icon [link11] View messages [link12] Minh-Huy Mai-Duc’s picture [link13] Comment [link14] Minh-Huy Mai-Duc’s picture [link15] Comment [link16] Moe Thiri Zun’s picture [link17] See post [link18] Install LinkedIn Widgets Stay updated at a glance Add widget [link19] Learn why we included this. [link20] Help [link22] LinkedIn [link23]"
+    }
+  ]
+}
