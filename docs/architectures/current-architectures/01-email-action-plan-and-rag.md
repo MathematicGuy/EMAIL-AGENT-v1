@@ -2,32 +2,34 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
-**Primary Owner:** `src/cowork_agent/features/email_action_plan` & `src/cowork_agent/integrations/rag`  
-**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md) (Stateless, standalone Email Agent)
+**Primary Owner:** `src/cowork_agent/features/email_action_plan`  
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §2](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md)
 
 ---
 
 ## 1. Subsystem Overview
 
-The Email Action Plan & RAG Subsystem is a **standalone, single-turn, memory-free** PRD-v1 pipeline. It is **not** an in-chat `@Email` tool ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)). It reads unread Gmail (`gmail.readonly`), normalizes messages into transient `EphemeralEmailEnvelope`s, resolves a route, optionally retrieves from the committed company corpus, and persists body-free Action Plans.
+The Email Action Plan & RAG Subsystem is a single-turn, memory-isolated pipeline dedicated to transforming unread Gmail messages into structured, body-free action plans. It reads unread emails via OAuth (`gmail.readonly`), applies 5-email reply chain aggregation ([ADR-011](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-011-reply-chain-context-aggregation.md)), normalizes messages into transient [`EphemeralEmailEnvelope`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/domain/target_contracts.py) records, deterministically routes each candidate, selectively queries the committed company knowledge base ([ADR-003](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-003-defer-attachment-processing.md)), and validates output plans before persisting body-free tasks.
 
 ```mermaid
 flowchart LR
-    GMAIL["Google Gmail API<br/>(gmail.readonly)"] --> READ["GmailMailboxAdapter"]
-    READ --> ENV["EphemeralEmailEnvelope<br/>(Transient / Non-persisted)"]
-    ENV --> ROUTE{"Route Resolver"}
+    GMAIL["Google Gmail API<br/>(gmail.readonly)"] --> ADAPT["GmailMailboxAdapter<br/>(5-msg reply chain)"]
+    ADAPT --> ENV["EphemeralEmailEnvelope<br/>(Transient / In-Memory)"]
+    ENV --> ROUTE{"Route Resolver<br/>+ Policy Guards"}
 
-    ROUTE -->|NO_ACTION| NOACT["No Action Result"]
-    ROUTE -->|DIRECT_PLAN| GEN["Action Plan Generator"]
-    ROUTE -->|RETRIEVE_RAG| RAG["Company RAG Retrieval<br/>(Turbovec + BM25 + RRF)"]
+    ROUTE -->|NO_ACTION| NOACT["No Action / Filtered"]
+    ROUTE -->|DIRECT_PLAN| GEN["Action Plan Generator<br/>(Gemini / OpenRouter)"]
+    ROUTE -->|RETRIEVE_RAG| RAG["Company Semantic RAG<br/>(Turbovec 4-bit + BM25 + RRF)"]
 
-    RAG --> GEN
-    GEN --> VAL["validate_action_plan"]
-    VAL --> TASKDB["Task / Result Persistence"]
+    RAG --> GATE{"Evidence Gate<br/>(Cohere / Jina Cutoff)"}
+    GATE -->|Supported| GEN
+    GATE -->|Unsupported/Degraded| GEN
+    GEN --> VAL["Output Validator<br/>(validate_action_plan)"]
+    VAL --> TASKDB[("Task Persistence<br/>(Postgres / SQLite)")]
 ```
 
 > [!NOTE]
-> Company RAG is retrieval-only for this workflow. Raw email and attachment bytes are never written to `data/extracted/` or the Turbovec index.
+> Company RAG is strictly retrieval-only for this workflow. Raw email bodies and attachments are never indexed into `data/extracted/` or the Turbovec semantic store.
 
 ---
 
@@ -35,27 +37,38 @@ flowchart LR
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **Mailbox Adapter** | [provider.py](../../../src/cowork_agent/integrations/gmail/provider.py) `GmailMailboxAdapter` | OAuth `gmail.readonly` only. `search_unread` / `get_thread` normalize metadata and body into `EphemeralEmailEnvelope`. |
-| **Attachment Presence** | [provider.py](../../../src/cowork_agent/integrations/gmail/provider.py) `_has_attachments` | ADR-003: record `attachments_present` only. Digest path does **not** download or extract attachment content. |
-| **Evidence-aware Route Resolver** | [routing.py](../../../src/cowork_agent/features/email_action_plan/routing.py) `resolve_candidate_after_retrieval` | The classifier filters `NO_ACTION`; the final `DIRECT_PLAN` / `RETRIEVE_RAG` route is deterministic after Cohere evidence is assessed. |
-| **Company Semantic RAG** | [bootstrap.py](../../../src/cowork_agent/integrations/rag/bootstrap.py) `build_semantic_memory` | Default `RAG_STORE_PROVIDER=turbovec`: [HybridSemanticMemory](../../../src/cowork_agent/integrations/rag/hybrid.py) wraps [TurbovecSemanticMemory](../../../src/cowork_agent/integrations/rag/turbovec_memory.py) + BM25 + RRF over committed `data/extracted/*.md` (`load_corpus`). Unknown, retired (`qdrant` — no live module), disabled, or failed setup degrades to [NullSemanticMemory](../../../src/cowork_agent/integrations/rag/null_memory.py). |
-| **Action Plan Workflow** | [workflow.py](../../../src/cowork_agent/features/email_action_plan/workflow.py) `DigestWorker` | Single-turn orchestration: fetch → classify → resolve → zero-or-one retrieve → one Gemini / Groq / Faucet generation call per non-`NO_ACTION` candidate. |
-| **Output Validator** | [validation.py](../../../src/cowork_agent/features/email_action_plan/validation.py) `validate_action_plan` | Enforces schema, citation grounding, and no raw-body leak before `TaskRepository.save_task`. |
+| **Mailbox Adapter & Reply Chain** | [`provider.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/gmail/provider.py) (`GmailMailboxAdapter`) & [`workflow.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py) | OAuth `gmail.readonly` access. Sorts threads chronologically, ensures latest email is `UNREAD`, aggregates up to 5 linked emails per thread ([ADR-011](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-011-reply-chain-context-aggregation.md)), and normalizes into `EphemeralEmailEnvelope`. |
+| **Attachment Scope Boundary** | [`provider.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/gmail/provider.py) (`_has_attachments`) | Implements [ADR-003](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-003-defer-attachment-processing.md): records `attachments_present` boolean counter only. Never downloads attachment content or passes attachment bytes to LLMs. |
+| **Route Classifier & Intent Extraction** | [`openrouter.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/providers/openrouter.py) / [`gemini.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/providers/gemini.py) | Evaluates email batches with truncated bodies (`body[:1200]`) to classify actionability, internal terms, and knowledge sufficiency. |
+| **Deterministic Route Resolver** | [`routing.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/routing.py) (`resolve_candidate_after_retrieval`, `apply_policy_guards`) | Table-driven resolution enforcing FR-07 policy guards (`COMPANY_POLICY`, `GOVERNANCE_DOCUMENT`, `PROCEDURE`, `TEMPLATE`). Aggregates candidate routes where highest precedence wins (`RETRIEVE_RAG` > `DIRECT_PLAN` > `NO_ACTION`). |
+| **Deterministic Evidence Gate** | [`evidence.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/evidence.py) (`assess_retrieval_evidence`) | Filters retrieval chunks using dynamic reranker cutoff (`min_rerank_score` and `relative_cutoff_ratio`). Downgrades ungrounded retrieval to partial direct plans. |
+| **Company Semantic Memory** | [`bootstrap.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/bootstrap.py), [`hybrid.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/hybrid.py), [`turbovec_memory.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/turbovec_memory.py) | Backed by `TurbovecSemanticMemory` (4-bit TurboQuant at `.data/turbovec_index.tvim`) wrapped with `BM25SearchAdapter` + RRF rank fusion + Cohere/Jina reranking over committed [`data/extracted/*.md`](file:///C:/WORK/EMAIL-AGENT-v1/data/extracted) files. Gracefully degrades to [`NullSemanticMemory`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/rag/null_memory.py). |
+| **Action Plan Workflow Orchestrator** | [`workflow.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/workflow.py) (`DigestWorker`) | Orchestrates the single-turn pipeline: fetch threads → classify intent → candidate correlation → 0-or-1 retrieval + query rewrite → evidence gate → action plan generation → validation → deduplication → persistence. |
+| **Action Plan Generator & Resilient LLM** | [`openrouter.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/providers/openrouter.py), [`gemini.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/providers/gemini.py), [`last_resort.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/last_resort.py) | Synthesizes full 4-block context (untrusted email data, route context, retrieved RAG context, ISO-8601 UTC+7 schema constraints). Implements [ADR-012](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-012-openrouter-gemini-last-resort.md) fallback (`models[]` fallback array + Gemini last-resort retry). |
+| **Output Validator & Privacy Guard** | [`validation.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/validation.py) (`validate_action_plan`) | Enforces required fields, allowed actionability, step sequence renumbering, citation sanity against retrieval chunks, and substring sliding-window privacy leak checks (`RAW_BODY_LEAK`). |
 
 ---
 
 ## 3. Storage & Memory Boundaries
 
-1. **Transient Email Data:** Raw bodies live only in `EphemeralEmailEnvelope` and the in-process [ShortTermStore](../../../src/cowork_agent/features/email_action_plan/short_term.py) (run-local TTL; cleared by the run finalizer). They are **never** persisted and **never** ingested into company RAG. Attachment **content** is out of scope (ADR-003); only `attachments_present` is counted.
-2. **Company RAG Corpus:** Committed `data/extracted/*.md` only, loaded by `load_corpus` in [knowledge_base.py](../../../src/cowork_agent/integrations/rag/knowledge_base.py) and indexed at process start by `build_semantic_memory` into Turbovec (`.data/turbovec_index.tvim`) + BM25. Offline Markdown is produced by `mail-todo-ingest-knowledge` (see 06). There is no live `qdrant` module.
-3. **Durable Output:** Run metadata, body-free `Task` rows (title, action plan, citation coordinates), and Gmail pointer metadata (sender, subject, thread, deep link). No raw email body or attachment bytes.
+1. **Transient In-Memory Envelopes:** Raw email text lives exclusively in `EphemeralEmailEnvelope` dataclasses and the in-process [`ShortTermStore`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/short_term.py). The store is purged in the `finally` block of `DigestWorker.execute` upon completion or failure. Raw email bodies never reach long-term storage.
+2. **Company RAG Corpus:** Curated company documents committed under [`data/extracted/*.md`](file:///C:/WORK/EMAIL-AGENT-v1/data/extracted), indexed at startup by `build_semantic_memory`. The corpus is read-only during execution; incoming emails or user uploads are never written to the company index.
+3. **Durable Task Output:** Persisted records in [`TaskRepository`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/features/email_action_plan/ports.py) store structured action steps, title, request summary, citation coordinates, and Gmail message pointer IDs (`TaskPointer`). No raw email body text or attachment binaries are retained.
 
 ---
 
-## 4. Alignment & Diff vs Target Architecture
+## 4. LLM Resilience & Multi-Provider Hierarchy
 
-- **Alignment:** Matches [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md): standalone PRD-v1 Email Agent, single-turn, no typed chat memory, not callable from AI Chat, company RAG retrieval-only, Gmail `gmail.readonly`, attachments presence-only (ADR-003).
-- **Decoupled Architecture:** [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md) — this workflow is a separate product API, not an in-chat `@Email` tool.
-- **Remaining vs TARGET:** 0 product Diff. Implementation leftover only: `AttachmentExtractorPort` / `SafeTextAttachmentExtractor` are still constructed for callers/tests; `DigestWorker` discards them and never downloads attachments.
+In accordance with [ADR-012](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-012-openrouter-gemini-last-resort.md):
+- When `LLM_PROVIDER=openrouter`, requests dispatch with native `models[]` fallback lists configured via `OPENROUTER_ALLOWED_MODELS`.
+- On `OpenRouterAPIError` (transport/network failure, 429 rate limit, 5xx upstream, or unparseable payload), the call automatically retries via [`last_resort.py`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/integrations/llm/last_resort.py) on Google Gemini using key rotation.
+- Schema repair loops run locally before triggering provider fallbacks.
 
+---
 
+## 5. Alignment & Diff vs Target Architecture
+
+- **Target Alignment:** Fully aligned with [TARGET-ARCHITECTURE.md §1 & §2](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md). The email action plan pipeline operates with strict privacy boundaries, stateless execution, presence-only attachment tracking ([ADR-003](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-003-defer-attachment-processing.md)), and complete retrieval evidence gating.
+- **Workflow Isolation:** Follows [ADR-004](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md) principles, keeping email ingestion isolated from conversational memory buffers while enabling flexible system integration.
+- **Implementation Residue:** Legacy `AttachmentExtractorPort` / `SafeTextAttachmentExtractor` definitions remain in codebase for compatibility/test harness purposes, but are discarded by `DigestWorker` at runtime.
+- **Architecture Diff:** **0 Product Diff — 100% Aligned with Target Architecture**.
