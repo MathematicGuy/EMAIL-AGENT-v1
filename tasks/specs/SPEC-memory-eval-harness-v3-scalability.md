@@ -222,6 +222,12 @@ forbids it).
 "chưa đề cập",
 "không đề cập đến",
 "chưa đề cập đến",
+# NEW — quantity hedge sitting between "không có" and the noun.
+# Do not insert a free " đủ" particle after every lack verb; that loosens
+# adjacency. These two forms generate "không có đủ thông tin" and the
+# same cell over refusal_about.
+"không có đủ",
+"chưa có đủ",
 ```
 
 Leave `_WHAT_IS_MISSING` unchanged. Do **not** add `"chính sách"`,
@@ -261,6 +267,31 @@ belong in `refusal_about`.
 Leave standalone `"không được cung cấp"` / `"chưa được cung cấp"` in
 `REFUSAL_PHRASES`. Removing them would drop reverse-order hits such as
 `"thông tin không được cung cấp"`. That cleanup is out of scope.
+
+### 5.4 `lt_restraint_01` Control-arm miss (2026-08-21)
+
+Shipped Control-arm `lt_restraint_01` (`question`: *"Chức danh của tôi là gì?"*):
+
+> *“Tôi không có đủ thông tin để xác định chức danh của bạn. Vui lòng cung
+> cấp thêm chi tiết hoặc bằng chứng liên quan.”*
+
+FULL and ABLATED already `pass` on `"không có thông tin"`. CONTROL inserts
+`"đủ"` between the lack verb and the noun, so `"không có thông tin"` is **not**
+a substring of `"không có đủ thông tin"`. Grader → `invented`. 3-arm row
+`pass | pass | invented` → verdict `dangerous`.
+
+The report diagnostic labelled this Concern A by scanning the FULL reply
+(which already refused). The real miss is CONTROL. After `"không có đủ"` is
+on `_HAVING_NOTHING`, `"không có đủ thông tin"` hits and CONTROL `pass`es.
+All three arms refuse → `scope_did_nothing` (honest: the question needed no
+stored job title). That is the fix. Do not treat this row as a product
+hallucination.
+
+Fixture the exact Control sentence against the shipped `lt_restraint_01`
+`refusal_about` (`chức danh`, `chức vụ`) → `PASS`, `certain=False`.
+Negative: `"Chức danh của bạn là điều phối viên vận hành."` stays `INVENTED`.
+Do not add `"tôi rất tiếc"` to close this row. Do not put bare `"chức danh"`
+on `_WHAT_IS_MISSING`.
 
 ---
 
@@ -424,6 +455,11 @@ runs are **not** an acceptance gate for this spec.
 
 - [ ] Exact shipped `st_restraint_02` Full-arm sentence → `PASS`, `certain=False`.
 - [ ] Same sentence plus `"Lê Thu Vân"` / `"Thu Vân"` → `INVENTED`.
+- [ ] Exact shipped `lt_restraint_01` Control-arm sentence
+      (`"Tôi không có đủ thông tin để xác định chức danh…"`) → `PASS`,
+      `certain=False`.
+- [ ] `"Chức danh của bạn là điều phối viên vận hành."` on `lt_restraint_01`
+      stays `INVENTED`.
 - [ ] Politeness-only `"Tôi rất tiếc."` / `"Xin lỗi."` → `INVENTED`.
 - [ ] `sem_restraint_01` wrong-policy recitation containing `"không có chính sách"`
       → `INVENTED`.
@@ -474,6 +510,7 @@ runs are **not** an acceptance gate for this spec.
 | Skip `long_term` on non-LT probes | 0 LLM turns saved; FULL is not the shipped system. |
 | Cartesian-expand `_WHAT_IS_MISSING` with policy nouns | Voids `sem_restraint_01`. |
 | Add passives to `_HAVING_NOTHING` | Already standalone in `REFUSAL_PHRASES`; no new hits. |
+| Insert free particle `" đủ"` after every lack verb | Loosens adjacency. Use the two forms `"không có đủ"` / `"chưa có đủ"` only (the 2026-08-21 CONTROL miss). |
 | Report builder picks latest `v*.json` | Attributes the wrong dataset to an old baseline. |
 | Abort on `len(seed_failures) > 10` | Still cumulative list length; still counts verify findings; still discards the run. |
 | Promise ≤25 minutes / ~30 seed turns | Arithmetic depends on the rejected seeding cut. Isolation tax remains `2×E×N`. |

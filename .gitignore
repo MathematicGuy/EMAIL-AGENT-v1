@@ -54,6 +54,7 @@ frontend/.env
 **/update_corpus2skill.py
 .superpowers
 .worktrees/
+worktrees/
 .playwright-mcp
 .playwright
 .pnpm-store
