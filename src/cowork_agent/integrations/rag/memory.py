@@ -57,7 +57,28 @@ class InRepoSemanticMemory:
         self._min_score_default = min_score_default
         self._matrix: np.ndarray | None = None
 
-    async def build_index(self) -> None:
+    @classmethod
+    def from_precomputed_matrix(
+        cls,
+        documents: Sequence[KnowledgeDocument],
+        embedder: EmbeddingPort,
+        matrix: np.ndarray,
+    ) -> InRepoSemanticMemory:
+        """Build an index from a validated passage-vector matrix (eval cache)."""
+        memory = cls(documents, embedder)
+        validated = np.array(matrix, copy=True)
+        if validated.ndim != 2:
+            raise ValueError("precomputed matrix must be 2-dimensional")
+        if validated.dtype != np.float32:
+            raise ValueError("precomputed matrix must be float32")
+        if not np.isfinite(validated).all():
+            raise ValueError("precomputed matrix must contain only finite values")
+        if validated.shape[0] != len(memory._chunks):
+            raise ValueError("precomputed matrix row count must match the number of chunks")
+        memory._matrix = validated
+        return memory
+
+    async def build_index(self) -> np.ndarray:
         """Embed every chunk once and unit-normalize the matrix."""
         vectors = await self._embedder.embed(
             tuple(chunk.text for chunk in self._chunks), task="retrieval.passage"
@@ -66,6 +87,7 @@ class InRepoSemanticMemory:
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         self._matrix = matrix / norms
+        return self._matrix
 
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         if self._matrix is None:
