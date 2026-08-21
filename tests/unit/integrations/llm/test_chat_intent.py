@@ -56,11 +56,16 @@ def test_gemini_classifier_rotates_key_after_rate_limit(monkeypatch) -> None:
             attempted_keys.append(api_key)
             if api_key == "key-a":
                 raise GeminiRateLimitError("limited")
-            return (
-                '{"intent":"chat","needs_rag":false,"needs_tool":false,"tool_name":null,'
-                '"needs_clarification":false,"retrieval_query":null,"confidence":0.95,'
-                '"reason_codes":["general_chat"]}'
-            )
+            return {
+                "intent": "chat",
+                "needs_rag": False,
+                "needs_tool": False,
+                "tool_name": None,
+                "needs_clarification": False,
+                "retrieval_query": None,
+                "confidence": 0.95,
+                "reason_codes": ["general_chat"],
+            }
 
     monkeypatch.setattr(
         "cowork_agent.integrations.llm.providers.gemini.GoogleGenAITransport",
