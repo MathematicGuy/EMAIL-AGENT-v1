@@ -33,6 +33,16 @@ def _is_provider_class(text: str) -> bool:
     return _PROVIDER_CLASS in text
 
 
+def _holds_provider_streak(ritual_failures: Sequence[str]) -> bool:
+    """EP/ST seed failures hold the breaker; long_term misses do not."""
+
+    return any(
+        f" {ritual}: " in line
+        for line in ritual_failures
+        for ritual in (MemoryType.EPISODIC.value, MemoryType.SHORT_TERM.value)
+    )
+
+
 def _note_provider_failure(session: LiveSession) -> None:
     session.consecutive_provider_failures += 1
     if session.consecutive_provider_failures >= session.max_consecutive_provider_failures:
@@ -323,12 +333,7 @@ async def ask_live(
             return "", 0
         # long_term misses are eval findings: they neither increment nor hold
         # the streak. Only LLM-backed rituals (episodic / short_term) do.
-        if any(
-            f" {scope}: " in line
-            for line in ritual_failures
-            for scope in (MemoryType.EPISODIC.value, MemoryType.SHORT_TERM.value)
-        ):
-            skip_reset = True
+        skip_reset = _holds_provider_streak(ritual_failures)
 
     text, latency_ms, errors = await ask_once(
         controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
