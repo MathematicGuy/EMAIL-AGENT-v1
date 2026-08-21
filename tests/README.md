@@ -7,7 +7,7 @@ already exists.
 Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
 interpreter on this machine and fails with unrelated `ssl` errors.
 
-**Whole suite: `uv run pytest -q` -> ~13.5 s, 1838 passed.** Defaults: 4 xdist
+**Whole suite: `uv run pytest -q` -> ~14.4 s, 1838 passed.** Defaults: 4 xdist
 workers with `--dist loadgroup`, `-m 'not live'`, `--strict-markers`. Worker
 flags are injected by `tests/xdist_plugin.py`, not `addopts`, so `-p no:xdist`
 is not a usage error. Do **not** pass `-n 0` or `-p no:xdist` on a focused
@@ -25,30 +25,30 @@ test pass.
 
 ## 1. Route Index
 
-Pick the narrowest row that contains your change. Times are **serial** (`-n0`),
-which is what one route costs; the full suite is parallel.
+Pick the narrowest row that contains your change. Times are measured with 4 xdist
+workers (`-n 4 --dist loadfile`).
 
-| # | Route | Tests | Serial | Covers |
+| # | Route | Tests | Time (-n 4) | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 844 | 2.5 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 102 | 2.3 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 76 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
-| R5 | `tests/unit/integrations/gmail` | 40 | 0.7 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 348 | 3.9 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 37 | 1.9 s | Repository logic against fakes. |
-| R8 | `tests/unit/orchestration` | 19 | 1.3 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 184 | 6.0 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
-| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 33 | 5.0 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 1.1 s | Real PostgreSQL. **Skips wholesale without a server** (~1 s to decide; see §5). One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
-| R13 | `tests/integration/email_action_plan` | 48 | 2.5 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 91 | 10.2 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 1762 | 18.8 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 1577 | 13.0 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(everything)* | 1838 | **13.5 s parallel** | `uv run pytest -q` |
+| R1 | `tests/unit/domain` | 179 | 2.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 844 | 5.0 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 102 | 5.3 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 76 | 4.1 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail` | 40 | 2.8 s | OAuth/PKCE, token cipher, mailbox adapter. |
+| R6 | `tests/unit/integrations` | 348 | 5.4 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 37 | 4.1 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 19 | 4.0 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 184 | 8.9 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
+| R10 | `tests/unit/fixtures` | 33 | 4.3 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 33 | 9.7 s | FastAPI via in-process ASGI transport. |
+| R12 | `tests/integration/persistence` | 9 | 3.4 s | Real PostgreSQL. **Skips wholesale without a server** (~1 s to decide; see §5). One xdist group (`pg-control-plane`); do not run these files in parallel against `cowork_mail_todo`. |
+| R13 | `tests/integration/email_action_plan` | 48 | 4.6 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 91 | 11.5 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1761 | 16.0 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1577 | 11.6 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
+| — | *(everything)* | 1838 | **14.4 s parallel** | `uv run pytest -q` |
 
-Collection alone is 2.5 s of that 13.5 s, and **every worker pays it in full** —
+Collection alone is 2.5 s of that 14.4 s, and **every worker pays it in full** —
 which is why more workers do not help (§5).
 
 ### Source -> route
