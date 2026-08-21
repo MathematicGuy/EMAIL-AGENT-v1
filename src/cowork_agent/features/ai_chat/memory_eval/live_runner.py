@@ -321,7 +321,13 @@ async def ask_live(
                 }
             )
             return "", 0
-        if ritual_failures:
+        # long_term misses are eval findings: they neither increment nor hold
+        # the streak. Only LLM-backed rituals (episodic / short_term) do.
+        if any(
+            f" {scope}: " in line
+            for line in ritual_failures
+            for scope in (MemoryType.EPISODIC.value, MemoryType.SHORT_TERM.value)
+        ):
             skip_reset = True
 
     text, latency_ms, errors = await ask_once(

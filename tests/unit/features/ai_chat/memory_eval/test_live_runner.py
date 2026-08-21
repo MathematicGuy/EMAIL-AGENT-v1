@@ -433,6 +433,33 @@ def test_verify_seed_findings_do_not_increment_consecutive_provider_failures(
     assert session.consecutive_provider_failures == 0
 
 
+def test_long_term_miss_with_successful_episodic_and_ask_resets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def miss_lt(gateway, scope, spec, *, now, profile_id):
+        del gateway, scope, spec, now, profile_id
+        return SeedOutcome(MemoryType.LONG_TERM, False, "empty-profile miss")
+
+    async def ok_ep(controller, session_id, spec, *, key_prefix):
+        del controller, session_id, spec, key_prefix
+        return SeedOutcome(MemoryType.EPISODIC, True, "ok", seeded=False)
+
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_long_term",
+        miss_lt,
+    )
+    monkeypatch.setattr(
+        "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
+        ok_ep,
+    )
+    session = _session(_Reply(), SeedSpec((), {"language": "vi"}, (), None))
+    session.consecutive_provider_failures = 2
+    text, _ = asyncio.run(ask_live(session, _probe(targets=MemoryType.EPISODIC), Arm.FULL, None))
+    assert text == "an answer"
+    assert any("empty-profile miss" in line for line in session.seed_failures)
+    assert session.consecutive_provider_failures == 0
+
+
 def test_consecutive_ask_once_provider_failures_abort(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fail_ask(controller, session_id, question, idempotency_key):
         del controller, session_id, question, idempotency_key
