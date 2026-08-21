@@ -10,6 +10,14 @@ vi.mock('./DocxViewer', () => ({
   ),
 }));
 
+vi.mock('./PdfViewer', () => ({
+  PdfViewer: ({ filename }: { filename: string }) => (
+    <div data-testid="pdf-viewer">
+      Pdf Viewer: {filename}
+    </div>
+  ),
+}));
+
 const mockRawDocs = [
   {
     filename: 'cap_lai_cccd.pdf',
@@ -110,9 +118,8 @@ describe('RawDocumentsView', () => {
     });
 
     await waitFor(() => {
-      const iframe = screen.getByTitle('pdf-preview-cap_lai_cccd.pdf');
-      expect(iframe).not.toBeNull();
-      expect(iframe.getAttribute('src')).toBeTruthy();
+      expect(screen.getByTestId('pdf-viewer')).not.toBeNull();
+      expect(screen.getByText('Pdf Viewer: cap_lai_cccd.pdf')).not.toBeNull();
     });
   });
 

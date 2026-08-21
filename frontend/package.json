@@ -25,6 +25,7 @@
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^1.26.0",
     "mammoth": "^1.12.1",
+    "pdfjs-dist": "^6.2.108",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
