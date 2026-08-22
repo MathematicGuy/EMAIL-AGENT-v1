@@ -45,11 +45,11 @@ def test_every_restraint_probe_declares_what_it_would_be_refusing_about(
 
 def test_the_seed_fits_the_prompt_window(probe_set_path: Path) -> None:
     # A short_term probe deliberately keeps its seeded session (SPEC §5.3) — the
-    # buffer IS the subject. So `live_runner` seeds short_term into that session,
-    # then appends the episodic seed turns on top of it, and then asks the probe:
+    # buffer IS the subject. `live_runner` seeds short_term into that session
+    # and then asks the probe. Episodic seed turns no longer occupy the probing
+    # session; they run in a foreign `{session_id}-seed` session.
     #
     #     seed_short_term  -> len(seed.short_term) turns
-    #     seed_episodic    -> len(seed.episodic) turns, appended after
     #     the probe        -> 1 turn
     #
     # `build_generation_context` keeps only the newest _MAX_ACTIVE_SESSION_TURNS
@@ -61,11 +61,11 @@ def test_the_seed_fits_the_prompt_window(probe_set_path: Path) -> None:
     # The constant is imported, not written as a literal: if the product changes
     # the window, this bound must move with it.
     seed = _probe_set(probe_set_path).seed
-    used = len(seed.short_term) + len(seed.episodic) + 1
+    used = len(seed.short_term) + 1
     assert used <= _MAX_ACTIVE_SESSION_TURNS, (
-        f"{probe_set_path.name} seeds {len(seed.short_term)} short_term turns + "
-        f"{len(seed.episodic)} episodic turns, and the probe turn makes {used}, "
-        f"over the {_MAX_ACTIVE_SESSION_TURNS}-turn prompt window. The oldest "
+        f"{probe_set_path.name} seeds {len(seed.short_term)} short_term turns, "
+        f"and the probe turn makes {used}, over the "
+        f"{_MAX_ACTIVE_SESSION_TURNS}-turn prompt window. The oldest "
         f"short_term seed line will be evicted before any short_term probe is "
         f"asked, and will be reported as amnesia."
     )

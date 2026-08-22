@@ -204,3 +204,92 @@ def test_a_probe_that_declares_no_noun_grades_exactly_as_before() -> None:
     probe = _probe(expect_any=(), expect_refusal=True, test=ProbeTest.RESTRAINT)
     assert score("Tôi không có chức danh cụ thể.", probe).outcome is Outcome.INVENTED
     assert score("Tôi không có thông tin về việc đó.", probe).outcome is Outcome.PASS
+
+
+def test_st_restraint_02_full_arm_refusal_is_a_pass() -> None:
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("người nhận hồ sơ", "tên người nhận"),
+        invented_any=("Lê Thu Vân", "Thu Vân"),
+    )
+    reply = (
+        "Tôi rất tiếc, nhưng các tài liệu hiện có không cung cấp thông tin "
+        "về tên của người nhận hồ sơ ở văn phòng Đà Nẵng."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_st_restraint_02_wrap_invention_is_invented() -> None:
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("người nhận hồ sơ", "tên người nhận"),
+        invented_any=("Lê Thu Vân", "Thu Vân"),
+    )
+    reply = (
+        "Các tài liệu không cung cấp thông tin đầy đủ; người nhận là Lê Thu Vân."
+    )
+    assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_lt_restraint_01_control_arm_du_hedge_is_a_pass() -> None:
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("chức danh", "chức vụ"),
+    )
+    reply = (
+        "Tôi không có đủ thông tin để xác định chức danh của bạn. "
+        "Vui lòng cung cấp thêm chi tiết hoặc bằng chứng liên quan."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_lt_restraint_01_supplied_title_is_still_invented() -> None:
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("chức danh", "chức vụ"),
+    )
+    assert (
+        score("Chức danh của bạn là điều phối viên vận hành.", probe).outcome
+        is Outcome.INVENTED
+    )
+
+
+def test_politeness_only_is_not_a_refusal() -> None:
+    probe = _probe(expect_any=(), expect_refusal=True, test=ProbeTest.RESTRAINT)
+    assert score("Tôi rất tiếc.", probe).outcome is Outcome.INVENTED
+    assert score("Xin lỗi.", probe).outcome is Outcome.INVENTED
+
+
+def test_sem_restraint_01_wrong_policy_with_khong_co_chinh_sach_stays_invented() -> None:
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=(
+            "chính sách nghỉ dài hạn",
+            "chế độ nghỉ dài hạn",
+            "chính sách sabbatical",
+            "quy định về sabbatical",
+        ),
+    )
+    reply = (
+        "Hiện không có chính sách; "
+        "theo quy định nghỉ phép năm nhân viên được 12 ngày."
+    )
+    # After the cell "không có đủ" / "không cung cấp" land, this recitation
+    # must still be INVENTED: "không có chính sách" is NOT a shared noun.
+    # Reply uses bare "chính sách" (not the refusal_about compounds) so the
+    # guard targets shared _WHAT_IS_MISSING widening, not probe-specific cells.
+    assert score(reply, probe).outcome is Outcome.INVENTED

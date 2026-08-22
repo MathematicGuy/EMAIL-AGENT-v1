@@ -37,20 +37,24 @@ $env:PYTHONPATH="src"; $env:PYTHONIOENCODING="utf-8"
   --output evaluations/MEMORIES/baselines/<name>-<model>.json
 ```
 
-`--provider` defaults to `$LLM_PROVIDER`, else gemini. Embedding the corpus
-needs `GEMINI_API_KEY`, or `JINA_API_KEY` when
-`DOCUMENT_EMBEDDING_PROVIDER=jina`.
+`--provider` defaults to `$LLM_PROVIDER`, else gemini. Memory-eval embeddings
+are Gemini (`GEMINI_API_KEY`). `JINA_API_KEY` is only required if you
+deliberately set `DOCUMENT_EMBEDDING_PROVIDER=jina` — that is not the eval default.
 
-**Exit code 0 means the harness ran**, not that memory is good.
+**Exit code 0 means the run finished**, not that memory is good. Exit **1** is no usable model, or a consecutive `chat_provider_unavailable` abort (default 3; `--max-consecutive-provider-failures`). If the output JSON has `"aborted": true`, baseline + detail were still written — build the report from them. Exit **2** is cannot start (probe set, args, unsafe target).
 
 ## Which probe set
 
-By default, the harness automatically discovers and loads the **latest probe set** found in `evaluations/MEMORIES/probes/` (e.g., `v2-four-scopes-wide.json` or whichever highest version is present).
+**Launch and report are different jobs.** Do not share “latest file on disk.”
+
+- **Launch** (`evaluate_memory.py` with no `--probe-set`): among `evaluations/MEMORIES/probes/*.json`, pick the maximum integer prefix after a leading `v` (`v3-four-scopes-hard.json` → `3`). Pin a historical set with `--probe-set`.
+- **Report** (`build_memory_evaluation_report.py` with no `--probe-set`): load the file whose `probe_set_id` equals `baseline["probe_set_id"]`, then verify `probe_set_sha256` when present. Unknown id or hash mismatch → exit 1, no markdown. A v2 baseline stays v2 after a v3 file is added.
 
 | file | probes | probe turns per run | what it is |
 |---|---|---|---|
 | `probes/v1-four-scopes.json` | 8 | 24 | `recall` + `restraint` per scope, one `update`. Historical v1 baseline. |
 | `probes/v2-four-scopes-wide.json` | 20 | 60 | The wide set: 2–3 probes per scope, `update` on `episodic` as well, and near-miss restraint probes. Its own corpus, `tests/fixtures/memory_eval/corpus-v2/`. |
+| `probes/v3-four-scopes-hard.json` | 20 | 60 | Harder v2 grid: crowded ST, same-shape CCCD distractor, `OT-141` lookalike, more `invented_any`. Corpus `tests/fixtures/memory_eval/corpus-v3/`. Default launch once this file exists. |
 
 ```powershell
 # Pinning to a specific historical probe set (e.g. v1):
@@ -59,17 +63,20 @@ By default, the harness automatically discovers and loads the **latest probe set
   --output evaluations/MEMORIES/baselines/<name>.json
 ```
 
-**The two are not comparable.** Different `probe_set_id`, different questions,
+**These sets are not comparable.** Different `probe_set_id`, different questions,
 different corpus — a v1 baseline and a v2 report are two different measurements
-and neither is a version of the other. See SPEC §12.2 rule 5.
+and neither is a version of the other. v2 and v3 are **not comparable**
+(different `probe_set_id`, different seed). See SPEC §12.2 rule 5.
 
-v2 costs roughly 2.5× v1 in model calls. SPEC §15.1 item 10 records that
-concurrent live runs draw far more `chat_provider_unavailable` dropouts than one
-does, and that one run at a time is the operating rule; more turns per run makes
-that matter more, not less.
+v3 costs ≈ 280 model turns (SPEC-memory-eval-probe-set-v3.md §4); v2 ≈ 220; v1
+≈ 52. SPEC §15.1 item 10 records that concurrent live runs draw far more
+`chat_provider_unavailable` dropouts than one does, and that one run at a time
+is the operating rule; more turns per run makes that matter more, not less.
 
 Why a second set exists rather than a wider v1:
 [SPEC-memory-eval-probe-set-v2.md](../../tasks/specs/SPEC-memory-eval-probe-set-v2.md).
+Why a third set exists rather than a harder edit of v2:
+[SPEC-memory-eval-probe-set-v3.md](../../tasks/specs/SPEC-memory-eval-probe-set-v3.md).
 
 ## `POSTGRES_MODE` — SQLite vs PostgreSQL Decision Matrix
 

@@ -20,10 +20,10 @@ OAUTH_STATE_TTL_SECONDS=600
 OAUTHLIB_INSECURE_TRANSPORT=1
 
 # LLM Provider Selection (openrouter | gemini | groq | mistral)
-# mistral: mistral-small-2603 
+# mistral: mistral-medium-3-5 | glm-5-2 | 
 # groq: qwen/qwen3.6-27b
 # gemini: gemini-3.5-flash-lite | gemma-4-31b (fast and reliable)
-LLM_PROVIDER=gemini
+LLM_PROVIDER=mistral
 
 # Gemini Action Extractor & Key Rotation Settings
 # Active Candidate Models for Memory Evaluation:
@@ -135,3 +135,4 @@ LANGFUSE_OBSERVE_DECORATOR_IO_CAPTURE_ENABLED=false
 EXTRACTION_MODE=advance
 OCR_MODEL_ID=mistral-ocr-latest
 KNOWLEDGE_INGEST_OCR_ENABLED=true
+MISTRAL_MODEL=mistral-medium-3-5

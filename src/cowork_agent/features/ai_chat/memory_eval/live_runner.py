@@ -22,11 +22,36 @@ from .probes import Probe, ProbeSet, SeedSpec
 from .runner import run_key
 from .seeding import seed_long_term
 
-MAX_ALLOWED_SEED_FAILURES = 3
+_PROVIDER_CLASS = "chat_provider_unavailable"
 
 
 class ExcessiveSeedFailuresError(RuntimeError):
-    """The evaluation run encountered too many seed failures and was aborted early."""
+    """The evaluation run encountered too many consecutive provider-class failures."""
+
+
+def _is_provider_class(text: str) -> bool:
+    return _PROVIDER_CLASS in text
+
+
+def _holds_provider_streak(ritual_failures: Sequence[str]) -> bool:
+    """EP/ST seed failures hold the breaker; long_term misses do not."""
+
+    return any(
+        f" {ritual}: " in line
+        for line in ritual_failures
+        for ritual in (MemoryType.EPISODIC.value, MemoryType.SHORT_TERM.value)
+    )
+
+
+def _note_provider_failure(session: LiveSession) -> None:
+    session.consecutive_provider_failures += 1
+    if session.consecutive_provider_failures >= session.max_consecutive_provider_failures:
+        raise ExcessiveSeedFailuresError(
+            f"Seeding failed {session.consecutive_provider_failures} consecutive "
+            f"provider-class times (>= {session.max_consecutive_provider_failures}); "
+            f"aborting evaluation for model '{session.identity.run_key}' immediately "
+            f"to prevent wasting calls on an unavailable or failing provider."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +168,8 @@ class LiveSession:
     seeded: set[str] = field(default_factory=set)
     seed_failures: list[str] = field(default_factory=list)
     ask_errors: list[dict[str, object]] = field(default_factory=list)
+    consecutive_provider_failures: int = 0
+    max_consecutive_provider_failures: int = 3
 
     def adapters_for(self, arm: Arm) -> AdapterSet:
         """The adapters one arm reads through.
@@ -169,21 +196,24 @@ async def _seed_for(
     scope: ChatMemoryScope,
     probe_controller: ChatController,
     probe_gateway: ArmScopedMemoryGateway,
-) -> None:
+) -> list[str]:
     """Seed one arm's store before the probe is asked.
 
     Where each ritual runs matters, and for two different reasons.
 
-    `short_term` runs through the PROBE controller. The buffer lives on the
-    gateway instance, so seeding through a second controller would fill a
-    different buffer and the turns would never reach the probe.
+    `short_term` runs through the PROBE controller, and only when the probe
+    targets the buffer. The buffer lives on the gateway instance, so seeding
+    through a second controller would fill a different buffer and the turns
+    would never reach the probe. Non-short-term probes must not fill it:
+    those facts would sit in the recent-turn window and the scope under test
+    would never be read.
 
-    `episodic` runs through a SEPARATE controller, because requesting a task is
-    itself a chat turn. Running it in the probing session would leave the task
-    text in the recent-turn window and an episodic probe could answer from the
-    prompt without episodic memory being read at all (SPEC §7 step 5). Episodes
-    are keyed by tenant and user, not by session, so a foreign seeding session
-    is still readable — verified against read_episodes' WHERE clause.
+    `episodic` always runs through a SEPARATE controller, because requesting a
+    task is itself a chat turn. Running it in the probing session would leave
+    the task text in the recent-turn window — including on a short_term probe,
+    where that text would contaminate the buffer under test. Episodes are
+    keyed by tenant and user, not by session, so a foreign seeding session is
+    still readable — verified against read_episodes' WHERE clause.
 
     `long_term` needs only a gateway; the profile is per-user.
     """
@@ -198,32 +228,26 @@ async def _seed_for(
         )
     ]
 
-    if needs_fresh_session(probe):
-        seed_session_id = f"{scope.session_id}-seed"
-        seed_scope = ChatMemoryScope(
-            tenant_id=scope.tenant_id, user_id=scope.user_id, session_id=seed_session_id
+    seed_session_id = f"{scope.session_id}-seed"
+    seed_scope = ChatMemoryScope(
+        tenant_id=scope.tenant_id, user_id=scope.user_id, session_id=seed_session_id
+    )
+    seed_controller, seed_gateway = build_arm_controller(
+        seed_scope,
+        session.adapters,
+        session.reply,
+        masked_scope=None,
+        company_rag_enabled=session.company_rag_enabled,
+    )
+    session.gateways.append(seed_gateway)
+    outcomes.append(
+        await seed_episodic(
+            seed_controller, seed_session_id, session.seed, key_prefix=seed_session_id
         )
-        seed_controller, seed_gateway = build_arm_controller(
-            seed_scope,
-            session.adapters,
-            session.reply,
-            masked_scope=None,
-            company_rag_enabled=session.company_rag_enabled,
-        )
-        session.gateways.append(seed_gateway)
-        outcomes.append(
-            await seed_episodic(
-                seed_controller, seed_session_id, session.seed, key_prefix=seed_session_id
-            )
-        )
-    else:
+    )
+    if probe.targets is MemoryType.SHORT_TERM:
         outcomes.append(
             await seed_short_term(
-                probe_controller, scope.session_id, session.seed, key_prefix=scope.session_id
-            )
-        )
-        outcomes.append(
-            await seed_episodic(
                 probe_controller, scope.session_id, session.seed, key_prefix=scope.session_id
             )
         )
@@ -233,15 +257,20 @@ async def _seed_for(
     # message on all three — which is how three masked-arm artefacts once read
     # as "all three scopes are empty".
     where = f"[{probe.probe_id}/{arm.value}]"
-    session.seed_failures.extend(
-        f"{where} {outcome.scope.value}: {outcome.reason}" for outcome in outcomes if not outcome.ok
-    )
+    ritual_failures = [
+        f"{where} {outcome.scope.value}: {outcome.reason}"
+        for outcome in outcomes
+        if not outcome.ok
+    ]
+    session.seed_failures.extend(ritual_failures)
     # A scope that declared nothing was never seeded, so verifying it would
-    # report a failure for memory nobody asked for.
+    # report a failure for memory nobody asked for. Verify findings are eval
+    # results: they never trip the provider circuit breaker.
     landed = tuple(outcome.scope for outcome in outcomes if outcome.ok and outcome.seeded)
     session.seed_failures.extend(
         f"{where} {finding.reason}" for finding in await verify_seed(probe_gateway, scope, landed)
     )
+    return ritual_failures
 
 
 async def ask_live(
@@ -278,16 +307,33 @@ async def ask_live(
     session.last_gateway = gateway
     session.gateways.append(gateway)
 
-    if arm is not Arm.CONTROL and scope.session_id not in session.seeded:
-        session.seeded.add(scope.session_id)
-        await _seed_for(session, probe, arm, scope, controller, gateway)
-        if len(session.seed_failures) > MAX_ALLOWED_SEED_FAILURES:
-            failures_count = len(session.seed_failures)
-            raise ExcessiveSeedFailuresError(
-                f"Seeding failed {failures_count} times (> {MAX_ALLOWED_SEED_FAILURES}); "
-                f"aborting evaluation for model '{session.identity.run_key}' immediately "
-                f"to prevent wasting calls on an unavailable or failing provider."
+    if arm is Arm.CONTROL:
+        text, latency_ms, errors = await ask_once(
+            controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
+        )
+        if errors:
+            session.ask_errors.append(
+                {"probe": probe.probe_id, "arm": arm.value, "errors": list(errors)}
             )
+        return text, latency_ms
+
+    skip_reset = False
+    if scope.session_id not in session.seeded:
+        session.seeded.add(scope.session_id)
+        ritual_failures = await _seed_for(session, probe, arm, scope, controller, gateway)
+        if any(_is_provider_class(line) for line in ritual_failures):
+            _note_provider_failure(session)
+            session.ask_errors.append(
+                {
+                    "probe": probe.probe_id,
+                    "arm": arm.value,
+                    "errors": [line for line in ritual_failures if _is_provider_class(line)],
+                }
+            )
+            return "", 0
+        # long_term misses are eval findings: they neither increment nor hold
+        # the streak. Only LLM-backed rituals (episodic / short_term) do.
+        skip_reset = _holds_provider_streak(ritual_failures)
 
     text, latency_ms, errors = await ask_once(
         controller, scope.session_id, probe.question, f"{probe.probe_id}-{arm.value}"
@@ -296,6 +342,11 @@ async def ask_live(
         session.ask_errors.append(
             {"probe": probe.probe_id, "arm": arm.value, "errors": list(errors)}
         )
+        if any(_is_provider_class(item) for item in errors):
+            _note_provider_failure(session)
+            return text, latency_ms
+    if not skip_reset:
+        session.consecutive_provider_failures = 0
     return text, latency_ms
 
 

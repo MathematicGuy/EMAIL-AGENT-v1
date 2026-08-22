@@ -63,7 +63,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   }, [filename]);
 
   useEffect(() => {
-    void fetchDocument();
+    queueMicrotask(() => void fetchDocument());
   }, [fetchDocument]);
 
   // 2. Render all PDF pages sequentially onto HTML Canvas
@@ -132,13 +132,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
     void renderPdf();
 
+    const node = containerRef.current;
     return () => {
       active = false;
       if (loadingTask) {
         void loadingTask.destroy();
       }
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (node) {
+        node.innerHTML = '';
       }
     };
   }, [rawBuffer]);

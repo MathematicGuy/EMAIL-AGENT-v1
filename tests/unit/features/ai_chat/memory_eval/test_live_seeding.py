@@ -228,20 +228,24 @@ def test_a_provider_that_returns_no_proposal_is_a_finding() -> None:
 class _Embedder:
     """Deterministic bag-of-words embedder. No network, stable across runs."""
 
-    def __init__(self, fail: bool = False) -> None:
+    def __init__(self, fail: bool = False, model: str = "fake") -> None:
         self._fail = fail
+        self.model = model
+        self.tasks: list[str] = []
 
     async def embed(self, texts: tuple[str, ...], *, task: str = "") -> list[list[float]]:
-        del task
+        self.tasks.append(task)
         if self._fail:
             raise RuntimeError("embedder down")
         vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
         return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
 
 
-def test_a_declared_corpus_is_indexed_and_an_adapter_returned() -> None:
+def test_a_declared_corpus_is_indexed_and_an_adapter_returned(tmp_path: Path) -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
-    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path(".")))
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, _Embedder(), corpus_root=Path("."), cache_dir=tmp_path)
+    )
     assert outcome.ok is True
     assert outcome.scope is MemoryType.SEMANTIC
     assert adapter is not None
@@ -264,12 +268,82 @@ def test_a_missing_corpus_directory_is_a_finding() -> None:
     assert adapter is None
 
 
-def test_an_embedder_failure_is_a_finding_not_a_crash() -> None:
+def test_an_embedder_failure_is_a_finding_not_a_crash(tmp_path: Path) -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
-    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(fail=True), corpus_root=Path(".")))
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, _Embedder(fail=True), corpus_root=Path("."), cache_dir=tmp_path)
+    )
     assert outcome.ok is False
     assert "embedder down" in outcome.reason
     assert adapter is None
+
+
+def test_semantic_cache_hit_skips_passage_embeds(tmp_path: Path) -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    first = _Embedder()
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, first, corpus_root=Path("."), cache_dir=tmp_path)
+    )
+    assert outcome.ok is True
+    assert adapter is not None
+    assert "retrieval.passage" in first.tasks
+
+    second = _Embedder()
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, second, corpus_root=Path("."), cache_dir=tmp_path)
+    )
+    assert outcome.ok is True
+    assert "retrieval.passage" not in second.tasks
+
+
+def test_semantic_cache_misses_when_embedder_identity_changes(tmp_path: Path) -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    asyncio.run(
+        seed_semantic(spec, _Embedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path)
+    )
+    other = _Embedder(model="b")
+    asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
+    assert "retrieval.passage" in other.tasks
+
+
+class _PrivateIdentityEmbedder:
+    """Bag-of-words embedder whose identity is only on private Gemini-style attrs."""
+
+    def __init__(self, *, model: str = "fake", dimensions: object = "") -> None:
+        self._model = model
+        self._dimensions = dimensions
+        self.tasks: list[str] = []
+
+    async def embed(self, texts: tuple[str, ...], *, task: str = "") -> list[list[float]]:
+        self.tasks.append(task)
+        vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
+        return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
+
+
+def test_semantic_cache_misses_when_private_embedder_model_changes(tmp_path: Path) -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    asyncio.run(
+        seed_semantic(
+            spec, _PrivateIdentityEmbedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path
+        )
+    )
+    other = _PrivateIdentityEmbedder(model="b")
+    asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
+    assert "retrieval.passage" in other.tasks
+
+
+def test_corrupt_cache_rebuilds_instead_of_failing_seed(tmp_path: Path) -> None:
+    spec = SeedSpec((), {}, (), _CORPUS)
+    asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path("."), cache_dir=tmp_path))
+    for npz in tmp_path.glob("*.npz"):
+        npz.write_bytes(b"not-an-npz")
+    embedder = _Embedder()
+    outcome, adapter = asyncio.run(
+        seed_semantic(spec, embedder, corpus_root=Path("."), cache_dir=tmp_path)
+    )
+    assert outcome.ok is True
+    assert adapter is not None
+    assert "retrieval.passage" in embedder.tasks
 
 
 # --- verification: "was it written" is a different question from "can we find it"

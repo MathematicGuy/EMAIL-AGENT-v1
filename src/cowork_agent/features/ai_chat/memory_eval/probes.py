@@ -8,9 +8,11 @@ question text would make every verdict an opinion.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from cowork_agent.domain.chat_contracts import MemoryType
 
@@ -69,8 +71,12 @@ class Probe:
     #: them and is graded INVENTED. That noun is different for every restraint
     #: probe, so it cannot live in the shared list. The probe knows it.
     refusal_about: tuple[str, ...] = ()
+    #: Contradiction nouns for restraint probes. If any appear in the reply,
+    #: the grade is INVENTED even when a refusal bigram is also present — the
+    #: wrap-invention shape (decline, then supply a nearby name). Only
+    #: meaningful with ``expect_refusal``.
+    invented_any: tuple[str, ...] = ()
     note: str = ""
-
 
 @dataclass(frozen=True, slots=True)
 class ProbeSet:
@@ -146,6 +152,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     stale_any = _string_tuple(data.get("stale_any"), f"probe {probe_id}: stale_any")
     expect_refusal = _bool(data.get("expect_refusal"), f"probe {probe_id}: expect_refusal")
     refusal_about = _string_tuple(data.get("refusal_about"), f"probe {probe_id}: refusal_about")
+    invented_any = _string_tuple(data.get("invented_any"), f"probe {probe_id}: invented_any")
 
     # Declared without a refusal expected, it would silently do nothing: the
     # noun is only ever combined with a word for having nothing on the refusal
@@ -153,6 +160,10 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     if refusal_about and not expect_refusal:
         raise ProbeSetError(
             f"probe {probe_id}: refusal_about is only meaningful with expect_refusal"
+        )
+    if invented_any and not expect_refusal:
+        raise ProbeSetError(
+            f"probe {probe_id}: invented_any is only meaningful with expect_refusal"
         )
 
     # A probe with no expectation always passes, which is worse than no probe.
@@ -174,6 +185,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         stale_any=stale_any,
         expect_refusal=expect_refusal,
         refusal_about=refusal_about,
+        invented_any=invented_any,
         note=note,
     )
 
@@ -243,3 +255,34 @@ def load_probe_set(payload: Mapping[str, object]) -> ProbeSet:
         seed=_load_seed(_mapping(payload.get("seed", {}), "seed")),
         probes=probes,
     )
+
+
+def find_probe_set_file(probes_dir: Path, probe_set_id: str) -> Path:
+    """Return the JSON file whose loaded ``probe_set_id`` matches ``probe_set_id``.
+
+    Scans ``probes_dir/*.json``. Zero matches or more than one match raise
+    ``ProbeSetError``. Unreadable or unloadable files are skipped so a stray
+    JSON next to a valid set does not hide an id match.
+    """
+
+    matches: list[Path] = []
+    for path in probes_dir.glob("*.json"):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping):
+                continue
+            loaded = load_probe_set(payload)
+        except (OSError, ValueError):
+            continue
+        if loaded.probe_set_id == probe_set_id:
+            matches.append(path)
+    if not matches:
+        raise ProbeSetError(f"no probe set file with probe_set_id {probe_set_id!r}")
+    if len(matches) > 1:
+        names = ", ".join(path.name for path in matches)
+        raise ProbeSetError(
+            f"multiple probe set files with probe_set_id {probe_set_id!r}: {names}"
+        )
+    return matches[0]

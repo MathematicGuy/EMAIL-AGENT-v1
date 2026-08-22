@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 from cowork_agent.features.ai_chat.memory_eval.probes import SeedSpec
 from cowork_agent.features.ai_chat.memory_eval.runner import run_key
 from scripts.evaluate_memory import main
+from tests.unit.scripts.cli_harness import run_cli
 
 
 def _probe_set_file(tmp_path: Path) -> Path:
@@ -58,6 +61,30 @@ def test_dry_run_writes_a_report_and_exits_zero(tmp_path: Path) -> None:
     assert report["schema_version"] == "2.1.0"
     assert report["probe_set_id"] == "unit"
     assert len(report["verdicts"]) == 1
+
+
+def test_dry_run_stamps_probe_set_path_and_sha256(tmp_path: Path) -> None:
+    probe_path = _probe_set_file(tmp_path)
+    output = tmp_path / "report.json"
+    code = main(
+        ["--dry-run", "--probe-set", str(probe_path), "--output", str(output)]
+    )
+    assert code == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["probe_set_sha256"] == hashlib.sha256(probe_path.read_bytes()).hexdigest()
+    stamped = str(report["probe_set_path"])
+    assert "\\" not in stamped
+    assert probe_path.name in stamped
+
+
+def test_resolve_latest_probe_set_returns_v3_path(tmp_path: Path) -> None:
+    from scripts.evaluate_memory import resolve_latest_probe_set
+
+    v2 = tmp_path / "v2-four-scopes-wide.json"
+    v3 = tmp_path / "v3-50-probes.json"
+    v2.write_text("{}", encoding="utf-8")
+    v3.write_text("{}", encoding="utf-8")
+    assert resolve_latest_probe_set(tmp_path) == v3
 
 
 def test_dry_run_report_contains_no_probe_text(tmp_path: Path) -> None:
@@ -138,5 +165,183 @@ def test_dry_run_with_custom_provider_flag(
     assert code == 0
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["provider"] == "dry-run"
+
+
+def test_max_consecutive_provider_failures_cli_rejects_below_one(tmp_path: Path) -> None:
+    result = run_cli(
+        "evaluate_memory",
+        "--dry-run",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--max-consecutive-provider-failures",
+        "0",
+    )
+    assert result.returncode == 2
+
+
+def test_max_consecutive_provider_failures_cli_accepts_positive(tmp_path: Path) -> None:
+    output = tmp_path / "report.json"
+    result = run_cli(
+        "evaluate_memory",
+        "--dry-run",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+        "--max-consecutive-provider-failures",
+        "3",
+    )
+    assert result.returncode == 0
+
+
+def test_resolve_max_consecutive_provider_failures_precedence() -> None:
+    from scripts.evaluate_memory import _resolve_max_consecutive_provider_failures
+
+    assert _resolve_max_consecutive_provider_failures(None, {}) == 3
+    assert (
+        _resolve_max_consecutive_provider_failures(
+            None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "5"}
+        )
+        == 5
+    )
+    assert (
+        _resolve_max_consecutive_provider_failures(
+            7, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "5"}
+        )
+        == 7
+    )
+
+
+def test_resolve_max_consecutive_provider_failures_rejects_invalid() -> None:
+    from scripts.evaluate_memory import _resolve_max_consecutive_provider_failures
+
+    with pytest.raises(ValueError):
+        _resolve_max_consecutive_provider_failures(0, {})
+    with pytest.raises(ValueError):
+        _resolve_max_consecutive_provider_failures(
+            None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "0"}
+        )
+    with pytest.raises(ValueError):
+        _resolve_max_consecutive_provider_failures(
+            None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "nope"}
+        )
+
+
+def test_run_live_passes_max_consecutive_into_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
+    from scripts.evaluate_memory import run_live
+
+    captured: dict[str, int] = {}
+
+    async def fake_ask(session, probe, arm, masked):
+        del probe, arm, masked
+        captured["max"] = session.max_consecutive_provider_failures
+        return "an answer", 1
+
+    monkeypatch.setattr("scripts.evaluate_memory.ask_live", fake_ask)
+    payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
+    probe_set = load_probe_set(payload)
+    env = LiveEnvironment(None, None, True, False, "")
+    asyncio.run(
+        run_live(
+            probe_set,
+            env,
+            object(),
+            provider="gemini",
+            model="m",
+            max_consecutive_provider_failures=5,
+        )
+    )
+    assert captured["max"] == 5
+
+
+def test_run_live_partial_flush_stamps_aborted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from cowork_agent.features.ai_chat.memory_eval.live_runner import ExcessiveSeedFailuresError
+    from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
+    from scripts.evaluate_memory import run_live
+
+    calls = {"n": 0}
+
+    async def fake_ask(session, probe, arm, masked):
+        del session, probe, arm, masked
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "an answer", 1
+        raise ExcessiveSeedFailuresError("tripped")
+
+    monkeypatch.setattr("scripts.evaluate_memory.ask_live", fake_ask)
+    payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
+    probe_set = load_probe_set(payload)
+    env = LiveEnvironment(None, None, True, False, "")
+    transcript: list[dict[str, object]] = []
+    report = asyncio.run(
+        run_live(
+            probe_set,
+            env,
+            object(),
+            provider="gemini",
+            model="m",
+            transcript=transcript,
+        )
+    )
+    assert report["aborted"] is True
+    assert transcript
+
+
+def test_aborted_run_writes_baseline_and_detail_and_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setattr(
+        "scripts.evaluate_memory.probe_environment",
+        lambda environ: LiveEnvironment(None, None, True, False, ""),
+    )
+    monkeypatch.setattr(
+        "scripts.evaluate_memory._build_chat_reply",
+        lambda provider, environ, model=None: (object(), provider, "model-x"),
+    )
+
+    async def fake_run_live(probe_set, env, reply, *, provider, model, transcript, **kwargs):
+        del probe_set, env, reply, provider, kwargs
+        transcript.append(
+            {
+                "probe": "st_recall_01",
+                "arm": "full",
+                "reply": "partial",
+                "question": "what did I say?",
+            }
+        )
+        return {
+            "schema_version": "2.1.0",
+            "probe_set_id": "unit",
+            "aborted": True,
+            "run_key": "rk",
+            "nonce": "n",
+            "model": model,
+            "ran_at": "2026-01-01T00:00:00+00:00",
+            "seed_failures": ["down"],
+        }
+
+    monkeypatch.setattr("scripts.evaluate_memory.run_live", fake_run_live)
+    detail_dir = tmp_path / "runs"
+    monkeypatch.setattr("scripts.evaluate_memory._DETAIL_DIR", detail_dir)
+    output = tmp_path / "report.json"
+    code = main(["--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
+    assert code == 1
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["aborted"] is True
+    matches = list(detail_dir.glob("*-unit-detail.json"))
+    assert matches
+    detail = json.loads(matches[-1].read_text(encoding="utf-8"))
+    assert detail["arms"]
 
 

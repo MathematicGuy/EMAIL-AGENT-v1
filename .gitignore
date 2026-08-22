@@ -54,6 +54,7 @@ frontend/.env
 **/update_corpus2skill.py
 .superpowers
 .worktrees/
+worktrees/
 .playwright-mcp
 .playwright
 .pnpm-store
@@ -62,6 +63,7 @@ frontend/.env
 .serena
 .mypy_cache
 .grok
+scratch
 
 # Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
@@ -91,6 +93,7 @@ frontend/.env
 /playwright/.auth/
 evaluations/CHAT/latency/runs/*.json
 evaluations/CHAT/ingestion-latency/runs/*.json
+evaluations/MEMORIES/runs/memeval-chat.db
 evaluations/MEMORIES/runs/
 evaluations/MEMORIES/reports/*.md
 !evaluations/MEMORIES/reports/REPORT_FORMAT.md

@@ -351,6 +351,7 @@ def test_chat_history_list_owned_turns_is_none_for_a_non_owner() -> None:
                 user_message="How should I prepare the report?",
                 assistant_message="Start with the quarterly metrics.",
                 created_at=datetime(2026, 8, 14, tzinfo=UTC),
+                idempotency_key="turn-1",
             )
             await history.write_turn(scope, turn, title="Quarterly report plan")
 

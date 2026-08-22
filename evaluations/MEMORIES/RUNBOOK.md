@@ -16,9 +16,6 @@ that reads as a fact and is not one.
 
 1. **Never point the harness at a remote or production database.** It fills
    memory and then deletes it.
-2. **`.env` here carries a `DATABASE_URL_CLOUD` pointing at production
-   Supabase.** Always set `PG_TEST_URL` explicitly. Never rely on default
-   resolution being what you assumed.
 3. **Never set `MEMEVAL_ALLOW_REMOTE_POSTGRES=1`, and never weaken the guard in
    `live_env.probe_environment`.** A refused host is the guard working.
 4. **Never edit production code to make a report green.** Fixing a real defect
@@ -31,23 +28,25 @@ that reads as a fact and is not one.
 6. **One run at a time.** Concurrent runs contend on the schema migration
    advisory lock and wedge, and two live runs on one provider account draw far
    more dropouts than one.
+7. **DO NOT use rtk when run memory eval (use `rtk proxy` or set `RTK_DISABLED=1`).**
 
-Everything below assumes `PYTHONPATH=src`, `PYTHONIOENCODING=utf-8`, and the
+Everything below assumes `PYTHONPATH=src`, `PYTHONIOENCODING=utf-8`, `RTK_DISABLED=1`, and the
 interpreter `.venv/Scripts/python.exe` — bare `python` hits the Windows App
-Execution Alias and fails.
+Execution Alias and fails. The eval provider/model is loaded from configuration
+(`LLM_PROVIDER` in `.env`, e.g. `gemini`) by default.
 
 ---
 
 ## 1. Pre-check — prove every dependency answers
 
 ```bash
-# PostgreSQL target (uses default provider from config, e.g. LLM_PROVIDER):
+# PostgreSQL target (loads provider from config by default):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
-PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 RTK_DISABLED=1 \
   .venv/Scripts/python.exe scripts/memeval_preflight.py
 
-# SQLite target (zero setup, no PostgreSQL required):
-POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
+# SQLite target (zero setup, scratch DB):
+POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 RTK_DISABLED=1 \
   .venv/Scripts/python.exe scripts/memeval_preflight.py
 ```
 
@@ -100,9 +99,8 @@ A dry run **measures nothing**. It proves the wiring assembles a report.
 ---
 
 ## 2. The run
-
 ```bash
-# PostgreSQL target (uses default configured LLM_PROVIDER):
+# PostgreSQL target (loads provider from config by default):
 LOCAL_URL="$(grep -m1 '^DATABASE_URL_LOCAL=' .env | cut -d= -f2-)"
 PG_TEST_URL="${LOCAL_URL%/*}/cowork_memeval" PYTHONPATH=src PYTHONIOENCODING=utf-8 \
   .venv/Scripts/python.exe scripts/evaluate_memory.py \
@@ -114,25 +112,25 @@ POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
     --output evaluations/MEMORIES/baselines/<name>-sqlite.json
 ```
 
-### Comparing Models / Leaderboard Runs
-When running benchmarks across different LLMs or providers for [MODEL-MEMORY-EVAL-LEADERBOARD.md](../../docs/references/agent-memory/MODEL-MEMORY-EVAL-LEADERBOARD.md), pass `--provider` and optional `--model` explicitly:
-```bash
-POSTGRES_MODE=off PYTHONPATH=src PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/evaluate_memory.py \
-    --provider openrouter --model <model-id> \
-    --output evaluations/MEMORIES/baselines/<name>-<model>.json
-```
+The provider and model are loaded from configuration (`LLM_PROVIDER`, e.g. `gemini`)
+by default. Pass `--provider <name>` (e.g. `--provider openrouter`) only when
+explicitly overriding the configured provider.
 
 Name `<name>` for what was measured, not when — the timestamp is inside the
 report.
 
-**Which eval dataset (probe set).** The harness automatically loads the **latest probe set** found under `evaluations/MEMORIES/probes/` (e.g. `v2-four-scopes-wide.json` or whichever highest version is present). You do not need to specify `--probe-set` unless you are explicitly pinning to an older/historical probe file for backward comparison.
+**Which question file.** Default launch is the latest `vN-*.json` in
+`evaluations/MEMORIES/probes/` (now `v3-four-scopes-hard.json`). Pin v2 with
+`--probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json`. Pin v1 with
+`--probe-set evaluations/MEMORIES/probes/v1-four-scopes.json`. Put the set in
+`<name>`: a v2 baseline and a v3 report are two different measurements, not two
+versions of one, and only `probe_set_id` inside the file says which is which.
+Reports bind by `probe_set_id` + sha256, not the newest file on disk.
 
-**Cost.** The exact call volume depends on the latest probe set:
-- If running an 8-question probe set (e.g. v1): 8 questions × 3 arms = 24 asks, and seeding roughly doubles it — about **52 model calls**. Single-digit minutes.
-- If running a wide 20-question probe set (e.g. v2): 20 questions × 3 arms = 60 asks, plus multi-episode seeding — roughly **2.5×** (~130–150 calls).
-
-Budget the time and the quota accordingly, and keep to one run at a time — rule 6 above, and SPEC §15.1 item 10: two concurrent live runs drew far more dropouts than one, and more turns per run makes that worse.
+**Cost.** v3 ~280 turns; v2 ~220; v1 ~52. Budget the time and the quota
+accordingly, and keep to one run at a time — rule 6 above, and SPEC §15.1 item
+10: two concurrent live runs drew far more dropouts than one, and more turns
+per run makes that worse.
 
 Run it in the background and wait rather than polling.
 
@@ -192,7 +190,7 @@ Automate all calculations, scorecard tables, and quote extraction using:
 ```bash
 PYTHONPATH=src .venv/Scripts/python.exe scripts/build_memory_evaluation_report.py
 ```
-*(Optionally pass `--baseline <path>` and `--detail <path>` to target a specific run).*
+*(Optionally pass `--baseline <path>` and `--detail <path>` to target a specific run. With no `--probe-set`, the builder binds `baseline["probe_set_id"]` + hash — not the latest file. An `"aborted": true` baseline is still a reportable run.)*
 
 
 ---

@@ -63,6 +63,16 @@ _HAVING_NOTHING: tuple[str, ...] = (
     "không thể tìm thấy",
     "không truy cập được",
     "chưa truy cập được",
+    # Document-centric active forms. Passives stay standalone in REFUSAL_PHRASES.
+    "không cung cấp",
+    "chưa cung cấp",
+    "không đề cập",
+    "chưa đề cập",
+    "không đề cập đến",
+    "chưa đề cập đến",
+    # Quantity hedge between lack verb and noun (do not free-particle "đủ").
+    "không có đủ",
+    "chưa có đủ",
 )
 _WHAT_IS_MISSING: tuple[str, ...] = (
     "thông tin",
@@ -185,6 +195,10 @@ def score(reply: str, probe: Probe) -> ScoreResult:
         return ScoreResult(Outcome.NO_ANSWER, True, "no reply text: the turn produced nothing")
 
     if probe.expect_refusal:
+        if probe.invented_any and _has(reply, probe.invented_any):
+            return ScoreResult(
+                Outcome.INVENTED, False, "answered a question it was never given the answer to"
+            )
         if _has(reply, refusal_phrases_for(probe)):
             return ScoreResult(Outcome.PASS, False, "declined, as it should")
         return ScoreResult(

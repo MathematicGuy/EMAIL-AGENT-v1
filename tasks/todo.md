@@ -41,6 +41,17 @@ Spec: [SPEC-retrieval-metadata-filters.md](specs/SPEC-retrieval-metadata-filters
 - [x] T4 Allowlist + Hybrid/BM25/Turbovec
 - [x] T5 Capability map + verify
 
+### Memory eval harness v3 (v2 probe set) — 2026-08-21
+
+Plan: [PLAN-memory-eval-harness-v3.md](plans/PLAN-memory-eval-harness-v3.md)
+Spec: [SPEC-memory-eval-harness-v3-scalability.md](specs/SPEC-memory-eval-harness-v3-scalability.md)
+
+- [ ] T1 Refusal grid + `invented_any` (`st_restraint_02`, `lt_restraint_01` `"không có đủ"`)
+- [ ] T2 Foreign-session episodic fill on FULL/ABLATED (keep 3-arm stores)
+- [ ] T3 Passage-vector cache in `seed_semantic`
+- [ ] T4 Consecutive provider breaker + skip-ask + partial flush
+- [ ] T5 Probe-set binding (CLI latest vs report-by-id + sha256)
+
 ---
 
 Agent-tracked backlogs (GitHub Issues is the source of truth; these files are indexes):

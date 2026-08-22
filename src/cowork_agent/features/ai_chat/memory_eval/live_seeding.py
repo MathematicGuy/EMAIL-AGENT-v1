@@ -11,9 +11,14 @@ seed is a finding about that scope (SPEC §6.1), and the other three still run.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
+
+import numpy as np
 
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -31,7 +36,7 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalResponse,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
-from cowork_agent.integrations.rag.knowledge_base import load_corpus
+from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
 
 from ..controller import ChatController
@@ -40,6 +45,9 @@ from .live_controller import ask_once, collect_errors, collect_reply
 from .live_env import ScopeFinding
 from .probes import SeedSpec
 from .seeding import SeedOutcome
+
+_CACHE_FORMAT_VERSION = "1"
+_DEFAULT_CACHE_DIR = Path("evaluations/MEMORIES/runs/cache/embeddings")
 
 
 async def seed_short_term(
@@ -123,6 +131,7 @@ async def seed_semantic(
     embedder: object,
     *,
     corpus_root: Path,
+    cache_dir: Path | None = None,
 ) -> tuple[SeedOutcome, object | None]:
     """Index the declared corpus and return a read adapter for it.
 
@@ -138,13 +147,19 @@ async def seed_semantic(
     if not spec.semantic_corpus_dir:
         return SeedOutcome.nothing_declared(MemoryType.SEMANTIC), None
     try:
-        documents = load_corpus(corpus_root / spec.semantic_corpus_dir)
+        corpus_dir = corpus_root / spec.semantic_corpus_dir
+        documents = load_corpus(corpus_dir)
+        cache_root = cache_dir if cache_dir is not None else _DEFAULT_CACHE_DIR
+        cache_path = cache_root / _cache_filename(corpus_dir, embedder, documents)
         with warnings.catch_warnings():
             # InRepoSemanticMemory is deprecated for production and retained
             # explicitly for offline evaluation harnesses. This is one.
             warnings.simplefilter("ignore", DeprecationWarning)
-            index = InRepoSemanticMemory(documents, embedder)  # type: ignore[arg-type]
-        await index.build_index()
+            index = _load_cached_index(cache_path, documents, embedder)
+            if index is None:
+                index = InRepoSemanticMemory(documents, embedder)  # type: ignore[arg-type]
+                matrix = await index.build_index()
+                _try_save_cached_matrix(cache_path, matrix)
     except Exception as error:  # noqa: BLE001 - a seed failure is a finding
         return (
             SeedOutcome(MemoryType.SEMANTIC, False, f"{type(error).__name__}: {error}"),
@@ -154,6 +169,100 @@ async def seed_semantic(
         SeedOutcome(MemoryType.SEMANTIC, True, f"indexed {len(documents)} documents"),
         SemanticChatMemoryAdapter(index),
     )
+
+
+def _cache_filename(
+    corpus_dir: Path, embedder: object, documents: Sequence[KnowledgeDocument]
+) -> str:
+    digest = _cache_key(corpus_dir, embedder, documents)
+    return f"{_sanitize_component(corpus_dir.name)}_{digest}.npz"
+
+
+def _cache_key(corpus_dir: Path, embedder: object, documents: Sequence[KnowledgeDocument]) -> str:
+    hasher = hashlib.sha256()
+    _update_len_prefixed(hasher, _CACHE_FORMAT_VERSION.encode("utf-8"))
+    _update_len_prefixed(hasher, type(embedder).__name__.encode("utf-8"))
+    _update_len_prefixed(hasher, _embedder_attr(embedder, "model", "_model").encode("utf-8"))
+    _update_len_prefixed(
+        hasher, _embedder_attr(embedder, "dimensions", "_dimensions").encode("utf-8")
+    )
+    _update_len_prefixed(hasher, b"task=retrieval.passage")
+    for path in sorted(corpus_dir.glob("*.md")):
+        _update_len_prefixed(hasher, path.relative_to(corpus_dir).as_posix().encode("utf-8"))
+        payload = path.read_bytes()
+        hasher.update(len(payload).to_bytes(8, "little"))
+        hasher.update(payload)
+    for document in documents:
+        for chunk in document.chunks:
+            _update_len_prefixed(hasher, chunk.text.encode("utf-8"))
+    return hasher.hexdigest()
+
+
+def _embedder_attr(embedder: object, public_name: str, private_name: str) -> str:
+    value = getattr(embedder, public_name, None)
+    if value is None or value == "":
+        value = getattr(embedder, private_name, "")
+    return str(value)
+
+
+def _update_len_prefixed(hasher: hashlib._Hash, data: bytes) -> None:
+    hasher.update(len(data).to_bytes(8, "little"))
+    hasher.update(data)
+
+
+def _sanitize_component(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in name)
+    return cleaned or "corpus"
+
+
+def _load_cached_index(
+    cache_path: Path,
+    documents: Sequence[KnowledgeDocument],
+    embedder: object,
+) -> InRepoSemanticMemory | None:
+    if not cache_path.is_file():
+        return None
+    try:
+        with np.load(cache_path, allow_pickle=False) as archive:
+            matrix = np.array(archive["matrix"], copy=True)
+        return InRepoSemanticMemory.from_precomputed_matrix(
+            documents,
+            embedder,  # type: ignore[arg-type]
+            matrix,
+        )
+    except Exception:  # noqa: BLE001 - corrupt cache is a miss, not a seed finding
+        try:
+            cache_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+
+
+def _try_save_cached_matrix(cache_path: Path, matrix: np.ndarray) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{cache_path.stem}.", suffix=".tmp.npz", dir=cache_path.parent
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            os.close(fd)
+            with tmp_path.open("wb") as handle:
+                np.savez(
+                    handle,
+                    matrix=np.asarray(matrix, dtype=np.float32),
+                    version=np.int32(int(_CACHE_FORMAT_VERSION)),
+                    n_chunks=np.int32(matrix.shape[0]),
+                    dim=np.int32(matrix.shape[1]),
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, cache_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    except Exception:  # noqa: BLE001 - cache write is best-effort after a built index
+        return
 
 
 class EmptySemanticMemory:
