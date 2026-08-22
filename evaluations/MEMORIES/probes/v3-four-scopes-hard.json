@@ -123,9 +123,9 @@
       "id": "ep_recall_01",
       "targets": "episodic",
       "test": "recall",
-      "question": "Tác vụ trước về gia hạn CCCD là cho văn phòng nào?",
-      "expect_any": ["Đà Nẵng", "Da Nang"],
-      "note": "Two approved CCCD episodes exist (Đà Nẵng and Hải Phòng). Answering Hải Phòng is a ranking miss, not a gap. Cue tác vụ trước required."
+      "question": "Tác vụ trước về gia hạn CCCD mới nhất là cho văn phòng nào?",
+      "expect_any": ["Hải Phòng", "Hai Phong"],
+      "note": "Retired expectation: this asked which office the CCCD task was for and expected Đà Nẵng, calling Hải Phòng a ranking miss. The SQLite ranker scores matched_terms/total_terms and both CCCD episodes contain every term of that question -- measured 1.000 and 1.000, an exact tie broken only by updated_at DESC, which picks Hải Phòng. No signal favouring Đà Nẵng exists, so the old expectation could not be met by any ranking. It now asks for the NEWEST CCCD task, which recency does decide. Answering Đà Nẵng is still a ranking miss. Adding mới nhất also drops the passport episode from the payload (0.600 -> 0.429). Cue tác vụ trước required."
     },
     {
       "id": "ep_recall_02",

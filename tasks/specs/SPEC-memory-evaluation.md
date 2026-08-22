@@ -1221,6 +1221,64 @@ reads the conclusions. This harness reports; it does not gate.
     set, importing the constant rather than repeating the number, so a change to
     the product moves the bound.
 
+17. **Two approved episodes about one task are two live facts, and nothing
+    retracts the older one.** Episodic is the scope where supersession is
+    *measurable* (item 15), and `v3_four_scopes_hard`'s `ep_update_01` measures
+    it failing: the Cần Thơ filing date moves 5 → 12 September, both rows stay
+    `USER_APPROVED` and retrievable, and the model reports 5 September as
+    current with `certain=true`.
+
+    The read path is not at fault, and this was checked rather than assumed.
+    Replaying the four v3 seeds through the real SQLite store and the real
+    retrieval policy returns **both** passport episodes and ranks the
+    superseding one **first**. `_episode_context` used to drop the `updated_at`
+    it had just been sorted by — that is fixed, and the payload now carries it.
+    Behaviour did not change.
+
+    So **recency ordering is not supersession**. Ordering says which row is
+    newer; it does not say the older one stopped being true. Nothing in the
+    episode model can say that: there is no `supersedes` edge, no retraction,
+    and no status distinguishing "approved" from "approved and later replaced".
+    A system prompt sentence instructing the model to infer supersession from
+    `updated_at` was written, shipped to a live run, and **did not work**; it was
+    reverted, because SPEC-memory-eval-probe-set-v3 §13.2 forbids a production
+    prompt change that triage has not named Concern D with a failing test.
+
+    Closing it is a product change — an explicit supersedes link, or retrieval
+    collapsing superseded episodes before they reach the model — not a grader or
+    dataset change. Until then `ep_update_01` is expected to report `dangerous`,
+    and that row is the gap, not noise to be tuned away.
+
+18. **The episodic ranker cannot separate two same-shape episodes, and
+    `ep_recall_01`'s original expectation was retired on that evidence.** It
+    asked which office the previous CCCD task was for and expected `Đà Nẵng`,
+    with SPEC-memory-eval-probe-set-v3 §7.3 calling `Hải Phòng` "a ranking
+    miss". No ranking could deliver that. The SQLite path scores
+    `matched_terms / total_terms`, and both CCCD episodes contain **every** term
+    the question survives frame-stripping with — measured **1.000 and 1.000**,
+    an exact tie. The only tie-break is `updated_at DESC`, which returns
+    `Hải Phòng` first. The v3 spec asserted a ranking requirement without ever
+    naming a signal to rank on, because the question text was inherited
+    unchanged from `v2_four_scopes_wide` while a fourth seed episode was added
+    underneath it.
+
+    Per §12.2 rule 6 the question was rewritten rather than deleted, and the
+    reason it failed stays here. It now asks for the **newest** CCCD task and
+    expects `Hải Phòng`, which recency does decide; answering `Đà Nẵng` is still
+    a ranking miss, so the distractor keeps doing its job. This is an in-place
+    edit of a shipped probe set, the same move §7.4 records for v1's timezone
+    and overtime questions. It is safe to make now only because
+    `probe_set_sha256` binding turns the discontinuity into a hard error:
+    `build_memory_evaluation_report.py` refuses to grade a baseline whose hash
+    no longer matches the file. **Both existing `v3_four_scopes_hard` baselines
+    therefore no longer build a report**, which is the intended loud failure and
+    not a regression — item 8 is the record of what silence used to cost.
+
+    What is *not* fixed is the underlying limit: two episodes of identical shape
+    differing only in one field are indistinguishable to this ranker, and any
+    probe that needs them separated on relevance rather than recency will hit
+    this again.
+
 ### 15.2 What to add next
 
 In order of value. Each can be added on its own without reworking what exists.
