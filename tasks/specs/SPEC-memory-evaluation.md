@@ -1061,14 +1061,29 @@ reads the conclusions. This harness reports; it does not gate.
    `run_key`, comparability has to be checked against `git log` on the probe
    file. `vi-postgres.json` and `vi-postgres-2.json` are the first pair this
    applies to.
-9. **A restraint question that behaves correctly is reported as
-   `scope_did_nothing`.** Restraint questions are excluded from leak detection
+9. **A restraint question that behaves correctly used to be reported as
+   `scope_did_nothing`. Fixed in report schema 2.2.0.** Restraint questions are excluded from leak detection
    on purpose (§7.2), so a product that declines under all three settings —
    which is the desired behaviour — falls through to `scope_did_nothing`, the
    second-worst label. `scope_earned_it` on a restraint question would mean
    hiding the memory made the model start inventing, which is a real thing to
    measure but not the expected one. Read `scope_did_nothing` on a restraint row
    as "declined everywhere", not as a finding.
+
+   This is now its own conclusion, **`restraint_held`**, which sorts last of
+   all — the one verdict with nothing for a reader to do. The reasoning above
+   is unchanged and is why `scope_earned_it` was not used instead. What changed
+   is that correct restraint no longer wears the second-worst label: at 20
+   probes that was half the scoreboard, and §7.1 exists to stop exactly this
+   kind of burial. `build_memory_evaluation_report.py` had already grown two
+   downstream special-cases re-labelling those rows green, which is the
+   evidence the label was wrong at the source; both now key on the verdict and
+   still accept `scope_did_nothing` from baselines at schema 2.1.0 and earlier.
+
+   **Comparability:** `per_scope.did_nothing` counts move. A 2.1.0 baseline
+   folds restraint rows into `did_nothing`; a 2.2.0 one puts them under
+   `restraint_held`. Per §12.2 rule 5 the two are not comparable on that column,
+   which is why the schema version moved rather than the field being reused.
 
 10. **Two runs started at once used to collide completely — fixed, with a
     residue.** `identity_for` derived every tenant and user from `run_key` plus

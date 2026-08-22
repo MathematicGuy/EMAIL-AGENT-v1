@@ -20,7 +20,7 @@ from .verdicts import Verdict, derive_verdict, verdict_rank
 
 # 2.1.0 adds `nonce`. Additive: a 2.0.0 reader that ignores unknown keys still
 # reads a 2.1.0 report, and every field it knew about means what it did.
-REPORT_SCHEMA_VERSION = "2.1.0"
+REPORT_SCHEMA_VERSION = "2.2.0"
 
 _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
     Verdict.UNREADABLE: "unreadable",
@@ -29,6 +29,7 @@ _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
     Verdict.LEAKED: "leaked",
     Verdict.SCOPE_DID_NOTHING: "did_nothing",
     Verdict.SCOPE_EARNED_IT: "earned_it",
+    Verdict.RESTRAINT_HELD: "restraint_held",
 }
 
 
