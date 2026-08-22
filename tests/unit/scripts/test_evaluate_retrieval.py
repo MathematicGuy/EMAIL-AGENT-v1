@@ -33,7 +33,7 @@ def run_cli(*argv: str) -> CliResult:
 def test_default_output_path_stays_under_documented_evaluations_store() -> None:
     module = load_module()
 
-    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "baselines"
+    assert module.DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "RETRIEVAL" / "baselines"
     assert module.default_output_path("hashing", "dense").parent == module.DEFAULT_OUTPUT_DIR
 
 

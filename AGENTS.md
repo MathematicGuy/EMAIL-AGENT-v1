@@ -1,6 +1,6 @@
 # Coding Agent Guidelines
 
-Operating guide for EMAIL-AGENT-v1. Keep this file under ~80 lines; anything
+Operating guide for EMAIL-AGENT-v1. Keep this file under ~100 lines; anything
 that is not an always-needed constraint belongs in a linked doc. Always
 install Python dependencies into a virtual environment (venv).
 
@@ -95,9 +95,11 @@ keeps spec, scope, and the Definition of Done.
 
 ## Authoritative docs
 
+- Evaluation harness: `evaluations/README.md`, `evaluations/HARNESS-GUIDE.md`
+- RAGAS & Grounding: `docs/evaluations/RAGAS.md`, `tasks/specs/SPEC-chat-ragas-evaluation.md`
 - ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-- Email RAG runtime: `docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
+- Email RAG runtime: `evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 - Frontend: `frontend/README.md`, `docs/SPEC-Demo-Frontend.md`
 

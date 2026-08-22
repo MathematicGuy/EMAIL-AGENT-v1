@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "routing" / "loader.py"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "EMAIL" / "runs"
 
 #: Route vocabulary shared with the fixture ExpectedRoute labels.
 ROUTE_NAMES: tuple[str, ...] = ("NO_ACTION", "DIRECT_PLAN", "RETRIEVE_RAG")

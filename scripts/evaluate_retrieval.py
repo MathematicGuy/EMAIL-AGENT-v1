@@ -55,7 +55,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "loader.py"
 DEFAULT_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "rag" / "retrieval_golden.json"
 DEFAULT_CORPUS_DIR = REPO_ROOT / "data" / "extracted"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "RETRIEVAL" / "baselines"
 
 #: Tenant stamp for the corpus and the retrieval filter (identity.LOCAL_TENANT_ID).
 TENANT_ID = "local"
