@@ -25,7 +25,7 @@ def _module():
 
 
 def test_default_output_directory_uses_the_evaluation_workspace() -> None:
-    assert _module().DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "CHAT-RAG" / "baselines"
+    assert _module().DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "CHAT-RAGAS" / "baselines"
 
 
 

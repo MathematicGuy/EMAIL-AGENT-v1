@@ -10,11 +10,12 @@ Sorted by overall capability, reliability, and strict attribution $(P, F, F)$:
 
 | Rank | Model Name | Provider | Full Pass Rate | Scope Earned It $(P, F, F)$ | Restraint (Anti-Hallucination) | Avg Latency | Seed Failures | Status / Recommendation |
 |:---:|---|---|:---:|:---:|:---:|:---:|:---:|---|
-| **1** | **Mistral Medium 3.5** (`mistral-medium-3-5`) | Mistral AI | **90.0%** (18/20) | **45.0%** (9/20) | **90.0%** (9/10) | **4.7s** | **0** (100% clean) | 🟢 **Top Performer / Primary Recommendation** (highest full pass rate, clean 0 seed failures, fast 4.7s latency) |
-| **2** | **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | Google Gemini | **80.0%** (16/20) | **45.0%** (9/20) | 70.0% (7/10) | **4.6s** | **0** (100% clean) | 🟢 **Primary Production Alternative** (ultra-fast, zero dropouts, high reasoning) |
-| **3** | **DeepSeek V4 Flash** (`deepseek/deepseek-v4-flash-0731`) | OpenRouter | **80.0%** (16/20) | **40.0%** (8/20) | **100.0%** (10/10) | 17.5s | 8 (gateway rate-limits) | 🟢 **Best Fallback Candidate** (superior restraint & clean refusals, slower than Gemini) |
-| **4** | **Gemini 3.5 Flash** (`gemini-3.5-flash`) | Google Gemini | **55.0%** (11/20) | **20.0%** (4/20) | **100.0%** (10/10) | 25.6s | 27 (API rate-limiting during seeding) | 🟡 **Competent but Throttled** (100% short/long-term pass, perfect restraint, throttled on episodic) |
-| **5** | **Mistral Small 2603** (`mistral-small-2603`) | Mistral AI | **35.0%** (7/20) | **15.0%** (3/20) | 30.0% (3/10) | **6.5s** | 2 | 🟡 **Low-Tier Fallback** (fast ~6.5s latency, good short-term/persona recall, high semantic amnesia) |
+| **1** | **GLM 5.2** (`glm-5-2`) | Mistral AI | **90.0%** (18/20) | **50.0%** (10/20) | 80.0% (8/10) | **4.3s** | 1 | 🟢 **Top Leader / Highest Attribution** (highest 50% Earned-It, 90% Full Pass, fastest 4.3s latency) |
+| **2** | **Mistral Medium 3.5** (`mistral-medium-3-5`) | Mistral AI | **90.0%** (18/20) | **45.0%** (9/20) | **90.0%** (9/10) | **4.7s** | **0** (100% clean) | 🟢 **Top Performer / Primary Recommendation** (clean 0 seed failures, 90% restraint, fast 4.7s latency) |
+| **3** | **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | Google Gemini | **80.0%** (16/20) | **45.0%** (9/20) | 70.0% (7/10) | **4.6s** | **0** (100% clean) | 🟢 **Primary Production Alternative** (ultra-fast, zero dropouts, high reasoning) |
+| **4** | **DeepSeek V4 Flash** (`deepseek/deepseek-v4-flash-0731`) | OpenRouter | **80.0%** (16/20) | **40.0%** (8/20) | **100.0%** (10/10) | 17.5s | 8 (gateway rate-limits) | 🟢 **Best Fallback Candidate** (superior restraint & clean refusals, slower than Gemini) |
+| **5** | **Gemini 3.5 Flash** (`gemini-3.5-flash`) | Google Gemini | **55.0%** (11/20) | **20.0%** (4/20) | **100.0%** (10/10) | 25.6s | 27 (API rate-limiting during seeding) | 🟡 **Competent but Throttled** (100% short/long-term pass, perfect restraint, throttled on episodic) |
+| **6** | **Mistral Small 2603** (`mistral-small-2603`) | Mistral AI | **35.0%** (7/20) | **15.0%** (3/20) | 30.0% (3/10) | **6.5s** | 2 | 🟡 **Low-Tier Fallback** (fast ~6.5s latency, good short-term/persona recall, high semantic amnesia) |
 
 ---
 
@@ -32,6 +33,12 @@ Models that failed basic viability, latency gates, or schema adherence:
 ---
 
 ## 3. Scope Breakdown Matrix
+
+### GLM 5.2 (`glm-5-2`)
+- **`short_term` (5/5 - 100%)**: 3 Earned-It, 2 Did Nothing (safe refusal), 0 errors. Flawless in-session recall & update tracking.
+- **`long_term` (4/4 - 100%)**: 1 Earned-It, 3 Did Nothing (safe refusal), 0 errors. Perfect persona attribution and safe refusal on missing fields.
+- **`episodic` (5/5 - 100%)**: 3 Earned-It (including perfect handling of supersession `ep_update_01`), 2 Did Nothing, 0 errors. Highest episodic accuracy recorded.
+- **`semantic` (4/6 - 67%)**: 3 Earned-It on Recall (100% recall success), 1 Did Nothing, 2 Verbose Safe Refusals (`sem_restraint_01`, `sem_restraint_03`).
 
 ### Mistral Medium 3.5 (`mistral-medium-3-5`)
 - **`short_term` (5/5 - 100%)**: 3 Earned-It, 2 Did Nothing (safe refusal), 0 errors. Flawless in-session memory & update handling.
@@ -93,6 +100,8 @@ uv run python scripts/memeval_latency_gate.py --provider gemini --model <candida
 
 | Priority | Target Model | Provider | Latency Gate Result | Status / Summary |
 |:---:|---|---|:---:|---|
+| **—** | **`glm-5-2`** | Mistral AI | **1.74s** (Passed) | 🟢 **Top Leader**: 90% Full Pass, 50% Earned-It, 4.3s avg latency. |
+| **—** | **`mistral-medium-3-5`** | Mistral AI | **~4.7s** (Passed) | 🟢 **Top Production Performer**: 90% Full Pass, 0 seed failures, 4.7s avg latency. |
 | **—** | **`gemini-3.5-flash-lite`** | Google Gemini | **4.6s** | 🟢 **Production Baseline**: 80% Full Pass, 0 seed failures, fast & robust. |
 | **—** | **`deepseek/deepseek-v4-flash-0731`** | OpenRouter | **17.5s** | 🟢 **Production Fallback**: 80% Full Pass, 100% restraint, higher latency. |
 | **—** | **`mistral-small-2603`** | Mistral AI | **6.28s** (Passed) | 🟡 **Low-Tier Fallback**: 35% Full Pass, 15% Earned-It, 6.5s avg latency. |

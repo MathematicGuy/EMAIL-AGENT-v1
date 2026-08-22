@@ -24,7 +24,7 @@ from statistics import mean
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "CHAT-RAG" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "CHAT-RAGAS" / "baselines"
 SCHEMA_VERSION = "chat-rag-eval.v1"
 
 

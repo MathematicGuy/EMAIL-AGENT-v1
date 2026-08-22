@@ -9,7 +9,7 @@ New to the harnesses? Start with the [Evaluation Harness Guide](./HARNESS-GUIDE.
 | Area | Purpose | Dashboard |
 |---|---|---|
 | [RETRIEVAL](./RETRIEVAL/) | Email-RAG routing and retrieval quality | [dashboard.md](./dashboard.md) |
-| [CHAT-RAG](./CHAT-RAG/) | Chat-with-documents grounding evaluation | [dashboard.md](./CHAT-RAG/dashboard.md) |
+| [CHAT-RAGAS](./CHAT-RAGAS/) | Chat-with-documents grounding evaluation (RAGAS) | [dashboard.md](./CHAT-RAGAS/dashboard.md) |
 | [CHAT](./CHAT/) | Chat intent and route-classification evaluation | JSON reports only |
 | [CHAT/latency](./CHAT/latency/) | Chat-switch UI latency (Playwright) | [TRACK.md](./CHAT/latency/TRACK.md) |
 | [MEMORIES](./MEMORIES/) | Four-scope agent memory: recall, update, restraint, isolation | [README.md](./MEMORIES/README.md) |

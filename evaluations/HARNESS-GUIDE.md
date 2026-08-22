@@ -33,7 +33,7 @@ for another.
 | `scripts/evaluate_routing.py`           | Email routing       | `tests/fixtures/routing/`                                      | `evaluations/baselines/`               |
 | `scripts/evaluate_chat_routing.py`      | Chat intent routing | `tests/fixtures/chat_routing/`                                 | `evaluations/CHAT/`                    |
 | `scripts/evaluate_retrieval.py`         | Retrieval           | `tests/fixtures/rag/retrieval_golden.json` + `data/extracted/` | `evaluations/baselines/`               |
-| `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `evaluations/CHAT-RAG/baselines/`      |
+| `scripts/evaluate_chat_rag.py`          | Chat grounding      | a local-only, uncommitted JSON file                            | `evaluations/CHAT-RAGAS/baselines/`      |
 | `scripts/build_evaluation_dashboard.py` | —                   | `evaluations/baselines/`                                       | `evaluations/dashboard.md`             |
 | Playwright `e2e/chat-history-latency.spec.ts` | Chat-switch UI latency | saved chats in the dashboard | `evaluations/CHAT/latency/` |
 
