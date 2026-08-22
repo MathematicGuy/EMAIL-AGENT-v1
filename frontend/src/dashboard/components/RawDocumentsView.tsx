@@ -186,7 +186,8 @@ export const RawDocumentsView: React.FC = () => {
     // extractedFor is set before the request resolves, so a failed fetch reports
     // "no extracted text" instead of retrying on every render.
     if (extractedFor === selectedDoc.filename) return;
-    void loadExtractedText(selectedDoc.filename);
+    const filename = selectedDoc.filename;
+    queueMicrotask(() => void loadExtractedText(filename));
   }, [selectedDoc, showsExtractedPane, extractedFor]);
 
   const filteredDocs = documents.filter((doc) => {

@@ -49,7 +49,7 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
   }, [filename]);
 
   useEffect(() => {
-    void fetchDocument();
+    queueMicrotask(() => void fetchDocument());
   }, [fetchDocument]);
 
   // 2. Continuous seamless rendering with docx-preview
@@ -77,10 +77,11 @@ export const DocxViewer: React.FC<DocxViewerProps> = ({
       });
     }
 
+    const node = containerRef.current;
     return () => {
       active = false;
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (node) {
+        node.innerHTML = '';
       }
     };
   }, [rawBuffer]);
