@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView } from './types';
+import type { Project } from './types/projectTypes';
 import { AVAILABLE_MODELS } from './data/mockData';
 import { useStreamingChat } from './hooks/useStreamingChat';
 import { Taskbar } from './components/Taskbar';
@@ -43,7 +44,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
   const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
   const [backgroundCompletion, setBackgroundCompletion] = useState<string | null>(null);
-  const { projects, activeProjectId, setActiveProjectId, createProject, ensureDefaultProject } = useProjects();
+  const {
+    projects,
+    activeProjectId,
+    setActiveProjectId,
+    createProject,
+    deleteProject,
+    ensureDefaultProject,
+  } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId),
@@ -90,7 +98,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
-    resetChat();
     setActiveView('chat');
   };
 
@@ -168,6 +175,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     });
   };
 
+  const handleDeleteProject = (project: Project) => {
+    if (project.isDefault) return;
+    if (!window.confirm(`Delete project “${project.name}”? All associated chats and documents will be removed.`)) return;
+    void deleteProject(project.id).catch(() => {
+      window.alert('Could not delete this project. Please try again.');
+    });
+  };
+
   return (
     <div className="h-screen w-screen flex bg-[#1b1a17] text-[#f3f2ef] overflow-hidden">
       <Taskbar
@@ -179,6 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         projects={projects}
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
+        onDeleteProject={handleDeleteProject}
         onSelectRecent={handleSelectRecent}
         onPrefetchChat={(chat) => { void prefetchChat(chat.id); }}
         onDeleteChat={handleDeleteChat}

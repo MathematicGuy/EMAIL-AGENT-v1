@@ -88,8 +88,8 @@ describe('Dashboard Project chat', () => {
 
     render(<Dashboard />);
     // The sidebar renders expanded by default, where the global new-chat control
-    // is an untitled button labelled "Tạo mới" (Taskbar.tsx).
-    fireEvent.click(screen.getByRole('button', { name: 'Tạo mới' }));
+    // is an untitled button labelled "Tạo cuộc trò chuyện mới" (Taskbar.tsx).
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo cuộc trò chuyện mới' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -165,6 +165,7 @@ describe('Dashboard Project chat', () => {
       return undefined;
     }));
     render(<Dashboard />);
+    fireEvent.click((await screen.findAllByText('Default Project'))[0]);
     fireEvent.click((await screen.findAllByText('Chat 1'))[0]);
     expect(await screen.findByText('Saved question')).toBeTruthy();
     expect(screen.getByText('Saved answer')).toBeTruthy();
@@ -267,6 +268,23 @@ describe('Dashboard Project chat', () => {
     expect((await screen.findByRole('status')).textContent).toContain(
       'Quarterly plan finished generating.'
     );
+  });
+
+  it('preserves active chat input and messages when selecting a project', async () => {
+    vi.stubGlobal('fetch', projectFetch());
+    render(<Dashboard />);
+    await screen.findAllByText('Default Project');
+
+    const input = screen.getByPlaceholderText('Tôi có thể giúp gì cho bạn hôm nay?');
+    fireEvent.change(input, { target: { value: 'Tin nhắn đang soạn' } });
+    expect((input as HTMLTextAreaElement).value).toBe('Tin nhắn đang soạn');
+
+    // Click project item
+    const projectBtn = (await screen.findAllByText('Default Project'))[0];
+    fireEvent.click(projectBtn);
+
+    // Input text should be preserved
+    expect((screen.getByPlaceholderText('Tôi có thể giúp gì cho bạn hôm nay?') as HTMLTextAreaElement).value).toBe('Tin nhắn đang soạn');
   });
 });
 

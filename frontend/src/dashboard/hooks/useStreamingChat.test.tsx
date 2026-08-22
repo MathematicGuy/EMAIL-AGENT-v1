@@ -981,6 +981,24 @@ describe('useStreamingChat Project chat client', () => {
     expect(result.current.messages.map((item) => item.content)).toEqual(['Question B', 'Answer B']);
     expect(result.current.isTranscriptLoading).toBe(false);
   });
+
+  it('orders newly created and loaded server chats with newest at the top', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/sessions?project_id=project-1')) {
+        return Promise.resolve(json({ sessions: [
+          { session_id: 'session-old', project_id: 'project-1', title: 'Old Chat' },
+          { session_id: 'session-new', project_id: 'project-1', title: 'New Chat' },
+        ] }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useStreamingChat('gemini', 'project-1'));
+    await waitFor(() => expect(result.current.recentChats).toHaveLength(2));
+    expect(result.current.recentChats[0].id).toBe('session-new');
+    expect(result.current.recentChats[1].id).toBe('session-old');
+  });
 });
 
 describe('Project document upload policy', () => {

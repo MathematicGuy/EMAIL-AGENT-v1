@@ -4,7 +4,6 @@ import {
   MessageSquare,
   GitBranch,
   Search,
-  SlidersHorizontal,
   Mail,
   LoaderCircle,
   Trash2,
@@ -79,6 +78,7 @@ interface TaskbarProps {
   projects: Project[];
   activeProjectId: string;
   onSelectProject: (projectId: string) => void;
+  onDeleteProject?: (project: Project) => void;
   onSelectRecent: (chat: RecentChat) => void;
   onPrefetchChat?: (chat: RecentChat) => void;
   onDeleteChat: (chat: RecentChat) => void;
@@ -89,6 +89,7 @@ interface TaskbarProps {
   activeView?: ActiveDashboardView;
   onChangeView?: (view: ActiveDashboardView) => void;
   isGenerating?: boolean;
+  initialExpandedProjectIds?: string[];
 }
 
 const SidebarToggleIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -115,6 +116,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   projects,
   activeProjectId,
   onSelectProject,
+  onDeleteProject,
   onSelectRecent,
   onPrefetchChat,
   onDeleteChat,
@@ -124,10 +126,13 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   onNavigateHome,
   activeView = 'chat',
   onChangeView,
-  isGenerating = false
+  isGenerating = false,
+  initialExpandedProjectIds,
 }) => {
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
-    () => new Set(projects.map((project) => project.id))
+  void isHistoryLoading;
+  void onNewChatInProject;
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    () => new Set(initialExpandedProjectIds ?? [])
   );
   const isExpanded = sidebarState === 'expanded';
 
@@ -256,7 +261,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
         >
           <Plus className="w-4 h-4 text-zinc-400" />
-          <span>Tạo mới</span>
+          <span>Tạo cuộc trò chuyện mới</span>
         </button>
 
         <div className="flex flex-col gap-0.5 text-xs">
@@ -297,18 +302,20 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
         </div>
 
-        <div className="mt-2 flex flex-col text-xs">
-          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
+        <div className="mt-2 flex flex-col text-xs flex-1 min-h-0">
+          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500 shrink-0">
             <span>DỰ ÁN</span>
-            <button onClick={onCreateProject} title="Tạo dự án" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100">
+            <button onClick={onCreateProject} title="Tạo dự án" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100 cursor-pointer">
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="space-y-0.5">
+          <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar min-h-0">
             {projects.map((project) => {
-              const isCollapsed = collapsedProjects.has(project.id);
+              const isProjectExpanded = expandedProjects.has(project.id);
               const isActive = activeProjectId === project.id;
-              const chats = recentChats.filter((chat) => chat.projectId === project.id);
+              const chats = recentChats.filter(
+                (chat) => chat.projectId === project.id || (!chat.projectId && project.isDefault)
+              );
               return (
                 <div key={project.id}>
                   <div
@@ -318,45 +325,56 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   >
                     <button
                       onClick={() =>
-                        setCollapsedProjects((current) => {
+                        setExpandedProjects((current) => {
                           const next = new Set(current);
-                          if (isCollapsed) next.delete(project.id);
+                          if (isProjectExpanded) next.delete(project.id);
                           else next.add(project.id);
                           return next;
                         })
                       }
-                      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${project.name}`}
-                      className="p-1.5 text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                      aria-label={`${isProjectExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
+                      className="p-1.5 text-zinc-500 hover:text-zinc-200 cursor-pointer shrink-0"
                     >
-                      {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      {isProjectExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                     </button>
                     <button
-                      onClick={() => onSelectProject(project.id)}
+                      onClick={() => {
+                        onSelectProject(project.id);
+                        setExpandedProjects((current) => {
+                          const next = new Set(current);
+                          if (isProjectExpanded) next.delete(project.id);
+                          else next.add(project.id);
+                          return next;
+                        });
+                      }}
                       className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-xs font-medium cursor-pointer"
                     >
                       <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: project.color || '#d97757' }} fill="currentColor" />
                       <span className="truncate">{project.icon && project.icon !== '📁' ? `${project.icon} ` : ''}{project.name}</span>
                     </button>
-                    <button
-                      onClick={() => {
-                        setCollapsedProjects((current) => {
-                          const next = new Set(current);
-                          next.delete(project.id);
-                          return next;
-                        });
-                        onNewChatInProject(project.id);
-                      }}
-                      title={`Đoạn chat mới trong ${project.name}`}
-                      className="invisible rounded p-1 text-zinc-400 hover:bg-zinc-700/50 hover:text-white group-hover:visible cursor-pointer"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </button>
+                    {!project.isDefault && onDeleteProject && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteProject(project);
+                        }}
+                        className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 shrink-0 cursor-pointer"
+                        title={`Xóa ${project.name}`}
+                        aria-label={`Xóa ${project.name}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
-                  {!isCollapsed && (
-                    <div className="ml-5 border-l border-zinc-700/50 pl-1.5 mt-0.5 space-y-0.5">
+                  {isProjectExpanded && (
+                    <div className="ml-5 border-l border-zinc-700/50 pl-1.5 mt-0.5 space-y-0.5 max-h-52 overflow-y-auto overflow-x-hidden custom-scrollbar pr-0.5">
                       {chats.map((chat) => (
-                        <div key={chat.id} className="group flex items-center gap-1">
+                        <div key={chat.id} className="group flex items-center gap-1 min-w-0">
                           <button
+                            data-testid="project-chat"
+                            data-chat-id={chat.id}
+                            onMouseEnter={() => onPrefetchChat?.(chat)}
+                            onFocus={() => onPrefetchChat?.(chat)}
                             onClick={() => {
                               onChangeView?.('chat');
                               onSelectRecent(chat);
@@ -381,7 +399,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                               chat.generationStatus === 'generating'
                               || (!chat.generationStatus && isGenerating && activeChatId === chat.id)
                             }
-                            className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                            className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 shrink-0"
                             title={`Xóa ${chat.title}`}
                             aria-label={`Xóa ${chat.title}`}
                           >
@@ -394,73 +412,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                       )}
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-3 flex-1 flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
-            <span>Gần đây</span>
-            <button className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer">
-              <SlidersHorizontal className="w-3 h-3" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar text-xs">
-            {isHistoryLoading && (
-              <div
-                className="px-2.5 py-2 text-[11px] text-zinc-500"
-                data-testid="chat-history-loading"
-              >
-                Đang tải lịch sử…
-              </div>
-            )}
-            {!isHistoryLoading && recentChats.length === 0 && (
-              <div className="px-2.5 py-2 text-[11px] text-zinc-500">
-                Chưa có cuộc trò chuyện
-              </div>
-            )}
-            {recentChats.slice(0, 10).map((chat) => {
-              const isActive = activeChatId === chat.id;
-              return (
-                <div key={chat.id} className="group flex items-center gap-1">
-                  <button
-                    data-testid="recent-chat"
-                    data-chat-id={chat.id}
-                    onMouseEnter={() => onPrefetchChat?.(chat)}
-                    onFocus={() => onPrefetchChat?.(chat)}
-                    onClick={() => {
-                      onChangeView?.('chat');
-                      onSelectRecent(chat);
-                    }}
-                    className={`min-w-0 flex-1 text-left px-2.5 py-1.5 rounded-md truncate transition-colors flex items-center gap-2 cursor-pointer ${
-                      isActive
-                        ? 'bg-[#2a2825] text-white font-medium'
-                        : 'text-[#949089] hover:text-zinc-200 hover:bg-[#24221f]'
-                    }`}
-                    title={chat.title}
-                  >
-                    <ChatLifecycleIndicator
-                      chat={chat}
-                      isActive={isActive}
-                      legacyGenerating={isGenerating && isActive}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-                  </button>
-                  <button
-                    onClick={() => onDeleteChat(chat)}
-                    disabled={
-                      chat.generationStatus === 'generating'
-                      || (!chat.generationStatus && isGenerating && isActive)
-                    }
-                    className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                    title={`Xóa ${chat.title}`}
-                    aria-label={`Xóa ${chat.title}`}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
                 </div>
               );
             })}

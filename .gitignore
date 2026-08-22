@@ -118,3 +118,7 @@ var/
 
 # Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
 .agents/skills/using-agent-skills/
+.agents/skills/grill-me/
+.agents/skills/grill-with-docs/
+.agents/skills/grilling/
+.agents/skills/domain-modeling/

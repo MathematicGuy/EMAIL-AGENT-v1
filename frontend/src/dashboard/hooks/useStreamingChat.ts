@@ -509,7 +509,8 @@ export function useStreamingChat(
       setRecentChats((current) => {
         const localById = new Map(current.map((chat) => [chat.id, chat]));
         const serverIds = new Set(payload.sessions.map((session) => session.session_id));
-        const serverChats: RecentChat[] = payload.sessions.map((session, index) => {
+        const reversedSessions = [...payload.sessions].reverse();
+        const serverChats: RecentChat[] = reversedSessions.map((session, index) => {
           const local = localById.get(session.session_id);
           const persistedStatus = generationStatus(session.latest_turn_status ?? session.status);
           return {
@@ -544,7 +545,7 @@ export function useStreamingChat(
       if (pending?.projectId === projectId) {
         pendingProjectChatRef.current = null;
         activateConversation(pending.sessionId);
-      } else {
+      } else if (!activeConversationRef.current && (runtimesRef.current.get(draftKeyRef.current)?.messages.length ?? 0) === 0) {
         activateNewDraft();
       }
       void refreshHistory();

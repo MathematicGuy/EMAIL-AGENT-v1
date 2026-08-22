@@ -9,8 +9,16 @@ const baseProps = {
   onNewChat: vi.fn(),
   onNewChatInProject: vi.fn(),
   onCreateProject: vi.fn(),
-  projects: [],
-  activeProjectId: '',
+  projects: [
+    {
+      id: 'project-default',
+      name: 'General',
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+  ],
+  activeProjectId: 'project-default',
+  initialExpandedProjectIds: ['project-default'],
   onSelectProject: vi.fn(),
   onSelectRecent: vi.fn(),
   onDeleteChat: vi.fn(),
@@ -111,5 +119,37 @@ describe('Taskbar', () => {
     );
 
     expect(screen.queryByLabelText('Unread')).toBeNull();
+  });
+
+  it('renders delete button for non-default project and triggers onDeleteProject', () => {
+    const onDeleteProject = vi.fn();
+    const customProject = {
+      id: 'project-custom',
+      name: 'Alpha Project',
+      isDefault: false,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+
+    render(
+      <Taskbar
+        {...baseProps}
+        sidebarState="expanded"
+        projects={[
+          ...baseProps.projects,
+          customProject,
+        ]}
+        onDeleteProject={onDeleteProject}
+      />,
+    );
+
+    // Default project should not have delete button
+    expect(screen.queryByRole('button', { name: 'Xóa General' })).toBeNull();
+
+    // Custom project should have delete button
+    const deleteButton = screen.getByRole('button', { name: 'Xóa Alpha Project' });
+    expect(deleteButton).toBeTruthy();
+
+    deleteButton.click();
+    expect(onDeleteProject).toHaveBeenCalledWith(customProject);
   });
 });

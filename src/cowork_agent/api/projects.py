@@ -222,11 +222,19 @@ def create_project_router() -> APIRouter:
     async def delete_project(
         project_id: str, request: Request
     ) -> Response | dict[str, object]:
+        principal = await _principal(request)
         result = await _projects(request).begin_project_deletion(
-            await _principal(request), project_id
+            principal, project_id
         )
         if result is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        sessions = getattr(request.app.state, "chat_sessions", None)
+        if sessions is not None and hasattr(sessions, "delete_project"):
+            await sessions.delete_project(
+                user_id=principal.user_id,
+                project_id=project_id,
+                tenant_id=principal.workspace_id,
+            )
         project, replacement, document_ids = result
         if project.deleted_at is not None:
             return Response(status_code=204)

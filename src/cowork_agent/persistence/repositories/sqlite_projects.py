@@ -109,13 +109,51 @@ class SQLiteProjectRepository:
     async def begin_project_deletion(
         self, principal: VerifiedPrincipal, project_id: str
     ) -> tuple[Project, Project | None, tuple[str, ...]] | None:
-        project = await self.require_project(principal, project_id)
-        if project is None:
-            return None
-        documents = await self.list_documents(principal, project_id)
-        for document in documents:
-            await asyncio.to_thread(self._set_document_status, document.id, "deleted")
-        return project, None, tuple(document.id for document in documents)
+        return await asyncio.to_thread(self._delete_project_sync, principal, project_id)
+
+    def _delete_project_sync(
+        self, principal: VerifiedPrincipal, project_id: str
+    ) -> tuple[Project, Project | None, tuple[str, ...]] | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM local_projects WHERE id=? AND workspace_id=? AND owner_user_id=?",
+                (project_id, principal.workspace_id, principal.user_id),
+            ).fetchone()
+            if row is None:
+                return None
+            project = _project(row)
+
+            doc_rows = db.execute(
+                "SELECT id FROM local_documents WHERE project_id=? AND workspace_id=? AND user_id=? AND status <> 'deleted'",
+                (project_id, principal.workspace_id, principal.user_id),
+            ).fetchall()
+            document_ids = tuple(str(d["id"]) for d in doc_rows)
+
+            db.execute(
+                "UPDATE local_documents SET status='deleted', updated_at=? WHERE project_id=? AND workspace_id=? AND user_id=?",
+                (_now(), project_id, principal.workspace_id, principal.user_id),
+            )
+
+            db.execute(
+                "DELETE FROM local_projects WHERE id=? AND workspace_id=? AND owner_user_id=?",
+                (project_id, principal.workspace_id, principal.user_id),
+            )
+
+            replacement: Project | None = None
+            if project.is_default:
+                replacement_id = str(uuid4())
+                now = _now()
+                db.execute(
+                    "INSERT INTO local_projects VALUES (?, ?, ?, 'Default Project', 1, ?)",
+                    (replacement_id, principal.workspace_id, principal.user_id, now),
+                )
+                rep_row = db.execute(
+                    "SELECT * FROM local_projects WHERE id=?", (replacement_id,)
+                ).fetchone()
+                assert rep_row is not None
+                replacement = _project(rep_row)
+
+            return project, replacement, document_ids
 
     def _initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

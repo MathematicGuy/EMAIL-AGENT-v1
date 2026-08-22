@@ -115,11 +115,39 @@ export function useProjects() {
     return project;
   }, [refreshProjects, setActiveProjectId]);
 
+  const deleteProject = useCallback(async (projectId: string) => {
+    await ensureGuestSession();
+    const response = await fetch(
+      `${API_BASE_URL}/v1/cowork/chat/projects/${encodeURIComponent(projectId)}`,
+      {
+        method: 'DELETE',
+        credentials: 'include',
+      }
+    );
+    if (!response.ok && response.status !== 204 && response.status !== 202) {
+      throw new Error(`Could not delete project (HTTP ${response.status})`);
+    }
+    projectMutationVersion.current += 1;
+    setProjects((current) => {
+      const next = current.filter((p) => p.id !== projectId);
+      setActiveProjectIdState((active) => {
+        if (active === projectId) {
+          const fallback = next.find((p) => p.isDefault)?.id ?? next[0]?.id ?? '';
+          if (fallback) window.localStorage.setItem(ACTIVE_PROJECT_KEY, fallback);
+          return fallback;
+        }
+        return active;
+      });
+      return next;
+    });
+  }, [ensureGuestSession]);
+
   return {
     projects,
     activeProjectId,
     setActiveProjectId,
     createProject,
+    deleteProject,
     ensureDefaultProject,
     refreshProjects,
     error,
