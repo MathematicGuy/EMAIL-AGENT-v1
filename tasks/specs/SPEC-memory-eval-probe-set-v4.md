@@ -445,6 +445,10 @@ names Concern D with a failing test first (v3 §13.2, `mem-eval` skill §3).
    argument, not a measurement. If the first run shows the five episodic recall
    probes are really the same probe asked five ways, the fix is a fifth episode
    and the 100-turn bill, or the §4.6 lever.
-2. **Is a 690-turn run one sitting?** v3's ≈280 was. If v4 has to be resumable,
-   that is a harness change and therefore a separate spec (§8.2) — but it should
-   be known before the set is written, not after.
+2. ~~**Is a 690-turn run one sitting?**~~ **Answered.** The v3 run of
+   2026-08-22T06:53Z took **14.4 minutes wall for ≈280 turns** on
+   `mistral-medium-3-5` over scratch SQLite, of which only **1.5 minutes was
+   asking** — the other 90% is seeding, exactly as §4.6 predicts. Scaling
+   linearly puts v4 at **≈35 minutes**. That is one sitting, so no resumability
+   work is needed. It also prices the §4.6 lever: the ~380 turns it would save
+   are worth roughly 20 minutes per run.
