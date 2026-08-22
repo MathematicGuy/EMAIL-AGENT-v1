@@ -57,9 +57,6 @@ flowchart TD
     subgraph Tier2 ["Tầng 2: RAGAS LLM Giám khảo (Kích hoạt qua --ragas)"]
         Faith["Faithfulness (Độ trung thực, không ảo giác so với PDF)"]
         Relevancy["Answer Relevancy (Độ phù hợp của câu trả lời với câu hỏi)"]
-        CtxRecall["Context Recall (Độ bao phủ của ngữ cảnh so với đáp án mẫu)"]
-        CtxPrecision["Context Precision (Thứ hạng của các trang PDF liên quan)"]
-        AnsCorrect["Answer Correctness (Độ chính xác ngữ nghĩa & sự thật)"]
     end
 
     subgraph Output ["Không gian làm việc đã commit: evaluations/CHAT-RAGAS/"]
@@ -91,15 +88,14 @@ Tính toán trực tiếp mà không cần gọi LLM, phù hợp chạy kiểm t
 
 ### 3.2 Tầng 2: Các chỉ số RAGAS Tối giản (LLM-as-a-Judge)
 
-Kích hoạt thông qua cờ `--ragas`, sử dụng các thành phần đánh giá đơn lượt của RAGAS:
+Kích hoạt thông qua cờ `--ragas`, tập trung vào **phía sinh câu trả lời** (xem [`docs/evaluations/RAGAS.md`](../../docs/evaluations/RAGAS.md)):
 
 | Chỉ số | Thành phần RAGAS | Dữ liệu yêu cầu | Ý nghĩa & Mục tiêu đánh giá |
 |---|---|---|---|
-| **Faithfulness** | `Faithfulness(llm=...)` | `answer`, `contexts` | Đo lường độ trung thực của câu trả lời dựa trên các đoạn trích từ PDF (phát hiện ảo giác). Mục tiêu: $\ge 0.90$. |
+| **Faithfulness** | `Faithfulness(llm=...)` | `answer`, `contexts` | Đo lường độ trung thực của câu trả lời dựa trên các đoạn trích từ PDF (phát hiện ảo giác). Mục tiêu: $\ge 0.95$. |
 | **Answer Relevancy** | `AnswerRelevancy(llm=..., embeddings=...)` | `question`, `answer` | Đánh giá mức độ câu trả lời đi thẳng vào trọng tâm câu hỏi của người dùng. Mục tiêu: $\ge 0.85$. |
-| **Context Recall** | `ContextRecall(llm=...)` | `contexts`, `reference` | Đo lường mức độ ngữ cảnh truy hồi bao phủ đầy đủ các sự kiện trong câu trả lời chuẩn. Mục tiêu: $\ge 0.85$. |
-| **Context Precision** | `ContextPrecision(llm=...)` | `question`, `contexts`, `reference` | Đánh giá mức độ ưu tiên xếp các đoạn trích liên quan lên đầu ngữ cảnh. Mục tiêu: $\ge 0.80$. |
-| **Answer Correctness** | `AnswerCorrectness(llm=...)` | `answer`, `reference` | Chỉ số tổng hợp đánh giá độ tương đồng ngữ nghĩa và tính chính xác so với câu trả lời chuẩn. |
+
+> **Quyết định phạm vi (Scope Decision):** Loại bỏ `context_precision` và `context_recall` khỏi RAGAS vì Tầng 1 tất định và [`scripts/evaluate_retrieval.py`](../../scripts/evaluate_retrieval.py) đã đo độ chính xác truy hồi cấp document và section dựa trên 100 case gán nhãn tay hoàn toàn miễn phí, offline và tất định. Không dùng LLM để ước lượng lại thứ đã có ground truth.
 
 ---
 
@@ -149,7 +145,8 @@ Các file báo cáo commit tại `evaluations/CHAT-RAGAS/baselines/` **phải đ
   "dataset_version": "local-chat-ragas-v1",
   "provider": "gemini",
   "model": "gemini-2.0-flash",
-  "evaluator_model": "gemini-2.0-flash",
+  "evaluator_provider": "mistral",
+  "evaluator_model": "mistral-large-latest",
   "case_count": 40,
   "metrics": {
     "retrieval": {
@@ -170,11 +167,8 @@ Các file báo cáo commit tại `evaluations/CHAT-RAGAS/baselines/` **phải đ
     },
     "ragas": {
       "evaluated_case_count": 40,
-      "faithfulness": 0.9425,
-      "answer_relevancy": 0.8910,
-      "context_precision": 0.8842,
-      "context_recall": 0.9250,
-      "answer_correctness": 0.9100
+      "faithfulness": 0.9625,
+      "answer_relevancy": 0.9110
     },
     "latency_ms": {
       "retrieval": {"p50": 22, "p95": 48},
@@ -197,9 +191,7 @@ Các file báo cáo commit tại `evaluations/CHAT-RAGAS/baselines/` **phải đ
       "abstained": false,
       "ragas_scores": {
         "faithfulness": 1.0,
-        "answer_relevancy": 0.92,
-        "context_precision": 1.0,
-        "context_recall": 1.0
+        "answer_relevancy": 0.92
       },
       "latency_ms": {
         "retrieval": 25,
@@ -337,31 +329,34 @@ def init_evaluator(
 ```python
 def run_ragas_evaluation(
     samples: list[dict[str, Any]],
-    evaluator_llm: Any = None,
-    evaluator_embeddings: Any = None,
+    evaluator_llm: Any,
+    evaluator_embeddings: Any,
+    callbacks: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Execute Ragas evaluation on dataset samples with exception isolation."""
     from datasets import Dataset
     from ragas import evaluate
-    from ragas.metrics import (
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
-    )
+    from ragas.metrics import faithfulness, answer_relevancy
 
     dataset = Dataset.from_list(samples)
-    metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
+    metrics = [faithfulness, answer_relevancy]
     
     result = evaluate(
         dataset=dataset,
         metrics=metrics,
         llm=evaluator_llm,
         embeddings=evaluator_embeddings,
+        callbacks=callbacks or [],
         raise_exceptions=False,
     )
     return result
 ```
+
+### 7.1 Hiệu chuẩn Tiếng Việt & Truy vết Langfuse (Obligations)
+
+1. **Hiệu chuẩn Tiếng Việt:** Prompt tách mệnh đề nguyên tử và prompt NLI của `faithfulness` phải được chuyển ngữ sang tiếng Việt và commit phiên bản chính thức tại `evaluations/CHAT-RAGAS/prompts/`. Đối chiếu với ít nhất 30 case do con người chấm tay; nếu độ đồng thuận thấp, metric ghi nhận là chưa hiệu chuẩn và không được dùng làm điều kiện chặn.
+2. **Truy vết Langfuse:** Tích hợp `LangfuseCallbackHandler` để đẩy điểm `faithfulness` và `answer_relevancy` theo thời gian thực về Langfuse (repo đã có `langfuse>=3,<4`).
+3. **Chống thiên lệch tự ưu ái:** Bắt buộc $\text{model\_judge} \neq \text{model\_generator}$; cấm dùng model throughput (`gemini-3.5-flash-lite`) làm judge; đặt `temperature=0`.
 
 ---
 
