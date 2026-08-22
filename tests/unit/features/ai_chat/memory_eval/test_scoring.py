@@ -293,3 +293,59 @@ def test_sem_restraint_01_wrong_policy_with_khong_co_chinh_sach_stays_invented()
     # Reply uses bare "chính sách" (not the refusal_about compounds) so the
     # guard targets shared _WHAT_IS_MISSING widening, not probe-specific cells.
     assert score(reply, probe).outcome is Outcome.INVENTED
+
+def test_sem_restraint_03_grounded_refusal_about_a_specific_form_is_a_pass() -> None:
+    # The v3 full-arm reply, verbatim. It is grounded in the equipment doc, it
+    # names no form code, and it says outright that no form is mentioned — an
+    # honest refusal graded INVENTED, which is the worst direction to be wrong
+    # in. The gap: the model declined about "biểu mẫu cụ thể" and the probe
+    # declares "biểu mẫu đổi laptop", so the adjacency rule saw no cell.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("biểu mẫu đổi laptop", "biểu mẫu đổi thiết bị", "mẫu đề nghị đổi máy"),
+        invented_any=("OT-114", "WFH-207", "OT-141"),
+    )
+    reply = (
+        "Theo Chính sách thiết bị làm việc, nhân viên báo trực tiếp cho bộ phận "
+        "công nghệ thông tin qua cổng nội bộ khi laptop hỏng. Không có biểu mẫu "
+        "cụ thể được đề cập cho việc đổi laptop hỏng."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_a_split_noun_refusal_that_recites_a_form_code_is_still_invented() -> None:
+    # The guard on the widening above. Declining about the head noun and then
+    # supplying a neighbouring code is the wrap-invention shape, and
+    # invented_any is checked first precisely so the widening cannot rescue it.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("biểu mẫu đổi laptop", "biểu mẫu đổi thiết bị", "mẫu đề nghị đổi máy"),
+        invented_any=("OT-114", "WFH-207", "OT-141"),
+    )
+    reply = "Không có biểu mẫu cụ thể cho việc đổi laptop hỏng; hãy dùng mẫu OT-141."
+    assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_the_rest_of_the_declared_noun_must_still_appear_in_the_reply() -> None:
+    # The head alone is not the topic. "không có chính sách" next to a
+    # recitation about a DIFFERENT policy must stay INVENTED, which is what
+    # sem_restraint_01's note asks for: bare "chính sách" is not a refusal.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=(
+            "chính sách nghỉ dài hạn",
+            "chế độ nghỉ dài hạn",
+            "chính sách sabbatical",
+            "quy định về sabbatical",
+        ),
+    )
+    reply = "Hiện không có chính sách; theo quy định nghỉ phép năm nhân viên được 12 ngày."
+    assert score(reply, probe).outcome is Outcome.INVENTED
