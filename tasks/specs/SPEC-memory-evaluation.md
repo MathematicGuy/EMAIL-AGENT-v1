@@ -562,6 +562,7 @@ Three grades per question collapse into one plain conclusion.
 | any | any | right | **`leaked`** | Not really a memory question. Left out of the score, named in the report. |
 | not right | — | not right | **`broken`** | This memory is not delivering at all. |
 | made up or out of date anywhere | — | — | **`dangerous`** | Overrides every other conclusion below it. |
+| right | right | right, on a question passed by refusing | **`restraint_held`** | The model declined everywhere it should have. Nothing to do. |
 
 `unreadable` is checked before all the others because every one of them would
 otherwise read silence as evidence. "Everything on" produced no text would read
@@ -574,11 +575,19 @@ answer this run**, and the fix is to run it again.
 ### 7.1 Order
 
 The scoreboard sorts `unreadable` → `dangerous` → `broken` → `leaked` →
-`scope_did_nothing` → `scope_earned_it`. `unreadable` sorts above `dangerous`
+`scope_did_nothing` → `scope_earned_it` → `restraint_held`. `unreadable` sorts above `dangerous`
 even though it is not a failure of behaviour: it means the run failed for that
 question, and a failed run cannot support a claim about the product, so it must
 not be scrolled past on the way to conclusions it no longer supports. A system that invents ranks below one that forgets, and the
 interesting rows are never buried under a wall of passes.
+
+`restraint_held` sorts last, below `scope_earned_it`, because it is the one
+conclusion with nothing for a reader to do: `scope_earned_it` at least carries
+an attribution claim worth a glance. It exists for the same reason the rest of
+this order does. A question passed by refusing is answered correctly by a store
+that was never filled, so correct restraint lands on right/right/right, which
+before schema 2.2.0 fell through to `scope_did_nothing` — the second-worst
+label — on half of every 20-question run. §15.1 item 9 has the full account.
 
 ### 7.2 Leak detection is deliberately narrow
 
@@ -879,7 +888,7 @@ whose result is dominated by the model is exactly what §7.2 exists to catch.
 
   "per_scope": {
     "short_term": { "probes": 2, "pass": 1, "stale": 0, "invented": 0, "miss": 1,
-                    "earned_it": 1, "did_nothing": 0, "broken": 1 },
+                    "earned_it": 1, "did_nothing": 0, "restraint_held": 0, "broken": 1 },
     "long_term":  { "...": 0 },
     "episodic":   { "...": 0 },
     "semantic":   { "...": 0 }
