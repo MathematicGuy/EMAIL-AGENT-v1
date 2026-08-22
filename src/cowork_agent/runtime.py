@@ -31,7 +31,8 @@ def configure_windows_reload() -> None:
             )
             self.process.start()
 
-        _br.BaseReload.restart = _windows_safe_restart  # type: ignore[method-assign]
+        # method-assign is required on Windows; unused on Linux CI (mypy unused-ignore).
+        _br.BaseReload.restart = _windows_safe_restart  # type: ignore[method-assign, unused-ignore]
     except Exception:
         pass
 

@@ -119,20 +119,18 @@ explicitly overriding the configured provider.
 Name `<name>` for what was measured, not when — the timestamp is inside the
 report.
 
-**Which question file.** Both commands above run the latest default,
-`v2-four-scopes-wide` — the wide 20-question set (`evaluations/MEMORIES/probes/v2-four-scopes-wide.json`).
-Pass `--probe-set evaluations/MEMORIES/probes/v1-four-scopes.json` if explicitly
-targeting the legacy 8-question v1 set. Put the set in `<name>`: a v1 baseline
-and a v2 report are two different measurements, not two versions of one, and
-only `probe_set_id` inside the file says which is which.
+**Which question file.** Default launch is the latest `vN-*.json` in
+`evaluations/MEMORIES/probes/` (now `v3-four-scopes-hard.json`). Pin v2 with
+`--probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json`. Pin v1 with
+`--probe-set evaluations/MEMORIES/probes/v1-four-scopes.json`. Put the set in
+`<name>`: a v2 baseline and a v3 report are two different measurements, not two
+versions of one, and only `probe_set_id` inside the file says which is which.
+Reports bind by `probe_set_id` + sha256, not the newest file on disk.
 
-**Cost.** v2 (default): 20 questions × 3 arms = 60 asks, and it seeds three
-episodes instead of one, roughly **130 model calls**. Single-digit minutes.
-Budget the time and the quota accordingly, and keep to one run at a time — rule 6
-above, and SPEC §15.1 item 10: two concurrent live runs drew far more dropouts
-than one, and more turns per run makes that worse.
-
-v1 (legacy): 8 questions × 3 arms = 24 asks, ~52 model calls.
+**Cost.** v3 ~280 turns; v2 ~220; v1 ~52. Budget the time and the quota
+accordingly, and keep to one run at a time — rule 6 above, and SPEC §15.1 item
+10: two concurrent live runs drew far more dropouts than one, and more turns
+per run makes that worse.
 
 Run it in the background and wait rather than polling.
 

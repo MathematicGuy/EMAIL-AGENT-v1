@@ -49,6 +49,19 @@ def _request(user_message: str) -> ChatMessageRequest:
     )
 
 
+def _seed_material(data: dict[str, Any]) -> str:
+    seed = data["seed"]
+    corpus_dir = REPO_ROOT / seed["semantic"]["corpus_dir"]
+    return "\n".join(
+        [
+            *seed["short_term"],
+            *(str(value) for value in seed["long_term"].values()),
+            *(entry["request"] for entry in seed["episodic"]),
+            *(path.read_text(encoding="utf-8") for path in sorted(corpus_dir.iterdir())),
+        ]
+    ).casefold()
+
+
 def test_probe_sets_are_found() -> None:
     # Discovery replaced a hardcoded path, and an empty glob would make every
     # parametrized assertion below vacuously true by generating no cases at all.
@@ -112,16 +125,7 @@ def test_recall_expectations_exist_somewhere_in_the_seed(probe_set_path: Path) -
     # corpus - v2 has its own - so a constant here would grade one set's
     # expectations against another set's documents.
     data = _load(probe_set_path)
-    seed = data["seed"]
-    corpus_dir = REPO_ROOT / seed["semantic"]["corpus_dir"]
-    material = "\n".join(
-        [
-            *seed["short_term"],
-            *(str(value) for value in seed["long_term"].values()),
-            *(entry["request"] for entry in seed["episodic"]),
-            *(path.read_text(encoding="utf-8") for path in sorted(corpus_dir.iterdir())),
-        ]
-    ).casefold()
+    material = _seed_material(data)
 
     for probe in data["probes"]:
         if probe["test"] != "recall":
@@ -130,3 +134,20 @@ def test_recall_expectations_exist_somewhere_in_the_seed(probe_set_path: Path) -
             f"{probe['id']} expects {probe['expect_any']!r}, and none of those "
             f"appear anywhere in the seed - nothing put them in memory to recall"
         )
+
+
+def test_invented_any_phrases_exist_somewhere_in_the_seed(probe_set_path: Path) -> None:
+    # invented_any is a near-miss only if the neighbour was actually stored.
+    # A phrase that appears nowhere in this set's seed is a random string, and
+    # the grader cannot fairly call it invention-from-neighbour.
+    data = _load(probe_set_path)
+    material = _seed_material(data)
+
+    missing: list[str] = []
+    for probe in data["probes"]:
+        for phrase in probe.get("invented_any") or []:
+            if phrase.casefold() not in material:
+                missing.append(f"{probe['id']}:{phrase!r}")
+    assert not missing, (
+        f"{probe_set_path.name} invented_any phrases absent from seed: {missing}"
+    )
