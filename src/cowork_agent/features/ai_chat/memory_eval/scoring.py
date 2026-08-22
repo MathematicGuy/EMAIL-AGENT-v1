@@ -35,11 +35,14 @@ class Outcome(StrEnum):
 # ABSENCE OF KNOWLEDGE, not politeness — "I'm sorry" also opens plenty of
 # confidently wrong answers, so it is not on this list.
 #
-# This list will never be complete, so every verdict resting on it is returned
-# with certain=False and counted in the report's `needs_reading`. A missed
-# phrasing scores an honest refusal as INVENTED — the worst direction to be
-# wrong in — so those rows are flagged for a human to read in runs/ rather than
-# silently trusted.
+# This list will never be complete, so a verdict resting on it is returned with
+# certain=False and counted in the report's `needs_reading`. A missed phrasing
+# scores an honest refusal as INVENTED — the worst direction to be wrong in — so
+# those rows are flagged for a human to read in runs/ rather than silently
+# trusted.
+#
+# The one exception is a decline that matched AND whose probe declared
+# `invented_any`: that verdict does not rest on this list alone. See `score`.
 # Vietnamese says "I have nothing" as a phrase for HAVING NOTHING followed by a
 # word for WHAT is missing. Those two choices are independent, so the phrasings
 # are a grid — and a grid written out as flat strings comes out half filled. It
@@ -210,9 +213,10 @@ def _has(haystack: str, needles: Sequence[str]) -> bool:
 def score(reply: str, probe: Probe) -> ScoreResult:
     """Grade one reply. Returns the outcome, whether it is certain, and why.
 
-    ``certain=False`` marks a verdict that rests on REFUSAL_PHRASES and should
-    be read by a human before it is believed. Everything else is a substring
-    check against text the probe set declared, and is certain by construction.
+    ``certain=False`` marks a verdict that rests on REFUSAL_PHRASES alone and
+    should be read by a human before it is believed. Everything else is a
+    substring check against text the probe set declared, and is certain by
+    construction.
     """
 
     reply = reply or ""
@@ -235,7 +239,20 @@ def score(reply: str, probe: Probe) -> ScoreResult:
         if _has(reply, refusal_phrases_for(probe)) or _declined_about_a_split_noun(
             reply, probe.refusal_about
         ):
-            return ScoreResult(Outcome.PASS, False, "declined, as it should")
+            # Certain only when the probe declared the invention it was guarding
+            # against — checked above, and absent. The doubt SPEC §6.3 describes
+            # runs one way: a phrasing nobody wrote down grades an honest
+            # refusal as invention, and that lands on the branch below, not this
+            # one. What is left here is the opposite worry, a reply that
+            # declines and invents anyway. The adjacency rule already rejects
+            # the hedged form, and a declared `invented_any` rules out the
+            # specific invention this question was written to catch. With both
+            # closed there is nothing left for a person to settle.
+            #
+            # A probe with no `invented_any` declared nothing, so nothing was
+            # checked, and the row stays uncertain. Some cannot declare one:
+            # v3's st_restraint_01 has no neighbouring id to name.
+            return ScoreResult(Outcome.PASS, bool(probe.invented_any), "declined, as it should")
         return ScoreResult(
             Outcome.INVENTED, False, "answered a question it was never given the answer to"
         )

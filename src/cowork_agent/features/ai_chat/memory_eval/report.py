@@ -20,6 +20,13 @@ from .verdicts import Verdict, derive_verdict, verdict_rank
 
 # 2.1.0 adds `nonce`. Additive: a 2.0.0 reader that ignores unknown keys still
 # reads a 2.1.0 report, and every field it knew about means what it did.
+#
+# 2.2.0 is NOT additive, which is why it is a version and not a new key. Two
+# fields change meaning: `per_scope.did_nothing` sheds its restraint rows to
+# `restraint_held` (SPEC §7.1), and `needs_reading` sheds the restraint rows
+# whose probe declared `invented_any` (§6.3). Both counts fall against a 2.1.0
+# baseline without anything about the product having changed, so §12.2 rule 5
+# does not hold across the bump.
 REPORT_SCHEMA_VERSION = "2.2.0"
 
 _VERDICT_COUNT_KEYS: dict[Verdict, str] = {
