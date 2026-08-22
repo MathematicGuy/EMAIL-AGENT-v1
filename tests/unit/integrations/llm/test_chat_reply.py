@@ -137,6 +137,7 @@ def test_configured_reply_keeps_company_evidence_and_advisory_episodes_separate(
             "task_title": "Earlier task",
             "action_plan": ["Use the earlier plan"],
             "validation_status": "user_approved",
+            "updated_at": "2026-08-11T00:00:00+00:00",
         }
     ]
     assert payload["conflict_precedence"] == [
@@ -525,3 +526,83 @@ def _openrouter_settings() -> OpenRouterSettings:
         {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "deepseek/x"},
         load_env_file=False,
     )
+
+
+def _dated_episode(
+    *, episode_id: str, title: str, plan: str, updated_at: datetime
+) -> TaskEpisode:
+    return TaskEpisode(
+        episode_id=episode_id,
+        record_id=f"record-{episode_id}",
+        user_id="user-1",
+        chat_session_id="earlier-session",
+        chat_turn_id=f"turn-{episode_id}",
+        creation_reason="explicit_user_task_request",
+        task_title=title,
+        minimal_request_paraphrase=title,
+        action_plan=(plan,),
+        rag_citations=(),
+        missing_information=(),
+        validation_status=ValidationStatus.USER_APPROVED,
+        retrieval_eligible=True,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
+        created_at=updated_at,
+        updated_at=updated_at,
+        pipeline_version="v2-m4",
+        model_id=None,
+        prompt_version=None,
+        confidence=None,
+    )
+
+
+def test_advisory_episodes_carry_the_recency_the_store_ranked_them_by() -> None:
+    # ep_update_01 of the v3 memory eval: two approved episodes about the same
+    # passport submission, one superseding the other's date. Retrieval already
+    # orders them newest-first — measured against the real SQLite store — and
+    # then this payload threw the timestamps away, so the model saw two equal
+    # facts that contradict each other and asserted the superseded 5 September
+    # with certainty. A reader cannot prefer the later episode without being
+    # told which one is later.
+    received: list[dict[str, object]] = []
+
+    async def complete(payload: dict[str, object]) -> dict[str, object]:
+        received.append(payload)
+        return {"assistant_text": "Answer", "task_proposal": None}
+
+    superseding = _dated_episode(
+        episode_id="episode-later",
+        title="Dời ngày nộp hồ sơ hộ chiếu Cần Thơ",
+        plan="Dời lịch nộp hồ sơ sang ngày 12 tháng 9.",
+        updated_at=datetime(2026, 8, 21, 19, 31, tzinfo=UTC),
+    )
+    superseded = _dated_episode(
+        episode_id="episode-earlier",
+        title="Cấp lại hộ chiếu cho văn phòng Cần Thơ",
+        plan="Nộp hồ sơ vào ngày 5 tháng 9.",
+        updated_at=datetime(2026, 8, 21, 19, 30, tzinfo=UTC),
+    )
+    request = ChatMessageRequest("session-1", "Ngày nộp hồ sơ là ngày nào?", "idem-3")
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(superseding, superseded),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+    )
+
+    reply = MistralChatReply(model="mistral-small-2603", complete=complete)
+    asyncio.run(_collect(reply, request, context))
+
+    rendered = received[0]["context"]["advisory_episodes"]
+    assert [episode["task_title"] for episode in rendered] == [
+        "Dời ngày nộp hồ sơ hộ chiếu Cần Thơ",
+        "Cấp lại hộ chiếu cho văn phòng Cần Thơ",
+    ]
+    assert [episode["updated_at"] for episode in rendered] == [
+        "2026-08-21T19:31:00+00:00",
+        "2026-08-21T19:30:00+00:00",
+    ]
