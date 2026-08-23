@@ -402,6 +402,18 @@ def test_job_reads_reject_tampered_or_unknown_warning_messages(tmp_path: Path) -
                 )
             with pytest.raises(ValueError):
                 await repository.get_job(job.job_id)
+            with pytest.raises(ValueError) as append_error:
+                await repository.append_warnings(
+                    job.job_id,
+                    (
+                        EvaluationWarning(
+                            code="CLEANUP_FAILED",
+                            details={"failed_resources": 1},
+                        ),
+                    ),
+                )
+            assert "raw provider error" not in repr(append_error.value)
+            assert "private" not in repr(append_error.value)
 
     asyncio.run(scenario())
 
@@ -1212,5 +1224,60 @@ def test_append_warnings_preserves_existing_worker_warnings_in_canonical_form(
                 "message": "Worker count was reduced because fewer credentials are healthy.",
             },
         ]
+
+    asyncio.run(scenario())
+
+
+def test_append_warnings_is_idempotent_for_concurrent_calls_and_replay(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "warning-dedupe-key", "hash-a")
+        worker_warning = EvaluationWarning(
+            code="WORKER_COUNT_REDUCED",
+            details={"requested_workers": 4, "effective_workers": 2},
+        )
+        cleanup_warning = EvaluationWarning(
+            code="CLEANUP_FAILED",
+            details={"failed_resources": 1},
+        )
+        distinct_cleanup_warning = EvaluationWarning(
+            code="CLEANUP_FAILED",
+            details={"failed_resources": 2},
+        )
+        await repository.transition_job(
+            job.job_id,
+            JobState.VALIDATING,
+            warnings=(worker_warning,),
+        )
+
+        await asyncio.gather(
+            repository.append_warnings(job.job_id, (cleanup_warning,)),
+            repository.append_warnings(job.job_id, (cleanup_warning,)),
+        )
+        await repository.append_warnings(job.job_id, (cleanup_warning,))
+        updated = await repository.append_warnings(
+            job.job_id,
+            (distinct_cleanup_warning, worker_warning),
+        )
+
+        assert updated.warnings == (
+            worker_warning,
+            cleanup_warning,
+            distinct_cleanup_warning,
+        )
+        with sqlite3.connect(database_path) as database:
+            row = database.execute(
+                "SELECT warnings_json FROM evaluation_jobs WHERE job_id = ?",
+                (job.job_id,),
+            ).fetchone()
+        assert row is not None
+        assert [item["code"] for item in json.loads(str(row[0]))] == [
+            "WORKER_COUNT_REDUCED",
+            "CLEANUP_FAILED",
+            "CLEANUP_FAILED",
+        ]
+        assert "private" not in str(row[0])
 
     asyncio.run(scenario())

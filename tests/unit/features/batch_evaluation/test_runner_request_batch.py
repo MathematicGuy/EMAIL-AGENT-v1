@@ -169,9 +169,16 @@ class ClaimGateRepository(CancellationTrackingRepository):
 
 
 class BlockingAttemptReplyFactory(FakeReplyFactory):
-    def __init__(self, repository: CancellationTrackingRepository) -> None:
+    def __init__(
+        self,
+        repository: CancellationTrackingRepository,
+        *,
+        expected_running: int = 1,
+    ) -> None:
         super().__init__(max_output_tokens=1, raising_outcomes=frozenset())
         self._repository = repository
+        self._expected_running = expected_running
+        self._running_attempts = 0
         self.attempt_running = asyncio.Event()
         self.release_attempt = asyncio.Event()
 
@@ -197,7 +204,9 @@ class BlockingAttemptReplyFactory(FakeReplyFactory):
                     )
                     if observed is not None:
                         await observed
-                    self.attempt_running.set()
+                    self._running_attempts += 1
+                    if self._running_attempts == self._expected_running:
+                        self.attempt_running.set()
                     try:
                         await self.release_attempt.wait()
                     except asyncio.CancelledError:
@@ -1225,3 +1234,58 @@ async def test_cancellation_preserves_safe_warning_when_cleanup_fails(tmp_path: 
     assert repository.completed_units == ["unit-0"]
     assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
     assert pool._records[0].active_lease is None
+
+
+@pytest.mark.asyncio
+async def test_two_cancelled_lanes_dedupe_cleanup_warning_across_replay(tmp_path: Path) -> None:
+    repository = CancellationTrackingRepository(tmp_path / "evaluation-jobs.db")
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY",
+        {
+            "MISTRAL_API_KEY": "secret-one",
+            "MISTRAL_API_KEY2": "secret-two",
+        },
+    )
+    factory = BlockingAttemptReplyFactory(repository, expected_running=2)
+    plugin = RequestBatchPlugin(2, cleanup_fails=True, provider_calls_per_unit=1)
+    service, _ = await prepared_supervised_runner(
+        tmp_path,
+        plugin,
+        factory,
+        repository,
+        pool,
+    )
+    job = await service.submit(
+        request(workers=2, provider_requests=8, tokens=8),
+        idempotency_key="two-lane-cleanup-failure",
+    )
+    await factory.attempt_running.wait()
+
+    await service.request_cancel(job.job_id)
+    cleanup_warning = EvaluationWarning(
+        code="CLEANUP_FAILED",
+        details={"failed_resources": 1},
+    )
+    await repository.append_warnings(job.job_id, (cleanup_warning,))
+
+    status = await service.get_status(job.job_id)
+    stored_job = await repository.get_job(job.job_id)
+    units = await repository.list_units(job.job_id)
+    attempts = await repository.list_attempts(job.job_id)
+    assert status["state"] == "cancelled"
+    assert [warning["code"] for warning in status["warnings"]] == ["CLEANUP_FAILED"]
+    assert stored_job is not None and stored_job.warnings == (cleanup_warning,)
+    assert len(units) == 2 and all(unit.state is UnitState.CANCELLED for unit in units)
+    assert len(attempts) == 2 and all(
+        attempt.state is AttemptState.CANCELLED for attempt in attempts
+    )
+    assert await repository.list_running_units(job.job_id) == ()
+    assert repository.step_states.count(StepState.RUNNING) == 2
+    assert repository.step_states.count(StepState.SKIPPED) == 2
+    assert "private cleanup failure" not in repr((status, stored_job, units, attempts))
+    assert b"private cleanup failure" not in (tmp_path / "evaluation-jobs.db").read_bytes()
+    assert plugin.cleanup_calls == 2
+    assert len(repository.completed_units) == 2
+    assert set(repository.completed_units) == {"unit-0", "unit-1"}
+    assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
+    assert all(record.active_lease is None for record in pool._records)

@@ -624,12 +624,15 @@ class SQLiteEvaluationJobRepository:
             if row is None:
                 raise KeyError(job_id)
             job = _job_from_row(row)
+            merged = _merge_warnings(job.warnings, additions)
+            if merged == job.warnings:
+                return job
             database.execute(
                 """
                 UPDATE evaluation_jobs SET warnings_json = ?, updated_at = ?
                 WHERE job_id = ?
                 """,
-                (_warnings_json((*job.warnings, *additions)), _now(), job_id),
+                (_warnings_json(merged), _now(), job_id),
             )
             updated = database.execute(
                 f"SELECT {_JOB_COLUMNS} FROM evaluation_jobs WHERE job_id = ?", (job_id,)
@@ -1003,6 +1006,23 @@ def _warnings_json(warnings: Sequence[EvaluationWarning]) -> str:
             for warning in warnings
         ]
     )
+
+
+def _merge_warnings(
+    existing: Sequence[EvaluationWarning],
+    additions: Sequence[EvaluationWarning],
+) -> tuple[EvaluationWarning, ...]:
+    merged: list[EvaluationWarning] = []
+    identities: set[str] = set()
+    for warning in (*existing, *additions):
+        identity = _safe_json(
+            {"code": warning.code, "message": warning.message, "details": warning.details}
+        )
+        if identity in identities:
+            continue
+        identities.add(identity)
+        merged.append(warning)
+    return tuple(merged)
 
 
 def _safe_json(value: object) -> str:
