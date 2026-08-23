@@ -704,8 +704,13 @@ def create_app() -> FastAPI:
                 evaluation_runtime = build_evaluation_runtime(
                     evaluation_settings.to_runtime_config(), os.environ
                 )
-                await evaluation_runtime.initialize()
-                await evaluation_runtime.recover()
+                try:
+                    await evaluation_runtime.initialize()
+                    await evaluation_runtime.recover()
+                except Exception:
+                    # Never abandon an initialized runtime if recovery fails.
+                    await evaluation_runtime.close()
+                    raise
                 app.state.evaluation_runtime = evaluation_runtime
                 app.state.evaluation_service = evaluation_runtime.service
                 app.state.evaluation_supervisor = evaluation_runtime.supervisor

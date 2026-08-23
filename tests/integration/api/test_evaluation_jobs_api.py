@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -344,7 +345,9 @@ def test_submission_returns_202_urls_and_terminal_result(tmp_path: Path) -> None
 
         for response in (submitted, result):
             assert "private reply" not in response.text
-        assert "secret-one" not in status and "secret-one" not in manifest
+        status_text = json.dumps(status)
+        manifest_text = json.dumps(manifest)
+        assert "secret-one" not in status_text and "secret-one" not in manifest_text
         assert str(tmp_path) not in submitted.text
         assert str(tmp_path) not in result.text
         await harness.supervisor.close()
@@ -669,9 +672,11 @@ def test_responses_never_leak_content_or_secrets_recursively(tmp_path: Path) -> 
             "deeper": [
                 {"prompt": "private prompt", "list_reply": ["private reply"]},
                 "/absolute/private/path.json",
+                "/data/eval-artifacts/run-1",
             ],
         },
         "authorization": "secret-c",
+        "status_url": "/v1/evaluation-jobs/job-1",
     }
 
     redacted = evaluation_jobs_api._redact_private(nested)  # noqa: SLF001
@@ -680,6 +685,10 @@ def test_responses_never_leak_content_or_secrets_recursively(tmp_path: Path) -> 
     for private in ("secret-a", "secret-b", "secret-c", "private prompt", "private reply"):
         assert private not in serialized
     assert "/absolute/private/path.json" not in serialized
+    # Unknown-root absolute paths (e.g. operator-configured artifact roots)
+    # must be redacted while public /v1/ API URLs survive.
+    assert "/data/eval-artifacts/run-1" not in serialized
+    assert redacted["status_url"] == "/v1/evaluation-jobs/job-1"
     assert redacted["safe"] == 1
 
     async def scenario() -> None:

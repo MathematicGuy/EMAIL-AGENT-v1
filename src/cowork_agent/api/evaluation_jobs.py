@@ -34,10 +34,6 @@ logger = logging.getLogger(__name__)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
-_FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,10}$")
-_POSIX_ROOT_SEGMENTS = frozenset(
-    {"home", "users", "tmp", "var", "opt", "srv", "mnt", "root", "etc", "usr", "private"}
-)
 _REDACTED = "[redacted]"
 # Normalized key markers whose values must never reach an API response.
 _PRIVATE_KEY_MARKERS = frozenset(
@@ -241,16 +237,15 @@ def _redact_private(value: Any) -> Any:
 
 
 def _looks_like_absolute_path(value: str) -> bool:
-    """Detect filesystem paths without redacting relative API URLs."""
+    """Redact every absolute path except the public /v1/ API URLs.
+
+    An allowlist is used because operator-configured artifact roots can
+    live under any filesystem root, so no root-segment denylist is safe.
+    """
 
     if value.startswith("\\\\") or _WINDOWS_PATH.match(value):
         return True
-    if not value.startswith("/"):
-        return False
-    segments = value[1:].split("/")
-    if segments[0].lower() in _POSIX_ROOT_SEGMENTS:
-        return True
-    return bool(_FILE_EXTENSION.search(segments[-1]))
+    return value.startswith("/") and not value.startswith("/v1/")
 
 
 def _is_private_key(key: str) -> bool:
