@@ -19,7 +19,7 @@ from .live_env import LiveEnvironment, unavailable_scopes
 from .probes import Probe, ProbeSet
 from .report import ProbeRow, build_report
 from .runner import run_key, run_probe_rows
-from .scoring import score
+from .scoring import Outcome, score
 
 
 # These are resolved only for a real live run. Importing live_runner at module
@@ -70,56 +70,64 @@ async def _build_adapters(
     declarative: object | None = None
     episodic: object | None = None
     pool: Any = None
-    if env.postgres_url is not None:
-        from psycopg_pool import AsyncConnectionPool
+    try:
+        if env.postgres_url is not None:
+            from psycopg_pool import AsyncConnectionPool
 
-        from cowork_agent.persistence.migrate import apply_migrations
-        from cowork_agent.persistence.repositories.postgres import (
-            PostgresChatProfileRepository,
-            PostgresTaskEpisodeRepository,
-        )
+            from cowork_agent.persistence.migrate import apply_migrations
+            from cowork_agent.persistence.repositories.postgres import (
+                PostgresChatProfileRepository,
+                PostgresTaskEpisodeRepository,
+            )
 
-        pool = AsyncConnectionPool(env.postgres_url, min_size=1, max_size=4, open=False)
-        await pool.open(wait=True)
-        await apply_migrations(pool)
-        declarative = PostgresChatProfileRepository(pool)
-        episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
-        print("[memeval] Initialized PostgreSQL repositories", file=sys.stderr, flush=True)
-    elif env.sqlite_path is not None:
-        from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
+            pool = AsyncConnectionPool(env.postgres_url, min_size=1, max_size=4, open=False)
+            await pool.open(wait=True)
+            await apply_migrations(pool)
+            declarative = PostgresChatProfileRepository(pool)
+            episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
+            print("[memeval] Initialized PostgreSQL repositories", file=sys.stderr, flush=True)
+        elif env.sqlite_path is not None:
+            from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
 
-        env.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        sqlite_chat = SQLiteChatRepository(env.sqlite_path)
-        await sqlite_chat.initialize()
-        declarative = sqlite_chat
-        episodic = sqlite_chat
-        print(
-            f"[memeval] Initialized SQLite repository at {env.sqlite_path}",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    semantic: object | None = None
-    if env.embeddings_ready:
-        from cowork_agent.integrations.rag.bootstrap import build_document_embedder
-
-        from .live_seeding import seed_semantic
-
-        print("[memeval] Seeding semantic memory corpus...", file=sys.stderr, flush=True)
-        embedder, _dimensions = build_document_embedder()
-        outcome, adapter = await seed_semantic(probe_set.seed, embedder, corpus_root=Path("."))
-        if outcome.ok:
-            semantic = adapter
-            print("[memeval] Semantic memory seeded successfully", file=sys.stderr, flush=True)
-        else:
-            failures.append(f"semantic: {outcome.reason}")
+            env.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+            sqlite_chat = SQLiteChatRepository(env.sqlite_path)
+            await sqlite_chat.initialize()
+            declarative = sqlite_chat
+            episodic = sqlite_chat
             print(
-                f"[memeval] Semantic memory seeding failed: {outcome.reason}",
+                f"[memeval] Initialized SQLite repository at {env.sqlite_path}",
                 file=sys.stderr,
                 flush=True,
             )
 
-    return AdapterSet(declarative, episodic, semantic), failures, pool
+        semantic: object | None = None
+        if env.embeddings_ready:
+            from cowork_agent.integrations.rag.bootstrap import build_document_embedder
+
+            from .live_seeding import seed_semantic
+
+            print("[memeval] Seeding semantic memory corpus...", file=sys.stderr, flush=True)
+            embedder, _dimensions = build_document_embedder()
+            outcome, adapter = await seed_semantic(probe_set.seed, embedder, corpus_root=Path("."))
+            if outcome.ok:
+                semantic = adapter
+                print("[memeval] Semantic memory seeded successfully", file=sys.stderr, flush=True)
+            else:
+                failures.append(f"semantic: {outcome.reason}")
+                print(
+                    f"[memeval] Semantic memory seeding failed: {outcome.reason}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+        return AdapterSet(declarative, episodic, semantic), failures, pool
+    except BaseException:
+        if pool is not None:
+            try:
+                await pool.close()
+            except BaseException:
+                pass
+        raise
 
 
 def _attach_stream_errors(session: Any, recorded: list[dict[str, object]]) -> None:
@@ -131,18 +139,16 @@ def _attach_stream_errors(session: Any, recorded: list[dict[str, object]]) -> No
         ]
 
 
-def _is_scratch_sqlite_path(path: Path | None) -> bool:
-    """Only remove files bearing the harness's explicit scratch-file prefix."""
+def _remove_owned_scratch_sqlite(environment: LiveEnvironment) -> bool:
+    """Remove only the SQLite file this attempt explicitly owns."""
 
-    return path is not None and path.suffix == ".db" and path.name.startswith("memeval-")
-
-
-def _remove_scratch_sqlite(path: Path | None) -> bool:
-    if not _is_scratch_sqlite_path(path):
+    path = environment.sqlite_path
+    if path is None or not environment.sqlite_path_owned:
         return False
-    assert path is not None
     try:
-        path.unlink(missing_ok=True)
+        path.unlink()
+    except FileNotFoundError:
+        return False
     except OSError:
         return False
     return True
@@ -156,6 +162,7 @@ async def execute_memory_shard(
     provider: str,
     model: str,
     max_consecutive_provider_failures: int = 3,
+    private_transcript_sink: list[dict[str, object]] | None = None,
 ) -> MemoryShardResult:
     """Execute one live shard, retaining private transcript evidence for its caller."""
 
@@ -169,18 +176,14 @@ async def execute_memory_shard(
         flush=True,
     )
     identity = build_identity(probe_set, model)
-    adapters, findings, pool = await _build_adapters(environment, probe_set)
-    findings.extend(item.reason for item in unavailable_scopes(environment))
-    session = LiveSession(
-        identity=identity,
-        adapters=adapters,
-        reply=reply,
-        seed=probe_set.seed,
-        max_consecutive_provider_failures=max_consecutive_provider_failures,
-    )
-    recorded: list[dict[str, object]] = []
+    seed_failures: list[str] = []
+    provider_findings: list[str] = []
+    pool: Any = None
+    session: Any = None
+    recorded = private_transcript_sink if private_transcript_sink is not None else []
     call_index = 0
     rows: tuple[ProbeRow, ...] = ()
+    scratch_removed = False
 
     async def ask(probe: Probe, arm: Arm, masked: MemoryType | None) -> tuple[str, int]:
         nonlocal call_index
@@ -192,6 +195,18 @@ async def execute_memory_shard(
             flush=True,
         )
         text, latency_ms = await ask_live(session, probe, arm, masked)
+        record: dict[str, object] = {
+            "probe": probe.probe_id,
+            "targets": probe.targets.value,
+            "arm": arm.value,
+            "masked": None if masked is None else masked.value,
+            "question": probe.question,
+            "reply": text,
+            "latency_ms": latency_ms,
+        }
+        # A scoring or logging failure after a provider reply must not discard
+        # the caller-owned private evidence needed to diagnose the attempt.
+        recorded.append(record)
         result = score(text, probe)
         certainty = "certain" if result.certain else "uncertain"
         print(
@@ -200,49 +215,60 @@ async def execute_memory_shard(
             file=sys.stderr,
             flush=True,
         )
-        recorded.append(
+        record.update(
             {
-                "probe": probe.probe_id,
-                "targets": probe.targets.value,
-                "arm": arm.value,
-                "masked": None if masked is None else masked.value,
-                "question": probe.question,
-                "reply": text,
                 "outcome": result.outcome.value,
                 "certain": result.certain,
                 "why": result.why,
-                "latency_ms": latency_ms,
             }
         )
         return text, latency_ms
 
     try:
-        rows = await run_probe_rows(probe_set, ask)
-    except ExcessiveSeedFailuresError as error:
-        if not recorded:
-            raise
-        print(f"ERROR: {error}", file=sys.stderr)
-        findings.append(f"aborted: {error}")
+        adapters, adapter_seed_failures, pool = await _build_adapters(environment, probe_set)
+        seed_failures.extend(adapter_seed_failures)
+        seed_failures.extend(item.reason for item in unavailable_scopes(environment))
+        session = LiveSession(
+            identity=identity,
+            adapters=adapters,
+            reply=reply,
+            seed=probe_set.seed,
+            max_consecutive_provider_failures=max_consecutive_provider_failures,
+        )
+        try:
+            rows = await run_probe_rows(probe_set, ask)
+        except ExcessiveSeedFailuresError as error:
+            if not recorded:
+                raise
+            print(f"ERROR: {error}", file=sys.stderr)
+            provider_findings.append(f"aborted: {error}")
     finally:
         try:
-            print("[memeval] Tearing down evaluation stores...", file=sys.stderr, flush=True)
-            await teardown(session.gateways)
-            print("[memeval] Teardown complete", file=sys.stderr, flush=True)
+            if session is not None:
+                expected_stores = len(session.gateways)
+                print("[memeval] Tearing down evaluation stores...", file=sys.stderr, flush=True)
+                removed_stores = await teardown(session.gateways)
+                if removed_stores != expected_stores:
+                    provider_findings.append(
+                        f"cleanup: removed {removed_stores} of {expected_stores} memory stores"
+                    )
+                print("[memeval] Teardown complete", file=sys.stderr, flush=True)
         finally:
             try:
                 if pool is not None:
                     await pool.close()
             finally:
-                scratch_removed = _remove_scratch_sqlite(environment.sqlite_path)
+                scratch_removed = _remove_owned_scratch_sqlite(environment)
 
+    assert session is not None
     _attach_stream_errors(session, recorded)
-    seed_failure_ids = tuple(sorted({*findings, *session.seed_failures}))
+    seed_failure_ids = tuple(sorted({*seed_failures, *session.seed_failures}))
     return MemoryShardResult(
         rows=rows,
         seed_failure_ids=seed_failure_ids,
         private_transcript=tuple(recorded),
         nonce=identity.nonce,
-        provider_findings=tuple(sorted(set(findings))),
+        provider_findings=tuple(sorted(set(provider_findings))),
         scratch_removed=scratch_removed,
     )
 
@@ -257,13 +283,45 @@ def build_memory_report(
 ) -> dict[str, object]:
     """Merge shard rows, then assemble the existing report exactly once."""
 
-    rows = tuple(row for shard in shard_results for row in shard.rows)
+    if not shard_results:
+        raise ValueError("cannot build a memory report without shard results")
+    nonces = {shard.nonce for shard in shard_results}
+    if len(nonces) != 1 or not nonces or not next(iter(nonces)):
+        raise ValueError("all memory shards must carry one non-empty shared nonce")
+
+    by_id = {probe.probe_id: probe for probe in probe_set.probes}
+    rows_by_id: dict[str, ProbeRow] = {}
+    aborted = any(
+        finding.startswith("aborted: ")
+        for shard in shard_results
+        for finding in shard.provider_findings
+    )
+    for shard in shard_results:
+        for row in shard.rows:
+            probe = by_id.get(row.probe_id)
+            if probe is None:
+                raise ValueError(f"shard row references unknown probe {row.probe_id!r}")
+            if row.probe_id in rows_by_id:
+                raise ValueError(f"shard rows duplicate probe {row.probe_id!r}")
+            if row.targets is not probe.targets or row.test is not probe.test:
+                raise ValueError(f"shard row has mismatched metadata for probe {row.probe_id!r}")
+            if not all(
+                isinstance(outcome, Outcome) for outcome in (row.full, row.ablated, row.control)
+            ):
+                raise ValueError(f"shard row lacks three arm outcomes for probe {row.probe_id!r}")
+            rows_by_id[row.probe_id] = row
+
+    missing = [probe.probe_id for probe in probe_set.probes if probe.probe_id not in rows_by_id]
+    if missing and not aborted:
+        raise ValueError(f"shard rows are missing probe {missing[0]!r}")
+    rows = tuple(
+        rows_by_id[probe.probe_id] for probe in probe_set.probes if probe.probe_id in rows_by_id
+    )
     seed_failures = tuple(
         sorted({failure for shard in shard_results for failure in shard.seed_failure_ids})
     )
-    nonces = {shard.nonce for shard in shard_results}
-    nonce = next(iter(nonces)) if len(nonces) == 1 else ""
-    return build_report(
+    nonce = next(iter(nonces))
+    report = build_report(
         probe_set,
         rows,
         provider=provider,
@@ -273,3 +331,6 @@ def build_memory_report(
         seed_failures=seed_failures,
         nonce=nonce,
     )
+    if aborted:
+        report["aborted"] = True
+    return report

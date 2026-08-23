@@ -241,7 +241,7 @@ def test_run_live_passes_max_consecutive_into_session(
     async def fake_execute(probe_set, env, reply, **kwargs):
         del probe_set, env, reply
         captured["max"] = kwargs["max_consecutive_provider_failures"]
-        return MemoryShardResult((), (), (), "nonce", (), True)
+        return MemoryShardResult((), (), (), "nonce", ("aborted: test",), True)
 
     monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fake_execute)
     payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
@@ -265,10 +265,9 @@ def test_run_live_delegates_one_full_shard_to_the_live_execution_seam(
 ) -> None:
     from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
     from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
-    from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
+    from cowork_agent.features.ai_chat.memory_eval.probes import ProbeTest, load_probe_set
     from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow
     from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
-    from cowork_agent.features.ai_chat.memory_eval.probes import ProbeTest
     from scripts import evaluate_memory
 
     payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
@@ -351,6 +350,40 @@ def test_run_live_partial_flush_stamps_aborted(
     )
     assert report["aborted"] is True
     assert transcript
+
+
+def test_run_live_keeps_partial_private_transcript_when_shard_execution_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
+    from scripts.evaluate_memory import run_live
+
+    async def fail_after_recording(*args: object, **kwargs: object) -> object:
+        del args
+        sink = kwargs["private_transcript_sink"]
+        assert isinstance(sink, list)
+        sink.append({"question": "private question", "reply": "partial reply"})
+        raise RuntimeError("ordinary failure")
+
+    monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fail_after_recording)
+    payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
+    probe_set = load_probe_set(payload)
+    transcript: list[dict[str, object]] = []
+
+    with pytest.raises(RuntimeError, match="ordinary failure"):
+        asyncio.run(
+            run_live(
+                probe_set,
+                LiveEnvironment(None, None, True, False, ""),
+                object(),
+                provider="gemini",
+                model="m",
+                transcript=transcript,
+            )
+        )
+
+    assert transcript == [{"question": "private question", "reply": "partial reply"}]
 
 
 def test_aborted_run_writes_baseline_and_detail_and_exits_one(

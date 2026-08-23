@@ -241,6 +241,7 @@ async def run_live(
 ) -> dict[str, object]:
     """Compatibility wrapper around one full-set live shard."""
 
+    transcript_size = len(transcript) if transcript is not None else 0
     result = await execute_memory_shard(
         probe_set,
         env,
@@ -248,8 +249,11 @@ async def run_live(
         provider=provider,
         model=model,
         max_consecutive_provider_failures=max_consecutive_provider_failures,
+        private_transcript_sink=transcript,
     )
-    if transcript is not None:
+    # Compatibility for callers/tests using an older shard adapter which
+    # returns its evidence rather than writing to the caller-owned sink.
+    if transcript is not None and len(transcript) == transcript_size:
         transcript.extend(result.private_transcript)
     report = build_memory_report(
         probe_set,
@@ -258,8 +262,6 @@ async def run_live(
         model=model,
         ran_at=datetime.now(UTC),
     )
-    if any(finding.startswith("aborted: ") for finding in result.provider_findings):
-        report["aborted"] = True
     return report
 
 
