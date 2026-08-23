@@ -111,14 +111,6 @@ keeps spec, scope, and the Definition of Done.
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 
 ## Agent skills
-### Issue tracker
-
-Linear team Heval1st (`HEV-` issues), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default five roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
 ### Domain docs
 
 Single-context: root `CONTEXT.md` plus ADRs in `tasks/adr/`. See `docs/agents/domain.md`.
