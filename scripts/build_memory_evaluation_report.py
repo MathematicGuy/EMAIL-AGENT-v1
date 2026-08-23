@@ -214,27 +214,51 @@ def diagnose_needs_reading_probe(
     has_refusal_phrase = any(marker in full_lower for marker in refusal_markers)
 
     if verdict == "dangerous" and test_type == "restraint":
-        if has_refusal_phrase:
+        # Scoring checks invented_any before refusal. A refusal substring in the
+        # full reply is wrap-invention when blind arms still refuse cleanly
+        # (invented, pass, pass) — the grader is right; adding patterns would
+        # swallow the near-miss. Concern A only if a blind arm also invented.
+        wrap_signature = (
+            full_outcome == "invented"
+            and ablated_outcome == "pass"
+            and control_outcome == "pass"
+        )
+        if wrap_signature:
             snippet = full_reply[:50].replace("\n", " ")
             return (
-                "🟡 `[Concern A - Bộ chấm điểm hiểu nhầm]`",
+                "🔴 `[Concern D - Wrap-invention / Prompt]`",
                 (
-                    "AI thực tế đã từ chối đúng nhưng bộ chấm điểm tự động chưa nhận diện được "
-                    "cách diễn đạt này."
+                    "AI từ chối rồi vẫn nêu thông tin lân cận (wrap-invention). "
+                    "Lỗi prompt, không phải bộ chấm điểm."
                 ),
                 (
-                    f"Phản hồi Full arm thực tế đã từ chối (\"{snippet}...\") nhưng mẫu từ chối "
-                    "chưa khớp với regex của bộ chấm điểm, dẫn đến bị tính nhầm là ảo giác. "
-                    "Cần bổ sung mẫu câu cho bộ chấm điểm."
+                    f"Full arm `invented` (\"{snippet}...\"); Ablated và Control `pass`. "
+                    "Cùng tín hiệu `prompt_fault`: bộ nhớ đã giao hàng, generation dùng nhầm. "
+                    "Không bổ sung mẫu từ chối cho grader. Siết prompt (refuse-means-stop) "
+                    f"trên vùng nhớ `{target_scope}`."
                 ),
             )
+        if not has_refusal_phrase:
+            return (
+                "🔴 `[Concern D - Tự bịa thông tin]`",
+                "AI tự ý bịa đặt thông tin khi gặp câu hỏi ngoài phạm vi dữ liệu thay vì từ chối.",
+                (
+                    f"Mô hình tự ý bịa đặt thông tin khi gặp câu hỏi kiểm thử từ chối (restraint) "
+                    f"trên vùng nhớ `{target_scope}` thay vì từ chối như kỳ vọng. Cần siết prompt "
+                    "hướng dẫn từ chối."
+                ),
+            )
+        snippet = full_reply[:50].replace("\n", " ")
         return (
-            "🔴 `[Concern D - Tự bịa thông tin]`",
-            "AI tự ý bịa đặt thông tin khi gặp câu hỏi ngoài phạm vi dữ liệu thay vì từ chối.",
+            "🟡 `[Concern A - Bộ chấm điểm hiểu nhầm]`",
             (
-                f"Mô hình tự ý bịa đặt thông tin khi gặp câu hỏi kiểm thử từ chối (restraint) "
-                f"trên vùng nhớ `{target_scope}` thay vì từ chối như kỳ vọng. Cần siết prompt "
-                "hướng dẫn từ chối."
+                "AI thực tế đã từ chối đúng nhưng bộ chấm điểm tự động chưa nhận diện được "
+                "cách diễn đạt này."
+            ),
+            (
+                f"Phản hồi Full arm thực tế đã từ chối (\"{snippet}...\") nhưng mẫu từ chối "
+                "chưa khớp với regex của bộ chấm điểm, dẫn đến bị tính nhầm là ảo giác. "
+                "Cần bổ sung mẫu câu cho bộ chấm điểm."
             ),
         )
 

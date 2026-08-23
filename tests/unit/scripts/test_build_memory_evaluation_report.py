@@ -176,3 +176,63 @@ def test_report_unknown_probe_set_id_exits_one(
     assert "ERROR" in stderr
     assert "v3_50_probes" in stderr
     assert not output.exists()
+
+
+def _diagnose(**overrides: object) -> tuple[str, str, str]:
+    module = load_script("build_memory_evaluation_report")
+    kwargs: dict[str, object] = {
+        "probe_id": "sem_restraint_02",
+        "target_scope": "semantic",
+        "test_type": "restraint",
+        "verdict": "dangerous",
+        "full_outcome": "invented",
+        "ablated_outcome": "pass",
+        "control_outcome": "pass",
+        "full_reply": "",
+        "ablated_reply": "Tôi không có thông tin.",
+        "control_reply": "Tôi không có thông tin.",
+        "seed_failures": (),
+    }
+    kwargs.update(overrides)
+    return module.diagnose_needs_reading_probe(**kwargs)
+
+
+def test_wrap_invention_with_refusal_phrase_is_concern_d_not_grader() -> None:
+    """Refuse-then-recite on full, clean refuse on blind arms, is prompt wrap-invention.
+
+    A refusal substring in the full reply is not Concern A: scoring already
+    grades invented_any (and unmatched answering) as invented, and the 3-arm
+    pattern (invented, pass, pass) is prompt_fault. Adding grader patterns
+    would swallow the near-miss.
+    """
+    badge, summary, _detail = _diagnose(
+        full_reply=(
+            "Hiện tại, tài liệu được cung cấp chỉ đề cập đến chính sách công tác "
+            "phí trong nước, với mức 450.000 đồng mỗi ngày. Không tìm thấy thông "
+            "tin về chính sách công tác phí cho chuyến đi nước ngoài."
+        ),
+    )
+    assert "Concern D" in badge
+    assert "Concern A" not in badge
+    assert "wrap" in summary.lower() or "bịa" in summary.lower()
+
+
+def test_unmatched_refusal_on_all_arms_is_still_concern_a() -> None:
+    """Blind arms also invented: grader likely missed a refusal phrasing."""
+    badge, _summary, _detail = _diagnose(
+        full_outcome="invented",
+        ablated_outcome="invented",
+        control_outcome="invented",
+        full_reply="Hiện tại tôi không có thông tin về biểu mẫu đổi laptop hỏng.",
+    )
+    assert "Concern A" in badge
+    assert "Concern D" not in badge
+
+
+def test_restraint_invention_without_refusal_phrase_is_concern_d() -> None:
+    badge, summary, _detail = _diagnose(
+        full_reply="Công tác phí nước ngoài là 2.000.000 đồng mỗi ngày.",
+    )
+    assert "Concern D" in badge
+    assert "Concern A" not in badge
+    assert "wrap" in summary.lower()
