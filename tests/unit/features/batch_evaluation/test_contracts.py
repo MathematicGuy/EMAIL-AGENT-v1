@@ -95,7 +95,11 @@ def test_request_requires_one_safe_identifier_per_selector(
         "authorization",
         "nested_api_key",
         "apiKey",
+        "APIKey",
+        "apikey",
         "accessToken",
+        "AccessToken",
+        "access_token",
     ],
 )
 def test_request_recursively_rejects_secret_shaped_parameter_keys(key: str) -> None:
@@ -128,7 +132,7 @@ def test_request_rejects_non_positive_budgets_and_unsupported_execution_mode() -
 
 def test_contract_records_and_nested_safe_metadata_are_frozen() -> None:
     request = EvaluationRequest.from_dict(valid_request())
-    unit = WorkUnit(unit_id="unit-1", ordinal=0, payload={"item": {"id": "case-1"}})
+    unit = WorkUnit(unit_id="unit-1", ordinal=0, payload={"item_id": "case-1"})
     artifact = ArtifactBundle(
         public_result={"summary": {"succeeded": 1}}, private_artifact_ids=("detail-1",)
     )
@@ -143,9 +147,9 @@ def test_contract_records_and_nested_safe_metadata_are_frozen() -> None:
     with pytest.raises(TypeError):
         request.parameters["probe_set"] = {}  # type: ignore[index]
     with pytest.raises(TypeError):
-        unit.payload["item"] = {}  # type: ignore[index]
+        unit.payload["item_id"] = "case-2"  # type: ignore[index]
     with pytest.raises(TypeError):
-        unit.payload["item"]["id"] = "case-2"  # type: ignore[index]
+        unit.payload["item_ids"] = ("case-2",)  # type: ignore[index]
     with pytest.raises(TypeError):
         artifact.public_result["summary"] = {}  # type: ignore[index]
     with pytest.raises(TypeError):
@@ -185,14 +189,16 @@ def test_safe_records_reject_secret_shaped_keys_and_hide_private_values_from_rep
     assert "private-result" not in repr(outcome)
 
 
-@pytest.mark.parametrize("key", ["question", "reply", "seed_content", "nested_prompt"])
-def test_work_unit_payload_rejects_private_content_shaped_keys_recursively(key: str) -> None:
-    with pytest.raises(ValueError, match="private content"):
+@pytest.mark.parametrize("key", ["message", "question", "reply", "content"])
+def test_work_unit_payload_rejects_every_non_metadata_key(key: str) -> None:
+    with pytest.raises(ValueError, match="unsupported metadata key") as error:
         WorkUnit(
             unit_id="unit-1",
             ordinal=0,
-            payload={"shard": {key: "private evaluation content"}},
+            payload={key: "private evaluation content"},
         )
+    assert key not in str(error.value)
+    assert error.value.__cause__ is None
 
 
 def test_work_unit_payload_accepts_stable_id_and_shard_metadata() -> None:
@@ -204,7 +210,10 @@ def test_work_unit_payload_accepts_stable_id_and_shard_metadata() -> None:
             "item_id": "item-1",
             "probe_ids": ["probe-1", "probe-2"],
             "ordinal": 2,
-            "shard": {"shard_id": "shard-1", "shard_index": 0, "shard_count": 2},
+            "ordinals": [0, 2],
+            "shard_id": "shard-1",
+            "shard_index": 0,
+            "shard_count": 2,
         },
     )
 
@@ -213,8 +222,25 @@ def test_work_unit_payload_accepts_stable_id_and_shard_metadata() -> None:
         "item_id": "item-1",
         "probe_ids": ("probe-1", "probe-2"),
         "ordinal": 2,
-        "shard": {"shard_id": "shard-1", "shard_index": 0, "shard_count": 2},
+        "ordinals": (0, 2),
+        "shard_id": "shard-1",
+        "shard_index": 0,
+        "shard_count": 2,
     }
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("item_id", 1),
+        ("probe_ids", "probe-1"),
+        ("ordinals", [0, -1]),
+        ("shard_index", -1),
+    ],
+)
+def test_work_unit_payload_type_checks_stable_metadata(key: str, value: object) -> None:
+    with pytest.raises((TypeError, ValueError), match=key):
+        WorkUnit(unit_id="unit-1", ordinal=0, payload={key: value})
 
 
 def test_artifact_and_cleanup_records_coerce_mutable_lists_to_tuples() -> None:

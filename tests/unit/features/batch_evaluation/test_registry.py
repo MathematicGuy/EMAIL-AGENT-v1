@@ -86,6 +86,19 @@ def test_registry_rejects_duplicate_and_unknown_types_without_echoing_input() ->
     assert unknown_error.value.__cause__ is None
 
 
+@pytest.mark.parametrize(
+    "key", ["APIKey", "apiKey", "api_key", "AccessToken", "accessToken", "access_token"]
+)
+def test_registry_rejects_compact_or_camel_case_secret_schema_keys(key: str) -> None:
+    plugin = FakePlugin()
+    plugin.parameter_schema = {key: {"type": "string"}}
+
+    with pytest.raises(ValueError, match="secret") as error:
+        PluginRegistry().register(plugin)
+    assert key not in str(error.value)
+    assert error.value.__cause__ is None
+
+
 def test_registry_lists_only_safe_plugin_type_metadata_in_stable_order() -> None:
     first = FakePlugin()
     second = FakePlugin()

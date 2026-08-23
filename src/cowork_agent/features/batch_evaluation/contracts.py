@@ -87,32 +87,11 @@ class CredentialState(StrEnum):
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _SECRET_KEY_PARTS = frozenset({"authorization", "credential", "password", "secret", "token"})
-_PRIVATE_CONTENT_KEYS = frozenset(
-    {
-        "answer",
-        "body",
-        "content",
-        "context",
-        "input",
-        "output",
-        "prompt",
-        "question",
-        "reply",
-        "response",
-        "text",
-    }
-)
-_PRIVATE_CONTENT_SUFFIXES = (
-    "_answer",
-    "_body",
-    "_content",
-    "_context",
-    "_prompt",
-    "_question",
-    "_reply",
-    "_response",
-    "_text",
-)
+_SECRET_KEY_COMPACTS = frozenset({"apikey", "accesstoken"})
+_WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*_id$")
+_WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*_ids$")
+_WORK_UNIT_INTEGER_FIELDS = frozenset({"ordinal", "shard_index", "shard_count"})
+_WORK_UNIT_INTEGER_COLLECTION_FIELDS = frozenset({"ordinals"})
 
 # A job retries no work by default unless a later submission explicitly opts in.
 DEFAULT_MAX_ATTEMPTS_PER_UNIT = 1
@@ -161,29 +140,16 @@ def _reject_secret_shaped_keys(value: object) -> None:
             if isinstance(key, str):
                 normalized = _normalize_key(key)
                 parts = frozenset(part for part in normalized.split("_") if part)
-                if "api_key" in normalized or parts & _SECRET_KEY_PARTS:
+                compact = normalized.replace("_", "")
+                if any(marker in compact for marker in _SECRET_KEY_COMPACTS) or (
+                    parts & _SECRET_KEY_PARTS
+                ):
                     raise ValueError("secret-shaped keys are not allowed in safe records")
             _reject_secret_shaped_keys(nested)
         return
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         for nested in value:
             _reject_secret_shaped_keys(nested)
-
-
-def _reject_private_content_shaped_keys(value: object) -> None:
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if isinstance(key, str):
-                normalized = _normalize_key(key)
-                if normalized in _PRIVATE_CONTENT_KEYS or normalized.endswith(
-                    _PRIVATE_CONTENT_SUFFIXES
-                ):
-                    raise ValueError("private content-shaped keys are not allowed in work metadata")
-            _reject_private_content_shaped_keys(nested)
-        return
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        for nested in value:
-            _reject_private_content_shaped_keys(nested)
 
 
 def _freeze_value(value: object) -> object:
@@ -206,8 +172,34 @@ def _freeze_safe_mapping(value: object, name: str) -> Mapping[str, object]:
 
 def _freeze_work_metadata(value: object) -> Mapping[str, object]:
     mapping = _require_mapping(value, "payload")
-    _reject_private_content_shaped_keys(mapping)
-    return _freeze_safe_mapping(mapping, "payload")
+    _reject_secret_shaped_keys(mapping)
+    return MappingProxyType(
+        {key: _freeze_work_metadata_value(key, item) for key, item in mapping.items()}
+    )
+
+
+def _freeze_work_metadata_value(key: str, value: object) -> object:
+    if _WORK_UNIT_ID_FIELD.fullmatch(key):
+        return _require_identifier(value, key)
+    if _WORK_UNIT_ID_COLLECTION_FIELD.fullmatch(key):
+        return _freeze_identifier_collection(value, key)
+    if key in _WORK_UNIT_INTEGER_FIELDS:
+        return _require_int_at_least(value, key, 0)
+    if key in _WORK_UNIT_INTEGER_COLLECTION_FIELDS:
+        return _freeze_non_negative_integer_collection(value, key)
+    raise ValueError("payload has unsupported metadata key")
+
+
+def _freeze_identifier_collection(value: object, name: str) -> tuple[str, ...]:
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        raise TypeError(f"{name} must be a sequence of safe identifiers")
+    return tuple(_require_identifier(item, name) for item in value)
+
+
+def _freeze_non_negative_integer_collection(value: object, name: str) -> tuple[int, ...]:
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Sequence):
+        raise TypeError(f"{name} must be a sequence of non-negative integers")
+    return tuple(_require_int_at_least(item, name, 0) for item in value)
 
 
 def _as_execution_mode(value: object) -> ExecutionMode:
