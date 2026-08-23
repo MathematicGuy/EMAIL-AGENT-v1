@@ -112,6 +112,25 @@ class ControlledUnitStore:
         self.completion_returned[call_index].set()
 
 
+class InstrumentedSemaphore(asyncio.Semaphore):
+    """Semaphore test double that exposes when each acquisition begins."""
+
+    def __init__(self, value: int, expected_acquires: int) -> None:
+        super().__init__(value)
+        self.acquire_started = tuple(asyncio.Event() for _ in range(expected_acquires))
+        self._acquire_calls = 0
+
+    async def acquire(self) -> bool:
+        call_index = self._acquire_calls
+        self._acquire_calls += 1
+        self.acquire_started[call_index].set()
+        return await super().acquire()
+
+    @property
+    def available_slots(self) -> int:
+        return self._value
+
+
 def successful_outcome(unit_id: str, ordinal: int) -> WorkUnitOutcome:
     return WorkUnitOutcome(
         unit_id=unit_id,
@@ -202,14 +221,19 @@ async def test_cancelled_waiting_claim_does_not_consume_capacity() -> None:
         completion_failures=(False,),
     )
     queue = DurableWorkUnitQueue(store, capacity=1)
+    slots = InstrumentedSemaphore(value=1, expected_acquires=3)
+    queue._slots = slots
 
     first_claim = asyncio.create_task(queue.claim_next("job-1", "lane-1"))
+    await slots.acquire_started[0].wait()
     await store.claim_started[0].wait()
     store.claim_may_commit[0].set()
     store.claim_may_return[0].set()
     assert await first_claim == unit("a", 0)
 
     cancelled_claim = asyncio.create_task(queue.claim_next("job-1", "lane-2"))
+    await slots.acquire_started[1].wait()
+    assert not store.claim_started[1].is_set()
     cancelled_claim.cancel()
     with pytest.raises(asyncio.CancelledError):
         await cancelled_claim
@@ -217,9 +241,14 @@ async def test_cancelled_waiting_claim_does_not_consume_capacity() -> None:
     store.completion_may_commit[0].set()
     store.completion_may_return[0].set()
     await queue.complete("job-1", successful_outcome("a", 0))
+    assert slots.available_slots == 1
+
+    second_claim = asyncio.create_task(queue.claim_next("job-1", "lane-3"))
+    await slots.acquire_started[2].wait()
+    await store.claim_started[1].wait()
     store.claim_may_commit[1].set()
     store.claim_may_return[1].set()
-    second = await queue.claim_next("job-1", "lane-3")
+    second = await second_claim
 
     assert second == unit("b", 1)
     assert store.claim_calls == [("job-1", "lane-1"), ("job-1", "lane-3")]
