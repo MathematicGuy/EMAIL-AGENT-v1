@@ -137,8 +137,22 @@ def _stamp_probe_set_identity(report: dict[str, object], probe_set_path: Path) -
     report["probe_set_sha256"] = hashlib.sha256(probe_set_path.read_bytes()).hexdigest()
 
 
+def _stamp_prompt_identity(report: dict[str, object]) -> None:
+    """Record which system prompt this baseline was scored against.
+
+    Two runs are comparable only if the prompt was the same, and nothing else in
+    the artifact says what it was. Imported here rather than at module scope for
+    the same reason `_build_chat_reply` defers its imports: the provider modules
+    pull in SDKs the offline paths do not need.
+    """
+
+    from cowork_agent.integrations.llm.chat_reply import system_prompt_sha
+
+    report["system_prompt_sha"] = system_prompt_sha()
+
+
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
-_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "vyce", "vyne", "mistral")
+_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "mimo", "mistral")
 
 
 def _default_provider(environ: Mapping[str, str]) -> str:
@@ -181,14 +195,14 @@ def _build_chat_reply(
         if model:
             openrouter = replace(openrouter, model=model, allowed_models=(model,))
         return OpenRouterChatReply.from_settings(openrouter), provider, openrouter.model
-    if provider in ("vyce", "vyne"):
-        from cowork_agent.config import VyceSettings
-        from cowork_agent.integrations.llm.chat_reply import VyceChatReply
+    if provider == "mimo":
+        from cowork_agent.config import MimoSettings
+        from cowork_agent.integrations.llm.chat_reply import MimoChatReply
 
-        vyce = VyceSettings.from_env(environ)
+        mimo = MimoSettings.from_env(environ)
         if model:
-            vyce = replace(vyce, model=model)
-        return VyceChatReply.from_settings(vyce), provider, vyce.model
+            mimo = replace(mimo, model=model)
+        return MimoChatReply.from_settings(mimo), provider, mimo.model
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.chat_reply import MistralChatReply
@@ -577,6 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
 
     _stamp_probe_set_identity(report, probe_set_path)
+    _stamp_prompt_identity(report)
 
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     output = args.output

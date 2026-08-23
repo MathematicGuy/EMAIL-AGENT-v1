@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
 from cowork_agent.config import (
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
     OpenRouterSettings,
-    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, EpisodeCitation
-from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
+from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable, ChatResponseInvalid
 from cowork_agent.features.ai_chat.generation_context import (
     ChatResponseMode,
     GenerationContext,
@@ -22,6 +24,8 @@ from cowork_agent.features.ai_chat.generation_context import (
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
 from cowork_agent.prompting import reorder_u_shaped
+
+logger = logging.getLogger(__name__)
 
 Completion = Callable[[dict[str, object]], Awaitable[Mapping[str, object]]]
 
@@ -42,6 +46,11 @@ Return a task_proposal object when task_proposal_requested is true, and null in 
 case, including whenever response_mode is clarify. task_proposal.prompt_version must be null.
 task_proposal.rag_citations may contain only citations supplied with current company evidence,
 copied field for field; when no company evidence was supplied it must be [].
+Advisory eligible episodes are listed with updated_at. When two of them describe the same task,
+the one with the later updated_at replaces the earlier one: answer from the later value and never
+state the replaced value as current. This holds when you are only answering a question, not only
+when you return a task_proposal. Apply this silently: answer the question that was asked, and do
+not report updated_at values, which episode is newer, or that you compared them.
 Before returning a task_proposal, read every advisory eligible episode and decide whether the
 request changes one of them rather than adding a new one. Moving or postponing a date, renaming,
 reassigning, cancelling or correcting an existing task is a revision, not a new task: set
@@ -52,6 +61,8 @@ an index that was not listed under advisory eligible episodes.
 citation_ids may contain only IDs supplied with current project evidence, and never an invented
 ID. When current project evidence is supplied and response_mode is normal, citation_ids must
 contain at least one ID from that evidence, naming the IDs that support your factual claims.
+When no current project evidence is supplied, citation_ids must be []: company evidence chunk
+IDs do not belong there, and company evidence is credited through task_proposal.rag_citations.
 conversation_title must be a concise title of at most 120 characters.
 
 Output language
@@ -113,6 +124,18 @@ _RESPONSE_SCHEMA: dict[str, object] = {
 }
 
 
+def system_prompt_sha() -> str:
+    """Fingerprint of the chat system prompt, so a run can record what it ran against.
+
+    Two evaluation runs are comparable only if they were driven by the same
+    system prompt, and an artifact that does not say which prompt produced it
+    cannot answer that question afterwards. The hash cannot be backfilled, so it
+    is recorded at run time even though nothing reads it yet.
+    """
+
+    return hashlib.sha256(_SYSTEM_INSTRUCTION.encode("utf-8")).hexdigest()
+
+
 class _ConfiguredChatReply:
     def __init__(self, *, model: str, complete: Completion) -> None:
         self._model = model
@@ -129,6 +152,9 @@ class _ConfiguredChatReply:
             return
         try:
             response = await self._complete(_request_payload(request, context))
+        except Exception as exc:
+            raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
+        try:
             proposal = _proposal_from_response(
                 response,
                 required=(
@@ -142,7 +168,11 @@ class _ConfiguredChatReply:
             text = _required_string(response.get("assistant_text"), "assistant_text")
             citation_ids = _validated_citation_ids(response, context)
         except Exception as exc:
-            raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
+            # The turn fails closed and the caller only ever sees a safe message,
+            # so without this line the reason a contract rejection happened is
+            # gone. Three memory-evaluation runs were spent guessing at it.
+            logger.warning("chat response failed validation: %r", exc)
+            raise ChatResponseInvalid(f"chat response failed validation: {exc!r}") from exc
         yield ChatReplyChunk(
             text,
             proposal,
@@ -231,10 +261,10 @@ class OpenRouterChatReply(_ConfiguredChatReply):
         return cls(model=settings.model, complete=complete)
 
 
-class VyceChatReply(_ConfiguredChatReply):
+class MimoChatReply(_ConfiguredChatReply):
     @classmethod
-    def from_settings(cls, settings: VyceSettings) -> VyceChatReply:
-        from .providers.vyce import execute_chat_completion
+    def from_settings(cls, settings: MimoSettings) -> MimoChatReply:
+        from .providers.mimo import execute_chat_completion
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
             return await execute_chat_completion(
@@ -245,9 +275,6 @@ class VyceChatReply(_ConfiguredChatReply):
             )
 
         return cls(model=settings.model, complete=complete)
-
-
-VyneChatReply = VyceChatReply
 
 
 class GeminiChatReply(_ConfiguredChatReply):
@@ -348,6 +375,8 @@ def _validated_citation_ids(
             else ()
         )
     }
+    if not allowed:
+        return ()
     if not set(ids).issubset(allowed):
         raise ValueError("citation_ids must match current project evidence")
     if allowed and context.response_mode is ChatResponseMode.NORMAL and not ids:

@@ -24,7 +24,7 @@ Tài liệu này định nghĩa cấu trúc chuẩn cho các báo cáo đánh gi
 | **Tổng số câu hỏi (Probes)** | 8 probes (24 lượt gọi / 3 arms) | Đầy đủ 4 phạm vi bộ nhớ |
 | **Tỉ lệ Trả lời Đúng (Pass Rate)** | X/8 (XX%) | Đo lường trên nhánh Full Context |
 | **Quy gán Đúng Vùng Nhớ (Scope Earned-It)** | X/8 (XX%) | Chứng minh bộ nhớ thực sự cung cấp thông tin (P, F, F) |
-| **Khả năng Ức chế / Chống ảo giác (Restraint)** | X/X (100%) | Từ chối trả lời khi không có dữ liệu |
+| **Khả năng Kiềm chế / Chống ảo giác (Restraint)** | X/X (100%) | Từ chối trả lời khi không có dữ liệu |
 | **Độ trễ trung bình (Avg Latency)** | XX.X giây / turn | Thời gian phản hồi trung bình |
 | **Lỗi Seeding (Seed Failures)** | 0 | Tất cả vùng nhớ được nạp thành công |
 

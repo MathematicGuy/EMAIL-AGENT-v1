@@ -627,8 +627,7 @@ def create_app() -> FastAPI:
                     "gemini": "Gemini",
                     "mistral": "Mistral",
                     "openrouter": "OpenRouter",
-                    "vyce": "Vyce",
-                    "vyne": "Vyce",
+                    "mimo": "Mimo",
                 }.get(provider, "LLM provider")
                 email_providers = await resolve_email_providers(provider)
                 chat_providers = resolve_chat_providers(provider)

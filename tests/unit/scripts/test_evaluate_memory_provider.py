@@ -57,18 +57,11 @@ def test_openrouter_reports_its_own_model() -> None:
     assert model == "vendor/model-under-test"
 
 
-def test_vyce_reports_its_own_model() -> None:
-    environ = {"VYCE_API_KEY": "sk-vyce-test", "VYCE_MODEL": "gpt-5.6-luna"}
-    _reply, provider, model = _build_chat_reply("vyce", environ)
-    assert provider == "vyce"
-    assert model == "gpt-5.6-luna"
-
-
-def test_vyne_reports_its_own_model() -> None:
-    environ = {"VYNE_API_KEY": "sk-vyne-test", "VYNE_MODEL": "gpt-5.6-luna"}
-    _reply, provider, model = _build_chat_reply("vyne", environ)
-    assert provider == "vyne"
-    assert model == "gpt-5.6-luna"
+def test_mimo_reports_its_own_model() -> None:
+    environ = {"MIMO_API_KEY": "tp-mimo-test", "MIMO_MODEL": "mimo-v2.5-pro"}
+    _reply, provider, model = _build_chat_reply("mimo", environ)
+    assert provider == "mimo"
+    assert model == "mimo-v2.5-pro"
 
 
 def test_unknown_provider_is_rejected() -> None:

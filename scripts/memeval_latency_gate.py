@@ -114,12 +114,12 @@ def _build_reply(provider: str, model: str) -> object:
         return OpenRouterChatReply.from_settings(
             replace(openrouter_settings, model=model, allowed_models=(model,))
         )
-    if provider in ("vyce", "vyne"):
-        from cowork_agent.config import VyceSettings
-        from cowork_agent.integrations.llm.chat_reply import VyceChatReply
+    if provider == "mimo":
+        from cowork_agent.config import MimoSettings
+        from cowork_agent.integrations.llm.chat_reply import MimoChatReply
 
-        vyce_settings = VyceSettings.from_env(environ)
-        return VyceChatReply.from_settings(replace(vyce_settings, model=model))
+        mimo_settings = MimoSettings.from_env(environ)
+        return MimoChatReply.from_settings(replace(mimo_settings, model=model))
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.chat_reply import MistralChatReply
@@ -228,7 +228,8 @@ def run_latency_gate(provider: str, model: str, *, fail_open: bool = False) -> b
     if fail_open and schema_passed:
         print(
             f"\n[GATE RESULT: FAIL-OPEN (PASSED WITH WARNINGS)] "
-            f"Model {model} exceeded latency budget ({avg_latency_s:.2f}s >= {MAX_ALLOWED_AVG_LATENCY_SECONDS}s), "
+            f"Model {model} exceeded latency budget "
+            f"({avg_latency_s:.2f}s >= {MAX_ALLOWED_AVG_LATENCY_SECONDS}s), "
             f"but hard schema passed. Permitting evaluation via --fail-open."
         )
         return True
@@ -241,13 +242,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--provider",
         default="gemini",
-        choices=["gemini", "openrouter", "vyce", "vyne", "mistral"],
+        choices=["gemini", "openrouter", "mimo", "mistral"],
     )
     parser.add_argument("--model", required=True, help="Model identifier to probe")
     parser.add_argument(
         "--fail-open",
         action="store_true",
-        help="Warn but return success (0) if hard schema passed even if latency threshold is exceeded",
+        help=(
+            "Warn but return success (0) if hard schema passed "
+            "even if latency threshold is exceeded"
+        ),
     )
     args = parser.parse_args(argv)
 

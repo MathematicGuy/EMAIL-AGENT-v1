@@ -9,9 +9,9 @@ from cowork_agent.config import (
     ChatIntentSettings,
     GeminiSettings,
     JinaEmbeddingSettings,
+    MimoSettings,
     MistralSettings,
     OpenRouterSettings,
-    VyceSettings,
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort, IntentClassifierPort
 from cowork_agent.features.email_action_plan.ports import (
@@ -21,21 +21,25 @@ from cowork_agent.features.email_action_plan.ports import (
 )
 from cowork_agent.integrations.llm.chat_intent import (
     GeminiIntentClassifier,
+    MimoIntentClassifier,
     MistralIntentClassifier,
     OpenRouterIntentClassifier,
-    VyceIntentClassifier,
 )
 from cowork_agent.integrations.llm.chat_reply import (
     GeminiChatReply,
+    MimoChatReply,
     MistralChatReply,
     OpenRouterChatReply,
-    VyceChatReply,
 )
 from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRetrievalQueryRewriter,
     GeminiRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.mimo import (
+    MimoActionPlanGenerator,
+    MimoRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
@@ -45,14 +49,10 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
-from cowork_agent.integrations.llm.providers.vyce import (
-    VyceActionPlanGenerator,
-    VyceRouteClassifier,
-)
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 
 _LOGGER = logging.getLogger(__name__)
-_SUPPORTED = frozenset({"gemini", "mistral", "openrouter", "vyce", "vyne"})
+_SUPPORTED = frozenset({"gemini", "mistral", "openrouter", "mimo"})
 
 
 @dataclass(frozen=True)
@@ -74,8 +74,8 @@ class ChatProviderBundle:
 def normalize_llm_provider(provider: str) -> str:
     name = provider.strip().lower()
     if name not in _SUPPORTED:
-        raise ValueError("LLM_PROVIDER must be 'gemini', 'mistral', 'openrouter', or 'vyce'")
-    return "vyce" if name == "vyne" else name
+        raise ValueError("LLM_PROVIDER must be 'gemini', 'mistral', 'openrouter', or 'mimo'")
+    return name
 
 
 def _openrouter_last_resort(*, log_status: bool) -> GeminiSettings | None:
@@ -103,11 +103,11 @@ async def resolve_email_providers(provider: str) -> EmailProviderBundle:
             query_rewriter=GeminiRetrievalQueryRewriter(gemini_settings),
             generation_concurrency=gemini_settings.action_plan_concurrency,
         )
-    if name == "vyce":
-        vyce_settings = VyceSettings.from_env()
+    if name == "mimo":
+        mimo_settings = MimoSettings.from_env()
         return EmailProviderBundle(
-            classifier=VyceRouteClassifier(vyce_settings),
-            generator=VyceActionPlanGenerator(vyce_settings),
+            classifier=MimoRouteClassifier(mimo_settings),
+            generator=MimoActionPlanGenerator(mimo_settings),
             semantic_memory=NullSemanticMemory(),
             query_rewriter=None,
             generation_concurrency=1,
@@ -144,12 +144,12 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
             chat_reply=GeminiChatReply.from_settings(gemini_settings),
             intent_settings=intent_settings,
         )
-    if name == "vyce":
-        vyce_settings = VyceSettings.from_env()
-        intent_settings = ChatIntentSettings.from_env(default_model=vyce_settings.model)
+    if name == "mimo":
+        mimo_settings = MimoSettings.from_env()
+        intent_settings = ChatIntentSettings.from_env(default_model=mimo_settings.model)
         return ChatProviderBundle(
-            intent_classifier=VyceIntentClassifier.from_settings(vyce_settings, intent_settings),
-            chat_reply=VyceChatReply.from_settings(vyce_settings),
+            intent_classifier=MimoIntentClassifier.from_settings(mimo_settings, intent_settings),
+            chat_reply=MimoChatReply.from_settings(mimo_settings),
             intent_settings=intent_settings,
         )
     if name == "mistral":

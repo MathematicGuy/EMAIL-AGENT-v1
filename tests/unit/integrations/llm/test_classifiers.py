@@ -10,9 +10,9 @@ import pytest
 
 from cowork_agent.config import (
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
     OpenRouterSettings,
-    VyceSettings,
 )
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -33,8 +33,8 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiRateLimitError,
     GeminiRouteClassifier,
 )
+from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
 from cowork_agent.integrations.llm.providers.openrouter import OpenRouterRouteClassifier
-from cowork_agent.integrations.llm.providers.vyce import VyceRouteClassifier
 
 
 def environment(**overrides: str) -> dict[str, str]:
@@ -372,7 +372,7 @@ def test_classifier_rotates_key_on_rate_limit_without_counting_a_retry() -> None
     asyncio.run(scenario())
 
 
-def test_vyce_classifier_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mimo_classifier_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
     payload = {
         "emails": [
@@ -393,11 +393,11 @@ def test_vyce_classifier_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         captured.append(body)
         return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json)
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
-        result = await VyceRouteClassifier(settings).classify(
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        result = await MimoRouteClassifier(settings).classify(
             "Asia/Ho_Chi_Minh", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
 
@@ -489,7 +489,7 @@ def test_mistral_classifier_parses_decision(
 def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cowork_agent.integrations.llm.providers import base, gemini, mistral, openrouter, vyce
+    from cowork_agent.integrations.llm.providers import base, gemini, mimo, mistral, openrouter
     from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
 
     observed_versions: list[object] = []
@@ -500,7 +500,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
                 observed_versions.append(value["prompt_version"])
 
     monkeypatch.setattr(base, "_update_current_span", record)
-    for provider in (gemini, vyce, mistral, openrouter):
+    for provider in (gemini, mimo, mistral, openrouter):
         monkeypatch.setattr(provider, "_update_current_generation", record)
 
     def response(*args: object, **kwargs: object) -> dict[str, object]:
@@ -509,7 +509,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
             "choices": [{"message": {"content": json.dumps({"emails": [decision_payload("msg")]})}}]
         }
 
-    monkeypatch.setattr(vyce, "_post_json", response)
+    monkeypatch.setattr(mimo, "_post_json", response)
     monkeypatch.setattr(mistral, "_post_json", response)
     monkeypatch.setattr(openrouter, "_post_json", response)
 
@@ -518,8 +518,8 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await gemini_classifier(
             ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
         ).classify("UTC", datetime.now(UTC), message)
-        await VyceRouteClassifier(
-            VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
+        await MimoRouteClassifier(
+            MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
         ).classify("UTC", datetime.now(UTC), message)
         await MistralRouteClassifier(
             MistralSettings.from_env(

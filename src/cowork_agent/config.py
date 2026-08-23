@@ -707,8 +707,8 @@ class EmailRagQualitySettings:
 
 
 @dataclass(frozen=True, slots=True)
-class VyceSettings:
-    """Configuration for the Vyce (VyceAI) chat-completions provider with key rotation."""
+class MimoSettings:
+    """Configuration for the Xiaomi MiMo chat-completions provider with key rotation."""
 
     rotator: APIKeyRotator = field(repr=False)
     model: str
@@ -725,53 +725,45 @@ class VyceSettings:
         environ: Mapping[str, str] | None = None,
         *,
         load_env_file: bool = True,
-    ) -> "VyceSettings":
+    ) -> "MimoSettings":
         if environ is None:
             if load_env_file:
                 load_runtime_environment()
             environ = os.environ
-        # Check VYCE_API_KEY first, fallback to VYNE_API_KEY
-        key_prefix = "VYCE_API_KEY"
-        if not any(k.startswith("VYCE_API_KEY") for k in environ) and any(
-            k.startswith("VYNE_API_KEY") for k in environ
-        ):
-            key_prefix = "VYNE_API_KEY"
-
+        key_prefix = "MIMO_API_KEY"
         rotator = APIKeyRotator.from_env(
-            key_prefix, environ=environ, provider_name="Vyce"
+            key_prefix, environ=environ, provider_name="Mimo"
         )
         model = (
-            environ.get("VYCE_MODEL")
-            or environ.get("VYNE_MODEL")
-            or "gpt-5.6-luna"
+            environ.get("MIMO_MODEL")
+            or "mimo-v2.5-pro"
         ).strip()
         if not model or model.startswith("replace-with-"):
-            raise ValueError("VYCE_MODEL must be a real Vyce model name")
+            raise ValueError("MIMO_MODEL must be a real Mimo model name")
         base_url = (
-            environ.get("VYCE_BASE_URL")
-            or environ.get("VYNE_BASE_URL")
-            or "https://vyceai.com/v1"
+            environ.get("MIMO_BASE_URL")
+            or "https://token-plan-ams.xiaomimimo.com/v1"
         ).strip()
         rotate_on_rate_limit = _boolean(
             environ,
-            "VYCE_ROTATE_ON_RATE_LIMIT",
-            _boolean(environ, "VYNE_ROTATE_ON_RATE_LIMIT", True),
+            "MIMO_ROTATE_ON_RATE_LIMIT",
+            True,
         )
         max_emails = _positive_int(
             environ,
-            "VYCE_MAX_EMAILS_PER_BATCH",
-            _positive_int(environ, "VYNE_MAX_EMAILS_PER_BATCH", 5),
+            "MIMO_MAX_EMAILS_PER_BATCH",
+            5,
         )
         max_tokens = _bounded_positive_int(
             environ,
-            "VYCE_MAX_OUTPUT_TOKENS",
-            _bounded_positive_int(environ, "VYNE_MAX_OUTPUT_TOKENS", 4096, maximum=8192),
+            "MIMO_MAX_OUTPUT_TOKENS",
+            4096,
             maximum=8192,
         )
         timeout = _bounded_positive_int(
             environ,
-            "VYCE_TIMEOUT_SECONDS",
-            _bounded_positive_int(environ, "VYNE_TIMEOUT_SECONDS", 60, maximum=120),
+            "MIMO_TIMEOUT_SECONDS",
+            60,
             maximum=120,
         )
         return cls(
@@ -784,9 +776,6 @@ class VyceSettings:
             rotate_on_rate_limit=rotate_on_rate_limit,
             max_attempts=len(rotator.keys),
         )
-
-
-VyneSettings = VyceSettings
 
 
 @dataclass(frozen=True, slots=True)
