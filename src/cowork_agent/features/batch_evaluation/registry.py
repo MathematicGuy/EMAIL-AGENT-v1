@@ -28,14 +28,14 @@ class PluginRegistry:
             raise TypeError("supported_modes must contain ExecutionMode values")
         _freeze_safe_mapping(plugin.parameter_schema, "parameter_schema")
         if evaluation_type in self._plugins:
-            raise ValueError(f"duplicate evaluation type: {evaluation_type}")
+            raise ValueError("duplicate evaluation type")
         self._plugins[evaluation_type] = plugin
 
     def require(self, evaluation_type: str) -> EvaluationPlugin:
         try:
             return self._plugins[evaluation_type]
-        except KeyError as error:
-            raise ValueError(f"unknown evaluation type: {evaluation_type}") from error
+        except KeyError:
+            raise ValueError("unknown evaluation type") from None
 
     def list_types(self) -> tuple[Mapping[str, object], ...]:
         """Return only safe static discovery metadata in deterministic order."""

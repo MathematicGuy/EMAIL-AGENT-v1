@@ -8,6 +8,7 @@ import pytest
 from cowork_agent.features.batch_evaluation.contracts import (
     ArtifactBundle,
     AttemptState,
+    CleanupOutcome,
     CredentialState,
     EvaluationBudget,
     EvaluationRequest,
@@ -42,8 +43,10 @@ def valid_request() -> dict[str, object]:
 
 def test_request_defaults_to_one_worker_and_rejects_zero() -> None:
     payload = valid_request()
-    payload["execution_options"] = {"max_attempts_per_unit": 2}
-    assert EvaluationRequest.from_dict(payload).max_workers == 1
+    payload["execution_options"] = {}
+    request = EvaluationRequest.from_dict(payload)
+    assert request.max_workers == 1
+    assert request.max_attempts_per_unit == 1
 
     payload["execution_options"] = {"max_workers": 0, "max_attempts_per_unit": 2}
     with pytest.raises(ValueError, match="max_workers"):
@@ -86,7 +89,14 @@ def test_request_requires_one_safe_identifier_per_selector(
 
 @pytest.mark.parametrize(
     "key",
-    ["api_key", "token", "authorization", "nested_api_key"],
+    [
+        "api_key",
+        "token",
+        "authorization",
+        "nested_api_key",
+        "apiKey",
+        "accessToken",
+    ],
 )
 def test_request_recursively_rejects_secret_shaped_parameter_keys(key: str) -> None:
     payload = valid_request()
@@ -108,9 +118,12 @@ def test_request_rejects_non_positive_budgets_and_unsupported_execution_mode() -
         EvaluationRequest.from_dict(payload)
 
     payload = valid_request()
-    payload["execution_mode"] = "provider_batch"
-    with pytest.raises(ValueError, match="execution_mode"):
+    invalid_mode = "provider_batch_with_private_value"
+    payload["execution_mode"] = invalid_mode
+    with pytest.raises(ValueError, match="execution_mode") as error:
         EvaluationRequest.from_dict(payload)
+    assert invalid_mode not in str(error.value)
+    assert error.value.__cause__ is None
 
 
 def test_contract_records_and_nested_safe_metadata_are_frozen() -> None:
@@ -170,6 +183,60 @@ def test_safe_records_reject_secret_shaped_keys_and_hide_private_values_from_rep
     assert "private-client" not in repr(context)
     assert "private-scratch" not in repr(context)
     assert "private-result" not in repr(outcome)
+
+
+@pytest.mark.parametrize("key", ["question", "reply", "seed_content", "nested_prompt"])
+def test_work_unit_payload_rejects_private_content_shaped_keys_recursively(key: str) -> None:
+    with pytest.raises(ValueError, match="private content"):
+        WorkUnit(
+            unit_id="unit-1",
+            ordinal=0,
+            payload={"shard": {key: "private evaluation content"}},
+        )
+
+
+def test_work_unit_payload_accepts_stable_id_and_shard_metadata() -> None:
+    unit = WorkUnit(
+        unit_id="unit-1",
+        ordinal=2,
+        payload={
+            "case_id": "case-1",
+            "item_id": "item-1",
+            "probe_ids": ["probe-1", "probe-2"],
+            "ordinal": 2,
+            "shard": {"shard_id": "shard-1", "shard_index": 0, "shard_count": 2},
+        },
+    )
+
+    assert unit.payload == {
+        "case_id": "case-1",
+        "item_id": "item-1",
+        "probe_ids": ("probe-1", "probe-2"),
+        "ordinal": 2,
+        "shard": {"shard_id": "shard-1", "shard_index": 0, "shard_count": 2},
+    }
+
+
+def test_artifact_and_cleanup_records_coerce_mutable_lists_to_tuples() -> None:
+    artifact_ids = ["detail-1"]
+    warning = EvaluationWarning(
+        code="WORKER_COUNT_REDUCED",
+        message="Worker count was reduced.",
+        details={"requested_workers": 4},
+    )
+    warnings = [warning]
+    artifact = ArtifactBundle(public_result={}, private_artifact_ids=artifact_ids)  # type: ignore[arg-type]
+    cleanup = CleanupOutcome(removed_resources=1, warnings=warnings)  # type: ignore[arg-type]
+
+    artifact_ids.append("detail-2")
+    warnings.clear()
+
+    assert artifact.private_artifact_ids == ("detail-1",)
+    assert cleanup.warnings == (warning,)
+    with pytest.raises(FrozenInstanceError):
+        artifact.private_artifact_ids = ()  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        cleanup.warnings = ()  # type: ignore[misc]
 
 
 def test_contract_enums_expose_documented_values() -> None:

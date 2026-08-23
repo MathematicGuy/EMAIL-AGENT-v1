@@ -87,6 +87,35 @@ class CredentialState(StrEnum):
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _SECRET_KEY_PARTS = frozenset({"authorization", "credential", "password", "secret", "token"})
+_PRIVATE_CONTENT_KEYS = frozenset(
+    {
+        "answer",
+        "body",
+        "content",
+        "context",
+        "input",
+        "output",
+        "prompt",
+        "question",
+        "reply",
+        "response",
+        "text",
+    }
+)
+_PRIVATE_CONTENT_SUFFIXES = (
+    "_answer",
+    "_body",
+    "_content",
+    "_context",
+    "_prompt",
+    "_question",
+    "_reply",
+    "_response",
+    "_text",
+)
+
+# A job retries no work by default unless a later submission explicitly opts in.
+DEFAULT_MAX_ATTEMPTS_PER_UNIT = 1
 
 
 def _require_identifier(value: object, name: str) -> str:
@@ -113,16 +142,24 @@ def _require_exact_keys(mapping: Mapping[str, object], name: str, expected: froz
     missing = expected - mapping.keys()
     extra = mapping.keys() - expected
     if missing or extra:
-        raise ValueError(
-            f"{name} has invalid keys: missing={sorted(missing)}, extra={sorted(extra)}"
-        )
+        raise ValueError(f"{name} has invalid keys")
+
+
+def _reject_unknown_keys(mapping: Mapping[str, object], name: str, allowed: frozenset[str]) -> None:
+    if mapping.keys() - allowed:
+        raise ValueError(f"{name} has invalid keys")
+
+
+def _normalize_key(key: str) -> str:
+    with_word_boundaries = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    return re.sub(r"[^a-z0-9]+", "_", with_word_boundaries.lower()).strip("_")
 
 
 def _reject_secret_shaped_keys(value: object) -> None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
             if isinstance(key, str):
-                normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+                normalized = _normalize_key(key)
                 parts = frozenset(part for part in normalized.split("_") if part)
                 if "api_key" in normalized or parts & _SECRET_KEY_PARTS:
                     raise ValueError("secret-shaped keys are not allowed in safe records")
@@ -131,6 +168,22 @@ def _reject_secret_shaped_keys(value: object) -> None:
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         for nested in value:
             _reject_secret_shaped_keys(nested)
+
+
+def _reject_private_content_shaped_keys(value: object) -> None:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if isinstance(key, str):
+                normalized = _normalize_key(key)
+                if normalized in _PRIVATE_CONTENT_KEYS or normalized.endswith(
+                    _PRIVATE_CONTENT_SUFFIXES
+                ):
+                    raise ValueError("private content-shaped keys are not allowed in work metadata")
+            _reject_private_content_shaped_keys(nested)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        for nested in value:
+            _reject_private_content_shaped_keys(nested)
 
 
 def _freeze_value(value: object) -> object:
@@ -151,6 +204,12 @@ def _freeze_safe_mapping(value: object, name: str) -> Mapping[str, object]:
     return cast(Mapping[str, object], _freeze_value(mapping))
 
 
+def _freeze_work_metadata(value: object) -> Mapping[str, object]:
+    mapping = _require_mapping(value, "payload")
+    _reject_private_content_shaped_keys(mapping)
+    return _freeze_safe_mapping(mapping, "payload")
+
+
 def _as_execution_mode(value: object) -> ExecutionMode:
     if isinstance(value, ExecutionMode):
         return value
@@ -158,8 +217,8 @@ def _as_execution_mode(value: object) -> ExecutionMode:
         raise TypeError("execution_mode must be an ExecutionMode")
     try:
         return ExecutionMode(value)
-    except ValueError as error:
-        raise ValueError(f"execution_mode is not supported: {value}") from error
+    except ValueError:
+        raise ValueError("execution_mode is not supported") from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,12 +282,10 @@ class EvaluationRequest:
             ),
         )
         execution_options = _require_mapping(data["execution_options"], "execution_options")
-        _require_exact_keys(
+        _reject_unknown_keys(
             execution_options,
             "execution_options",
-            frozenset({"max_workers", "max_attempts_per_unit"})
-            if "max_workers" in execution_options
-            else frozenset({"max_attempts_per_unit"}),
+            frozenset({"max_workers", "max_attempts_per_unit"}),
         )
         budget = _require_mapping(data["budget"], "budget")
         _require_exact_keys(
@@ -247,7 +304,9 @@ class EvaluationRequest:
                 execution_options.get("max_workers", 1), "max_workers", 1
             ),
             max_attempts_per_unit=_require_int_at_least(
-                execution_options["max_attempts_per_unit"], "max_attempts_per_unit", 1
+                execution_options.get("max_attempts_per_unit", DEFAULT_MAX_ATTEMPTS_PER_UNIT),
+                "max_attempts_per_unit",
+                1,
             ),
             budget=EvaluationBudget(
                 max_provider_requests=_require_int_at_least(
@@ -313,7 +372,7 @@ class WorkUnit:
     def __post_init__(self) -> None:
         _require_identifier(self.unit_id, "unit_id")
         _require_int_at_least(self.ordinal, "ordinal", 0)
-        object.__setattr__(self, "payload", _freeze_safe_mapping(self.payload, "payload"))
+        object.__setattr__(self, "payload", _freeze_work_metadata(self.payload))
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,10 +421,16 @@ class ArtifactBundle:
         object.__setattr__(
             self, "public_result", _freeze_safe_mapping(self.public_result, "public_result")
         )
+        if isinstance(self.private_artifact_ids, str) or not isinstance(
+            self.private_artifact_ids, Sequence
+        ):
+            raise TypeError("private_artifact_ids must be a sequence of non-empty strings")
+        private_artifact_ids = tuple(self.private_artifact_ids)
         if not all(
-            isinstance(identifier, str) and identifier for identifier in self.private_artifact_ids
+            isinstance(identifier, str) and identifier for identifier in private_artifact_ids
         ):
             raise ValueError("private_artifact_ids must contain non-empty strings")
+        object.__setattr__(self, "private_artifact_ids", private_artifact_ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,8 +459,12 @@ class CleanupOutcome:
 
     def __post_init__(self) -> None:
         _require_int_at_least(self.removed_resources, "removed_resources", 0)
-        if not all(isinstance(warning, EvaluationWarning) for warning in self.warnings):
+        if isinstance(self.warnings, str) or not isinstance(self.warnings, Sequence):
+            raise TypeError("warnings must be a sequence of EvaluationWarning instances")
+        warnings = tuple(self.warnings)
+        if not all(isinstance(warning, EvaluationWarning) for warning in warnings):
             raise TypeError("warnings must contain EvaluationWarning instances")
+        object.__setattr__(self, "warnings", warnings)
 
 
 @dataclass(frozen=True, slots=True)

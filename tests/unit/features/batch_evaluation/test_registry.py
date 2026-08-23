@@ -70,15 +70,20 @@ def test_registry_registers_and_requires_a_static_plugin() -> None:
     assert_type(registry.require("memory-eval"), EvaluationPlugin)
 
 
-def test_registry_rejects_duplicate_and_unknown_types_without_calling_plugins() -> None:
+def test_registry_rejects_duplicate_and_unknown_types_without_echoing_input() -> None:
     registry = PluginRegistry()
     plugin = FakePlugin()
     registry.register(plugin)
 
-    with pytest.raises(ValueError, match="duplicate evaluation type: memory-eval"):
+    with pytest.raises(ValueError, match="duplicate evaluation type") as duplicate_error:
         registry.register(plugin)
-    with pytest.raises(ValueError, match="unknown evaluation type: unknown-eval"):
-        registry.require("unknown-eval")
+    assert plugin.evaluation_type not in str(duplicate_error.value)
+
+    unknown_type = "unknown-apiKey-private-value"
+    with pytest.raises(ValueError, match="unknown evaluation type") as unknown_error:
+        registry.require(unknown_type)
+    assert unknown_type not in str(unknown_error.value)
+    assert unknown_error.value.__cause__ is None
 
 
 def test_registry_lists_only_safe_plugin_type_metadata_in_stable_order() -> None:
