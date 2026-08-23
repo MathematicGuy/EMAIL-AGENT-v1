@@ -5,11 +5,15 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
 from cowork_agent.integrations.key_rotation import APIKeyRotator
+
+if TYPE_CHECKING:
+    from cowork_agent.features.batch_evaluation.bootstrap import EvaluationRuntimeConfig
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 MICROSOFT_MAIL_READ_SCOPE = "https://graph.microsoft.com/Mail.Read"
@@ -705,6 +709,63 @@ class EmailRagQualitySettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EvaluationSettings:
+    """Internal-only evaluation control-plane API configuration.
+
+    The API is disabled unless explicitly enabled, and enabling it without a
+    strong bearer token is a startup configuration error. The token is kept
+    out of every representation and log line.
+    """
+
+    enabled: bool
+    api_token: str = field(repr=False, default="")
+    job_db_path: str = ".data/evaluation-jobs.db"
+    artifact_root: str = ".data/evaluation-jobs"
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "EvaluationSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        enabled = _evaluation_flag(environ, "EVALUATION_API_ENABLED", default=False)
+        api_token = environ.get("EVALUATION_API_TOKEN", "").strip()
+        if enabled:
+            if not api_token:
+                raise ValueError(
+                    "EVALUATION_API_TOKEN must be configured when the evaluation API is enabled"
+                )
+            if len(api_token) < 32:
+                raise ValueError("EVALUATION_API_TOKEN must be at least 32 characters long")
+        return cls(
+            enabled=enabled,
+            api_token=api_token,
+            job_db_path=_non_empty_value(
+                environ, "EVALUATION_JOB_DB_PATH", ".data/evaluation-jobs.db"
+            ),
+            artifact_root=_non_empty_value(
+                environ, "EVALUATION_ARTIFACT_ROOT", ".data/evaluation-jobs"
+            ),
+        )
+
+    def to_runtime_config(self) -> "EvaluationRuntimeConfig":
+        """Resolve the configured storage locations for one local runtime."""
+
+        from cowork_agent.features.batch_evaluation.bootstrap import (
+            EvaluationRuntimeConfig,
+        )
+
+        return EvaluationRuntimeConfig(
+            job_db_path=Path(self.job_db_path),
+            artifact_root=Path(self.artifact_root),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MimoSettings:
@@ -901,6 +962,17 @@ def _boolean(environ: Mapping[str, str], name: str, default: bool) -> bool:
     if value not in {"true", "false"}:
         raise ValueError(f"{name} must be true or false")
     return value == "true"
+
+
+def _evaluation_flag(environ: Mapping[str, str], name: str, *, default: bool) -> bool:
+    value = environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    if value in {"1", "true"}:
+        return True
+    if value in {"0", "false"}:
+        return False
+    raise ValueError(f"{name} must be one of 0, 1, true, or false")
 
 
 def _non_empty_value(environ: Mapping[str, str], name: str, default: str) -> str:

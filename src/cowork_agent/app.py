@@ -31,6 +31,7 @@ import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  
 from cowork_agent.config import (
     ChatMemorySettings,
     EmailRagQualitySettings,
+    EvaluationSettings,
     GmailSettings,
     OutlookSettings,
     SessionSettings,
@@ -70,6 +71,7 @@ from cowork_agent.features.ai_chat.ports import (
 from cowork_agent.features.ai_chat.session_buffer import (
     InMemoryChatSessionBuffer,
 )
+from cowork_agent.features.batch_evaluation.bootstrap import build_evaluation_runtime
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -143,6 +145,7 @@ from cowork_agent.runtime import (
 )
 
 from .api.chat import create_chat_router
+from .api.evaluation_jobs import create_evaluation_router
 from .api.handlers import _jsonable
 from .api.projects import create_project_router
 
@@ -692,9 +695,27 @@ def create_app() -> FastAPI:
                 app.state.knowledge_documents = ()
                 app.state.llm_configuration_error = str(exc)
                 app.state.llm_provider_label = provider_label
+            evaluation_settings = getattr(app.state, "evaluation_settings", None)
+            if evaluation_settings is not None:
+                # Internal evaluation control plane: durable storage first,
+                # then restart recovery, then request handling. The bearer
+                # token stays server-side and never appears in logs or
+                # responses.
+                evaluation_runtime = build_evaluation_runtime(
+                    evaluation_settings.to_runtime_config(), os.environ
+                )
+                await evaluation_runtime.initialize()
+                await evaluation_runtime.recover()
+                app.state.evaluation_runtime = evaluation_runtime
+                app.state.evaluation_service = evaluation_runtime.service
+                app.state.evaluation_supervisor = evaluation_runtime.supervisor
+                app.state.evaluation_api_token = evaluation_settings.api_token
         except ValueError as exc:
             raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
+        evaluation_runtime_shutdown = getattr(app.state, "evaluation_runtime", None)
+        if evaluation_runtime_shutdown is not None:
+            await evaluation_runtime_shutdown.close()
         # The project index holds no network handle of its own: it reads local
         # .tvim files and borrows private_storage, which is closed below.
         pg_pool = getattr(app.state, "pg_pool", None)
@@ -707,6 +728,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
     app.include_router(create_project_router())
+    # The evaluation API is internal-only and disabled by default; its routes
+    # are mounted exclusively when explicitly enabled with a bearer token.
+    evaluation_settings = EvaluationSettings.from_env()
+    if evaluation_settings.enabled:
+        app.include_router(create_evaluation_router())
+        app.state.evaluation_settings = evaluation_settings
 
     @app.get("/health")
     @app.get("/api/v1/health")
