@@ -85,6 +85,26 @@ def test_artifact_references_are_readable_without_exposing_paths(tmp_path: Path)
     assert store.read_private_details(private_ref) == {"reply": "private"}
 
 
+@pytest.mark.parametrize("constant", ("NaN", "Infinity", "-Infinity"))
+def test_artifact_readers_reject_handcrafted_non_finite_json(
+    tmp_path: Path, constant: str
+) -> None:
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+    manifest_ref = store.write_manifest("job-1", {"summary": {"succeeded": 1}})
+    private_ref = store.write_private_details("job-1", "detail-1", {"reply": "private"})
+    (tmp_path / manifest_ref).write_text(
+        '{"summary":{"score":' + constant + "}}", encoding="utf-8"
+    )
+    (tmp_path / private_ref).write_text(
+        '{"trace":' + constant + "}", encoding="utf-8"
+    )
+
+    with pytest.raises(UnsafeArtifact, match="cannot be read"):
+        store.read_manifest(manifest_ref)
+    with pytest.raises(UnsafeArtifact, match="cannot be read"):
+        store.read_private_details(private_ref)
+
+
 def test_artifact_store_rejects_symlink_escapes(tmp_path: Path) -> None:
     if os.name != "nt":
         pytest.skip("Windows junction exercise")

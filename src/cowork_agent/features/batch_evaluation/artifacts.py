@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import stat
@@ -119,8 +120,11 @@ class FilesystemEvaluationArtifactStore:
         if candidate.suffix != ".json":
             raise UnsafeArtifact("artifact reference must name a JSON file")
         try:
-            return json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
+            return json.loads(
+                candidate.read_text(encoding="utf-8"),
+                parse_constant=_reject_non_finite_json_constant,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as error:
             raise UnsafeArtifact("artifact reference cannot be read") from error
 
 
@@ -137,6 +141,8 @@ def _validate_public_metadata(value: object) -> None:
         return
     if isinstance(value, Path) or (isinstance(value, str) and Path(value).is_absolute()):
         raise UnsafeArtifact("artifact metadata cannot contain absolute paths")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise UnsafeArtifact("artifact metadata cannot contain non-finite numbers")
     if value is None or isinstance(value, str | int | float | bool):
         return
     raise UnsafeArtifact("artifact metadata must be JSON-compatible")
@@ -182,6 +188,10 @@ def _json_text(value: object) -> str:
         )
     except (TypeError, ValueError) as error:
         raise UnsafeArtifact("artifact values must be JSON-compatible") from error
+
+
+def _reject_non_finite_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value} is not allowed")
 
 
 def _write_atomically(path: Path, content: str) -> None:

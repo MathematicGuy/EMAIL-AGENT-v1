@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -62,6 +63,23 @@ def test_canonical_hash_ignores_json_key_order_but_not_values() -> None:
 
     assert canonical_request_hash(first) == canonical_request_hash(reordered)
     assert canonical_request_hash(first) != canonical_request_hash(changed)
+
+
+@pytest.mark.parametrize("value", (math.nan, math.inf, -math.inf))
+def test_contract_hash_input_rejects_non_finite_numbers(value: float) -> None:
+    payload = valid_request()
+    payload["parameters"] = {"threshold": value}
+
+    with pytest.raises(ValueError, match="finite"):
+        EvaluationRequest.from_dict(payload)
+
+
+@pytest.mark.parametrize("value", (math.nan, math.inf, -math.inf))
+def test_public_artifact_contract_rejects_non_finite_numbers(value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        ArtifactBundle(
+            public_result={"summary": {"score": value}}, private_artifact_ids=()
+        )
 
 
 @pytest.mark.parametrize(
@@ -300,6 +318,34 @@ def test_artifact_and_cleanup_records_coerce_mutable_lists_to_tuples() -> None:
 def test_warnings_only_accept_safe_structured_details(details: dict[str, str]) -> None:
     with pytest.raises((TypeError, ValueError)):
         EvaluationWarning(code="PROVIDER_RETRY", details=details)
+
+
+def test_warning_message_is_code_owned_and_rejects_tampering() -> None:
+    template = "Worker count was reduced because fewer credentials are healthy."
+    warning = EvaluationWarning(
+        code="WORKER_COUNT_REDUCED",
+        message=template,
+        details={"requested_workers": 4, "effective_workers": 3},
+    )
+
+    assert warning.message == template
+    assert EvaluationWarning(
+        code="WORKER_COUNT_REDUCED",
+        details={"requested_workers": 4, "effective_workers": 3},
+    ).message == template
+    with pytest.raises(ValueError, match="message") as unsafe:
+        EvaluationWarning(
+            code="WORKER_COUNT_REDUCED",
+            message="raw provider response: api_key=private",
+            details={"requested_workers": 4},
+        )
+    assert "api_key" not in str(unsafe.value)
+    with pytest.raises(ValueError, match="code"):
+        EvaluationWarning(
+            code="UNKNOWN_WARNING",
+            message="Unknown warning text",
+            details={"requested_workers": 4},
+        )
 
 
 def test_contract_enums_expose_documented_values() -> None:

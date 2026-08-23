@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -102,6 +103,9 @@ _WARNING_PRIVATE_KEY_PARTS = _SECRET_KEY_PARTS | frozenset(
         "traceback",
     }
 )
+_WARNING_MESSAGES = MappingProxyType(
+    {"WORKER_COUNT_REDUCED": "Worker count was reduced because fewer credentials are healthy."}
+)
 _WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_id$")
 _WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_ids$")
 _WORK_UNIT_INTEGER_FIELDS = frozenset({"ordinal", "shard_index", "shard_count"})
@@ -173,6 +177,8 @@ def _freeze_value(value: object) -> object:
         return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
     if isinstance(value, tuple | list):
         return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("safe record floats must be finite")
     if value is None or isinstance(value, str | int | float | bool | Enum):
         return value
     raise TypeError("safe record values must be JSON-compatible")
@@ -358,7 +364,9 @@ def canonical_request_hash(request: EvaluationRequest) -> str:
         },
         "parameters": _json_value(request.parameters),
     }
-    canonical_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    canonical_json = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    )
     return sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
@@ -457,9 +465,16 @@ class ArtifactBundle:
 class EvaluationWarning:
     code: str
     details: Mapping[str, int | str]
+    message: str = ""
 
     def __post_init__(self) -> None:
         _require_identifier(self.code, "code")
+        expected_message = _WARNING_MESSAGES.get(self.code)
+        if expected_message is None:
+            raise ValueError("warning code is not supported")
+        if self.message and self.message != expected_message:
+            raise ValueError("warning message must match its code-owned template")
+        object.__setattr__(self, "message", expected_message)
         object.__setattr__(self, "details", _freeze_warning_details(self.details))
 
 

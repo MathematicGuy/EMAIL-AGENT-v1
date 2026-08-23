@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
@@ -142,6 +143,7 @@ _RECOVERABLE_JOB_STATES = (
     JobState.COLLECTING,
     JobState.CANCELLATION_REQUESTED,
 )
+_EXECUTABLE_JOB_STATES = frozenset({JobState.QUEUED, JobState.RUNNING})
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _PRIVATE_METADATA_KEY_PARTS = frozenset(
     {
@@ -421,6 +423,11 @@ class SQLiteEvaluationJobRepository:
         _require_identifier(worker_id, "worker_id")
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
+            job = database.execute(
+                "SELECT state FROM evaluation_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if job is None or JobState(str(job[0])) not in _EXECUTABLE_JOB_STATES:
+                return None
             row = database.execute(
                 """
                 SELECT unit_id, ordinal, safe_payload_json
@@ -668,6 +675,9 @@ class SQLiteEvaluationJobRepository:
 
     async def write_step(
         self,
+        job_id: str,
+        unit_id: str,
+        worker_id: str,
         attempt_id: str,
         *,
         step_id: str,
@@ -676,20 +686,56 @@ class SQLiteEvaluationJobRepository:
         safe_metadata: Mapping[str, object],
     ) -> EvaluationStep:
         return await asyncio.to_thread(
-            self._write_step_sync, attempt_id, step_id, ordinal, state, safe_metadata
+            self._write_step_sync,
+            job_id,
+            unit_id,
+            worker_id,
+            attempt_id,
+            step_id,
+            ordinal,
+            state,
+            safe_metadata,
         )
 
     def _write_step_sync(
         self,
+        job_id: str,
+        unit_id: str,
+        worker_id: str,
         attempt_id: str,
         step_id: str,
         ordinal: int,
         state: StepState,
         safe_metadata: Mapping[str, object],
     ) -> EvaluationStep:
+        _require_identifier(job_id, "job_id")
+        _require_identifier(unit_id, "unit_id")
+        _require_identifier(worker_id, "worker_id")
+        _require_identifier(attempt_id, "attempt_id")
         metadata_json = _safe_metadata_json(safe_metadata)
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
+            attempt = database.execute(
+                """
+                SELECT attempts.job_id, attempts.unit_id, attempts.worker_id, attempts.state,
+                       units.state, units.claimed_by
+                FROM evaluation_attempts AS attempts
+                JOIN evaluation_units AS units
+                    ON units.job_id = attempts.job_id AND units.unit_id = attempts.unit_id
+                WHERE attempts.attempt_id = ?
+                """,
+                (attempt_id,),
+            ).fetchone()
+            if (
+                attempt is None
+                or str(attempt[0]) != job_id
+                or str(attempt[1]) != unit_id
+                or str(attempt[2]) != worker_id
+                or str(attempt[3]) != AttemptState.RUNNING.value
+                or str(attempt[4]) != UnitState.RUNNING.value
+                or str(attempt[5]) != worker_id
+            ):
+                raise InvalidStateTransition("step requires its worker's live running attempt")
             row = database.execute(
                 "SELECT ordinal, state FROM evaluation_steps WHERE attempt_id = ? AND step_id = ?",
                 (attempt_id, step_id),
@@ -818,7 +864,7 @@ def _request_json(request: EvaluationRequest) -> str:
 def _warnings_json(warnings: Sequence[EvaluationWarning]) -> str:
     return _safe_json(
         [
-            {"code": warning.code, "details": warning.details}
+            {"code": warning.code, "message": warning.message, "details": warning.details}
             for warning in warnings
         ]
     )
@@ -853,6 +899,8 @@ def _validate_safe_metadata(value: object) -> None:
         return
     if isinstance(value, Path) or (isinstance(value, str) and Path(value).is_absolute()):
         raise ValueError("step metadata cannot contain absolute paths")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("step metadata numbers must be finite")
     if value is None or isinstance(value, str | int | float | bool):
         return
     raise ValueError("step metadata must be JSON-compatible")
@@ -876,7 +924,7 @@ def _json_default(value: object) -> object:
 
 
 def _mapping_from_json(value: object) -> Mapping[str, object]:
-    parsed = value if isinstance(value, Mapping) else json.loads(str(value))
+    parsed = value if isinstance(value, Mapping) else _json_loads(value)
     if not isinstance(parsed, dict) or not all(isinstance(key, str) for key in parsed):
         raise ValueError("stored work metadata is invalid")
     return parsed
@@ -903,22 +951,36 @@ def _request_from_json(value: object) -> EvaluationRequest:
 
 
 def _warnings_from_json(value: object) -> tuple[EvaluationWarning, ...]:
-    parsed = json.loads(str(value))
+    parsed = _json_loads(value)
     if not isinstance(parsed, list):
         raise ValueError("stored warnings are invalid")
     warnings: list[EvaluationWarning] = []
     for item in parsed:
         if (
             not isinstance(item, dict)
-            or not {"code", "details"} <= set(item)
-            or set(item) - {"code", "details", "message"}
+            or set(item) != {"code", "message", "details"}
         ):
             raise ValueError("stored warning is invalid")
+        code = item["code"]
+        message = item["message"]
         details = item["details"]
-        if not isinstance(details, dict) or not all(isinstance(key, str) for key in details):
+        if (
+            not isinstance(code, str)
+            or not isinstance(message, str)
+            or not isinstance(details, dict)
+            or not all(isinstance(key, str) for key in details)
+        ):
             raise ValueError("stored warning details are invalid")
-        warnings.append(EvaluationWarning(code=str(item["code"]), details=details))
+        warnings.append(EvaluationWarning(code=code, message=message, details=details))
     return tuple(warnings)
+
+
+def _json_loads(value: object) -> object:
+    return json.loads(str(value), parse_constant=_reject_non_finite_json_constant)
+
+
+def _reject_non_finite_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value} is not allowed")
 
 
 def _job_from_row(row: Sequence[object]) -> EvaluationJob:

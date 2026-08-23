@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,26 @@ def request() -> EvaluationRequest:
         budget=EvaluationBudget(max_provider_requests=10, max_total_tokens=1_000),
         parameters={"version_id": "v1"},
     )
+
+
+async def queue_job(repository: SQLiteEvaluationJobRepository, job_id: str) -> None:
+    validating = await repository.transition_job(job_id, JobState.VALIDATING)
+    await repository.transition_job(validating.job_id, JobState.QUEUED)
+
+
+class PausedClaimRepository(SQLiteEvaluationJobRepository):
+    """Let the test deterministically order a submitted claim after cancellation."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.claim_started = threading.Event()
+        self.release_claim = threading.Event()
+
+    def _claim_ready_unit_sync(self, job_id: str, worker_id: str) -> WorkUnit | None:
+        self.claim_started.set()
+        if not self.release_claim.wait(timeout=5):
+            raise TimeoutError("test did not release the claim")
+        return super()._claim_ready_unit_sync(job_id, worker_id)
 
 
 def test_idempotency_is_atomic_and_hash_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -89,6 +110,7 @@ def test_unit_claims_are_atomic_and_completed_units_are_not_replayed(tmp_path: P
                 WorkUnit(unit_id="unit-2", ordinal=1, payload={"case_id": "case-2"}),
             ),
         )
+        await queue_job(repository, job.job_id)
 
         claims = await asyncio.gather(
             repository.claim_ready_unit(job.job_id, "worker-1"),
@@ -132,6 +154,7 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
             job.job_id,
             (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
         )
+        await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
 
         attempt = await repository.start_attempt(
@@ -139,6 +162,9 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
         )
         assert attempt.attempt_number == 1
         step = await repository.write_step(
+            job.job_id,
+            "unit-1",
+            "worker-1",
             attempt.attempt_id,
             step_id="request-1",
             ordinal=0,
@@ -147,6 +173,9 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
         )
         assert step.state is StepState.RUNNING
         completed = await repository.write_step(
+            job.job_id,
+            "unit-1",
+            "worker-1",
             attempt.attempt_id,
             step_id="request-1",
             ordinal=0,
@@ -155,6 +184,9 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
         )
         assert completed.state is StepState.SUCCEEDED
         replayed = await repository.write_step(
+            job.job_id,
+            "unit-1",
+            "worker-1",
             attempt.attempt_id,
             step_id="request-1",
             ordinal=0,
@@ -164,6 +196,9 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
         assert replayed.state is StepState.SUCCEEDED
         with pytest.raises(InvalidStateTransition):
             await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-1",
                 attempt.attempt_id,
                 step_id="request-1",
                 ordinal=0,
@@ -172,6 +207,9 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
             )
         with pytest.raises(ValueError):
             await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-1",
                 attempt.attempt_id,
                 step_id="private-step",
                 ordinal=1,
@@ -204,6 +242,7 @@ def test_recovery_only_requeues_claims_without_provider_attempts(tmp_path: Path)
                 WorkUnit(unit_id="unit-terminal", ordinal=2, payload={"case_id": "case-3"}),
             ),
         )
+        await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-safe") is not None
         assert await repository.claim_ready_unit(job.job_id, "worker-running") is not None
         assert await repository.claim_ready_unit(job.job_id, "worker-terminal") is not None
@@ -254,6 +293,7 @@ def test_claim_and_attempt_ownership_are_persisted_and_enforced(tmp_path: Path) 
             job.job_id,
             (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
         )
+        await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
         claimed = await repository.get_unit(job.job_id, "unit-1")
         assert claimed is not None
@@ -287,7 +327,9 @@ def test_job_reads_preserve_safe_request_and_warnings_by_default(tmp_path: Path)
         submitted = request()
         job, _ = await repository.create_or_get(submitted, "read-key", "hash-a")
         warning = EvaluationWarning(
-            code="WORKER_COUNT_REDUCED", details={"requested_workers": 2, "available": 1}
+            code="WORKER_COUNT_REDUCED",
+            message="Worker count was reduced because fewer credentials are healthy.",
+            details={"requested_workers": 2, "available": 1},
         )
         validating = await repository.transition_job(
             job.job_id, JobState.VALIDATING, warnings=(warning,)
@@ -301,28 +343,25 @@ def test_job_reads_preserve_safe_request_and_warnings_by_default(tmp_path: Path)
     asyncio.run(scenario())
 
 
-def test_legacy_warning_messages_are_not_exposed_when_reading_jobs(tmp_path: Path) -> None:
+def test_job_reads_reject_tampered_or_unknown_warning_messages(tmp_path: Path) -> None:
     async def scenario() -> None:
         database_path = tmp_path / "evaluation-jobs.db"
         repository = SQLiteEvaluationJobRepository(database_path)
         await repository.initialize()
         job, _ = await repository.create_or_get(request(), "legacy-warning-key", "hash-a")
-        with sqlite3.connect(database_path) as database:
-            database.execute(
-                "UPDATE evaluation_jobs SET warnings_json = ? WHERE job_id = ?",
-                (
-                    '[{"code":"WORKER_COUNT_REDUCED","message":"raw provider error",'
-                    '"details":{"requested_workers":2}}]',
-                    job.job_id,
-                ),
-            )
-
-        stored = await repository.get_job(job.job_id)
-
-        assert stored is not None
-        assert stored.warnings == (
-            EvaluationWarning(code="WORKER_COUNT_REDUCED", details={"requested_workers": 2}),
-        )
+        for payload in (
+            '[{"code":"WORKER_COUNT_REDUCED","message":"raw provider error",'
+            '"details":{"requested_workers":2}}]',
+            '[{"code":"UNKNOWN_WARNING","message":"Unknown warning text",'
+            '"details":{"requested_workers":2}}]',
+        ):
+            with sqlite3.connect(database_path) as database:
+                database.execute(
+                    "UPDATE evaluation_jobs SET warnings_json = ? WHERE job_id = ?",
+                    (payload, job.job_id),
+                )
+            with pytest.raises(ValueError):
+                await repository.get_job(job.job_id)
 
     asyncio.run(scenario())
 
@@ -349,6 +388,7 @@ def test_step_metadata_rejects_non_finite_json_values(tmp_path: Path) -> None:
             job.job_id,
             (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
         )
+        await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
         attempt = await repository.start_attempt(
             job.job_id, "unit-1", "worker-1", "credential-1"
@@ -356,12 +396,179 @@ def test_step_metadata_rejects_non_finite_json_values(tmp_path: Path) -> None:
 
         with pytest.raises(ValueError):
             await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-1",
                 attempt.attempt_id,
                 step_id="request-1",
                 ordinal=0,
                 state=StepState.RUNNING,
                 safe_metadata={"score": float("nan")},
             )
+
+    asyncio.run(scenario())
+
+
+def test_claim_requires_an_executable_job_and_stops_after_cancellation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "claim-state-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-2", ordinal=1, payload={"case_id": "case-2"}),
+            ),
+        )
+
+        assert await repository.claim_ready_unit(job.job_id, "worker-1") is None
+        await queue_job(repository, job.job_id)
+        assert (await repository.claim_ready_unit(job.job_id, "worker-1")).unit_id == "unit-1"  # type: ignore[union-attr]
+
+        cancelled = await repository.request_cancellation(job.job_id)
+        assert cancelled.state is JobState.CANCELLATION_REQUESTED
+        assert await repository.claim_ready_unit(job.job_id, "worker-2") is None
+        remaining = await repository.get_unit(job.job_id, "unit-2")
+        assert remaining is not None
+        assert remaining.state is UnitState.READY
+
+    asyncio.run(scenario())
+
+
+def test_cancellation_wins_a_deterministically_ordered_claim_race(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = PausedClaimRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "claim-race-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        await queue_job(repository, job.job_id)
+
+        claim = asyncio.create_task(repository.claim_ready_unit(job.job_id, "worker-1"))
+        assert await asyncio.to_thread(repository.claim_started.wait, 5)
+        cancellation = await repository.request_cancellation(job.job_id)
+        assert cancellation.state is JobState.CANCELLATION_REQUESTED
+        repository.release_claim.set()
+
+        assert await claim is None
+        unit = await repository.get_unit(job.job_id, "unit-1")
+        assert unit is not None
+        assert unit.state is UnitState.READY
+
+    asyncio.run(scenario())
+
+
+def test_step_writes_require_the_live_attempt_owner_and_unit(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "step-owner-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-2", ordinal=1, payload={"case_id": "case-2"}),
+            ),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
+        assert await repository.claim_ready_unit(job.job_id, "worker-2") is not None
+
+        with pytest.raises(InvalidStateTransition):
+            await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-1",
+                "attempt-missing",
+                step_id="request-1",
+                ordinal=0,
+                state=StepState.RUNNING,
+                safe_metadata={"request_id": "request-1"},
+            )
+        first = await repository.start_attempt(
+            job.job_id, "unit-1", "worker-1", "credential-1"
+        )
+        with pytest.raises(InvalidStateTransition):
+            await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-2",
+                first.attempt_id,
+                step_id="request-1",
+                ordinal=0,
+                state=StepState.RUNNING,
+                safe_metadata={"request_id": "request-1"},
+            )
+        with pytest.raises(InvalidStateTransition):
+            await repository.write_step(
+                job.job_id,
+                "unit-2",
+                "worker-1",
+                first.attempt_id,
+                step_id="request-1",
+                ordinal=0,
+                state=StepState.RUNNING,
+                safe_metadata={"request_id": "request-1"},
+            )
+        await repository.finish_attempt(first.attempt_id, AttemptState.FAILED, worker_id="worker-1")
+        with pytest.raises(InvalidStateTransition):
+            await repository.write_step(
+                job.job_id,
+                "unit-1",
+                "worker-1",
+                first.attempt_id,
+                step_id="request-1",
+                ordinal=0,
+                state=StepState.RUNNING,
+                safe_metadata={"request_id": "request-1"},
+            )
+
+        second = await repository.start_attempt(
+            job.job_id, "unit-2", "worker-2", "credential-1"
+        )
+        await repository.recover_orphaned_attempts(job.job_id)
+        with pytest.raises(InvalidStateTransition):
+            await repository.write_step(
+                job.job_id,
+                "unit-2",
+                "worker-2",
+                second.attempt_id,
+                step_id="request-2",
+                ordinal=0,
+                state=StepState.RUNNING,
+                safe_metadata={"request_id": "request-2"},
+            )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("constant", ("NaN", "Infinity", "-Infinity"))
+def test_repository_rejects_handcrafted_non_finite_persisted_json(
+    tmp_path: Path, constant: str
+) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "crafted-json-key", "hash-a")
+        request_json = (
+            '{"evaluation_type":"memory_eval","provider":"openai","target_model":"model_1",'
+            '"dataset_ref":"probe_set_1","credential_pool":"eval_pool",'
+            '"execution_mode":"workflow_shards","max_workers":2,'
+            '"max_attempts_per_unit":2,"budget":{"max_provider_requests":10,'
+            '"max_total_tokens":1000},"parameters":{"threshold":' + constant + "}}"
+        )
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_jobs SET request_json = ? WHERE job_id = ?",
+                (request_json, job.job_id),
+            )
+
+        with pytest.raises(ValueError):
+            await repository.get_job(job.job_id)
 
     asyncio.run(scenario())
 
