@@ -297,6 +297,24 @@ def test_st_restraint_02_wrap_invention_is_invented() -> None:
     assert score(reply, probe).outcome is Outcome.INVENTED
 
 
+def test_an_inverted_absence_in_the_supplied_context_is_a_refusal() -> None:
+    """mimo v5: 'Thông tin về X không có trong dữ liệu được cung cấp' — noun first."""
+
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("người nhận hồ sơ", "tên người nhận"),
+        invented_any=("Lê Thu Vân", "Thu Vân"),
+    )
+    reply = (
+        "Thông tin về người nhận hồ sơ ở văn phòng Đà Nẵng không có trong dữ liệu được cung cấp."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is True
+
+
 def test_lt_restraint_01_control_arm_du_hedge_is_a_pass() -> None:
     probe = _probe(
         expect_any=(),

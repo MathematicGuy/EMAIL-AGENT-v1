@@ -76,6 +76,11 @@ _HAVING_NOTHING: tuple[str, ...] = (
     # Quantity hedge between lack verb and noun (do not free-particle "đủ").
     "không có đủ",
     "chưa có đủ",
+    # Inverted absence: "Thông tin về X không có trong dữ liệu được cung cấp"
+    # (mimo v5 refuse-means-stop). Noun first, location after; still adjacent
+    # lack+thing so a hedge-then-invent reply does not match.
+    "không có trong",
+    "không có trong các",
 )
 _WHAT_IS_MISSING: tuple[str, ...] = (
     "thông tin",
@@ -85,6 +90,7 @@ _WHAT_IS_MISSING: tuple[str, ...] = (
     "chi tiết",
     "ghi nhận",
     "nội dung",
+    "ngữ cảnh",
 )
 #: The two must be ADJACENT to count. A looser rule — the words appearing
 #: anywhere in the same reply — would pass "tôi không chắc, nhưng chính sách
