@@ -432,7 +432,7 @@ class EvaluationJobRunner:
                     return
                 raise
         ledger = BudgetLedger(job.request.budget, self._reply_factory.max_output_tokens)
-        if job.request.execution_mode.value == "request_batch":
+        if job.request.execution_mode is ExecutionMode.REQUEST_BATCH:
             cleanup_warnings = await self._run_pull_lanes(job, plugin, plan, ledger)
         else:
             cleanup_warnings = await self._run_fixed_shards(
@@ -1077,13 +1077,8 @@ class EvaluationJobRunner:
 
     def _retry_delay(self, failed_attempt_number: int, retry_after_seconds: int) -> float:
         exponential = self._retry_backoff_base_seconds * (2 ** (failed_attempt_number - 1))
-        local_delay = (
-            self._retry_backoff_max_seconds
-            if exponential > self._retry_backoff_max_seconds
-            else exponential
-        )
-        provider_delay = float(retry_after_seconds)
-        return provider_delay if provider_delay > local_delay else local_delay
+        local_delay = min(exponential, self._retry_backoff_max_seconds)
+        return max(float(retry_after_seconds), float(local_delay))
 
     async def _cleanup(
         self,
