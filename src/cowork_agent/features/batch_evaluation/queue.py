@@ -38,6 +38,10 @@ class UnitStore(Protocol):
 
     async def claim_ready_unit(self, job_id: str, worker_id: str) -> WorkUnit | None: ...
 
+    async def claim_ready_unit_by_id(
+        self, job_id: str, unit_id: str, worker_id: str
+    ) -> WorkUnit | None: ...
+
     async def complete_unit(self, job_id: str, outcome: WorkUnitOutcome) -> None: ...
 
 

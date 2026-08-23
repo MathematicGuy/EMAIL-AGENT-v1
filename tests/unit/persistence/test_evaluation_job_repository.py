@@ -551,6 +551,40 @@ def test_claim_requires_an_executable_job_and_stops_after_cancellation(tmp_path:
     asyncio.run(scenario())
 
 
+def test_specific_unit_claim_is_atomic_and_respects_ready_and_cancellation_state(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "specific-claim-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-2", ordinal=1, payload={"case_id": "case-2"}),
+                WorkUnit(unit_id="unit-3", ordinal=2, payload={"case_id": "case-3"}),
+            ),
+        )
+
+        assert await repository.claim_ready_unit_by_id(job.job_id, "unit-1", "worker-1") is None
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit_by_id(job.job_id, "missing", "worker-1") is None
+        claimed = await repository.claim_ready_unit_by_id(job.job_id, "unit-2", "worker-1")
+        assert claimed == WorkUnit(unit_id="unit-2", ordinal=1, payload={"case_id": "case-2"})
+        assert await repository.claim_ready_unit_by_id(job.job_id, "unit-2", "worker-2") is None
+
+        competing = await asyncio.gather(
+            repository.claim_ready_unit_by_id(job.job_id, "unit-1", "worker-3"),
+            repository.claim_ready_unit_by_id(job.job_id, "unit-1", "worker-4"),
+        )
+        assert sum(item is not None for item in competing) == 1
+        await repository.request_cancellation(job.job_id)
+        assert await repository.claim_ready_unit_by_id(job.job_id, "unit-3", "worker-5") is None
+
+    asyncio.run(scenario())
+
+
 def test_cancellation_commit_prevents_claim_after_sqlite_writer_lock_ordering(
     tmp_path: Path,
 ) -> None:

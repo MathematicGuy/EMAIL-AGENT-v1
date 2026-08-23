@@ -460,6 +460,54 @@ class SQLiteEvaluationJobRepository:
             unit_id=str(row[0]), ordinal=int(row[1]), payload=_mapping_from_json(row[2])
         )
 
+    async def claim_ready_unit_by_id(
+        self, job_id: str, unit_id: str, worker_id: str
+    ) -> WorkUnit | None:
+        """Claim one preassigned ready unit without permitting shard work stealing."""
+
+        return await asyncio.to_thread(
+            self._claim_ready_unit_by_id_sync, job_id, unit_id, worker_id
+        )
+
+    def _claim_ready_unit_by_id_sync(
+        self, job_id: str, unit_id: str, worker_id: str
+    ) -> WorkUnit | None:
+        _require_identifier(unit_id, "unit_id")
+        _require_identifier(worker_id, "worker_id")
+        with self._connect() as database:
+            self._begin_immediate(database, "claim")
+            job = database.execute(
+                "SELECT state FROM evaluation_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if job is None or JobState(str(job[0])) not in _EXECUTABLE_JOB_STATES:
+                return None
+            row = database.execute(
+                """
+                SELECT ordinal, safe_payload_json
+                FROM evaluation_units
+                WHERE job_id = ? AND unit_id = ? AND state = ?
+                """,
+                (job_id, unit_id, UnitState.READY.value),
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = database.execute(
+                """
+                UPDATE evaluation_units SET state = ?, claimed_by = ?
+                WHERE job_id = ? AND unit_id = ? AND state = ?
+                """,
+                (
+                    UnitState.RUNNING.value,
+                    worker_id,
+                    job_id,
+                    unit_id,
+                    UnitState.READY.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return WorkUnit(unit_id=unit_id, ordinal=int(row[0]), payload=_mapping_from_json(row[1]))
+
     async def get_unit(self, job_id: str, unit_id: str) -> EvaluationUnit | None:
         return await asyncio.to_thread(self._get_unit_sync, job_id, unit_id)
 
