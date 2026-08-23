@@ -29,6 +29,7 @@ from cowork_agent.features.batch_evaluation.registry import PluginRegistry
 from cowork_agent.features.batch_evaluation.service import (
     EvaluationConflict,
     EvaluationJobService,
+    EvaluationJobSupervisor,
     EvaluationResultConflict,
     EvaluationValidationError,
 )
@@ -154,6 +155,25 @@ class StatusRepository:
         return self.job
 
 
+class RecordingSupervisor:
+    def __init__(self) -> None:
+        self.repository: SQLiteEvaluationJobRepository | StatusRepository | None = None
+        self.started: list[str] = []
+        self.cancelled: list[str] = []
+
+    async def start(self, job_id: str) -> None:
+        assert self.repository is not None
+        job = await self.repository.get_job(job_id)
+        assert job is not None and job.state is JobState.QUEUED
+        assert await self.repository.list_units(job_id)
+        self.started.append(job_id)
+
+    async def cancel(self, job_id: str) -> None:
+        assert self.repository is not None
+        self.cancelled.append(job_id)
+        await self.repository.request_cancellation(job_id)
+
+
 def request(*, max_workers: int = 1) -> EvaluationRequest:
     return EvaluationRequest(
         evaluation_type="fake-eval",
@@ -172,6 +192,7 @@ def request(*, max_workers: int = 1) -> EvaluationRequest:
 async def service_with(
     tmp_path: Path,
     plugin: FakePlugin,
+    supervisor: EvaluationJobSupervisor | None = None,
 ) -> tuple[EvaluationJobService, SQLiteEvaluationJobRepository]:
     path = tmp_path / "evaluation-jobs.db"
     repository = SQLiteEvaluationJobRepository(path)
@@ -186,6 +207,7 @@ async def service_with(
             {"MISTRAL_API_KEY": "secret-key"},
         ),
         artifact_store=FilesystemEvaluationArtifactStore(tmp_path / "artifacts"),
+        supervisor=supervisor,
     )
     return service, repository
 
@@ -209,6 +231,7 @@ def status_job(*, state: JobState = JobState.QUEUED) -> EvaluationJob:
 def status_service(
     tmp_path: Path,
     repository: StatusRepository,
+    supervisor: EvaluationJobSupervisor | None = None,
 ) -> EvaluationJobService:
     return EvaluationJobService(
         registry=PluginRegistry(),
@@ -217,6 +240,7 @@ def status_service(
             "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-key"}
         ),
         artifact_store=FilesystemEvaluationArtifactStore(tmp_path / "artifacts"),
+        supervisor=supervisor,
     )
 
 
@@ -320,6 +344,21 @@ async def test_submit_replays_idempotently_and_rejects_request_hash_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_submit_schedules_once_after_persisting_and_replay_does_not_reschedule(
+    tmp_path: Path,
+) -> None:
+    supervisor = RecordingSupervisor()
+    service, repository = await service_with(tmp_path, FakePlugin(), supervisor)
+    supervisor.repository = repository
+
+    first = await service.submit(request(), idempotency_key="scheduled")
+    replay = await service.submit(request(), idempotency_key="scheduled")
+
+    assert replay.job_id == first.job_id
+    assert supervisor.started == [first.job_id]
+
+
+@pytest.mark.asyncio
 async def test_submit_persists_default_worker_resolution_and_lists_types(
     tmp_path: Path,
 ) -> None:
@@ -357,6 +396,21 @@ async def test_result_conflicts_while_nonterminal_and_cancellation_is_idempotent
     assert first == replay
     assert first["state"] == "cancellation_requested"
     assert first["cancel_requested"] is True
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_routes_active_jobs_through_the_supervisor(
+    tmp_path: Path,
+) -> None:
+    repository = StatusRepository(status_job(), (), ())
+    supervisor = RecordingSupervisor()
+    supervisor.repository = repository
+    service = status_service(tmp_path, repository, supervisor)
+
+    status = await service.request_cancel("status-job")
+
+    assert supervisor.cancelled == ["status-job"]
+    assert status["state"] == "cancellation_requested"
 
 
 @pytest.mark.asyncio

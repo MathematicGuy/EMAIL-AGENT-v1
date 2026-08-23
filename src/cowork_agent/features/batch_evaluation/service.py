@@ -54,6 +54,14 @@ class EvaluationResultConflict(EvaluationConflict):
     """A result is not available while its evaluation job remains non-terminal."""
 
 
+class EvaluationJobSupervisor(Protocol):
+    """Schedule durable jobs after persistence and drive cancellation cleanup."""
+
+    async def start(self, job_id: str) -> None: ...
+
+    async def cancel(self, job_id: str) -> None: ...
+
+
 class _StatusRepository(Protocol):
     """The durable reads required to build safe job-status aggregates."""
 
@@ -72,11 +80,13 @@ class EvaluationJobService:
         repository: SQLiteEvaluationJobRepository,
         credential_pool: CredentialLeasingPool,
         artifact_store: FilesystemEvaluationArtifactStore,
+        supervisor: EvaluationJobSupervisor | None = None,
     ) -> None:
         self._registry = registry
         self._repository = repository
         self._credential_pool = credential_pool
         self._artifact_store = artifact_store
+        self._supervisor = supervisor
 
     async def submit(self, request: EvaluationRequest, *, idempotency_key: str) -> EvaluationJob:
         """Preflight a typed request before atomically creating its durable job."""
@@ -107,7 +117,15 @@ class EvaluationJobService:
             warnings=warnings,
         )
         await self._repository.add_units(validating.job_id, units)
-        return await self._repository.transition_job(validating.job_id, JobState.QUEUED)
+        queued = await self._repository.transition_job(validating.job_id, JobState.QUEUED)
+        if self._supervisor is not None:
+            try:
+                await self._supervisor.start(queued.job_id)
+            except BaseException as error:
+                if isinstance(error, KeyboardInterrupt | SystemExit | asyncio.CancelledError):
+                    raise
+                raise EvaluationConflict("evaluation job scheduling failed") from None
+        return queued
 
     async def get_status(self, job_id: str) -> Mapping[str, object]:
         """Return the bounded public job lifecycle metadata for one job."""
@@ -131,9 +149,17 @@ class EvaluationJobService:
         if existing.state in _TERMINAL_STATES:
             return await self._status_view(existing)
         try:
-            job = await self._repository.request_cancellation(job_id)
+            if self._supervisor is None:
+                job = await self._repository.request_cancellation(job_id)
+            else:
+                await self._supervisor.cancel(job_id)
+                job = await self._require_job(job_id)
         except InvalidStateTransition as error:
             raise EvaluationConflict("evaluation job can no longer be cancelled") from error
+        except BaseException as error:
+            if isinstance(error, KeyboardInterrupt | SystemExit | asyncio.CancelledError):
+                raise
+            raise EvaluationConflict("evaluation job cancellation failed") from None
         return await self._status_view(job)
 
     async def list_types(self) -> tuple[Mapping[str, object], ...]:
