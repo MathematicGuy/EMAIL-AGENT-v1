@@ -46,6 +46,7 @@ class MemoryShardResult:
     nonce: str
     provider_findings: tuple[str, ...]
     scratch_removed: bool
+    report_nonce: str = field(default="", repr=False)
 
 
 def _load_live_runner() -> None:
@@ -139,19 +140,19 @@ def _attach_stream_errors(session: Any, recorded: list[dict[str, object]]) -> No
         ]
 
 
-def _remove_owned_scratch_sqlite(environment: LiveEnvironment) -> bool:
+def _remove_owned_scratch_sqlite(environment: LiveEnvironment) -> tuple[bool, str | None]:
     """Remove only the SQLite file this attempt explicitly owns."""
 
     path = environment.sqlite_path
     if path is None or not environment.sqlite_path_owned:
-        return False
+        return False, None
     try:
         path.unlink()
     except FileNotFoundError:
-        return False
+        return False, None
     except OSError:
-        return False
-    return True
+        return False, "cleanup: failed to remove owned SQLite scratch file"
+    return True, None
 
 
 async def execute_memory_shard(
@@ -163,6 +164,7 @@ async def execute_memory_shard(
     model: str,
     max_consecutive_provider_failures: int = 3,
     private_transcript_sink: list[dict[str, object]] | None = None,
+    report_nonce: str | None = None,
 ) -> MemoryShardResult:
     """Execute one live shard, retaining private transcript evidence for its caller."""
 
@@ -176,6 +178,11 @@ async def execute_memory_shard(
         flush=True,
     )
     identity = build_identity(probe_set, model)
+    if not identity.nonce:
+        raise ValueError("memory shard identity nonce must be non-empty")
+    effective_report_nonce = identity.nonce if report_nonce is None else report_nonce
+    if not effective_report_nonce:
+        raise ValueError("memory report nonce must be non-empty")
     seed_failures: list[str] = []
     provider_findings: list[str] = []
     pool: Any = None
@@ -258,7 +265,9 @@ async def execute_memory_shard(
                 if pool is not None:
                     await pool.close()
             finally:
-                scratch_removed = _remove_owned_scratch_sqlite(environment)
+                scratch_removed, scratch_cleanup_finding = _remove_owned_scratch_sqlite(environment)
+                if scratch_cleanup_finding is not None:
+                    provider_findings.append(scratch_cleanup_finding)
 
     assert session is not None
     _attach_stream_errors(session, recorded)
@@ -270,6 +279,7 @@ async def execute_memory_shard(
         nonce=identity.nonce,
         provider_findings=tuple(sorted(set(provider_findings))),
         scratch_removed=scratch_removed,
+        report_nonce=effective_report_nonce,
     )
 
 
@@ -285,9 +295,9 @@ def build_memory_report(
 
     if not shard_results:
         raise ValueError("cannot build a memory report without shard results")
-    nonces = {shard.nonce for shard in shard_results}
-    if len(nonces) != 1 or not nonces or not next(iter(nonces)):
-        raise ValueError("all memory shards must carry one non-empty shared nonce")
+    report_nonces = {shard.report_nonce for shard in shard_results}
+    if len(report_nonces) != 1 or not report_nonces or not next(iter(report_nonces)):
+        raise ValueError("all memory shards must carry one non-empty shared report nonce")
 
     by_id = {probe.probe_id: probe for probe in probe_set.probes}
     rows_by_id: dict[str, ProbeRow] = {}
@@ -320,7 +330,7 @@ def build_memory_report(
     seed_failures = tuple(
         sorted({failure for shard in shard_results for failure in shard.seed_failure_ids})
     )
-    nonce = next(iter(nonces))
+    nonce = next(iter(report_nonces))
     report = build_report(
         probe_set,
         rows,

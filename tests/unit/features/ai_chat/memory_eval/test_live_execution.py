@@ -145,6 +145,7 @@ def test_execute_memory_shard_returns_private_rows_and_cleans_a_scratch_sqlite_f
     assert [row.probe_id for row in result.rows] == ["probe-1"]
     assert result.seed_failure_ids == ("adapter finding",)
     assert result.nonce == "nonce"
+    assert result.report_nonce == "nonce"
     assert result.provider_findings == ()
     assert len(result.private_transcript) == 3
     assert result.scratch_removed is True
@@ -239,12 +240,18 @@ def test_execute_memory_shard_cleans_up_before_propagating_cancellation(
 ) -> None:
     scratch_path = tmp_path / "memeval-cancel.db"
     _transcript, events = _configure_live_execution(monkeypatch, scratch_path=scratch_path)
+    transcript: list[dict[str, object]] = []
+    calls = 0
 
-    async def cancel(*args: object) -> tuple[str, int]:
+    async def cancel_after_one_reply(*args: object) -> tuple[str, int]:
         del args
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "one", 1
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(live_execution, "ask_live", cancel)
+    monkeypatch.setattr(live_execution, "ask_live", cancel_after_one_reply)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
@@ -254,9 +261,13 @@ def test_execute_memory_shard_cleans_up_before_propagating_cancellation(
                 object(),
                 provider="provider",
                 model="model",
+                private_transcript_sink=transcript,
             )
         )
 
+    assert len(transcript) == 1
+    assert transcript[0]["question"] == "one?"
+    assert transcript[0]["reply"] == "one"
     assert events == ["teardown", "pool-close"]
     assert not scratch_path.exists()
 
@@ -287,6 +298,48 @@ def test_execute_memory_shard_removes_scratch_after_teardown_failure(
 
     assert events == ["teardown", "pool-close"]
     assert not scratch_path.exists()
+
+
+def test_execute_memory_shard_reports_owned_scratch_unlink_failure_without_touching_external_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scratch_path = tmp_path / "memeval-unlink-failure.db"
+    external_path = tmp_path / "external.db"
+    external_path.write_text("external", encoding="utf-8")
+    _transcript, _events = _configure_live_execution(monkeypatch, scratch_path=scratch_path)
+    original_unlink = Path.unlink
+
+    def fail_owned_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path == scratch_path:
+            raise PermissionError("scratch is locked")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_owned_unlink)
+
+    external_result = asyncio.run(
+        live_execution.execute_memory_shard(
+            _live_probe_set(),
+            LiveEnvironment(None, external_path, True, True, ""),
+            object(),
+            provider="provider",
+            model="model",
+        )
+    )
+    result = asyncio.run(
+        live_execution.execute_memory_shard(
+            _live_probe_set(),
+            LiveEnvironment(None, scratch_path, True, True, "", sqlite_path_owned=True),
+            object(),
+            provider="provider",
+            model="model",
+        )
+    )
+
+    assert external_result.scratch_removed is False
+    assert result.scratch_removed is False
+    assert result.provider_findings == ("cleanup: failed to remove owned SQLite scratch file",)
+    assert scratch_path.exists()
+    assert external_path.read_text(encoding="utf-8") == "external"
 
 
 def test_execute_memory_shard_closes_pool_and_removes_owned_scratch_after_session_setup_failure(
@@ -487,6 +540,7 @@ def test_build_memory_report_merges_rows_and_calls_report_once(
         nonce="nonce",
         provider_findings=("z",),
         scratch_removed=True,
+        report_nonce="report-nonce",
     )
 
     assert live_execution.build_memory_report(
@@ -498,7 +552,7 @@ def test_build_memory_report_merges_rows_and_calls_report_once(
     ) == {"report": "built"}
     assert len(calls) == 1
     assert calls[0][1] == rows
-    assert calls[0][-1]["nonce"] == "nonce"
+    assert calls[0][-1]["nonce"] == "report-nonce"
     assert calls[0][-1]["seed_failures"] == ("z",)
 
 
@@ -515,8 +569,12 @@ def test_build_memory_report_restores_original_probe_order_from_out_of_order_sha
         return {"report": "built"}
 
     monkeypatch.setattr(live_execution, "build_report", build_report)
-    second = live_execution.MemoryShardResult((rows[1],), (), (), "nonce", (), True)
-    first = live_execution.MemoryShardResult((rows[0],), (), (), "nonce", (), True)
+    second = live_execution.MemoryShardResult(
+        (rows[1],), (), (), "shard-second", (), True, "report-nonce"
+    )
+    first = live_execution.MemoryShardResult(
+        (rows[0],), (), (), "shard-first", (), True, "report-nonce"
+    )
 
     assert live_execution.build_memory_report(
         probe_set,
@@ -526,6 +584,77 @@ def test_build_memory_report_restores_original_probe_order_from_out_of_order_sha
         ran_at=datetime(2026, 8, 23),
     ) == {"report": "built"}
     assert [row.probe_id for row in captured[0]] == ["probe-1", "probe-2"]
+
+
+def test_two_executed_shards_merge_with_distinct_identity_nonces_and_one_report_nonce(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A report job key joins shards without reusing their live-session identity."""
+
+    _transcript, _events = _configure_live_execution(monkeypatch)
+    identity_nonces = iter(("shard-one", "shard-two"))
+    monkeypatch.setattr(
+        live_execution,
+        "build_identity",
+        lambda *_: SimpleNamespace(run_key="run-key", nonce=next(identity_nonces)),
+    )
+    probe_set = _two_probe_set()
+    first = ProbeSet(
+        schema_version=probe_set.schema_version,
+        probe_set_id=probe_set.probe_set_id,
+        label=probe_set.label,
+        seed=probe_set.seed,
+        probes=(probe_set.probes[0],),
+    )
+    second = ProbeSet(
+        schema_version=probe_set.schema_version,
+        probe_set_id=probe_set.probe_set_id,
+        label=probe_set.label,
+        seed=probe_set.seed,
+        probes=(probe_set.probes[1],),
+    )
+
+    async def execute_both() -> tuple[live_execution.MemoryShardResult, ...]:
+        return await asyncio.gather(
+            live_execution.execute_memory_shard(
+                first,
+                LiveEnvironment(None, None, True, True, ""),
+                object(),
+                provider="provider",
+                model="model",
+                report_nonce="report-job",
+            ),
+            live_execution.execute_memory_shard(
+                second,
+                LiveEnvironment(None, None, True, True, ""),
+                object(),
+                provider="provider",
+                model="model",
+                report_nonce="report-job",
+            ),
+        )
+
+    shard_results = asyncio.run(execute_both())
+    original_build_report = live_execution.build_report
+    merged_rows: list[ProbeRow] = []
+
+    def capture_report(*args: object, **kwargs: object) -> dict[str, object]:
+        merged_rows.extend(args[1])
+        return original_build_report(*args, **kwargs)
+
+    monkeypatch.setattr(live_execution, "build_report", capture_report)
+    report = live_execution.build_memory_report(
+        probe_set,
+        tuple(reversed(shard_results)),
+        provider="provider",
+        model="model",
+        ran_at=datetime(2026, 8, 23),
+    )
+
+    assert {result.nonce for result in shard_results} == {"shard-one", "shard-two"}
+    assert {result.report_nonce for result in shard_results} == {"report-job"}
+    assert [row.probe_id for row in merged_rows] == ["probe-1", "probe-2"]
+    assert report["nonce"] == "report-job"
 
 
 @pytest.mark.parametrize(
@@ -563,6 +692,7 @@ def test_build_memory_report_rejects_invalid_shard_probe_sets(
         "nonce",
         (),
         True,
+        "report-nonce",
     )
 
     with pytest.raises(ValueError, match=message):
@@ -587,7 +717,9 @@ def test_build_memory_report_rejects_rows_without_all_three_arm_outcomes() -> No
         certain=True,
         latency_ms=1,
     )
-    shard = live_execution.MemoryShardResult((incomplete,), (), (), "nonce", (), True)
+    shard = live_execution.MemoryShardResult(
+        (incomplete,), (), (), "nonce", (), True, "report-nonce"
+    )
 
     with pytest.raises(ValueError, match="three arm outcomes"):
         live_execution.build_memory_report(
@@ -599,14 +731,16 @@ def test_build_memory_report_rejects_rows_without_all_three_arm_outcomes() -> No
         )
 
 
-def test_build_memory_report_requires_one_nonempty_shared_nonce() -> None:
+def test_build_memory_report_requires_one_nonempty_shared_report_nonce() -> None:
     probe_set = _live_probe_set()
     row = asyncio.run(run_probe_rows(probe_set, _scripted_rows))[0]
 
-    for nonces in (("",), ("first", "second")):
-        shards = tuple(
-            live_execution.MemoryShardResult((row,), (), (), nonce, (), True) for nonce in nonces
-        )
+    missing_report_nonce = (live_execution.MemoryShardResult((row,), (), (), "identity", (), True),)
+    mismatched_report_nonces = (
+        live_execution.MemoryShardResult((row,), (), (), "identity-one", (), True, "first"),
+        live_execution.MemoryShardResult((row,), (), (), "identity-two", (), True, "second"),
+    )
+    for shards in (missing_report_nonce, mismatched_report_nonces):
         with pytest.raises(ValueError, match="nonce"):
             live_execution.build_memory_report(
                 probe_set,
@@ -628,6 +762,7 @@ def test_build_memory_report_marks_an_aborted_partial_run_without_reclassifying_
         "nonce",
         ("aborted: provider unavailable",),
         True,
+        "report-nonce",
     )
 
     report = live_execution.build_memory_report(
@@ -641,6 +776,7 @@ def test_build_memory_report_marks_an_aborted_partial_run_without_reclassifying_
     assert report["aborted"] is True
     assert report["seed_failures"] == ["semantic: seed failed"]
     assert report["per_scope"]["long_term"]["probes"] == 0  # type: ignore[index]
+    assert "private partial reply" not in str(report)
 
 
 async def _scripted_rows(

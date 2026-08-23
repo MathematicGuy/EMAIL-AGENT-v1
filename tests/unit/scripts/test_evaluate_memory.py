@@ -241,7 +241,7 @@ def test_run_live_passes_max_consecutive_into_session(
     async def fake_execute(probe_set, env, reply, **kwargs):
         del probe_set, env, reply
         captured["max"] = kwargs["max_consecutive_provider_failures"]
-        return MemoryShardResult((), (), (), "nonce", ("aborted: test",), True)
+        return MemoryShardResult((), (), (), "nonce", ("aborted: test",), True, "nonce")
 
     monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fake_execute)
     payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
@@ -286,7 +286,7 @@ def test_run_live_delegates_one_full_shard_to_the_live_execution_seam(
 
     async def execute(*args: object, **kwargs: object) -> MemoryShardResult:
         calls.append((*args, kwargs))
-        return MemoryShardResult((row,), ("seed",), (), "nonce", ("seed",), True)
+        return MemoryShardResult((row,), ("seed",), (), "nonce", ("seed",), True, "nonce")
 
     monkeypatch.setattr(evaluate_memory, "execute_memory_shard", execute)
     report = asyncio.run(
@@ -331,6 +331,7 @@ def test_run_live_partial_flush_stamps_aborted(
             "nonce",
             ("aborted: tripped",),
             True,
+            "nonce",
         )
 
     monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fake_execute)
@@ -384,6 +385,54 @@ def test_run_live_keeps_partial_private_transcript_when_shard_execution_raises(
         )
 
     assert transcript == [{"question": "private question", "reply": "partial reply"}]
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [(RuntimeError, "ordinary failure"), (asyncio.CancelledError, "")],
+    ids=("ordinary-failure", "cancellation"),
+)
+def test_main_writes_no_public_artifact_when_live_execution_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+    message: str,
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setattr(
+        "scripts.evaluate_memory.probe_environment",
+        lambda environ: LiveEnvironment(None, None, True, False, ""),
+    )
+    monkeypatch.setattr(
+        "scripts.evaluate_memory._build_chat_reply",
+        lambda provider, environ, model=None: (object(), provider, "model-x"),
+    )
+    captured_transcripts: list[list[dict[str, object]]] = []
+
+    async def fail_run_live(probe_set, env, reply, *, transcript, **kwargs):
+        del probe_set, env, reply, kwargs
+        captured_transcripts.append(transcript)
+        transcript.append({"question": "private question", "reply": "private reply"})
+        if message:
+            raise error_type(message)
+        raise error_type()
+
+    monkeypatch.setattr("scripts.evaluate_memory.run_live", fail_run_live)
+    detail_dir = tmp_path / "runs"
+    monkeypatch.setattr("scripts.evaluate_memory._DETAIL_DIR", detail_dir)
+    output = tmp_path / "report.json"
+
+    with pytest.raises(error_type, match=message or None):
+        main(["--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
+
+    assert captured_transcripts == [
+        [{"question": "private question", "reply": "private reply"}]
+    ]
+    assert not output.exists()
+    assert not list(detail_dir.glob("*.json"))
 
 
 def test_aborted_run_writes_baseline_and_detail_and_exits_one(
