@@ -2,6 +2,9 @@
 
 This document visualizes the complete end-to-end architecture, parallel dispatch pipeline, 3-arm isolation guarantees, and reporting lifecycle for high-speed memory evaluations in Cowork Agent.
 
+MIMO `mimo-v2.5-pro` scoreboard and open defects:
+[`MIMO-V2.5-PRO-CHAT-REPLY-TRAIL.md`](./MIMO-V2.5-PRO-CHAT-REPLY-TRAIL.md).
+
 ---
 
 ## 1. High-Level System Architecture

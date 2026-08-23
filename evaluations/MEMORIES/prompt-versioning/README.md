@@ -9,6 +9,10 @@ The report says **what** happened. This directory is about **where to look** and
 - `<slot>/v<N>-<date>.md` here records a prompt version: the hypothesis written
   before the run, and the verdict after it.
 
+MIMO `mimo-v2.5-pro` progress (what is fixed, what is still open, not the
+mistral series):
+[`docs/references/agent-memory/MIMO-V2.5-PRO-CHAT-REPLY-TRAIL.md`](../../../docs/references/agent-memory/MIMO-V2.5-PRO-CHAT-REPLY-TRAIL.md).
+
 ## The loop
 
 ```
