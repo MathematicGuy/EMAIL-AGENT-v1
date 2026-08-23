@@ -172,8 +172,9 @@ class CredentialLeasingPool:
                 record.state = CredentialState.AVAILABLE
                 record.cooling_until = None
 
-    @staticmethod
-    def _require_active_lease(lease: CredentialLease) -> _CredentialRecord:
+    def _require_active_lease(self, lease: CredentialLease) -> _CredentialRecord:
+        if lease._pool is not self:
+            raise RuntimeError("Credential lease belongs to another pool")
         if lease._settled or lease._record.state is not CredentialState.LEASED:
             raise RuntimeError("Credential lease is no longer active")
         return lease._record

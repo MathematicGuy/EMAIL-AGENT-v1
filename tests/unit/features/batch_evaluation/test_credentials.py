@@ -124,3 +124,29 @@ def test_async_context_manager_releases_a_cancelled_lease() -> None:
         assert (await pool.lease()).alias == "mistral-1"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["release", "cool_down", "disable"])
+def test_foreign_pool_cannot_settle_another_pools_active_lease(operation: str) -> None:
+    async def scenario() -> None:
+        pool_a = CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-a"}, clock=FakeClock()
+        )
+        pool_b = CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-b"}, clock=FakeClock()
+        )
+        lease_a = await pool_a.lease()
+
+        with pytest.raises(RuntimeError, match="belongs to another pool"):
+            if operation == "release":
+                await pool_b.release(lease_a)
+            elif operation == "cool_down":
+                await pool_b.cool_down(lease_a, 30)
+            else:
+                await pool_b.disable(lease_a)
+
+        assert pool_a.state_for(lease_a.alias) is CredentialState.LEASED
+        with pytest.raises(RuntimeError, match="No healthy credential"):
+            await pool_a.lease()
+
+    asyncio.run(scenario())

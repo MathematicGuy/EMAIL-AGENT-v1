@@ -35,6 +35,13 @@ def _lease() -> object:
     return asyncio.run(scenario())
 
 
+async def _lease_async() -> object:
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-evaluation-key"}
+    )
+    return await pool.lease()
+
+
 @pytest.mark.parametrize(
     ("error", "outcome", "status", "retry_after"),
     [
@@ -128,3 +135,150 @@ def test_evaluation_reply_uses_the_hidden_lease_key_only_to_create_transient_set
     assert captured[0].max_output_tokens == 123
     assert captured[0].timeout_seconds == 9
     assert "secret-evaluation-key" not in repr(captured[0])
+
+
+def test_evaluation_reply_emits_success_before_a_consumer_closes_after_the_final_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        events: list[object] = []
+
+        async def final_chunk_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+            del args, kwargs
+            yield ChatReplyChunk("final reply")
+
+        monkeypatch.setattr(
+            "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
+            classmethod(
+                lambda cls, settings: type("FakeReply", (), {"stream_reply": final_chunk_stream})()
+            ),
+        )
+        reply = MistralEvaluationReplyFactory().bind(
+            await _lease_async(), "mistral-small", events.append
+        )
+        request = ChatMessageRequest("session-1", "private prompt", "idem-1")
+        context = assemble_generation_context(
+            request,
+            MemoryContextResponse(
+                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+            ),
+        )
+        stream = reply.stream_reply(request, context)
+
+        assert await anext(stream) == ChatReplyChunk("final reply")
+        await stream.aclose()
+
+        assert [event.outcome for event in events] == ["succeeded"]
+
+    asyncio.run(scenario())
+
+
+def test_evaluation_reply_preserves_multi_chunk_order_with_one_chunk_lookahead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        events: list[object] = []
+        provider_chunks_seen: list[str] = []
+
+        async def multi_chunk_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+            del args, kwargs
+            for text in ("first", "second", "third"):
+                provider_chunks_seen.append(text)
+                yield ChatReplyChunk(text)
+
+        monkeypatch.setattr(
+            "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
+            classmethod(
+                lambda cls, settings: type("FakeReply", (), {"stream_reply": multi_chunk_stream})()
+            ),
+        )
+        reply = MistralEvaluationReplyFactory().bind(
+            await _lease_async(), "mistral-small", events.append
+        )
+        request = ChatMessageRequest("session-1", "private prompt", "idem-1")
+        context = assemble_generation_context(
+            request,
+            MemoryContextResponse(
+                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+            ),
+        )
+        stream = reply.stream_reply(request, context)
+
+        assert await anext(stream) == ChatReplyChunk("first")
+        assert provider_chunks_seen == ["first", "second"]
+        assert [chunk async for chunk in stream] == [ChatReplyChunk("second"), ChatReplyChunk("third")]
+        assert [event.outcome for event in events] == ["succeeded"]
+
+    asyncio.run(scenario())
+
+
+def test_evaluation_reply_records_cancelled_when_closed_before_provider_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        events: list[object] = []
+
+        async def incomplete_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+            del args, kwargs
+            yield ChatReplyChunk("first")
+            yield ChatReplyChunk("second")
+
+        monkeypatch.setattr(
+            "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
+            classmethod(
+                lambda cls, settings: type("FakeReply", (), {"stream_reply": incomplete_stream})()
+            ),
+        )
+        reply = MistralEvaluationReplyFactory().bind(
+            await _lease_async(), "mistral-small", events.append
+        )
+        request = ChatMessageRequest("session-1", "private prompt", "idem-1")
+        context = assemble_generation_context(
+            request,
+            MemoryContextResponse(
+                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+            ),
+        )
+        stream = reply.stream_reply(request, context)
+
+        assert await anext(stream) == ChatReplyChunk("first")
+        await stream.aclose()
+
+        assert [event.outcome for event in events] == ["cancelled"]
+
+    asyncio.run(scenario())
+
+
+def test_evaluation_reply_reraises_cancellation_before_provider_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        events: list[object] = []
+        second_chunk_started = asyncio.Event()
+
+        async def blocking_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+            del args, kwargs
+            yield ChatReplyChunk("first")
+            second_chunk_started.set()
+            await asyncio.Event().wait()
+            yield ChatReplyChunk("unreachable")
+
+        monkeypatch.setattr(
+            "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
+            classmethod(
+                lambda cls, settings: type("FakeReply", (), {"stream_reply": blocking_stream})()
+            ),
+        )
+        reply = MistralEvaluationReplyFactory().bind(
+            await _lease_async(), "mistral-small", events.append
+        )
+        consumer = asyncio.create_task(_collect(reply))
+
+        await second_chunk_started.wait()
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+
+        assert [event.outcome for event in events] == ["cancelled"]
+
+    asyncio.run(scenario())
