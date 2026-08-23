@@ -7,6 +7,8 @@
 - [SPEC-memory-evaluation.md](./SPEC-memory-evaluation.md) — parent memory-evaluation contract.
 - [SPEC-memory-eval-harness-v3-scalability.md](./SPEC-memory-eval-harness-v3-scalability.md) — current memory harness correctness and scalability work.
 - [Memory evaluation runbook](../../evaluations/MEMORIES/RUNBOOK.md) — current operational safety rules.
+- [SPEC-chat-ragas-evaluation.md](./SPEC-chat-ragas-evaluation.md) — Chat-RAGAS plug-in contract.
+- [RAGAS operations guide](../../docs/evaluations/RAGAS.md) — current evaluator state and adoption rules.
 
 ---
 
@@ -16,11 +18,12 @@ Evaluation tooling currently consists primarily of separate CLI workflows.
 Memory evaluation selects one provider adapter and one API key, then runs every
 probe and its three experimental arms sequentially.
 
-The AI evaluation developer has three Mistral API keys with independent usage
-limits. Using one key does not consume or reduce the other keys' limits. The
-evaluation system should therefore be able to run three safe concurrent lanes,
-one per key, while preserving experiment correctness and recording which
-non-secret credential alias ran each lane.
+The AI evaluation developer currently has three Mistral API keys with
+independent usage limits and may add a fourth or fifth later. Using one key does
+not consume or reduce the other keys' limits. The evaluation system should
+therefore discover the pool dynamically and run up to the requested number of
+safe concurrent lanes, one per active key, while preserving experiment
+correctness and recording which non-secret credential alias ran each lane.
 
 The same batch-processing control plane should later support memory,
 retrieval, routing, email-intent, and similar evaluations without building a
@@ -54,9 +57,9 @@ Build an asynchronous evaluation API for AI evaluation developers, backed by:
 6. An artifact store and deterministic result aggregator.
 
 The recommended memory-evaluation integration partitions complete probes into
-three isolated SQLite workflow shards. Each shard leases one Mistral key and
-processes its assigned probes sequentially. Every probe's three arms remain in
-the same shard.
+up to `effective_workers` isolated SQLite workflow shards. Each shard leases
+one Mistral key and processes its assigned probes sequentially. Every probe's
+three arms remain in the same shard.
 
 ### Level 1 — Basic batch-processing system
 
@@ -76,11 +79,11 @@ flowchart LR
     SHARDS --> POOL["Credential lease pool"]
     POOL --> K1["Mistral key 1<br/>independent limit"]
     POOL --> K2["Mistral key 2<br/>independent limit"]
-    POOL --> K3["Mistral key 3<br/>independent limit"]
+    POOL --> KN["Mistral key N<br/>discovered dynamically"]
 
     K1 --> EXEC["Our batch executor"]
     K2 --> EXEC
-    K3 --> EXEC
+    KN --> EXEC
 
     EXEC -->|"request_batch"| CHAT["Ordinary Mistral<br/>chat-completion calls"]
     EXEC -->|"workflow_shards"| WF["Stateful local workflow workers"]
@@ -104,15 +107,16 @@ flowchart TD
     REQ["Memory evaluation request"] --> PLUGIN["MemoryEval plug-in"]
     PLUGIN --> PRE["Existing mem-eval preflight"]
     PRE -->|"failed"| ABORT["Fail before model spend"]
-    PRE -->|"ready"| PART["Partition probes into 3 deterministic shards"]
+    PRE -->|"ready"| LIMIT["Resolve effective_workers"]
+    LIMIT --> PART["Partition probes into N deterministic shards"]
 
     PART --> S1["Shard 1<br/>probes 1, 4, 7..."]
     PART --> S2["Shard 2<br/>probes 2, 5, 8..."]
-    PART --> S3["Shard 3<br/>probes 3, 6, 9..."]
+    PART --> SN["Shard N<br/>remaining probes"]
 
     S1 --> W1["Worker + key 1<br/>isolated SQLite DB<br/>unique nonce"]
     S2 --> W2["Worker + key 2<br/>isolated SQLite DB<br/>unique nonce"]
-    S3 --> W3["Worker + key 3<br/>isolated SQLite DB<br/>unique nonce"]
+    SN --> WN["Worker + key N<br/>isolated SQLite DB<br/>unique nonce"]
 
     subgraph PROBE["Each probe remains one experiment"]
         FULL["FULL<br/>seed + read all memory"]
@@ -123,7 +127,7 @@ flowchart TD
 
     W1 --> FULL
     W2 --> FULL
-    W3 --> FULL
+    WN --> FULL
 
     CONTROL --> SCORE["Existing deterministic scorer"]
     SCORE --> MERGE["Merge in original probe order"]
@@ -135,6 +139,34 @@ flowchart TD
 The current injected `AskProbe` remains the highest useful
 memory-evaluation test seam. The generic evaluation job service becomes the
 highest API-level test seam.
+
+### Level 3 — Chat-RAGAS plugged into the same system
+
+Chat-RAGAS is a stateless `request_batch` plug-in. Tier 1 stays local and
+deterministic. Tier 2 creates one work unit per case, uses the custom scheduler
+to spread cases across leased keys, and keeps RAGAS concurrency at `1` inside
+each worker.
+
+```mermaid
+flowchart TD
+    REQ["Chat-RAGAS request<br/>--ragas --max-workers N"] --> PLUGIN["ChatRagas plug-in"]
+    PLUGIN --> PRE["Validate local dataset, models, privacy, budgets"]
+    PRE --> T1["Tier 1<br/>deterministic metrics"]
+    PRE --> PLAN["Tier 2<br/>one case = one work unit"]
+    PLAN --> LIMIT["effective_workers = min(requested, active keys, ready cases, plug-in limit)"]
+    LIMIT --> POOL["Credential lease pool"]
+    POOL --> W1["Worker 1 + key alias 1"]
+    POOL --> W2["Worker 2 + key alias 2"]
+    POOL --> WN["Worker N + key alias N"]
+    W1 --> SEQ["Per case, sequential<br/>faithfulness → answer relevancy"]
+    W2 --> SEQ
+    WN --> SEQ
+    SEQ --> RESULT["Metric result or explicit failure"]
+    RESULT --> MERGE["Merge by original case order"]
+    T1 --> REPORT["Metadata-only report"]
+    MERGE --> REPORT
+    MERGE --> PRIVATE["Private local detail artifact"]
+```
 
 ## User Stories
 
@@ -150,8 +182,9 @@ highest API-level test seam.
    so that configuration mistakes do not spend money.
 6. As an evaluator, I want preflight checks before execution, so that unusable
    keys, datasets, models, or databases fail early.
-7. As an evaluator, I want three independently limited Mistral keys used
-   concurrently when safe, so that independent work completes faster.
+7. As an evaluator, I want every independently limited Mistral key up to
+   `max_workers` used concurrently when safe, so adding a fourth or fifth key
+   increases capacity without a code change.
 8. As an evaluator, I want each key represented by a non-secret alias, so that
    I can diagnose failures without exposing credentials.
 9. As an evaluator, I want one failed key to stop receiving new work, so that
@@ -205,6 +238,12 @@ highest API-level test seam.
 The endpoint accepts a credential-pool alias such as `mistral-eval`, never
 actual API keys.
 
+`POST /v1/evaluation-jobs` accepts `execution.max_workers` as an optional
+positive integer. The equivalent dev CLI flag is `--max-workers`. It is an
+upper bound for our scheduler, not a request to RAGAS or Mistral's built-in
+Batch API. Status and result manifests expose both requested and effective
+values.
+
 The first release is for AI evaluation developers only. It is not part of the
 normal Cowork Agent user experience.
 
@@ -236,12 +275,16 @@ convention:
 - `MISTRAL_API_KEY`
 - `MISTRAL_API_KEY2`
 - `MISTRAL_API_KEY3`
+- `MISTRAL_API_KEY4`
+- `MISTRAL_API_KEY5`
 
 The shared parser also accepts underscore-number variants, but project
 documentation and examples should use the convention above consistently.
 
-These three keys have independent usage limits. The scheduler therefore allows
-three concurrent Mistral lanes by default, bounded to one leased lane per key.
+Numbered suffixes are not capped at five; four and five are concrete scale-up
+examples. These keys have independent usage limits. The scheduler therefore
+allows one concurrent Mistral lane per active key, bounded to one leased lane
+per key by default.
 It must not apply a shared-workspace quota assumption to this configured pool.
 Provider-reported global limits, if any are encountered at runtime, still take
 precedence and must be surfaced rather than ignored.
@@ -249,6 +292,21 @@ precedence and must be surfaced rather than ignored.
 Current status: the shared utility can parse these names, but the Mistral
 evaluation adapter still uses the single `MISTRAL_API_KEY` field.
 Implementation connects the evaluation-only Mistral transport to the pool.
+
+Worker resolution is deterministic:
+
+```text
+effective_workers = min(
+  requested_max_workers or active_key_count,
+  active_key_count,
+  ready_work_unit_count,
+  plugin_concurrency_limit,
+)
+```
+
+`max_workers < 1` is rejected before job creation. Requesting more workers than
+available keys or ready units is valid and clamps to the effective value; the
+manifest records the reason. No code path assumes exactly three keys.
 
 The existing round-robin rotator is evolved into or wrapped by a lease-aware
 pool with these states:
@@ -258,7 +316,7 @@ pool with these states:
 - `cooling_down`
 - `disabled`
 
-One workflow shard or native provider batch retains the same credential lease
+One workflow shard or request work unit retains the same credential lease
 for its external lifecycle. Only a salted fingerprint or configured alias is
 persisted.
 
@@ -298,8 +356,8 @@ monotonic and persisted before being returned to clients.
   create Mistral batch jobs.
 - Partitions inputs into locally tracked work items with stable ids.
 - Sends one ordinary Mistral chat-completion request per work item.
-- Runs up to three request lanes concurrently, one per independently limited
-  key, with configurable per-key concurrency initially defaulting to `1`.
+- Runs up to `effective_workers` request lanes concurrently, one per
+  independently limited key, with per-key concurrency initially fixed at `1`.
 - Persists attempt state, safe error classification, latency, token usage when
   returned, and the private result artifact.
 - Uses bounded queues and budgets so a large evaluation cannot create
@@ -318,14 +376,14 @@ monotonic and persisted before being returned to clients.
 
 The first concurrent implementation is SQLite-only:
 
-- Partition probes deterministically into at most three shards.
+- Partition probes deterministically into at most `effective_workers` shards.
 - Keep all three arms of a probe in the same shard.
 - Give every shard a separate scratch SQLite file, live session, adapter set,
   transcript, nonce, and artifact path.
 - Let each worker process its assigned probes sequentially.
 - Use one Mistral credential lease per worker.
-- Start up to three workers concurrently because the keys have independent
-  usage limits.
+- Start up to `effective_workers` concurrently because the keys have
+  independent usage limits.
 - Merge rows in the original probe-set order.
 - Preserve the existing scorer, verdict derivation, seeding rules, masking
   behavior, and teardown.
@@ -337,6 +395,30 @@ The first concurrent implementation is SQLite-only:
 PostgreSQL memory evaluation remains concurrency `1` in this specification.
 Parallel PostgreSQL execution requires a separate design proving migration,
 connection-pool, and cleanup behavior.
+
+### Chat-RAGAS adapter
+
+The Chat-RAGAS plug-in uses `request_batch` for Tier 2:
+
+- Tier 1 deterministic metrics run locally and do not acquire provider keys.
+- The dev CLI may read `--input` locally. The HTTP API accepts only an opaque,
+  pre-registered dataset reference; it never accepts an arbitrary filesystem
+  path or uploads private document text in the job request.
+- Each Tier 2 case is one independently retryable work unit with a stable id.
+- A worker retains one credential lease for both judge-LLM and embedding calls
+  needed by that case.
+- `faithfulness` and `answer_relevancy` run sequentially inside a case in v1.
+- RAGAS internal concurrency is `1`; outer scheduler concurrency is the only
+  worker fan-out. This prevents `N` custom workers from each spawning another
+  RAGAS worker pool.
+- The exact RAGAS scorer API is chosen only after pinning a supported version.
+  A single-turn scorer or collection item is preferred over bulk `evaluate()`.
+- NaN, missing, or non-finite metric values count as explicit metric failures.
+- The aggregator reports attempted, succeeded, failed, and skipped counts per
+  metric and never labels a partial run as complete.
+- Questions, answers, references, and contexts remain in private local
+  artifacts; the public baseline contains only ids, counts, scores, timing, and
+  safe execution metadata.
 
 ### Persistence and artifacts
 
@@ -360,14 +442,16 @@ workspace:
 
 1. **Foundation:** job API, job store, static plug-in registry, fake executor,
    status/result/cancellation, and idempotency.
-2. **Custom multi-key executor:** lease-aware credential pool, three
-   independent concurrency lanes, bounded work queue, ordinary Mistral
+2. **Custom multi-key executor:** lease-aware credential pool, dynamically
+   bounded concurrency lanes, `--max-workers`, bounded work queue, ordinary Mistral
    chat-completion transport, and deterministic result collection.
-3. **Memory evaluation:** SQLite workflow sharding across three keys,
+3. **Memory evaluation:** SQLite workflow sharding across available keys,
    deterministic aggregation, and existing report compatibility.
-4. **Future evaluators:** retrieval, routing, email-intent, and other stateless
+4. **Chat-RAGAS:** case-sharded Tier 2 judge calls with nested RAGAS concurrency
+   disabled, explicit partial-failure counts, and metadata-only aggregation.
+5. **Future evaluators:** retrieval, routing, email-intent, and other stateless
    evaluations register adapters without new endpoint families.
-5. **Advanced option:** only after measuring a real need, extract memory-eval
+6. **Advanced option:** only after measuring a real need, extract memory-eval
    prompt preparation from controller execution so more work can use the
    custom `request_batch` strategy without weakening the three-arm contract.
 
@@ -399,9 +483,12 @@ API integration tests cover:
 
 Credential-pool tests cover:
 
-- Three-key parsing.
+- Dynamic one-, three-, and five-key parsing.
 - Deduplication.
-- Three simultaneous leases across three independent keys.
+- `max_workers=5` produces five simultaneous leases when five independent keys
+  and at least five work units are available.
+- Requested workers above the active-key or ready-work count clamp safely and
+  report requested and effective values.
 - No simultaneous duplicate lease of the same key.
 - Per-key cooldown and recovery without pausing healthy keys.
 - Permanent disablement.
@@ -420,9 +507,47 @@ Memory plug-in tests extend the existing `AskProbe` and live-runner seams:
 - Existing full/ablated/control masking tests remain unchanged.
 - The serial path and one-key configuration remain backward compatible.
 
+Chat-RAGAS plug-in tests cover:
+
+- One case maps to one stable work unit and output order is deterministic.
+- `--max-workers` values `1`, `3`, and `5` reach the custom scheduler.
+- Five keys permit five outer workers; RAGAS internal concurrency remains `1`.
+- One key failure does not discard successful case metrics from healthy keys.
+- NaN and missing metric values increment failure counts.
+- Private question, answer, reference, and context fields never reach the
+  metadata-only baseline, job status, logs, or errors.
+
 The repository's narrowest relevant routes are feature tests, LLM integration
 tests, script tests, and API integration tests. Live Mistral validation is an
 opt-in smoke test and does not run in ordinary CI.
+
+## Stress-test result: Chat-RAGAS and future 4–5-key scale
+
+**Result: conditionally passes after the contract changes in this revision.**
+The plug-in boundary is flexible enough for Chat-RAGAS, but the current runtime
+does not yet implement the batch scheduler or accept `--max-workers`.
+
+| Stress condition | Result | Required contract |
+|---|---|---|
+| Reuse the endpoint for Chat-RAGAS | Pass | Register `chat-ragas` as a `request_batch` plug-in; do not add another endpoint family. |
+| Keep local dataset paths out of the HTTP API | Pass with guard | CLI resolves `--input`; API receives only an opaque pre-registered dataset reference. |
+| Preserve Tier 1 behavior | Pass | Run deterministic metrics locally without keys. |
+| Parallelize Tier 2 safely | Pass with design change | One case per work unit; one leased key per outer worker; metrics sequential inside the case. |
+| Scale from 3 to 4–5 keys | Pass with design change | Dynamic key discovery and `effective_workers`; no hard-coded three-lane scheduler. |
+| Prevent hidden 25-way fan-out at 5 workers | Pass with guard | RAGAS internal concurrency must be `1`, so total outer concurrency stays at five. |
+| Survive one judge/key failure | Pass with guard | Per-case and per-metric outcomes plus `partially_succeeded`; no aggregate-only result. |
+| Keep private documents out of artifacts | Pass | Reuse metadata-only baseline and private local artifact split. |
+
+Repository verification on 2026-08-23 found:
+
+- `parse_api_keys_from_env()` already accepts arbitrary numbered Mistral keys,
+  including `MISTRAL_API_KEY4` and `MISTRAL_API_KEY5`.
+- `APIKeyRotator` is round-robin and async-safe, but it is not a lease-aware
+  worker pool and does not prevent simultaneous reuse of one key.
+- `scripts/evaluate_chat_rag.py` currently rejects `--max-workers`.
+- `run_ragas()` currently bulk-evaluates the complete dataset, so it cannot yet
+  expose case-level scheduling, credential leases, or accurate partial-failure
+  counts.
 
 ## Out of Scope
 
@@ -463,10 +588,11 @@ Current repository seams supporting this design:
 
 ### Acceptance criteria
 
-- [ ] Three configured Mistral keys are discovered without exposing values.
-- [ ] The scheduler leases all three independent keys concurrently when at
-      least three shards are ready.
-- [ ] A SQLite memory evaluation runs with three isolated workflow shards.
+- [ ] One to five (and later numbered) Mistral keys are discovered without exposing values.
+- [ ] `--max-workers` and `execution.max_workers` accept positive integers and
+      expose requested/effective values.
+- [ ] The scheduler leases up to `effective_workers` independent keys concurrently.
+- [ ] A SQLite memory evaluation runs with isolated workflow shards up to the effective limit.
 - [ ] Every probe retains all three arms on one shard.
 - [ ] One-key behavior remains supported.
 - [ ] PostgreSQL mode enforces concurrency `1`.
@@ -475,5 +601,6 @@ Current repository seams supporting this design:
 - [ ] Incomplete execution cannot appear as a successful complete benchmark.
 - [ ] Another evaluator can be added through a registered plug-in without a
       new endpoint family.
+- [ ] Chat-RAGAS runs one case per work unit with RAGAS internal concurrency `1`.
 - [ ] Offline tests cover scheduler, isolation, redaction, retry, and state
       transition behavior.
