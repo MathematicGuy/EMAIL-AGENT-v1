@@ -508,7 +508,7 @@ git commit -m "feat: persist evaluation job state"
 **Files:**
 - Create: `src/cowork_agent/features/batch_evaluation/service.py`
 - Create: `src/cowork_agent/features/batch_evaluation/runner.py`
-- Create: `tests/unit/features/batch_evaluation/test_service.py`
+- Create: `tests/unit/features/batch_evaluation/test_evaluation_job_service.py`
 - Create: `tests/unit/features/batch_evaluation/test_runner_request_batch.py`
 - Create: `tests/unit/features/batch_evaluation/test_runner_workflow_shards.py`
 
@@ -559,7 +559,7 @@ All units complete → `succeeded`; mixed complete/failed → `partially_succeed
 - [ ] **Step 6: Run R2 feature tests**
 
 ```powershell
-uv run pytest -q tests/unit/features/batch_evaluation/test_service.py tests/unit/features/batch_evaluation/test_runner_request_batch.py tests/unit/features/batch_evaluation/test_runner_workflow_shards.py
+uv run pytest -q tests/unit/features/batch_evaluation/test_evaluation_job_service.py tests/unit/features/batch_evaluation/test_runner_request_batch.py tests/unit/features/batch_evaluation/test_runner_workflow_shards.py
 uv run ruff check src/cowork_agent/features/batch_evaluation tests/unit/features/batch_evaluation
 uv run mypy src
 ```
@@ -608,7 +608,7 @@ Queued jobs restart. Running/collecting jobs first classify orphaned attempts as
 - [ ] **Step 4: Run focused tests**
 
 ```powershell
-uv run pytest -q tests/unit/features/batch_evaluation/test_supervisor.py tests/unit/features/batch_evaluation/test_service.py
+uv run pytest -q tests/unit/features/batch_evaluation/test_supervisor.py tests/unit/features/batch_evaluation/test_evaluation_job_service.py
 uv run ruff check src/cowork_agent/features/batch_evaluation/supervisor.py src/cowork_agent/features/batch_evaluation/service.py
 uv run mypy src
 ```

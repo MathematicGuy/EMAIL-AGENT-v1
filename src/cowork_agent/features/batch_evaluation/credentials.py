@@ -18,6 +18,7 @@ class _CredentialRecord:
     api_key: str = field(repr=False)
     state: CredentialState = CredentialState.AVAILABLE
     cooling_until: float | None = field(default=None, repr=False)
+    active_lease: CredentialLease | None = field(default=None, repr=False)
 
 
 class CredentialLease:
@@ -57,6 +58,12 @@ class CredentialLease:
 
         if not self._settled:
             await self._pool.cool_down(self, retry_after_seconds)
+
+    async def hold_cooldown(self, retry_after_seconds: int) -> None:
+        """Apply cooldown while retaining this lease's exclusive ownership."""
+
+        if not self._settled:
+            await self._pool.hold_cooldown(self, retry_after_seconds)
 
     async def disable(self) -> None:
         """Permanently stop using this credential and settle this lease."""
@@ -112,33 +119,38 @@ class CredentialLeasingPool:
                 if record.state is CredentialState.AVAILABLE:
                     record.state = CredentialState.LEASED
                     self._next_index = (index + 1) % record_count
-                    return CredentialLease(self, record)
+                    lease = CredentialLease(self, record)
+                    record.active_lease = lease
+                    return lease
         raise RuntimeError("No healthy credential is available for leasing")
 
     async def release(self, lease: CredentialLease) -> None:
         async with self._lock:
             record = self._require_active_lease(lease)
-            record.state = CredentialState.AVAILABLE
+            record.active_lease = None
+            if record.state is CredentialState.LEASED:
+                record.state = CredentialState.AVAILABLE
             lease._settled = True
 
     async def cool_down(self, lease: CredentialLease, retry_after_seconds: int) -> None:
-        if (
-            isinstance(retry_after_seconds, bool)
-            or not isinstance(retry_after_seconds, int)
-            or retry_after_seconds < 0
-        ):
-            raise ValueError("retry_after_seconds must be a non-negative integer")
         async with self._lock:
-            record = self._require_active_lease(lease)
-            record.state = CredentialState.COOLING_DOWN
-            record.cooling_until = self._clock() + retry_after_seconds
+            self._hold_cooldown(lease, retry_after_seconds)
+            record = lease._record
+            record.active_lease = None
             lease._settled = True
+
+    async def hold_cooldown(self, lease: CredentialLease, retry_after_seconds: int) -> None:
+        """Cool a credential without relinquishing its active lease."""
+
+        async with self._lock:
+            self._hold_cooldown(lease, retry_after_seconds)
 
     async def disable(self, lease: CredentialLease) -> None:
         async with self._lock:
             record = self._require_active_lease(lease)
             record.state = CredentialState.DISABLED
             record.cooling_until = None
+            record.active_lease = None
             lease._settled = True
 
     def state_for(self, alias: str) -> CredentialState:
@@ -169,15 +181,35 @@ class CredentialLeasingPool:
                 and record.cooling_until is not None
                 and record.cooling_until <= now
             ):
-                record.state = CredentialState.AVAILABLE
+                record.state = (
+                    CredentialState.LEASED
+                    if record.active_lease is not None
+                    else CredentialState.AVAILABLE
+                )
                 record.cooling_until = None
 
     def _require_active_lease(self, lease: CredentialLease) -> _CredentialRecord:
         if lease._pool is not self:
             raise RuntimeError("Credential lease belongs to another pool")
-        if lease._settled or lease._record.state is not CredentialState.LEASED:
+        record = lease._record
+        if (
+            lease._settled
+            or record.active_lease is not lease
+            or record.state not in (CredentialState.LEASED, CredentialState.COOLING_DOWN)
+        ):
             raise RuntimeError("Credential lease is no longer active")
-        return lease._record
+        return record
+
+    def _hold_cooldown(self, lease: CredentialLease, retry_after_seconds: int) -> None:
+        if (
+            isinstance(retry_after_seconds, bool)
+            or not isinstance(retry_after_seconds, int)
+            or retry_after_seconds < 0
+        ):
+            raise ValueError("retry_after_seconds must be a non-negative integer")
+        record = self._require_active_lease(lease)
+        record.state = CredentialState.COOLING_DOWN
+        record.cooling_until = self._clock() + retry_after_seconds
 
 
 def _monotonic() -> float:

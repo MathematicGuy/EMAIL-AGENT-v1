@@ -88,6 +88,54 @@ def test_cooldown_recovers_after_the_provider_delay() -> None:
     asyncio.run(scenario())
 
 
+def test_retained_cooldown_keeps_the_owning_lease_exclusive_past_its_deadline() -> None:
+    async def scenario() -> None:
+        clock = FakeClock()
+        pool = CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-a"}, clock=clock
+        )
+        owner = await pool.lease()
+        await owner.hold_cooldown(30)
+
+        assert pool.state_for(owner.alias) is CredentialState.COOLING_DOWN
+        with pytest.raises(RuntimeError, match="No healthy credential"):
+            await pool.lease()
+
+        clock.now += 30
+
+        assert pool.state_for(owner.alias) is CredentialState.LEASED
+        with pytest.raises(RuntimeError, match="No healthy credential"):
+            await pool.lease()
+
+        await owner.release()
+        assert (await pool.lease()).alias == owner.alias
+
+    asyncio.run(scenario())
+
+
+def test_releasing_a_retained_cooldown_leaves_the_alias_unavailable_until_deadline() -> None:
+    async def scenario() -> None:
+        clock = FakeClock()
+        pool = CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-a"}, clock=clock
+        )
+        owner = await pool.lease()
+        await owner.hold_cooldown(30)
+        await owner.release()
+
+        assert pool.state_for(owner.alias) is CredentialState.COOLING_DOWN
+        with pytest.raises(RuntimeError, match="No healthy credential"):
+            await pool.lease()
+
+        clock.now += 30
+
+        recovered = await pool.lease()
+        assert recovered.alias == owner.alias
+        assert pool.state_for(owner.alias) is CredentialState.LEASED
+
+    asyncio.run(scenario())
+
+
 def test_disabled_credential_is_never_leased_again() -> None:
     async def scenario() -> None:
         pool = CredentialLeasingPool.from_env(
@@ -126,7 +174,7 @@ def test_async_context_manager_releases_a_cancelled_lease() -> None:
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("operation", ["release", "cool_down", "disable"])
+@pytest.mark.parametrize("operation", ["release", "cool_down", "hold_cooldown", "disable"])
 def test_foreign_pool_cannot_settle_another_pools_active_lease(operation: str) -> None:
     async def scenario() -> None:
         pool_a = CredentialLeasingPool.from_env(
@@ -142,6 +190,8 @@ def test_foreign_pool_cannot_settle_another_pools_active_lease(operation: str) -
                 await pool_b.release(lease_a)
             elif operation == "cool_down":
                 await pool_b.cool_down(lease_a, 30)
+            elif operation == "hold_cooldown":
+                await pool_b.hold_cooldown(lease_a, 30)
             else:
                 await pool_b.disable(lease_a)
 

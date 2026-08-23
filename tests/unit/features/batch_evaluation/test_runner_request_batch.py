@@ -88,11 +88,15 @@ class FakeReplyFactory:
         self.raising_outcomes = raising_outcomes
         self.provider_calls = 0
         self.bound_aliases: list[str] = []
+        self.bound_settled: list[bool] = []
+        self.bound_active: list[bool] = []
 
     def bind(self, lease: object, model: str, attempt_sink: AttemptSink) -> FakeReply:
         del model
         alias = lease.alias
         self.bound_aliases.append(alias)
+        self.bound_settled.append(lease._settled)
+        self.bound_active.append(lease._record.active_lease is lease)
         return FakeReply(attempt_sink, alias, self)
 
     def attempt_metadata(
@@ -678,6 +682,8 @@ async def test_retryable_failures_use_bounded_exponential_and_retry_after_backof
     attempts = await repository.list_attempts(job.job_id, "unit-0")
     assert slept == [1, 5]
     assert factory.provider_calls == 3
+    assert factory.bound_settled == [False, False, False]
+    assert factory.bound_active == [True, True, True]
     assert [attempt.state for attempt in attempts] == [
         AttemptState.FAILED,
         AttemptState.FAILED,

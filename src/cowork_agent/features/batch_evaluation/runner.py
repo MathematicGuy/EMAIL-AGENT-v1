@@ -651,7 +651,7 @@ class EvaluationJobRunner:
                         provider_retry_after,
                         event.retry_after_seconds or 0,
                     )
-                    await lease.cool_down(event.retry_after_seconds or 0)
+                    await lease.hold_cooldown(event.retry_after_seconds or 0)
                 elif event.outcome == "authentication_failed":
                     await lease.disable()
                     lane_stopped.set()
@@ -728,8 +728,11 @@ class EvaluationJobRunner:
                 None if cancelled else classification.failure_class,
                 worker_id=lane_id,
             )
-            if classification.credential_state is CredentialState.COOLING_DOWN:
-                await lease.cool_down(0)
+            if (
+                classification.credential_state is CredentialState.COOLING_DOWN
+                and not credential_cooling
+            ):
+                await lease.hold_cooldown(provider_retry_after)
                 credential_cooling = True
             elif classification.credential_state is CredentialState.DISABLED:
                 await lease.disable()

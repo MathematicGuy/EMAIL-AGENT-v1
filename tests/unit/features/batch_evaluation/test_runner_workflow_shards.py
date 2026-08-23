@@ -36,11 +36,15 @@ class FakeReplyFactory:
 
     def __init__(self) -> None:
         self.bound_aliases: list[str] = []
+        self.bound_settled: list[bool] = []
+        self.bound_active: list[bool] = []
 
     def bind(self, lease: object, model: str, attempt_sink: object) -> object:
         del model, attempt_sink
         alias = lease.alias
         self.bound_aliases.append(alias)
+        self.bound_settled.append(lease._settled)
+        self.bound_active.append(lease._record.active_lease is lease)
         return object()
 
 
@@ -189,6 +193,8 @@ async def test_fixed_shards_keep_one_lease_execute_assigned_work_sequentially_an
     assert sorted(repository.claimed_unit_ids) == ["unit-0", "unit-1", "unit-2", "unit-3"]
     assert len(pool.leased_aliases) == 2
     assert len(factory.bound_aliases) == 5
+    assert factory.bound_settled == [False] * 5
+    assert factory.bound_active == [True] * 5
     by_alias = {
         alias: [
             ordinal
