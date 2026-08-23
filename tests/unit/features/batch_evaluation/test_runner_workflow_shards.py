@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
+from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow
+from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
     ArtifactBundle,
@@ -21,6 +26,8 @@ from cowork_agent.features.batch_evaluation.contracts import (
     WorkUnitOutcome,
 )
 from cowork_agent.features.batch_evaluation.credentials import CredentialLeasingPool
+from cowork_agent.features.batch_evaluation.plugins import memory_eval
+from cowork_agent.features.batch_evaluation.plugins.memory_eval import MemoryEvalPlugin
 from cowork_agent.features.batch_evaluation.registry import PluginRegistry
 from cowork_agent.features.batch_evaluation.runner import EvaluationJobRunner
 from cowork_agent.features.batch_evaluation.service import EvaluationJobService
@@ -217,3 +224,132 @@ async def test_fixed_shards_keep_one_lease_execute_assigned_work_sequentially_an
     assert len({context.attempt_id for context in unit_zero_contexts}) >= 2
     assert len({context.scratch_dir for context in unit_zero_contexts}) >= 2
     assert [outcome.ordinal for outcome in plugin.aggregate_outcomes] == [0, 1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    repository = TrackingRepository(tmp_path / "evaluation-jobs.db")
+    await repository.initialize()
+    registry = PluginRegistry()
+    plugin = MemoryEvalPlugin(
+        environment_resolver=lambda: LiveEnvironment(
+            postgres_url=None,
+            sqlite_path=Path("sqlite-template.db"),
+            gemini_ready=True,
+            embeddings_ready=True,
+            embedding_key_name="GEMINI_API_KEY",
+        )
+    )
+    registry.register(plugin)
+    pool = TrackingCredentialPool()
+    factory = FakeReplyFactory()
+    service = EvaluationJobService(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+    )
+    runner = EvaluationJobRunner(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+        scratch_root=tmp_path / "scratch",
+        reply_factory=factory,
+    )
+    observed: list[dict[str, object]] = []
+
+    async def fake_execute_memory_shard(
+        probe_set: object,
+        environment: LiveEnvironment,
+        reply: object,
+        *,
+        model: str,
+        report_nonce: str,
+        **_: object,
+    ) -> MemoryShardResult:
+        assert environment.sqlite_path is not None
+        environment.sqlite_path.touch()
+        probe = probe_set.probes[0]  # type: ignore[union-attr]
+        identity_nonce = uuid4().hex
+        output = environment.sqlite_path.parent / "output.json"
+        output.write_text("private output", encoding="utf-8")
+        transcript = {"question": "private prompt", "reply": "private reply"}
+        observed.append(
+            {
+                "database": environment.sqlite_path,
+                "tenant": f"tenant-{identity_nonce}",
+                "user": f"user-{identity_nonce}",
+                "session": f"session-{identity_nonce}-{probe.probe_id}",
+                "nonce": identity_nonce,
+                "transcript": transcript,
+                "output": output,
+                "reply": reply,
+                "report_nonce": report_nonce,
+            }
+        )
+        environment.sqlite_path.unlink()
+        return MemoryShardResult(
+            rows=tuple(
+                ProbeRow(
+                    probe_id=item.probe_id,
+                    targets=item.targets,
+                    test=item.test,
+                    full=Outcome.PASS,
+                    ablated=Outcome.MISS,
+                    control=Outcome.MISS,
+                    certain=True,
+                    latency_ms=1,
+                )
+                for item in probe_set.probes  # type: ignore[union-attr]
+            ),
+            seed_failure_ids=(),
+            private_transcript=(transcript,),
+            nonce=identity_nonce,
+            provider_findings=(),
+            scratch_removed=True,
+            report_nonce=report_nonce,
+        )
+
+    monkeypatch.setattr(memory_eval, "execute_memory_shard", fake_execute_memory_shard)
+    job = await service.submit(
+        EvaluationRequest(
+            evaluation_type="memory-eval",
+            provider="mistral",
+            target_model="mistral-small-latest",
+            dataset_ref="v1-four-scopes",
+            credential_pool="mistral-eval",
+            execution_mode=ExecutionMode.WORKFLOW_SHARDS,
+            max_workers=2,
+            max_attempts_per_unit=1,
+            budget=EvaluationBudget(max_provider_requests=300, max_total_tokens=300_000),
+            parameters={},
+        ),
+        idempotency_key="memory-shards-key",
+    )
+
+    await runner.run(job.job_id)
+
+    assert len(observed) == 8
+    for key in ("database", "tenant", "user", "session", "nonce", "transcript", "output", "reply"):
+        values = [entry[key] for entry in observed]
+        unique_values = {
+            id(value) if key in {"transcript", "reply"} else value for value in values
+        }
+        assert len(unique_values) == len(values)
+    assert len({entry["report_nonce"] for entry in observed}) == 1
+    assert all(not Path(entry["output"]).exists() for entry in observed)
+    assert not list((tmp_path / "scratch").iterdir())
+    manifest = artifacts.read_manifest(artifacts.manifest_reference(job.job_id))
+    serialized = str(manifest)
+    assert "private prompt" not in serialized
+    assert "private reply" not in serialized
+    assert "output.json" not in serialized
+    private_files = list(
+        (tmp_path / "artifacts" / ".runtime" / "evaluation-artifacts" / "private").rglob("*.json")
+    )
+    assert private_files
+    assert "private prompt" in private_files[0].read_text(encoding="utf-8")
