@@ -160,6 +160,24 @@ class _DurableWorkIntegrity:
     missing_outcomes: tuple[WorkUnitOutcome, ...]
 
 
+async def _gather_lane_warnings(
+    lane_tasks: tuple[asyncio.Task[tuple[EvaluationWarning, ...]], ...],
+) -> tuple[EvaluationWarning, ...]:
+    """Await every lane task, absorbing lane failures into job warnings."""
+
+    try:
+        completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        await asyncio.gather(*lane_tasks, return_exceptions=True)
+        raise
+    warnings: list[EvaluationWarning] = []
+    for result in completed:
+        if isinstance(result, BaseException):
+            continue
+        warnings.extend(result)
+    return tuple(warnings)
+
+
 async def _resolve_durable_operation(
     operation: Awaitable[_OperationResult],
 ) -> tuple[_OperationResult | None, BaseException | None, bool]:
@@ -402,10 +420,7 @@ class EvaluationJobRunner:
                 plugin,
                 plan,
                 integrity.expected_units,
-                (
-                    *(await self._durable_outcomes(job.job_id)),
-                    *integrity.missing_outcomes,
-                ),
+                await self._final_outcomes(job.job_id, integrity),
                 (),
             )
             return
@@ -413,9 +428,7 @@ class EvaluationJobRunner:
             try:
                 job = await self._repository.transition_job(job.job_id, JobState.RUNNING)
             except InvalidStateTransition:
-                cancelled = await self._require_job(job.job_id)
-                if cancelled.state is JobState.CANCELLATION_REQUESTED:
-                    await self._finish_cancelled(cancelled, plugin, plan)
+                if await self._resolve_cancelled_transition(job.job_id, plugin, plan):
                     return
                 raise
         ledger = BudgetLedger(job.request.budget, self._reply_factory.max_output_tokens)
@@ -432,10 +445,7 @@ class EvaluationJobRunner:
         additions = tuple(warning for warning in cleanup_warnings if warning not in job.warnings)
         if additions:
             job = await self._repository.append_warnings(job.job_id, additions)
-        outcomes = (
-            *(await self._durable_outcomes(job.job_id)),
-            *integrity.missing_outcomes,
-        )
+        outcomes = await self._final_outcomes(job.job_id, integrity)
         if await self._is_cancel_requested(job.job_id):
             await self._finish_cancelled(job, plugin, plan)
             return
@@ -449,9 +459,7 @@ class EvaluationJobRunner:
                 cleanup_warnings,
             )
         except InvalidStateTransition:
-            cancelled = await self._require_job(job.job_id)
-            if cancelled.state is JobState.CANCELLATION_REQUESTED:
-                await self._finish_cancelled(cancelled, plugin, plan)
+            if await self._resolve_cancelled_transition(job.job_id, plugin, plan):
                 return
             raise
 
@@ -469,17 +477,7 @@ class EvaluationJobRunner:
             )
             for index in range(job.effective_workers)
         )
-        try:
-            completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
-        except asyncio.CancelledError:
-            await asyncio.gather(*lane_tasks, return_exceptions=True)
-            raise
-        warnings: list[EvaluationWarning] = []
-        for result in completed:
-            if isinstance(result, BaseException):
-                continue
-            warnings.extend(result)
-        return tuple(warnings)
+        return await _gather_lane_warnings(lane_tasks)
 
     async def _run_pull_lane(
         self,
@@ -521,13 +519,7 @@ class EvaluationJobRunner:
                     )
                     raise
                 except BaseException:
-                    cancellation_requested = await self._is_cancel_requested(job.job_id)
-                    executed = _ExecutedUnit(
-                        _cancelled_outcome(unit)
-                        if cancellation_requested
-                        else _failed_outcome(unit),
-                        None,
-                    )
+                    executed = await self._fallback_executed_unit(job.job_id, unit)
                 await queue.complete(job.job_id, executed)
                 warnings.extend(executed.warnings)
         finally:
@@ -561,17 +553,7 @@ class EvaluationJobRunner:
             for index, assigned_units in enumerate(assignments)
             if assigned_units
         )
-        try:
-            completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
-        except asyncio.CancelledError:
-            await asyncio.gather(*lane_tasks, return_exceptions=True)
-            raise
-        warnings: list[EvaluationWarning] = []
-        for result in completed:
-            if isinstance(result, BaseException):
-                continue
-            warnings.extend(result)
-        return tuple(warnings)
+        return await _gather_lane_warnings(lane_tasks)
 
     async def _run_fixed_lane(
         self,
@@ -634,13 +616,7 @@ class EvaluationJobRunner:
                     )
                     raise
                 except BaseException:
-                    cancellation_requested = await self._is_cancel_requested(job.job_id)
-                    executed = _ExecutedUnit(
-                        _cancelled_outcome(unit)
-                        if cancellation_requested
-                        else _failed_outcome(unit),
-                        None,
-                    )
+                    executed = await self._fallback_executed_unit(job.job_id, unit)
                 await self._repository.complete_unit(
                     job.job_id,
                     executed.outcome,
@@ -865,6 +841,32 @@ class EvaluationJobRunner:
             return _ExecutedUnit(_failed_outcome(unit), None, tuple(unit_warnings))
         return _ExecutedUnit(_failed_outcome(unit), None, tuple(unit_warnings))
 
+    async def _fallback_executed_unit(self, job_id: str, unit: WorkUnit) -> _ExecutedUnit:
+        """Record a durable outcome for a unit whose execution raised unexpectedly."""
+
+        if await self._is_cancel_requested(job_id):
+            return _ExecutedUnit(_cancelled_outcome(unit), None)
+        return _ExecutedUnit(_failed_outcome(unit), None)
+
+    async def _resolve_cancelled_transition(
+        self,
+        job_id: str,
+        plugin: EvaluationPlugin,
+        plan: PluginPlan,
+    ) -> bool:
+        """Finish a job whose durable state flipped to cancellation; False re-raises."""
+
+        latest = await self._require_job(job_id)
+        if latest.state is JobState.CANCELLATION_REQUESTED:
+            await self._finish_cancelled(latest, plugin, plan)
+            return True
+        return False
+
+    async def _final_outcomes(
+        self, job_id: str, integrity: _DurableWorkIntegrity
+    ) -> tuple[WorkUnitOutcome, ...]:
+        return (*(await self._durable_outcomes(job_id)), *integrity.missing_outcomes)
+
     async def _fail_budget_exhausted_unit(
         self,
         job: EvaluationJob,
@@ -906,9 +908,7 @@ class EvaluationJobRunner:
                     JobState.COLLECTING,
                 )
             except InvalidStateTransition:
-                cancelled = await self._require_job(job.job_id)
-                if cancelled.state is JobState.CANCELLATION_REQUESTED:
-                    await self._finish_cancelled(cancelled, plugin, plan)
+                if await self._resolve_cancelled_transition(job.job_id, plugin, plan):
                     return
                 raise
         ordered = tuple(sorted(outcomes, key=lambda outcome: (outcome.ordinal, outcome.unit_id)))
@@ -1172,23 +1172,20 @@ def _plain_public_value(value: object) -> object:
     return value
 
 
-def _cancelled_outcome(unit: WorkUnit) -> WorkUnitOutcome:
+def _terminal_outcome(unit: WorkUnit, state: UnitState) -> WorkUnitOutcome:
     return WorkUnitOutcome(
         unit_id=unit.unit_id,
         ordinal=unit.ordinal,
-        state=UnitState.CANCELLED,
+        state=state,
         provider_requests=0,
         total_tokens=0,
         private_result=None,
     )
+
+
+def _cancelled_outcome(unit: WorkUnit) -> WorkUnitOutcome:
+    return _terminal_outcome(unit, UnitState.CANCELLED)
 
 
 def _failed_outcome(unit: WorkUnit) -> WorkUnitOutcome:
-    return WorkUnitOutcome(
-        unit_id=unit.unit_id,
-        ordinal=unit.ordinal,
-        state=UnitState.FAILED,
-        provider_requests=0,
-        total_tokens=0,
-        private_result=None,
-    )
+    return _terminal_outcome(unit, UnitState.FAILED)
