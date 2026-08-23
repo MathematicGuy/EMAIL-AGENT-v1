@@ -42,7 +42,6 @@ from cowork_agent.features.batch_evaluation.credentials import (
     CredentialLease,
     CredentialLeasingPool,
 )
-from cowork_agent.features.batch_evaluation.planning import DataSharder
 from cowork_agent.features.batch_evaluation.registry import PluginRegistry
 from cowork_agent.integrations.llm.evaluation_mistral import MistralEvaluationReplyFactory
 from cowork_agent.persistence.repositories.evaluation_jobs import (
@@ -152,6 +151,13 @@ class _ExecutedUnit:
 class _CleanupResult:
     warnings: tuple[EvaluationWarning, ...]
     error: BaseException | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DurableWorkIntegrity:
+    expected_units: tuple[WorkUnit, ...]
+    executable_units: tuple[WorkUnit, ...]
+    missing_outcomes: tuple[WorkUnitOutcome, ...]
 
 
 async def _resolve_durable_operation(
@@ -382,7 +388,7 @@ class EvaluationJobRunner:
             return
         try:
             plan = await self._preflight(plugin, job.request)
-            units = await self._durable_work_units(job, plan)
+            integrity = await self._durable_work_units(job, plugin, plan)
         except BaseException:
             await self._finish_unplanned_failure(job)
             return
@@ -395,8 +401,11 @@ class EvaluationJobRunner:
                 job,
                 plugin,
                 plan,
-                units,
-                await self._durable_outcomes(job.job_id),
+                integrity.expected_units,
+                (
+                    *(await self._durable_outcomes(job.job_id)),
+                    *integrity.missing_outcomes,
+                ),
                 (),
             )
             return
@@ -413,11 +422,20 @@ class EvaluationJobRunner:
         if job.request.execution_mode.value == "request_batch":
             cleanup_warnings = await self._run_pull_lanes(job, plugin, plan, ledger)
         else:
-            cleanup_warnings = await self._run_fixed_shards(job, plugin, plan, units, ledger)
+            cleanup_warnings = await self._run_fixed_shards(
+                job,
+                plugin,
+                plan,
+                integrity.executable_units,
+                ledger,
+            )
         additions = tuple(warning for warning in cleanup_warnings if warning not in job.warnings)
         if additions:
             job = await self._repository.append_warnings(job.job_id, additions)
-        outcomes = await self._durable_outcomes(job.job_id)
+        outcomes = (
+            *(await self._durable_outcomes(job.job_id)),
+            *integrity.missing_outcomes,
+        )
         if await self._is_cancel_requested(job.job_id):
             await self._finish_cancelled(job, plugin, plan)
             return
@@ -426,7 +444,7 @@ class EvaluationJobRunner:
                 job,
                 plugin,
                 plan,
-                units,
+                integrity.expected_units,
                 outcomes,
                 cleanup_warnings,
             )
@@ -524,19 +542,24 @@ class EvaluationJobRunner:
         units: tuple[WorkUnit, ...],
         ledger: BudgetLedger,
     ) -> tuple[EvaluationWarning, ...]:
-        shards = DataSharder().partition(units, job.effective_workers)
+        assignments: list[list[WorkUnit]] = [
+            [] for _ in range(job.effective_workers)
+        ]
+        for unit in units:
+            assignments[unit.ordinal % job.effective_workers].append(unit)
         lane_tasks = tuple(
             asyncio.create_task(
                 self._run_fixed_lane(
                     job,
                     plugin,
                     plan,
-                    tuple(item.value for item in shard),
+                    tuple(assigned_units),
                     ledger,
                     f"lane-{index + 1}",
                 )
             )
-            for index, shard in enumerate(shards)
+            for index, assigned_units in enumerate(assignments)
+            if assigned_units
         )
         try:
             completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
@@ -945,7 +968,12 @@ class EvaluationJobRunner:
     async def _finish_unplanned_failure(self, job: EvaluationJob) -> None:
         self._artifact_store.write_manifest(job.job_id, {"state": "failed"})
         latest = await self._require_job(job.job_id)
-        if latest.state in {JobState.VALIDATING, JobState.QUEUED, JobState.RUNNING}:
+        if latest.state in {
+            JobState.VALIDATING,
+            JobState.QUEUED,
+            JobState.RUNNING,
+            JobState.COLLECTING,
+        }:
             await self._repository.transition_job(job.job_id, JobState.FAILED)
 
     async def _preflight(self, plugin: EvaluationPlugin, request: EvaluationRequest) -> PluginPlan:
@@ -955,13 +983,44 @@ class EvaluationJobRunner:
         return plan
 
     async def _durable_work_units(
-        self, job: EvaluationJob, plan: PluginPlan
-    ) -> tuple[WorkUnit, ...]:
+        self,
+        job: EvaluationJob,
+        plugin: EvaluationPlugin,
+        plan: PluginPlan,
+    ) -> _DurableWorkIntegrity:
         stored_units = await self._repository.list_units(job.job_id)
         units = tuple(
             WorkUnit(unit_id=unit.unit_id, ordinal=unit.ordinal, payload=unit.payload)
             for unit in stored_units
         )
+        if job.request.execution_mode is ExecutionMode.WORKFLOW_SHARDS:
+            expected = plugin.build_work_units(plan, job.effective_workers)
+            if (
+                not isinstance(expected, tuple)
+                or not 0 < len(expected) <= plan.ready_work
+                or any(not isinstance(unit, WorkUnit) for unit in expected)
+                or len({unit.unit_id for unit in expected}) != len(expected)
+                or len({unit.ordinal for unit in expected}) != len(expected)
+                or tuple(unit.ordinal for unit in expected) != tuple(range(len(expected)))
+            ):
+                raise ValueError("evaluation workflow descriptor is invalid")
+            expected_by_id = {unit.unit_id: unit for unit in expected}
+            if (
+                len({unit.unit_id for unit in units}) != len(units)
+                or len({unit.ordinal for unit in units}) != len(units)
+                or any(
+                    expected_by_id.get(unit.unit_id) != unit
+                    for unit in units
+                )
+            ):
+                raise ValueError("durable evaluation work units are inconsistent with the plan")
+            durable_ids = {unit.unit_id for unit in units}
+            missing = tuple(
+                _failed_outcome(unit)
+                for unit in expected
+                if unit.unit_id not in durable_ids
+            )
+            return _DurableWorkIntegrity(expected, units, missing)
         valid_count = (
             len(units) == plan.ready_work
             if job.request.execution_mode is ExecutionMode.REQUEST_BATCH
@@ -973,7 +1032,7 @@ class EvaluationJobRunner:
             or len({unit.unit_id for unit in units}) != len(units)
         ):
             raise ValueError("durable evaluation work units are inconsistent with the plan")
-        return units
+        return _DurableWorkIntegrity(units, units, ())
 
     async def _durable_outcomes(self, job_id: str) -> tuple[WorkUnitOutcome, ...]:
         outcomes: list[WorkUnitOutcome] = []
