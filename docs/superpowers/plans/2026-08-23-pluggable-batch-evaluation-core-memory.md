@@ -946,6 +946,41 @@ git commit -m "test: add evaluation key independence smoke gate"
 
 ---
 
+### Task 11.5: Behavior-Preserving Code Simplification
+
+**Files:**
+- Modify only batch-evaluation, memory-evaluation, API, bootstrap, and smoke-test files added or materially changed by Tasks 1–11.
+- Do not modify unrelated providers, frontend code, SQL migrations, or deferred RAGAS production code.
+
+**Interfaces:**
+- Consumes: the verified implementation from Tasks 1–11.
+- Preserves: every public contract, runtime behavior, report schema, persistence transition, warning code, cleanup guarantee, and test expectation.
+- Produces: smaller and clearer implementation code with no feature expansion.
+
+- [ ] **Step 1: Invoke `agent-skills:code-simplification` and identify narrow opportunities**
+
+Restrict review to this branch's newly implemented or materially changed files. Prefer clearer names, flatter control flow, removal of local duplication, and smaller private helpers. Reject any suggestion that changes behavior or public interfaces.
+
+- [ ] **Step 2: Apply simplifications in separate refactor commits**
+
+Keep behavior-preserving cleanup separate from feature/fix commits so it can be reviewed or reverted independently. Do not rewrite tests merely to accommodate a changed contract.
+
+- [ ] **Step 3: Re-run unchanged focused tests and static checks**
+
+```powershell
+uv run pytest -q tests/unit/features/batch_evaluation tests/unit/features/ai_chat/memory_eval tests/unit/integrations/llm/test_evaluation_mistral.py tests/unit/persistence/test_evaluation_job_repository.py tests/unit/scripts/test_evaluate_memory.py tests/unit/scripts/test_smoke_test_mistral_evaluation_keys.py tests/integration/api/test_evaluation_jobs_api.py
+uv run ruff check .
+uv run mypy src
+```
+
+Expected: the existing tests pass unchanged; no baseline/report/API output changes.
+
+- [ ] **Step 4: Review the simplification diff**
+
+Use a fresh code review focused on accidental behavior changes, obscured ownership boundaries, and deleted edge-case handling. Route any defect back to Task 11.5 and repeat the focused checks.
+
+---
+
 ### Task 12: End-to-End Acceptance and Final Quality Gate
 
 **Files:**
@@ -1013,7 +1048,8 @@ Task 7 memory row/live extraction
          └─> Task 9 runtime/CLI
                 └─> Task 10 API/app wiring
 Task 3 ─> Task 11 smoke gate
-Tasks 1–11 ─> Task 12 acceptance
+Tasks 1–11 ─> Task 11.5 code simplification
+Task 11.5 ─> Task 12 acceptance
 ```
 
 Tasks 2, 3, 4, and 7 are file-disjoint after Task 1 and can be implemented in parallel. Tasks 5–6 and Tasks 8–10 are sequential dependency chains. The parent agent retains ownership of SPEC alignment, cross-task interface consistency, final integration, and Definition of Done.
@@ -1032,7 +1068,7 @@ Tasks 2, 3, 4, and 7 are file-disjoint after Task 1 and can be implemented in pa
 | `request_batch` pluggability and sequential steps inside one stateless case | 2, 5 | Planned with a fake RAGAS-shaped plug-in |
 | Production Chat RAGAS sample/metric adapter | Separate future plan | Deferred by the approved core/memory scope |
 
-The self-review found no uncovered core or memory acceptance requirement. The only deliberately uncovered SPEC criteria are the real Chat RAGAS adapter assertions; the fake stateless contract covers the shared Level 1 behavior they depend on without pretending RAGAS is implemented.
+Task 11.5 changes no SPEC coverage; it is a behavior-preserving maintainability gate. The self-review found no uncovered core or memory acceptance requirement. The only deliberately uncovered SPEC criteria are the real Chat RAGAS adapter assertions; the fake stateless contract covers the shared Level 1 behavior they depend on without pretending RAGAS is implemented.
 
 ## Checkpoints
 
