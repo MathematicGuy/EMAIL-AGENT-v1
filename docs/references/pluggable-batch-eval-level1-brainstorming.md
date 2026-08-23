@@ -1,145 +1,180 @@
-# Pluggable Batch Evaluation API — Level 1 System Design & Brainstorming
+# Pluggable Batch Evaluation — Level 1 Brainstorming
 
-**Status:** Brainstorming & Idea Refinement  
-**Area:** Evaluation Control Plane & Worker Architecture  
-**Reference Document:** [`tasks/specs/SPEC-pluggable-batch-evaluation-api.md`](../tasks/specs/SPEC-pluggable-batch-evaluation-api.md)
-
----
-
-## 1. Problem Statement
-
-> **How Might We** build an extensible, rate-limit-aware evaluation engine that maximizes throughput across multiple independent API keys for a given model, without conflating local data-parallel sharding with provider-side batch APIs or multi-model benchmarking matrices?
+**Status:** Recommended design preview
+**Official spec:** [`SPEC-pluggable-batch-evaluation-api.md`](../../tasks/specs/SPEC-pluggable-batch-evaluation-api.md)
 
 ---
 
-## 2. Core Architectural Clarification
+## 1. Problem Statement — Solve Slow Evaluation with Batch Processing and Multiple Evaluation Plug-ins
 
-When discussing "Batch Processing" in the context of LLM evaluations, three distinct dimensions often get conflated:
+Evaluation is slow when every case runs sequentially through one provider API
+key. We need one small Level 1 batch-processing system that can:
 
-| Dimension | Meaning | In Level 1 Scope? |
+- Run one evaluation job against one target model.
+- Use `max_workers=1..N` to process independent work concurrently.
+- Bound workers by healthy compatible API keys and ready work.
+- Support multiple evaluation use cases without adding another scheduler or API.
+- Preserve each evaluator's correctness, privacy, and aggregation rules.
+
+Level 1 is local data-parallel execution. It is not a provider batch API and it
+is not a multi-model benchmark matrix.
+
+The first two plug-in use cases prove both execution shapes:
+
+- **Memory evaluation:** stateful `workflow_shards`; complete probes stay
+  together and each shard receives isolated SQLite state.
+- **Chat RAGAS evaluation:** stateless `request_batch`; one case is one work unit
+  pulled by the next free worker.
+
+---
+
+## 2. Clarification
+
+### How a memory-evaluation batch job is activated
+
+The existing memory evaluator does not start or manage batch workers. The
+caller submits one job:
+
+```text
+POST /v1/evaluation-jobs
+evaluation_type = "memory-eval"
+execution_mode = "workflow_shards"
+target_model = "mistral-small-latest"
+dataset_ref = "probes_v1"
+max_workers = 4
+credential_pool = "mistral-eval"
+```
+
+The Level 1 engine resolves the registered `MemoryEvalPlugin`, calculates the
+effective worker count, leases credentials, runs isolated shards, and asks the
+plug-in to aggregate their results.
+
+### Dynamic worker rule
+
+```text
+effective_workers = min(
+    requested max_workers,
+    healthy compatible credentials,
+    ready work units or planned shards,
+)
+```
+
+Examples:
+
+| Request | Healthy keys | Ready work | Result |
+|---|---:|---:|---|
+| `max_workers=1` | 3 | 20 | Run 1 worker |
+| `max_workers=2` | 3 | 20 | Run 2 workers |
+| `max_workers=4` | 3 | 20 | Run 3 workers and emit `WORKER_COUNT_REDUCED` |
+| `max_workers=4` | 3 | 2 | Run 2 workers; no credential-capacity warning |
+
+The warning records requested workers, effective workers, and available
+credentials. It never exposes API-key values.
+
+### Recommended memory plug-in boundary
+
+Create new batch integration code, but reuse the existing memory-evaluation
+semantics. A small extraction is required because reusable orchestration should
+not be imported from the private CLI script.
+
+```python
+class MemoryEvalPlugin:
+    evaluation_type = "memory-eval"
+    execution_strategy = "workflow_shards"
+
+    async def preflight(self, request) -> MemoryEvalPlan:
+        payload = load_dataset_json(request.dataset_ref)
+        probe_set = load_probe_set(payload)
+        return MemoryEvalPlan(probe_set=probe_set)
+
+    def plan_shards(
+        self,
+        plan: MemoryEvalPlan,
+        effective_workers: int,
+    ) -> list[MemoryShard]:
+        return partition_complete_probes(plan.probe_set, effective_workers)
+
+    async def execute_shard(
+        self,
+        shard: MemoryShard,
+        context: ShardContext,
+    ) -> MemoryShardResult:
+        return await execute_memory_shard(
+            probe_set=shard.probe_set,
+            environment=context.isolated_environment,
+            reply=context.lease_bound_reply,
+            provider=context.provider,
+            model=context.model,
+        )
+
+    def aggregate(self, plan, shard_results):
+        return merge_in_original_probe_order(plan, shard_results)
+```
+
+Recommended improvements:
+
+- Extract reusable `execute_memory_shard()` and adapter construction from the
+  memory-evaluation CLI into the memory-evaluation package.
+- Keep the plug-in stateless; never store one job's probe set on the registered
+  plug-in instance.
+- Pass a lease-bound reply client instead of a raw API key.
+- Give every shard a collision-safe path containing job ID and shard ID.
+- Keep FULL, ABLATED, and CONTROL arms of one probe in the same shard.
+- Preserve the existing scorer, verdicts, seeding, masking, transcript privacy,
+  and teardown behavior.
+- Merge completed rows in original probe-set order.
+- Keep PostgreSQL memory evaluation at `max_workers=1` in Level 1.
+
+### Why this remains pluggable
+
+The core owns only job state, worker resolution, scheduling, credential leases,
+progress, cancellation, and durable work-unit outcomes. Each plug-in owns its
+evaluation-specific planning, execution, failure interpretation, artifacts, and
+aggregation.
+
+| Concern | Memory evaluation plug-in | Chat RAGAS plug-in |
 |---|---|---|
-| **A. Data Batching (Workload Sharding)** | Splitting $N$ evaluation items/probes across $K$ workers running against the **same model** using **distinct API keys** to bypass single-key rate limits. | **YES (Core Focus)** |
-| **B. Multi-Model Matrix Batching** | Running an evaluation across a suite of $M$ different models (e.g. Mistral 7B vs Large vs Gemini) for comparison. | **NO (Composition Layer above Level 1)** |
-| **C. Provider Batch API** | Offloading offline asynchronous jobs directly to provider infrastructure (e.g. Mistral/OpenAI 24h JSONL batch endpoints). | **NO (Explicitly Out of Scope)** |
+| Execution mode | `workflow_shards` | `request_batch` |
+| Work unit | Isolated shard of complete probes | One RAGAS case |
+| Inside one unit | Probes sequential; three arms together | Metrics sequential |
+| Core worker pool | Dynamic `1..N` | Dynamic `1..N` |
+| Nested worker pool | None | RAGAS internal workers fixed at `1` |
+| Aggregation | Original probe order | Original case order |
 
-### Visual Topology: Level 1 Data-Parallel Sharding
+Adding either plug-in requires no new endpoint, scheduler, credential pool, job
+state machine, or artifact store.
+
+---
+
+## 3. Visual Topology: Level 1 Data-Parallel Sharding with Dynamic `max_workers`
 
 ```mermaid
 flowchart TD
-    subgraph Job["Single Evaluation Job"]
-        CONF["Evaluator: MemoryEval / RoutingEval<br/>Target Model: mistral-small-latest<br/>Dataset: 60 Probes / Prompts"]
-    end
+    CLIENT["Evaluation client"] -->|"POST job<br/>evaluation_type + max_workers=N"| API["Evaluation Job API"]
+    API --> REG["Static Plug-in Registry"]
+    REG --> PLAN["Plug-in preflight + deterministic work plan"]
 
-    Job -->|"Partition Work"| SCHED["Work Scheduler / Queue"]
+    PLAN --> RESOLVE["Dynamic worker resolver<br/>effective = min(max_workers,<br/>healthy keys, ready work)"]
+    KEYS["Credential pool<br/>healthy compatible keys"] --> RESOLVE
 
-    subgraph DataPartitioning["Data Shards (Batch of Probes)"]
-        S1["Data Items [1..20]"]
-        S2["Data Items [21..40]"]
-        S3["Data Items [41..60]"]
-    end
+    RESOLVE -->|"requested 4, keys 3"| WARN["Run 3 workers<br/>WORKER_COUNT_REDUCED warning"]
+    RESOLVE --> MODE{"Execution mode"}
 
-    SCHED --> S1
-    SCHED --> S2
-    SCHED --> S3
+    MODE -->|"workflow_shards<br/>Memory evaluation"| SHARDS["Deterministic DataSharder<br/>complete probes + isolated SQLite"]
+    MODE -->|"request_batch<br/>Chat RAGAS"| QUEUE["Dynamic WorkUnitQueue<br/>one case per work unit"]
 
-    subgraph CredentialPool["Leased Credential Pool"]
-        K1["MISTRAL_API_KEY (Lane 1 Limit)"]
-        K2["MISTRAL_API_KEY2 (Lane 2 Limit)"]
-        K3["MISTRAL_API_KEY3 (Lane 3 Limit)"]
-    end
+    SHARDS --> LANES["LaneExecutors 1..effective_workers"]
+    QUEUE --> LANES
+    KEYS -->|"one exclusive lease per lane"| LANES
 
-    S1 -.->|Lease| K1
-    S2 -.->|Lease| K2
-    S3 -.->|Lease| K3
+    LANES --> MEM["MemoryEvalPlugin<br/>execute isolated shard"]
+    LANES --> RAGAS["ChatRagasPlugin<br/>execute one case"]
 
-    subgraph Workers["Concurrent Worker Lanes"]
-        W1["Worker 1 (Leases Key 1)"]
-        W2["Worker 2 (Leases Key 2)"]
-        W3["Worker 3 (Leases Key 3)"]
-    end
-
-    K1 --> W1
-    K2 --> W2
-    K3 --> W3
-
-    W1 -->|"Normal Chat Completion"| API["Mistral API"]
-    W2 -->|"Normal Chat Completion"| API
-    W3 -->|"Normal Chat Completion"| API
-
-    W1 --> AGG["Deterministic Aggregator"]
-    W2 --> AGG
-    W3 --> AGG
-
-    AGG --> OUT["Aggregated Benchmark Baseline [1..60]"]
+    MEM --> AGG["Plug-in aggregation<br/>restore original input order"]
+    RAGAS --> AGG
+    AGG --> RESULT["Job result + execution manifest<br/>public metadata / private details"]
 ```
 
----
-
-## 3. Recommended Direction & Refinements for Level 1
-
-### A. Disambiguate Terminology in Specs and Code
-Replace generic terms like `BatchExecutor` with domain-accurate abstractions:
-- **`DataSharder` / `WorkUnitQueue`**: Responsible for slicing datasets into atomic units.
-- **`CredentialLeasingPool`**: Manages the lifecycle (`available`, `leased`, `cooling_down`, `disabled`) of provider keys with independent quotas.
-- **`LaneExecutor`**: The concurrent worker executing against an assigned API key lease.
-
-### B. Execution Strategy Tailoring: Pull Queue vs Static Shards
-Level 1 defines two execution modes that require different queue semantics:
-1. **`request_batch` (Stateless Fan-out)**:
-   - *Problem with Static Sharding:* If Key 2 hits a transient `429` backoff, static shards leave Shard 2 blocked while Workers 1 and 3 sit idle.
-   - *Refined Design:* Use a **Dynamic Pull Queue**. Workers 1, 2, and 3 pull the next atomic request from a shared in-memory queue. Throttled keys pause their pull loop without starving the overall job.
-2. **`workflow_shards` (Stateful Multi-Step Pipelines)**:
-   - Requires deterministic isolation (e.g. dedicated SQLite database per shard, unique tenant nonces, seed $\to$ mask $\to$ query $\to$ score).
-   - Uses **Deterministic Partitioning** (e.g. round-robin probe assignment) with per-shard scratch databases and atomic teardown.
-
-### C. Dynamic Elasticity & Fault Recovery
-The system must gracefully handle dynamic key pool sizes:
-- **$M = 3$**: 3 concurrent lanes (optimal speedup).
-- **$M = 1$**: 1 sequential lane (backward-compatible local dev).
-- **Key Authentication Failure (`401/403`)**: Mark key `disabled`. Its remaining unstarted work items return to the queue and get processed by remaining healthy keys.
-
-### D. Composition Hierarchy (How Multi-Model Fits Later)
-- **Level 1 (Atomic Execution Primitive)**:
-  $$\text{execute\_job}(\text{evaluator\_type}, \text{target\_model}, \text{dataset}, \text{key\_pool}) \to \text{JobResult}$$
-- **Layer Above Level 1 (Multi-Model Suite Orchestrator)**:
-  Dispatches $M$ Level 1 jobs across different models and merges the results into leaderboard formats (e.g., updating `MODEL-MEMORY-EVAL-LEADERBOARD.md`).
-
----
-
-## 4. Key Assumptions to Validate
-
-- [ ] **Assumption 1 (Key Independence):** The 3 configured Mistral API keys truly maintain isolated rate limits and do not share an invisible organization-wide concurrency bottleneck.
-  - *Validation:* Run a concurrent synthetic probe benchmark saturating all 3 keys simultaneously and check for cross-key 429 throttling.
-- [ ] **Assumption 2 (In-Memory Queue vs Job Store Crash Safety):** For long-running jobs, storing work-item state in the SQLite Job Store provides sufficient crash recovery without adding heavy distributed queue dependencies (e.g. Celery / Redis).
-  - *Validation:* Simulate service restart mid-job and verify that the job store marks orphaned running shards as retryable or failed.
-- [ ] **Assumption 3 (Memory Eval Seeding Isolation):** Complete probe arms (`FULL`, `ABLATED`, `CONTROL`) executed on an isolated SQLite file on Shard $i$ will never bleed context or side-effects into Shard $j$.
-  - *Validation:* Parallel probe suite execution with unique synthetic memories asserted per shard.
-
----
-
-## 5. MVP Scope (Level 1)
-
-### What's In
-- Job submission API (`POST /v1/evaluation-jobs`, `GET /v1/evaluation-jobs/{job_id}`, `GET /v1/evaluation-jobs/{job_id}/result`).
-- SQLite-backed durable job state machine (`accepted -> validating -> queued -> running -> collecting -> succeeded`).
-- Credential Lease Pool managing $K$ keys with status tracking (`available`, `leased`, `cooling_down`, `disabled`).
-- Worker execution engine supporting both `request_batch` (stateless pull queue) and `workflow_shards` (isolated stateful shards).
-- Deterministic result aggregation preserving input probe ordering.
-- Offline fakes for job store, credential pool, and provider transports.
-
-### What's Out (and Why)
-- **Mistral Provider Batch API Integration**: Bypasses local control plane, introduces 24h asynchronous turnaround, and cannot execute stateful local memory seeding/scoring workflows.
-- **Multi-Model Benchmark Matrix within a single job**: Mixing multiple model targets into a single job complicates shard scheduling and error recovery. Handled as multiple Level 1 jobs instead.
-- **PostgreSQL Parallel Memory Sharding**: Kept at concurrency `1` to avoid advisory-lock contention and complex parallel schema isolation in this phase.
-- **Public Multi-Tenant Authentication**: Internal administrator/evaluator tooling only.
-
----
-
-## 6. Open Questions for Brainstorming
-
-1. **Job Preemption & Cancellation Granularity:**
-   When `POST /v1/evaluation-jobs/{job_id}/cancel` is called, should in-flight HTTP requests be aborted immediately via `asyncio.CancelledError`, or should the worker finish the current probe arm and exit before the next item?
-2. **Dynamic Work Stealing in `workflow_shards`:**
-   If Shard 1 finishes its 20 probes much faster than Shard 2 (due to probe length variance), should Shard 1 be allowed to "steal" remaining unstarted probes from Shard 2, given the need to re-initialize SQLite scratch states?
-3. **Artifact Retention & Cleanup Lifecycle:**
-   How long should intermediate per-shard SQLite scratch databases and raw provider response logs be retained before automated garbage collection?
+The Level 1 core changes concurrency, not evaluation meaning. A worker executes
+the work unit defined by the selected plug-in; the plug-in continues to own how
+that unit is evaluated and interpreted.

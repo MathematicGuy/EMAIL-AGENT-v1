@@ -49,7 +49,6 @@ from cowork_agent.integrations.llm.providers.vyce import (
     VyceActionPlanGenerator,
     VyceRouteClassifier,
 )
-from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +93,8 @@ def _openrouter_last_resort(*, log_status: bool) -> GeminiSettings | None:
 async def resolve_email_providers(provider: str) -> EmailProviderBundle:
     name = normalize_llm_provider(provider)
     if name == "gemini":
+        from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
+
         gemini_settings = GeminiSettings.from_env()
         return EmailProviderBundle(
             classifier=GeminiRouteClassifier(gemini_settings),

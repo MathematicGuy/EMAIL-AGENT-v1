@@ -872,7 +872,8 @@ class OpenRouterSettings:
 
 
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
-    value = int(environ.get(name, str(default)))
+    raw = environ.get(name, str(default)).strip().replace(",", "")
+    value = int(raw)
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
