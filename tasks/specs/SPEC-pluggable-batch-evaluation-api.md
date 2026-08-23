@@ -18,12 +18,19 @@ Evaluation tooling currently consists primarily of separate CLI workflows.
 Memory evaluation selects one provider adapter and one API key, then runs every
 probe and its three experimental arms sequentially.
 
-The AI evaluation developer currently has three Mistral API keys with
-independent usage limits and may add a fourth or fifth later. Using one key does
-not consume or reduce the other keys' limits. The evaluation system should
-therefore discover the pool dynamically and run up to the requested number of
-safe concurrent lanes, one per active key, while preserving experiment
-correctness and recording which non-secret credential alias ran each lane.
+<<<<<<< HEAD
+The AI evaluation developer has three Mistral API keys with independent usage
+limits. Using one key does not consume or reduce the other keys' limits. The
+evaluation system should therefore be able to run three safe concurrent lanes,
+one per key, while preserving experiment correctness and recording which
+non-secret credential alias ran each lane.
+=======
+The operator has three Mistral API keys with independent usage limits. Using
+one key does not consume or reduce the other keys' limits. The evaluation
+system should therefore be able to run three safe concurrent lanes, one per
+key, while preserving experiment correctness and recording which non-secret
+credential alias ran each lane.
+>>>>>>> fix/memory-eval-refusal-noun-head
 
 The same batch-processing control plane should later support memory,
 retrieval, routing, email-intent, and similar evaluations without building a
@@ -45,7 +52,11 @@ the Mistral settings and chat reply adapter currently consume one key.
 
 ## Solution
 
+<<<<<<< HEAD
 Build an asynchronous evaluation API for AI evaluation developers, backed by:
+=======
+Build an internal, administrator-only asynchronous evaluation API backed by:
+>>>>>>> fix/memory-eval-refusal-noun-head
 
 1. An evaluation plug-in registry.
 2. A durable evaluation job store.
@@ -209,6 +220,7 @@ flowchart TD
     rather than adding new endpoints.
 19. As a developer, I want a fake provider-batch adapter, so that scheduling,
     retries, cancellation, and aggregation are testable offline.
+<<<<<<< HEAD
 20. As an AI evaluation developer, I want cancellation to stop queued work and
     cancel local workers and cancellable in-flight requests, so that unwanted
     spending stops promptly.
@@ -216,6 +228,15 @@ flowchart TD
     persistence, logs, errors, and artifacts.
 22. As an AI evaluation developer, I want request and token budgets, so that
     unexpectedly large jobs are rejected or stopped.
+=======
+20. As an operator, I want cancellation to stop queued work and cancel local
+    workers and cancellable in-flight requests, so that unwanted spending
+    stops promptly.
+21. As an operator, I want secrets excluded from requests, persistence, logs,
+    errors, and artifacts.
+22. As an operator, I want request and token budgets, so that unexpectedly
+    large jobs are rejected or stopped.
+>>>>>>> fix/memory-eval-refusal-noun-head
 23. As a benchmark reader, I want the execution manifest to record shard and
     credential aliases, so that I can detect whether infrastructure differences
     affected the result.
@@ -238,14 +259,13 @@ flowchart TD
 The endpoint accepts a credential-pool alias such as `mistral-eval`, never
 actual API keys.
 
-`POST /v1/evaluation-jobs` accepts `execution.max_workers` as an optional
-positive integer. The equivalent dev CLI flag is `--max-workers`. It is an
-upper bound for our scheduler, not a request to RAGAS or Mistral's built-in
-Batch API. Status and result manifests expose both requested and effective
-values.
-
+<<<<<<< HEAD
 The first release is for AI evaluation developers only. It is not part of the
 normal Cowork Agent user experience.
+=======
+The first release is local or administrator-only. It does not expose an
+evaluation endpoint to ordinary product users.
+>>>>>>> fix/memory-eval-refusal-noun-head
 
 ### Plug-in interface
 

@@ -222,13 +222,29 @@ class MemoryGateway:
                         started=started,
                     )
                 else:
-                    episodes = tuple(
+                    eligible = tuple(
                         episode
                         for episode in candidates
                         if episode.retrieval_eligible
                         and episode.validation_status
                         in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED}
                         and episode.user_id == self._scope.user_id
+                    )
+                    # Concern D: a revision carries a supersedes link to the episode
+                    # it replaces. Ancestors are dropped here rather than by flipping
+                    # retrieval_eligible, which is derived from validation_status and
+                    # cannot be set freely. Only episodes that survived the filter
+                    # above may retire another, so a rejected revision cannot hide an
+                    # approved ancestor.
+                    superseded_ids = {
+                        episode.supersedes
+                        for episode in eligible
+                        if episode.supersedes is not None
+                    }
+                    episodes = tuple(
+                        episode
+                        for episode in eligible
+                        if episode.episode_id not in superseded_ids
                     )[: request.reads.episodic.max_items]
                     self._emit(
                         MemoryType.EPISODIC,

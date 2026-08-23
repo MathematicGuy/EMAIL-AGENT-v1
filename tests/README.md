@@ -116,9 +116,18 @@ Before writing a test, check if its invariant is already owned.
 
 ---
 
-## 5. Verification & Fast Gates
+## 5. Verification & Pre-PR Gates
 
-Before submitting changes, run:
+Before submitting changes or opening a PR to `main`, run and pass the full CI + E2E gate suite:
+
 ```bash
-uv run pytest -q ; uv run ruff check . ; uv run mypy src
+# 1. Backend CI checks
+uv run ruff check . && uv run mypy src && uv run pytest -q
+
+# 2. Frontend CI checks
+cd frontend && pnpm lint && pnpm check-types && pnpm test && pnpm build
+
+# 3. Playwright E2E tests
+pnpm run test:e2e
 ```
+

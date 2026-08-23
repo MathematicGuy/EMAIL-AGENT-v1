@@ -9,7 +9,11 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings
+from cowork_agent.config import (
+    GeminiSettings,
+    MistralSettings,
+    VyceSettings,
+)
 from cowork_agent.domain import Priority
 from cowork_agent.domain.target_contracts import (
     Actionability,
@@ -31,10 +35,13 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GenerationSchemaError,
 )
-from cowork_agent.integrations.llm.providers.groq import GroqActionPlanGenerator, GroqAPIError
 from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
     MistralAPIError,
+)
+from cowork_agent.integrations.llm.providers.vyce import (
+    VyceActionPlanGenerator,
+    VyceAPIError,
 )
 
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
@@ -314,7 +321,7 @@ def test_generator_raises_safe_error_after_failed_repair_retry() -> None:
     asyncio.run(scenario())
 
 
-def test_groq_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vyce_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
 
     def fake_post_json(
@@ -325,12 +332,12 @@ def test_groq_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
         return {"choices": [{"message": {"content": json.dumps({"task": task_payload()})}}]}
 
     monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.groq._post_json", fake_post_json
+        "cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json
     )
 
     async def scenario() -> None:
-        settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
-        generator = GroqActionPlanGenerator(settings)
+        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
+        generator = VyceActionPlanGenerator(settings)
         output = await generator.generate(
             user_timezone="Asia/Ho_Chi_Minh",
             current_time=CURRENT_TIME,
@@ -347,13 +354,12 @@ def test_groq_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
 
     assert len(captured) == 1
     body = captured[0]
-    assert body["model"] == "qwen/qwen3.6-27b"
-    assert body["reasoning_effort"] == "none"
-    assert body["reasoning_format"] == "hidden"
+    assert body["model"] == "gpt-5.6-luna"
     assert body["response_format"] == {"type": "json_object"}
     messages = body["messages"]
     assert isinstance(messages, list)
-    assert messages[0]["content"] == GENERATOR_SYSTEM_INSTRUCTION
+    assert messages[0]["content"].startswith(GENERATOR_SYSTEM_INSTRUCTION)
+    assert json.dumps(GENERATION_SCHEMA, ensure_ascii=False) in messages[0]["content"]
     user_content = messages[1]["content"]
     assert isinstance(user_content, str)
     assert json.dumps(GENERATION_SCHEMA, ensure_ascii=False) in user_content
@@ -361,7 +367,7 @@ def test_groq_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
     assert "<retrieved_context>" in user_content
 
 
-def test_groq_generator_repair_retry_recovers_then_fails_safely(
+def test_vyce_generator_repair_retry_recovers_then_fails_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payloads: list[dict[str, object]] = [
@@ -382,12 +388,12 @@ def test_groq_generator_repair_retry_recovers_then_fails_safely(
         }
 
     monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.groq._post_json", fake_post_json
+        "cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json
     )
 
-    async def generate_once_groq() -> None:
-        settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
-        await GroqActionPlanGenerator(settings).generate(
+    async def generate_once_vyce() -> None:
+        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
+        await VyceActionPlanGenerator(settings).generate(
             user_timezone="Asia/Ho_Chi_Minh",
             current_time=CURRENT_TIME,
             run_context=RUN_CONTEXT,
@@ -398,13 +404,13 @@ def test_groq_generator_repair_retry_recovers_then_fails_safely(
         )
 
     async def scenario() -> None:
-        await generate_once_groq()  # first payload invalid, repaired second wins
+        await generate_once_vyce()  # first payload invalid, repaired second wins
         assert len(captured) == 2
         # json.dumps escapes newlines, so match a newline-free fragment of
         # GENERATOR_REPAIR_INSTRUCTION unique to the generator retry.
         assert "steps numbered from 1" in json.dumps(captured[1], ensure_ascii=False)
-        with pytest.raises(GroqAPIError):
-            await generate_once_groq()  # both payloads invalid -> safe failure
+        with pytest.raises(VyceAPIError):
+            await generate_once_vyce()  # both payloads invalid -> safe failure
         assert len(captured) == 4
 
     asyncio.run(scenario())

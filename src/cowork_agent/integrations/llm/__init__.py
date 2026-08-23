@@ -2,12 +2,14 @@
 
 from .chat_intent import (
     GeminiIntentClassifier,
-    GroqIntentClassifier,
     MistralIntentClassifier,
+    VyceIntentClassifier,
+    VyneIntentClassifier,
 )
 
 __all__ = [
     "GeminiIntentClassifier",
-    "GroqIntentClassifier",
     "MistralIntentClassifier",
+    "VyceIntentClassifier",
+    "VyneIntentClassifier",
 ]

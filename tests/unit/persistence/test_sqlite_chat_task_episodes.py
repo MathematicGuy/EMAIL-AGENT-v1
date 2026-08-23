@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -8,11 +9,17 @@ from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     EpisodeSourceType,
     EpisodeTransition,
+    EpisodicMemoryQuery,
     MemoryNamespace,
     MemoryType,
     TaskEpisode,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
+from cowork_agent.features.ai_chat.retrieval_policy import (
+    EPISODIC_RETRIEVAL_MAX_ITEMS,
+    EPISODIC_RETRIEVAL_MIN_SCORE,
+    episodic_search_text,
+)
 from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
 
 NOW = datetime(2026, 8, 19, 9, tzinfo=UTC)
@@ -109,5 +116,97 @@ def test_a_transition_naming_another_episode_id_is_refused(tmp_path: Path) -> No
         )
 
         assert result is None
+
+    asyncio.run(scenario())
+
+
+def _passport_episode(
+    *, episode_id: str, title: str, plan: tuple[str, ...], at: datetime
+) -> TaskEpisode:
+    return TaskEpisode(
+        episode_id=episode_id,
+        record_id=f"rec-{episode_id}",
+        user_id="ep-user@example.com",
+        chat_session_id="session-ep",
+        chat_turn_id=f"turn-{episode_id}",
+        creation_reason="explicit_user_task_request",
+        task_title=title,
+        minimal_request_paraphrase=title,
+        action_plan=plan,
+        rag_citations=(),
+        missing_information=(),
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        retrieval_eligible=False,
+        source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
+        created_at=at,
+        updated_at=at,
+        pipeline_version="1",
+        model_id="model-ep",
+        prompt_version="prompt-ep",
+        confidence=0.9,
+    )
+
+
+def test_two_episodes_about_one_task_come_back_with_the_later_one_first(
+    tmp_path: Path,
+) -> None:
+    # The measurement behind the v3 ep_update_01 finding. Two approved episodes
+    # about the same passport submission — a create naming 5 September and a
+    # reschedule moving it to 12 September — tie on term overlap, so updated_at
+    # is what decides, and the store hands back the SUPERSEDING one first.
+    #
+    # It matters that this is pinned here. The diagnosis was that retrieval
+    # prefers the older create; it does not, and the ordering it produces is
+    # the only thing the reply layer has to tell the two dates apart.
+    async def scenario() -> None:
+        repository = SQLiteChatRepository(tmp_path / "chat.db")
+        await repository.initialize()
+
+        seeds = (
+            (
+                "ep-create",
+                "Cấp lại hộ chiếu cho văn phòng Cần Thơ",
+                ("Nộp hồ sơ theo kế hoạch vào ngày 5 tháng 9.",),
+                NOW,
+            ),
+            (
+                "ep-reschedule",
+                "Dời ngày nộp hồ sơ hộ chiếu Cần Thơ",
+                ("Thực hiện điều chỉnh lịch hẹn nộp hồ sơ sang ngày 12 tháng 9.",),
+                NOW + timedelta(minutes=1),
+            ),
+        )
+        for episode_id, title, plan, at in seeds:
+            namespace = replace(
+                _namespace(), record_id=f"rec-{episode_id}", source_id=f"turn-{episode_id}"
+            )
+            await repository.write_task_episode(
+                namespace,
+                _passport_episode(episode_id=episode_id, title=title, plan=plan, at=at),
+                expires_at=None,
+            )
+            await repository.transition_task_episode(
+                EpisodeTransition(
+                    episode_id=episode_id,
+                    namespace=namespace,
+                    from_status=ValidationStatus.SYSTEM_GENERATED,
+                    to_status=ValidationStatus.USER_APPROVED,
+                    retrieval_eligible=True,
+                    transitioned_at=at,
+                )
+            )
+
+        terms = episodic_search_text("Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?")
+        retrieved = await repository.read_episodes(
+            _namespace(),
+            EpisodicMemoryQuery(
+                query=terms,
+                max_items=EPISODIC_RETRIEVAL_MAX_ITEMS,
+                min_score=EPISODIC_RETRIEVAL_MIN_SCORE,
+                timeout_ms=2000,
+            ),
+        )
+
+        assert [episode.episode_id for episode in retrieved] == ["ep-reschedule", "ep-create"]
 
     asyncio.run(scenario())

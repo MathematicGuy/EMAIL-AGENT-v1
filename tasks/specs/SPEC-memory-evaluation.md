@@ -438,7 +438,7 @@ accents (§2.2).
 | # | Condition | Grade | Certain? |
 |---|---|---|---|
 | 1 | The answer is empty | no answer (`NO_ANSWER`) | yes |
-| 2 | We expected a refusal, and the answer refuses | right (`PASS`) | no |
+| 2 | We expected a refusal, and the answer refuses | right (`PASS`) | only if the question declared `invented_any` (§6.3) |
 | 3 | We expected a refusal, and it does not refuse | made up (`INVENTED`) | no |
 | 4 | Expected answer **absent**, and an out-of-date answer **is** present | out of date (`STALE`) | yes |
 | 5 | Expected answer **absent**, no out-of-date answer present | missing (`MISS`) | yes |
@@ -486,7 +486,7 @@ We detect refusals with a list of phrases. **That list can never be complete.**
 Models decline in more ways than anyone can write down, and a phrasing we missed
 grades an honest refusal as "made up" — the worst direction to be wrong in.
 Rules 2 and 3 are the only ones that can be wrong this way, and they are the
-only ones marked `certain=false`.
+only candidates for `certain=false`.
 
 This is not theoretical. Vietnamese says "I have nothing" as a phrase for
 **having nothing** followed by a word for **what is missing**, and the two
@@ -533,13 +533,40 @@ The harness does not try to settle those rows. It counts them into
 `needs_reading` and stops. The answer text sits in the detail file under
 `runs/`, which is not committed. A person opens it and decides.
 
+**A question that declares `invented_any` settles its own rule 2.** From report
+schema 2.2.0, a reply that matched the grid on a question carrying declared bait
+is `certain=true`. The doubt above runs in one direction — a phrasing nobody
+wrote down scores an honest refusal as made up — and that lands on rule 3, never
+rule 2. What is left on rule 2 is the opposite worry, a reply that declines and
+invents anyway; the adjacency rule already rejects the hedged form, and declared
+bait rules out the specific invention the question was written to catch. With
+both closed there is nothing for a person to add.
+
+The three cases it does **not** cover, all still `certain=false`:
+
+- **Rule 3, always.** It is reached by *failing* to match the grid, so declared
+  bait cannot rescue it. This is the §6.3 failure mode itself.
+- **A bait hit.** A correct decline may name the bait to say where it really
+  belongs — v3's `ep_restraint_02` note warns of exactly this. A bait hit is a
+  substring match, not a reading, and it produces `dangerous`, the direction
+  where a human read is worth most.
+- **A question with no `invented_any`.** Nothing was declared, so nothing was
+  checked. Some cannot declare one: `st_restraint_01` has no neighbouring case
+  number to name, and `lt_restraint_03` would have to list the timezone string,
+  which would punish an honest time fact.
+
+On the v3 baseline of 2026-08-21 this takes `needs_reading` from 10 of 20 to 6,
+and it is a **dataset** lever rather than a fixed cost: a question set that
+declares bait everywhere it honestly can drives it near zero. That matters
+because the escape hatch below was written against eight questions.
+
 An LLM judge was designed for this job and deliberately **not** built. It would
 add a second provider to depend on and a second model call per uncertain row, to
 settle at best three rows out of eight. And a judge that cannot be reached
 answers "I could not check", which lands back on the same `certain=false` we
 already have. Counting the uncertainty costs nothing and says the same true
 thing. Revisit this if the question set ever grows past what a person will read
-by hand.
+by hand — which the paragraph above is the first attempt to prevent.
 
 The rule behind all of it:
 
@@ -562,6 +589,7 @@ Three grades per question collapse into one plain conclusion.
 | any | any | right | **`leaked`** | Not really a memory question. Left out of the score, named in the report. |
 | not right | — | not right | **`broken`** | This memory is not delivering at all. |
 | made up or out of date anywhere | — | — | **`dangerous`** | Overrides every other conclusion below it. |
+| right | right | right, on a question passed by refusing | **`restraint_held`** | The model declined everywhere it should have. Nothing to do. |
 
 `unreadable` is checked before all the others because every one of them would
 otherwise read silence as evidence. "Everything on" produced no text would read
@@ -574,11 +602,19 @@ answer this run**, and the fix is to run it again.
 ### 7.1 Order
 
 The scoreboard sorts `unreadable` → `dangerous` → `broken` → `leaked` →
-`scope_did_nothing` → `scope_earned_it`. `unreadable` sorts above `dangerous`
+`scope_did_nothing` → `scope_earned_it` → `restraint_held`. `unreadable` sorts above `dangerous`
 even though it is not a failure of behaviour: it means the run failed for that
 question, and a failed run cannot support a claim about the product, so it must
 not be scrolled past on the way to conclusions it no longer supports. A system that invents ranks below one that forgets, and the
 interesting rows are never buried under a wall of passes.
+
+`restraint_held` sorts last, below `scope_earned_it`, because it is the one
+conclusion with nothing for a reader to do: `scope_earned_it` at least carries
+an attribution claim worth a glance. It exists for the same reason the rest of
+this order does. A question passed by refusing is answered correctly by a store
+that was never filled, so correct restraint lands on right/right/right, which
+before schema 2.2.0 fell through to `scope_did_nothing` — the second-worst
+label — on half of every 20-question run. §15.1 item 9 has the full account.
 
 ### 7.2 Leak detection is deliberately narrow
 
@@ -879,7 +915,7 @@ whose result is dominated by the model is exactly what §7.2 exists to catch.
 
   "per_scope": {
     "short_term": { "probes": 2, "pass": 1, "stale": 0, "invented": 0, "miss": 1,
-                    "earned_it": 1, "did_nothing": 0, "broken": 1 },
+                    "earned_it": 1, "did_nothing": 0, "restraint_held": 0, "broken": 1 },
     "long_term":  { "...": 0 },
     "episodic":   { "...": 0 },
     "semantic":   { "...": 0 }
@@ -1061,14 +1097,29 @@ reads the conclusions. This harness reports; it does not gate.
    `run_key`, comparability has to be checked against `git log` on the probe
    file. `vi-postgres.json` and `vi-postgres-2.json` are the first pair this
    applies to.
-9. **A restraint question that behaves correctly is reported as
-   `scope_did_nothing`.** Restraint questions are excluded from leak detection
+9. **A restraint question that behaves correctly used to be reported as
+   `scope_did_nothing`. Fixed in report schema 2.2.0.** Restraint questions are excluded from leak detection
    on purpose (§7.2), so a product that declines under all three settings —
    which is the desired behaviour — falls through to `scope_did_nothing`, the
    second-worst label. `scope_earned_it` on a restraint question would mean
    hiding the memory made the model start inventing, which is a real thing to
    measure but not the expected one. Read `scope_did_nothing` on a restraint row
    as "declined everywhere", not as a finding.
+
+   This is now its own conclusion, **`restraint_held`**, which sorts last of
+   all — the one verdict with nothing for a reader to do. The reasoning above
+   is unchanged and is why `scope_earned_it` was not used instead. What changed
+   is that correct restraint no longer wears the second-worst label: at 20
+   probes that was half the scoreboard, and §7.1 exists to stop exactly this
+   kind of burial. `build_memory_evaluation_report.py` had already grown two
+   downstream special-cases re-labelling those rows green, which is the
+   evidence the label was wrong at the source; both now key on the verdict and
+   still accept `scope_did_nothing` from baselines at schema 2.1.0 and earlier.
+
+   **Comparability:** `per_scope.did_nothing` counts move. A 2.1.0 baseline
+   folds restraint rows into `did_nothing`; a 2.2.0 one puts them under
+   `restraint_held`. Per §12.2 rule 5 the two are not comparable on that column,
+   which is why the schema version moved rather than the field being reused.
 
 10. **Two runs started at once used to collide completely — fixed, with a
     residue.** `identity_for` derived every tenant and user from `run_key` plus
@@ -1220,6 +1271,100 @@ reads the conclusions. This harness reports; it does not gate.
     `test_the_seed_fits_the_prompt_window` now pins it for every committed probe
     set, importing the constant rather than repeating the number, so a change to
     the product moves the bound.
+
+17. **Two approved episodes about one task were two live facts, and nothing
+    retracted the older one. A write-time `supersedes` link now does — and
+    `ep_update_01` still reports `dangerous`, for a different reason.** Episodic
+    is the scope where supersession is *measurable* (item 15), and
+    `v3_four_scopes_hard`'s `ep_update_01` measured it failing: the Cần Thơ
+    filing date moved 5 → 12 September, both rows stayed `USER_APPROVED` and
+    retrievable, and the model reported 5 September as current with
+    `certain=true`.
+
+    The read path was never at fault, and this was checked rather than assumed.
+    Replaying the four v3 seeds through the real SQLite store and the real
+    retrieval policy returns **both** passport episodes and ranks the
+    superseding one **first**. So **recency ordering is not supersession**:
+    ordering says which row is newer, not that the older one stopped being true.
+    A system prompt sentence instructing the model to infer supersession from
+    `updated_at` was written, shipped to a live run, and **did not work**; it was
+    reverted under SPEC-memory-eval-probe-set-v3 §13.2.
+
+    What closed the retrieval gap, gated on a failing test first:
+
+    - `TaskEpisode.supersedes` (migration `015_episode_supersedes`), naming the
+      episode a revision replaces. `retrieval_eligible` stays a generated column
+      derived from `validation_status`, so supersession is resolved at **read**
+      time — `MemoryGateway` drops an ancestor only when an episode that already
+      passed the eligibility filter names it, so a rejected revision cannot hide
+      an approved ancestor.
+    - The provider never sees an `episode_id`. It names an **ordinal** into the
+      advisory episodes it was shown and the reply adapter resolves it, the same
+      shape as `allowed_citations`. At the revision write turn retrieval shows
+      exactly **one** advisory episode — the passport create — so the only
+      failure available to the model is omission, not a wrong target.
+    - `select_memory_reads` now enables the episodic read for an explicit task
+      request. This was the blocker: a task-*creation* message carries no
+      episodic cue, so the write turn saw zero advisory episodes and had no
+      ordinal to name. Route A was inert until this changed, and the first live
+      run proved it — all 227 seeded episodes came back `supersedes=None`.
+
+    Measured, and this is where the finding turns: the link is declared
+    **8/8** on a repeat probe set, always targeting the passport create, and
+    replaying the *captured live payloads* through the real gateway returns the
+    revision **alone**. The ancestor no longer reaches the model. `ep_update_01`
+    still graded `stale` **8/8**, because the revision episode the product writes
+    carries the retired date in its own plan —
+    *"Cập nhật ngày nộp hồ sơ hộ chiếu từ 5 tháng 9 sang 12 tháng 9"* — and the
+    probe asks *"Ngày nộp hồ sơ hộ chiếu **trên tác vụ trước** là ngày nào?"*,
+    which reads as a request for the previous task's date. The model answers with
+    the `từ` side and `stale_any` fires.
+
+    So `ep_update_01` no longer measures supersession. It measures whether the
+    model quotes the *from* side of a from→to sentence, against a question whose
+    own wording asks for the older value, and it cannot separate "reported a
+    retired fact" from "quoted the retired value inside the current fact". Fixing
+    the probe is a dataset change and does not need §13.2; whether the product
+    should stop writing the old date into the revision's plan is a separate
+    product question, and it is not answered here.
+
+    Two measurement traps this exposed. A rate computed from
+    `runs/memeval-chat.db` **after** a run measures residue: the harness deletes
+    the episodes it seeded, so 264 rows became 133 pre-existing ones, and an
+    early "8% of sessions carry a link" came entirely from that residue. And a
+    count of *all* links overstates the one that matters — CCCD creations link to
+    each other too, which is why link totals exceeded the number of revisions.
+    Both numbers have to be sampled in flight and classified by episode.
+
+18. **The episodic ranker cannot separate two same-shape episodes, and
+    `ep_recall_01`'s original expectation was retired on that evidence.** It
+    asked which office the previous CCCD task was for and expected `Đà Nẵng`,
+    with SPEC-memory-eval-probe-set-v3 §7.3 calling `Hải Phòng` "a ranking
+    miss". No ranking could deliver that. The SQLite path scores
+    `matched_terms / total_terms`, and both CCCD episodes contain **every** term
+    the question survives frame-stripping with — measured **1.000 and 1.000**,
+    an exact tie. The only tie-break is `updated_at DESC`, which returns
+    `Hải Phòng` first. The v3 spec asserted a ranking requirement without ever
+    naming a signal to rank on, because the question text was inherited
+    unchanged from `v2_four_scopes_wide` while a fourth seed episode was added
+    underneath it.
+
+    Per §12.2 rule 6 the question was rewritten rather than deleted, and the
+    reason it failed stays here. It now asks for the **newest** CCCD task and
+    expects `Hải Phòng`, which recency does decide; answering `Đà Nẵng` is still
+    a ranking miss, so the distractor keeps doing its job. This is an in-place
+    edit of a shipped probe set, the same move §7.4 records for v1's timezone
+    and overtime questions. It is safe to make now only because
+    `probe_set_sha256` binding turns the discontinuity into a hard error:
+    `build_memory_evaluation_report.py` refuses to grade a baseline whose hash
+    no longer matches the file. **Both existing `v3_four_scopes_hard` baselines
+    therefore no longer build a report**, which is the intended loud failure and
+    not a regression — item 8 is the record of what silence used to cost.
+
+    What is *not* fixed is the underlying limit: two episodes of identical shape
+    differing only in one field are indistinguishable to this ranker, and any
+    probe that needs them separated on relevance rather than recency will hit
+    this again.
 
 ### 15.2 What to add next
 

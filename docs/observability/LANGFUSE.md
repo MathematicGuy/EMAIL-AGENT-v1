@@ -18,7 +18,7 @@ Langfuse chịu trách nhiệm thu thập dữ liệu giám sát tự động (a
 - **Token & Cost Telemetry:** Đếm chính xác số lượng Tokens (Prompt / Completion) và tính toán chi phí gọi LLM API.
 
 ### In-Scope (Bắt buộc dùng Langfuse Tracing)
-- **LLM Providers:** Tất cả các provider Gemini (`gemini.py`), Groq (`groq.py`), Faucet (`faucet.py`).
+- **LLM Providers:** Tất cả các provider Gemini (`gemini.py`), Vyce (`vyce.py`), Mistral (`mistral.py`), OpenRouter (`openrouter.py`).
 - **Workflow Controllers:** Các luồng xử lý chính `execute()` trong `workflow.py` và `stream_message()` trong `controller.py`.
 - **RAG Retrievers:** Các hàm truy vấn tri thức `retrieve()` trong `qdrant.py` và `chat_memory.py`.
 - **API Routers:** Các endpoint API chính trong `api/chat.py`.
