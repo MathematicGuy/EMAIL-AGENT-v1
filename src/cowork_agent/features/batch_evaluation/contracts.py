@@ -104,7 +104,12 @@ _WARNING_PRIVATE_KEY_PARTS = _SECRET_KEY_PARTS | frozenset(
     }
 )
 _WARNING_MESSAGES = MappingProxyType(
-    {"WORKER_COUNT_REDUCED": "Worker count was reduced because fewer credentials are healthy."}
+    {
+        "CLEANUP_FAILED": "Evaluation cleanup did not complete.",
+        "WORKER_COUNT_REDUCED": (
+            "Worker count was reduced because fewer credentials are healthy."
+        ),
+    }
 )
 _WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_id$")
 _WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_ids$")

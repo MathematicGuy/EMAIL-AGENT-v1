@@ -734,6 +734,16 @@ class EvaluationJobRunner:
                 error = raised
             cleanup = await self._cleanup(plugin, context, scratch_dir)
             unit_warnings.extend(cleanup.warnings)
+            if (
+                isinstance(error, asyncio.CancelledError)
+                and cleanup.error is not None
+                and not isinstance(cleanup.error, asyncio.CancelledError)
+            ):
+                cleanup_warning = EvaluationWarning(
+                    code="CLEANUP_FAILED",
+                    details={"failed_resources": 1},
+                )
+                await self._repository.append_warnings(job.job_id, (cleanup_warning,))
             if cleanup.error is not None and error is None:
                 error = (
                     cleanup.error

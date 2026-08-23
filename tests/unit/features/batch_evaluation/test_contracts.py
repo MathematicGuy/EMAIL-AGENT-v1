@@ -348,6 +348,16 @@ def test_warning_message_is_code_owned_and_rejects_tampering() -> None:
         )
 
 
+def test_cleanup_failed_warning_uses_safe_code_owned_template() -> None:
+    warning = EvaluationWarning(
+        code="CLEANUP_FAILED",
+        details={"failed_resources": 1},
+    )
+
+    assert warning.message == "Evaluation cleanup did not complete."
+    assert dict(warning.details) == {"failed_resources": 1}
+
+
 def test_contract_enums_expose_documented_values() -> None:
     assert set(ExecutionMode) == {ExecutionMode.REQUEST_BATCH, ExecutionMode.WORKFLOW_SHARDS}
     assert JobState.SUCCEEDED.value == "succeeded"

@@ -1175,3 +1175,53 @@ async def test_supervisor_cancellation_during_attempt_cleans_step_attempt_unit_a
     assert repository.completed_units == ["unit-0"]
     assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
     assert pool._records[0].active_lease is None
+
+
+@pytest.mark.asyncio
+async def test_cancellation_preserves_safe_warning_when_cleanup_fails(tmp_path: Path) -> None:
+    repository = CancellationTrackingRepository(tmp_path / "evaluation-jobs.db")
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}
+    )
+    factory = BlockingAttemptReplyFactory(repository)
+    plugin = RequestBatchPlugin(1, cleanup_fails=True, provider_calls_per_unit=1)
+    service, _ = await prepared_supervised_runner(
+        tmp_path,
+        plugin,
+        factory,
+        repository,
+        pool,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="cancel-with-cleanup-failure",
+    )
+    await factory.attempt_running.wait()
+
+    await service.request_cancel(job.job_id)
+
+    status = await service.get_status(job.job_id)
+    stored_job = await repository.get_job(job.job_id)
+    stored_unit = await repository.get_unit(job.job_id, "unit-0")
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    safe_records = (status, stored_job, stored_unit, attempts)
+    assert status["state"] == "cancelled"
+    assert status["warnings"] == (
+        {
+            "code": "CLEANUP_FAILED",
+            "message": "Evaluation cleanup did not complete.",
+            "details": {"failed_resources": 1},
+        },
+    )
+    assert stored_job is not None and stored_job.state is JobState.CANCELLED
+    assert [warning.code for warning in stored_job.warnings] == ["CLEANUP_FAILED"]
+    assert stored_unit is not None and stored_unit.state is UnitState.CANCELLED
+    assert len(attempts) == 1 and attempts[0].state is AttemptState.CANCELLED
+    assert await repository.list_running_units(job.job_id) == ()
+    assert repository.step_states[-1] is StepState.SKIPPED
+    assert "private cleanup failure" not in repr(safe_records)
+    assert b"private cleanup failure" not in (tmp_path / "evaluation-jobs.db").read_bytes()
+    assert plugin.cleanup_calls == 1
+    assert repository.completed_units == ["unit-0"]
+    assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
+    assert pool._records[0].active_lease is None
