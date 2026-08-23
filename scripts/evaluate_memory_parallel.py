@@ -6,7 +6,7 @@ Features:
   2. Automatic API Connection & Transient Error Interception.
   3. Two-Pass Execution: Initial parallel sweep + targeted recovery pass for failed probes.
   4. Full Schema 2.2.0 compatibility with build_memory_evaluation_report.py.
-  5. Standalone manifest output and --retry-failed support.
+  5. Standalone unrecovered-failure manifest next to the detail transcript.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 if sys.platform == "win32":
     if hasattr(sys.stdout, "reconfigure"):
@@ -65,6 +65,40 @@ from scripts.evaluate_memory import (
 )
 
 
+def classify_empty_failure(error_lines: Sequence[str]) -> Literal["contract", "transient"]:
+    """Empty/NO_ANSWER is only retried when it is a transport flake.
+
+    `chat_response_invalid` is a response-contract rejection; retrying it
+    cannot fix the payload and hides a real defect as an API dropout.
+    """
+
+    if any("chat_response_invalid" in line for line in error_lines):
+        return "contract"
+    return "transient"
+
+
+def _ask_error_lines(session: LiveSession, probe_id: str, arm: str) -> tuple[str, ...]:
+    for item in reversed(session.ask_errors):
+        if item.get("probe") == probe_id and item.get("arm") == arm:
+            errors = item.get("errors") or ()
+            return tuple(str(line) for line in errors)
+    return ()
+
+
+def _empty_failure_reason(error_lines: Sequence[str]) -> str:
+    if not error_lines:
+        return "empty_reply"
+    code = error_lines[0].split(":", 1)[0].strip()
+    return code or "empty_reply"
+
+
+def _empty_kind_and_reason(
+    session: LiveSession, probe_id: str, arm: str
+) -> tuple[Literal["contract", "transient"], str]:
+    lines = _ask_error_lines(session, probe_id, arm)
+    return classify_empty_failure(lines), _empty_failure_reason(lines)
+
+
 @dataclass
 class FailedCall:
     probe: Probe
@@ -72,6 +106,17 @@ class FailedCall:
     masked: MemoryType | None
     error_reason: str
     attempt: int = 1
+
+
+def unrecovered_manifest_entry(call: FailedCall, *, retried: bool = True) -> dict[str, object]:
+    """One unrecovered row. These calls already went through recovery."""
+
+    return {
+        "probe": call.probe.probe_id,
+        "arm": call.arm.value,
+        "error": call.error_reason,
+        "retried": retried,
+    }
 
 
 async def execute_single_arm(
@@ -111,9 +156,10 @@ async def execute_single_arm(
     certainty = "certain" if result.certain else "uncertain"
 
     if result.outcome == Outcome.NO_ANSWER or not text.strip():
+        kind, reason = _empty_kind_and_reason(session, probe.probe_id, arm.value)
         print(
             f"[{current_idx:02d}/{total_calls:02d}] ⚠️ Probe '{probe.probe_id}' "
-            f"[{arm_name}] -> NO_ANSWER (API connection/empty response) [{latency_ms}ms]",
+            f"[{arm_name}] -> NO_ANSWER ({kind}: {reason}) [{latency_ms}ms]",
             file=sys.stderr,
             flush=True,
         )
@@ -176,17 +222,18 @@ async def run_probe_task(
             )
             arm_results[arm] = (outcome, certain, lat, text)
 
-            # Check if this failure is caused by an API connection or empty reply
             if outcome == Outcome.NO_ANSWER or not text.strip():
-                async with lock:
-                    failed_calls.append(
-                        FailedCall(
-                            probe=probe,
-                            arm=arm,
-                            masked=masked,
-                            error_reason="API Connection / Empty Response (NO_ANSWER)",
+                kind, reason = _empty_kind_and_reason(session, probe.probe_id, arm.value)
+                if kind == "transient":
+                    async with lock:
+                        failed_calls.append(
+                            FailedCall(
+                                probe=probe,
+                                arm=arm,
+                                masked=masked,
+                                error_reason=reason,
+                            )
                         )
-                    )
 
     return arm_results
 
@@ -497,14 +544,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path = _DETAIL_DIR / f"{stamp}-{probe_set.probe_set_id}-unrecovered.json"
         manifest_path.write_text(
             json.dumps(
-                [
-                    {
-                        "probe": c.probe.probe_id,
-                        "arm": c.arm.value,
-                        "error": c.error_reason,
-                    }
-                    for c in unrecovered
-                ],
+                [unrecovered_manifest_entry(c) for c in unrecovered],
                 indent=2,
             ),
             encoding="utf-8",
