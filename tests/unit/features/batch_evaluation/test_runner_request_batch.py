@@ -11,6 +11,7 @@ from cowork_agent.features.batch_evaluation.contracts import (
     ArtifactBundle,
     AttemptState,
     CleanupOutcome,
+    CredentialState,
     EvaluationBudget,
     EvaluationRequest,
     EvaluationWarning,
@@ -90,6 +91,7 @@ class FakeReplyFactory:
         self.bound_aliases: list[str] = []
         self.bound_settled: list[bool] = []
         self.bound_active: list[bool] = []
+        self.bound_states: list[CredentialState] = []
 
     def bind(self, lease: object, model: str, attempt_sink: AttemptSink) -> FakeReply:
         del model
@@ -97,6 +99,7 @@ class FakeReplyFactory:
         self.bound_aliases.append(alias)
         self.bound_settled.append(lease._settled)
         self.bound_active.append(lease._record.active_lease is lease)
+        self.bound_states.append(lease._record.state)
         return FakeReply(attempt_sink, alias, self)
 
     def attempt_metadata(
@@ -265,6 +268,7 @@ async def prepared_runner(
     sleeper: Callable[[float], Awaitable[None]] | None = None,
     retry_backoff_base_seconds: float = 1.0,
     retry_backoff_max_seconds: float = 30.0,
+    credential_pool: CredentialLeasingPool | None = None,
 ) -> tuple[EvaluationJobRunner, EvaluationJobService, SQLiteEvaluationJobRepository]:
     artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
     repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
@@ -273,7 +277,7 @@ async def prepared_runner(
     registry.register(plugin)
     keys = {"MISTRAL_API_KEY": "secret-one"}
     keys.update({f"MISTRAL_API_KEY{index}": f"secret-{index}" for index in range(2, key_count + 1)})
-    pool = CredentialLeasingPool.from_env("MISTRAL_API_KEY", keys)
+    pool = credential_pool or CredentialLeasingPool.from_env("MISTRAL_API_KEY", keys)
     service = EvaluationJobService(
         registry=registry,
         repository=repository,
@@ -647,10 +651,18 @@ async def test_ambiguous_timeout_is_unknown_and_never_retried(tmp_path: Path) ->
 async def test_retryable_failures_use_bounded_exponential_and_retry_after_backoff(
     tmp_path: Path,
 ) -> None:
+    class FakeClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = FakeClock()
     slept: list[float] = []
 
     async def sleeper(delay: float) -> None:
         slept.append(delay)
+        clock.now += delay
 
     plugin = RetryableRequestBatchPlugin(1, provider_calls_per_unit=1)
     factory = FakeReplyFactory(
@@ -662,6 +674,9 @@ async def test_retryable_failures_use_bounded_exponential_and_retry_after_backof
         ),
         raising_outcomes=frozenset({"provider_unavailable", "rate_limited"}),
     )
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}, clock=clock
+    )
     runner, service, repository = await prepared_runner(
         tmp_path,
         plugin,
@@ -671,6 +686,7 @@ async def test_retryable_failures_use_bounded_exponential_and_retry_after_backof
         sleeper=sleeper,
         retry_backoff_base_seconds=1,
         retry_backoff_max_seconds=5,
+        credential_pool=pool,
     )
     job = await service.submit(
         request(workers=1, provider_requests=10, tokens=10, attempts=3),
@@ -680,16 +696,90 @@ async def test_retryable_failures_use_bounded_exponential_and_retry_after_backof
     await runner.run(job.job_id)
 
     attempts = await repository.list_attempts(job.job_id, "unit-0")
-    assert slept == [1, 5]
+    assert slept == [1, 7]
     assert factory.provider_calls == 3
     assert factory.bound_settled == [False, False, False]
     assert factory.bound_active == [True, True, True]
+    assert factory.bound_states == [CredentialState.LEASED] * 3
     assert [attempt.state for attempt in attempts] == [
         AttemptState.FAILED,
         AttemptState.FAILED,
         AttemptState.SUCCEEDED,
     ]
     assert (await service.get_status(job.job_id))["state"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_retained_cooldown_releases_alias_after_deadline(
+    tmp_path: Path,
+) -> None:
+    class FakeClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = FakeClock()
+    sleeper_started = asyncio.Event()
+    release_sleeper = asyncio.Event()
+    slept: list[float] = []
+
+    async def sleeper(delay: float) -> None:
+        slept.append(delay)
+        sleeper_started.set()
+        await release_sleeper.wait()
+
+    plugin = RetryableRequestBatchPlugin(1, provider_calls_per_unit=1)
+    factory = FakeReplyFactory(
+        max_output_tokens=1,
+        scripted_events=(("rate_limited", 7),),
+        raising_outcomes=frozenset({"rate_limited"}),
+    )
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}, clock=clock
+    )
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        factory,
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        key_count=1,
+        sleeper=sleeper,
+        retry_backoff_max_seconds=5,
+        credential_pool=pool,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        idempotency_key="cancel-retained-cooldown-key",
+    )
+
+    run_task = asyncio.create_task(runner.run(job.job_id))
+    await sleeper_started.wait()
+
+    assert slept == [7]
+    assert factory.provider_calls == 1
+    assert pool.state_for("mistral-1") is CredentialState.COOLING_DOWN
+
+    await service.request_cancel(job.job_id)
+    release_sleeper.set()
+    await run_task
+
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    assert factory.provider_calls == 1
+    assert len(attempts) == 1
+    assert (await service.get_status(job.job_id))["state"] == "cancelled"
+    assert pool._records[0].active_lease is None
+    assert pool.state_for("mistral-1") is CredentialState.COOLING_DOWN
+    with pytest.raises(RuntimeError, match="No healthy credential"):
+        await pool.lease()
+
+    clock.now = 7.0
+
+    recovered = await pool.lease()
+    assert recovered.alias == "mistral-1"
+    with pytest.raises(RuntimeError, match="No healthy credential"):
+        await pool.lease()
+    await recovered.release()
 
 
 @pytest.mark.asyncio

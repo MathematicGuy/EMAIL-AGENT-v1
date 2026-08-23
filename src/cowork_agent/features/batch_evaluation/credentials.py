@@ -65,6 +65,12 @@ class CredentialLease:
         if not self._settled:
             await self._pool.hold_cooldown(self, retry_after_seconds)
 
+    async def resume_after_cooldown(self) -> None:
+        """Confirm a retained cooldown has elapsed before another provider bind."""
+
+        if not self._settled:
+            await self._pool.resume_after_cooldown(self)
+
     async def disable(self) -> None:
         """Permanently stop using this credential and settle this lease."""
 
@@ -144,6 +150,15 @@ class CredentialLeasingPool:
 
         async with self._lock:
             self._hold_cooldown(lease, retry_after_seconds)
+
+    async def resume_after_cooldown(self, lease: CredentialLease) -> None:
+        """Make an elapsed retained cooldown leasable by its existing owner only."""
+
+        async with self._lock:
+            record = self._require_active_lease(lease)
+            self._recover_cooled_credentials()
+            if record.state is CredentialState.COOLING_DOWN:
+                raise RuntimeError("Credential cooldown has not elapsed")
 
     async def disable(self, lease: CredentialLease) -> None:
         async with self._lock:

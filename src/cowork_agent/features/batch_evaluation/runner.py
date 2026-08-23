@@ -752,6 +752,9 @@ class EvaluationJobRunner:
                     return _ExecutedUnit(
                         _cancelled_outcome(unit), None, tuple(unit_warnings)
                     )
+                if credential_cooling:
+                    await lease.resume_after_cooldown()
+                    credential_cooling = False
                 continue
             if credential_cooling:
                 lane_stopped.set()
@@ -929,13 +932,13 @@ class EvaluationJobRunner:
 
     def _retry_delay(self, failed_attempt_number: int, retry_after_seconds: int) -> float:
         exponential = self._retry_backoff_base_seconds * (2 ** (failed_attempt_number - 1))
-        provider_delay = float(retry_after_seconds)
-        requested = exponential if exponential >= provider_delay else provider_delay
-        return (
+        local_delay = (
             self._retry_backoff_max_seconds
-            if requested > self._retry_backoff_max_seconds
-            else requested
+            if exponential > self._retry_backoff_max_seconds
+            else exponential
         )
+        provider_delay = float(retry_after_seconds)
+        return provider_delay if provider_delay > local_delay else local_delay
 
     async def _cleanup(
         self,
