@@ -138,7 +138,6 @@ def test_contract_records_and_nested_safe_metadata_are_frozen() -> None:
     )
     warning = EvaluationWarning(
         code="WORKER_COUNT_REDUCED",
-        message="Worker count was reduced.",
         details={"requested_workers": 4},
     )
 
@@ -274,7 +273,6 @@ def test_artifact_and_cleanup_records_coerce_mutable_lists_to_tuples() -> None:
     artifact_ids = ["detail-1"]
     warning = EvaluationWarning(
         code="WORKER_COUNT_REDUCED",
-        message="Worker count was reduced.",
         details={"requested_workers": 4},
     )
     warnings = [warning]
@@ -290,6 +288,18 @@ def test_artifact_and_cleanup_records_coerce_mutable_lists_to_tuples() -> None:
         artifact.private_artifact_ids = ()  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         cleanup.warnings = ()  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "details",
+    (
+        {"error": "raw provider response"},
+        {"provider_status": "HTTP 429"},
+    ),
+)
+def test_warnings_only_accept_safe_structured_details(details: dict[str, str]) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        EvaluationWarning(code="PROVIDER_RETRY", details=details)
 
 
 def test_contract_enums_expose_documented_values() -> None:

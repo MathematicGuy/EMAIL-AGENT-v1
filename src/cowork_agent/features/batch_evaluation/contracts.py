@@ -88,6 +88,20 @@ class CredentialState(StrEnum):
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _SECRET_KEY_PARTS = frozenset({"authorization", "credential", "password", "secret", "token"})
 _SECRET_KEY_COMPACTS = frozenset({"apikey", "accesstoken"})
+_WARNING_PRIVATE_KEY_PARTS = _SECRET_KEY_PARTS | frozenset(
+    {
+        "content",
+        "dataset",
+        "error",
+        "message",
+        "path",
+        "private",
+        "prompt",
+        "question",
+        "reply",
+        "traceback",
+    }
+)
 _WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_id$")
 _WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_ids$")
 _WORK_UNIT_INTEGER_FIELDS = frozenset({"ordinal", "shard_index", "shard_count"})
@@ -168,6 +182,20 @@ def _freeze_safe_mapping(value: object, name: str) -> Mapping[str, object]:
     mapping = _require_mapping(value, name)
     _reject_secret_shaped_keys(mapping)
     return cast(Mapping[str, object], _freeze_value(mapping))
+
+
+def _freeze_warning_details(value: object) -> Mapping[str, int | str]:
+    details = _freeze_safe_mapping(value, "details")
+    for key, item in details.items():
+        normalized = _normalize_key(key)
+        parts = frozenset(part for part in normalized.split("_") if part)
+        if parts & _WARNING_PRIVATE_KEY_PARTS:
+            raise ValueError("warning details contain a private key")
+        if isinstance(item, str):
+            _require_identifier(item, "warning detail")
+        elif isinstance(item, bool) or not isinstance(item, int):
+            raise TypeError("details values must be safe strings or integers")
+    return cast(Mapping[str, int | str], details)
 
 
 def _freeze_work_metadata(value: object) -> Mapping[str, object]:
@@ -428,20 +456,11 @@ class ArtifactBundle:
 @dataclass(frozen=True, slots=True)
 class EvaluationWarning:
     code: str
-    message: str
     details: Mapping[str, int | str]
 
     def __post_init__(self) -> None:
         _require_identifier(self.code, "code")
-        if not isinstance(self.message, str) or not self.message:
-            raise ValueError("message must be a non-empty string")
-        details = _freeze_safe_mapping(self.details, "details")
-        if not all(
-            isinstance(value, str | int) and not isinstance(value, bool)
-            for value in details.values()
-        ):
-            raise TypeError("details values must be strings or integers")
-        object.__setattr__(self, "details", cast(Mapping[str, int | str], details))
+        object.__setattr__(self, "details", _freeze_warning_details(self.details))
 
 
 @dataclass(frozen=True, slots=True)

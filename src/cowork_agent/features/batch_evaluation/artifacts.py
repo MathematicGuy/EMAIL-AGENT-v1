@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -24,6 +25,11 @@ _PRIVATE_KEY_PARTS = frozenset(
         "error",
         "message",
         "password",
+        "path",
+        "file",
+        "directory",
+        "root",
+        "private",
         "prompt",
         "question",
         "reply",
@@ -39,16 +45,16 @@ class FilesystemEvaluationArtifactStore:
     """Write public manifests and private details without returning local paths."""
 
     def __init__(self, root: Path) -> None:
-        self._root = root
-        self._manifest_root = root / "evaluation-artifacts" / "manifests"
-        self._private_root = root / ".runtime" / "evaluation-artifacts" / "private"
+        self._root = root.resolve()
+        self._manifest_root = self._root / "evaluation-artifacts" / "manifests"
+        self._private_root = self._root / ".runtime" / "evaluation-artifacts" / "private"
 
     def write_manifest(self, job_id: str, metadata: Mapping[str, object]) -> str:
         """Atomically persist only safe, response-ready metadata for a job."""
 
         _require_identifier(job_id, "job_id")
         _validate_public_metadata(metadata)
-        path = self._manifest_root / f"{job_id}.json"
+        path = self._contained_path(self._manifest_root / f"{job_id}.json")
         _write_atomically(path, _json_text(metadata))
         return self._reference(path)
 
@@ -57,12 +63,65 @@ class FilesystemEvaluationArtifactStore:
 
         _require_identifier(job_id, "job_id")
         _require_identifier(artifact_id, "artifact_id")
-        path = self._private_root / job_id / f"{artifact_id}.json"
+        path = self._contained_path(self._private_root / job_id / f"{artifact_id}.json")
         _write_atomically(path, _json_text(details))
         return self._reference(path)
 
+    def manifest_reference(self, job_id: str) -> str:
+        """Return the stable public reference for one validated job identifier."""
+
+        _require_identifier(job_id, "job_id")
+        return self._reference(self._contained_path(self._manifest_root / f"{job_id}.json"))
+
+    def read_manifest(self, reference: str) -> Mapping[str, object]:
+        """Read one public manifest through its opaque relative reference."""
+
+        value = self._read(reference, self._manifest_root)
+        if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+            raise UnsafeArtifact("manifest must contain a JSON object")
+        _validate_public_metadata(value)
+        return value
+
+    def read_private_details(self, reference: str) -> object:
+        """Read private artifact details through a validated private reference."""
+
+        return self._read(reference, self._private_root)
+
     def _reference(self, path: Path) -> str:
-        return path.relative_to(self._root).as_posix()
+        return self._contained_path(path).relative_to(self._root).as_posix()
+
+    def _contained_path(self, path: Path) -> Path:
+        absolute = path.absolute()
+        try:
+            relative = absolute.relative_to(self._root)
+        except ValueError as error:
+            raise UnsafeArtifact("artifact path escapes its configured root") from error
+        current = self._root
+        for part in relative.parts:
+            current /= part
+            if _is_reparse_point(current):
+                raise UnsafeArtifact("artifact path cannot traverse a symbolic link")
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(self._root)
+        except ValueError as error:
+            raise UnsafeArtifact("artifact path escapes its configured root") from error
+        return resolved
+
+    def _read(self, reference: str, expected_root: Path) -> object:
+        path = _path_from_reference(reference)
+        candidate = self._contained_path(self._root / path)
+        expected = self._contained_path(expected_root)
+        try:
+            candidate.relative_to(expected)
+        except ValueError as error:
+            raise UnsafeArtifact("artifact reference is outside its expected root") from error
+        if candidate.suffix != ".json":
+            raise UnsafeArtifact("artifact reference must name a JSON file")
+        try:
+            return json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise UnsafeArtifact("artifact reference cannot be read") from error
 
 
 def _validate_public_metadata(value: object) -> None:
@@ -97,9 +156,30 @@ def _require_identifier(value: str, name: str) -> None:
         raise UnsafeArtifact(f"{name} must be a safe identifier")
 
 
+def _path_from_reference(reference: str) -> Path:
+    if not isinstance(reference, str) or not reference:
+        raise UnsafeArtifact("artifact reference must be a non-empty relative path")
+    path = Path(reference)
+    if path.is_absolute() or path.drive or any(part == ".." for part in path.parts):
+        raise UnsafeArtifact("artifact reference must be relative")
+    return path
+
+
+def _is_reparse_point(path: Path) -> bool:
+    if not os.path.lexists(path):
+        return False
+    if path.is_symlink():
+        return True
+    attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
 def _json_text(value: object) -> str:
     try:
-        return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        return (
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            + "\n"
+        )
     except (TypeError, ValueError) as error:
         raise UnsafeArtifact("artifact values must be JSON-compatible") from error
 

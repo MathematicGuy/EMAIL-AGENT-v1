@@ -1,4 +1,7 @@
 import json
+import math
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +19,26 @@ def test_manifest_rejects_private_metadata_recursively(tmp_path: Path) -> None:
         store.write_manifest("job-1", {"summary": {"question": "private"}})
     with pytest.raises(UnsafeArtifact):
         store.write_manifest("job-1", {"apiKey": "secret-value"})
+
+
+@pytest.mark.parametrize("key", ("path", "file", "directory", "root", "privateDetails"))
+def test_manifest_rejects_path_and_private_shaped_keys_recursively(
+    tmp_path: Path, key: str
+) -> None:
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+
+    with pytest.raises(UnsafeArtifact):
+        store.write_manifest("job-1", {"summary": {key: "private-value"}})
+
+
+@pytest.mark.parametrize("value", (math.nan, math.inf, -math.inf))
+def test_artifact_store_rejects_non_finite_json_values(tmp_path: Path, value: float) -> None:
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError):
+        store.write_manifest("job-1", {"summary": {"score": value}})
+    with pytest.raises(ValueError):
+        store.write_private_details("job-1", "detail-1", {"trace": value})
 
 
 def test_artifact_store_keeps_private_details_under_runtime_root_and_returns_relative_refs(
@@ -49,3 +72,34 @@ def test_manifest_write_replaces_existing_file_without_leaving_temporary_files(
         "summary": {"succeeded": 2}
     }
     assert not list((tmp_path / "evaluation-artifacts" / "manifests").glob("*.tmp"))
+
+
+def test_artifact_references_are_readable_without_exposing_paths(tmp_path: Path) -> None:
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+
+    manifest_ref = store.write_manifest("job-1", {"summary": {"succeeded": 1}})
+    private_ref = store.write_private_details("job-1", "detail-1", {"reply": "private"})
+
+    assert store.manifest_reference("job-1") == manifest_ref
+    assert store.read_manifest(manifest_ref) == {"summary": {"succeeded": 1}}
+    assert store.read_private_details(private_ref) == {"reply": "private"}
+
+
+def test_artifact_store_rejects_symlink_escapes(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows junction exercise")
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    manifests = tmp_path / "evaluation-artifacts" / "manifests"
+    manifests.parent.mkdir()
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(manifests), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert created.returncode == 0, created.stderr
+
+    with pytest.raises(UnsafeArtifact):
+        store.write_manifest("job-1", {"summary": {"succeeded": 1}})

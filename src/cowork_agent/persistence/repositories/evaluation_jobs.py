@@ -6,7 +6,8 @@ import asyncio
 import json
 import re
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,8 +15,10 @@ from uuid import uuid4
 
 from cowork_agent.features.batch_evaluation.contracts import (
     AttemptState,
+    EvaluationBudget,
     EvaluationRequest,
     EvaluationWarning,
+    ExecutionMode,
     FailureClass,
     JobState,
     StepState,
@@ -36,9 +39,11 @@ class InvalidStateTransition(ValueError):
 @dataclass(frozen=True, slots=True)
 class EvaluationJob:
     job_id: str
+    request: EvaluationRequest
     state: JobState
     requested_workers: int
     effective_workers: int
+    warnings: tuple[EvaluationWarning, ...]
     cancel_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -50,6 +55,7 @@ class EvaluationAttempt:
     attempt_id: str
     job_id: str
     unit_id: str
+    worker_id: str
     credential_alias: str
     attempt_number: int
     state: AttemptState
@@ -64,6 +70,23 @@ class EvaluationStep:
     step_id: str
     ordinal: int
     state: StepState
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationUnit:
+    job_id: str
+    unit_id: str
+    ordinal: int
+    state: UnitState
+    claimed_by: str | None
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRecovery:
+    requeued_unit_ids: tuple[str, ...]
+    unknown_attempt_ids: tuple[str, ...]
+    blocked_unit_ids: tuple[str, ...]
 
 
 _JOB_TRANSITIONS: dict[JobState, frozenset[JobState]] = {
@@ -105,13 +128,21 @@ _ATTEMPT_TERMINAL_STATES = frozenset(
     {AttemptState.SUCCEEDED, AttemptState.FAILED, AttemptState.UNKNOWN, AttemptState.CANCELLED}
 )
 _JOB_COLUMNS = (
-    "job_id, state, requested_workers, effective_workers, cancel_requested_at,"
-    " created_at, updated_at, completed_at"
+    "job_id, request_json, warnings_json, state, requested_workers, effective_workers,"
+    " cancel_requested_at, created_at, updated_at, completed_at"
 )
+_UNIT_COLUMNS = "job_id, unit_id, ordinal, state, claimed_by, safe_payload_json"
 _ATTEMPT_COLUMNS = (
-    "attempt_id, job_id, unit_id, credential_alias, attempt_number, state, failure_class,"
-    " started_at, completed_at"
+    "attempt_id, job_id, unit_id, worker_id, credential_alias, attempt_number, state,"
+    " failure_class, started_at, completed_at"
 )
+_RECOVERABLE_JOB_STATES = (
+    JobState.QUEUED,
+    JobState.RUNNING,
+    JobState.COLLECTING,
+    JobState.CANCELLATION_REQUESTED,
+)
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _PRIVATE_METADATA_KEY_PARTS = frozenset(
     {
         "authorization",
@@ -166,6 +197,7 @@ class SQLiteEvaluationJobRepository:
                     unit_id TEXT NOT NULL,
                     ordinal INTEGER NOT NULL,
                     state TEXT NOT NULL,
+                    claimed_by TEXT,
                     safe_payload_json TEXT NOT NULL,
                     PRIMARY KEY(job_id, unit_id)
                 );
@@ -173,6 +205,7 @@ class SQLiteEvaluationJobRepository:
                     attempt_id TEXT PRIMARY KEY,
                     job_id TEXT NOT NULL,
                     unit_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
                     credential_alias TEXT NOT NULL,
                     attempt_number INTEGER NOT NULL,
                     state TEXT NOT NULL,
@@ -193,7 +226,14 @@ class SQLiteEvaluationJobRepository:
                     ON evaluation_units(job_id, state, ordinal, unit_id);
                 CREATE INDEX IF NOT EXISTS evaluation_attempts_job_state_idx
                     ON evaluation_attempts(job_id, state);
+                CREATE UNIQUE INDEX IF NOT EXISTS evaluation_attempts_one_running_unit_idx
+                    ON evaluation_attempts(job_id, unit_id)
+                    WHERE state = 'running';
                 """
+            )
+            _add_column_if_missing(database, "evaluation_units", "claimed_by TEXT")
+            _add_column_if_missing(
+                database, "evaluation_attempts", "worker_id TEXT NOT NULL DEFAULT ''"
             )
 
     async def create_or_get(
@@ -237,7 +277,7 @@ class SQLiteEvaluationJobRepository:
                 (idempotency_key,),
             ).fetchone()
         assert row is not None
-        if str(row[8]) != request_hash:
+        if str(row[10]) != request_hash:
             raise IdempotencyConflict("idempotency key belongs to another request")
         return _job_from_row(row), cursor.rowcount == 1
 
@@ -251,13 +291,29 @@ class SQLiteEvaluationJobRepository:
             ).fetchone()
         return None if row is None else _job_from_row(row)
 
+    async def list_recoverable_jobs(self) -> tuple[EvaluationJob, ...]:
+        return await asyncio.to_thread(self._list_recoverable_jobs_sync)
+
+    def _list_recoverable_jobs_sync(self) -> tuple[EvaluationJob, ...]:
+        placeholders = ", ".join("?" for _ in _RECOVERABLE_JOB_STATES)
+        with self._connect() as database:
+            rows = database.execute(
+                f"""
+                SELECT {_JOB_COLUMNS} FROM evaluation_jobs
+                WHERE state IN ({placeholders})
+                ORDER BY created_at, job_id
+                """,
+                tuple(state.value for state in _RECOVERABLE_JOB_STATES),
+            ).fetchall()
+        return tuple(_job_from_row(row) for row in rows)
+
     async def transition_job(
         self,
         job_id: str,
         state: JobState,
         *,
         effective_workers: int | None = None,
-        warnings: Sequence[EvaluationWarning] = (),
+        warnings: Sequence[EvaluationWarning] | None = None,
     ) -> EvaluationJob:
         return await asyncio.to_thread(
             self._transition_job_sync, job_id, state, effective_workers, warnings
@@ -268,7 +324,7 @@ class SQLiteEvaluationJobRepository:
         job_id: str,
         state: JobState,
         effective_workers: int | None,
-        warnings: Sequence[EvaluationWarning],
+        warnings: Sequence[EvaluationWarning] | None,
     ) -> EvaluationJob:
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
@@ -278,6 +334,8 @@ class SQLiteEvaluationJobRepository:
             if row is None:
                 raise KeyError(job_id)
             job = _job_from_row(row)
+            if state is JobState.CANCELLED and job.state is JobState.CANCELLED:
+                return job
             if state not in _JOB_TRANSITIONS[job.state]:
                 raise InvalidStateTransition(f"cannot move job from {job.state.value}")
             now = _now()
@@ -291,9 +349,9 @@ class SQLiteEvaluationJobRepository:
                 (
                     state.value,
                     job.effective_workers if effective_workers is None else effective_workers,
-                    _warnings_json(warnings),
+                    _warnings_json(job.warnings if warnings is None else warnings),
                     now,
-                    now if state in _JOB_TRANSITIONS and not _JOB_TRANSITIONS[state] else None,
+                    now if not _JOB_TRANSITIONS[state] else job.completed_at,
                     job_id,
                 ),
             )
@@ -344,9 +402,8 @@ class SQLiteEvaluationJobRepository:
                 database.execute(
                     """
                     INSERT INTO evaluation_units (
-                        job_id, unit_id, ordinal, state, safe_payload_json
-                    )
-                    VALUES (?, ?, ?, ?, ?)
+                        job_id, unit_id, ordinal, state, claimed_by, safe_payload_json
+                    ) VALUES (?, ?, ?, ?, NULL, ?)
                     """,
                     (
                         job_id,
@@ -361,7 +418,7 @@ class SQLiteEvaluationJobRepository:
         return await asyncio.to_thread(self._claim_ready_unit_sync, job_id, worker_id)
 
     def _claim_ready_unit_sync(self, job_id: str, worker_id: str) -> WorkUnit | None:
-        del worker_id
+        _require_identifier(worker_id, "worker_id")
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
             row = database.execute(
@@ -378,16 +435,48 @@ class SQLiteEvaluationJobRepository:
                 return None
             cursor = database.execute(
                 """
-                UPDATE evaluation_units SET state = ?
+                UPDATE evaluation_units SET state = ?, claimed_by = ?
                 WHERE job_id = ? AND unit_id = ? AND state = ?
                 """,
-                (UnitState.RUNNING.value, job_id, str(row[0]), UnitState.READY.value),
+                (
+                    UnitState.RUNNING.value,
+                    worker_id,
+                    job_id,
+                    str(row[0]),
+                    UnitState.READY.value,
+                ),
             )
             if cursor.rowcount != 1:
                 return None
         return WorkUnit(
             unit_id=str(row[0]), ordinal=int(row[1]), payload=_mapping_from_json(row[2])
         )
+
+    async def get_unit(self, job_id: str, unit_id: str) -> EvaluationUnit | None:
+        return await asyncio.to_thread(self._get_unit_sync, job_id, unit_id)
+
+    def _get_unit_sync(self, job_id: str, unit_id: str) -> EvaluationUnit | None:
+        with self._connect() as database:
+            row = database.execute(
+                f"SELECT {_UNIT_COLUMNS} FROM evaluation_units WHERE job_id = ? AND unit_id = ?",
+                (job_id, unit_id),
+            ).fetchone()
+        return None if row is None else _unit_from_row(row)
+
+    async def list_running_units(self, job_id: str) -> tuple[EvaluationUnit, ...]:
+        return await asyncio.to_thread(self._list_running_units_sync, job_id)
+
+    def _list_running_units_sync(self, job_id: str) -> tuple[EvaluationUnit, ...]:
+        with self._connect() as database:
+            rows = database.execute(
+                f"""
+                SELECT {_UNIT_COLUMNS} FROM evaluation_units
+                WHERE job_id = ? AND state = ?
+                ORDER BY ordinal, unit_id
+                """,
+                (job_id, UnitState.RUNNING.value),
+            ).fetchall()
+        return tuple(_unit_from_row(row) for row in rows)
 
     async def complete_unit(self, job_id: str, outcome: WorkUnitOutcome) -> None:
         await asyncio.to_thread(self._complete_unit_sync, job_id, outcome)
@@ -413,23 +502,48 @@ class SQLiteEvaluationJobRepository:
             raise InvalidStateTransition("unit is not running")
 
     async def start_attempt(
-        self, job_id: str, unit_id: str, credential_alias: str
+        self, job_id: str, unit_id: str, worker_id: str, credential_alias: str
     ) -> EvaluationAttempt:
-        return await asyncio.to_thread(self._start_attempt_sync, job_id, unit_id, credential_alias)
+        return await asyncio.to_thread(
+            self._start_attempt_sync, job_id, unit_id, worker_id, credential_alias
+        )
 
     def _start_attempt_sync(
-        self, job_id: str, unit_id: str, credential_alias: str
+        self, job_id: str, unit_id: str, worker_id: str, credential_alias: str
     ) -> EvaluationAttempt:
+        _require_identifier(worker_id, "worker_id")
+        _require_identifier(credential_alias, "credential_alias")
         attempt_id = f"attempt-{uuid4().hex}"
         now = _now()
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
             row = database.execute(
-                "SELECT state FROM evaluation_units WHERE job_id = ? AND unit_id = ?",
+                "SELECT state, claimed_by FROM evaluation_units WHERE job_id = ? AND unit_id = ?",
                 (job_id, unit_id),
             ).fetchone()
             if row is None or str(row[0]) != UnitState.RUNNING.value:
                 raise InvalidStateTransition("attempt requires a running unit")
+            if str(row[1]) != worker_id:
+                raise InvalidStateTransition("attempt owner does not hold the unit claim")
+            states = tuple(
+                AttemptState(str(attempt_row[0]))
+                for attempt_row in database.execute(
+                    """
+                    SELECT state FROM evaluation_attempts
+                    WHERE job_id = ? AND unit_id = ?
+                    ORDER BY attempt_number DESC
+                    """,
+                    (job_id, unit_id),
+                ).fetchall()
+            )
+            if AttemptState.RUNNING in states:
+                raise InvalidStateTransition("unit already has a running attempt")
+            if AttemptState.UNKNOWN in states:
+                raise InvalidStateTransition("unit has an unknown provider outcome")
+            if states and states[0] is not AttemptState.FAILED:
+                raise InvalidStateTransition(
+                    "unit requires explicit recovery before another attempt"
+                )
             attempt_number = int(
                 database.execute(
                     "SELECT COUNT(*) FROM evaluation_attempts WHERE job_id = ? AND unit_id = ?",
@@ -439,14 +553,15 @@ class SQLiteEvaluationJobRepository:
             database.execute(
                 """
                 INSERT INTO evaluation_attempts (
-                    attempt_id, job_id, unit_id, credential_alias, attempt_number,
+                    attempt_id, job_id, unit_id, worker_id, credential_alias, attempt_number,
                     state, failure_class, started_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
                 """,
                 (
                     attempt_id,
                     job_id,
                     unit_id,
+                    worker_id,
                     credential_alias,
                     attempt_number,
                     AttemptState.RUNNING.value,
@@ -471,21 +586,66 @@ class SQLiteEvaluationJobRepository:
             ).fetchone()
         return None if row is None else _attempt_from_row(row)
 
+    async def list_attempts(
+        self, job_id: str, unit_id: str | None = None
+    ) -> tuple[EvaluationAttempt, ...]:
+        return await asyncio.to_thread(self._list_attempts_sync, job_id, unit_id)
+
+    def _list_attempts_sync(
+        self, job_id: str, unit_id: str | None
+    ) -> tuple[EvaluationAttempt, ...]:
+        with self._connect() as database:
+            if unit_id is None:
+                rows = database.execute(
+                    f"""
+                    SELECT {_ATTEMPT_COLUMNS} FROM evaluation_attempts
+                    WHERE job_id = ? ORDER BY unit_id, attempt_number, attempt_id
+                    """,
+                    (job_id,),
+                ).fetchall()
+            else:
+                rows = database.execute(
+                    f"""
+                    SELECT {_ATTEMPT_COLUMNS} FROM evaluation_attempts
+                    WHERE job_id = ? AND unit_id = ? ORDER BY attempt_number, attempt_id
+                    """,
+                    (job_id, unit_id),
+                ).fetchall()
+        return tuple(_attempt_from_row(row) for row in rows)
+
     async def finish_attempt(
         self,
         attempt_id: str,
         state: AttemptState,
         failure_class: FailureClass | None = None,
+        *,
+        worker_id: str,
     ) -> EvaluationAttempt:
-        return await asyncio.to_thread(self._finish_attempt_sync, attempt_id, state, failure_class)
+        return await asyncio.to_thread(
+            self._finish_attempt_sync, attempt_id, state, failure_class, worker_id
+        )
 
     def _finish_attempt_sync(
-        self, attempt_id: str, state: AttemptState, failure_class: FailureClass | None
+        self,
+        attempt_id: str,
+        state: AttemptState,
+        failure_class: FailureClass | None,
+        worker_id: str,
     ) -> EvaluationAttempt:
         if state not in _ATTEMPT_TERMINAL_STATES:
             raise InvalidStateTransition("attempt must finish in a terminal state")
+        _require_identifier(worker_id, "worker_id")
         with self._connect() as database:
-            cursor = database.execute(
+            database.execute("BEGIN IMMEDIATE")
+            existing = database.execute(
+                "SELECT worker_id, state FROM evaluation_attempts WHERE attempt_id = ?",
+                (attempt_id,),
+            ).fetchone()
+            if existing is None or str(existing[1]) != AttemptState.RUNNING.value:
+                raise InvalidStateTransition("attempt is not running")
+            if str(existing[0]) != worker_id:
+                raise InvalidStateTransition("attempt owner does not match worker")
+            database.execute(
                 """
                 UPDATE evaluation_attempts
                 SET state = ?, failure_class = ?, completed_at = ?
@@ -499,8 +659,6 @@ class SQLiteEvaluationJobRepository:
                     AttemptState.RUNNING.value,
                 ),
             )
-            if cursor.rowcount != 1:
-                raise InvalidStateTransition("attempt is not running")
             row = database.execute(
                 f"SELECT {_ATTEMPT_COLUMNS} FROM evaluation_attempts WHERE attempt_id = ?",
                 (attempt_id,),
@@ -560,42 +718,81 @@ class SQLiteEvaluationJobRepository:
                 )
         return EvaluationStep(attempt_id=attempt_id, step_id=step_id, ordinal=ordinal, state=state)
 
-    async def recover_orphaned_attempts(self, job_id: str) -> tuple[str, ...]:
+    async def recover_orphaned_attempts(self, job_id: str) -> EvaluationRecovery:
         return await asyncio.to_thread(self._recover_orphaned_attempts_sync, job_id)
 
-    def _recover_orphaned_attempts_sync(self, job_id: str) -> tuple[str, ...]:
+    def _recover_orphaned_attempts_sync(self, job_id: str) -> EvaluationRecovery:
         with self._connect() as database:
             database.execute("BEGIN IMMEDIATE")
             rows = database.execute(
                 """
-                SELECT attempt_id FROM evaluation_attempts
+                SELECT unit_id FROM evaluation_units
                 WHERE job_id = ? AND state = ?
-                ORDER BY attempt_number, attempt_id
+                ORDER BY ordinal, unit_id
                 """,
-                (job_id, AttemptState.RUNNING.value),
+                (job_id, UnitState.RUNNING.value),
             ).fetchall()
-            identifiers = tuple(str(row[0]) for row in rows)
-            if identifiers:
-                database.execute(
+            requeued: list[str] = []
+            unknown_attempts: list[str] = []
+            blocked: list[str] = []
+            for row in rows:
+                unit_id = str(row[0])
+                attempts = database.execute(
                     """
-                    UPDATE evaluation_attempts
-                    SET state = ?, failure_class = ?, completed_at = ?
-                    WHERE job_id = ? AND state = ?
+                    SELECT attempt_id, state FROM evaluation_attempts
+                    WHERE job_id = ? AND unit_id = ?
+                    ORDER BY attempt_number, attempt_id
                     """,
-                    (
-                        AttemptState.UNKNOWN.value,
-                        FailureClass.UNKNOWN.value,
-                        _now(),
-                        job_id,
-                        AttemptState.RUNNING.value,
-                    ),
-                )
-        return identifiers
+                    (job_id, unit_id),
+                ).fetchall()
+                if not attempts:
+                    database.execute(
+                        """
+                        UPDATE evaluation_units SET state = ?, claimed_by = NULL
+                        WHERE job_id = ? AND unit_id = ? AND state = ?
+                        """,
+                        (UnitState.READY.value, job_id, unit_id, UnitState.RUNNING.value),
+                    )
+                    requeued.append(unit_id)
+                    continue
+                blocked.append(unit_id)
+                for attempt_id, state in attempts:
+                    if str(state) != AttemptState.RUNNING.value:
+                        continue
+                    database.execute(
+                        """
+                        UPDATE evaluation_attempts
+                        SET state = ?, failure_class = ?, completed_at = ?
+                        WHERE attempt_id = ? AND state = ?
+                        """,
+                        (
+                            AttemptState.UNKNOWN.value,
+                            FailureClass.UNKNOWN.value,
+                            _now(),
+                            str(attempt_id),
+                            AttemptState.RUNNING.value,
+                        ),
+                    )
+                    unknown_attempts.append(str(attempt_id))
+        return EvaluationRecovery(
+            requeued_unit_ids=tuple(requeued),
+            unknown_attempt_ids=tuple(unknown_attempts),
+            blocked_unit_ids=tuple(blocked),
+        )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         database = sqlite3.connect(self._path, timeout=30)
         database.row_factory = sqlite3.Row
-        return database
+        try:
+            yield database
+        except BaseException:
+            database.rollback()
+            raise
+        else:
+            database.commit()
+        finally:
+            database.close()
 
 
 def _request_json(request: EvaluationRequest) -> str:
@@ -613,6 +810,7 @@ def _request_json(request: EvaluationRequest) -> str:
                 "max_provider_requests": request.budget.max_provider_requests,
                 "max_total_tokens": request.budget.max_total_tokens,
             },
+            "parameters": request.parameters,
         }
     )
 
@@ -620,7 +818,7 @@ def _request_json(request: EvaluationRequest) -> str:
 def _warnings_json(warnings: Sequence[EvaluationWarning]) -> str:
     return _safe_json(
         [
-            {"code": warning.code, "message": warning.message, "details": warning.details}
+            {"code": warning.code, "details": warning.details}
             for warning in warnings
         ]
     )
@@ -632,6 +830,7 @@ def _safe_json(value: object) -> str:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
+        allow_nan=False,
         default=_json_default,
     )
 
@@ -677,22 +876,74 @@ def _json_default(value: object) -> object:
 
 
 def _mapping_from_json(value: object) -> Mapping[str, object]:
-    parsed = json.loads(str(value))
+    parsed = value if isinstance(value, Mapping) else json.loads(str(value))
     if not isinstance(parsed, dict) or not all(isinstance(key, str) for key in parsed):
         raise ValueError("stored work metadata is invalid")
     return parsed
 
 
+def _request_from_json(value: object) -> EvaluationRequest:
+    parsed = _mapping_from_json(value)
+    budget = _mapping_from_json(parsed.get("budget"))
+    return EvaluationRequest(
+        evaluation_type=str(parsed["evaluation_type"]),
+        provider=str(parsed["provider"]),
+        target_model=str(parsed["target_model"]),
+        dataset_ref=str(parsed["dataset_ref"]),
+        credential_pool=str(parsed["credential_pool"]),
+        execution_mode=ExecutionMode(str(parsed["execution_mode"])),
+        max_workers=_integer(parsed["max_workers"]),
+        max_attempts_per_unit=_integer(parsed["max_attempts_per_unit"]),
+        budget=EvaluationBudget(
+            max_provider_requests=_integer(budget["max_provider_requests"]),
+            max_total_tokens=_integer(budget["max_total_tokens"]),
+        ),
+        parameters=_mapping_from_json(parsed.get("parameters", "{}")),
+    )
+
+
+def _warnings_from_json(value: object) -> tuple[EvaluationWarning, ...]:
+    parsed = json.loads(str(value))
+    if not isinstance(parsed, list):
+        raise ValueError("stored warnings are invalid")
+    warnings: list[EvaluationWarning] = []
+    for item in parsed:
+        if (
+            not isinstance(item, dict)
+            or not {"code", "details"} <= set(item)
+            or set(item) - {"code", "details", "message"}
+        ):
+            raise ValueError("stored warning is invalid")
+        details = item["details"]
+        if not isinstance(details, dict) or not all(isinstance(key, str) for key in details):
+            raise ValueError("stored warning details are invalid")
+        warnings.append(EvaluationWarning(code=str(item["code"]), details=details))
+    return tuple(warnings)
+
+
 def _job_from_row(row: Sequence[object]) -> EvaluationJob:
     return EvaluationJob(
         job_id=str(row[0]),
-        state=JobState(str(row[1])),
-        requested_workers=_integer(row[2]),
-        effective_workers=_integer(row[3]),
-        cancel_requested_at=_optional_datetime(row[4]),
-        created_at=_datetime(row[5]),
-        updated_at=_datetime(row[6]),
-        completed_at=_optional_datetime(row[7]),
+        request=_request_from_json(row[1]),
+        warnings=_warnings_from_json(row[2]),
+        state=JobState(str(row[3])),
+        requested_workers=_integer(row[4]),
+        effective_workers=_integer(row[5]),
+        cancel_requested_at=_optional_datetime(row[6]),
+        created_at=_datetime(row[7]),
+        updated_at=_datetime(row[8]),
+        completed_at=_optional_datetime(row[9]),
+    )
+
+
+def _unit_from_row(row: Sequence[object]) -> EvaluationUnit:
+    return EvaluationUnit(
+        job_id=str(row[0]),
+        unit_id=str(row[1]),
+        ordinal=_integer(row[2]),
+        state=UnitState(str(row[3])),
+        claimed_by=None if row[4] is None else str(row[4]),
+        payload=_mapping_from_json(row[5]),
     )
 
 
@@ -701,12 +952,13 @@ def _attempt_from_row(row: Sequence[object]) -> EvaluationAttempt:
         attempt_id=str(row[0]),
         job_id=str(row[1]),
         unit_id=str(row[2]),
-        credential_alias=str(row[3]),
-        attempt_number=_integer(row[4]),
-        state=AttemptState(str(row[5])),
-        failure_class=None if row[6] is None else FailureClass(str(row[6])),
-        started_at=_datetime(row[7]),
-        completed_at=_optional_datetime(row[8]),
+        worker_id=str(row[3]),
+        credential_alias=str(row[4]),
+        attempt_number=_integer(row[5]),
+        state=AttemptState(str(row[6])),
+        failure_class=None if row[7] is None else FailureClass(str(row[7])),
+        started_at=_datetime(row[8]),
+        completed_at=_optional_datetime(row[9]),
     )
 
 
@@ -724,3 +976,16 @@ def _optional_datetime(value: object) -> datetime | None:
 
 def _integer(value: object) -> int:
     return int(str(value))
+
+
+def _require_identifier(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
+        raise ValueError(f"{name} must be a safe identifier")
+    return value
+
+
+def _add_column_if_missing(database: sqlite3.Connection, table: str, definition: str) -> None:
+    column = definition.split(maxsplit=1)[0]
+    columns = {str(row[1]) for row in database.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        database.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
