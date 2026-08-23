@@ -3,7 +3,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings, OpenRouterSettings
+from cowork_agent.config import (
+    GeminiSettings,
+    MistralSettings,
+    OpenRouterSettings,
+    VyceSettings,
+)
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -24,11 +29,12 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
 from cowork_agent.features.ai_chat.generation_context import assemble_generation_context
+from cowork_agent.integrations.key_rotation import APIKeyRotator
 from cowork_agent.integrations.llm.chat_reply import (
     GeminiChatReply,
-    GroqChatReply,
     MistralChatReply,
     OpenRouterChatReply,
+    VyceChatReply,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 
@@ -49,6 +55,7 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
                 "missing_information": [],
                 "prompt_version": "chat-v2",
                 "confidence": 0.9,
+                "supersedes_index": None,
             },
         }
 
@@ -81,7 +88,10 @@ def test_configured_provider_settings_select_the_matching_chat_reply_adapter() -
         GeminiChatReply,
     )
     assert isinstance(
-        GroqChatReply.from_settings(GroqSettings("key", "model", 1, 1)), GroqChatReply
+        VyceChatReply.from_settings(
+            VyceSettings(APIKeyRotator(["key"], "Vyce"), "model", "https://vyceai.com/v1", 1, 1, 1)
+        ),
+        VyceChatReply,
     )
     assert isinstance(
         MistralChatReply.from_settings(MistralSettings("key", "model", 1, 1, 1)),
@@ -134,6 +144,7 @@ def test_configured_reply_keeps_company_evidence_and_advisory_episodes_separate(
     ]
     assert payload["advisory_episodes"] == [
         {
+            "index": 0,
             "task_title": "Earlier task",
             "action_plan": ["Use the earlier plan"],
             "validation_status": "user_approved",
@@ -307,6 +318,7 @@ def _task_response(citations: list[dict[str, object]]) -> dict[str, object]:
             "missing_information": [],
             "prompt_version": "chat-v2",
             "confidence": 0.9,
+            "supersedes_index": None,
         },
     }
 
@@ -332,6 +344,58 @@ class _SemanticMemory:
             retrieval_status=RetrievalStatus.SUCCESS,
             latency_ms=1,
         )
+
+
+def _revision_reply(supersedes_index: object) -> MistralChatReply:
+    async def complete(payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        return {
+            "assistant_text": "Đã dời lịch.",
+            "task_proposal": {
+                "task_title": "Dời lịch tác vụ trước",
+                "minimal_request_paraphrase": "Dời lịch tác vụ trước",
+                "action_plan": ["Cập nhật ngày mới"],
+                "rag_citations": [],
+                "missing_information": [],
+                "prompt_version": "chat-v2",
+                "confidence": 0.9,
+                "supersedes_index": supersedes_index,
+            },
+        }
+
+    return MistralChatReply(model="mistral-small-2603", complete=complete)
+
+
+def _revision_context() -> object:
+    request = ChatMessageRequest("session-1", "Tạo tác vụ dời lịch tác vụ trước.", "idem-3")
+    return assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(_eligible_episode(),),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+    )
+
+
+def test_configured_reply_resolves_a_supersedes_ordinal_to_the_episode_id() -> None:
+    """Concern D: the model names a position, the server owns the identifier."""
+    request = ChatMessageRequest("session-1", "Tạo tác vụ dời lịch tác vụ trước.", "idem-3")
+
+    chunks = asyncio.run(_collect(_revision_reply(0), request, _revision_context()))
+
+    assert chunks[0].task_proposal is not None
+    assert chunks[0].task_proposal.supersedes == "episode-1"
+
+
+def test_configured_reply_rejects_a_supersedes_ordinal_with_no_advisory_episode() -> None:
+    request = ChatMessageRequest("session-1", "Tạo tác vụ dời lịch tác vụ trước.", "idem-3")
+
+    with pytest.raises(ChatReplyUnavailable):
+        asyncio.run(_collect(_revision_reply(7), request, _revision_context()))
 
 
 def _eligible_episode() -> TaskEpisode:

@@ -28,13 +28,13 @@ Two decoupled workflows — do not merge them:
 ```text
 src/cowork_agent/
 ├── app.py                       # FastAPI composition root; entry point `mail-todo-api`
-├── config.py                    # env settings loaders (Gmail, Gemini, Groq)
+├── config.py                    # env settings loaders (Gmail, Gemini, Vyce)
 ├── prompting.py                 # shared untrusted/retrieved block delimiters for prompts
 ├── api/                         # HTTP handlers / response serialization
 ├── domain/models.py             # pure domain models (no framework imports)
 ├── features/email_action_plan/  # workflow, policies, ports, schemas
 ├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
-├── integrations/llm/            # Gemini/Groq providers, fakes
+├── integrations/llm/            # Gemini/Vyce/Mistral/OpenRouter providers, fakes
 ├── integrations/rag/            # local hybrid semantic retrieval (V1-M3)
 ├── orchestration/local.py       # in-process local orchestration
 └── persistence/                 # SQLite mailbox-connection repo; migrations/
@@ -68,7 +68,7 @@ Frontend (`frontend/`): `pnpm install` · `pnpm dev` · `pnpm test` ·
 - Ask before changing SQL migrations or RAG bootstrap fallbacks.
 - System architecture: Level 1 system architecture is documented in `docs/architectures/current-architectures/`.
 
-## Verification
+## Verification & Pre-PR Gate
 
 `tests/README.md` is the harness, not prose. Read it before running or writing
 any test: **§1** maps each `src/` path to the narrowest route (R1–R16) with its
@@ -81,6 +81,14 @@ Widen a level only when the narrow route is green. Run the full suite once at
 the end, or immediately when a shared contract (ports, schemas, migrations)
 changed. When `src/` changes, also run `ruff` and `mypy`. When `frontend/`
 changes, run `pnpm test` and `pnpm check-types` there.
+
+**Pre-PR Gate (Mandatory before opening a PR to `main`):**
+Before creating any PR to `main` when requested by the user, ALWAYS run and pass
+all CI quality gates and Playwright E2E tests:
+1. Python: `uv run ruff check .` && `uv run mypy src` && `uv run pytest -q`
+2. Frontend: `cd frontend && pnpm lint && pnpm check-types && pnpm test && pnpm build`
+3. E2E: `pnpm run test:e2e` (Playwright)
+Block PR creation immediately if any check or test fails.
 
 A yellow `DESELECTED - NOT VERIFIED BY THIS RUN` banner ends every run, naming
 what `-m 'not live'` dropped. Green above that banner is not a verified suite.
@@ -97,12 +105,9 @@ keeps spec, scope, and the Definition of Done.
 
 - ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-- Email RAG runtime: `docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
-- Frontend: `frontend/README.md`, `docs/SPEC-Demo-Frontend.md`
 
 ## Agent skills
-
 ### Issue tracker
 
 Linear team Heval1st (`HEV-` issues), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.

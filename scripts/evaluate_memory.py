@@ -138,7 +138,7 @@ def _stamp_probe_set_identity(report: dict[str, object], probe_set_path: Path) -
 
 
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
-_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "groq", "mistral")
+_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "vyce", "vyne", "mistral")
 
 
 def _default_provider(environ: Mapping[str, str]) -> str:
@@ -181,14 +181,14 @@ def _build_chat_reply(
         if model:
             openrouter = replace(openrouter, model=model, allowed_models=(model,))
         return OpenRouterChatReply.from_settings(openrouter), provider, openrouter.model
-    if provider == "groq":
-        from cowork_agent.config import GroqSettings
-        from cowork_agent.integrations.llm.chat_reply import GroqChatReply
+    if provider in ("vyce", "vyne"):
+        from cowork_agent.config import VyceSettings
+        from cowork_agent.integrations.llm.chat_reply import VyceChatReply
 
-        groq = GroqSettings.from_env(environ)
+        vyce = VyceSettings.from_env(environ)
         if model:
-            groq = replace(groq, model=model)
-        return GroqChatReply.from_settings(groq), provider, groq.model
+            vyce = replace(vyce, model=model)
+        return VyceChatReply.from_settings(vyce), provider, vyce.model
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.chat_reply import MistralChatReply

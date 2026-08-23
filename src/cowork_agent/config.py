@@ -707,11 +707,17 @@ class EmailRagQualitySettings:
 
 
 @dataclass(frozen=True, slots=True)
-class GroqSettings:
-    api_key: str = field(repr=False)
+class VyceSettings:
+    """Configuration for the Vyce (VyceAI) chat-completions provider with key rotation."""
+
+    rotator: APIKeyRotator = field(repr=False)
     model: str
+    base_url: str
     max_emails_per_batch: int
+    max_output_tokens: int
     timeout_seconds: int
+    rotate_on_rate_limit: bool = True
+    max_attempts: int = 3
 
     @classmethod
     def from_env(
@@ -719,20 +725,68 @@ class GroqSettings:
         environ: Mapping[str, str] | None = None,
         *,
         load_env_file: bool = True,
-    ) -> "GroqSettings":
+    ) -> "VyceSettings":
         if environ is None:
             if load_env_file:
                 load_runtime_environment()
             environ = os.environ
-        model = environ.get("GROQ_MODEL", "qwen/qwen3.6-27b").strip()
-        if not model or model.startswith("replace-with-"):
-            raise ValueError("GROQ_MODEL must be a real Groq model name")
-        return cls(
-            api_key=_required_secret(environ, "GROQ_API_KEY"),
-            model=model,
-            max_emails_per_batch=_positive_int(environ, "GROQ_MAX_EMAILS_PER_BATCH", 5),
-            timeout_seconds=_positive_int(environ, "GROQ_TIMEOUT_SECONDS", 60),
+        # Check VYCE_API_KEY first, fallback to VYNE_API_KEY
+        key_prefix = "VYCE_API_KEY"
+        if not any(k.startswith("VYCE_API_KEY") for k in environ) and any(
+            k.startswith("VYNE_API_KEY") for k in environ
+        ):
+            key_prefix = "VYNE_API_KEY"
+
+        rotator = APIKeyRotator.from_env(
+            key_prefix, environ=environ, provider_name="Vyce"
         )
+        model = (
+            environ.get("VYCE_MODEL")
+            or environ.get("VYNE_MODEL")
+            or "gpt-5.6-luna"
+        ).strip()
+        if not model or model.startswith("replace-with-"):
+            raise ValueError("VYCE_MODEL must be a real Vyce model name")
+        base_url = (
+            environ.get("VYCE_BASE_URL")
+            or environ.get("VYNE_BASE_URL")
+            or "https://vyceai.com/v1"
+        ).strip()
+        rotate_on_rate_limit = _boolean(
+            environ,
+            "VYCE_ROTATE_ON_RATE_LIMIT",
+            _boolean(environ, "VYNE_ROTATE_ON_RATE_LIMIT", True),
+        )
+        max_emails = _positive_int(
+            environ,
+            "VYCE_MAX_EMAILS_PER_BATCH",
+            _positive_int(environ, "VYNE_MAX_EMAILS_PER_BATCH", 5),
+        )
+        max_tokens = _bounded_positive_int(
+            environ,
+            "VYCE_MAX_OUTPUT_TOKENS",
+            _bounded_positive_int(environ, "VYNE_MAX_OUTPUT_TOKENS", 4096, maximum=8192),
+            maximum=8192,
+        )
+        timeout = _bounded_positive_int(
+            environ,
+            "VYCE_TIMEOUT_SECONDS",
+            _bounded_positive_int(environ, "VYNE_TIMEOUT_SECONDS", 60, maximum=120),
+            maximum=120,
+        )
+        return cls(
+            rotator=rotator,
+            model=model,
+            base_url=base_url,
+            max_emails_per_batch=max_emails,
+            max_output_tokens=max_tokens,
+            timeout_seconds=timeout,
+            rotate_on_rate_limit=rotate_on_rate_limit,
+            max_attempts=len(rotator.keys),
+        )
+
+
+VyneSettings = VyceSettings
 
 
 @dataclass(frozen=True, slots=True)

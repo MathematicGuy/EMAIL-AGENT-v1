@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings, OpenRouterSettings
+from cowork_agent.config import (
+    GeminiSettings,
+    MistralSettings,
+    OpenRouterSettings,
+    VyceSettings,
+)
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
@@ -28,8 +33,8 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiRateLimitError,
     GeminiRouteClassifier,
 )
-from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
 from cowork_agent.integrations.llm.providers.openrouter import OpenRouterRouteClassifier
+from cowork_agent.integrations.llm.providers.vyce import VyceRouteClassifier
 
 
 def environment(**overrides: str) -> dict[str, str]:
@@ -369,7 +374,7 @@ def test_classifier_rotates_key_on_rate_limit_without_counting_a_retry() -> None
     asyncio.run(scenario())
 
 
-def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vyce_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
     payload = {
         "emails": [
@@ -391,12 +396,12 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
         return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
     monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.groq._post_json", fake_post_json
+        "cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json
     )
 
     async def scenario() -> None:
-        settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
-        result = await GroqRouteClassifier(settings).classify(
+        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
+        result = await VyceRouteClassifier(settings).classify(
             "Asia/Ho_Chi_Minh", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
 
@@ -415,7 +420,8 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
     assert body["response_format"] == {"type": "json_object"}
     messages = body["messages"]
     assert isinstance(messages, list)
-    assert messages[0]["content"] == CLASSIFIER_SYSTEM_INSTRUCTION
+    assert messages[0]["content"].startswith(CLASSIFIER_SYSTEM_INSTRUCTION)
+    assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in messages[0]["content"]
     user_content = messages[1]["content"]
     assert isinstance(user_content, str)
     assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in user_content
@@ -501,7 +507,7 @@ def test_mistral_classifier_parses_decision_and_requests_classification_schema(
 def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cowork_agent.integrations.llm.providers import gemini, groq, mistral, openrouter
+    from cowork_agent.integrations.llm.providers import gemini, mistral, openrouter, vyce
     from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
 
     observed_versions: list[object] = []
@@ -511,7 +517,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
             if isinstance(value, Mapping) and "prompt_version" in value:
                 observed_versions.append(value["prompt_version"])
 
-    for provider in (gemini, groq, mistral, openrouter):
+    for provider in (gemini, vyce, mistral, openrouter):
         monkeypatch.setattr(provider, "_update_current_span", record)
         monkeypatch.setattr(provider, "_update_current_generation", record)
 
@@ -523,7 +529,7 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
             ]
         }
 
-    monkeypatch.setattr(groq, "_post_json", response)
+    monkeypatch.setattr(vyce, "_post_json", response)
     monkeypatch.setattr(mistral, "_post_json", response)
     monkeypatch.setattr(openrouter, "_post_json", response)
 
@@ -532,8 +538,8 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await gemini_classifier(
             ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
         ).classify("UTC", datetime.now(UTC), message)
-        await GroqRouteClassifier(
-            GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
+        await VyceRouteClassifier(
+            VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
         ).classify("UTC", datetime.now(UTC), message)
         await MistralRouteClassifier(
             MistralSettings.from_env(

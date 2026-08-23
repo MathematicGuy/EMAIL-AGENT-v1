@@ -26,6 +26,7 @@ Models that failed basic viability, latency gates, or schema adherence:
 |---|---|:---:|:---:|:---:|---|
 | `gemma-4-31b-it` | Google Gemini | Terminated (4/60 calls) | 2.94s (gate) | 4 | **Schema Incompatibility / Circuit Breaker**: Passed latency gate and answered short-term probes quickly (~2.7s–3.4s), but could not output the structured `task_proposal` JSON schema during episodic seeding (`task_proposal: null`), causing 4 consecutive seed failures and triggering auto-shutdown. |
 | `gemma-4-26b-a4b-it` | Google Gemini | Terminated (5/60 calls) | 6.73s (gate) | 4 | **Low Accuracy, Latency Spikes & Schema Failure**: Missed short-term recall (`miss` on `st_recall_01` & `st_recall_02`), suffered extreme 64s latency spikes on control arm, and failed episodic task generation. Shut down by circuit breaker. |
+| `gpt-5.6-luna` | Vyne | Terminated | 10.85s (gate) | 5 | **Schema Incompatibility on Negative/Refusal Turns & Slow Latency (10.85s avg, 17.55s task proposal)**: Failed the hardened 3-arm admission gate. While explicit task proposals successfully parse into JSON, when responding to questions with missing context/restraint (Ablated & Control arms), the model outputs raw plain-text conversational refusals instead of JSON schema objects (`Vyne response was not valid JSON`), causing repeated parse failures and tripping the circuit breaker. |
 | `gemini-3.6-flash` | Google Gemini | N/A | **20.95s** | N/A | **Rejected by Pre-Evaluation Latency Gate**: Failed the hard performance gate ($\text{Avg Latency } 20.95\text{s} > 9.0\text{s}$ across 5 sample turns). Excluded from full 60-call queue. |
 | `inclusionai/ling-3.0-flash` | OpenRouter | **45.0%** (9/20) | 27.4s | 18 | **Timeout / High Amnesia**: Severe generation timeouts, frequent gateway dropouts, and low memory recall. |
 
@@ -97,7 +98,8 @@ uv run python scripts/memeval_latency_gate.py --provider gemini --model <candida
 | **—** | **`deepseek/deepseek-v4-flash-0731`** | OpenRouter | **17.5s** | 🟢 **Production Fallback**: 80% Full Pass, 100% restraint, higher latency. |
 | **—** | **`mistral-small-2603`** | Mistral AI | **6.28s** (Passed) | 🟡 **Low-Tier Fallback**: 35% Full Pass, 15% Earned-It, 6.5s avg latency. |
 | **—** | **`gemma-4-31b-it`** | Google Gemini | **~2.94s** (Passed) | 🔴 **Incompatible**: Fast short-term recall, but failed JSON schema for task proposals. |
-| **—** | **`gemma-4-26b-a4b-it`** | Google Gemini | **~6.73s** (Passed) | 🔴 **Incompatible**: Low recall accuracy, 64s latency spikes, failed episodic seeding. |
+| **1** | **`gemini-3.5-flash-lite`** | Google Gemini | **1.06s** (Passed) | 🟢 **Baseline / Champion**: 100% 3-Arm Gate Pass (Full: 0.94s, Ablated: 0.97s, Control: 0.95s, Task Schema: 1.38s). |
+| **—** | **`gpt-5.6-luna`** | Vyce | **6.45s** (Passed < 9s) | 🟢 **Admitted via Instructor Pattern**: 100% 3-Arm Gate Pass (Full: 4.49s, Ablated: 4.72s, Control: 7.91s, Task Schema: 8.68s). Admitted to evaluation queue. |
 | **—** | **`gemini-3.6-flash`** | Google Gemini | **20.95s** (Failed < 9s) | 🔴 **Rejected at Gate**: Exceeded 9.0s latency budget. |
 
 > *Note: Antigravity is dedicated as an Agentic Framework / Task Engine for broader operational tasks and is excluded from memory evaluation.*
@@ -116,14 +118,14 @@ To prevent runs from spinning and wasting dozens of calls when a provider has se
 ## 7. Standard Evaluation Execution Commands
 
 ```bash
-# 1. First verify model with Light Latency Gate:
-uv run python scripts/memeval_latency_gate.py --provider gemini --model <model-slug>
+# 1. First verify candidate model with Light Latency Gate:
+uv run python scripts/memeval_latency_gate.py --provider vyce --model gpt-5.6-luna
 
 # 2. Run full 20-probe evaluation on SQLite scratch backend:
 uv run python scripts/evaluate_memory.py \
   --probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json \
-  --provider gemini \
-  --model <model-slug>
+  --provider vyce \
+  --model gpt-5.6-luna
 
 # 3. Build synthesized markdown evaluation report:
 uv run python scripts/build_memory_evaluation_report.py

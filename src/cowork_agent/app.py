@@ -34,7 +34,6 @@ from cowork_agent.config import (
     EmailRagQualitySettings,
     GeminiSettings,
     GmailSettings,
-    GroqSettings,
     JinaEmbeddingSettings,
     MistralSettings,
     OpenRouterSettings,
@@ -42,6 +41,7 @@ from cowork_agent.config import (
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
+    VyceSettings,
     database_url,
     load_runtime_environment,
 )
@@ -113,25 +113,21 @@ from cowork_agent.integrations.gmail.provider import (
 )
 from cowork_agent.integrations.llm.chat_intent import (
     GeminiIntentClassifier,
-    GroqIntentClassifier,
     MistralIntentClassifier,
     OpenRouterIntentClassifier,
+    VyceIntentClassifier,
 )
 from cowork_agent.integrations.llm.chat_reply import (
     GeminiChatReply,
-    GroqChatReply,
     MistralChatReply,
     OpenRouterChatReply,
+    VyceChatReply,
 )
 from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRetrievalQueryRewriter,
     GeminiRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.groq import (
-    GroqActionPlanGenerator,
-    GroqRouteClassifier,
 )
 from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
@@ -140,6 +136,10 @@ from cowork_agent.integrations.llm.providers.mistral import (
 from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.vyce import (
+    VyceActionPlanGenerator,
+    VyceRouteClassifier,
 )
 from cowork_agent.integrations.mailbox import (
     MailboxNotConnectedError,
@@ -661,9 +661,10 @@ def create_app() -> FastAPI:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
                     "gemini": "Gemini",
-                    "groq": "Groq",
                     "mistral": "Mistral",
                     "openrouter": "OpenRouter",
+                    "vyce": "Vyce",
+                    "vyne": "Vyce",
                 }.get(provider, "LLM provider")
                 classifier: RouteClassifierPort
                 generator: ActionPlanGeneratorPort
@@ -684,16 +685,16 @@ def create_app() -> FastAPI:
                     query_rewriter = GeminiRetrievalQueryRewriter(gemini_settings)
                     semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
                     app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
-                elif provider == "groq":
-                    groq_settings = GroqSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(default_model=groq_settings.model)
-                    intent_classifier = GroqIntentClassifier.from_settings(
-                        groq_settings, intent_settings
+                elif provider in ("vyce", "vyne"):
+                    vyce_settings = VyceSettings.from_env()
+                    intent_settings = ChatIntentSettings.from_env(default_model=vyce_settings.model)
+                    intent_classifier = VyceIntentClassifier.from_settings(
+                        vyce_settings, intent_settings
                     )
-                    classifier = GroqRouteClassifier(groq_settings)
-                    generator = GroqActionPlanGenerator(groq_settings)
+                    classifier = VyceRouteClassifier(vyce_settings)
+                    generator = VyceActionPlanGenerator(vyce_settings)
                     semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
+                    app.state.chat_reply = VyceChatReply.from_settings(vyce_settings)
                 elif provider == "mistral":
                     mistral_settings = MistralSettings.from_env()
                     intent_settings = ChatIntentSettings.from_env(
@@ -739,7 +740,7 @@ def create_app() -> FastAPI:
                     )
                 else:
                     raise ValueError(
-                        "LLM_PROVIDER must be 'gemini', 'groq', 'mistral', or 'openrouter'"
+                        "LLM_PROVIDER must be 'gemini', 'mistral', 'openrouter', or 'vyce'"
                     )
                 app.state.chat_intent_settings = intent_settings
                 app.state.chat_routing_service = (

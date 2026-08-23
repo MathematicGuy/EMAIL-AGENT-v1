@@ -9,9 +9,9 @@ from typing import Any, cast
 
 from cowork_agent.config import (
     GeminiSettings,
-    GroqSettings,
     MistralSettings,
     OpenRouterSettings,
+    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, EpisodeCitation
 from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
@@ -42,6 +42,13 @@ Return a task_proposal object when task_proposal_requested is true, and null in 
 case, including whenever response_mode is clarify. task_proposal.prompt_version must be null.
 task_proposal.rag_citations may contain only citations supplied with current company evidence,
 copied field for field; when no company evidence was supplied it must be [].
+Before returning a task_proposal, read every advisory eligible episode and decide whether the
+request changes one of them rather than adding a new one. Moving or postponing a date, renaming,
+reassigning, cancelling or correcting an existing task is a revision, not a new task: set
+task_proposal.supersedes_index to that episode's index, so the replaced episode stops being read
+as current. Vietnamese revision cues include dời, hoãn, đổi, sửa, cập nhật, thay and huỷ. Use
+supersedes_index=null only when no advisory episode covers the task being changed, and never use
+an index that was not listed under advisory eligible episodes.
 citation_ids may contain only IDs supplied with current project evidence, and never an invented
 ID. When current project evidence is supplied and response_mode is normal, citation_ids must
 contain at least one ID from that evidence, naming the IDs that support your factual claims.
@@ -75,6 +82,7 @@ _RESPONSE_SCHEMA: dict[str, object] = {
                 "missing_information",
                 "prompt_version",
                 "confidence",
+                "supersedes_index",
             ],
             "additionalProperties": False,
             "properties": {
@@ -98,6 +106,7 @@ _RESPONSE_SCHEMA: dict[str, object] = {
                 "missing_information": {"type": "array", "items": {"type": "string"}},
                 "prompt_version": {"type": ["string", "null"]},
                 "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+                "supersedes_index": {"type": ["integer", "null"], "minimum": 0},
             },
         },
     },
@@ -128,6 +137,7 @@ class _ConfiguredChatReply:
                 ),
                 configured_model_id=self._model,
                 allowed_citations=_allowed_citations(context),
+                advisory_episode_ids=_advisory_episode_ids(context),
             )
             text = _required_string(response.get("assistant_text"), "assistant_text")
             citation_ids = _validated_citation_ids(response, context)
@@ -221,37 +231,23 @@ class OpenRouterChatReply(_ConfiguredChatReply):
         return cls(model=settings.model, complete=complete)
 
 
-class GroqChatReply(_ConfiguredChatReply):
+class VyceChatReply(_ConfiguredChatReply):
     @classmethod
-    def from_settings(cls, settings: GroqSettings) -> GroqChatReply:
-        from .providers.groq import GROQ_CHAT_COMPLETIONS_URL, _post_json
+    def from_settings(cls, settings: VyceSettings) -> VyceChatReply:
+        from .providers.vyce import execute_chat_completion
 
         async def complete(payload: dict[str, object]) -> Mapping[str, object]:
-            response = await asyncio.to_thread(
-                _post_json,
-                GROQ_CHAT_COMPLETIONS_URL,
-                settings.api_key,
-                {
-                    "model": settings.model,
-                    "messages": [
-                        {"role": "system", "content": payload["system"]},
-                        {
-                            "role": "user",
-                            "content": json.dumps(payload["context"], ensure_ascii=False),
-                        },
-                    ],
-                    "temperature": 0,
-                    "response_format": {"type": "json_object"},
-                },
-                settings.timeout_seconds,
+            return await execute_chat_completion(
+                settings,
+                cast(str, payload["system"]),
+                json.dumps(payload["context"], ensure_ascii=False),
+                _RESPONSE_SCHEMA,
             )
-            content = response["choices"][0]["message"]["content"]
-            parsed = json.loads(str(content))
-            if not isinstance(parsed, Mapping):
-                raise ValueError("Groq chat response must be an object")
-            return cast(Mapping[str, object], parsed)
 
         return cls(model=settings.model, complete=complete)
+
+
+VyneChatReply = VyceChatReply
 
 
 class GeminiChatReply(_ConfiguredChatReply):
@@ -394,15 +390,25 @@ def _episode_context(context: GenerationContext) -> list[dict[str, object]]:
     # and stripped of their timestamps they reach the model as two equal facts
     # that contradict each other. It has nothing to prefer the later one by,
     # and the v3 memory eval caught it asserting a superseded date as current.
+    # index is the model's only handle on an episode: episode_id is server-owned
+    # and stays out of the payload, so a revision names the episode it replaces
+    # by position in this list and the server resolves it back to an id.
     return [
         {
+            "index": index,
             "task_title": episode.task_title,
             "action_plan": list(episode.action_plan),
             "validation_status": episode.validation_status.value,
             "updated_at": episode.updated_at.isoformat(),
         }
-        for episode in context.advisory_episodes.value
+        for index, episode in enumerate(context.advisory_episodes.value)
     ]
+
+
+def _advisory_episode_ids(context: GenerationContext) -> tuple[str, ...]:
+    if context.advisory_episodes is None:
+        return ()
+    return tuple(episode.episode_id for episode in context.advisory_episodes.value)
 
 
 def _proposal_from_response(
@@ -411,6 +417,7 @@ def _proposal_from_response(
     required: bool,
     configured_model_id: str,
     allowed_citations: frozenset[EpisodeCitation],
+    advisory_episode_ids: tuple[str, ...],
 ) -> ChatTaskProposal | None:
     if set(response) not in (
         {"assistant_text", "task_proposal"},
@@ -434,6 +441,7 @@ def _proposal_from_response(
         "missing_information",
         "prompt_version",
         "confidence",
+        "supersedes_index",
     }
     if set(proposal) != expected_fields:
         raise ValueError("task proposal contains unsupported fields")
@@ -456,7 +464,22 @@ def _proposal_from_response(
         model_id=configured_model_id,
         prompt_version=_optional_string(proposal.get("prompt_version"), "prompt_version"),
         confidence=_optional_confidence(proposal.get("confidence")),
+        supersedes=_resolved_supersedes(
+            proposal.get("supersedes_index"), advisory_episode_ids
+        ),
     )
+
+
+def _resolved_supersedes(value: object, advisory_episode_ids: tuple[str, ...]) -> str | None:
+    """Resolve the model's ordinal into the server-owned id of the episode it retires."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("supersedes_index must be an integer or null")
+    if not 0 <= value < len(advisory_episode_ids):
+        raise ValueError("supersedes_index must name an advisory episode")
+    return advisory_episode_ids[value]
 
 
 def _conversation_title(value: object) -> str | None:

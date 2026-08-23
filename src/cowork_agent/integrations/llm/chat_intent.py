@@ -5,15 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from math import ceil
 from typing import cast
 
 from cowork_agent.config import (
     ChatIntentSettings,
     GeminiSettings,
-    GroqSettings,
     MistralSettings,
     OpenRouterSettings,
+    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import (
     IntentClassifierInput,
@@ -133,33 +134,32 @@ class GeminiIntentClassifier(ConfiguredIntentClassifier):
         return cls(complete)
 
 
-class GroqIntentClassifier(ConfiguredIntentClassifier):
+class VyceIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: GroqSettings, intent: ChatIntentSettings
-    ) -> GroqIntentClassifier:
-        from .providers.groq import GROQ_CHAT_COMPLETIONS_URL, _post_json
+        cls, provider: VyceSettings, intent: ChatIntentSettings
+    ) -> VyceIntentClassifier:
+        from .providers.vyce import execute_chat_completion
+
+        timeout_sec = max(1, ceil(intent.timeout_ms / 1000))
+        effective_settings = replace(
+            provider,
+            model=intent.model,
+            timeout_seconds=timeout_sec,
+        )
 
         async def complete(prompt: str) -> Mapping[str, object]:
-            response = await asyncio.to_thread(
-                _post_json,
-                GROQ_CHAT_COMPLETIONS_URL,
-                provider.api_key,
-                {
-                    "model": intent.model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_INSTRUCTION},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0,
-                    "response_format": {"type": "json_object"},
-                },
-                max(1, ceil(intent.timeout_ms / 1000)),
+            return await execute_chat_completion(
+                effective_settings,
+                _SYSTEM_INSTRUCTION,
+                prompt,
+                INTENT_RESPONSE_SCHEMA,
             )
-            content = response["choices"][0]["message"]["content"]
-            return _json_object(content)
 
         return cls(complete)
+
+
+VyneIntentClassifier = VyceIntentClassifier
 
 
 class MistralIntentClassifier(ConfiguredIntentClassifier):

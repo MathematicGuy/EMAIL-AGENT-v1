@@ -281,6 +281,52 @@ as v3's does.
 fill an older set's hole. `corpus-v4/` is forked precisely so this can be
 checked in one place.
 
+### 6.5 One episodic recall slot is reserved for the collapse guard
+
+One of the five `episodic` recall probes (§4.2) must ask which offices have a
+CCCD renewal task and expect **both** `Đà Nẵng` and `Hải Phòng`. This costs no
+extra budget; it claims a slot that already exists.
+
+It exists because v3 cannot see a whole class of damage. Closing Concern D was
+first attempted by collapsing similar episodes at retrieval time on word
+overlap. Measured on v3's own seed, that ranking is inverted: the two episodes
+that must stay separate — CCCD Đà Nẵng and CCCD Hải Phòng, two real offices —
+score **0.77**, while the pair that must merge — the passport filing on 5 Sep
+and the move to 12 Sep — scores **0.50**. No threshold separates them.
+
+The damage is invisible to v3. Retrieval for `ep_recall_01` returns the two CCCD
+episodes together; a collapse drops the Đà Nẵng one; the probe expects
+`Hải Phòng`, the newer and kept episode, and still passes. So a lexical collapse
+would turn `ep_update_01` green while silently hiding a real office's task, and
+the report would read all-clear. The route shipped instead is a write-time
+`supersedes` link, but the blind spot is a property of the dataset, not of the
+route, and it stays until a probe names it.
+
+### 6.6 The `update` probe must not ask for the value it calls stale
+
+v3's `ep_update_01` asks *"Ngày nộp hồ sơ hộ chiếu **trên tác vụ trước** là ngày
+nào?"* with `stale_any: ["5 tháng 9", "5/9"]`. Two things make that unmeasurable
+now that the `supersedes` link ships.
+
+The first is the question. "Trên tác vụ trước" reads as *on the previous task*,
+and the previous task's filing date **is** 5 September. A model answering the
+question as written is graded `stale` for being right.
+
+The second is the seed. The revision episode the product writes carries the
+retired date inside its own plan — *"Cập nhật ngày nộp hồ sơ hộ chiếu từ 5 tháng
+9 sang 12 tháng 9"*. Measured 2026-08-23: with the link declared 8/8 and the
+ancestor provably dropped at read time, the probe still graded `stale` 8/8, every
+reply naming 5 September. The superseded value reaches the model **inside the
+surviving episode**, so no retrieval change can make this probe green.
+
+v4's `update` probe therefore asks for the current value in its own terms — *"Hồ
+sơ hộ chiếu Cần Thơ hiện phải nộp vào ngày nào?"* — and `stale_any` keeps
+`5 tháng 9`. That version can only fire when the model prefers the retired date
+over the current one, which is what `update` is for.
+
+Whether the product should keep writing the old date into a revision's plan is a
+separate question and is deliberately not answered by a dataset change.
+
 ---
 
 ## 7. `invented_any` is now mandatory

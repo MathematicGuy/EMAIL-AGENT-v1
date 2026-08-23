@@ -40,6 +40,10 @@ class ChatTaskProposal:
     model_id: str | None
     prompt_version: str | None
     confidence: float | None
+    # Server-resolved, not provider-supplied: the provider names an ordinal into
+    # the advisory episodes it was shown, and the reply adapter turns that into
+    # the id of the episode this task replaces.
+    supersedes: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

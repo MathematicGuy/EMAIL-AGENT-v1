@@ -58,6 +58,12 @@ class EpisodeStore:
         self.transitions: list[EpisodeTransition] = []
         self.deletes: list[str] = []
 
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        # A task-creation turn now reads episodic memory so a revision can name
+        # the episode it replaces; this double has nothing stored to return.
+        del namespace, query
+        return ()
+
     async def write_task_episode(
         self, namespace: object, episode: TaskEpisode, *, expires_at: object
     ) -> TaskEpisode:

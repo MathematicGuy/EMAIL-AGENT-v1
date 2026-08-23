@@ -390,12 +390,12 @@ def build_live_classifier() -> tuple[Any, str, str]:
             provider,
             settings.model,
         )
-    if provider == "groq":
-        from cowork_agent.config import GroqSettings
-        from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+    if provider in ("vyce", "vyne"):
+        from cowork_agent.config import VyceSettings
+        from cowork_agent.integrations.llm.providers.vyce import VyceRouteClassifier
 
-        settings = GroqSettings.from_env()
-        return GroqRouteClassifier(settings), provider, settings.model
+        settings = VyceSettings.from_env()
+        return VyceRouteClassifier(settings), provider, settings.model
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier

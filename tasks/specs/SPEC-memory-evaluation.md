@@ -1272,33 +1272,69 @@ reads the conclusions. This harness reports; it does not gate.
     set, importing the constant rather than repeating the number, so a change to
     the product moves the bound.
 
-17. **Two approved episodes about one task are two live facts, and nothing
-    retracts the older one.** Episodic is the scope where supersession is
-    *measurable* (item 15), and `v3_four_scopes_hard`'s `ep_update_01` measures
-    it failing: the Cần Thơ filing date moves 5 → 12 September, both rows stay
-    `USER_APPROVED` and retrievable, and the model reports 5 September as
-    current with `certain=true`.
+17. **Two approved episodes about one task were two live facts, and nothing
+    retracted the older one. A write-time `supersedes` link now does — and
+    `ep_update_01` still reports `dangerous`, for a different reason.** Episodic
+    is the scope where supersession is *measurable* (item 15), and
+    `v3_four_scopes_hard`'s `ep_update_01` measured it failing: the Cần Thơ
+    filing date moved 5 → 12 September, both rows stayed `USER_APPROVED` and
+    retrievable, and the model reported 5 September as current with
+    `certain=true`.
 
-    The read path is not at fault, and this was checked rather than assumed.
+    The read path was never at fault, and this was checked rather than assumed.
     Replaying the four v3 seeds through the real SQLite store and the real
     retrieval policy returns **both** passport episodes and ranks the
-    superseding one **first**. `_episode_context` used to drop the `updated_at`
-    it had just been sorted by — that is fixed, and the payload now carries it.
-    Behaviour did not change.
-
-    So **recency ordering is not supersession**. Ordering says which row is
-    newer; it does not say the older one stopped being true. Nothing in the
-    episode model can say that: there is no `supersedes` edge, no retraction,
-    and no status distinguishing "approved" from "approved and later replaced".
+    superseding one **first**. So **recency ordering is not supersession**:
+    ordering says which row is newer, not that the older one stopped being true.
     A system prompt sentence instructing the model to infer supersession from
     `updated_at` was written, shipped to a live run, and **did not work**; it was
-    reverted, because SPEC-memory-eval-probe-set-v3 §13.2 forbids a production
-    prompt change that triage has not named Concern D with a failing test.
+    reverted under SPEC-memory-eval-probe-set-v3 §13.2.
 
-    Closing it is a product change — an explicit supersedes link, or retrieval
-    collapsing superseded episodes before they reach the model — not a grader or
-    dataset change. Until then `ep_update_01` is expected to report `dangerous`,
-    and that row is the gap, not noise to be tuned away.
+    What closed the retrieval gap, gated on a failing test first:
+
+    - `TaskEpisode.supersedes` (migration `015_episode_supersedes`), naming the
+      episode a revision replaces. `retrieval_eligible` stays a generated column
+      derived from `validation_status`, so supersession is resolved at **read**
+      time — `MemoryGateway` drops an ancestor only when an episode that already
+      passed the eligibility filter names it, so a rejected revision cannot hide
+      an approved ancestor.
+    - The provider never sees an `episode_id`. It names an **ordinal** into the
+      advisory episodes it was shown and the reply adapter resolves it, the same
+      shape as `allowed_citations`. At the revision write turn retrieval shows
+      exactly **one** advisory episode — the passport create — so the only
+      failure available to the model is omission, not a wrong target.
+    - `select_memory_reads` now enables the episodic read for an explicit task
+      request. This was the blocker: a task-*creation* message carries no
+      episodic cue, so the write turn saw zero advisory episodes and had no
+      ordinal to name. Route A was inert until this changed, and the first live
+      run proved it — all 227 seeded episodes came back `supersedes=None`.
+
+    Measured, and this is where the finding turns: the link is declared
+    **8/8** on a repeat probe set, always targeting the passport create, and
+    replaying the *captured live payloads* through the real gateway returns the
+    revision **alone**. The ancestor no longer reaches the model. `ep_update_01`
+    still graded `stale` **8/8**, because the revision episode the product writes
+    carries the retired date in its own plan —
+    *"Cập nhật ngày nộp hồ sơ hộ chiếu từ 5 tháng 9 sang 12 tháng 9"* — and the
+    probe asks *"Ngày nộp hồ sơ hộ chiếu **trên tác vụ trước** là ngày nào?"*,
+    which reads as a request for the previous task's date. The model answers with
+    the `từ` side and `stale_any` fires.
+
+    So `ep_update_01` no longer measures supersession. It measures whether the
+    model quotes the *from* side of a from→to sentence, against a question whose
+    own wording asks for the older value, and it cannot separate "reported a
+    retired fact" from "quoted the retired value inside the current fact". Fixing
+    the probe is a dataset change and does not need §13.2; whether the product
+    should stop writing the old date into the revision's plan is a separate
+    product question, and it is not answered here.
+
+    Two measurement traps this exposed. A rate computed from
+    `runs/memeval-chat.db` **after** a run measures residue: the harness deletes
+    the episodes it seeded, so 264 rows became 133 pre-existing ones, and an
+    early "8% of sessions carry a link" came entirely from that residue. And a
+    count of *all* links overstates the one that matters — CCCD creations link to
+    each other too, which is why link totals exceeded the number of revisions.
+    Both numbers have to be sampled in flight and classified by episode.
 
 18. **The episodic ranker cannot separate two same-shape episodes, and
     `ep_recall_01`'s original expectation was retired on that evidence.** It

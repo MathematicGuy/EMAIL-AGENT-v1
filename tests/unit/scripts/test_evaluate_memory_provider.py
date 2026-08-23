@@ -57,6 +57,20 @@ def test_openrouter_reports_its_own_model() -> None:
     assert model == "vendor/model-under-test"
 
 
+def test_vyce_reports_its_own_model() -> None:
+    environ = {"VYCE_API_KEY": "sk-vyce-test", "VYCE_MODEL": "gpt-5.6-luna"}
+    _reply, provider, model = _build_chat_reply("vyce", environ)
+    assert provider == "vyce"
+    assert model == "gpt-5.6-luna"
+
+
+def test_vyne_reports_its_own_model() -> None:
+    environ = {"VYNE_API_KEY": "sk-vyne-test", "VYNE_MODEL": "gpt-5.6-luna"}
+    _reply, provider, model = _build_chat_reply("vyne", environ)
+    assert provider == "vyne"
+    assert model == "gpt-5.6-luna"
+
+
 def test_unknown_provider_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         _build_chat_reply("no-such-provider", {})
