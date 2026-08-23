@@ -59,6 +59,23 @@ async def run_probe_set(
 ) -> dict[str, object]:
     """Ask every probe under all three arms and assemble the report."""
 
+    rows = await run_probe_rows(probe_set, ask)
+
+    return build_report(
+        probe_set,
+        rows,
+        provider=provider,
+        model=model,
+        run_key=run_key(probe_set.probe_set_id, model, probe_set.seed),
+        ran_at=ran_at,
+        seed_failures=seed_failures,
+        nonce=nonce,
+    )
+
+
+async def run_probe_rows(probe_set: ProbeSet, ask: AskProbe) -> tuple[ProbeRow, ...]:
+    """Ask every probe under all three arms and return mergeable scored rows."""
+
     rows: list[ProbeRow] = []
 
     for probe in probe_set.probes:
@@ -94,13 +111,4 @@ async def run_probe_set(
             )
         )
 
-    return build_report(
-        probe_set,
-        rows,
-        provider=provider,
-        model=model,
-        run_key=run_key(probe_set.probe_set_id, model, probe_set.seed),
-        ran_at=ran_at,
-        seed_failures=seed_failures,
-        nonce=nonce,
-    )
+    return tuple(rows)

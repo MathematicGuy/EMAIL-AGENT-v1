@@ -1,9 +1,12 @@
 """Mistral OpenAI-compatible adapters for classification and action plans."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from collections.abc import Mapping
+from email.message import Message
 from typing import Any
 from urllib.error import HTTPError, URLError
 
@@ -37,11 +40,20 @@ class MistralAPIError(RuntimeError):
 
     error_code = "MISTRAL_API_ERROR"
 
-    def __init__(self, detail: str, *, safe_message: str | None = None) -> None:
+    def __init__(
+        self,
+        detail: str,
+        *,
+        safe_message: str | None = None,
+        status_code: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
         super().__init__(detail)
         self.safe_message = safe_message or (
             "Mistral không thể phân tích email. Vui lòng kiểm tra cấu hình model và thử lại."
         )
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
 
 
 class MistralActionPlanGenerator(ConfiguredActionPlanGenerator):
@@ -169,6 +181,8 @@ def _post_json(
             safe_message=(
                 f"Mistral từ chối yêu cầu (HTTP {exc.code}). Vui lòng kiểm tra model rồi thử lại."
             ),
+            status_code=exc.code,
+            retry_after_seconds=_retry_after_seconds(exc.headers),
         ) from exc
     except (TimeoutError, URLError) as exc:
         raise MistralAPIError(
@@ -181,3 +195,18 @@ def _post_json(
         raise MistralAPIError("Mistral API response was not valid JSON") from exc
     except ValueError as exc:
         raise MistralAPIError("Mistral API response must be a JSON object") from exc
+
+
+def _retry_after_seconds(headers: Message[str, str] | None) -> int | None:
+    """Extract only a non-negative integer Retry-After value from provider headers."""
+
+    if headers is None:
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
