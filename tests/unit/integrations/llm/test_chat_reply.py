@@ -681,6 +681,16 @@ def test_advisory_episodes_carry_the_recency_the_store_ranked_them_by() -> None:
     ]
 
 
+def test_system_prompt_a_refusal_is_the_complete_answer() -> None:
+    """Wrap-invention recites neighbouring facts after declining (mimo v4 Concern D)."""
+
+    prompt = " ".join(chat_reply._SYSTEM_INSTRUCTION.split())
+    assert (
+        "When the labeled context does not contain the fact the question asked for, "
+        "the complete answer is that the fact is absent. Write that one statement and stop."
+    ) in prompt
+
+
 def test_system_prompt_sha_is_stable_across_calls() -> None:
     assert system_prompt_sha() == system_prompt_sha()
     assert len(system_prompt_sha()) == 64
