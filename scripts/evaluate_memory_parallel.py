@@ -244,7 +244,7 @@ async def run_recovery_pass(
     probe_arm_map: dict[str, dict[Arm, tuple[Outcome, bool, int, str]]],
     recorded: list[dict[str, object]],
     lock: asyncio.Lock,
-    max_recovery_attempts: int = 3,
+    max_recovery_attempts: int = 5,
 ) -> list[FailedCall]:
     """Pass 2: Targeted retry pass for probes that experienced API failures."""
     if not failed_calls:
@@ -316,7 +316,7 @@ async def run_parallel_evaluation(
     provider: str,
     model: str,
     concurrency: int = 5,
-    max_recovery_retries: int = 3,
+    max_recovery_retries: int = 5,
     transcript: list[dict[str, object]] | None = None,
 ) -> tuple[dict[str, object], list[FailedCall]]:
     total_calls = len(probe_set.probes) * 3
@@ -466,8 +466,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--max-retries",
         type=int,
-        default=3,
-        help="Maximum targeted recovery retries for API failures (default: 3).",
+        default=5,
+        help="Maximum targeted recovery retries for API failures (default: 5).",
     )
     args = parser.parse_args(argv)
 

@@ -17,6 +17,7 @@ from scripts.evaluate_memory_parallel import (
     run_probe_task,
     unrecovered_manifest_entry,
 )
+from tests.unit.scripts.cli_harness import run_cli
 
 
 def _probe() -> Probe:
@@ -114,6 +115,14 @@ def test_uncoded_empty_is_queued_for_recovery(monkeypatch: pytest.MonkeyPatch) -
     failed = asyncio.run(_run_with_errors(monkeypatch, ()))
     assert len(failed) == 3
     assert all(item.error_reason == "empty_reply" for item in failed)
+
+
+def test_max_retries_cli_default_is_five() -> None:
+    result = run_cli("evaluate_memory_parallel", "--help")
+    assert result.returncode == 0
+    text = " ".join(result.stdout.split())
+    assert "--max-retries" in text
+    assert "recovery retries for API failures (default: 5)" in text
 
 
 def test_unrecovered_manifest_records_that_recovery_ran() -> None:
