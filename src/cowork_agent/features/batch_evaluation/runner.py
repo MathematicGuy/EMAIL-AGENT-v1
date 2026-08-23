@@ -26,6 +26,7 @@ from cowork_agent.features.batch_evaluation.contracts import (
     EvaluationPlugin,
     EvaluationRequest,
     EvaluationWarning,
+    ExecutionMode,
     FailureClass,
     FailureClassification,
     JobState,
@@ -951,8 +952,13 @@ class EvaluationJobRunner:
             WorkUnit(unit_id=unit.unit_id, ordinal=unit.ordinal, payload=unit.payload)
             for unit in stored_units
         )
+        valid_count = (
+            len(units) == plan.ready_work
+            if job.request.execution_mode is ExecutionMode.REQUEST_BATCH
+            else 0 < len(units) <= plan.ready_work
+        )
         if (
-            len(units) != plan.ready_work
+            not valid_count
             or tuple(unit.ordinal for unit in units) != tuple(range(len(units)))
             or len({unit.unit_id for unit in units}) != len(units)
         ):

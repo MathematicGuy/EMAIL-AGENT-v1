@@ -12,6 +12,7 @@ from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluatio
 from cowork_agent.features.batch_evaluation.contracts import (
     EvaluationPlugin,
     EvaluationRequest,
+    ExecutionMode,
     FailureClass,
     JobState,
     PluginPlan,
@@ -94,7 +95,12 @@ class EvaluationJobService:
         plugin = self._require_compatible_plugin(request)
         plan = await self._preflight(plugin, request)
         resolution = self._resolve_workers(request, plan)
-        units = self._build_units(plugin, plan, resolution.effective_workers)
+        units = self._build_units(
+            plugin,
+            plan,
+            resolution.effective_workers,
+            request.execution_mode,
+        )
         request_hash = canonical_request_hash(request)
         try:
             job, created = await self._repository.create_or_get(
@@ -204,7 +210,11 @@ class EvaluationJobService:
         return resolution
 
     def _build_units(
-        self, plugin: EvaluationPlugin, plan: PluginPlan, effective_workers: int
+        self,
+        plugin: EvaluationPlugin,
+        plan: PluginPlan,
+        effective_workers: int,
+        execution_mode: ExecutionMode,
     ) -> tuple[WorkUnit, ...]:
         try:
             units = plugin.build_work_units(plan, effective_workers)
@@ -214,7 +224,14 @@ class EvaluationJobService:
             raise EvaluationValidationError(
                 "evaluation plan could not create work units"
             ) from error
-        if not isinstance(units, tuple) or len(units) != plan.ready_work:
+        if not isinstance(units, tuple):
+            raise EvaluationValidationError("evaluation plan has an invalid work-unit count")
+        valid_count = (
+            len(units) == plan.ready_work
+            if execution_mode is ExecutionMode.REQUEST_BATCH
+            else 0 < len(units) <= plan.ready_work
+        )
+        if not valid_count:
             raise EvaluationValidationError("evaluation plan has an invalid work-unit count")
         if any(not isinstance(unit, WorkUnit) for unit in units):
             raise EvaluationValidationError("evaluation plan has invalid work units")

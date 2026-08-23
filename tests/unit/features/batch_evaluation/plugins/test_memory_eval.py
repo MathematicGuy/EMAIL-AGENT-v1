@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
 
 from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
 from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
+from cowork_agent.features.ai_chat.memory_eval.probes import ProbeSet
 from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow
 from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
 from cowork_agent.features.batch_evaluation.contracts import (
@@ -103,8 +106,8 @@ async def test_preflight_is_immutable_per_job_and_rejects_incompatible_requests(
 
     assert first.dataset_ref == "v1-four-scopes"
     assert second.dataset_ref == "v2-four-scopes-wide"
-    assert len(plugin.build_work_units(first, lane_count=1)) == first.ready_work
-    assert len(plugin.build_work_units(second, lane_count=1)) == second.ready_work
+    assert len(plugin.build_work_units(first, lane_count=1)) == 1
+    assert len(plugin.build_work_units(second, lane_count=1)) == 1
 
     for request in (
         _request(provider="gemini"),
@@ -126,6 +129,46 @@ async def test_preflight_is_immutable_per_job_and_rejects_incompatible_requests(
         await postgres_plugin.preflight(_request(max_workers=2))
 
     assert (await postgres_plugin.preflight(_request(max_workers=1))).ready_work > 0
+
+    no_store_plugin = _plugin(
+        environment=LiveEnvironment(
+            postgres_url=None,
+            sqlite_path=None,
+            gemini_ready=True,
+            embeddings_ready=True,
+            embedding_key_name="GEMINI_API_KEY",
+        )
+    )
+    with pytest.raises(ValueError, match="SQLite"):
+        await no_store_plugin.preflight(_request(max_workers=2))
+
+    assert (await no_store_plugin.preflight(_request(max_workers=1))).ready_work > 0
+
+
+@pytest.mark.asyncio
+async def test_preflight_detaches_and_deeply_freezes_mutable_probe_seed_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = MemoryProbeCatalog(_PROBES_DIR)
+    loaded = catalog.resolve("v1-four-scopes")
+    mutable_long_term = dict(loaded.seed.long_term)
+    source = replace(loaded, seed=replace(loaded.seed, long_term=mutable_long_term))
+    monkeypatch.setattr(catalog, "resolve", lambda _dataset_ref: source)
+    plugin = MemoryEvalPlugin(
+        catalog=catalog,
+        environment_resolver=_sqlite_environment,
+    )
+
+    plan = await plugin.preflight(_request())
+    private_plan = cast(memory_eval._MemoryEvalPlan, plan.private_plan)
+    frozen_long_term = private_plan.probe_set.seed.long_term
+    original = dict(frozen_long_term)
+
+    mutable_long_term["review-mutation"] = "must not leak"
+
+    assert dict(frozen_long_term) == original
+    with pytest.raises(TypeError):
+        frozen_long_term["blocked-write"] = "value"  # type: ignore[index]
 
 
 @pytest.mark.asyncio
@@ -175,7 +218,7 @@ async def test_work_units_round_robin_all_probes_with_only_durable_metadata() ->
     probe_set = MemoryProbeCatalog(_PROBES_DIR).resolve("v1-four-scopes")
     original_ids = tuple(probe.probe_id for probe in probe_set.probes)
 
-    assert len(units) == len(original_ids)
+    assert len(units) == 3
     assert [unit.ordinal for unit in units] == list(range(len(units)))
     assert all(set(unit.payload) == {"probe_ids", "ordinals"} for unit in units)
     flattened = [
@@ -189,12 +232,22 @@ async def test_work_units_round_robin_all_probes_with_only_durable_metadata() ->
     assert [ordinal for ordinal, _ in sorted(flattened)] == list(range(len(original_ids)))
     assert len({probe_id for _, probe_id in flattened}) == len(original_ids)
     assert [tuple(unit.payload["ordinals"]) for unit in units] == [
-        (ordinal,) for ordinal in range(len(original_ids))
+        (0, 3, 6),
+        (1, 4, 7),
+        (2, 5),
     ]
+    assert [tuple(unit.payload["probe_ids"]) for unit in units] == [
+        original_ids[0::3],
+        original_ids[1::3],
+        original_ids[2::3],
+    ]
+
+    one_per_probe = plugin.build_work_units(plan, lane_count=len(original_ids) + 5)
+    assert len(one_per_probe) == len(original_ids)
 
 
 @pytest.mark.asyncio
-async def test_execute_work_does_not_turn_an_unavailable_postgres_target_into_sqlite(
+async def test_serial_execute_work_keeps_an_explicit_no_store_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     unavailable = LiveEnvironment(
@@ -205,7 +258,7 @@ async def test_execute_work_does_not_turn_an_unavailable_postgres_target_into_sq
         embedding_key_name="GEMINI_API_KEY",
     )
     plugin = _plugin(environment=unavailable)
-    plan = await plugin.preflight(_request())
+    plan = await plugin.preflight(_request(max_workers=1))
     unit = plugin.build_work_units(plan, lane_count=1)[0]
     seen: list[LiveEnvironment] = []
 
@@ -346,8 +399,13 @@ async def test_execute_work_isolates_concurrent_shards_and_encodes_private_resul
     )
 
     assert {entry["database"] for entry in observed} == {
-        context.scratch_dir / "memory-eval.sqlite" for context in contexts
+        context.scratch_dir / f"memeval-{context.attempt_id}.db" for context in contexts
     }
+    assert all(
+        cast(Path, entry["database"]).name.startswith("memeval-")
+        and cast(Path, entry["database"]).suffix == ".db"
+        for entry in observed
+    )
     for key in ("tenant", "user", "session", "nonce", "transcript", "output", "reply"):
         values = {
             id(entry[key]) if key in {"transcript", "reply"} else entry[key]
@@ -356,6 +414,78 @@ async def test_execute_work_isolates_concurrent_shards_and_encodes_private_resul
         assert len(values) == len(observed)
     assert len({entry["report_nonce"] for entry in observed}) == 1
     assert all(json.loads(json.dumps(outcome.private_result)) for outcome in outcomes)
+    assert all(not cast(Path, entry["database"]).exists() for entry in observed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_kind",
+    ("aborted", "missing-row", "incomplete-row", "cleanup"),
+)
+async def test_execute_work_returns_failed_for_dishonest_shard_results(
+    failure_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = _plugin()
+    plan = await plugin.preflight(_request(max_workers=2))
+    unit = plugin.build_work_units(plan, lane_count=2)[0]
+
+    async def fake_execute_memory_shard(
+        probe_set: ProbeSet,
+        environment: LiveEnvironment,
+        reply: object,
+        *,
+        report_nonce: str,
+        **_: object,
+    ) -> MemoryShardResult:
+        del reply
+        assert environment.sqlite_path is not None
+        rows = tuple(
+            ProbeRow(
+                probe_id=probe.probe_id,
+                targets=probe.targets,
+                test=probe.test,
+                full=Outcome.PASS,
+                ablated=Outcome.MISS,
+                control=Outcome.MISS,
+                certain=True,
+                latency_ms=1,
+            )
+            for probe in probe_set.probes
+        )
+        if failure_kind == "missing-row":
+            rows = rows[:-1]
+        elif failure_kind == "incomplete-row":
+            rows = (replace(rows[0], full=cast(Outcome, "not-an-outcome")), *rows[1:])
+        return MemoryShardResult(
+            rows=rows,
+            seed_failure_ids=(),
+            private_transcript=({"question": "private", "reply": "private"},),
+            nonce="identity",
+            provider_findings=("aborted: provider limit",)
+            if failure_kind == "aborted"
+            else (),
+            scratch_removed=failure_kind != "cleanup",
+            report_nonce=report_nonce,
+        )
+
+    monkeypatch.setattr(memory_eval, "execute_memory_shard", fake_execute_memory_shard)
+    outcome = await plugin.execute_work(
+        unit,
+        WorkContext(
+            job_id="memory-job",
+            attempt_id="attempt-failed",
+            lane_id="lane-1",
+            credential_alias="mistral-1",
+            plugin_plan=plan,
+            provider_client=object(),
+            scratch_dir=tmp_path,
+        ),
+    )
+
+    assert outcome.state is UnitState.FAILED
+    assert outcome.private_result is None
 
 
 @pytest.mark.asyncio

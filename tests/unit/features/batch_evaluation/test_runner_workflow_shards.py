@@ -281,6 +281,13 @@ async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_iso
         observed.append(
             {
                 "database": environment.sqlite_path,
+                "ordinals": tuple(
+                    index
+                    for index, candidate in enumerate(
+                        memory_eval.MemoryProbeCatalog().resolve("v1-four-scopes").probes
+                    )
+                    if candidate.probe_id in {item.probe_id for item in probe_set.probes}
+                ),
                 "tenant": f"tenant-{identity_nonce}",
                 "user": f"user-{identity_nonce}",
                 "session": f"session-{identity_nonce}-{probe.probe_id}",
@@ -333,7 +340,11 @@ async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_iso
 
     await runner.run(job.job_id)
 
-    assert len(observed) == 8
+    assert len(observed) == 2
+    assert {entry["ordinals"] for entry in observed} == {
+        (0, 2, 4, 6),
+        (1, 3, 5, 7),
+    }
     for key in ("database", "tenant", "user", "session", "nonce", "transcript", "output", "reply"):
         values = [entry[key] for entry in observed]
         unique_values = {
@@ -353,3 +364,117 @@ async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_iso
     )
     assert private_files
     assert "private prompt" in private_files[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failures", "expected_state"),
+    (
+        ({0: "aborted"}, "partially_succeeded"),
+        ({0: "aborted", 1: "cleanup"}, "failed"),
+    ),
+)
+async def test_memory_plugin_runner_never_succeeds_with_aborted_or_unclean_shards(
+    failures: Mapping[int, str],
+    expected_state: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    repository = TrackingRepository(tmp_path / "evaluation-jobs.db")
+    await repository.initialize()
+    registry = PluginRegistry()
+    plugin = MemoryEvalPlugin(
+        environment_resolver=lambda: LiveEnvironment(
+            postgres_url=None,
+            sqlite_path=Path("sqlite-template.db"),
+            gemini_ready=True,
+            embeddings_ready=True,
+            embedding_key_name="GEMINI_API_KEY",
+        )
+    )
+    registry.register(plugin)
+    pool = TrackingCredentialPool()
+    service = EvaluationJobService(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+    )
+    runner = EvaluationJobRunner(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+        scratch_root=tmp_path / "scratch",
+        reply_factory=FakeReplyFactory(),
+    )
+    canonical = memory_eval.MemoryProbeCatalog().resolve("v1-four-scopes")
+    probe_ordinals = {probe.probe_id: index for index, probe in enumerate(canonical.probes)}
+
+    async def fake_execute_memory_shard(
+        probe_set: object,
+        environment: LiveEnvironment,
+        reply: object,
+        *,
+        report_nonce: str,
+        **_: object,
+    ) -> MemoryShardResult:
+        del reply
+        assert environment.sqlite_path is not None
+        lane = probe_ordinals[probe_set.probes[0].probe_id]  # type: ignore[union-attr]
+        failure = failures.get(lane)
+        transcript = ({"question": "private failure", "reply": "private failure"},)
+        return MemoryShardResult(
+            rows=tuple(
+                ProbeRow(
+                    probe_id=probe.probe_id,
+                    targets=probe.targets,
+                    test=probe.test,
+                    full=Outcome.PASS,
+                    ablated=Outcome.MISS,
+                    control=Outcome.MISS,
+                    certain=True,
+                    latency_ms=1,
+                )
+                for probe in probe_set.probes  # type: ignore[union-attr]
+            ),
+            seed_failure_ids=(),
+            private_transcript=transcript,
+            nonce=f"identity-{lane}",
+            provider_findings=("aborted: provider limit",) if failure == "aborted" else (),
+            scratch_removed=failure != "cleanup",
+            report_nonce=report_nonce,
+        )
+
+    monkeypatch.setattr(memory_eval, "execute_memory_shard", fake_execute_memory_shard)
+    job = await service.submit(
+        EvaluationRequest(
+            evaluation_type="memory-eval",
+            provider="mistral",
+            target_model="mistral-small-latest",
+            dataset_ref="v1-four-scopes",
+            credential_pool="mistral-eval",
+            execution_mode=ExecutionMode.WORKFLOW_SHARDS,
+            max_workers=2,
+            max_attempts_per_unit=1,
+            budget=EvaluationBudget(max_provider_requests=300, max_total_tokens=300_000),
+            parameters={},
+        ),
+        idempotency_key=f"memory-failure-{expected_state}",
+    )
+
+    await runner.run(job.job_id)
+
+    terminal = await repository.get_job(job.job_id)
+    assert terminal is not None
+    assert terminal.state.value == expected_state
+    manifest = artifacts.read_manifest(artifacts.manifest_reference(job.job_id))
+    assert manifest["aborted"] is True
+    assert manifest["execution_manifest"]["failed_unit_count"] == len(failures)
+    serialized = str(manifest)
+    assert "private failure" not in serialized
+    assert all(
+        set(shard) == {"unit_id", "ordinal", "state"}
+        for shard in manifest["execution_manifest"]["shards"]
+    )

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import cast
 
 from cowork_agent.domain.chat_contracts import MemoryType
@@ -18,9 +20,11 @@ from cowork_agent.features.ai_chat.memory_eval.live_execution import (
     execute_memory_shard,
 )
 from cowork_agent.features.ai_chat.memory_eval.probes import (
+    EpisodeSeed,
     Probe,
     ProbeSet,
     ProbeTest,
+    SeedSpec,
     load_probe_set,
 )
 from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow
@@ -146,12 +150,18 @@ class MemoryEvalPlugin(EvaluationPlugin):
             raise ValueError("memory evaluation requires workflow_shards mode")
         if request.parameters:
             raise ValueError("memory evaluation does not accept parameters")
-        probe_set = self._catalog.resolve(request.dataset_ref)
+        probe_set = _freeze_probe_set(self._catalog.resolve(request.dataset_ref))
         environment = self._environment_resolver()
         if not isinstance(environment, LiveEnvironment):
             raise TypeError("memory environment resolver must return LiveEnvironment")
         if environment.postgres_url is not None and request.max_workers != 1:
             raise ValueError("PostgreSQL memory evaluation requires max_workers=1")
+        if (
+            request.max_workers > 1
+            and environment.postgres_url is None
+            and environment.sqlite_path is None
+        ):
+            raise ValueError("parallel memory evaluation requires an available SQLite store")
         private_plan = _MemoryEvalPlan(
             probe_set=probe_set,
             provider=request.provider,
@@ -169,23 +179,34 @@ class MemoryEvalPlugin(EvaluationPlugin):
 
     def build_work_units(self, plan: PluginPlan, lane_count: int) -> tuple[WorkUnit, ...]:
         memory_plan = _memory_plan(plan)
-        del lane_count
+        shard_count = min(lane_count, len(memory_plan.probe_set.probes))
+        if shard_count < 1:
+            raise ValueError("memory evaluation requires at least one work lane")
         return tuple(
             WorkUnit(
-                unit_id=f"memory-shard-{ordinal}",
-                ordinal=ordinal,
+                unit_id=f"memory-shard-{lane_ordinal}",
+                ordinal=lane_ordinal,
                 payload={
-                    "probe_ids": (probe.probe_id,),
-                    "ordinals": (ordinal,),
+                    "probe_ids": tuple(
+                        probe.probe_id
+                        for probe in memory_plan.probe_set.probes[lane_ordinal::shard_count]
+                    ),
+                    "ordinals": tuple(
+                        range(lane_ordinal, len(memory_plan.probe_set.probes), shard_count)
+                    ),
                 },
             )
-            for ordinal, probe in enumerate(memory_plan.probe_set.probes)
+            for lane_ordinal in range(shard_count)
         )
 
     async def execute_work(self, unit: WorkUnit, context: WorkContext) -> WorkUnitOutcome:
         memory_plan = _memory_plan(context.plugin_plan)
         shard_probe_set = _probe_subset(memory_plan.probe_set, unit)
-        environment = _attempt_environment(memory_plan.environment, context.scratch_dir)
+        environment = _attempt_environment(
+            memory_plan.environment,
+            context.scratch_dir,
+            context.attempt_id,
+        )
         result = await execute_memory_shard(
             shard_probe_set,
             environment,
@@ -194,6 +215,15 @@ class MemoryEvalPlugin(EvaluationPlugin):
             model=memory_plan.model,
             report_nonce=memory_plan.report_nonce,
         )
+        if not _is_complete_success(result, shard_probe_set, environment):
+            return WorkUnitOutcome(
+                unit_id=unit.unit_id,
+                ordinal=unit.ordinal,
+                state=UnitState.FAILED,
+                provider_requests=len(result.private_transcript),
+                total_tokens=0,
+                private_result=None,
+            )
         return WorkUnitOutcome(
             unit_id=unit.unit_id,
             ordinal=unit.ordinal,
@@ -225,7 +255,7 @@ class MemoryEvalPlugin(EvaluationPlugin):
             failed_unit_count > 0
             or completed_probe_count != len(memory_plan.probe_set.probes)
         )
-        report_inputs = [shard.result for shard in valid]
+        report_inputs = _ordered_report_inputs(valid, memory_plan.probe_set)
         if incomplete or not report_inputs:
             report_inputs.append(
                 MemoryShardResult(
@@ -279,16 +309,63 @@ def _default_environment() -> LiveEnvironment:
     return probe_environment(os.environ)
 
 
-def _attempt_environment(environment: LiveEnvironment, scratch_dir: Path) -> LiveEnvironment:
+def _attempt_environment(
+    environment: LiveEnvironment,
+    scratch_dir: Path,
+    attempt_id: str,
+) -> LiveEnvironment:
     if environment.postgres_url is not None:
         return replace(environment, sqlite_path=None, sqlite_path_owned=False)
     if environment.sqlite_path is None:
         return environment
     return replace(
         environment,
-        sqlite_path=scratch_dir / "memory-eval.sqlite",
+        sqlite_path=scratch_dir / f"memeval-{_safe_filename_id(attempt_id)}.db",
         sqlite_path_owned=True,
     )
+
+
+def _safe_filename_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "-", value)
+
+
+def _freeze_probe_set(probe_set: ProbeSet) -> ProbeSet:
+    seed = probe_set.seed
+    return ProbeSet(
+        schema_version=probe_set.schema_version,
+        probe_set_id=probe_set.probe_set_id,
+        label=probe_set.label,
+        seed=SeedSpec(
+            short_term=tuple(seed.short_term),
+            long_term=MappingProxyType(dict(seed.long_term)),
+            episodic=tuple(
+                EpisodeSeed(request=episode.request, approve=episode.approve)
+                for episode in seed.episodic
+            ),
+            semantic_corpus_dir=seed.semantic_corpus_dir,
+        ),
+        probes=tuple(replace(probe) for probe in probe_set.probes),
+    )
+
+
+def _is_complete_success(
+    result: MemoryShardResult,
+    probe_set: ProbeSet,
+    environment: LiveEnvironment,
+) -> bool:
+    rows_complete = len(result.rows) == len(probe_set.probes) and all(
+        row.probe_id == probe.probe_id
+        and row.targets is probe.targets
+        and row.test is probe.test
+        and all(
+            isinstance(outcome, Outcome)
+            for outcome in (row.full, row.ablated, row.control)
+        )
+        for row, probe in zip(result.rows, probe_set.probes, strict=True)
+    )
+    aborted = any(finding.startswith("aborted: ") for finding in result.provider_findings)
+    cleanup_failed = environment.sqlite_path_owned and not result.scratch_removed
+    return not aborted and not cleanup_failed and rows_complete
 
 
 def _probe_subset(probe_set: ProbeSet, unit: WorkUnit) -> ProbeSet:
@@ -424,6 +501,50 @@ def _valid_shards(
     return valid, invalid
 
 
+def _ordered_report_inputs(
+    shards: Sequence[_DecodedShardResult], probe_set: ProbeSet
+) -> list[MemoryShardResult]:
+    if not shards:
+        return []
+    rows_by_id = {
+        row.probe_id: row
+        for shard in shards
+        for row in shard.result.rows
+    }
+    first = shards[0].result
+    return [
+        MemoryShardResult(
+            rows=tuple(
+                rows_by_id[probe.probe_id]
+                for probe in probe_set.probes
+                if probe.probe_id in rows_by_id
+            ),
+            seed_failure_ids=tuple(
+                sorted(
+                    {
+                        failure
+                        for shard in shards
+                        for failure in shard.result.seed_failure_ids
+                    }
+                )
+            ),
+            private_transcript=(),
+            nonce=first.nonce,
+            provider_findings=tuple(
+                sorted(
+                    {
+                        finding
+                        for shard in shards
+                        for finding in shard.result.provider_findings
+                    }
+                )
+            ),
+            scratch_removed=all(shard.result.scratch_removed for shard in shards),
+            report_nonce=first.report_nonce,
+        )
+    ]
+
+
 def _decode_private_result(
     value: object, *, unit_id: str, ordinal: int
 ) -> _DecodedShardResult:
@@ -550,23 +671,15 @@ def _execution_manifest(
     completed_probe_count: int,
     failed_unit_count: int,
 ) -> dict[str, object]:
-    successful_by_unit = {shard.unit_id: shard for shard in successful}
     shards: list[dict[str, object]] = []
     for outcome in sorted(outcomes, key=lambda item: item.ordinal):
-        entry: dict[str, object] = {
-            "unit_id": outcome.unit_id,
-            "ordinal": outcome.ordinal,
-            "state": outcome.state.value,
-        }
-        if shard := successful_by_unit.get(outcome.unit_id):
-            entry.update(
-                {
-                    "key_alias": shard.execution.credential_alias,
-                    "attempt_id": shard.execution.attempt_id,
-                    "lane_id": shard.execution.lane_id,
-                }
-            )
-        shards.append(entry)
+        shards.append(
+            {
+                "unit_id": outcome.unit_id,
+                "ordinal": outcome.ordinal,
+                "state": outcome.state.value,
+            }
+        )
     return {
         "expected_probe_count": expected_probe_count,
         "completed_probe_count": completed_probe_count,
