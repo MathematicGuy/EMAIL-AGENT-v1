@@ -19,6 +19,7 @@ from cowork_agent.features.batch_evaluation.contracts import (
     EvaluationRequest,
     EvaluationWarning,
     JobState,
+    UnitState,
 )
 from scripts.evaluate_memory import main
 from tests.unit.scripts.cli_harness import run_cli
@@ -76,12 +77,47 @@ class _FakeEvaluationService:
         return self._report
 
 
+def _unit_snapshot(*states: UnitState) -> tuple[SimpleNamespace, ...]:
+    """One durable unit-progress snapshot, shaped for the watchdog's read."""
+
+    return tuple(
+        SimpleNamespace(unit_id=f"unit-{index}", state=state)
+        for index, state in enumerate(states)
+    )
+
+
+def _advancing_unit_snapshots(count: int) -> list[tuple[SimpleNamespace, ...]]:
+    """`count` pairwise-different snapshots, each moving one unit forward.
+
+    Enough distinct snapshots let a poll outlast the idle bound while always
+    showing fresh durable movement - exactly the shape of a healthy RUNNING
+    phase, where only unit rows change.
+    """
+
+    snapshots: list[tuple[SimpleNamespace, ...]] = []
+    states = [UnitState.READY] * 4
+    index = 0
+    for _ in range(count):
+        snapshots.append(_unit_snapshot(*states))
+        if states[index] is UnitState.READY:
+            states[index] = UnitState.RUNNING
+        elif states[index] is UnitState.RUNNING:
+            states[index] = UnitState.SUCCEEDED
+            index = (index + 1) % len(states)
+    return snapshots
+
+
 class _FakeEvaluationRepository:
     def __init__(
-        self, job: SimpleNamespace, poll_sequence: Sequence[SimpleNamespace] | None = None
+        self,
+        job: SimpleNamespace,
+        poll_sequence: Sequence[SimpleNamespace] | None = None,
+        unit_snapshots: Sequence[tuple[SimpleNamespace, ...]] | None = None,
     ) -> None:
         self._job = job
         self._pending = list(poll_sequence or ())
+        self._unit_snapshots = list(unit_snapshots or ())
+        self._last_units: tuple[SimpleNamespace, ...] = ()
         self.polls = 0
 
     async def get_job(self, job_id: str) -> SimpleNamespace:
@@ -90,6 +126,12 @@ class _FakeEvaluationRepository:
         if self._pending:
             return self._pending.pop(0)
         return self._job
+
+    async def list_units(self, job_id: str) -> tuple[SimpleNamespace, ...]:
+        assert job_id == self._job.job_id
+        if self._unit_snapshots:
+            self._last_units = self._unit_snapshots.pop(0)
+        return self._last_units
 
 
 class _FakeEvaluationRuntime:
@@ -105,6 +147,7 @@ class _FakeEvaluationRuntime:
         result_manifest: dict[str, object] | None = None,
         poll_sequence: Sequence[SimpleNamespace] | None = None,
         submit_error: Exception | None = None,
+        unit_snapshots: Sequence[tuple[SimpleNamespace, ...]] | None = None,
     ) -> None:
         self.job = SimpleNamespace(
             job_id="memory-job-1",
@@ -129,7 +172,7 @@ class _FakeEvaluationRuntime:
             },
             submit_error=submit_error,
         )
-        self.repository = _FakeEvaluationRepository(self.job, poll_sequence)
+        self.repository = _FakeEvaluationRepository(self.job, poll_sequence, unit_snapshots)
         self.credential_pool = SimpleNamespace(healthy_count=healthy_workers)
         self.initialized = False
         self.recovered = False
@@ -157,6 +200,7 @@ def _install_fake_mistral_runtime(
     result_manifest: dict[str, object] | None = None,
     poll_sequence: Sequence[SimpleNamespace] | None = None,
     submit_error: Exception | None = None,
+    unit_snapshots: Sequence[tuple[SimpleNamespace, ...]] | None = None,
 ) -> _FakeEvaluationRuntime:
     from tests.unit.scripts.cli_harness import load_script
 
@@ -170,6 +214,7 @@ def _install_fake_mistral_runtime(
         result_manifest=result_manifest,
         poll_sequence=poll_sequence,
         submit_error=submit_error,
+        unit_snapshots=unit_snapshots,
     )
     script = load_script("evaluate_memory")
     monkeypatch.setattr(
@@ -578,6 +623,126 @@ def test_stranded_job_without_progress_fails_cleanly_instead_of_hanging(
     assert "no progress" in result.stderr
     assert runtime.closed is True
     assert not output.exists()
+
+
+def test_running_job_with_advancing_unit_progress_survives_the_watchdog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A healthy RUNNING phase changes neither state nor updated_at; only the
+    # durable unit rows move. Advancing units must count as progress, or the
+    # watchdog would cancel billed in-flight work on every long run. The poll
+    # sequence outlasts the idle bound, so only unit movement keeps it alive.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    monkeypatch.setenv("MEMEVAL_JOB_WAIT_IDLE_SECONDS", "0.3")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    frozen_updated_at = datetime.now(UTC)
+    running = SimpleNamespace(
+        job_id="memory-job-1",
+        state=JobState.RUNNING,
+        updated_at=frozen_updated_at,
+    )
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        poll_sequence=(running,) * 8,
+        unit_snapshots=_advancing_unit_snapshots(8),
+    )
+    output = tmp_path / "report.json"
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+
+    assert result.returncode == 0
+    assert "no progress" not in result.stderr
+    assert runtime.repository.polls >= 8
+    assert runtime.closed is True
+    assert output.exists()
+
+
+def test_stalled_running_job_with_frozen_units_fails_within_the_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Units that never move are the real stalled signal: the watchdog must
+    # still fail cleanly within the idle bound.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    monkeypatch.setenv("MEMEVAL_JOB_WAIT_IDLE_SECONDS", "0.2")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        state=JobState.RUNNING,
+        unit_snapshots=(_unit_snapshot(UnitState.READY, UnitState.READY),),
+    )
+    output = tmp_path / "report.json"
+
+    started = time.monotonic()
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 10
+    assert result.returncode == 1
+    assert "no progress" in result.stderr
+    assert runtime.closed is True
+    assert not output.exists()
+
+
+def test_invalid_job_wait_idle_env_exits_two_before_any_spend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A malformed idle bound is invalid configuration: reject it before submit
+    # so no evaluation work (or spend) can start, exit 2 like other bad flags.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    monkeypatch.setenv("MEMEVAL_JOB_WAIT_IDLE_SECONDS", "bogus")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+    )
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(tmp_path / "report.json"),
+    )
+
+    assert result.returncode == 2
+    assert "MEMEVAL_JOB_WAIT_IDLE_SECONDS" in result.stderr
+    assert requests == []
+    assert runtime.initialized is False
 
 
 @pytest.mark.parametrize("stub_manifest", [{"state": "failed"}, {"state": "cancelled"}])

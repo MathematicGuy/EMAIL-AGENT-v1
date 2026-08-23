@@ -67,7 +67,10 @@ from cowork_agent.persistence.repositories.evaluation_jobs import EvaluationJob
 _ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES = "MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES"
 _DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES = 3
 _ENV_JOB_WAIT_IDLE_SECONDS = "MEMEVAL_JOB_WAIT_IDLE_SECONDS"
-_DEFAULT_JOB_WAIT_IDLE_SECONDS = 300.0
+# Must outlast the unit-to-unit gaps of a full single-worker wide-set run
+# (tens of minutes of provider calls); only a job whose durable unit rows
+# stop moving for this long is treated as stranded.
+_DEFAULT_JOB_WAIT_IDLE_SECONDS = 1800.0
 _JOB_POLL_INTERVAL_SECONDS = 0.05
 
 
@@ -390,12 +393,14 @@ async def _wait_for_terminal_mistral_job(
 
     A replayed idempotency key can return a job stranded in a non-terminal
     state that recovery cannot drive; without a bound this loop would spin
-    forever. Progress means the state or its durable timestamp changed.
+    forever. Progress means the state, its durable timestamp, or any unit row
+    changed: during a healthy RUNNING phase only the unit rows move, so a
+    run with advancing units must never trip the bound.
     """
 
     repository = runtime.repository
     loop = asyncio.get_running_loop()
-    last_progress: tuple[object, object] | None = None
+    last_progress: tuple[object, object, object] | None = None
     last_progress_at = loop.time()
     while True:
         job = await repository.get_job(job_id)
@@ -403,7 +408,11 @@ async def _wait_for_terminal_mistral_job(
             raise RuntimeError("evaluation job disappeared before reaching a terminal state")
         if job.state in _TERMINAL_JOB_STATES:
             return job
-        progress = (job.state, job.updated_at)
+        units = await repository.list_units(job_id)
+        unit_progress = tuple(
+            sorted((unit.unit_id, unit.state.value) for unit in units)
+        )
+        progress = (job.state, job.updated_at, unit_progress)
         if progress != last_progress:
             last_progress = progress
             last_progress_at = loop.time()
@@ -435,6 +444,7 @@ async def _run_mistral_evaluation(
     max_workers: int,
     idempotency_key: str,
     environ: Mapping[str, str],
+    job_wait_idle_seconds: float,
 ) -> tuple[dict[str, object], JobState, tuple[object, ...]]:
     runtime = build_evaluation_runtime(
         EvaluationRuntimeConfig(
@@ -452,9 +462,8 @@ async def _run_mistral_evaluation(
             _mistral_request(probe_set, model=model, max_workers=max_workers),
             idempotency_key=idempotency_key,
         )
-        idle_timeout_seconds = _resolve_job_wait_idle_seconds(environ)
         terminal = await _wait_for_terminal_mistral_job(
-            runtime, job.job_id, idle_timeout_seconds=idle_timeout_seconds
+            runtime, job.job_id, idle_timeout_seconds=job_wait_idle_seconds
         )
         report = dict(await runtime.service.get_result(job.job_id))
         if not _is_memory_eval_report(report):
@@ -529,6 +538,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_consecutive = _resolve_max_consecutive_provider_failures(
             args.max_consecutive_provider_failures, dict(os.environ)
         )
+        # Validated before any provider spend: a malformed bound must abort
+        # the run before submit, not after it.
+        job_wait_idle_seconds = _resolve_job_wait_idle_seconds(dict(os.environ))
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -568,6 +580,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         max_workers=args.max_workers,
                         idempotency_key=args.idempotency_key or f"memeval-{uuid4().hex}",
                         environ=environ,
+                        job_wait_idle_seconds=job_wait_idle_seconds,
                     )
                 )
             except (
