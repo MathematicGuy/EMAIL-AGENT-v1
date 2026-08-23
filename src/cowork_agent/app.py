@@ -29,19 +29,13 @@ from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.config import (
-    ChatIntentSettings,
     ChatMemorySettings,
     EmailRagQualitySettings,
-    GeminiSettings,
     GmailSettings,
-    JinaEmbeddingSettings,
-    MistralSettings,
-    OpenRouterSettings,
     OutlookSettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
-    VyceSettings,
     database_url,
     load_runtime_environment,
 )
@@ -72,7 +66,6 @@ from cowork_agent.features.ai_chat.ports import (
     ChatReplyPort,
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
-    IntentClassifierPort,
 )
 from cowork_agent.features.ai_chat.session_buffer import (
     InMemoryChatSessionBuffer,
@@ -83,9 +76,7 @@ from cowork_agent.features.email_action_plan.observability import (
 )
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
-    ActionPlanGeneratorPort,
     MailboxConnectionRepository,
-    RouteClassifierPort,
     RunRepository,
     SemanticMemoryPort,
     TaskRepository,
@@ -111,35 +102,9 @@ from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
     GmailMailboxAdapter,
 )
-from cowork_agent.integrations.llm.chat_intent import (
-    GeminiIntentClassifier,
-    MistralIntentClassifier,
-    OpenRouterIntentClassifier,
-    VyceIntentClassifier,
-)
-from cowork_agent.integrations.llm.chat_reply import (
-    GeminiChatReply,
-    MistralChatReply,
-    OpenRouterChatReply,
-    VyceChatReply,
-)
-from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
-from cowork_agent.integrations.llm.providers.gemini import (
-    GeminiActionPlanGenerator,
-    GeminiRetrievalQueryRewriter,
-    GeminiRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.mistral import (
-    MistralActionPlanGenerator,
-    MistralRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.openrouter import (
-    OpenRouterActionPlanGenerator,
-    OpenRouterRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.vyce import (
-    VyceActionPlanGenerator,
-    VyceRouteClassifier,
+from cowork_agent.integrations.llm.provider_factory import (
+    resolve_chat_providers,
+    resolve_email_providers,
 )
 from cowork_agent.integrations.mailbox import (
     MailboxNotConnectedError,
@@ -152,7 +117,6 @@ from cowork_agent.integrations.outlook import OutlookConnectionService, OutlookM
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_document_embedder,
-    build_semantic_memory,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
@@ -666,82 +630,16 @@ def create_app() -> FastAPI:
                     "vyce": "Vyce",
                     "vyne": "Vyce",
                 }.get(provider, "LLM provider")
-                classifier: RouteClassifierPort
-                generator: ActionPlanGeneratorPort
-                intent_classifier: IntentClassifierPort
-                generation_concurrency = 1
-                query_rewriter = None
-                if provider == "gemini":
-                    gemini_settings = GeminiSettings.from_env()
-                    generation_concurrency = gemini_settings.action_plan_concurrency
-                    intent_settings = ChatIntentSettings.from_env(
-                        default_model=gemini_settings.model
-                    )
-                    intent_classifier = GeminiIntentClassifier.from_settings(
-                        gemini_settings, intent_settings
-                    )
-                    classifier = GeminiRouteClassifier(gemini_settings)
-                    generator = GeminiActionPlanGenerator(gemini_settings)
-                    query_rewriter = GeminiRetrievalQueryRewriter(gemini_settings)
-                    semantic_memory = await build_semantic_memory(JinaEmbeddingSettings.from_env())
-                    app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
-                elif provider in ("vyce", "vyne"):
-                    vyce_settings = VyceSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(default_model=vyce_settings.model)
-                    intent_classifier = VyceIntentClassifier.from_settings(
-                        vyce_settings, intent_settings
-                    )
-                    classifier = VyceRouteClassifier(vyce_settings)
-                    generator = VyceActionPlanGenerator(vyce_settings)
-                    semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = VyceChatReply.from_settings(vyce_settings)
-                elif provider == "mistral":
-                    mistral_settings = MistralSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(
-                        default_model=mistral_settings.model
-                    )
-                    intent_classifier = MistralIntentClassifier.from_settings(
-                        mistral_settings, intent_settings
-                    )
-                    classifier = MistralRouteClassifier(mistral_settings)
-                    generator = MistralActionPlanGenerator(mistral_settings)
-                    semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = MistralChatReply.from_settings(mistral_settings)
-                elif provider == "openrouter":
-                    openrouter_settings = OpenRouterSettings.from_env()
-                    gemini_last_resort = load_optional_gemini_settings()
-                    if gemini_last_resort is None:
-                        logger.info(
-                            "OpenRouter Gemini last-resort is off; "
-                            "no numbered GEMINI_API_KEY_* configured"
-                        )
-                    else:
-                        logger.info(
-                            "OpenRouter Gemini last-resort is on (%s)",
-                            gemini_last_resort.model,
-                        )
-                    intent_settings = ChatIntentSettings.from_env(
-                        default_model=openrouter_settings.model
-                    )
-                    intent_classifier = OpenRouterIntentClassifier.from_settings(
-                        openrouter_settings,
-                        intent_settings,
-                        last_resort=gemini_last_resort,
-                    )
-                    classifier = OpenRouterRouteClassifier(
-                        openrouter_settings, last_resort=gemini_last_resort
-                    )
-                    generator = OpenRouterActionPlanGenerator(
-                        openrouter_settings, last_resort=gemini_last_resort
-                    )
-                    semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = OpenRouterChatReply.from_settings(
-                        openrouter_settings, last_resort=gemini_last_resort
-                    )
-                else:
-                    raise ValueError(
-                        "LLM_PROVIDER must be 'gemini', 'mistral', 'openrouter', or 'vyce'"
-                    )
+                email_providers = await resolve_email_providers(provider)
+                chat_providers = resolve_chat_providers(provider)
+                classifier = email_providers.classifier
+                generator = email_providers.generator
+                intent_classifier = chat_providers.intent_classifier
+                generation_concurrency = email_providers.generation_concurrency
+                query_rewriter = email_providers.query_rewriter
+                semantic_memory = email_providers.semantic_memory
+                intent_settings = chat_providers.intent_settings
+                app.state.chat_reply = chat_providers.chat_reply
                 app.state.chat_intent_settings = intent_settings
                 app.state.chat_routing_service = (
                     ChatRoutingService(
@@ -980,9 +878,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=503, detail="Outlook connection is unavailable")
         if error:
             if settings.frontend_url:
-                return _frontend_mail_redirect(
-                    settings.frontend_url, "denied", provider="outlook"
-                )
+                return _frontend_mail_redirect(settings.frontend_url, "denied", provider="outlook")
             raise HTTPException(status_code=400, detail="Microsoft OAuth was denied")
         if not code:
             if settings.frontend_url:
@@ -1351,9 +1247,7 @@ def create_app() -> FastAPI:
         try:
             raw = json.loads(manifest_file.read_text(encoding="utf-8"))
             return {
-                k: str(v["output"])
-                for k, v in raw.items()
-                if isinstance(v, dict) and "output" in v
+                k: str(v["output"]) for k, v in raw.items() if isinstance(v, dict) and "output" in v
             }
         except Exception as exc:
             logger.warning("Failed to load ingestion-manifest.json: %s", exc)
@@ -1535,9 +1429,7 @@ def create_app() -> FastAPI:
         }
 
     @app.put("/api/v1/raw-documents/{filename}")
-    async def put_raw_document(
-        filename: str, request: Request
-    ) -> dict[str, Any]:
+    async def put_raw_document(filename: str, request: Request) -> dict[str, Any]:
         safe_name = Path(filename).name
         if not safe_name or safe_name in (".", ".."):
             raise HTTPException(status_code=400, detail="Invalid filename")
@@ -1575,9 +1467,7 @@ def create_app() -> FastAPI:
         return {"status": "saved", "filename": safe_name, "size": len(content)}
 
     @app.delete("/api/v1/raw-documents/{filename}")
-    async def delete_raw_document(
-        filename: str, request: Request
-    ) -> dict[str, Any]:
+    async def delete_raw_document(filename: str, request: Request) -> dict[str, Any]:
         safe_name = Path(filename).name
         if not safe_name or safe_name in (".", ".."):
             raise HTTPException(status_code=400, detail="Invalid filename")
@@ -1628,11 +1518,7 @@ async def _raw_document_repo(request: Request) -> Any:
         # Mirror the startup path's location so a request that arrives before (or
         # without) lifespan startup still reads the same version history.
         settings = getattr(request.app.state, "gmail_settings", None)
-        parent = (
-            settings.connection_db_path.parent
-            if settings is not None
-            else Path.cwd() / "data"
-        )
+        parent = settings.connection_db_path.parent if settings is not None else Path.cwd() / "data"
         repo = SQLiteRawDocumentRepository(parent / "raw_documents.db")
         # Without this the table is never created and every query raises
         # "no such table: raw_document_metadata".

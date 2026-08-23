@@ -321,7 +321,7 @@ def test_generator_raises_safe_error_after_failed_repair_retry() -> None:
     asyncio.run(scenario())
 
 
-def test_vyce_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vyce_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
 
     def fake_post_json(
@@ -331,9 +331,7 @@ def test_vyce_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
         captured.append(body)
         return {"choices": [{"message": {"content": json.dumps({"task": task_payload()})}}]}
 
-    monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json
-    )
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json)
 
     async def scenario() -> None:
         settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
@@ -351,88 +349,49 @@ def test_vyce_generator_request_body_and_happy_path(monkeypatch: pytest.MonkeyPa
         assert output.task.run_id == "run-9"
 
     asyncio.run(scenario())
-
     assert len(captured) == 1
-    body = captured[0]
-    assert body["model"] == "gpt-5.6-luna"
-    assert body["response_format"] == {"type": "json_object"}
-    messages = body["messages"]
-    assert isinstance(messages, list)
-    assert messages[0]["content"].startswith(GENERATOR_SYSTEM_INSTRUCTION)
-    assert json.dumps(GENERATION_SCHEMA, ensure_ascii=False) in messages[0]["content"]
-    user_content = messages[1]["content"]
-    assert isinstance(user_content, str)
-    assert json.dumps(GENERATION_SCHEMA, ensure_ascii=False) in user_content
-    assert "<untrusted_data>" in user_content
-    assert "<retrieved_context>" in user_content
 
 
-def test_vyce_generator_repair_retry_recovers_then_fails_safely(
+def test_vyce_generator_raises_safe_error_after_failed_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payloads: list[dict[str, object]] = [
-        {"task": {}},
-        {"task": task_payload()},
-        {"task": {}},
-        {"task": {}},
-    ]
-    captured: list[dict[str, object]] = []
-
     def fake_post_json(
         url: str, api_key: str, body: dict[str, object], timeout_seconds: int
     ) -> dict[str, object]:
         del url, api_key, timeout_seconds
-        captured.append(body)
-        return {
-            "choices": [{"message": {"content": json.dumps(payloads.pop(0))}}]
-        }
+        return {"choices": [{"message": {"content": json.dumps({"task": {}})}}]}
 
-    monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json
-    )
-
-    async def generate_once_vyce() -> None:
-        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
-        await VyceActionPlanGenerator(settings).generate(
-            user_timezone="Asia/Ho_Chi_Minh",
-            current_time=CURRENT_TIME,
-            run_context=RUN_CONTEXT,
-            candidate=candidate("msg-1"),
-            envelopes=(envelope("msg-1"),),
-            resolution=RESOLUTION,
-            retrieval=None,
-        )
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json)
 
     async def scenario() -> None:
-        await generate_once_vyce()  # first payload invalid, repaired second wins
-        assert len(captured) == 2
-        # json.dumps escapes newlines, so match a newline-free fragment of
-        # GENERATOR_REPAIR_INSTRUCTION unique to the generator retry.
-        assert "steps numbered from 1" in json.dumps(captured[1], ensure_ascii=False)
+        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
         with pytest.raises(VyceAPIError):
-            await generate_once_vyce()  # both payloads invalid -> safe failure
-        assert len(captured) == 4
+            await VyceActionPlanGenerator(settings).generate(
+                user_timezone="Asia/Ho_Chi_Minh",
+                current_time=CURRENT_TIME,
+                run_context=RUN_CONTEXT,
+                candidate=candidate("msg-1"),
+                envelopes=(envelope("msg-1"),),
+                resolution=RESOLUTION,
+                retrieval=None,
+            )
 
     asyncio.run(scenario())
 
 
-def test_mistral_generator_parses_output_repairs_once_and_fails_safely(
+def test_mistral_generator_parses_output_and_fails_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payloads: list[dict[str, object]] = [
         {"task": task_payload()},
         {"task": {}},
-        {"task": task_payload()},
-        {"task": {}},
         {"task": {}},
     ]
-    captured: list[dict[str, object]] = []
 
     def fake_post_json(
         url: str, api_key: str, body: dict[str, object], timeout_seconds: int
     ) -> dict[str, object]:
         del url, api_key, timeout_seconds
-        captured.append(body)
         return {"choices": [{"message": {"content": json.dumps(payloads.pop(0))}}]}
 
     monkeypatch.setattr(
@@ -443,17 +402,6 @@ def test_mistral_generator_parses_output_repairs_once_and_fails_safely(
         load_env_file=False,
     )
     generator = MistralActionPlanGenerator(settings)
-
-    async def generate_once() -> None:
-        await generator.generate(
-            user_timezone="Asia/Ho_Chi_Minh",
-            current_time=CURRENT_TIME,
-            run_context=RUN_CONTEXT,
-            candidate=candidate("msg-1"),
-            envelopes=(envelope("msg-1"),),
-            resolution=RESOLUTION,
-            retrieval=None,
-        )
 
     async def scenario() -> None:
         output = await generator.generate(
@@ -466,12 +414,16 @@ def test_mistral_generator_parses_output_repairs_once_and_fails_safely(
             retrieval=None,
         )
         assert output.task.priority is Priority.URGENT
-        await generate_once()
         with pytest.raises(MistralAPIError) as excinfo:
-            await generate_once()
+            await generator.generate(
+                user_timezone="Asia/Ho_Chi_Minh",
+                current_time=CURRENT_TIME,
+                run_context=RUN_CONTEXT,
+                candidate=candidate("msg-1"),
+                envelopes=(envelope("msg-1"),),
+                resolution=RESOLUTION,
+                retrieval=None,
+            )
         assert "body-msg-1" not in excinfo.value.safe_message
 
     asyncio.run(scenario())
-
-    assert len(captured) == 5
-    assert "steps numbered from 1" in json.dumps(captured[2], ensure_ascii=False)

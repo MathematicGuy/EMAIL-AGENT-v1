@@ -36,9 +36,7 @@ def test_mistral_settings_require_configured_key_and_model_without_exposing_key(
 def test_mistral_settings_reject_values_above_resource_bounds() -> None:
     base = {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}
     with pytest.raises(ValueError, match="MISTRAL_MAX_OUTPUT_TOKENS must not exceed 4096"):
-        MistralSettings.from_env(
-            {**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False
-        )
+        MistralSettings.from_env({**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False)
     with pytest.raises(ValueError, match="MISTRAL_TIMEOUT_SECONDS must not exceed 120"):
         MistralSettings.from_env({**base, "MISTRAL_TIMEOUT_SECONDS": "121"}, load_env_file=False)
 
@@ -64,7 +62,9 @@ def test_mistral_completion_uses_fixed_url_and_bounded_request(
         captured["body"] = json.loads((request.data or b"").decode())
         return FakeResponse()
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mistral.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.openai_transport.urlopen", fake_urlopen
+    )
 
     response = _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
 
@@ -107,9 +107,7 @@ def test_mistral_generator_requests_json_with_bounded_output_tokens(
     def fake_post_json(
         url: str, api_key: str, body: dict[str, object], timeout_seconds: int
     ) -> dict[str, object]:
-        captured.update(
-            {"url": url, "api_key": api_key, "body": body, "timeout": timeout_seconds}
-        )
+        captured.update({"url": url, "api_key": api_key, "body": body, "timeout": timeout_seconds})
         return {"choices": [{"message": {"content": "{}"}}]}
 
     monkeypatch.setattr(

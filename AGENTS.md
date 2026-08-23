@@ -34,7 +34,7 @@ src/cowork_agent/
 ├── domain/models.py             # pure domain models (no framework imports)
 ├── features/email_action_plan/  # workflow, policies, ports, schemas
 ├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
-├── integrations/llm/            # Gemini/Vyce/Mistral/OpenRouter providers, fakes
+├── integrations/llm/            # providers, shared prompts/parsers/base, provider_factory
 ├── integrations/rag/            # local hybrid semantic retrieval (V1-M3)
 ├── orchestration/local.py       # in-process local orchestration
 └── persistence/                 # SQLite mailbox-connection repo; migrations/
@@ -107,10 +107,7 @@ keeps spec, scope, and the Definition of Done.
 - RAGAS & Grounding: `docs/evaluations/RAGAS.md`, `tasks/specs/SPEC-chat-ragas-evaluation.md`
 - ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-<<<<<<< HEAD
 - Email RAG runtime: `evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
-=======
->>>>>>> fix/memory-eval-refusal-noun-head
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 
 ## Agent skills
