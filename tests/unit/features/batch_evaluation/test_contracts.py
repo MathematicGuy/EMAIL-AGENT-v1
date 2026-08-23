@@ -229,6 +229,33 @@ def test_work_unit_payload_accepts_stable_id_and_shard_metadata() -> None:
     }
 
 
+def test_work_unit_payload_accepts_multi_segment_stable_id_metadata() -> None:
+    unit = WorkUnit(
+        unit_id="unit-1",
+        ordinal=0,
+        payload={
+            "source_document_id": "document-1",
+            "test_case_ids": ["case-1", "case-2"],
+        },
+    )
+
+    assert unit.payload == {
+        "source_document_id": "document-1",
+        "test_case_ids": ("case-1", "case-2"),
+    }
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["Source_document_id", "source__document_id", "_source_document_id", "message"],
+)
+def test_work_unit_payload_rejects_malformed_or_free_form_metadata_keys(key: str) -> None:
+    with pytest.raises(ValueError, match="unsupported metadata key") as error:
+        WorkUnit(unit_id="unit-1", ordinal=0, payload={key: "value"})
+    assert key not in str(error.value)
+    assert error.value.__cause__ is None
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [

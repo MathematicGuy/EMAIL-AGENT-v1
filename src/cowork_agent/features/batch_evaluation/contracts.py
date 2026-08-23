@@ -88,8 +88,8 @@ class CredentialState(StrEnum):
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _SECRET_KEY_PARTS = frozenset({"authorization", "credential", "password", "secret", "token"})
 _SECRET_KEY_COMPACTS = frozenset({"apikey", "accesstoken"})
-_WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*_id$")
-_WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*_ids$")
+_WORK_UNIT_ID_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_id$")
+_WORK_UNIT_ID_COLLECTION_FIELD = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*_ids$")
 _WORK_UNIT_INTEGER_FIELDS = frozenset({"ordinal", "shard_index", "shard_count"})
 _WORK_UNIT_INTEGER_COLLECTION_FIELDS = frozenset({"ordinals"})
 
