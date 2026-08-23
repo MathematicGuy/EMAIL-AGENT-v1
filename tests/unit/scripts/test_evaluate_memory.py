@@ -4,6 +4,9 @@ import asyncio
 import hashlib
 import json
 import os
+import time
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,15 +52,21 @@ class _FakeEvaluationService:
         idempotency_keys: list[str],
         job: SimpleNamespace,
         report: dict[str, object],
+        submit_error: Exception | None = None,
     ) -> None:
         self._requests = requests
         self._idempotency_keys = idempotency_keys
         self._job = job
         self._report = report
+        self._submit_error = submit_error
 
     async def submit(
         self, request: EvaluationRequest, *, idempotency_key: str
     ) -> SimpleNamespace:
+        # Raised before anything is recorded: a rejected submission must not
+        # start (or bill) any evaluation work.
+        if self._submit_error is not None:
+            raise self._submit_error
         self._requests.append(request)
         self._idempotency_keys.append(idempotency_key)
         return self._job
@@ -68,11 +77,18 @@ class _FakeEvaluationService:
 
 
 class _FakeEvaluationRepository:
-    def __init__(self, job: SimpleNamespace) -> None:
+    def __init__(
+        self, job: SimpleNamespace, poll_sequence: Sequence[SimpleNamespace] | None = None
+    ) -> None:
         self._job = job
+        self._pending = list(poll_sequence or ())
+        self.polls = 0
 
     async def get_job(self, job_id: str) -> SimpleNamespace:
         assert job_id == self._job.job_id
+        self.polls += 1
+        if self._pending:
+            return self._pending.pop(0)
         return self._job
 
 
@@ -86,18 +102,24 @@ class _FakeEvaluationRuntime:
         healthy_workers: int,
         state: JobState = JobState.SUCCEEDED,
         warnings: tuple[EvaluationWarning, ...] = (),
+        result_manifest: dict[str, object] | None = None,
+        poll_sequence: Sequence[SimpleNamespace] | None = None,
+        submit_error: Exception | None = None,
     ) -> None:
         self.job = SimpleNamespace(
             job_id="memory-job-1",
             state=state,
             effective_workers=effective_workers,
             warnings=warnings,
+            updated_at=datetime.now(UTC),
         )
         self.service = _FakeEvaluationService(
             requests,
             idempotency_keys,
             self.job,
-            {
+            result_manifest
+            if result_manifest is not None
+            else {
                 "schema_version": "2.2.0",
                 "probe_set_id": "unit",
                 "provider": "mistral",
@@ -105,14 +127,19 @@ class _FakeEvaluationRuntime:
                 "aborted": state is not JobState.SUCCEEDED,
                 "execution_manifest": {"private_runtime_metadata": "not for baseline"},
             },
+            submit_error=submit_error,
         )
-        self.repository = _FakeEvaluationRepository(self.job)
+        self.repository = _FakeEvaluationRepository(self.job, poll_sequence)
         self.credential_pool = SimpleNamespace(healthy_count=healthy_workers)
         self.initialized = False
+        self.recovered = False
         self.closed = False
 
     async def initialize(self) -> None:
         self.initialized = True
+
+    async def recover(self) -> None:
+        self.recovered = True
 
     async def close(self) -> None:
         self.closed = True
@@ -127,6 +154,9 @@ def _install_fake_mistral_runtime(
     healthy_workers: int,
     state: JobState = JobState.SUCCEEDED,
     warnings: tuple[EvaluationWarning, ...] = (),
+    result_manifest: dict[str, object] | None = None,
+    poll_sequence: Sequence[SimpleNamespace] | None = None,
+    submit_error: Exception | None = None,
 ) -> _FakeEvaluationRuntime:
     from tests.unit.scripts.cli_harness import load_script
 
@@ -137,6 +167,9 @@ def _install_fake_mistral_runtime(
         healthy_workers=healthy_workers,
         state=state,
         warnings=warnings,
+        result_manifest=result_manifest,
+        poll_sequence=poll_sequence,
+        submit_error=submit_error,
     )
     script = load_script("evaluate_memory")
     monkeypatch.setattr(
@@ -459,6 +492,169 @@ def test_mistral_idempotency_key_is_replayed_without_a_new_runtime(
     assert first.returncode == replay.returncode == 0
     assert len(requests) == 2
     assert idempotency_keys == ["replay-memory-evaluation", "replay-memory-evaluation"]
+
+
+def test_stranded_replayed_job_is_recovered_and_reaches_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A replay against a job stranded in QUEUED must recover it and poll past
+    # the non-terminal snapshot instead of returning the stranded state.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    stranded = SimpleNamespace(
+        job_id="memory-job-1",
+        state=JobState.QUEUED,
+        updated_at=datetime.now(UTC),
+    )
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        poll_sequence=(stranded,),
+    )
+    output = tmp_path / "report.json"
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--idempotency-key",
+        "replay-stranded-job",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+
+    assert result.returncode == 0
+    assert runtime.initialized is True
+    assert runtime.recovered is True
+    assert runtime.repository.polls >= 2
+    assert runtime.closed is True
+    assert output.exists()
+
+
+def test_stranded_job_without_progress_fails_cleanly_instead_of_hanging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A job recovery cannot drive (e.g. stranded in VALIDATING/ACCEPTED) never
+    # updates; the wait must be bounded and fail cleanly instead of looping
+    # forever.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    monkeypatch.setenv("MEMEVAL_JOB_WAIT_IDLE_SECONDS", "0.2")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        state=JobState.QUEUED,
+    )
+    output = tmp_path / "report.json"
+
+    started = time.monotonic()
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--idempotency-key",
+        "replay-stuck-job",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 10  # bounded; the old loop never returned
+    assert result.returncode == 1
+    assert "no progress" in result.stderr
+    assert runtime.closed is True
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("stub_manifest", [{"state": "failed"}, {"state": "cancelled"}])
+def test_stub_manifest_is_not_written_as_a_baseline(
+    stub_manifest: dict[str, object], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # On unplanned failure the runner writes a bare state stub, which is not a
+    # memory-eval report and must not be committed under baselines/.
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        state=JobState.FAILED,
+        result_manifest=dict(stub_manifest),
+    )
+    output = tmp_path / "report.json"
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+
+    assert result.returncode == 1
+    assert "no scorable report" in result.stderr
+    assert not output.exists()
+    assert result.stdout.strip() == ""
+
+
+def test_zero_healthy_mistral_keys_exits_one_without_spending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no healthy credential the service rejects the submission before any
+    # work starts: clean exit 1, surfaced reason, and no baseline artifact.
+    from cowork_agent.features.batch_evaluation.service import EvaluationValidationError
+
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=0,
+        healthy_workers=0,
+        submit_error=EvaluationValidationError(
+            "no compatible evaluation workers are available"
+        ),
+    )
+    output = tmp_path / "report.json"
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+
+    assert result.returncode == 1
+    assert "no compatible evaluation workers are available" in result.stderr
+    assert requests == []
+    assert runtime.closed is True
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("state", (JobState.FAILED, JobState.CANCELLED))

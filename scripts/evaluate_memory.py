@@ -3,8 +3,11 @@
 
 Exit codes:
   0 - the run completed and a report was written
-  1 - the run could not produce a scorable result (no usable model)
-  2 - the probe set could not be loaded
+  1 - the run could not produce a scorable result: no usable model, the
+      Mistral evaluation could not start or finish safely, or the job
+      finished without a scorable report
+  2 - the probe set could not be loaded, or a flag was invalid (including
+      --max-workers > 1 on a provider other than mistral)
 
 Exit code 0 does NOT mean the memory system is good. It means the harness ran.
 Verdicts are read by a human; this harness reports, it does not gate.
@@ -63,6 +66,9 @@ from cowork_agent.persistence.repositories.evaluation_jobs import EvaluationJob
 
 _ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES = "MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES"
 _DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES = 3
+_ENV_JOB_WAIT_IDLE_SECONDS = "MEMEVAL_JOB_WAIT_IDLE_SECONDS"
+_DEFAULT_JOB_WAIT_IDLE_SECONDS = 300.0
+_JOB_POLL_INTERVAL_SECONDS = 0.05
 
 
 def _positive_int(value: str) -> int:
@@ -105,6 +111,31 @@ def _resolve_max_consecutive_provider_failures(
             f"got {raw!r}"
         )
     return parsed
+
+
+def _resolve_job_wait_idle_seconds(environ: Mapping[str, str]) -> float:
+    """How long a Mistral job may stay in one non-terminal snapshot.
+
+    The poll loop is otherwise unbounded: a job stranded in a state recovery
+    cannot drive (e.g. VALIDATING/ACCEPTED) never updates, so the wait must
+    give up on its behalf.
+    """
+
+    raw = environ.get(_ENV_JOB_WAIT_IDLE_SECONDS, "").strip()
+    if not raw:
+        return _DEFAULT_JOB_WAIT_IDLE_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{_ENV_JOB_WAIT_IDLE_SECONDS} must be a number of seconds > 0, got {raw!r}"
+        ) from None
+    if parsed <= 0:
+        raise ValueError(
+            f"{_ENV_JOB_WAIT_IDLE_SECONDS} must be a number of seconds > 0, got {raw!r}"
+        )
+    return parsed
+
 
 _DEFAULT_PROBES_DIR = Path("evaluations/MEMORIES/probes")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
@@ -350,16 +381,51 @@ def _mistral_request(
 
 
 async def _wait_for_terminal_mistral_job(
-    runtime: EvaluationRuntime, job_id: str
+    runtime: EvaluationRuntime,
+    job_id: str,
+    *,
+    idle_timeout_seconds: float,
 ) -> EvaluationJob:
+    """Poll one job until it is terminal, failing cleanly if it stops moving.
+
+    A replayed idempotency key can return a job stranded in a non-terminal
+    state that recovery cannot drive; without a bound this loop would spin
+    forever. Progress means the state or its durable timestamp changed.
+    """
+
     repository = runtime.repository
+    loop = asyncio.get_running_loop()
+    last_progress: tuple[object, object] | None = None
+    last_progress_at = loop.time()
     while True:
         job = await repository.get_job(job_id)
         if job is None:
             raise RuntimeError("evaluation job disappeared before reaching a terminal state")
         if job.state in _TERMINAL_JOB_STATES:
             return job
-        await asyncio.sleep(0.05)
+        progress = (job.state, job.updated_at)
+        if progress != last_progress:
+            last_progress = progress
+            last_progress_at = loop.time()
+        elif loop.time() - last_progress_at > idle_timeout_seconds:
+            raise ValueError(
+                f"Mistral evaluation job {job_id} made no progress for "
+                f"{idle_timeout_seconds:g}s in state {job.state.value}; "
+                "it will not finish without manual intervention"
+            )
+        await asyncio.sleep(_JOB_POLL_INTERVAL_SECONDS)
+
+
+def _is_memory_eval_report(report: Mapping[str, object]) -> bool:
+    """Real reports carry the report schema; runner stub manifests do not.
+
+    On unplanned failure or failed aggregation the runner persists a bare
+    ``{"state": "failed"}``-style stub. That is a durable job record, not a
+    baseline report, and must never be written under baselines/.
+    """
+
+    schema_version = report.get("schema_version")
+    return isinstance(schema_version, str) and bool(schema_version)
 
 
 async def _run_mistral_evaluation(
@@ -379,12 +445,24 @@ async def _run_mistral_evaluation(
     )
     try:
         await runtime.initialize()
+        # A replayed idempotency key can map to a job a previous process left
+        # stranded in a recoverable state; resume those before waiting.
+        await runtime.recover()
         job = await runtime.service.submit(
             _mistral_request(probe_set, model=model, max_workers=max_workers),
             idempotency_key=idempotency_key,
         )
-        terminal = await _wait_for_terminal_mistral_job(runtime, job.job_id)
+        idle_timeout_seconds = _resolve_job_wait_idle_seconds(environ)
+        terminal = await _wait_for_terminal_mistral_job(
+            runtime, job.job_id, idle_timeout_seconds=idle_timeout_seconds
+        )
         report = dict(await runtime.service.get_result(job.job_id))
+        if not _is_memory_eval_report(report):
+            raise ValueError(
+                f"Mistral evaluation finished in state {terminal.state.value} but "
+                "produced no scorable report; the durable job manifest carries "
+                "the failure record"
+            )
         # Execution details belong to the job manifest and must not change the
         # established baseline-report schema.
         report.pop("execution_manifest", None)
@@ -497,9 +575,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 EvaluationSupervisorError,
                 EvaluationValidationError,
                 ValueError,
-            ):
+            ) as error:
+                # These messages are deliberately sanitized upstream, so they
+                # are safe to surface.
                 print(
-                    "ERROR: Mistral evaluation could not start or finish safely.",
+                    f"ERROR: Mistral evaluation could not start or finish safely: {error}",
                     file=sys.stderr,
                 )
                 return 1
