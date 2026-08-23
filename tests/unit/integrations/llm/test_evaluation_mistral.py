@@ -18,10 +18,15 @@ async def _collect(reply: object) -> tuple[ChatReplyChunk, ...]:
     context = assemble_generation_context(
         request,
         MemoryContextResponse(
-            turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
         ),
     )
-    stream = getattr(reply, "stream_reply")(request, context)
+    stream = reply.stream_reply(request, context)
     return tuple([chunk async for chunk in stream])
 
 
@@ -45,7 +50,12 @@ async def _lease_async() -> object:
 @pytest.mark.parametrize(
     ("error", "outcome", "status", "retry_after"),
     [
-        (MistralAPIError("rate limited", status_code=429, retry_after_seconds=17), "rate_limited", 429, 17),
+        (
+            MistralAPIError("rate limited", status_code=429, retry_after_seconds=17),
+            "rate_limited",
+            429,
+            17,
+        ),
         (MistralAPIError("not authorized", status_code=401), "authentication_failed", 401, None),
         (TimeoutError("private transport detail"), "timed_out", None, None),
     ],
@@ -66,7 +76,9 @@ def test_evaluation_reply_records_safe_failure_metadata_without_content_or_key(
 
     monkeypatch.setattr(
         "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
-        classmethod(lambda cls, settings: type("FakeReply", (), {"stream_reply": failing_stream})()),
+        classmethod(
+            lambda cls, settings: type("FakeReply", (), {"stream_reply": failing_stream})()
+        ),
     )
     reply = MistralEvaluationReplyFactory().bind(_lease(), "mistral-small", events.append)
 
@@ -96,7 +108,9 @@ def test_evaluation_reply_records_success_without_reply_content_or_key(
 
     monkeypatch.setattr(
         "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
-        classmethod(lambda cls, settings: type("FakeReply", (), {"stream_reply": successful_stream})()),
+        classmethod(
+            lambda cls, settings: type("FakeReply", (), {"stream_reply": successful_stream})()
+        ),
     )
     reply = MistralEvaluationReplyFactory().bind(_lease(), "mistral-small", events.append)
 
@@ -143,7 +157,9 @@ def test_evaluation_reply_emits_success_before_a_consumer_closes_after_the_final
     async def scenario() -> None:
         events: list[object] = []
 
-        async def final_chunk_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+        async def final_chunk_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[ChatReplyChunk]:
             del args, kwargs
             yield ChatReplyChunk("final reply")
 
@@ -160,7 +176,12 @@ def test_evaluation_reply_emits_success_before_a_consumer_closes_after_the_final
         context = assemble_generation_context(
             request,
             MemoryContextResponse(
-                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+                turns=(),
+                profile=None,
+                episodes=(),
+                semantic_context=None,
+                degraded=False,
+                degraded_sources=(),
             ),
         )
         stream = reply.stream_reply(request, context)
@@ -180,7 +201,9 @@ def test_evaluation_reply_preserves_multi_chunk_order_with_one_chunk_lookahead(
         events: list[object] = []
         provider_chunks_seen: list[str] = []
 
-        async def multi_chunk_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+        async def multi_chunk_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[ChatReplyChunk]:
             del args, kwargs
             for text in ("first", "second", "third"):
                 provider_chunks_seen.append(text)
@@ -199,14 +222,22 @@ def test_evaluation_reply_preserves_multi_chunk_order_with_one_chunk_lookahead(
         context = assemble_generation_context(
             request,
             MemoryContextResponse(
-                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+                turns=(),
+                profile=None,
+                episodes=(),
+                semantic_context=None,
+                degraded=False,
+                degraded_sources=(),
             ),
         )
         stream = reply.stream_reply(request, context)
 
         assert await anext(stream) == ChatReplyChunk("first")
         assert provider_chunks_seen == ["first", "second"]
-        assert [chunk async for chunk in stream] == [ChatReplyChunk("second"), ChatReplyChunk("third")]
+        assert [chunk async for chunk in stream] == [
+            ChatReplyChunk("second"),
+            ChatReplyChunk("third"),
+        ]
         assert [event.outcome for event in events] == ["succeeded"]
 
     asyncio.run(scenario())
@@ -218,7 +249,9 @@ def test_evaluation_reply_records_cancelled_when_closed_before_provider_completi
     async def scenario() -> None:
         events: list[object] = []
 
-        async def incomplete_stream(*args: object, **kwargs: object) -> AsyncIterator[ChatReplyChunk]:
+        async def incomplete_stream(
+            *args: object, **kwargs: object
+        ) -> AsyncIterator[ChatReplyChunk]:
             del args, kwargs
             yield ChatReplyChunk("first")
             yield ChatReplyChunk("second")
@@ -236,7 +269,12 @@ def test_evaluation_reply_records_cancelled_when_closed_before_provider_completi
         context = assemble_generation_context(
             request,
             MemoryContextResponse(
-                turns=(), profile=None, episodes=(), semantic_context=None, degraded=False, degraded_sources=()
+                turns=(),
+                profile=None,
+                episodes=(),
+                semantic_context=None,
+                degraded=False,
+                degraded_sources=(),
             ),
         )
         stream = reply.stream_reply(request, context)

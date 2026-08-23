@@ -95,7 +95,7 @@ def test_selecting_a_provider_without_its_key_exits_one(
     assert code == 1
 
 
-@pytest.mark.parametrize("provider", ("gemini", "openrouter", "vyce", "vyne"))
+@pytest.mark.parametrize("provider", ("gemini", "openrouter", "mimo"))
 def test_non_mistral_parallel_workers_are_rejected_before_environment_probe(
     provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
