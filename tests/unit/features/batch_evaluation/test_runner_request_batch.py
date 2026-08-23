@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -9,12 +11,15 @@ import pytest
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
     ArtifactBundle,
+    AttemptState,
     CleanupOutcome,
     EvaluationBudget,
     EvaluationRequest,
+    EvaluationWarning,
     ExecutionMode,
     FailureClass,
     FailureClassification,
+    JobState,
     PluginPlan,
     ProviderAttemptEvent,
     UnitState,
@@ -32,9 +37,109 @@ from cowork_agent.features.batch_evaluation.runner import (
     EvaluationJobRunner,
 )
 from cowork_agent.features.batch_evaluation.service import EvaluationJobService
-from cowork_agent.persistence.repositories.evaluation_jobs import SQLiteEvaluationJobRepository
+from cowork_agent.persistence.repositories.evaluation_jobs import (
+    EvaluationJob,
+    SQLiteEvaluationJobRepository,
+)
 
 AttemptSink = Callable[[ProviderAttemptEvent], Awaitable[None] | None]
+
+
+@dataclass(frozen=True, slots=True)
+class DurableUnitRecord:
+    job_id: str
+    unit_id: str
+    ordinal: int
+    state: UnitState
+    claimed_by: str | None
+    payload: Mapping[str, object]
+    provider_requests: int
+    total_tokens: int
+    outcome_ref: str | None
+
+
+class FutureSQLiteRepository(SQLiteEvaluationJobRepository):
+    def __init__(
+        self,
+        path: Path,
+        artifact_store: FilesystemEvaluationArtifactStore,
+        outcome_metadata: dict[tuple[str, str], tuple[int, int, str | None]] | None = None,
+    ) -> None:
+        super().__init__(path)
+        self._artifact_store = artifact_store
+        self._outcome_metadata = outcome_metadata if outcome_metadata is not None else {}
+
+    async def complete_unit(
+        self,
+        job_id: str,
+        outcome: WorkUnitOutcome,
+        *,
+        outcome_ref: str | None = None,
+    ) -> None:
+        if outcome.state is UnitState.SUCCEEDED:
+            assert outcome_ref is not None
+            assert self._artifact_store.read_private_details(outcome_ref) == outcome.private_result
+        else:
+            assert outcome_ref is None
+        await super().complete_unit(job_id, outcome)
+        self._outcome_metadata[(job_id, outcome.unit_id)] = (
+            outcome.provider_requests,
+            outcome.total_tokens,
+            outcome_ref,
+        )
+
+    async def list_units(self, job_id: str) -> tuple[DurableUnitRecord, ...]:
+        with self._connect() as database:
+            rows = database.execute(
+                """
+                SELECT job_id, unit_id, ordinal, state, claimed_by, safe_payload_json
+                FROM evaluation_units
+                WHERE job_id = ?
+                ORDER BY ordinal, unit_id
+                """,
+                (job_id,),
+            ).fetchall()
+        return tuple(
+            DurableUnitRecord(
+                job_id=str(row[0]),
+                unit_id=str(row[1]),
+                ordinal=int(row[2]),
+                state=UnitState(str(row[3])),
+                claimed_by=None if row[4] is None else str(row[4]),
+                payload=json.loads(str(row[5])),
+                provider_requests=self._outcome_metadata.get(
+                    (job_id, str(row[1])), (0, 0, None)
+                )[0],
+                total_tokens=self._outcome_metadata.get((job_id, str(row[1])), (0, 0, None))[1],
+                outcome_ref=self._outcome_metadata.get((job_id, str(row[1])), (0, 0, None))[2],
+            )
+            for row in rows
+        )
+
+    async def append_warnings(
+        self, job_id: str, warnings: Sequence[EvaluationWarning]
+    ) -> EvaluationJob:
+        job = await self.get_job(job_id)
+        assert job is not None
+        combined = (*job.warnings, *warnings)
+        serialized = json.dumps(
+            [
+                {
+                    "code": warning.code,
+                    "message": warning.message,
+                    "details": dict(warning.details),
+                }
+                for warning in combined
+            ]
+        )
+        with self._connect() as database:
+            database.execute(
+                "UPDATE evaluation_jobs SET warnings_json = ? WHERE job_id = ?",
+                (serialized, job_id),
+            )
+        updated = await self.get_job(job_id)
+        assert updated is not None
+        return updated
 
 
 class FakeReply:
@@ -48,17 +153,23 @@ class FakeReply:
 
         async def stream() -> AsyncIterator[str]:
             self._factory.provider_calls += 1
+            outcome, status_code, retry_after_seconds = self._factory.attempt_metadata(
+                self._alias,
+                self._factory.provider_calls,
+            )
             event = ProviderAttemptEvent(
                 credential_alias=self._alias,
                 request_attempt_id=f"provider-{self._factory.provider_calls}",
-                outcome=self._factory.outcome_for(self._alias),
-                status_code=None,
-                retry_after_seconds=0,
+                outcome=outcome,
+                status_code=status_code,
+                retry_after_seconds=retry_after_seconds,
                 latency_ms=0,
             )
             result = self._sink(event)
             if result is not None:
                 await result
+            if event.outcome in self._factory.raising_outcomes:
+                raise ProviderFailure()
             yield "private reply"
 
         return stream()
@@ -70,9 +181,13 @@ class FakeReplyFactory:
         *,
         max_output_tokens: int = 10,
         outcomes: Mapping[str, str] | None = None,
+        scripted_events: Sequence[tuple[str, int | None]] = (),
+        raising_outcomes: frozenset[str] = frozenset({"timed_out"}),
     ) -> None:
         self.max_output_tokens = max_output_tokens
         self._outcomes = dict(outcomes or {})
+        self._scripted_events = tuple(scripted_events)
+        self.raising_outcomes = raising_outcomes
         self.provider_calls = 0
         self.bound_aliases: list[str] = []
 
@@ -82,8 +197,20 @@ class FakeReplyFactory:
         self.bound_aliases.append(alias)
         return FakeReply(attempt_sink, alias, self)
 
-    def outcome_for(self, alias: str) -> str:
-        return self._outcomes.get(alias, "succeeded")
+    def attempt_metadata(
+        self, alias: str, attempt_number: int
+    ) -> tuple[str, int | None, int | None]:
+        if attempt_number <= len(self._scripted_events):
+            outcome, retry_after = self._scripted_events[attempt_number - 1]
+        else:
+            outcome = self._outcomes.get(alias, "succeeded")
+            retry_after = None
+        status = (
+            429
+            if outcome == "rate_limited"
+            else 503 if outcome == "provider_unavailable" else None
+        )
+        return outcome, status, retry_after
 
 
 class ProviderFailure(RuntimeError):
@@ -103,17 +230,23 @@ class RequestBatchPlugin:
         block_ordinal: int | None = None,
         fail_ordinals: frozenset[int] = frozenset(),
         cleanup_fails: bool = False,
+        cleanup_warns: bool = False,
+        provider_calls_per_unit: int = 2,
     ) -> None:
         self.work_count = work_count
         self.block_ordinal = block_ordinal
         self.fail_ordinals = fail_ordinals
         self.cleanup_fails = cleanup_fails
+        self.cleanup_warns = cleanup_warns
+        self.provider_calls_per_unit = provider_calls_per_unit
         self.started = tuple(asyncio.Event() for _ in range(work_count))
         self.finished = tuple(asyncio.Event() for _ in range(work_count))
         self.release_blocked = asyncio.Event()
         self.executions: list[tuple[str, int]] = []
         self.finish_order: list[int] = []
         self.aggregate_outcomes: tuple[WorkUnitOutcome, ...] = ()
+        self.aggregate_private_results: tuple[object, ...] = ()
+        self.scratch_dirs: list[Path] = []
 
     async def preflight(self, request: EvaluationRequest) -> PluginPlan:
         return PluginPlan(request.dataset_ref, self.work_count, object())
@@ -130,10 +263,11 @@ class RequestBatchPlugin:
         )
 
     async def execute_work(self, unit: WorkUnit, context: WorkContext) -> WorkUnitOutcome:
+        self.scratch_dirs.append(context.scratch_dir)
         self.started[unit.ordinal].set()
         self.executions.append((context.credential_alias, unit.ordinal))
         reply = context.provider_client
-        for _ in range(2):
+        for _ in range(self.provider_calls_per_unit):
             stream = reply.stream_reply(object(), object())
             assert [item async for item in stream] == ["private reply"]
         if self.block_ordinal == unit.ordinal:
@@ -156,6 +290,7 @@ class RequestBatchPlugin:
     ) -> ArtifactBundle:
         del plan
         self.aggregate_outcomes = tuple(outcomes)
+        self.aggregate_private_results = tuple(outcome.private_result for outcome in outcomes)
         return ArtifactBundle(
             public_result={"ordinals": tuple(outcome.ordinal for outcome in outcomes)},
             private_artifact_ids=(),
@@ -165,14 +300,46 @@ class RequestBatchPlugin:
         del context
         if self.cleanup_fails:
             raise RuntimeError("private cleanup failure")
-        return CleanupOutcome(removed_resources=1, warnings=())
+        warnings = (
+            EvaluationWarning(
+                code="WORKER_COUNT_REDUCED",
+                details={
+                    "requested_workers": 2,
+                    "healthy_credentials": 1,
+                    "ready_work": 1,
+                    "effective_workers": 1,
+                },
+            ),
+        ) if self.cleanup_warns else ()
+        return CleanupOutcome(removed_resources=1, warnings=warnings)
 
     def classify_failure(self, error: BaseException) -> FailureClassification:
         del error
         return FailureClassification(FailureClass.PROVIDER, retryable=False, credential_state=None)
 
 
-def request(*, workers: int, provider_requests: int, tokens: int) -> EvaluationRequest:
+class RetryableRequestBatchPlugin(RequestBatchPlugin):
+    def classify_failure(self, error: BaseException) -> FailureClassification:
+        del error
+        return FailureClassification(FailureClass.PROVIDER, retryable=True, credential_state=None)
+
+
+class NonJsonPrivateResultPlugin(RequestBatchPlugin):
+    async def execute_work(self, unit: WorkUnit, context: WorkContext) -> WorkUnitOutcome:
+        outcome = await super().execute_work(unit, context)
+        return WorkUnitOutcome(
+            unit_id=outcome.unit_id,
+            ordinal=outcome.ordinal,
+            state=outcome.state,
+            provider_requests=outcome.provider_requests,
+            total_tokens=outcome.total_tokens,
+            private_result=object(),
+        )
+
+
+def request(
+    *, workers: int, provider_requests: int, tokens: int, attempts: int = 1
+) -> EvaluationRequest:
     return EvaluationRequest(
         evaluation_type="request-eval",
         provider="mistral",
@@ -181,7 +348,7 @@ def request(*, workers: int, provider_requests: int, tokens: int) -> EvaluationR
         credential_pool="mistral-eval",
         execution_mode=ExecutionMode.REQUEST_BATCH,
         max_workers=workers,
-        max_attempts_per_unit=1,
+        max_attempts_per_unit=attempts,
         budget=EvaluationBudget(provider_requests, tokens),
         parameters={},
     )
@@ -193,15 +360,18 @@ async def prepared_runner(
     factory: FakeReplyFactory,
     submitted_request: EvaluationRequest,
     key_count: int = 3,
-) -> tuple[EvaluationJobRunner, EvaluationJobService, SQLiteEvaluationJobRepository]:
-    repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+    sleeper: Callable[[float], Awaitable[None]] | None = None,
+    retry_backoff_base_seconds: float = 1.0,
+    retry_backoff_max_seconds: float = 30.0,
+) -> tuple[EvaluationJobRunner, EvaluationJobService, FutureSQLiteRepository]:
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    repository = FutureSQLiteRepository(tmp_path / "evaluation-jobs.db", artifacts)
     await repository.initialize()
     registry = PluginRegistry()
     registry.register(plugin)
     keys = {"MISTRAL_API_KEY": "secret-one"}
     keys.update({f"MISTRAL_API_KEY{index}": f"secret-{index}" for index in range(2, key_count + 1)})
     pool = CredentialLeasingPool.from_env("MISTRAL_API_KEY", keys)
-    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
     service = EvaluationJobService(
         registry=registry,
         repository=repository,
@@ -215,6 +385,9 @@ async def prepared_runner(
         artifact_store=artifacts,
         scratch_root=tmp_path / "scratch",
         reply_factory=factory,
+        sleeper=sleeper,
+        retry_backoff_base_seconds=retry_backoff_base_seconds,
+        retry_backoff_max_seconds=retry_backoff_max_seconds,
     )
     await service.submit(submitted_request, idempotency_key="job-key")
     return runner, service, repository
@@ -247,6 +420,176 @@ async def test_request_batch_pulls_durably_and_aggregates_by_original_ordinal(
     assert plugin.finish_order != [0, 1, 2, 3]
     assert [outcome.ordinal for outcome in plugin.aggregate_outcomes] == [0, 1, 2, 3]
     assert await service.get_result(job.job_id) == {"ordinals": [0, 1, 2, 3]}
+    assert (await service.get_status(job.job_id))["state"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_success_writes_private_outcome_before_durable_completion(
+    tmp_path: Path,
+) -> None:
+    plugin = RequestBatchPlugin(1)
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        FakeReplyFactory(max_output_tokens=1),
+        request(workers=1, provider_requests=4, tokens=4),
+        key_count=1,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="private-outcome-key",
+    )
+
+    await runner.run(job.job_id)
+
+    stored = (await repository.list_units(job.job_id))[0]
+    assert stored.provider_requests == 2
+    assert stored.total_tokens == 2
+    assert stored.outcome_ref is not None
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    assert artifacts.read_private_details(stored.outcome_ref) == {"private": "unit-0"}
+    public_result = await service.get_result(job.job_id)
+    assert public_result == {"ordinals": [0]}
+    assert "unit-0" not in repr(public_result)
+
+
+@pytest.mark.asyncio
+async def test_non_json_private_outcome_fails_without_a_durable_reference(tmp_path: Path) -> None:
+    plugin = NonJsonPrivateResultPlugin(1)
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        FakeReplyFactory(max_output_tokens=1),
+        request(workers=1, provider_requests=4, tokens=4),
+        key_count=1,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="non-json-outcome-key",
+    )
+
+    await runner.run(job.job_id)
+
+    stored = (await repository.list_units(job.job_id))[0]
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    assert stored.state is UnitState.FAILED
+    assert stored.outcome_ref is None
+    assert attempts[0].failure_class is FailureClass.EVALUATION
+    assert await service.get_result(job.job_id) == {"ordinals": [0]}
+
+
+@pytest.mark.asyncio
+async def test_restart_aggregates_a_completed_unit_without_reexecuting_it(
+    tmp_path: Path,
+) -> None:
+    initial_plugin = RequestBatchPlugin(2)
+    _, service, repository = await prepared_runner(
+        tmp_path,
+        initial_plugin,
+        FakeReplyFactory(max_output_tokens=1),
+        request(workers=1, provider_requests=10, tokens=10),
+        key_count=1,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=10, tokens=10),
+        idempotency_key="restart-key",
+    )
+    await repository.transition_job(job.job_id, JobState.RUNNING)
+    completed_unit = await repository.claim_ready_unit(job.job_id, "crashed-lane")
+    assert completed_unit is not None and completed_unit.ordinal == 0
+    completed_outcome = WorkUnitOutcome(
+        unit_id=completed_unit.unit_id,
+        ordinal=completed_unit.ordinal,
+        state=UnitState.SUCCEEDED,
+        provider_requests=2,
+        total_tokens=3,
+        private_result={"private": "restored-unit-0"},
+    )
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    completed_ref = artifacts.write_private_details(
+        job.job_id,
+        "unit-0-crashed-attempt-outcome",
+        completed_outcome.private_result,
+    )
+    await repository.complete_unit(job.job_id, completed_outcome, outcome_ref=completed_ref)
+
+    restarted_plugin = RequestBatchPlugin(2)
+    restarted_registry = PluginRegistry()
+    restarted_registry.register(restarted_plugin)
+    restarted_factory = FakeReplyFactory(max_output_tokens=1)
+    restarted_runner = EvaluationJobRunner(
+        registry=restarted_registry,
+        repository=repository,
+        credential_pool=CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}
+        ),
+        artifact_store=artifacts,
+        scratch_root=tmp_path / "restarted-scratch",
+        reply_factory=restarted_factory,
+    )
+
+    await restarted_runner.run(job.job_id)
+
+    assert [ordinal for _, ordinal in restarted_plugin.executions] == [1]
+    assert [outcome.ordinal for outcome in restarted_plugin.aggregate_outcomes] == [0, 1]
+    assert restarted_plugin.aggregate_private_results[0] == {"private": "restored-unit-0"}
+    assert restarted_factory.provider_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_collecting_restart_aggregates_all_durable_outcomes_without_execution(
+    tmp_path: Path,
+) -> None:
+    initial_plugin = RequestBatchPlugin(1)
+    _, service, repository = await prepared_runner(
+        tmp_path,
+        initial_plugin,
+        FakeReplyFactory(max_output_tokens=1),
+        request(workers=1, provider_requests=4, tokens=4),
+        key_count=1,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="collecting-restart-key",
+    )
+    await repository.transition_job(job.job_id, JobState.RUNNING)
+    completed_unit = await repository.claim_ready_unit(job.job_id, "crashed-lane")
+    assert completed_unit is not None
+    completed_outcome = WorkUnitOutcome(
+        unit_id=completed_unit.unit_id,
+        ordinal=completed_unit.ordinal,
+        state=UnitState.SUCCEEDED,
+        provider_requests=1,
+        total_tokens=1,
+        private_result={"private": "collecting-result"},
+    )
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    outcome_ref = artifacts.write_private_details(
+        job.job_id,
+        "unit-0-collecting-outcome",
+        completed_outcome.private_result,
+    )
+    await repository.complete_unit(job.job_id, completed_outcome, outcome_ref=outcome_ref)
+    await repository.transition_job(job.job_id, JobState.COLLECTING)
+
+    restarted_plugin = RequestBatchPlugin(1)
+    registry = PluginRegistry()
+    registry.register(restarted_plugin)
+    runner = EvaluationJobRunner(
+        registry=registry,
+        repository=repository,
+        credential_pool=CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}
+        ),
+        artifact_store=artifacts,
+        scratch_root=tmp_path / "collecting-scratch",
+        reply_factory=FakeReplyFactory(max_output_tokens=1),
+    )
+
+    await runner.run(job.job_id)
+
+    assert restarted_plugin.executions == []
+    assert [outcome.ordinal for outcome in restarted_plugin.aggregate_outcomes] == [0]
     assert (await service.get_status(job.job_id))["state"] == "succeeded"
 
 
@@ -363,6 +706,131 @@ async def test_concurrent_lanes_cannot_over_reserve_the_request_budget(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_timeout_is_unknown_and_never_retried(tmp_path: Path) -> None:
+    slept: list[float] = []
+
+    async def sleeper(delay: float) -> None:
+        slept.append(delay)
+
+    plugin = RetryableRequestBatchPlugin(1, provider_calls_per_unit=1)
+    factory = FakeReplyFactory(
+        max_output_tokens=1,
+        outcomes={"mistral-1": "timed_out"},
+    )
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        factory,
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        key_count=1,
+        sleeper=sleeper,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        idempotency_key="timeout-key",
+    )
+
+    await runner.run(job.job_id)
+
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    assert factory.provider_calls == 1
+    assert len(attempts) == 1
+    assert attempts[0].state is AttemptState.UNKNOWN
+    assert attempts[0].failure_class is FailureClass.UNKNOWN
+    assert (await service.get_status(job.job_id))["state"] == "failed"
+    assert slept == []
+
+
+@pytest.mark.asyncio
+async def test_retryable_failures_use_bounded_exponential_and_retry_after_backoff(
+    tmp_path: Path,
+) -> None:
+    slept: list[float] = []
+
+    async def sleeper(delay: float) -> None:
+        slept.append(delay)
+
+    plugin = RetryableRequestBatchPlugin(1, provider_calls_per_unit=1)
+    factory = FakeReplyFactory(
+        max_output_tokens=1,
+        scripted_events=(
+            ("provider_unavailable", None),
+            ("rate_limited", 7),
+            ("succeeded", None),
+        ),
+        raising_outcomes=frozenset({"provider_unavailable", "rate_limited"}),
+    )
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        factory,
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        key_count=1,
+        sleeper=sleeper,
+        retry_backoff_base_seconds=1,
+        retry_backoff_max_seconds=5,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        idempotency_key="backoff-key",
+    )
+
+    await runner.run(job.job_id)
+
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    assert slept == [1, 5]
+    assert factory.provider_calls == 3
+    assert [attempt.state for attempt in attempts] == [
+        AttemptState.FAILED,
+        AttemptState.FAILED,
+        AttemptState.SUCCEEDED,
+    ]
+    assert (await service.get_status(job.job_id))["state"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_backoff_stops_before_another_spend_or_claim(
+    tmp_path: Path,
+) -> None:
+    slept: list[float] = []
+    service_holder: list[EvaluationJobService] = []
+    job_id_holder: list[str] = []
+
+    async def sleeper(delay: float) -> None:
+        slept.append(delay)
+        await service_holder[0].request_cancel(job_id_holder[0])
+
+    plugin = RetryableRequestBatchPlugin(2, provider_calls_per_unit=1)
+    factory = FakeReplyFactory(
+        max_output_tokens=1,
+        outcomes={"mistral-1": "provider_unavailable"},
+        raising_outcomes=frozenset({"provider_unavailable"}),
+    )
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        factory,
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        key_count=1,
+        sleeper=sleeper,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=10, tokens=10, attempts=3),
+        idempotency_key="cancel-backoff-key",
+    )
+    service_holder.append(service)
+    job_id_holder.append(job.job_id)
+
+    await runner.run(job.job_id)
+
+    unclaimed = await repository.get_unit(job.job_id, "unit-1")
+    assert slept == [1]
+    assert factory.provider_calls == 1
+    assert unclaimed is not None and unclaimed.state is UnitState.READY
+    assert (await service.get_status(job.job_id))["state"] == "cancelled"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cancellation_requested", "expected_state"),
     ((False, UnitState.FAILED), (True, UnitState.CANCELLED)),
@@ -399,7 +867,7 @@ async def test_claimed_unstarted_unit_distinguishes_budget_exhaustion_from_cance
     )
     lease = await lease_pool.lease()
     try:
-        outcome = await runner._execute_claimed_unit(
+        executed = await runner._execute_claimed_unit(
             job,
             plugin,
             await plugin.preflight(job.request),
@@ -412,6 +880,7 @@ async def test_claimed_unstarted_unit_distinguishes_budget_exhaustion_from_cance
     finally:
         await lease.release()
 
+    outcome = executed.outcome
     await queue.complete(job.job_id, outcome)
 
     persisted = await repository.get_unit(job.job_id, claimed.unit_id)
@@ -446,7 +915,7 @@ async def test_mixed_and_cleanup_failures_cannot_claim_clean_success(tmp_path: P
     await partial_runner.run(partial_job.job_id)
 
     cleanup_plugin = RequestBatchPlugin(1, cleanup_fails=True)
-    cleanup_runner, cleanup_service, _ = await prepared_runner(
+    cleanup_runner, cleanup_service, cleanup_repository = await prepared_runner(
         tmp_path / "cleanup",
         cleanup_plugin,
         FakeReplyFactory(max_output_tokens=1),
@@ -461,6 +930,36 @@ async def test_mixed_and_cleanup_failures_cannot_claim_clean_success(tmp_path: P
 
     assert (await partial_service.get_status(partial_job.job_id))["state"] == "partially_succeeded"
     assert (await cleanup_service.get_status(cleanup_job.job_id))["state"] == "failed"
+    cleanup_attempts = await cleanup_repository.list_attempts(cleanup_job.job_id, "unit-0")
+    assert cleanup_attempts[0].failure_class is FailureClass.EVALUATION
+    assert cleanup_plugin.scratch_dirs
+    assert all(not path.exists() for path in cleanup_plugin.scratch_dirs)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_warnings_are_persisted_and_prevent_clean_success(tmp_path: Path) -> None:
+    plugin = RequestBatchPlugin(1, cleanup_warns=True)
+    runner, service, repository = await prepared_runner(
+        tmp_path,
+        plugin,
+        FakeReplyFactory(max_output_tokens=1),
+        request(workers=1, provider_requests=4, tokens=4),
+        key_count=1,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="cleanup-warning-key",
+    )
+
+    await runner.run(job.job_id)
+
+    status = await service.get_status(job.job_id)
+    stored = (await repository.list_units(job.job_id))[0]
+    assert status["state"] == "partially_succeeded"
+    assert [warning["code"] for warning in status["warnings"]] == ["WORKER_COUNT_REDUCED"]
+    assert stored.state is UnitState.SUCCEEDED
+    assert stored.outcome_ref is not None
+    assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
 
 
 @pytest.mark.asyncio
