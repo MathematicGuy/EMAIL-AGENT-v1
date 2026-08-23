@@ -28,30 +28,20 @@ from cowork_agent.config import (
     GeminiSettings,
     load_runtime_environment,
 )
+from cowork_agent.features.ai_chat.memory_eval import live_execution
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
-from cowork_agent.features.ai_chat.memory_eval.default_project import (
-    NullDefaultProjectEpisodes,
-)
-from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_env import (
     LiveEnvironment,
     UnsafeTargetError,
     probe_environment,
     run_with_selector_loop,
-    unavailable_scopes,
 )
-from cowork_agent.features.ai_chat.memory_eval.live_runner import (
-    ExcessiveSeedFailuresError,
-    LiveSession,
-    ask_live,
-    build_identity,
-    teardown,
+from cowork_agent.features.ai_chat.memory_eval.live_execution import (
+    build_memory_report,
+    execute_memory_shard,
 )
-from cowork_agent.features.ai_chat.memory_eval.live_seeding import seed_semantic
 from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, load_probe_set
-from cowork_agent.features.ai_chat.memory_eval.report import REPORT_SCHEMA_VERSION
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
-from cowork_agent.features.ai_chat.memory_eval.scoring import score
 
 _ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES = "MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES"
 _DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES = 3
@@ -239,127 +229,6 @@ async def _dry_run(probe_set: object) -> dict[str, object]:
     )
 
 
-async def _build_adapters(
-    env: LiveEnvironment, probe_set: ProbeSet
-) -> tuple[AdapterSet, list[str], Any]:
-    """Build every adapter the environment can support. Absences are findings.
-
-    Nothing here raises on a missing dependency. A scope whose adapter could not
-    be built fails closed at the gateway, which is what an unavailable scope
-    should look like, and the reason travels into the report instead of ending
-    the run for the scopes that were fine. `unavailable_scopes` names the
-    missing infrastructure; this function only reports what it tried and could
-    not finish, so the two never say the same thing twice.
-    """
-
-    failures: list[str] = []
-    declarative: object | None = None
-    episodic: object | None = None
-    pool: object | None = None
-    if env.postgres_url is not None:
-        from psycopg_pool import AsyncConnectionPool
-
-        from cowork_agent.persistence.migrate import apply_migrations
-        from cowork_agent.persistence.repositories.postgres import (
-            PostgresChatProfileRepository,
-            PostgresTaskEpisodeRepository,
-        )
-
-        pool = AsyncConnectionPool(env.postgres_url, min_size=1, max_size=4, open=False)
-        await pool.open(wait=True)
-        await apply_migrations(pool)
-        declarative = PostgresChatProfileRepository(pool)
-        # The harness builds its scopes directly, so they carry the legacy
-        # "default-project" sentinel that the app resolves to a real UUID before
-        # any episode is written. `task_episodes.project_id` is `uuid`, so the
-        # sentinel would fail every write here. See `default_project`.
-        episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
-        print("[memeval] Initialized PostgreSQL repositories", file=sys.stderr, flush=True)
-    elif env.sqlite_path is not None:
-        # The product backs long_term and episodic with SQLite whenever
-        # database_url() is empty, and one SQLiteChatRepository serves both
-        # roles — exactly as app.py wires them. Building only the Postgres pair
-        # here would report two working scopes as unavailable.
-        from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
-
-        env.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        sqlite_chat = SQLiteChatRepository(env.sqlite_path)
-        await sqlite_chat.initialize()
-        declarative = sqlite_chat
-        episodic = sqlite_chat
-        print(
-            f"[memeval] Initialized SQLite repository at {env.sqlite_path}",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    semantic: object | None = None
-    if env.embeddings_ready:
-        # Use the app's own factory rather than naming a provider here. It
-        # honours DOCUMENT_EMBEDDING_PROVIDER, so the corpus is embedded by
-        # whatever the product embeds documents with. Hardcoding one provider
-        # would measure a retrieval path the product no longer uses, which is
-        # the "same system as shipped" rule in SPEC 12.1.
-        from cowork_agent.integrations.rag.bootstrap import build_document_embedder
-
-        print("[memeval] Seeding semantic memory corpus...", file=sys.stderr, flush=True)
-        embedder, _dimensions = build_document_embedder()
-        outcome, adapter = await seed_semantic(
-            probe_set.seed,
-            embedder,
-            corpus_root=Path("."),
-        )
-        if outcome.ok:
-            semantic = adapter
-            print("[memeval] Semantic memory seeded successfully", file=sys.stderr, flush=True)
-        else:
-            failures.append(f"semantic: {outcome.reason}")
-            print(
-                f"[memeval] Semantic memory seeding failed: {outcome.reason}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-    return AdapterSet(declarative, episodic, semantic), failures, pool
-
-
-def _attach_stream_errors(
-    session: LiveSession, recorded: list[dict[str, object]]
-) -> None:
-    for record in recorded:
-        record["stream_errors"] = [
-            item
-            for item in session.ask_errors
-            if item["probe"] == record["probe"] and item["arm"] == record["arm"]
-        ]
-
-
-def _aborted_report(
-    probe_set: ProbeSet,
-    *,
-    provider: str,
-    model: str,
-    identity: Any,
-    seed_failures: Sequence[str],
-) -> dict[str, object]:
-    return {
-        "schema_version": REPORT_SCHEMA_VERSION,
-        "probe_set_id": probe_set.probe_set_id,
-        "probe_count": len(probe_set.probes),
-        "provider": provider,
-        "model": model,
-        "ran_at": datetime.now(UTC).isoformat(),
-        "run_key": identity.run_key,
-        "nonce": identity.nonce,
-        "per_scope": {},
-        "verdicts": [],
-        "leaked_probes": [],
-        "needs_reading": 0,
-        "seed_failures": sorted(seed_failures),
-        "aborted": True,
-    }
-
-
 async def run_live(
     probe_set: ProbeSet,
     env: LiveEnvironment,
@@ -370,110 +239,27 @@ async def run_live(
     transcript: list[dict[str, object]] | None = None,
     max_consecutive_provider_failures: int = 3,
 ) -> dict[str, object]:
-    """Seed, probe under three arms, report, then delete everything created.
+    """Compatibility wrapper around one full-set live shard."""
 
-    `transcript` collects the full question and reply for every arm. The
-    committed report is metadata-only by design, so without this the replies a
-    human has to read to resolve an uncertain refusal do not survive the run.
-    """
-
-    total_calls = len(probe_set.probes) * 3
-    print(
-        f"[memeval] Starting evaluation run: probe_set={probe_set.probe_set_id} "
-        f"({len(probe_set.probes)} probes, {total_calls} calls) | "
-        f"provider={provider} | model={model}",
-        file=sys.stderr,
-        flush=True,
-    )
-
-    identity = build_identity(probe_set, model)
-    adapters, failures, pool = await _build_adapters(env, probe_set)
-    failures.extend(item.reason for item in unavailable_scopes(env))
-    session = LiveSession(
-        identity=identity,
-        adapters=adapters,
-        reply=reply,
-        seed=probe_set.seed,
+    result = await execute_memory_shard(
+        probe_set,
+        env,
+        reply,
+        provider=provider,
+        model=model,
         max_consecutive_provider_failures=max_consecutive_provider_failures,
     )
-    recorded = transcript if transcript is not None else []
-    call_idx = 0
-
-    async def ask(probe: Probe, arm: Arm, masked: Any) -> tuple[str, int]:
-        nonlocal call_idx
-        call_idx += 1
-        current_idx = call_idx
-        target_name = probe.targets.value
-        arm_name = arm.value
-        print(
-            f"[{current_idx:02d}/{total_calls:02d}] Asking probe '{probe.probe_id}' "
-            f"(target: {target_name}, arm: {arm_name})...",
-            file=sys.stderr,
-            flush=True,
-        )
-        text, latency_ms = await ask_live(session, probe, arm, masked)
-        result = score(text, probe)
-        certainty = "certain" if result.certain else "uncertain"
-        print(
-            f"[{current_idx:02d}/{total_calls:02d}] Done probe '{probe.probe_id}' "
-            f"[{arm_name}] -> outcome: {result.outcome.value} ({certainty}) [{latency_ms}ms]",
-            file=sys.stderr,
-            flush=True,
-        )
-        recorded.append(
-            {
-                "probe": probe.probe_id,
-                "targets": probe.targets.value,
-                "arm": arm.value,
-                "masked": None if masked is None else str(masked.value),
-                "question": probe.question,
-                "reply": text,
-                "outcome": result.outcome.value,
-                "certain": result.certain,
-                "why": result.why,
-                "latency_ms": latency_ms,
-            }
-        )
-        return text, latency_ms
-
-    report: dict[str, object] | None = None
-    try:
-        report = await run_probe_set(
-            probe_set,
-            ask,
-            provider=provider,
-            model=model,
-            ran_at=datetime.now(UTC),
-            seed_failures=failures,
-            nonce=identity.nonce,
-        )
-        # Seeding happens inside ask_live, so session.seed_failures is only
-        # complete once run_probe_set has returned. Passing it as an argument
-        # above would capture an empty list on every run, because arguments are
-        # evaluated before the call.
-        report["seed_failures"] = sorted({*failures, *session.seed_failures})
-        _attach_stream_errors(session, recorded)
-    except ExcessiveSeedFailuresError as error:
-        _attach_stream_errors(session, recorded)
-        if not recorded:
-            raise
-        print(f"ERROR: {error}", file=sys.stderr)
-        report = _aborted_report(
-            probe_set,
-            provider=provider,
-            model=model,
-            identity=identity,
-            seed_failures=sorted({*failures, *session.seed_failures}),
-        )
-    finally:
-        # Teardown runs even when a probe raised. A run that created stores must
-        # not leave them behind, and a partial cleanup still beats none.
-        print("[memeval] Tearing down evaluation stores...", file=sys.stderr, flush=True)
-        await teardown(session.gateways)
-        if pool is not None:
-            await pool.close()
-        print("[memeval] Teardown complete", file=sys.stderr, flush=True)
-    assert report is not None
+    if transcript is not None:
+        transcript.extend(result.private_transcript)
+    report = build_memory_report(
+        probe_set,
+        (result,),
+        provider=provider,
+        model=model,
+        ran_at=datetime.now(UTC),
+    )
+    if any(finding.startswith("aborted: ") for finding in result.provider_findings):
+        report["aborted"] = True
     return report
 
 
@@ -572,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_consecutive_provider_failures=max_consecutive,
                 )
             )
-        except ExcessiveSeedFailuresError as error:
+        except live_execution.ExcessiveSeedFailuresError as error:
             print(f"ERROR: {error}", file=sys.stderr)
             return 1
 
@@ -628,4 +414,3 @@ if __name__ == "__main__":
     # checkout, which would turn that unit test into a real billed run.
     load_runtime_environment()
     raise SystemExit(main())
-

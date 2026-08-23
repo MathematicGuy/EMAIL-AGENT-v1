@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import SeedSpec
 from cowork_agent.features.ai_chat.memory_eval.runner import run_key
 from scripts.evaluate_memory import main
@@ -231,17 +232,18 @@ def test_run_live_passes_max_consecutive_into_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
     from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
     from scripts.evaluate_memory import run_live
 
     captured: dict[str, int] = {}
 
-    async def fake_ask(session, probe, arm, masked):
-        del probe, arm, masked
-        captured["max"] = session.max_consecutive_provider_failures
-        return "an answer", 1
+    async def fake_execute(probe_set, env, reply, **kwargs):
+        del probe_set, env, reply
+        captured["max"] = kwargs["max_consecutive_provider_failures"]
+        return MemoryShardResult((), (), (), "nonce", (), True)
 
-    monkeypatch.setattr("scripts.evaluate_memory.ask_live", fake_ask)
+    monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fake_execute)
     payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
     probe_set = load_probe_set(payload)
     env = LiveEnvironment(None, None, True, False, "")
@@ -258,24 +260,81 @@ def test_run_live_passes_max_consecutive_into_session(
     assert captured["max"] == 5
 
 
+def test_run_live_delegates_one_full_shard_to_the_live_execution_seam(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
+    from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
+    from cowork_agent.features.ai_chat.memory_eval.report import ProbeRow
+    from cowork_agent.features.ai_chat.memory_eval.scoring import Outcome
+    from cowork_agent.features.ai_chat.memory_eval.probes import ProbeTest
+    from scripts import evaluate_memory
+
+    payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
+    probe_set = load_probe_set(payload)
+    calls: list[tuple[object, ...]] = []
+    row = ProbeRow(
+        probe_id="st_recall_01",
+        targets=MemoryType.SHORT_TERM,
+        test=ProbeTest.RECALL,
+        full=Outcome.PASS,
+        ablated=Outcome.MISS,
+        control=Outcome.MISS,
+        certain=True,
+        latency_ms=3,
+    )
+
+    async def execute(*args: object, **kwargs: object) -> MemoryShardResult:
+        calls.append((*args, kwargs))
+        return MemoryShardResult((row,), ("seed",), (), "nonce", ("seed",), True)
+
+    monkeypatch.setattr(evaluate_memory, "execute_memory_shard", execute)
+    report = asyncio.run(
+        evaluate_memory.run_live(
+            probe_set,
+            LiveEnvironment(None, None, True, True, ""),
+            object(),
+            provider="provider",
+            model="model",
+            max_consecutive_provider_failures=5,
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] is probe_set
+    assert calls[0][-1]["max_consecutive_provider_failures"] == 5
+    assert report["nonce"] == "nonce"
+    assert report["seed_failures"] == ["seed"]
+
+
 def test_run_live_partial_flush_stamps_aborted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
-    from cowork_agent.features.ai_chat.memory_eval.live_runner import ExcessiveSeedFailuresError
+    from cowork_agent.features.ai_chat.memory_eval.live_execution import MemoryShardResult
     from cowork_agent.features.ai_chat.memory_eval.probes import load_probe_set
     from scripts.evaluate_memory import run_live
 
-    calls = {"n": 0}
+    async def fake_execute(probe_set, env, reply, **kwargs):
+        del probe_set, env, reply, kwargs
+        return MemoryShardResult(
+            (),
+            ("down",),
+            (
+                {
+                    "probe": "st_recall_01",
+                    "arm": "full",
+                    "question": "what did I say?",
+                    "reply": "partial",
+                },
+            ),
+            "nonce",
+            ("aborted: tripped",),
+            True,
+        )
 
-    async def fake_ask(session, probe, arm, masked):
-        del session, probe, arm, masked
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return "an answer", 1
-        raise ExcessiveSeedFailuresError("tripped")
-
-    monkeypatch.setattr("scripts.evaluate_memory.ask_live", fake_ask)
+    monkeypatch.setattr("scripts.evaluate_memory.execute_memory_shard", fake_execute)
     payload = json.loads(_probe_set_file(tmp_path).read_text(encoding="utf-8"))
     probe_set = load_probe_set(payload)
     env = LiveEnvironment(None, None, True, False, "")
@@ -343,5 +402,3 @@ def test_aborted_run_writes_baseline_and_detail_and_exits_one(
     assert matches
     detail = json.loads(matches[-1].read_text(encoding="utf-8"))
     assert detail["arms"]
-
-
