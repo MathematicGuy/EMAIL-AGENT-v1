@@ -9,6 +9,30 @@ is [MEMORY_IN_A_NUTSHELL.md](./MEMORY_IN_A_NUTSHELL.md). How to run it for real
 is [RUNBOOK.md](./RUNBOOK.md). Why it is built this way is
 [SPEC-memory-evaluation.md](../../tasks/specs/SPEC-memory-evaluation.md).
 
+## Current Best Report & Baseline Reference
+
+The current authoritative baseline report for memory evaluation is:
+
+- **Report**: [`reports/2026-08-21-v3_four_scopes_hard.md`](./reports/2026-08-21-v3_four_scopes_hard.md)
+- **Date**: 2026-08-21
+- **Probe Set**: `v3_four_scopes_hard` ([`probes/v3-four-scopes-hard.json`](./probes/v3-four-scopes-hard.json), 20 probes / 60 turns across 3 arms)
+- **Provider / Model**: `mistral` / `mistral-medium-3-5`
+- **Storage Backend**: SQLite scratch (`runs/memeval-chat.db`, `POSTGRES_MODE=off`)
+- **Baseline JSON**: [`baselines/v3-four-scopes-hard-sqlite.json`](./baselines/v3-four-scopes-hard-sqlite.json)
+
+### Baseline Key Performance Indicators (for Future Eval Comparison)
+
+| Metric | Value | Scope Breakdown | Evaluation Note |
+|---|---|---|---|
+| **Full Arm Pass Rate** | **15 / 20 (75.0%)** | ST: 5/5 (100%), LT: 4/4 (100%), EP: 2/5 (40%), SEM: 4/6 (67%) | Measures correctness when full memory is present |
+| **Scope Earned-It $(P, F, F)$** | **8 / 20 (40.0%)** | ST: 3, LT: 1, EP: 1, SEM: 3 | Strict attribution: full passes, ablated/control fail |
+| **Restraint (Anti-Hallucination)** | **7 / 10 (70.0%)** | ST: 2/2, LT: 3/3, EP: 1/2, SEM: 1/3 | Refusal when memory does not contain requested fact |
+| **Average Latency** | **4.5s / turn** | Over 60 turns across 3 arms | Recorded on `mistral-medium-3-5` |
+| **Seed Failures** | **0 (none)** | All 4 memory scopes | 100% clean memory ingestion |
+
+> [!NOTE]
+> Use this report and its associated baseline (`v3-four-scopes-hard-sqlite.json`) as the comparison baseline for future memory evaluations and regression tracking on the `v3_four_scopes_hard` probe set.
+
 ## Commands
 
 On this machine, bare `python` hits the Windows App Execution Alias and fails.
