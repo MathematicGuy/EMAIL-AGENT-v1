@@ -7,7 +7,14 @@ from cowork_agent.features.batch_evaluation.planning import DataSharder, resolve
 
 @pytest.mark.parametrize(
     ("requested", "healthy", "ready", "effective", "warns"),
-    [(1, 3, 10, 1, False), (2, 3, 10, 2, False), (4, 3, 10, 3, True), (4, 5, 2, 2, False)],
+    [
+        (1, 3, 10, 1, False),
+        (2, 3, 10, 2, False),
+        (4, 3, 10, 3, True),
+        (4, 3, 3, 3, True),
+        (4, 3, 2, 2, False),
+        (4, 5, 2, 2, False),
+    ],
 )
 def test_worker_resolution(
     requested: int, healthy: int, ready: int, effective: int, warns: bool

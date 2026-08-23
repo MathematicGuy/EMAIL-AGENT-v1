@@ -56,7 +56,7 @@ def resolve_worker_count(
                 "healthy_credentials": healthy_credentials,
             },
         )
-        if requested > healthy_credentials
+        if requested > healthy_credentials and healthy_credentials <= ready_work
         else None
     )
     return WorkerResolution(
