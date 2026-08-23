@@ -249,6 +249,60 @@ def test_evaluation_reply_records_cancelled_when_closed_before_provider_completi
     asyncio.run(scenario())
 
 
+def test_evaluation_reply_records_cancelled_when_closed_before_first_pull(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        events: list[object] = []
+
+        class ClosableStream:
+            def __init__(self) -> None:
+                self.closed = 0
+
+            def __aiter__(self) -> "ClosableStream":
+                return self
+
+            async def __anext__(self) -> ChatReplyChunk:
+                return ChatReplyChunk("unreachable")
+
+            async def aclose(self) -> None:
+                self.closed += 1
+
+        inner_stream = ClosableStream()
+        monkeypatch.setattr(
+            "cowork_agent.integrations.llm.chat_reply.MistralChatReply.from_settings",
+            classmethod(
+                lambda cls, settings: type(
+                    "FakeReply", (), {"stream_reply": lambda *args: inner_stream}
+                )()
+            ),
+        )
+        reply = MistralEvaluationReplyFactory().bind(
+            await _lease_async(), "mistral-small", events.append
+        )
+        request = ChatMessageRequest("session-1", "private prompt", "idem-1")
+        context = assemble_generation_context(
+            request,
+            MemoryContextResponse(
+                turns=(),
+                profile=None,
+                episodes=(),
+                semantic_context=None,
+                degraded=False,
+                degraded_sources=(),
+            ),
+        )
+
+        stream = reply.stream_reply(request, context)
+        await stream.aclose()
+        await stream.aclose()
+
+        assert [event.outcome for event in events] == ["cancelled"]
+        assert inner_stream.closed == 1
+
+    asyncio.run(scenario())
+
+
 def test_evaluation_reply_reraises_cancellation_before_provider_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

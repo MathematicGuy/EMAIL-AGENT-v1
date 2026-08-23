@@ -68,54 +68,20 @@ class _AttemptObservableMistralReply:
         self._clock = clock
         self._request_id_factory = request_id_factory
 
-    async def stream_reply(
+    def stream_reply(
         self, request: ChatMessageRequest, context: GenerationContext
     ) -> AsyncIterator[str | ChatReplyChunk]:
         started_at = self._clock()
         request_id = self._request_id_factory()
         stream = self._reply.stream_reply(request, context).__aiter__()
-        terminal_emitted = False
 
         async def emit_terminal(error: BaseException | None) -> None:
-            nonlocal terminal_emitted
-            if terminal_emitted:
-                return
-            terminal_emitted = True
             try:
                 await self._emit(error, started_at, request_id)
             except Exception:
                 pass
 
-        try:
-            try:
-                buffered_chunk = await anext(stream)
-            except StopAsyncIteration:
-                await emit_terminal(None)
-                return
-
-            while True:
-                try:
-                    next_chunk = await anext(stream)
-                except StopAsyncIteration:
-                    await emit_terminal(None)
-                    yield buffered_chunk
-                    return
-                yield buffered_chunk
-                buffered_chunk = next_chunk
-        except (GeneratorExit, asyncio.CancelledError) as exc:
-            await emit_terminal(exc)
-            raise
-        except BaseException as exc:
-            await emit_terminal(exc)
-            raise
-        finally:
-            if not terminal_emitted:
-                close = getattr(stream, "aclose", None)
-                if close is not None:
-                    try:
-                        await close()
-                    except BaseException:
-                        pass
+        return _AttemptObservableStream(stream, emit_terminal)
 
     async def _emit(
         self, error: BaseException | None, started_at: float, request_id: str
@@ -133,6 +99,83 @@ class _AttemptObservableMistralReply:
         if result is not None:
             await result
 
+
+class _AttemptObservableStream(AsyncIterator[str | ChatReplyChunk]):
+    def __init__(
+        self,
+        stream: AsyncIterator[str | ChatReplyChunk],
+        emit_terminal: Callable[[BaseException | None], Awaitable[None]],
+    ) -> None:
+        self._stream = stream
+        self._emit_terminal_callback = emit_terminal
+        self._buffered_chunk: str | ChatReplyChunk | None = None
+        self._closed = False
+        self._inner_closed = False
+        self._terminal_emitted = False
+
+    def __aiter__(self) -> AsyncIterator[str | ChatReplyChunk]:
+        return self
+
+    async def __anext__(self) -> str | ChatReplyChunk:
+        if self._closed:
+            raise StopAsyncIteration
+
+        try:
+            if self._buffered_chunk is None:
+                self._buffered_chunk = await anext(self._stream)
+
+            try:
+                next_chunk = await anext(self._stream)
+            except StopAsyncIteration:
+                await self._emit_terminal(None)
+                self._closed = True
+                buffered_chunk = self._buffered_chunk
+                self._buffered_chunk = None
+                assert buffered_chunk is not None
+                return buffered_chunk
+
+            buffered_chunk = self._buffered_chunk
+            self._buffered_chunk = next_chunk
+            assert buffered_chunk is not None
+            return buffered_chunk
+        except StopAsyncIteration:
+            await self._emit_terminal(None)
+            self._closed = True
+            raise
+        except (GeneratorExit, asyncio.CancelledError) as exc:
+            await self._emit_terminal(exc)
+            self._closed = True
+            await self._close_inner()
+            raise
+        except BaseException as exc:
+            await self._emit_terminal(exc)
+            self._closed = True
+            await self._close_inner()
+            raise
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await self._emit_terminal(asyncio.CancelledError())
+        await self._close_inner()
+
+    async def _emit_terminal(self, error: BaseException | None) -> None:
+        if self._terminal_emitted:
+            return
+        self._terminal_emitted = True
+        await self._emit_terminal_callback(error)
+
+    async def _close_inner(self) -> None:
+        if self._inner_closed:
+            return
+        self._inner_closed = True
+        close = getattr(self._stream, "aclose", None)
+        if close is not None:
+            try:
+                await close()
+            except BaseException:
+                pass
 
 def _attempt_metadata(error: BaseException | None) -> tuple[int | None, int | None, str]:
     if error is None:
