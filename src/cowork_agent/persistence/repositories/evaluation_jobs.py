@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 
 from cowork_agent.features.batch_evaluation.contracts import (
@@ -80,6 +80,9 @@ class EvaluationUnit:
     ordinal: int
     state: UnitState
     claimed_by: str | None
+    provider_requests: int
+    total_tokens: int
+    outcome_ref: str | None
     payload: Mapping[str, object]
 
 
@@ -132,7 +135,10 @@ _JOB_COLUMNS = (
     "job_id, request_json, warnings_json, state, requested_workers, effective_workers,"
     " cancel_requested_at, created_at, updated_at, completed_at"
 )
-_UNIT_COLUMNS = "job_id, unit_id, ordinal, state, claimed_by, safe_payload_json"
+_UNIT_COLUMNS = (
+    "job_id, unit_id, ordinal, state, claimed_by, provider_requests, total_tokens, outcome_ref,"
+    " safe_payload_json"
+)
 _ATTEMPT_COLUMNS = (
     "attempt_id, job_id, unit_id, worker_id, credential_alias, attempt_number, state,"
     " failure_class, started_at, completed_at"
@@ -201,6 +207,9 @@ class SQLiteEvaluationJobRepository:
                     ordinal INTEGER NOT NULL,
                     state TEXT NOT NULL,
                     claimed_by TEXT,
+                    provider_requests INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    outcome_ref TEXT,
                     safe_payload_json TEXT NOT NULL,
                     PRIMARY KEY(job_id, unit_id)
                 );
@@ -235,6 +244,13 @@ class SQLiteEvaluationJobRepository:
                 """
             )
             _add_column_if_missing(database, "evaluation_units", "claimed_by TEXT")
+            _add_column_if_missing(
+                database, "evaluation_units", "provider_requests INTEGER NOT NULL DEFAULT 0"
+            )
+            _add_column_if_missing(
+                database, "evaluation_units", "total_tokens INTEGER NOT NULL DEFAULT 0"
+            )
+            _add_column_if_missing(database, "evaluation_units", "outcome_ref TEXT")
             _add_column_if_missing(
                 database, "evaluation_attempts", "worker_id TEXT NOT NULL DEFAULT ''"
             )
@@ -405,8 +421,9 @@ class SQLiteEvaluationJobRepository:
                 database.execute(
                     """
                     INSERT INTO evaluation_units (
-                        job_id, unit_id, ordinal, state, claimed_by, safe_payload_json
-                    ) VALUES (?, ?, ?, ?, NULL, ?)
+                        job_id, unit_id, ordinal, state, claimed_by, provider_requests,
+                        total_tokens, outcome_ref, safe_payload_json
+                    ) VALUES (?, ?, ?, ?, NULL, 0, 0, NULL, ?)
                     """,
                     (
                         job_id,
@@ -534,20 +551,51 @@ class SQLiteEvaluationJobRepository:
             ).fetchall()
         return tuple(_unit_from_row(row) for row in rows)
 
-    async def complete_unit(self, job_id: str, outcome: WorkUnitOutcome) -> None:
-        await asyncio.to_thread(self._complete_unit_sync, job_id, outcome)
+    async def list_units(self, job_id: str) -> tuple[EvaluationUnit, ...]:
+        return await asyncio.to_thread(self._list_units_sync, job_id)
 
-    def _complete_unit_sync(self, job_id: str, outcome: WorkUnitOutcome) -> None:
+    def _list_units_sync(self, job_id: str) -> tuple[EvaluationUnit, ...]:
+        with self._connect() as database:
+            rows = database.execute(
+                f"""
+                SELECT {_UNIT_COLUMNS} FROM evaluation_units
+                WHERE job_id = ?
+                ORDER BY ordinal, unit_id
+                """,
+                (job_id,),
+            ).fetchall()
+        return tuple(_unit_from_row(row) for row in rows)
+
+    async def complete_unit(
+        self,
+        job_id: str,
+        outcome: WorkUnitOutcome,
+        *,
+        outcome_ref: str | None = None,
+    ) -> None:
+        await asyncio.to_thread(self._complete_unit_sync, job_id, outcome, outcome_ref)
+
+    def _complete_unit_sync(
+        self, job_id: str, outcome: WorkUnitOutcome, outcome_ref: str | None
+    ) -> None:
         if outcome.state not in _UNIT_TERMINAL_STATES:
             raise InvalidStateTransition("work units may only complete in a terminal state")
+        reference = _outcome_reference(outcome_ref, outcome.state)
         with self._connect() as database:
+            self._begin_immediate(database, "complete")
             cursor = database.execute(
                 """
-                UPDATE evaluation_units SET state = ?
+                UPDATE evaluation_units
+                SET state = ?, claimed_by = NULL, provider_requests = ?, total_tokens = ?,
+                    outcome_ref = ?
                 WHERE job_id = ? AND unit_id = ? AND ordinal = ? AND state = ?
+                    AND claimed_by IS NOT NULL
                 """,
                 (
                     outcome.state.value,
+                    outcome.provider_requests,
+                    outcome.total_tokens,
+                    reference,
                     job_id,
                     outcome.unit_id,
                     outcome.ordinal,
@@ -555,7 +603,39 @@ class SQLiteEvaluationJobRepository:
                 ),
             )
         if cursor.rowcount != 1:
-            raise InvalidStateTransition("unit is not running")
+            raise InvalidStateTransition("unit is not live and claimed")
+
+    async def append_warnings(
+        self, job_id: str, warnings: Sequence[EvaluationWarning]
+    ) -> EvaluationJob:
+        return await asyncio.to_thread(self._append_warnings_sync, job_id, warnings)
+
+    def _append_warnings_sync(
+        self, job_id: str, warnings: Sequence[EvaluationWarning]
+    ) -> EvaluationJob:
+        additions = tuple(warnings)
+        if not all(isinstance(warning, EvaluationWarning) for warning in additions):
+            raise TypeError("warnings must contain EvaluationWarning instances")
+        with self._connect() as database:
+            self._begin_immediate(database, "append_warnings")
+            row = database.execute(
+                f"SELECT {_JOB_COLUMNS} FROM evaluation_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            job = _job_from_row(row)
+            database.execute(
+                """
+                UPDATE evaluation_jobs SET warnings_json = ?, updated_at = ?
+                WHERE job_id = ?
+                """,
+                (_warnings_json((*job.warnings, *additions)), _now(), job_id),
+            )
+            updated = database.execute(
+                f"SELECT {_JOB_COLUMNS} FROM evaluation_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        assert updated is not None
+        return _job_from_row(updated)
 
     async def start_attempt(
         self, job_id: str, unit_id: str, worker_id: str, credential_alias: str
@@ -1073,13 +1153,17 @@ def _job_from_row(row: Sequence[object]) -> EvaluationJob:
 
 
 def _unit_from_row(row: Sequence[object]) -> EvaluationUnit:
+    state = UnitState(str(row[3]))
     return EvaluationUnit(
         job_id=str(row[0]),
         unit_id=str(row[1]),
         ordinal=_integer(row[2]),
-        state=UnitState(str(row[3])),
+        state=state,
         claimed_by=None if row[4] is None else str(row[4]),
-        payload=_mapping_from_json(row[5]),
+        provider_requests=_non_negative_integer(row[5], "provider_requests"),
+        total_tokens=_non_negative_integer(row[6], "total_tokens"),
+        outcome_ref=_outcome_reference(row[7], state),
+        payload=_mapping_from_json(row[8]),
     )
 
 
@@ -1112,6 +1196,35 @@ def _optional_datetime(value: object) -> datetime | None:
 
 def _integer(value: object) -> int:
     return int(str(value))
+
+
+def _non_negative_integer(value: object, name: str) -> int:
+    parsed = _integer(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
+
+
+def _outcome_reference(value: object, state: UnitState) -> str | None:
+    if value is None:
+        if state is UnitState.SUCCEEDED:
+            raise ValueError("outcome_ref is required for succeeded units")
+        return None
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("outcome_ref must be a non-empty relative artifact reference")
+    path = Path(value)
+    windows_path = PureWindowsPath(value)
+    if (
+        not path.parts
+        or path.is_absolute()
+        or path.drive
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or any(part in {".", ".."} for part in path.parts)
+        or any(part in {".", ".."} for part in windows_path.parts)
+    ):
+        raise ValueError("outcome_ref must be a relative artifact reference")
+    return value
 
 
 def _require_identifier(value: object, name: str) -> str:

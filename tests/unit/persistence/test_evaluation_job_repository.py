@@ -161,6 +161,7 @@ def test_unit_claims_are_atomic_and_completed_units_are_not_replayed(tmp_path: P
                 total_tokens=10,
                 private_result=object(),
             ),
+            outcome_ref=".runtime/evaluation-artifacts/private/job-1/unit-1.json",
         )
         await repository.complete_unit(
             job.job_id,
@@ -172,6 +173,7 @@ def test_unit_claims_are_atomic_and_completed_units_are_not_replayed(tmp_path: P
                 total_tokens=10,
                 private_result=object(),
             ),
+            outcome_ref=".runtime/evaluation-artifacts/private/job-1/unit-2.json",
         )
         assert await repository.claim_ready_unit(job.job_id, "worker-3") is None
 
@@ -795,3 +797,420 @@ def test_repository_closes_every_sqlite_connection(
 
     assert connections
     assert all(database.was_closed for database in connections)
+
+
+def test_initialize_migrates_legacy_evaluation_units_with_outcome_defaults(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                """
+                CREATE TABLE evaluation_units (
+                    job_id TEXT NOT NULL,
+                    unit_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    safe_payload_json TEXT NOT NULL,
+                    PRIMARY KEY(job_id, unit_id)
+                )
+                """
+            )
+
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "legacy-units-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+
+        with sqlite3.connect(database_path) as database:
+            columns = {
+                str(row[1]): (str(row[2]), row[4])
+                for row in database.execute("PRAGMA table_info(evaluation_units)")
+            }
+        assert columns["provider_requests"] == ("INTEGER", "0")
+        assert columns["total_tokens"] == ("INTEGER", "0")
+        assert columns["outcome_ref"] == ("TEXT", None)
+
+        unit = await repository.get_unit(job.job_id, "unit-1")
+        assert unit is not None
+        assert unit.provider_requests == 0
+        assert unit.total_tokens == 0
+        assert unit.outcome_ref is None
+
+    asyncio.run(scenario())
+
+
+def test_list_units_orders_all_durable_outcomes_and_round_trips_counts(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "outcome-roundtrip-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-z", ordinal=1, payload={"case_id": "case-z"}),
+                WorkUnit(unit_id="unit-a", ordinal=0, payload={"case_id": "case-a"}),
+                WorkUnit(unit_id="unit-b", ordinal=1, payload={"case_id": "case-b"}),
+            ),
+        )
+        await queue_job(repository, job.job_id)
+
+        claimed_a = await repository.claim_ready_unit(job.job_id, "worker-a")
+        claimed_b = await repository.claim_ready_unit(job.job_id, "worker-b")
+        claimed_z = await repository.claim_ready_unit(job.job_id, "worker-z")
+        assert claimed_a is not None and claimed_a.unit_id == "unit-a"
+        assert claimed_b is not None and claimed_b.unit_id == "unit-b"
+        assert claimed_z is not None and claimed_z.unit_id == "unit-z"
+
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-a",
+                ordinal=0,
+                state=UnitState.SUCCEEDED,
+                provider_requests=2,
+                total_tokens=20,
+                private_result=object(),
+            ),
+            outcome_ref=".runtime/evaluation-artifacts/private/job-1/unit-a.json",
+        )
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-b",
+                ordinal=1,
+                state=UnitState.FAILED,
+                provider_requests=3,
+                total_tokens=30,
+                private_result=object(),
+            ),
+            outcome_ref=None,
+        )
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-z",
+                ordinal=1,
+                state=UnitState.CANCELLED,
+                provider_requests=0,
+                total_tokens=0,
+                private_result=object(),
+            ),
+            outcome_ref=None,
+        )
+
+        units = await repository.list_units(job.job_id)
+        assert [(unit.ordinal, unit.unit_id, unit.state) for unit in units] == [
+            (0, "unit-a", UnitState.SUCCEEDED),
+            (1, "unit-b", UnitState.FAILED),
+            (1, "unit-z", UnitState.CANCELLED),
+        ]
+        assert units[0].provider_requests == 2
+        assert units[0].total_tokens == 20
+        assert units[0].outcome_ref == ".runtime/evaluation-artifacts/private/job-1/unit-a.json"
+        assert units[0].claimed_by is None
+        assert units[1].provider_requests == 3
+        assert units[1].total_tokens == 30
+        assert units[1].outcome_ref is None
+        assert units[2].provider_requests == 0
+        assert units[2].total_tokens == 0
+        assert units[2].outcome_ref is None
+
+    asyncio.run(scenario())
+
+
+def test_complete_unit_never_serializes_private_result(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "private-result-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
+
+        private_result = "private provider result must never reach SQLite"
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-1",
+                ordinal=0,
+                state=UnitState.SUCCEEDED,
+                provider_requests=1,
+                total_tokens=10,
+                private_result=private_result,
+            ),
+            outcome_ref=".runtime/evaluation-artifacts/private/job-1/unit-1.json",
+        )
+
+        with sqlite3.connect(database_path) as database:
+            dump = "\n".join(database.iterdump())
+        assert private_result not in dump
+
+    asyncio.run(scenario())
+
+
+def test_recovery_preserves_completed_unit_outcome_fields(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "recovery-outcome-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-complete", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-orphan", ordinal=1, payload={"case_id": "case-2"}),
+            ),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-complete") is not None
+        assert await repository.claim_ready_unit(job.job_id, "worker-orphan") is not None
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-complete",
+                ordinal=0,
+                state=UnitState.SUCCEEDED,
+                provider_requests=2,
+                total_tokens=20,
+                private_result=object(),
+            ),
+            outcome_ref=".runtime/evaluation-artifacts/private/job-1/unit-complete.json",
+        )
+
+        recovery = await repository.recover_orphaned_attempts(job.job_id)
+
+        assert recovery.requeued_unit_ids == ("unit-orphan",)
+        completed = await repository.get_unit(job.job_id, "unit-complete")
+        assert completed is not None
+        assert completed.state is UnitState.SUCCEEDED
+        assert completed.provider_requests == 2
+        assert completed.total_tokens == 20
+        assert completed.outcome_ref == (
+            ".runtime/evaluation-artifacts/private/job-1/unit-complete.json"
+        )
+        orphan = await repository.get_unit(job.job_id, "unit-orphan")
+        assert orphan is not None
+        assert orphan.state is UnitState.READY
+        assert orphan.claimed_by is None
+        assert orphan.provider_requests == 0
+        assert orphan.total_tokens == 0
+        assert orphan.outcome_ref is None
+
+    asyncio.run(scenario())
+
+
+def test_failed_and_cancelled_units_complete_without_outcome_references(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "terminal-no-ref-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-failed", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-cancelled", ordinal=1, payload={"case_id": "case-2"}),
+            ),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-failed") is not None
+        assert await repository.claim_ready_unit(job.job_id, "worker-cancelled") is not None
+
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-failed",
+                ordinal=0,
+                state=UnitState.FAILED,
+                provider_requests=1,
+                total_tokens=10,
+                private_result=object(),
+            ),
+            outcome_ref=None,
+        )
+        await repository.complete_unit(
+            job.job_id,
+            WorkUnitOutcome(
+                unit_id="unit-cancelled",
+                ordinal=1,
+                state=UnitState.CANCELLED,
+                provider_requests=0,
+                total_tokens=0,
+                private_result=object(),
+            ),
+            outcome_ref=None,
+        )
+
+        assert (await repository.get_unit(job.job_id, "unit-failed")).outcome_ref is None  # type: ignore[union-attr]
+        assert (await repository.get_unit(job.job_id, "unit-cancelled")).outcome_ref is None  # type: ignore[union-attr]
+
+    asyncio.run(scenario())
+
+
+def test_successful_units_require_safe_relative_outcome_references(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "success-ref-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
+        outcome = WorkUnitOutcome(
+            unit_id="unit-1",
+            ordinal=0,
+            state=UnitState.SUCCEEDED,
+            provider_requests=1,
+            total_tokens=10,
+            private_result=object(),
+        )
+
+        with pytest.raises(ValueError, match="outcome_ref"):
+            await repository.complete_unit(job.job_id, outcome, outcome_ref=None)
+        for unsafe_reference in (
+            "",
+            "../outside.json",
+            str((tmp_path / "outside.json").resolve()),
+            r"C:\\private\\outcome.json",
+        ):
+            with pytest.raises(ValueError, match="outcome_ref"):
+                await repository.complete_unit(
+                    job.job_id, outcome, outcome_ref=unsafe_reference
+                )
+        stored = await repository.get_unit(job.job_id, "unit-1")
+        assert stored is not None
+        assert stored.state is UnitState.RUNNING
+        assert stored.claimed_by == "worker-1"
+
+    asyncio.run(scenario())
+
+
+def test_unit_reads_reject_tampered_outcome_references(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "tampered-ref-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_units SET outcome_ref = ? WHERE job_id = ? AND unit_id = ?",
+                (r"C:\\private\\outcome.json", job.job_id, "unit-1"),
+            )
+
+        with pytest.raises(ValueError, match="outcome_ref"):
+            await repository.get_unit(job.job_id, "unit-1")
+        with pytest.raises(ValueError, match="outcome_ref"):
+            await repository.list_units(job.job_id)
+
+    asyncio.run(scenario())
+
+
+def test_complete_unit_requires_the_live_claimed_unit_and_matching_ordinal(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "unit-invariant-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (
+                WorkUnit(unit_id="unit-ordinal", ordinal=0, payload={"case_id": "case-1"}),
+                WorkUnit(unit_id="unit-owner", ordinal=1, payload={"case_id": "case-2"}),
+            ),
+        )
+        await queue_job(repository, job.job_id)
+        assert await repository.claim_ready_unit(job.job_id, "worker-ordinal") is not None
+        assert await repository.claim_ready_unit(job.job_id, "worker-owner") is not None
+
+        with pytest.raises(InvalidStateTransition):
+            await repository.complete_unit(
+                job.job_id,
+                WorkUnitOutcome(
+                    unit_id="unit-ordinal",
+                    ordinal=1,
+                    state=UnitState.FAILED,
+                    provider_requests=0,
+                    total_tokens=0,
+                    private_result=object(),
+                ),
+                outcome_ref=None,
+            )
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_units SET claimed_by = NULL WHERE job_id = ? AND unit_id = ?",
+                (job.job_id, "unit-owner"),
+            )
+        with pytest.raises(InvalidStateTransition):
+            await repository.complete_unit(
+                job.job_id,
+                WorkUnitOutcome(
+                    unit_id="unit-owner",
+                    ordinal=1,
+                    state=UnitState.FAILED,
+                    provider_requests=0,
+                    total_tokens=0,
+                    private_result=object(),
+                ),
+                outcome_ref=None,
+            )
+
+    asyncio.run(scenario())
+
+
+def test_append_warnings_preserves_existing_worker_warnings_in_canonical_form(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "warning-append-key", "hash-a")
+        worker_warning = EvaluationWarning(
+            code="WORKER_COUNT_REDUCED",
+            details={"requested_workers": 4, "effective_workers": 3},
+        )
+        cleanup_warning = EvaluationWarning(
+            code="WORKER_COUNT_REDUCED",
+            details={"requested_workers": 4, "available_workers": 3},
+        )
+        await repository.transition_job(
+            job.job_id, JobState.VALIDATING, warnings=(worker_warning,)
+        )
+
+        updated = await repository.append_warnings(job.job_id, (cleanup_warning,))
+
+        assert updated.warnings == (worker_warning, cleanup_warning)
+        with sqlite3.connect(database_path) as database:
+            row = database.execute(
+                "SELECT warnings_json FROM evaluation_jobs WHERE job_id = ?", (job.job_id,)
+            ).fetchone()
+        assert row is not None
+        assert json.loads(str(row[0])) == [
+            {
+                "code": "WORKER_COUNT_REDUCED",
+                "details": {"effective_workers": 3, "requested_workers": 4},
+                "message": "Worker count was reduced because fewer credentials are healthy.",
+            },
+            {
+                "code": "WORKER_COUNT_REDUCED",
+                "details": {"available_workers": 3, "requested_workers": 4},
+                "message": "Worker count was reduced because fewer credentials are healthy.",
+            },
+        ]
+
+    asyncio.run(scenario())
