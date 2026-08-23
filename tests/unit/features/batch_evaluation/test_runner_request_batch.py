@@ -21,6 +21,7 @@ from cowork_agent.features.batch_evaluation.contracts import (
     JobState,
     PluginPlan,
     ProviderAttemptEvent,
+    StepState,
     UnitState,
     WorkContext,
     WorkUnit,
@@ -36,6 +37,7 @@ from cowork_agent.features.batch_evaluation.runner import (
     EvaluationJobRunner,
 )
 from cowork_agent.features.batch_evaluation.service import EvaluationJobService
+from cowork_agent.features.batch_evaluation.supervisor import EvaluationSupervisor
 from cowork_agent.persistence.repositories.evaluation_jobs import SQLiteEvaluationJobRepository
 
 AttemptSink = Callable[[ProviderAttemptEvent], Awaitable[None] | None]
@@ -122,6 +124,92 @@ class ProviderFailure(RuntimeError):
     pass
 
 
+class CancellationTrackingRepository(SQLiteEvaluationJobRepository):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.cancellation_committed = asyncio.Event()
+        self.events: list[str] = []
+        self.step_states: list[StepState] = []
+        self.completed_units: list[str] = []
+
+    async def request_cancellation(self, job_id: str):  # type: ignore[no-untyped-def]
+        job = await super().request_cancellation(job_id)
+        self.events.append("cancellation_committed")
+        self.cancellation_committed.set()
+        return job
+
+    async def write_step(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        step = await super().write_step(*args, **kwargs)  # type: ignore[arg-type]
+        self.step_states.append(step.state)
+        return step
+
+    async def complete_unit(
+        self,
+        job_id: str,
+        outcome: WorkUnitOutcome,
+        *,
+        outcome_ref: str | None = None,
+    ) -> None:
+        await super().complete_unit(job_id, outcome, outcome_ref=outcome_ref)
+        self.completed_units.append(outcome.unit_id)
+
+
+class ClaimGateRepository(CancellationTrackingRepository):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.claim_committed = asyncio.Event()
+        self.return_claim = asyncio.Event()
+
+    async def claim_ready_unit(self, job_id: str, worker_id: str) -> WorkUnit | None:
+        unit = await super().claim_ready_unit(job_id, worker_id)
+        if unit is not None:
+            self.claim_committed.set()
+            await self.return_claim.wait()
+        return unit
+
+
+class BlockingAttemptReplyFactory(FakeReplyFactory):
+    def __init__(self, repository: CancellationTrackingRepository) -> None:
+        super().__init__(max_output_tokens=1, raising_outcomes=frozenset())
+        self._repository = repository
+        self.attempt_running = asyncio.Event()
+        self.release_attempt = asyncio.Event()
+
+    def bind(self, lease: object, model: str, attempt_sink: AttemptSink) -> object:
+        del model
+        self.bound_aliases.append(lease.alias)
+
+        class Reply:
+            def stream_reply(inner_self, request: object, context: object) -> AsyncIterator[str]:
+                del inner_self, request, context
+
+                async def stream() -> AsyncIterator[str]:
+                    self.provider_calls += 1
+                    observed = attempt_sink(
+                        ProviderAttemptEvent(
+                            credential_alias=lease.alias,
+                            request_attempt_id="provider-running",
+                            outcome="running",
+                            status_code=None,
+                            retry_after_seconds=None,
+                            latency_ms=0,
+                        )
+                    )
+                    if observed is not None:
+                        await observed
+                    self.attempt_running.set()
+                    try:
+                        await self.release_attempt.wait()
+                    except asyncio.CancelledError:
+                        self._repository.events.append("attempt_cancelled")
+                        raise
+                    yield "private reply"
+
+                return stream()
+
+        return Reply()
+
+
 class RequestBatchPlugin:
     evaluation_type = "request-eval"
     version = "1"
@@ -152,6 +240,7 @@ class RequestBatchPlugin:
         self.aggregate_outcomes: tuple[WorkUnitOutcome, ...] = ()
         self.aggregate_private_results: tuple[object, ...] = ()
         self.scratch_dirs: list[Path] = []
+        self.cleanup_calls = 0
 
     async def preflight(self, request: EvaluationRequest) -> PluginPlan:
         return PluginPlan(request.dataset_ref, self.work_count, object())
@@ -203,6 +292,7 @@ class RequestBatchPlugin:
 
     async def cleanup(self, context: WorkContext) -> CleanupOutcome:
         del context
+        self.cleanup_calls += 1
         if self.cleanup_fails:
             raise RuntimeError("private cleanup failure")
         warnings = (
@@ -297,6 +387,36 @@ async def prepared_runner(
     )
     await service.submit(submitted_request, idempotency_key="job-key")
     return runner, service, repository
+
+
+async def prepared_supervised_runner(
+    tmp_path: Path,
+    plugin: RequestBatchPlugin,
+    factory: FakeReplyFactory,
+    repository: CancellationTrackingRepository,
+    pool: CredentialLeasingPool,
+) -> tuple[EvaluationJobService, SQLiteEvaluationJobRepository]:
+    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
+    await repository.initialize()
+    registry = PluginRegistry()
+    registry.register(plugin)
+    runner = EvaluationJobRunner(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+        scratch_root=tmp_path / "scratch",
+        reply_factory=factory,
+    )
+    supervisor = EvaluationSupervisor(repository=repository, runner=runner)
+    service = EvaluationJobService(
+        registry=registry,
+        repository=repository,
+        credential_pool=pool,
+        artifact_store=artifacts,
+        supervisor=supervisor,
+    )
+    return service, repository
 
 
 @pytest.mark.asyncio
@@ -980,3 +1100,78 @@ async def test_cancellation_stops_new_claims_and_finishes_cancelled(tmp_path: Pa
     assert (await service.get_status(job.job_id))["state"] == "cancelled"
     unit = await repository.get_unit(job.job_id, "unit-1")
     assert unit is not None and unit.state is UnitState.READY
+
+
+@pytest.mark.asyncio
+async def test_supervisor_cancellation_after_claim_commit_cleans_owned_unit_and_lease(
+    tmp_path: Path,
+) -> None:
+    repository = ClaimGateRepository(tmp_path / "evaluation-jobs.db")
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}
+    )
+    factory = FakeReplyFactory(max_output_tokens=1)
+    service, _ = await prepared_supervised_runner(
+        tmp_path,
+        RequestBatchPlugin(1, provider_calls_per_unit=1),
+        factory,
+        repository,
+        pool,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="cancel-after-claim",
+    )
+    await repository.claim_committed.wait()
+
+    cancelling = asyncio.create_task(service.request_cancel(job.job_id))
+    await repository.cancellation_committed.wait()
+    repository.return_claim.set()
+    await cancelling
+
+    stored = await repository.get_unit(job.job_id, "unit-0")
+    assert stored is not None and stored.state is UnitState.CANCELLED
+    assert await repository.list_attempts(job.job_id) == ()
+    assert (await service.get_status(job.job_id))["state"] == "cancelled"
+    assert factory.provider_calls == 0
+    assert repository.completed_units == ["unit-0"]
+    assert pool._records[0].active_lease is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_cancellation_during_attempt_cleans_step_attempt_unit_and_lease(
+    tmp_path: Path,
+) -> None:
+    repository = CancellationTrackingRepository(tmp_path / "evaluation-jobs.db")
+    pool = CredentialLeasingPool.from_env(
+        "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-one"}
+    )
+    factory = BlockingAttemptReplyFactory(repository)
+    plugin = RequestBatchPlugin(1, provider_calls_per_unit=1)
+    service, _ = await prepared_supervised_runner(
+        tmp_path,
+        plugin,
+        factory,
+        repository,
+        pool,
+    )
+    job = await service.submit(
+        request(workers=1, provider_requests=4, tokens=4),
+        idempotency_key="cancel-during-attempt",
+    )
+    await factory.attempt_running.wait()
+
+    await service.request_cancel(job.job_id)
+
+    stored = await repository.get_unit(job.job_id, "unit-0")
+    attempts = await repository.list_attempts(job.job_id, "unit-0")
+    assert repository.events[:2] == ["cancellation_committed", "attempt_cancelled"]
+    assert repository.step_states == [StepState.RUNNING, StepState.SKIPPED]
+    assert stored is not None and stored.state is UnitState.CANCELLED
+    assert len(attempts) == 1 and attempts[0].state is AttemptState.CANCELLED
+    assert (await service.get_status(job.job_id))["state"] == "cancelled"
+    assert factory.provider_calls == 1
+    assert plugin.cleanup_calls == 1
+    assert repository.completed_units == ["unit-0"]
+    assert plugin.scratch_dirs and all(not path.exists() for path in plugin.scratch_dirs)
+    assert pool._records[0].active_lease is None

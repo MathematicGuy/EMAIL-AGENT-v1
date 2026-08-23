@@ -72,12 +72,19 @@ class _RecoveryUnit:
 
 
 class FakeStore:
-    def __init__(self, jobs: Iterable[EvaluationJob]) -> None:
+    def __init__(
+        self,
+        jobs: Iterable[EvaluationJob],
+        *,
+        cancellation_failures: int = 0,
+    ) -> None:
         self.jobs = {job.job_id: job for job in jobs}
         self.events: list[tuple[str, str]] = []
         self.recovery_calls: list[str] = []
         self.units: dict[str, _RecoveryUnit] = {}
         self.attempt_states: dict[str, AttemptState] = {}
+        self.cancellation_failures = cancellation_failures
+        self.job_failed = asyncio.Event()
 
     async def get_job(self, job_id: str) -> EvaluationJob | None:
         return self.jobs.get(job_id)
@@ -88,6 +95,9 @@ class FakeStore:
     async def request_cancellation(self, job_id: str) -> EvaluationJob:
         job = self.jobs[job_id]
         self.events.append(("request_cancel", job_id))
+        if self.cancellation_failures:
+            self.cancellation_failures -= 1
+            raise RuntimeError("database-secret")
         if job.state not in _TERMINAL_STATES:
             self.jobs[job_id] = replace(
                 job,
@@ -125,6 +135,14 @@ class FakeStore:
             unknown_attempt_ids=tuple(unknown_attempts),
             blocked_unit_ids=tuple(blocked),
         )
+
+    async def transition_job(self, job_id: str, state: JobState) -> EvaluationJob:
+        job = self.jobs[job_id]
+        self.events.append((f"transition_{state.value}", job_id))
+        self.jobs[job_id] = replace(job, state=state)
+        if state is JobState.FAILED:
+            self.job_failed.set()
+        return self.jobs[job_id]
 
 
 class BlockingRunner:
@@ -173,6 +191,44 @@ class FailingCleanupRunner:
             self.released.set()
 
 
+class BackgroundFailingRunner:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def run(self, job_id: str) -> None:
+        del job_id
+        self.started.set()
+        raise RuntimeError("provider-secret")
+
+
+class ReplacementRaceRunner:
+    def __init__(self, store: FakeStore) -> None:
+        self._store = store
+        self.calls = 0
+        self.first_started = asyncio.Event()
+        self.release_first = asyncio.Event()
+        self.first_returning = asyncio.Event()
+        self.second_started = asyncio.Event()
+        self.second_cancelled = asyncio.Event()
+
+    async def run(self, job_id: str) -> None:
+        self.calls += 1
+        call = self.calls
+        if call == 1:
+            self.first_started.set()
+            await self.release_first.wait()
+            self.first_returning.set()
+            return
+        if call == 2:
+            self.second_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if call == 2:
+                self.second_cancelled.set()
+            await self._store.finish_cancelled(job_id)
+
+
 @pytest.mark.asyncio
 async def test_start_owns_one_process_local_task_per_executable_job() -> None:
     store = FakeStore((_job("job-1"), _job("finished", JobState.SUCCEEDED)))
@@ -214,6 +270,7 @@ async def test_cancel_persists_before_stopping_claims_and_waits_for_cleanup() ->
 
     assert store.events[-1] == ("terminal_cancel", "job-1")
     assert runner.leases_released == {"job-1"}
+    assert supervisor.failures == ()
 
 
 @pytest.mark.asyncio
@@ -311,3 +368,92 @@ async def test_close_surfaces_safe_cleanup_errors_after_waiting_for_release() ->
 
     assert "provider-secret" not in str(error.value)
     assert runner.released.is_set()
+
+
+@pytest.mark.asyncio
+async def test_close_can_retry_when_durable_cancellation_requests_fail() -> None:
+    store = FakeStore((_job("job-1"), _job("job-2")), cancellation_failures=2)
+    runner = BlockingRunner(store)
+    supervisor = EvaluationSupervisor(repository=store, runner=runner)
+    await asyncio.gather(supervisor.start("job-1"), supervisor.start("job-2"))
+    await runner.started.wait()
+
+    with pytest.raises(EvaluationSupervisorError) as error:
+        await supervisor.close()
+
+    assert "database-secret" not in str(error.value)
+    assert {(failure.job_id, failure.code) for failure in error.value.failures} == {
+        ("job-1", "CANCELLATION_REQUEST_FAILED"),
+        ("job-2", "CANCELLATION_REQUEST_FAILED"),
+    }
+    assert not runner.cancelled.is_set()
+    assert store.jobs["job-1"].state is JobState.QUEUED
+    assert store.jobs["job-2"].state is JobState.QUEUED
+
+    runner.cleanup_allowed.set()
+    await supervisor.close()
+
+    assert runner.cancelled.is_set()
+    assert store.jobs["job-1"].state is JobState.CANCELLED
+    assert store.jobs["job-2"].state is JobState.CANCELLED
+    assert runner.leases_released == {"job-1", "job-2"}
+
+
+@pytest.mark.asyncio
+async def test_background_runner_failure_is_safe_durable_and_drainable() -> None:
+    store = FakeStore((_job("job-1"),))
+    runner = BackgroundFailingRunner()
+    supervisor = EvaluationSupervisor(repository=store, runner=runner)
+    loop = asyncio.get_running_loop()
+    unhandled: list[dict[str, object]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    try:
+        await supervisor.start("job-1")
+        await runner.started.wait()
+        await store.job_failed.wait()
+        checkpoint: asyncio.Future[None] = loop.create_future()
+        loop.call_soon(checkpoint.set_result, None)
+        await checkpoint
+
+        assert store.jobs["job-1"].state is JobState.FAILED
+        assert [(failure.job_id, failure.code) for failure in supervisor.failures] == [
+            ("job-1", "RUNNER_FAILED")
+        ]
+        assert "provider-secret" not in repr(supervisor.failures)
+
+        with pytest.raises(EvaluationSupervisorError) as error:
+            await supervisor.close()
+        assert "provider-secret" not in str(error.value)
+        assert supervisor.drain_failures() == error.value.failures
+
+        await supervisor.close()
+        assert unhandled == []
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.asyncio
+async def test_old_done_callback_cannot_remove_replacement_task() -> None:
+    store = FakeStore((_job("job-1"),))
+    runner = ReplacementRaceRunner(store)
+    supervisor = EvaluationSupervisor(repository=store, runner=runner)
+
+    await supervisor.start("job-1")
+    await runner.first_started.wait()
+    runner.release_first.set()
+    await runner.first_returning.wait()
+
+    # The waiter is scheduled before task A's done callback, so B becomes owned first.
+    await supervisor.start("job-1")
+    await runner.second_started.wait()
+    await supervisor.start("job-1")
+    checkpoint: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+    asyncio.get_running_loop().call_soon(checkpoint.set_result, None)
+    await checkpoint
+
+    assert runner.calls == 2
+
+    await supervisor.close()
+    assert runner.second_cancelled.is_set()
+    assert store.jobs["job-1"].state is JobState.CANCELLED

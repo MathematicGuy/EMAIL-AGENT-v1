@@ -199,6 +199,11 @@ class _DurableOutcomeQueue:
                 raise RuntimeError("repository returned an already-owned work unit")
             self._owned.add(key)
         if cancelled:
+            if unit is not None:
+                await self.complete(
+                    job_id,
+                    _ExecutedUnit(_cancelled_outcome(unit), None),
+                )
             raise asyncio.CancelledError
         return unit
 
@@ -445,7 +450,11 @@ class EvaluationJobRunner:
             )
             for index in range(job.effective_workers)
         )
-        completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
+        try:
+            completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            await asyncio.gather(*lane_tasks, return_exceptions=True)
+            raise
         warnings: list[EvaluationWarning] = []
         for result in completed:
             if isinstance(result, BaseException):
@@ -486,6 +495,12 @@ class EvaluationJobRunner:
                         ledger,
                         lane_stopped,
                     )
+                except asyncio.CancelledError:
+                    await queue.complete(
+                        job.job_id,
+                        _ExecutedUnit(_cancelled_outcome(unit), None),
+                    )
+                    raise
                 except BaseException:
                     cancellation_requested = await self._is_cancel_requested(job.job_id)
                     executed = _ExecutedUnit(
@@ -522,7 +537,11 @@ class EvaluationJobRunner:
             )
             for index, shard in enumerate(shards)
         )
-        completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
+        try:
+            completed = await asyncio.gather(*lane_tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            await asyncio.gather(*lane_tasks, return_exceptions=True)
+            raise
         warnings: list[EvaluationWarning] = []
         for result in completed:
             if isinstance(result, BaseException):
@@ -551,11 +570,25 @@ class EvaluationJobRunner:
                     break
                 if await self._is_cancel_requested(job.job_id):
                     break
-                unit = await self._repository.claim_ready_unit_by_id(
-                    job.job_id,
-                    assigned.unit_id,
-                    lane_id,
+                unit, error, cancelled = await _resolve_durable_operation(
+                    self._repository.claim_ready_unit_by_id(
+                        job.job_id,
+                        assigned.unit_id,
+                        lane_id,
+                    )
                 )
+                if error is not None:
+                    if cancelled:
+                        raise asyncio.CancelledError from error
+                    raise error
+                if cancelled:
+                    if unit is not None:
+                        await self._repository.complete_unit(
+                            job.job_id,
+                            _cancelled_outcome(unit),
+                            outcome_ref=None,
+                        )
+                    raise asyncio.CancelledError
                 if unit is None:
                     continue
                 try:
@@ -569,6 +602,13 @@ class EvaluationJobRunner:
                         ledger,
                         lane_stopped,
                     )
+                except asyncio.CancelledError:
+                    await self._repository.complete_unit(
+                        job.job_id,
+                        _cancelled_outcome(unit),
+                        outcome_ref=None,
+                    )
+                    raise
                 except BaseException:
                     cancellation_requested = await self._is_cancel_requested(job.job_id)
                     executed = _ExecutedUnit(
@@ -604,27 +644,40 @@ class EvaluationJobRunner:
                 return _ExecutedUnit(_cancelled_outcome(unit), None)
             if ledger.exhausted:
                 return await self._fail_budget_exhausted_unit(job, unit, lane_id, lease.alias)
-            attempt = await self._repository.start_attempt(
-                job.job_id,
-                unit.unit_id,
-                lane_id,
-                lease.alias,
+            attempt, start_error, start_cancelled = await _resolve_durable_operation(
+                self._repository.start_attempt(
+                    job.job_id,
+                    unit.unit_id,
+                    lane_id,
+                    lease.alias,
+                )
             )
+            if start_error is not None:
+                if start_cancelled:
+                    raise asyncio.CancelledError from start_error
+                raise start_error
+            assert attempt is not None
             scratch_dir = self._create_scratch_dir(job.job_id, lane_id, attempt.attempt_id)
             attempt_id = attempt.attempt_id
             event_ordinal = 0
             ambiguous_provider_outcome = False
             provider_retry_after = 0
             credential_cooling = False
+            running_steps: dict[str, int] = {}
 
             async def observe(
                 event: ProviderAttemptEvent,
                 *,
                 observed_attempt_id: str = attempt_id,
+                running_attempt_steps: dict[str, int] = running_steps,
             ) -> None:
                 nonlocal ambiguous_provider_outcome, credential_cooling
                 nonlocal event_ordinal, provider_retry_after
                 state = _step_state_for(event.outcome)
+                if state is StepState.RUNNING:
+                    running_attempt_steps[event.request_attempt_id] = event_ordinal
+                else:
+                    running_attempt_steps.pop(event.request_attempt_id, None)
                 await self._repository.write_step(
                     job_id=job.job_id,
                     unit_id=unit.unit_id,
@@ -672,6 +725,8 @@ class EvaluationJobRunner:
                     ),
                     scratch_dir=scratch_dir,
                 )
+                if start_cancelled:
+                    raise asyncio.CancelledError
                 outcome = await plugin.execute_work(unit, context)
                 _validate_outcome(unit, outcome)
             except BaseException as raised:
@@ -721,7 +776,20 @@ class EvaluationJobRunner:
 
             classification = _classify(plugin, error)
             cancellation_requested = await self._is_cancel_requested(job.job_id)
-            cancelled = isinstance(error, asyncio.CancelledError) or cancellation_requested
+            task_cancelled = isinstance(error, asyncio.CancelledError)
+            cancelled = task_cancelled or cancellation_requested
+            if cancelled:
+                for step_id, ordinal in running_steps.items():
+                    await self._repository.write_step(
+                        job_id=job.job_id,
+                        unit_id=unit.unit_id,
+                        worker_id=lane_id,
+                        attempt_id=attempt.attempt_id,
+                        step_id=step_id,
+                        ordinal=ordinal,
+                        state=StepState.SKIPPED,
+                        safe_metadata={"outcome": "cancelled"},
+                    )
             await self._repository.finish_attempt(
                 attempt.attempt_id,
                 AttemptState.CANCELLED if cancelled else AttemptState.FAILED,
@@ -738,6 +806,8 @@ class EvaluationJobRunner:
                 await lease.disable()
                 lane_stopped.set()
             if cancelled:
+                if task_cancelled:
+                    raise error
                 return _ExecutedUnit(_cancelled_outcome(unit), None, tuple(unit_warnings))
             if (
                 classification.retryable
@@ -966,6 +1036,8 @@ class EvaluationJobRunner:
 
 
 def _step_state_for(outcome: str) -> StepState:
+    if outcome == "running":
+        return StepState.RUNNING
     if outcome == "succeeded":
         return StepState.SUCCEEDED
     if outcome == "cancelled":
