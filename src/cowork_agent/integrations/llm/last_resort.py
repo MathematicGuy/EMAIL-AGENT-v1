@@ -12,9 +12,9 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiKeyRotator,
     GeminiRateLimitError,
     GoogleGenAITransport,
-    _update_current_generation,
 )
 from cowork_agent.integrations.llm.providers.openrouter import OpenRouterAPIError
+from cowork_agent.integrations.llm.providers.tracing import _update_current_generation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,8 +25,7 @@ def _usable_numbered_gemini_keys(environ: Mapping[str, str]) -> tuple[str, ...]:
     numbered_keys = sorted(
         (int(name.removeprefix("GEMINI_API_KEY_")), value)
         for name, value in environ.items()
-        if name.startswith("GEMINI_API_KEY_")
-        and name.removeprefix("GEMINI_API_KEY_").isdecimal()
+        if name.startswith("GEMINI_API_KEY_") and name.removeprefix("GEMINI_API_KEY_").isdecimal()
     )
     return tuple(
         value.strip()

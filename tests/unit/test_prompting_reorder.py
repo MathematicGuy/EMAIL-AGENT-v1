@@ -60,7 +60,7 @@ def test_email_generation_prompt_actual_chunks_are_u_shaped() -> None:
     )
     from cowork_agent.features.email_action_plan.correlation import TaskCandidate
     from cowork_agent.features.email_action_plan.routing import RouteResolution
-    from cowork_agent.integrations.llm.providers.gemini import _build_generation_prompt
+    from cowork_agent.integrations.llm.providers.prompts import _build_generation_prompt
     from cowork_agent.prompting import RETRIEVED_CONTEXT_TAG
 
     chunks = tuple(
@@ -162,8 +162,7 @@ def test_chat_reply_actual_chunks_are_u_shaped() -> None:
     from cowork_agent.integrations.llm.chat_reply import _company_evidence
 
     raw_chunks = tuple(
-        {"chunk_id": f"chat-chunk-{i}", "text": f"Chat text {i}"}
-        for i in range(1, 6)
+        {"chunk_id": f"chat-chunk-{i}", "text": f"Chat text {i}"} for i in range(1, 6)
     )
 
     semantic_context = {
@@ -181,8 +180,7 @@ def test_chat_reply_actual_chunks_are_u_shaped() -> None:
             for i in range(1, 6)
         ),
         "scores": tuple(
-            {"chunk_id": f"chat-chunk-{i}", "relevance_score": 0.9 - (i * 0.1)}
-            for i in range(1, 6)
+            {"chunk_id": f"chat-chunk-{i}", "relevance_score": 0.9 - (i * 0.1)} for i in range(1, 6)
         ),
     }
 
@@ -210,5 +208,3 @@ def test_chat_reply_actual_chunks_are_u_shaped() -> None:
         "chat-chunk-4",
         "chat-chunk-2",
     ]
-
-

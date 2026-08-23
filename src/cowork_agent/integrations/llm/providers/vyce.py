@@ -5,49 +5,25 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Mapping, Sequence
-from datetime import datetime
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-
-from langfuse import observe
 
 from cowork_agent.config import VyceSettings
 from cowork_agent.domain.target_contracts import (
-    ActionPlanOutput,
     EphemeralEmailEnvelope,
-    SemanticRetrievalResponse,
-)
-from cowork_agent.features.email_action_plan.correlation import TaskCandidate
-from cowork_agent.features.email_action_plan.routing import RouteResolution
-from cowork_agent.features.email_action_plan.schemas import (
-    ClassificationResult,
-    ClassifiedMessage,
-    GenerationContext,
-)
-from cowork_agent.features.email_action_plan.shaping import (
-    batch_messages,
-    group_by_thread,
 )
 
-from .gemini import (
+from .base import ConfiguredActionPlanGenerator, ConfiguredRouteClassifier
+from .openai_transport import openai_completion_json, openai_request_body, post_json
+from .prompts import (
     CLASSIFICATION_SCHEMA,
-    CLASSIFIER_REPAIR_INSTRUCTION,
     CLASSIFIER_SYSTEM_INSTRUCTION,
     EMAIL_INTENT_PROMPT_VERSION,
     GENERATION_SCHEMA,
     GENERATOR_SYSTEM_INSTRUCTION,
-    _build_generation_prompt,
-    _build_prompt,
-    _classified_messages_for,
-    _generate_with_schema_repair,
-    _parse_action_plan_output,
-    _task_source_links,
-    _update_current_generation,
-    _update_current_span,
-    _validated_decisions,
 )
+from .tracing import _update_current_generation
 
 VYCE_USER_AGENT = "module-mail/0.1.0"
 
@@ -80,47 +56,20 @@ class VyceGatewayError(VyceAPIError):
     error_code = "VYCE_GATEWAY_ERROR"
 
 
-class VyceActionPlanGenerator:
+class VyceActionPlanGenerator(ConfiguredActionPlanGenerator):
     """ActionPlanGeneratorPort adapter for Vyce with key rotation."""
 
     def __init__(self, settings: VyceSettings) -> None:
         self._settings = settings
 
-    async def generate(
-        self,
-        *,
-        user_timezone: str,
-        current_time: datetime,
-        run_context: GenerationContext,
-        candidate: TaskCandidate,
-        envelopes: Sequence[EphemeralEmailEnvelope],
-        resolution: RouteResolution,
-        retrieval: SemanticRetrievalResponse | None,
-    ) -> ActionPlanOutput:
-        prompt = _build_generation_prompt(
-            user_timezone, current_time, envelopes, candidate, resolution, retrieval
+    def _schema_error(self) -> Exception:
+        return VyceAPIError(
+            "Vyce response did not match the generation schema",
+            safe_message=(
+                "Vyce trả về dữ liệu không đúng cấu trúc task yêu cầu. "
+                "Vui lòng thử lại hoặc kiểm tra schema generation."
+            ),
         )
-        try:
-            return await _generate_with_schema_repair(
-                self._complete,
-                prompt,
-                lambda payload: _parse_action_plan_output(
-                    payload,
-                    run_context=run_context,
-                    candidate=candidate,
-                    first_envelope=envelopes[0],
-                    source_links=_task_source_links(envelopes, candidate.source_message_ids),
-                    current_time=current_time,
-                ),
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise VyceAPIError(
-                "Vyce response did not match the generation schema",
-                safe_message=(
-                    "Vyce trả về dữ liệu không đúng cấu trúc task yêu cầu. "
-                    "Vui lòng thử lại hoặc kiểm tra schema generation."
-                ),
-            ) from exc
 
     async def _complete(self, prompt: str) -> Mapping[str, Any]:
         return await execute_chat_completion(
@@ -131,73 +80,23 @@ class VyceActionPlanGenerator:
         )
 
 
-class VyceRouteClassifier:
+class VyceRouteClassifier(ConfiguredRouteClassifier):
     """RouteClassifierPort adapter for Vyce with key rotation."""
 
     def __init__(self, settings: VyceSettings) -> None:
+        super().__init__(
+            provider_name="vyce",
+            max_emails_per_batch=settings.max_emails_per_batch,
+        )
         self._settings = settings
 
-    @observe(
-        as_type="span",
-        name="classify-email-intent",
-        capture_input=False,
-        capture_output=False,
-    )
-    async def classify(
+    async def _complete(
         self,
-        user_timezone: str,
-        current_time: datetime,
-        messages: Sequence[EphemeralEmailEnvelope],
-    ) -> ClassificationResult:
-        classified: list[ClassifiedMessage] = []
-        batch_count = 0
-        _update_current_span(
-            input_data={
-                "message_count": len(messages),
-                "prompt_version": EMAIL_INTENT_PROMPT_VERSION,
-            },
-            metadata={
-                "feature": "email-intent-router",
-                "provider": "vyce",
-            },
-        )
-        for batch in batch_messages(group_by_thread(messages), self._settings.max_emails_per_batch):
-            batch_ids = tuple(message.gmail_message_id for thread in batch for message in thread)
-            if not batch_ids:
-                continue
-            batch_count += 1
-            classified.extend(
-                await self._classify_batch(user_timezone, current_time, batch, batch_ids)
-            )
-        result = ClassificationResult(tuple(classified), batch_count)
-        _update_current_span(
-            output_data={
-                "classified_count": len(result.decisions),
-                "batch_count": result.batch_count,
-                "fallback_count": sum(1 for item in result.decisions if item.is_fallback),
-            },
-        )
-        return result
-
-    async def _classify_batch(
-        self,
-        user_timezone: str,
-        current_time: datetime,
-        threads: Sequence[_Thread],
-        batch_ids: Sequence[str],
-    ) -> tuple[ClassifiedMessage, ...]:
-        prompt = _build_prompt(user_timezone, current_time, threads)
-        payload = await self._post_classifier_payload(prompt)
-        decisions = _validated_decisions(payload, frozenset(batch_ids))
-        missing_ids = [msg_id for msg_id in batch_ids if msg_id not in decisions]
-        if missing_ids:
-            repaired_payload = await self._post_classifier_payload(
-                prompt + CLASSIFIER_REPAIR_INSTRUCTION
-            )
-            decisions.update(_validated_decisions(repaired_payload, frozenset(missing_ids)))
-        return _classified_messages_for(batch_ids, decisions)
-
-    async def _post_classifier_payload(self, prompt: str) -> Mapping[str, Any] | None:
+        prompt: str,
+        *,
+        trace_input: Mapping[str, object] | None = None,
+    ) -> Mapping[str, Any] | None:
+        del trace_input
         try:
             payload = await execute_chat_completion(
                 self._settings,
@@ -256,26 +155,20 @@ async def execute_chat_completion(
             last_error = exc
             if not settings.rotate_on_rate_limit:
                 raise
-            _CLASSIFIER_LOGGER.warning(
-                "Vyce rate limit hit, rotating key: %s", exc
-            )
+            _CLASSIFIER_LOGGER.warning("Vyce rate limit hit, rotating key: %s", exc)
             await asyncio.sleep(0.5)
             continue
         except Exception as exc:
             last_error = exc
             if not settings.rotate_on_rate_limit:
                 raise
-            _CLASSIFIER_LOGGER.warning(
-                "Vyce request failed, rotating key: %s", exc
-            )
+            _CLASSIFIER_LOGGER.warning("Vyce request failed, rotating key: %s", exc)
             await asyncio.sleep(0.5)
             continue
 
     if isinstance(last_error, VyceAPIError):
         raise last_error
-    raise VyceAPIError(
-        f"All Vyce candidate API keys failed: {last_error}"
-    ) from last_error
+    raise VyceAPIError(f"All Vyce candidate API keys failed: {last_error}") from last_error
 
 
 def _request_body(
@@ -285,102 +178,35 @@ def _request_body(
     schema: Mapping[str, object],
     max_output_tokens: int,
 ) -> dict[str, object]:
-    task_requested = (
-        '"task_proposal_requested": true' in prompt
-        or '"task_proposal_requested":true' in prompt
+    return openai_request_body(
+        model,
+        system_instruction,
+        prompt,
+        schema,
+        max_output_tokens,
+        schema_in_system=True,
+        task_proposal_guard=True,
     )
-    schema_json = json.dumps(schema, ensure_ascii=False)
-    system_content = (
-        f"{system_instruction}\n\n"
-        "CRITICAL JSON FORMAT REQUIREMENT:\n"
-        "You must ALWAYS return a valid JSON object matching this schema exactly:\n"
-        f"{schema_json}\n"
-        "Never output raw plain text. Even for refusals, missing information, or generic replies, "
-        "you MUST encapsulate the response inside the JSON object."
-    )
-    if task_requested:
-        user_content = (
-            f"{prompt}\n"
-            "CRITICAL: Since task_proposal_requested is true, "
-            "you MUST populate task_proposal with a full object (NOT null).\n"
-            f"Return only a valid JSON object matching this schema exactly:\n"
-            f"{schema_json}"
-        )
-    else:
-        user_content = (
-            f"{prompt}\nReturn only a valid JSON object matching this schema exactly:\n"
-            f"{schema_json}"
-        )
-    return {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
-        ],
-        "temperature": 0.0,
-        "max_tokens": max_output_tokens,
-        "response_format": {"type": "json_object"},
-    }
 
 
 def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:
     """Parse and normalize completion using Instructor-style schema coercion."""
-    try:
-        content = response["choices"][0]["message"]["content"]
-    except (IndexError, KeyError, TypeError) as exc:
-        raise VyceAPIError("Vyce response did not contain a chat completion") from exc
-    content_str = str(content).strip()
-    if content_str.startswith("```"):
-        lines = content_str.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        content_str = "\n".join(lines).strip()
-
-    try:
-        payload = json.loads(content_str)
-        if isinstance(payload, Mapping):
-            normalized: dict[str, Any] = dict(payload)
-            if "assistant_text" in normalized:
-                normalized.setdefault("conversation_title", "Phản hồi")
-                normalized.setdefault("citation_ids", [])
-                normalized.setdefault("task_proposal", None)
-            return normalized
-    except json.JSONDecodeError:
-        pass
-
-    # Instructor normalization: Coerce raw plain text into structured schema
-    if content_str:
-        first_line = content_str.splitlines()[0] if content_str.splitlines() else "Phản hồi"
-        title = first_line[:40] if len(first_line) <= 40 else f"{first_line[:37]}..."
-        return {
-            "assistant_text": content_str,
-            "conversation_title": title,
-            "citation_ids": [],
-            "task_proposal": None,
-        }
-
-    raise VyceAPIError("Vyce returned an empty response")
+    return openai_completion_json(
+        response,
+        error_cls=VyceAPIError,
+        missing_completion="Vyce response did not contain a chat completion",
+        invalid_json="Vyce API response was not valid JSON",
+        not_object="Vyce API response must be a JSON object",
+        coerce_plain_text=True,
+        empty_response="Vyce returned an empty response",
+    )
 
 
 def _post_json(
     url: str, api_key: str, body: Mapping[str, object], timeout_seconds: int
 ) -> Mapping[str, Any]:
-    request = Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": VYCE_USER_AGENT,
-        },
-        method="POST",
-    )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 -- fixed HTTPS URL
-            payload = json.loads(response.read().decode("utf-8"))
+        return post_json(url, api_key, body, timeout_seconds, user_agent=VYCE_USER_AGENT)
     except HTTPError as exc:
         if exc.code == 429:
             raise VyceRateLimitError(
@@ -401,15 +227,12 @@ def _post_json(
     except (TimeoutError, URLError) as exc:
         raise VyceGatewayError(
             f"Vyce API request failed: {exc}",
-            safe_message=(
-                "Không thể kết nối tới Vyce hoặc yêu cầu đã hết thời gian chờ."
-            ),
+            safe_message=("Không thể kết nối tới Vyce hoặc yêu cầu đã hết thời gian chờ."),
         ) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise VyceGatewayError("Vyce API response was not valid JSON") from exc
-    if not isinstance(payload, Mapping):
-        raise VyceAPIError("Vyce API response must be a JSON object")
-    return cast(Mapping[str, Any], payload)
+    except ValueError as exc:
+        raise VyceAPIError("Vyce API response must be a JSON object") from exc
 
 
 # Backwards compatibility aliases

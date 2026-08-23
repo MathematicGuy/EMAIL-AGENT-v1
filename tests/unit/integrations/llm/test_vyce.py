@@ -7,8 +7,6 @@ from cowork_agent.integrations.llm.providers.vyce import (
     VyceAPIError,
     VyceGatewayError,
     VyceRateLimitError,
-    _completion_json,
-    _request_body,
     execute_chat_completion,
 )
 
@@ -55,58 +53,6 @@ def test_vyce_settings_from_env_validates_model() -> None:
             {"VYCE_API_KEY": "test-key", "VYCE_MODEL": "replace-with-real-model"},
             load_env_file=False,
         )
-
-
-def test_vyce_request_body_structure() -> None:
-    body = _request_body(
-        model="gpt-5.6-luna",
-        system_instruction="System prompt",
-        prompt="User prompt",
-        schema={"type": "object", "properties": {"result": {"type": "string"}}},
-        max_output_tokens=1024,
-    )
-    assert body["model"] == "gpt-5.6-luna"
-    assert body["temperature"] == 0.0
-    assert body["max_tokens"] == 1024
-    assert body["response_format"] == {"type": "json_object"}
-    messages = body["messages"]
-    assert isinstance(messages, list)
-    assert "System prompt" in messages[0]["content"]
-    assert "CRITICAL JSON FORMAT REQUIREMENT" in messages[0]["content"]
-    assert "User prompt" in messages[1]["content"]
-
-
-def test_vyce_completion_json_normalizes_and_extracts() -> None:
-    # 1. Valid JSON object with markdown code fences
-    response = {
-        "choices": [
-            {
-                "message": {
-                    "content": '```json\n{"assistant_text": "Xin chào", "task_proposal": null}\n```'
-                }
-            }
-        ]
-    }
-    payload = _completion_json(response)
-    assert payload["assistant_text"] == "Xin chào"
-    assert payload["conversation_title"] == "Phản hồi"
-    assert payload["citation_ids"] == []
-
-    # 2. Raw conversational text (Instructor coercion)
-    response_raw = {
-        "choices": [
-            {
-                "message": {
-                    "content": "Tôi không có thông tin về số điện thoại của bạn."
-                }
-            }
-        ]
-    }
-    payload_coerced = _completion_json(response_raw)
-    assert payload_coerced["assistant_text"] == "Tôi không có thông tin về số điện thoại của bạn."
-    assert payload_coerced["conversation_title"].startswith("Tôi không có thông tin")
-    assert payload_coerced["citation_ids"] == []
-    assert payload_coerced["task_proposal"] is None
 
 
 @pytest.mark.asyncio
