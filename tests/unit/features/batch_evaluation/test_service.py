@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -8,12 +10,14 @@ import pytest
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
     ArtifactBundle,
+    AttemptState,
     CleanupOutcome,
     EvaluationBudget,
     EvaluationRequest,
     ExecutionMode,
     FailureClass,
     FailureClassification,
+    JobState,
     PluginPlan,
     UnitState,
     WorkContext,
@@ -28,7 +32,12 @@ from cowork_agent.features.batch_evaluation.service import (
     EvaluationResultConflict,
     EvaluationValidationError,
 )
-from cowork_agent.persistence.repositories.evaluation_jobs import SQLiteEvaluationJobRepository
+from cowork_agent.persistence.repositories.evaluation_jobs import (
+    EvaluationAttempt,
+    EvaluationJob,
+    EvaluationUnit,
+    SQLiteEvaluationJobRepository,
+)
 
 
 class FakePlugin:
@@ -52,6 +61,8 @@ class FakePlugin:
         self.preflight_calls += 1
         if self.preflight_error is not None:
             raise self.preflight_error
+        if request.target_model != "small-model":
+            raise ValueError("unsupported target model: private-model-name")
         return PluginPlan(
             dataset_ref=request.dataset_ref,
             ready_work=self.ready_work,
@@ -100,6 +111,49 @@ class FakePlugin:
         )
 
 
+class StatusRepository:
+    """Protocol-shaped store whose private records must never reach status output."""
+
+    def __init__(
+        self,
+        job: EvaluationJob,
+        units: tuple[EvaluationUnit, ...],
+        attempts: tuple[EvaluationAttempt, ...],
+    ) -> None:
+        self.job = job
+        self.units = units
+        self.attempts = attempts
+
+    async def get_job(self, job_id: str) -> EvaluationJob | None:
+        return self.job if job_id == self.job.job_id else None
+
+    async def list_units(self, job_id: str) -> tuple[EvaluationUnit, ...]:
+        assert job_id == self.job.job_id
+        return self.units
+
+    async def list_attempts(self, job_id: str) -> tuple[EvaluationAttempt, ...]:
+        assert job_id == self.job.job_id
+        return self.attempts
+
+    async def request_cancellation(self, job_id: str) -> EvaluationJob:
+        if job_id != self.job.job_id:
+            raise KeyError(job_id)
+        if self.job.state in {
+            JobState.SUCCEEDED,
+            JobState.PARTIALLY_SUCCEEDED,
+            JobState.FAILED,
+            JobState.CANCELLED,
+        }:
+            raise AssertionError(f"terminal job {job_id} must not request cancellation")
+        if self.job.state is not JobState.CANCELLATION_REQUESTED:
+            self.job = replace(
+                self.job,
+                state=JobState.CANCELLATION_REQUESTED,
+                cancel_requested_at=self.job.updated_at,
+            )
+        return self.job
+
+
 def request(*, max_workers: int = 1) -> EvaluationRequest:
     return EvaluationRequest(
         evaluation_type="fake-eval",
@@ -134,6 +188,36 @@ async def service_with(
         artifact_store=FilesystemEvaluationArtifactStore(tmp_path / "artifacts"),
     )
     return service, repository
+
+
+def status_job(*, state: JobState = JobState.QUEUED) -> EvaluationJob:
+    timestamp = datetime(2026, 8, 23, tzinfo=UTC)
+    return EvaluationJob(
+        job_id="status-job",
+        request=request(),
+        state=state,
+        requested_workers=3,
+        effective_workers=2,
+        warnings=(),
+        cancel_requested_at=None,
+        created_at=timestamp,
+        updated_at=timestamp,
+        completed_at=timestamp if state in {JobState.SUCCEEDED, JobState.FAILED} else None,
+    )
+
+
+def status_service(
+    tmp_path: Path,
+    repository: StatusRepository,
+) -> EvaluationJobService:
+    return EvaluationJobService(
+        registry=PluginRegistry(),
+        repository=repository,  # type: ignore[arg-type]
+        credential_pool=CredentialLeasingPool.from_env(
+            "MISTRAL_API_KEY", {"MISTRAL_API_KEY": "secret-key"}
+        ),
+        artifact_store=FilesystemEvaluationArtifactStore(tmp_path / "artifacts"),
+    )
 
 
 @pytest.mark.asyncio
@@ -190,6 +274,34 @@ async def test_submit_rejects_unknown_type_and_incompatible_mode_without_persist
 
 
 @pytest.mark.asyncio
+async def test_submit_rejects_unknown_target_model_during_plugin_preflight_without_spend(
+    tmp_path: Path,
+) -> None:
+    plugin = FakePlugin()
+    service, repository = await service_with(tmp_path, plugin)
+    unknown_model = EvaluationRequest(
+        evaluation_type="fake-eval",
+        provider="mistral",
+        target_model="unknown-model",
+        dataset_ref="dataset-v1",
+        credential_pool="mistral-eval",
+        execution_mode=ExecutionMode.REQUEST_BATCH,
+        max_workers=1,
+        max_attempts_per_unit=1,
+        budget=EvaluationBudget(max_provider_requests=1, max_total_tokens=1),
+        parameters={},
+    )
+
+    with pytest.raises(EvaluationValidationError) as error:
+        await service.submit(unknown_model, idempotency_key="unknown-model")
+
+    assert "private-model-name" not in str(error.value)
+    assert plugin.preflight_calls == 1
+    assert plugin.provider_calls == 0
+    assert await repository.list_recoverable_jobs() == ()
+
+
+@pytest.mark.asyncio
 async def test_submit_replays_idempotently_and_rejects_request_hash_conflicts(
     tmp_path: Path,
 ) -> None:
@@ -208,30 +320,16 @@ async def test_submit_replays_idempotently_and_rejects_request_hash_conflicts(
 
 
 @pytest.mark.asyncio
-async def test_submit_persists_default_worker_resolution_and_safe_status(
+async def test_submit_persists_default_worker_resolution_and_lists_types(
     tmp_path: Path,
 ) -> None:
     plugin = FakePlugin(ready_work=2)
     service, _ = await service_with(tmp_path, plugin)
 
     job = await service.submit(request(), idempotency_key="default-workers")
-    status = await service.get_status(job.job_id)
-
-    assert status["requested_workers"] == 1
-    assert status["effective_workers"] == 1
-    assert status["state"] == "queued"
-    assert set(status) == {
-        "job_id",
-        "state",
-        "requested_workers",
-        "effective_workers",
-        "warnings",
-        "cancel_requested",
-        "created_at",
-        "updated_at",
-        "completed_at",
-    }
-    assert "secret-key" not in repr(status)
+    assert job.requested_workers == 1
+    assert job.effective_workers == 1
+    assert job.state is JobState.QUEUED
     assert await service.list_types() == (
         {
             "type": "fake-eval",
@@ -252,8 +350,152 @@ async def test_result_conflicts_while_nonterminal_and_cancellation_is_idempotent
     with pytest.raises(EvaluationResultConflict):
         await service.get_result(job.job_id)
 
-    first = await service.request_cancel(job.job_id)
-    replay = await service.request_cancel(job.job_id)
+    cancellation = status_service(tmp_path, StatusRepository(status_job(), (), ()))
+    first = await cancellation.request_cancel("status-job")
+    replay = await cancellation.request_cancel("status-job")
 
     assert first == replay
     assert first["state"] == "cancellation_requested"
+    assert first["cancel_requested"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_status_reports_evolving_safe_unit_and_attempt_progress(
+    tmp_path: Path,
+) -> None:
+    job = status_job()
+    repository = StatusRepository(
+        job,
+        (
+            EvaluationUnit(job.job_id, "unit-1", 0, UnitState.READY, None, {"prompt": "private"}),
+            EvaluationUnit(
+                job.job_id, "unit-2", 1, UnitState.RUNNING, "worker-1", {"reply": "private"}
+            ),
+            EvaluationUnit(
+                job.job_id, "unit-3", 2, UnitState.SUCCEEDED, "worker-2", {"key": "private"}
+            ),
+            EvaluationUnit(
+                job.job_id,
+                "unit-4",
+                3,
+                UnitState.FAILED,
+                "worker-2",
+                {"outcome_ref": "private"},
+            ),
+            EvaluationUnit(
+                job.job_id,
+                "unit-5",
+                4,
+                UnitState.CANCELLED,
+                "worker-3",
+                {"payload": "private"},
+            ),
+        ),
+        (
+            EvaluationAttempt(
+                "attempt-1", job.job_id, "unit-3", "worker-2", "credential-private", 1,
+                AttemptState.SUCCEEDED, None, job.created_at, job.updated_at,
+            ),
+            EvaluationAttempt(
+                "attempt-2", job.job_id, "unit-4", "worker-2", "credential-private", 1,
+                AttemptState.FAILED, FailureClass.PROVIDER, job.created_at, job.updated_at,
+            ),
+            EvaluationAttempt(
+                "attempt-3", job.job_id, "unit-4", "worker-2", "credential-private", 2,
+                AttemptState.UNKNOWN, FailureClass.UNKNOWN, job.created_at, job.updated_at,
+            ),
+        ),
+    )
+    service = status_service(tmp_path, repository)
+
+    status = await service.get_status(job.job_id)
+
+    assert status == {
+        "job_id": "status-job",
+        "state": "queued",
+        "progress": {
+            "total": 5,
+            "ready": 1,
+            "running": 1,
+            "succeeded": 1,
+            "failed": 1,
+            "cancelled": 1,
+        },
+        "attempts": {"total": 3, "retries": 1},
+        "failure_classes": {"provider": 1, "unknown": 1},
+        "requested_workers": 3,
+        "effective_workers": 2,
+        "warnings": (),
+        "cancel_requested": False,
+        "created_at": "2026-08-23T00:00:00+00:00",
+        "updated_at": "2026-08-23T00:00:00+00:00",
+        "completed_at": None,
+    }
+    assert all(
+        private not in repr(status)
+        for private in ("prompt", "reply", "key", "payload", "outcome_ref", "credential-private")
+    )
+
+    repository.units = (
+        EvaluationUnit(job.job_id, "unit-1", 0, UnitState.SUCCEEDED, "worker-1", {}),
+        EvaluationUnit(job.job_id, "unit-2", 1, UnitState.SUCCEEDED, "worker-1", {}),
+        *repository.units[2:],
+    )
+    repository.attempts = (
+        *repository.attempts,
+        EvaluationAttempt(
+            "attempt-4",
+            job.job_id,
+            "unit-1",
+            "worker-1",
+            "credential-private",
+            2,
+            AttemptState.SUCCEEDED,
+            None,
+            job.created_at,
+            job.updated_at,
+        ),
+    )
+
+    evolved = await service.get_status(job.job_id)
+
+    assert evolved["progress"] == {
+        "total": 5,
+        "ready": 0,
+        "running": 0,
+        "succeeded": 3,
+        "failed": 1,
+        "cancelled": 1,
+    }
+    assert evolved["attempts"] == {"total": 4, "retries": 2}
+    assert evolved["failure_classes"] == {"provider": 1, "unknown": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    (
+        JobState.SUCCEEDED,
+        JobState.PARTIALLY_SUCCEEDED,
+        JobState.FAILED,
+        JobState.CANCELLED,
+    ),
+)
+async def test_request_cancel_returns_current_status_for_every_terminal_state(
+    tmp_path: Path,
+    state: JobState,
+) -> None:
+    job = status_job(state=state)
+    service = status_service(tmp_path, StatusRepository(job, (), ()))
+
+    status = await service.request_cancel(job.job_id)
+
+    assert status["state"] == state.value
+    assert status["progress"] == {
+        "total": 0,
+        "ready": 0,
+        "running": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "cancelled": 0,
+    }

@@ -6,13 +6,16 @@ import asyncio
 from collections.abc import Mapping
 from datetime import datetime
 from types import MappingProxyType
+from typing import Protocol, cast
 
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
     EvaluationPlugin,
     EvaluationRequest,
+    FailureClass,
     JobState,
     PluginPlan,
+    UnitState,
     WorkerResolution,
     WorkUnit,
     canonical_request_hash,
@@ -21,7 +24,9 @@ from cowork_agent.features.batch_evaluation.credentials import CredentialLeasing
 from cowork_agent.features.batch_evaluation.planning import resolve_worker_count
 from cowork_agent.features.batch_evaluation.registry import PluginRegistry
 from cowork_agent.persistence.repositories.evaluation_jobs import (
+    EvaluationAttempt,
     EvaluationJob,
+    EvaluationUnit,
     IdempotencyConflict,
     InvalidStateTransition,
     SQLiteEvaluationJobRepository,
@@ -47,6 +52,14 @@ class EvaluationConflict(ValueError):
 
 class EvaluationResultConflict(EvaluationConflict):
     """A result is not available while its evaluation job remains non-terminal."""
+
+
+class _StatusRepository(Protocol):
+    """The durable reads required to build safe job-status aggregates."""
+
+    async def list_units(self, job_id: str) -> tuple[EvaluationUnit, ...]: ...
+
+    async def list_attempts(self, job_id: str) -> tuple[EvaluationAttempt, ...]: ...
 
 
 class EvaluationJobService:
@@ -100,7 +113,7 @@ class EvaluationJobService:
         """Return the bounded public job lifecycle metadata for one job."""
 
         job = await self._require_job(job_id)
-        return _status_view(job)
+        return await self._status_view(job)
 
     async def get_result(self, job_id: str) -> Mapping[str, object]:
         """Return the public manifest only after the runner has made the job terminal."""
@@ -115,13 +128,13 @@ class EvaluationJobService:
         """Record a durable cancellation request without exposing execution details."""
 
         existing = await self._require_job(job_id)
-        if existing.state is JobState.CANCELLED:
-            return _status_view(existing)
+        if existing.state in _TERMINAL_STATES:
+            return await self._status_view(existing)
         try:
             job = await self._repository.request_cancellation(job_id)
         except InvalidStateTransition as error:
             raise EvaluationConflict("evaluation job can no longer be cancelled") from error
-        return _status_view(job)
+        return await self._status_view(job)
 
     async def list_types(self) -> tuple[Mapping[str, object], ...]:
         """List startup-registered plug-in metadata only."""
@@ -191,12 +204,45 @@ class EvaluationJobService:
             raise KeyError(job_id)
         return job
 
+    async def _status_view(self, job: EvaluationJob) -> Mapping[str, object]:
+        repository = cast(_StatusRepository, self._repository)
+        units = await repository.list_units(job.job_id)
+        attempts = await repository.list_attempts(job.job_id)
+        return _status_view(job, units, attempts)
 
-def _status_view(job: EvaluationJob) -> Mapping[str, object]:
+
+def _status_view(
+    job: EvaluationJob,
+    units: tuple[EvaluationUnit, ...],
+    attempts: tuple[EvaluationAttempt, ...],
+) -> Mapping[str, object]:
+    progress = {state.value: 0 for state in UnitState}
+    for unit in units:
+        progress[unit.state.value] += 1
+    failure_classes = {
+        failure_class.value: sum(
+            attempt.failure_class is failure_class for attempt in attempts
+        )
+        for failure_class in FailureClass
+    }
     return MappingProxyType(
         {
             "job_id": job.job_id,
             "state": job.state.value,
+            "progress": MappingProxyType({"total": len(units), **progress}),
+            "attempts": MappingProxyType(
+                {
+                    "total": len(attempts),
+                    "retries": sum(attempt.attempt_number > 1 for attempt in attempts),
+                }
+            ),
+            "failure_classes": MappingProxyType(
+                {
+                    failure_class: count
+                    for failure_class, count in failure_classes.items()
+                    if count > 0
+                }
+            ),
             "requested_workers": job.requested_workers,
             "effective_workers": job.effective_workers,
             "warnings": tuple(
