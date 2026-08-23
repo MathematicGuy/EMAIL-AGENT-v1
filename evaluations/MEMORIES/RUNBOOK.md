@@ -64,9 +64,9 @@ raise worker count after either warning. `rate_limited`,
 `authentication_failed`, `provider_unavailable`, and `timed_out` are safe
 status classes for triage, not transport diagnostics.
 
-For a smoke-gated Mistral memory evaluation, `--max-workers` is **planned and
-not available until Task 9**. Once Task 9 lands, it is the requested upper
-bound, capped by healthy leased aliases, and may emit
+For a smoke-gated Mistral memory evaluation, `--max-workers` is available
+after Task 9. It is the requested upper bound, capped by healthy leased
+aliases, and may emit
 `WORKER_COUNT_REDUCED`. Parallel memory evaluation is **SQLite-only**:
 set `POSTGRES_MODE=off` before using `--max-workers` above one. PostgreSQL
 memory evaluations always use `--max-workers 1`, including local throwaway

@@ -5,12 +5,18 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cowork_agent.domain.chat_contracts import MemoryType
 from cowork_agent.features.ai_chat.memory_eval.probes import SeedSpec
 from cowork_agent.features.ai_chat.memory_eval.runner import run_key
+from cowork_agent.features.batch_evaluation.contracts import (
+    EvaluationRequest,
+    EvaluationWarning,
+    JobState,
+)
 from scripts.evaluate_memory import main
 from tests.unit.scripts.cli_harness import run_cli
 
@@ -34,6 +40,144 @@ def _probe_set_file(tmp_path: Path) -> Path:
     path = tmp_path / "probes.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
+
+
+class _FakeEvaluationService:
+    def __init__(
+        self,
+        requests: list[EvaluationRequest],
+        idempotency_keys: list[str],
+        job: SimpleNamespace,
+        report: dict[str, object],
+    ) -> None:
+        self._requests = requests
+        self._idempotency_keys = idempotency_keys
+        self._job = job
+        self._report = report
+
+    async def submit(
+        self, request: EvaluationRequest, *, idempotency_key: str
+    ) -> SimpleNamespace:
+        self._requests.append(request)
+        self._idempotency_keys.append(idempotency_key)
+        return self._job
+
+    async def get_result(self, job_id: str) -> dict[str, object]:
+        assert job_id == self._job.job_id
+        return self._report
+
+
+class _FakeEvaluationRepository:
+    def __init__(self, job: SimpleNamespace) -> None:
+        self._job = job
+
+    async def get_job(self, job_id: str) -> SimpleNamespace:
+        assert job_id == self._job.job_id
+        return self._job
+
+
+class _FakeEvaluationRuntime:
+    def __init__(
+        self,
+        requests: list[EvaluationRequest],
+        idempotency_keys: list[str],
+        *,
+        effective_workers: int,
+        healthy_workers: int,
+        state: JobState = JobState.SUCCEEDED,
+        warnings: tuple[EvaluationWarning, ...] = (),
+    ) -> None:
+        self.job = SimpleNamespace(
+            job_id="memory-job-1",
+            state=state,
+            effective_workers=effective_workers,
+            warnings=warnings,
+        )
+        self.service = _FakeEvaluationService(
+            requests,
+            idempotency_keys,
+            self.job,
+            {
+                "schema_version": "2.2.0",
+                "probe_set_id": "unit",
+                "provider": "mistral",
+                "model": "mistral-small-2603",
+                "aborted": state is not JobState.SUCCEEDED,
+                "execution_manifest": {"private_runtime_metadata": "not for baseline"},
+            },
+        )
+        self.repository = _FakeEvaluationRepository(self.job)
+        self.credential_pool = SimpleNamespace(healthy_count=healthy_workers)
+        self.initialized = False
+        self.closed = False
+
+    async def initialize(self) -> None:
+        self.initialized = True
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_mistral_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    requests: list[EvaluationRequest],
+    idempotency_keys: list[str],
+    *,
+    effective_workers: int,
+    healthy_workers: int,
+    state: JobState = JobState.SUCCEEDED,
+    warnings: tuple[EvaluationWarning, ...] = (),
+) -> _FakeEvaluationRuntime:
+    from tests.unit.scripts.cli_harness import load_script
+
+    runtime = _FakeEvaluationRuntime(
+        requests,
+        idempotency_keys,
+        effective_workers=effective_workers,
+        healthy_workers=healthy_workers,
+        state=state,
+        warnings=warnings,
+    )
+    script = load_script("evaluate_memory")
+    monkeypatch.setattr(
+        script,
+        "build_evaluation_runtime",
+        lambda config, environ: runtime,
+        raising=False,
+    )
+    return runtime
+
+
+def _keep_legacy_mistral_path_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep pre-Task-9 code deterministic while proving it never uses this path."""
+
+    from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
+    from tests.unit.scripts.cli_harness import load_script
+
+    script = load_script("evaluate_memory")
+    monkeypatch.setattr(
+        script,
+        "probe_environment",
+        lambda environ: LiveEnvironment(None, None, True, False, ""),
+    )
+    monkeypatch.setattr(
+        script,
+        "_build_chat_reply",
+        lambda provider, environ, model=None: (object(), provider, "mistral-small-2603"),
+    )
+
+    async def legacy_report(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return {
+            "schema_version": "2.2.0",
+            "probe_set_id": "unit",
+            "provider": "mistral",
+            "model": "mistral-small-2603",
+            "aborted": False,
+        }
+
+    monkeypatch.setattr(script, "run_live", legacy_report)
+    monkeypatch.setattr(script, "run_with_selector_loop", lambda coroutine: asyncio.run(coroutine))
 
 
 def test_run_key_is_stable_for_the_same_inputs() -> None:
@@ -166,6 +310,185 @@ def test_dry_run_with_custom_provider_flag(
     assert code == 0
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["provider"] == "dry-run"
+
+
+def test_mistral_max_workers_defaults_to_one_and_keeps_runtime_metadata_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    runtime = _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+    )
+    output = tmp_path / "report.json"
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(output),
+    )
+
+    assert result.returncode == 0
+    assert requests[0].max_workers == 1
+    assert runtime.initialized is True
+    assert runtime.closed is True
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["schema_version"] == "2.2.0"
+    assert "execution_manifest" not in report
+    assert "not for baseline" not in output.read_text(encoding="utf-8")
+
+
+def test_four_requested_mistral_workers_with_three_keys_reports_reduction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key-1")
+    monkeypatch.setenv("MISTRAL_API_KEY2", "test-mistral-key-2")
+    monkeypatch.setenv("MISTRAL_API_KEY3", "test-mistral-key-3")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=3,
+        healthy_workers=3,
+        warnings=(
+            EvaluationWarning(
+                code="WORKER_COUNT_REDUCED",
+                details={
+                    "requested_workers": 4,
+                    "effective_workers": 3,
+                    "healthy_credentials": 3,
+                },
+            ),
+        ),
+    )
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--max-workers",
+        "4",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(tmp_path / "report.json"),
+    )
+
+    assert result.returncode == 0
+    assert requests[0].max_workers == 4
+    assert "WORKER_COUNT_REDUCED" in result.stderr
+    assert "requested_workers=4" in result.stderr
+    assert "effective_workers=3" in result.stderr
+    assert "healthy_credentials=3" in result.stderr
+
+
+def test_ready_work_scarcity_does_not_emit_a_credential_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key-1")
+    monkeypatch.setenv("MISTRAL_API_KEY2", "test-mistral-key-2")
+    monkeypatch.setenv("MISTRAL_API_KEY3", "test-mistral-key-3")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=3,
+    )
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--max-workers",
+        "4",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(tmp_path / "report.json"),
+    )
+
+    assert result.returncode == 0
+    assert "WORKER_COUNT_REDUCED" not in result.stderr
+
+
+def test_mistral_idempotency_key_is_replayed_without_a_new_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+    )
+    argv = (
+        "--provider",
+        "mistral",
+        "--idempotency-key",
+        "replay-memory-evaluation",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(tmp_path / "report.json"),
+    )
+
+    first = run_cli("evaluate_memory", *argv)
+    replay = run_cli("evaluate_memory", *argv)
+
+    assert first.returncode == replay.returncode == 0
+    assert len(requests) == 2
+    assert idempotency_keys == ["replay-memory-evaluation", "replay-memory-evaluation"]
+
+
+@pytest.mark.parametrize("state", (JobState.FAILED, JobState.CANCELLED))
+def test_mistral_terminal_failure_or_cancellation_returns_nonzero(
+    state: JobState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests: list[EvaluationRequest] = []
+    idempotency_keys: list[str] = []
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+    _keep_legacy_mistral_path_offline(monkeypatch)
+    _install_fake_mistral_runtime(
+        monkeypatch,
+        requests,
+        idempotency_keys,
+        effective_workers=1,
+        healthy_workers=1,
+        state=state,
+    )
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        "mistral",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+        "--output",
+        str(tmp_path / "report.json"),
+    )
+
+    assert result.returncode == 1
 
 
 def test_max_consecutive_provider_failures_cli_rejects_below_one(tmp_path: Path) -> None:
