@@ -1,6 +1,9 @@
 import asyncio
+import json
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -46,19 +49,49 @@ async def queue_job(repository: SQLiteEvaluationJobRepository, job_id: str) -> N
     await repository.transition_job(validating.job_id, JobState.QUEUED)
 
 
-class PausedClaimRepository(SQLiteEvaluationJobRepository):
-    """Let the test deterministically order a submitted claim after cancellation."""
+class TransactionOrderedRepository(SQLiteEvaluationJobRepository):
+    """Expose test-only events around the actual SQLite writer-lock boundary."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(path)
-        self.claim_started = threading.Event()
-        self.release_claim = threading.Event()
+        self.hold_operation: str | None = None
+        self.writer_lock_acquired = threading.Event()
+        self.claim_begin_attempted = threading.Event()
+        self.cancellation_begin_attempted = threading.Event()
+        self.release_writer_lock = threading.Event()
+        self._claim_thread_id: int | None = None
+        self._cancellation_thread_id: int | None = None
+        self._after_write_lock_acquired_for_tests = self._hold_writer_lock
 
     def _claim_ready_unit_sync(self, job_id: str, worker_id: str) -> WorkUnit | None:
-        self.claim_started.set()
-        if not self.release_claim.wait(timeout=5):
-            raise TimeoutError("test did not release the claim")
+        self._claim_thread_id = threading.get_ident()
         return super()._claim_ready_unit_sync(job_id, worker_id)
+
+    def _request_cancellation_sync(self, job_id: str) -> evaluation_jobs.EvaluationJob:
+        self._cancellation_thread_id = threading.get_ident()
+        return super()._request_cancellation_sync(job_id)
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        with super()._connect() as database:
+            database.set_trace_callback(self._trace_sql)
+            yield database
+
+    def _trace_sql(self, statement: str) -> None:
+        if statement.strip().upper() != "BEGIN IMMEDIATE":
+            return
+        thread_id = threading.get_ident()
+        if thread_id == self._claim_thread_id:
+            self.claim_begin_attempted.set()
+        if thread_id == self._cancellation_thread_id:
+            self.cancellation_begin_attempted.set()
+
+    def _hold_writer_lock(self, operation: str) -> None:
+        if operation != self.hold_operation:
+            return
+        self.writer_lock_acquired.set()
+        if not self.release_writer_lock.wait(timeout=5):
+            raise TimeoutError("test did not release the SQLite writer lock")
 
 
 def test_idempotency_is_atomic_and_hash_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -354,6 +387,11 @@ def test_job_reads_reject_tampered_or_unknown_warning_messages(tmp_path: Path) -
             '"details":{"requested_workers":2}}]',
             '[{"code":"UNKNOWN_WARNING","message":"Unknown warning text",'
             '"details":{"requested_workers":2}}]',
+            '[{"code":"WORKER_COUNT_REDUCED","message":'
+            '"Worker count was reduced because fewer credentials are healthy.",'
+            '"details":{"requested_workers":2},"extra":1}]',
+            '[{"code":"WORKER_COUNT_REDUCED","details":{"token":"private"}}]',
+            '[{"code":"WORKER_COUNT_REDUCED","details":{"requested_workers":{}}}]',
         ):
             with sqlite3.connect(database_path) as database:
                 database.execute(
@@ -362,6 +400,49 @@ def test_job_reads_reject_tampered_or_unknown_warning_messages(tmp_path: Path) -
                 )
             with pytest.raises(ValueError):
                 await repository.get_job(job.job_id)
+
+    asyncio.run(scenario())
+
+
+def test_legacy_warning_rows_are_readable_and_rewritten_in_canonical_form(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "legacy-warning-key", "hash-a")
+        legacy_warning_json = (
+            '[{"code":"WORKER_COUNT_REDUCED",'
+            '"details":{"requested_workers":2,"effective_workers":1}}]'
+        )
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_jobs SET warnings_json = ? WHERE job_id = ?",
+                (legacy_warning_json, job.job_id),
+            )
+
+        legacy = await repository.get_job(job.job_id)
+        assert legacy is not None
+        assert legacy.warnings == (
+            EvaluationWarning(
+                code="WORKER_COUNT_REDUCED",
+                details={"requested_workers": 2, "effective_workers": 1},
+            ),
+        )
+
+        updated = await repository.transition_job(job.job_id, JobState.VALIDATING)
+        assert updated.warnings == legacy.warnings
+        with sqlite3.connect(database_path) as database:
+            row = database.execute(
+                "SELECT warnings_json FROM evaluation_jobs WHERE job_id = ?", (job.job_id,)
+            ).fetchone()
+        assert row is not None
+        assert json.loads(str(row[0])) == [
+            {
+                "code": "WORKER_COUNT_REDUCED",
+                "message": "Worker count was reduced because fewer credentials are healthy.",
+                "details": {"effective_workers": 1, "requested_workers": 2},
+            }
+        ]
 
     asyncio.run(scenario())
 
@@ -409,6 +490,40 @@ def test_step_metadata_rejects_non_finite_json_values(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_unit_read_rejects_exponent_overflow_without_exposing_raw_json(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        database_path = tmp_path / "evaluation-jobs.db"
+        repository = SQLiteEvaluationJobRepository(database_path)
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "overflow-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_units SET safe_payload_json = "
+                "? WHERE job_id = ? AND unit_id = ?",
+                ('{"case_id":"case-1","score":1.25}', job.job_id, "unit-1"),
+            )
+        finite = await repository.get_unit(job.job_id, "unit-1")
+        assert finite is not None
+        assert finite.payload == {"case_id": "case-1", "score": 1.25}
+
+        with sqlite3.connect(database_path) as database:
+            database.execute(
+                "UPDATE evaluation_units SET safe_payload_json = "
+                "? WHERE job_id = ? AND unit_id = ?",
+                ('{"case_id":1e9999}', job.job_id, "unit-1"),
+            )
+        with pytest.raises(ValueError) as error:
+            await repository.get_unit(job.job_id, "unit-1")
+
+        assert "1e9999" not in str(error.value)
+
+    asyncio.run(scenario())
+
+
 def test_claim_requires_an_executable_job_and_stops_after_cancellation(tmp_path: Path) -> None:
     async def scenario() -> None:
         repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
@@ -436,9 +551,11 @@ def test_claim_requires_an_executable_job_and_stops_after_cancellation(tmp_path:
     asyncio.run(scenario())
 
 
-def test_cancellation_wins_a_deterministically_ordered_claim_race(tmp_path: Path) -> None:
+def test_cancellation_commit_prevents_claim_after_sqlite_writer_lock_ordering(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
-        repository = PausedClaimRepository(tmp_path / "evaluation-jobs.db")
+        repository = TransactionOrderedRepository(tmp_path / "evaluation-jobs.db")
         await repository.initialize()
         job, _ = await repository.create_or_get(request(), "claim-race-key", "hash-a")
         await repository.add_units(
@@ -447,16 +564,51 @@ def test_cancellation_wins_a_deterministically_ordered_claim_race(tmp_path: Path
         )
         await queue_job(repository, job.job_id)
 
+        repository.hold_operation = "cancellation"
+        cancellation = asyncio.create_task(repository.request_cancellation(job.job_id))
+        assert await asyncio.to_thread(repository.writer_lock_acquired.wait, 5)
         claim = asyncio.create_task(repository.claim_ready_unit(job.job_id, "worker-1"))
-        assert await asyncio.to_thread(repository.claim_started.wait, 5)
-        cancellation = await repository.request_cancellation(job.job_id)
-        assert cancellation.state is JobState.CANCELLATION_REQUESTED
-        repository.release_claim.set()
+        assert await asyncio.to_thread(repository.claim_begin_attempted.wait, 5)
+        repository.release_writer_lock.set()
 
+        assert (await cancellation).state is JobState.CANCELLATION_REQUESTED
         assert await claim is None
         unit = await repository.get_unit(job.job_id, "unit-1")
         assert unit is not None
         assert unit.state is UnitState.READY
+        assert unit.claimed_by is None
+
+    asyncio.run(scenario())
+
+
+def test_claim_commit_preserves_single_owner_before_later_cancellation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        repository = TransactionOrderedRepository(tmp_path / "evaluation-jobs.db")
+        await repository.initialize()
+        job, _ = await repository.create_or_get(request(), "claim-first-key", "hash-a")
+        await repository.add_units(
+            job.job_id,
+            (WorkUnit(unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}),),
+        )
+        await queue_job(repository, job.job_id)
+
+        repository.hold_operation = "claim"
+        claim_task = asyncio.create_task(repository.claim_ready_unit(job.job_id, "worker-1"))
+        assert await asyncio.to_thread(repository.writer_lock_acquired.wait, 5)
+        cancellation_task = asyncio.create_task(repository.request_cancellation(job.job_id))
+        assert await asyncio.to_thread(repository.cancellation_begin_attempted.wait, 5)
+        repository.release_writer_lock.set()
+
+        assert await claim_task == WorkUnit(
+            unit_id="unit-1", ordinal=0, payload={"case_id": "case-1"}
+        )
+        assert (await cancellation_task).state is JobState.CANCELLATION_REQUESTED
+        unit = await repository.get_unit(job.job_id, "unit-1")
+        assert unit is not None
+        assert unit.state is UnitState.RUNNING
+        assert unit.claimed_by == "worker-1"
+        assert await repository.claim_ready_unit(job.job_id, "worker-2") is None
+        assert await repository.list_running_units(job.job_id) == (unit,)
 
     asyncio.run(scenario())
 

@@ -123,6 +123,7 @@ class FilesystemEvaluationArtifactStore:
             return json.loads(
                 candidate.read_text(encoding="utf-8"),
                 parse_constant=_reject_non_finite_json_constant,
+                parse_float=_finite_json_float,
             )
         except (OSError, json.JSONDecodeError, ValueError) as error:
             raise UnsafeArtifact("artifact reference cannot be read") from error
@@ -192,6 +193,13 @@ def _json_text(value: object) -> str:
 
 def _reject_non_finite_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant {value} is not allowed")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number is not allowed")
+    return parsed
 
 
 def _write_atomically(path: Path, content: str) -> None:

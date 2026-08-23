@@ -7,7 +7,7 @@ import json
 import math
 import re
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -170,6 +170,7 @@ class SQLiteEvaluationJobRepository:
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._after_write_lock_acquired_for_tests: Callable[[str], None] | None = None
 
     async def initialize(self) -> None:
         await asyncio.to_thread(self._initialize_sync)
@@ -368,7 +369,7 @@ class SQLiteEvaluationJobRepository:
 
     def _request_cancellation_sync(self, job_id: str) -> EvaluationJob:
         with self._connect() as database:
-            database.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(database, "cancellation")
             row = database.execute(
                 f"SELECT {_JOB_COLUMNS} FROM evaluation_jobs WHERE job_id = ?", (job_id,)
             ).fetchone()
@@ -422,7 +423,7 @@ class SQLiteEvaluationJobRepository:
     def _claim_ready_unit_sync(self, job_id: str, worker_id: str) -> WorkUnit | None:
         _require_identifier(worker_id, "worker_id")
         with self._connect() as database:
-            database.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(database, "claim")
             job = database.execute(
                 "SELECT state FROM evaluation_jobs WHERE job_id = ?", (job_id,)
             ).fetchone()
@@ -826,6 +827,12 @@ class SQLiteEvaluationJobRepository:
             blocked_unit_ids=tuple(blocked),
         )
 
+    def _begin_immediate(self, database: sqlite3.Connection, operation: str) -> None:
+        database.execute("BEGIN IMMEDIATE")
+        hook = self._after_write_lock_acquired_for_tests
+        if hook is not None:
+            hook(operation)
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         database = sqlite3.connect(self._path, timeout=30)
@@ -956,31 +963,50 @@ def _warnings_from_json(value: object) -> tuple[EvaluationWarning, ...]:
         raise ValueError("stored warnings are invalid")
     warnings: list[EvaluationWarning] = []
     for item in parsed:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"code", "message", "details"}
+        if not isinstance(item, dict) or set(item) not in (
+            {"code", "details"},
+            {"code", "message", "details"},
         ):
             raise ValueError("stored warning is invalid")
         code = item["code"]
-        message = item["message"]
         details = item["details"]
         if (
             not isinstance(code, str)
-            or not isinstance(message, str)
             or not isinstance(details, dict)
             or not all(isinstance(key, str) for key in details)
         ):
             raise ValueError("stored warning details are invalid")
-        warnings.append(EvaluationWarning(code=code, message=message, details=details))
+        try:
+            if "message" not in item:
+                warning = EvaluationWarning(code=code, details=details)
+            else:
+                message = item["message"]
+                if not isinstance(message, str):
+                    raise ValueError("stored warning message is invalid")
+                warning = EvaluationWarning(code=code, message=message, details=details)
+        except (TypeError, ValueError) as error:
+            raise ValueError("stored warning is invalid") from error
+        warnings.append(warning)
     return tuple(warnings)
 
 
 def _json_loads(value: object) -> object:
-    return json.loads(str(value), parse_constant=_reject_non_finite_json_constant)
+    return json.loads(
+        str(value),
+        parse_constant=_reject_non_finite_json_constant,
+        parse_float=_finite_json_float,
+    )
 
 
 def _reject_non_finite_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant {value} is not allowed")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number is not allowed")
+    return parsed
 
 
 def _job_from_row(row: Sequence[object]) -> EvaluationJob:

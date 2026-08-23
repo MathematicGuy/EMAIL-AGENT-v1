@@ -105,6 +105,23 @@ def test_artifact_readers_reject_handcrafted_non_finite_json(
         store.read_private_details(private_ref)
 
 
+def test_private_artifact_reader_rejects_exponent_overflow_without_exposing_raw_json(
+    tmp_path: Path,
+) -> None:
+    store = FilesystemEvaluationArtifactStore(tmp_path)
+    private_ref = store.write_private_details("job-1", "detail-1", {"reply": "private"})
+    private_path = tmp_path / private_ref
+
+    private_path.write_text('{"score":1.25}', encoding="utf-8")
+    assert store.read_private_details(private_ref) == {"score": 1.25}
+
+    private_path.write_text('{"score":1e9999}', encoding="utf-8")
+    with pytest.raises(UnsafeArtifact, match="cannot be read") as error:
+        store.read_private_details(private_ref)
+
+    assert "1e9999" not in str(error.value)
+
+
 def test_artifact_store_rejects_symlink_escapes(tmp_path: Path) -> None:
     if os.name != "nt":
         pytest.skip("Windows junction exercise")
