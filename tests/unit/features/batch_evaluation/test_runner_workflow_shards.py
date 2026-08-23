@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -112,25 +110,10 @@ class ShardPlugin:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class DurableUnitRecord:
-    job_id: str
-    unit_id: str
-    ordinal: int
-    state: UnitState
-    claimed_by: str | None
-    payload: Mapping[str, object]
-    provider_requests: int
-    total_tokens: int
-    outcome_ref: str | None
-
-
 class TrackingRepository(SQLiteEvaluationJobRepository):
-    def __init__(self, path: Path, artifacts: FilesystemEvaluationArtifactStore) -> None:
+    def __init__(self, path: Path) -> None:
         super().__init__(path)
-        self._artifacts = artifacts
         self.claimed_unit_ids: list[str] = []
-        self._outcomes: dict[tuple[str, str], tuple[int, int, str | None]] = {}
 
     async def claim_ready_unit(self, job_id: str, worker_id: str) -> WorkUnit | None:
         del job_id, worker_id
@@ -141,50 +124,6 @@ class TrackingRepository(SQLiteEvaluationJobRepository):
     ) -> WorkUnit | None:
         self.claimed_unit_ids.append(unit_id)
         return await super().claim_ready_unit_by_id(job_id, unit_id, worker_id)
-
-    async def complete_unit(
-        self,
-        job_id: str,
-        outcome: WorkUnitOutcome,
-        *,
-        outcome_ref: str | None = None,
-    ) -> None:
-        if outcome.state is UnitState.SUCCEEDED:
-            assert outcome_ref is not None
-            self._artifacts.read_private_details(outcome_ref)
-        await super().complete_unit(job_id, outcome)
-        self._outcomes[(job_id, outcome.unit_id)] = (
-            outcome.provider_requests,
-            outcome.total_tokens,
-            outcome_ref,
-        )
-
-    async def list_units(self, job_id: str) -> tuple[DurableUnitRecord, ...]:
-        with self._connect() as database:
-            rows = database.execute(
-                """
-                SELECT job_id, unit_id, ordinal, state, claimed_by, safe_payload_json
-                FROM evaluation_units
-                WHERE job_id = ?
-                ORDER BY ordinal, unit_id
-                """,
-                (job_id,),
-            ).fetchall()
-        return tuple(
-            DurableUnitRecord(
-                job_id=str(row[0]),
-                unit_id=str(row[1]),
-                ordinal=int(row[2]),
-                state=UnitState(str(row[3])),
-                claimed_by=None if row[4] is None else str(row[4]),
-                payload=json.loads(str(row[5])),
-                provider_requests=self._outcomes.get((job_id, str(row[1])), (0, 0, None))[0],
-                total_tokens=self._outcomes.get((job_id, str(row[1])), (0, 0, None))[1],
-                outcome_ref=self._outcomes.get((job_id, str(row[1])), (0, 0, None))[2],
-            )
-            for row in rows
-        )
-
 
 class TrackingCredentialPool(CredentialLeasingPool):
     def __init__(self) -> None:
@@ -221,7 +160,7 @@ async def test_fixed_shards_keep_one_lease_execute_assigned_work_sequentially_an
     tmp_path: Path,
 ) -> None:
     artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
-    repository = TrackingRepository(tmp_path / "evaluation-jobs.db", artifacts)
+    repository = TrackingRepository(tmp_path / "evaluation-jobs.db")
     await repository.initialize()
     registry = PluginRegistry()
     plugin = ShardPlugin()

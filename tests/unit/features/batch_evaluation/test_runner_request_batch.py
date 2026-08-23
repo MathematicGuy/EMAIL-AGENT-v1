@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -37,109 +35,9 @@ from cowork_agent.features.batch_evaluation.runner import (
     EvaluationJobRunner,
 )
 from cowork_agent.features.batch_evaluation.service import EvaluationJobService
-from cowork_agent.persistence.repositories.evaluation_jobs import (
-    EvaluationJob,
-    SQLiteEvaluationJobRepository,
-)
+from cowork_agent.persistence.repositories.evaluation_jobs import SQLiteEvaluationJobRepository
 
 AttemptSink = Callable[[ProviderAttemptEvent], Awaitable[None] | None]
-
-
-@dataclass(frozen=True, slots=True)
-class DurableUnitRecord:
-    job_id: str
-    unit_id: str
-    ordinal: int
-    state: UnitState
-    claimed_by: str | None
-    payload: Mapping[str, object]
-    provider_requests: int
-    total_tokens: int
-    outcome_ref: str | None
-
-
-class FutureSQLiteRepository(SQLiteEvaluationJobRepository):
-    def __init__(
-        self,
-        path: Path,
-        artifact_store: FilesystemEvaluationArtifactStore,
-        outcome_metadata: dict[tuple[str, str], tuple[int, int, str | None]] | None = None,
-    ) -> None:
-        super().__init__(path)
-        self._artifact_store = artifact_store
-        self._outcome_metadata = outcome_metadata if outcome_metadata is not None else {}
-
-    async def complete_unit(
-        self,
-        job_id: str,
-        outcome: WorkUnitOutcome,
-        *,
-        outcome_ref: str | None = None,
-    ) -> None:
-        if outcome.state is UnitState.SUCCEEDED:
-            assert outcome_ref is not None
-            assert self._artifact_store.read_private_details(outcome_ref) == outcome.private_result
-        else:
-            assert outcome_ref is None
-        await super().complete_unit(job_id, outcome)
-        self._outcome_metadata[(job_id, outcome.unit_id)] = (
-            outcome.provider_requests,
-            outcome.total_tokens,
-            outcome_ref,
-        )
-
-    async def list_units(self, job_id: str) -> tuple[DurableUnitRecord, ...]:
-        with self._connect() as database:
-            rows = database.execute(
-                """
-                SELECT job_id, unit_id, ordinal, state, claimed_by, safe_payload_json
-                FROM evaluation_units
-                WHERE job_id = ?
-                ORDER BY ordinal, unit_id
-                """,
-                (job_id,),
-            ).fetchall()
-        return tuple(
-            DurableUnitRecord(
-                job_id=str(row[0]),
-                unit_id=str(row[1]),
-                ordinal=int(row[2]),
-                state=UnitState(str(row[3])),
-                claimed_by=None if row[4] is None else str(row[4]),
-                payload=json.loads(str(row[5])),
-                provider_requests=self._outcome_metadata.get(
-                    (job_id, str(row[1])), (0, 0, None)
-                )[0],
-                total_tokens=self._outcome_metadata.get((job_id, str(row[1])), (0, 0, None))[1],
-                outcome_ref=self._outcome_metadata.get((job_id, str(row[1])), (0, 0, None))[2],
-            )
-            for row in rows
-        )
-
-    async def append_warnings(
-        self, job_id: str, warnings: Sequence[EvaluationWarning]
-    ) -> EvaluationJob:
-        job = await self.get_job(job_id)
-        assert job is not None
-        combined = (*job.warnings, *warnings)
-        serialized = json.dumps(
-            [
-                {
-                    "code": warning.code,
-                    "message": warning.message,
-                    "details": dict(warning.details),
-                }
-                for warning in combined
-            ]
-        )
-        with self._connect() as database:
-            database.execute(
-                "UPDATE evaluation_jobs SET warnings_json = ? WHERE job_id = ?",
-                (serialized, job_id),
-            )
-        updated = await self.get_job(job_id)
-        assert updated is not None
-        return updated
 
 
 class FakeReply:
@@ -363,9 +261,9 @@ async def prepared_runner(
     sleeper: Callable[[float], Awaitable[None]] | None = None,
     retry_backoff_base_seconds: float = 1.0,
     retry_backoff_max_seconds: float = 30.0,
-) -> tuple[EvaluationJobRunner, EvaluationJobService, FutureSQLiteRepository]:
+) -> tuple[EvaluationJobRunner, EvaluationJobService, SQLiteEvaluationJobRepository]:
     artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
-    repository = FutureSQLiteRepository(tmp_path / "evaluation-jobs.db", artifacts)
+    repository = SQLiteEvaluationJobRepository(tmp_path / "evaluation-jobs.db")
     await repository.initialize()
     registry = PluginRegistry()
     registry.register(plugin)
