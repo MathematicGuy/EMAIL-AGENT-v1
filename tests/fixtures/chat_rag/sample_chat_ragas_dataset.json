@@ -1,0 +1,64 @@
+{
+  "dataset_version": "sample-chat-ragas-v1",
+  "provider": "google",
+  "model": "gemini-2.0-flash",
+  "cases": [
+    {
+      "id": "chat-case-001",
+      "expected_document_ids": ["doc-hr-policy"],
+      "retrieved_document_ids": ["doc-hr-policy", "doc-it-policy"],
+      "citation_document_ids": ["doc-hr-policy"],
+      "should_abstain": false,
+      "abstained": false,
+      "latency_ms": {
+        "retrieval": 25,
+        "generation": 340,
+        "evaluator": 520
+      },
+      "question": "What is the annual remote work equipment stipend?",
+      "answer": "The remote work equipment allowance is $500 per calendar year [doc-hr-policy].",
+      "contexts": [
+        "Employees are eligible for up to $500 per calendar year for home office equipment reimbursement under the remote work policy."
+      ],
+      "reference_answer": "Employees receive a $500 annual stipend for remote work equipment."
+    },
+    {
+      "id": "chat-case-002",
+      "expected_document_ids": ["doc-leave-policy"],
+      "retrieved_document_ids": ["doc-leave-policy"],
+      "citation_document_ids": ["doc-leave-policy"],
+      "should_abstain": false,
+      "abstained": false,
+      "latency_ms": {
+        "retrieval": 30,
+        "generation": 290,
+        "evaluator": 480
+      },
+      "question": "How many days of annual leave do full-time employees get?",
+      "answer": "Full-time employees receive 15 days of paid annual leave per year [doc-leave-policy].",
+      "contexts": [
+        "Full-time employees accrue 15 days of paid annual leave per full calendar year of employment."
+      ],
+      "reference_answer": "Full-time employees are entitled to 15 paid annual leave days each year."
+    },
+    {
+      "id": "chat-case-003",
+      "expected_document_ids": [],
+      "retrieved_document_ids": ["doc-general-faq"],
+      "citation_document_ids": [],
+      "should_abstain": true,
+      "abstained": true,
+      "latency_ms": {
+        "retrieval": 15,
+        "generation": 120,
+        "evaluator": 200
+      },
+      "question": "Can I bring my pet iguana to the office?",
+      "answer": "I do not have information in the provided policies regarding exotic pets in the office.",
+      "contexts": [
+        "Only certified service animals are permitted on company premises."
+      ],
+      "reference_answer": "The policy only allows certified service animals, not pets."
+    }
+  ]
+}
