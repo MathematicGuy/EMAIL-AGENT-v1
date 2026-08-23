@@ -63,7 +63,7 @@ def _report(**kwargs: object) -> dict[str, object]:
 
 def test_report_carries_schema_version_and_provenance() -> None:
     report = _report()
-    assert report["schema_version"] == "2.1.0"
+    assert report["schema_version"] == "2.2.0"
     assert report["probe_set_id"] == "unit"
     assert report["provider"] == "gemini"
     assert report["model"] == "model-id"

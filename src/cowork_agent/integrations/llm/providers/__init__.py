@@ -1,11 +1,30 @@
 """Concrete LLM provider adapters."""
 
 from .gemini import GeminiActionPlanGenerator, GeminiRouteClassifier
-from .groq import GroqActionPlanGenerator, GroqRouteClassifier
+from .vyce import (
+    VyceActionPlanGenerator,
+    VyceAPIError,
+    VyceGatewayError,
+    VyceRateLimitError,
+    VyceRouteClassifier,
+    VyneActionPlanGenerator,
+    VyneAPIError,
+    VyneGatewayError,
+    VyneRateLimitError,
+    VyneRouteClassifier,
+)
 
 __all__ = [
     "GeminiActionPlanGenerator",
     "GeminiRouteClassifier",
-    "GroqActionPlanGenerator",
-    "GroqRouteClassifier",
+    "VyceAPIError",
+    "VyceActionPlanGenerator",
+    "VyceGatewayError",
+    "VyceRateLimitError",
+    "VyceRouteClassifier",
+    "VyneAPIError",
+    "VyneActionPlanGenerator",
+    "VyneGatewayError",
+    "VyneRateLimitError",
+    "VyneRouteClassifier",
 ]

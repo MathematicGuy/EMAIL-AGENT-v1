@@ -13,11 +13,11 @@ import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  
 from cowork_agent.config import (
     GeminiSettings,
     GmailSettings,
-    GroqSettings,
     JinaEmbeddingSettings,
     MistralSettings,
     OpenRouterSettings,
     UserDocumentsSettings,
+    VyceSettings,
     database_url,
     load_runtime_environment,
 )
@@ -41,10 +41,6 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GeminiRouteClassifier,
 )
-from cowork_agent.integrations.llm.providers.groq import (
-    GroqActionPlanGenerator,
-    GroqRouteClassifier,
-)
 from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
     MistralRouteClassifier,
@@ -52,6 +48,10 @@ from cowork_agent.integrations.llm.providers.mistral import (
 from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
+)
+from cowork_agent.integrations.llm.providers.vyce import (
+    VyceActionPlanGenerator,
+    VyceRouteClassifier,
 )
 from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
@@ -140,10 +140,10 @@ async def run_worker() -> None:
             generator = GeminiActionPlanGenerator(gemini_settings)
             jina_embedding_settings = JinaEmbeddingSettings.from_env()
             semantic_memory = await build_semantic_memory(jina_embedding_settings)
-        elif provider == "groq":
-            groq_settings = GroqSettings.from_env()
-            classifier = GroqRouteClassifier(groq_settings)
-            generator = GroqActionPlanGenerator(groq_settings)
+        elif provider in ("vyce", "vyne"):
+            vyce_settings = VyceSettings.from_env()
+            classifier = VyceRouteClassifier(vyce_settings)
+            generator = VyceActionPlanGenerator(vyce_settings)
             semantic_memory = NullSemanticMemory()
         elif provider == "mistral":
             mistral_settings = MistralSettings.from_env()
@@ -172,7 +172,7 @@ async def run_worker() -> None:
             semantic_memory = NullSemanticMemory()
         else:
             raise ValueError(
-                "LLM_PROVIDER must be 'gemini', 'groq', 'mistral', or 'openrouter'"
+                "LLM_PROVIDER must be 'gemini', 'mistral', 'openrouter', or 'vyce'"
             )
         digest_worker = DigestWorker(
             runs,

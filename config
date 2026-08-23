@@ -19,9 +19,9 @@ GMAIL_CONNECTION_DB_PATH=.data/mail_todo.db
 OAUTH_STATE_TTL_SECONDS=600
 OAUTHLIB_INSECURE_TRANSPORT=1
 
-# LLM Provider Selection (openrouter | gemini | groq | mistral)
-# mistral: mistral-medium-3-5 | glm-5-2 | 
-# groq: qwen/qwen3.6-27b
+# LLM Provider Selection (openrouter | gemini | vyne | mistral)
+# mistral: mistral-medium-3-5 | glm-5-2
+# vyne: gpt-5.6-luna
 # gemini: gemini-3.5-flash-lite | gemma-4-31b (fast and reliable)
 LLM_PROVIDER=mistral
 
@@ -69,13 +69,16 @@ OPENROUTER_MAX_EMAILS_PER_BATCH=5
 OPENROUTER_MAX_OUTPUT_TOKENS=2048
 OPENROUTER_TIMEOUT_SECONDS=60
 
-# Groq Configuration
-GROQ_MODEL=qwen/qwen3.6-27b
-GROQ_MAX_EMAILS_PER_BATCH=5
-GROQ_TIMEOUT_SECONDS=60
+# Vyne Configuration
+VYNE_MODEL=gpt-5.6-luna
+VYNE_BASE_URL=https://vyceai.com/v1
+VYNE_MAX_EMAILS_PER_BATCH=5
+VYNE_MAX_OUTPUT_TOKENS=4096
+VYNE_TIMEOUT_SECONDS=60
+VYNE_ROTATE_ON_RATE_LIMIT=true
 
-# Mistral Configuration
-MISTRAL_MODEL=mistral-small-2603
+# Mistral Configuration: glm-5-2 | mistral-medium-3-5
+MISTRAL_MODEL=glm-5-2
 MISTRAL_MAX_EMAILS_PER_BATCH=5
 MISTRAL_MAX_OUTPUT_TOKENS=2048
 MISTRAL_TIMEOUT_SECONDS=60
@@ -104,7 +107,7 @@ CHAT_EPISODE_RETENTION_SECONDS=7776000
 
 # AI Chat Intent Routing & Feature Flags
 CHAT_INTENT_CLASSIFIER_ENABLED=true
-CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000
+CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000 # 10s
 CHAT_COMPANY_RAG_ENABLED=false
 USER_DOCUMENTS_ENABLED=true
 USER_DOCUMENTS_TOOL_AXIS_ENABLED=false

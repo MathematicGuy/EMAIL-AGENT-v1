@@ -102,6 +102,18 @@ def _episode() -> TaskEpisode:
     )
 
 
+def test_task_episode_round_trips_a_supersedes_link_and_rejects_a_self_reference() -> None:
+    """Concern D: the link is what lets retrieval retire a corrected episode."""
+    revision = replace(_episode(), episode_id="episode-2", supersedes="episode-1")
+
+    assert revision.to_dict()["supersedes"] == "episode-1"
+    assert TaskEpisode.from_dict(revision.to_dict()) == revision
+    assert _episode().supersedes is None
+
+    with pytest.raises(ValueError, match="supersedes must not reference the episode itself"):
+        replace(_episode(), supersedes="episode-1")
+
+
 def _task_proposal_payload() -> dict[str, object]:
     episode = _episode()
     return {

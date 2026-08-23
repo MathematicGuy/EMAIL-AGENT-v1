@@ -649,6 +649,7 @@ class TaskEpisode:
     prompt_version: str | None
     confidence: float | None
     project_id: str | None = None
+    supersedes: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -740,6 +741,10 @@ class TaskEpisode:
             raise TypeError("confidence must be a number or None")
         if self.project_id is not None:
             _require_string(self.project_id, "project_id")
+        if self.supersedes is not None:
+            _require_string(self.supersedes, "supersedes")
+            if self.supersedes == self.episode_id:
+                raise ValueError("supersedes must not reference the episode itself")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -769,6 +774,7 @@ class TaskEpisode:
             "prompt_version",
             "confidence",
             "project_id",
+            "supersedes",
         }
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
@@ -834,6 +840,11 @@ class TaskEpisode:
             project_id=(
                 _require_string(data["project_id"], "project_id")
                 if data.get("project_id") is not None
+                else None
+            ),
+            supersedes=(
+                _require_string(data["supersedes"], "supersedes")
+                if data.get("supersedes") is not None
                 else None
             ),
         )

@@ -928,6 +928,7 @@ class ChatController:
             prompt_version=proposal.prompt_version,
             confidence=proposal.confidence,
             project_id=self._scope.project_id,
+            supersedes=proposal.supersedes,
         )
 
     async def _transition_task_episode(
