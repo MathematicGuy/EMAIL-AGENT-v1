@@ -46,6 +46,40 @@ def _completion_response() -> dict[str, object]:
     }
 
 
+def test_mixed_success_and_429_demonstrates_independence_when_success_overlaps_throttle() -> None:
+    from scripts import smoke_test_mistral_evaluation_keys as smoke
+
+    observations = (
+        smoke._Observation("mistral-1", "rate_limited", 10, 100, 100),
+        smoke._Observation("mistral-2", "succeeded", 10, 120, None),
+    )
+
+    assert smoke._independence_demonstrated(observations) is True
+
+
+def test_mixed_success_then_429_is_inconclusive_without_overlap() -> None:
+    from scripts import smoke_test_mistral_evaluation_keys as smoke
+
+    observations = (
+        smoke._Observation("mistral-1", "succeeded", 10, 90, None),
+        smoke._Observation("mistral-2", "rate_limited", 10, 100, 100),
+    )
+
+    assert smoke._independence_demonstrated(observations) is False
+
+
+def test_mixed_success_and_429_is_inconclusive_when_an_alias_fails() -> None:
+    from scripts import smoke_test_mistral_evaluation_keys as smoke
+
+    observations = (
+        smoke._Observation("mistral-1", "rate_limited", 10, 100, 100),
+        smoke._Observation("mistral-2", "succeeded", 10, 120, None),
+        smoke._Observation("mistral-3", "failed", 10, 110, None),
+    )
+
+    assert smoke._independence_demonstrated(observations) is False
+
+
 def test_smoke_requests_each_selected_alias_concurrently_caps_workers_and_redacts_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

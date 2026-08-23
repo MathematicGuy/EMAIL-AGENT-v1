@@ -38,6 +38,7 @@ class _Observation:
     alias: str
     status_class: str
     latency_ms: int
+    completed_at_ms: int
     rate_limited_at_ms: int | None
 
     def public(self) -> dict[str, object]:
@@ -90,10 +91,12 @@ async def _smoke_alias(
     *,
     model: str,
     started_at: float,
+    barrier: asyncio.Barrier,
     factory: MistralEvaluationReplyFactory,
 ) -> _Observation:
     events: list[ProviderAttemptEvent] = []
     request, context = _request_and_context()
+    await barrier.wait()
     try:
         async with lease:
             reply = factory.bind(lease, model, events.append)
@@ -107,11 +110,12 @@ async def _smoke_alias(
     except Exception:
         pass
 
+    completed_at_ms = max(0, int((time.monotonic() - started_at) * 1000))
     if not events:
-        return _Observation(lease.alias, "failed", 0, None)
+        return _Observation(lease.alias, "failed", 0, completed_at_ms, None)
     event = events[-1]
     rate_limited_at_ms = (
-        max(0, int((time.monotonic() - started_at) * 1000))
+        completed_at_ms
         if event.status_code == 429
         else None
     )
@@ -119,6 +123,7 @@ async def _smoke_alias(
         alias=event.credential_alias,
         status_class=event.outcome,
         latency_ms=event.latency_ms,
+        completed_at_ms=completed_at_ms,
         rate_limited_at_ms=rate_limited_at_ms,
     )
 
@@ -142,7 +147,15 @@ def _independence_demonstrated(observations: Sequence[_Observation]) -> bool:
     status_classes = {item.status_class for item in observations}
     if status_classes == {"succeeded"}:
         return True
-    return "succeeded" in status_classes and "rate_limited" in status_classes
+    if not status_classes <= {"succeeded", "rate_limited"}:
+        return False
+    successful = [item for item in observations if item.status_class == "succeeded"]
+    rate_limited = [item for item in observations if item.rate_limited_at_ms is not None]
+    return any(
+        success.completed_at_ms >= rate_limit.rate_limited_at_ms
+        for success in successful
+        for rate_limit in rate_limited
+    )
 
 
 async def run_smoke(
@@ -166,12 +179,14 @@ async def run_smoke(
     model = _model_from(environ)
     leases = await asyncio.gather(*(pool.lease() for _ in range(effective_workers)))
     started_at = time.monotonic()
+    barrier = asyncio.Barrier(effective_workers)
     observations = await asyncio.gather(
         *(
             _smoke_alias(
                 lease,
                 model=model,
                 started_at=started_at,
+                barrier=barrier,
                 factory=MistralEvaluationReplyFactory(),
             )
             for lease in leases
