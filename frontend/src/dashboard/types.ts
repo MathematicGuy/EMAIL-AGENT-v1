@@ -29,6 +29,7 @@ export interface ModelOption {
   description: string;
   badge?: string;
   icon?: string;
+  speedLabel?: string;
 }
 
 export interface ChatMessage {

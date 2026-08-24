@@ -54,9 +54,9 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         <div className="max-h-[72vh] overflow-y-auto py-0.5">
           {AVAILABLE_MODELS.map((model) => {
             const isSelected = selectedModel.id === model.id;
-            const speedLabel = model.id.startsWith('gemini')
-              ? 'Nhanh'
-              : 'Suy luận';
+            const speedLabel =
+              model.speedLabel ??
+              (model.id.startsWith('gemini') ? 'Nhanh' : 'Suy luận');
 
             return (
               <button

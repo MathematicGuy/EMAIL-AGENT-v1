@@ -9,11 +9,10 @@ export interface AssistantScope {
 
 export type AssistantModelId =
   | 'gemini-3.5-flash-lite'
-  | 'gemini-3.6-flash-lite'
-  | 'gemini-3.5-flash'
-  | 'gemini-3.6-flash'
-  | 'deepseek-openrouter'
-  | 'deepseek-nvidia';
+  | 'mimo-v2.5-pro'
+  | 'openai/gpt-oss-120b'
+  | 'mistral-medium-3-5'
+  | string;
 
 export const LOCAL_ASSISTANT_SCOPE: AssistantScope = {
   actorId: 'demo-user',

@@ -18,43 +18,33 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash Lite',
     version: '3.5',
-    description: 'Google Gemini 3.5 Flash Lite.',
-    badge: 'Default'
+    description: 'Google Gemini 3.5 Flash Lite — Tốc độ phản hồi cực nhanh, độ trễ thấp.',
+    badge: 'Gemini',
+    speedLabel: 'Nhanh'
   },
   {
-    id: 'gemini-3.6-flash-lite',
-    name: 'Gemini 3.6 Flash Lite',
-    version: '3.6',
-    description: 'Google Gemini 3.6 Flash Lite.',
-    badge: 'Gemini'
+    id: 'mimo-v2.5-pro',
+    name: 'MiMo v2.5 Pro',
+    version: '2.5',
+    description: 'Xiaomi MiMo v2.5 Pro — Mô hình khuyên dùng hàng đầu, suy luận mạnh mẽ và chính xác cao.',
+    badge: 'Default',
+    speedLabel: 'Suy luận'
   },
   {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
+    id: 'openai/gpt-oss-120b',
+    name: 'GPT OSS 120B',
+    version: '120B',
+    description: 'OpenAI GPT OSS 120B qua OpenRouter — Khả năng suy luận và lý luận mở rộng.',
+    badge: 'OpenRouter',
+    speedLabel: 'Suy luận'
+  },
+  {
+    id: 'mistral-medium-3-5',
+    name: 'Mistral Medium 3.5',
     version: '3.5',
-    description: 'Google Gemini 3.5 Flash.',
-    badge: 'Gemini'
-  },
-  {
-    id: 'gemini-3.6-flash',
-    name: 'Gemini 3.6 Flash',
-    version: '3.6',
-    description: 'Google Gemini 3.6 Flash.',
-    badge: 'Gemini'
-  },
-  {
-    id: 'deepseek-openrouter',
-    name: 'DeepSeek · OpenRouter',
-    version: 'OpenRouter',
-    description: 'DeepSeek qua OpenRouter, sử dụng OPENROUTER_MODEL trên backend.',
-    badge: 'OpenRouter'
-  },
-  {
-    id: 'deepseek-nvidia',
-    name: 'DeepSeek · NVIDIA',
-    version: 'NVIDIA',
-    description: 'DeepSeek qua NVIDIA NIM, sử dụng NVIDIA_MODEL trên backend.',
-    badge: 'NVIDIA'
+    description: 'Mistral AI Medium 3.5 — Cân bằng lý tưởng giữa tốc độ xử lý và độ tin cậy.',
+    badge: 'Mistral',
+    speedLabel: 'Nhanh'
   }
 ];
 
