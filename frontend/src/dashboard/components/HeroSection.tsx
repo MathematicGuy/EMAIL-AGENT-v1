@@ -87,35 +87,8 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         activeProject={activeProject}
         projects={projects}
         onSelectProject={onSelectProject}
+        promptSuggestions={IDEAS_FOR_YOU}
       />
-
-      {/* Ideas for you section matching image.png */}
-      <div className="w-full max-w-3xl md:max-w-4xl mt-8 px-4 space-y-3">
-        <div className="text-xs font-medium text-zinc-500 select-none">Gợi ý cho bạn</div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-          {IDEAS_FOR_YOU.map((idea) => (
-            <button
-              key={idea.id}
-              // In chat mode the artifact ideas only prefill the composer, so
-              // Enter/Send stays the single send path. Card three and cowork
-              // mode keep their original send behaviour.
-              onClick={() =>
-                idea.id === 'idea-3'
-                  ? onSend(idea.prompt)
-                  : onChangeText(idea.prompt)
-              }
-              className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#23221f] hover:bg-[#2c2a26] border border-[#33312e] text-left transition-all cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-[#2b2926] border border-zinc-700/40 flex items-center justify-center text-sm shrink-0 group-hover:border-zinc-500 transition-colors">
-                {idea.icon}
-              </div>
-              <span className="text-xs font-medium text-zinc-200 group-hover:text-white transition-colors leading-snug">
-                {idea.title}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

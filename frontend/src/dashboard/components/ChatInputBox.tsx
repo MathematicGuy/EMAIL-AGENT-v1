@@ -1,13 +1,9 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   Plus,
   Mic,
   ChevronDown,
   ArrowUp,
-  FolderKanban,
-  Folder,
-  Check,
-  Hand,
   FileText,
   LoaderCircle,
   X,
@@ -19,6 +15,13 @@ import type {
   ModelOption,
 } from '../types';
 import type { Project } from '../types/projectTypes';
+
+export interface PromptSuggestion {
+  id: string;
+  icon: string;
+  title: string;
+  prompt: string;
+}
 
 interface ChatInputBoxProps {
   inputText: string;
@@ -36,6 +39,7 @@ interface ChatInputBoxProps {
   activeProject?: Project;
   projects?: Project[];
   onSelectProject?: (projectId: string) => void;
+  promptSuggestions?: PromptSuggestion[];
 }
 
 function formatFileSize(sizeBytes: number): string {
@@ -71,10 +75,13 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   activeProject,
   projects,
   onSelectProject,
+  promptSuggestions = [],
 }) => {
+  void activeProject;
+  void projects;
+  void onSelectProject;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const hasPendingAttachment = attachments.some((item) => item.status !== 'ready');
   const mentionQuery = activeMentionQuery(inputText);
   const matchingMailMentions = mentionQuery === null
@@ -86,7 +93,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
+      textareaRef.current.style.height = `${Math.max(24, Math.min(textareaRef.current.scrollHeight, 180))}px`;
     }
   }, [inputText]);
 
@@ -171,7 +178,28 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   };
 
   return (
-    <div className="w-full max-w-3xl md:max-w-4xl mx-auto px-4 select-text">
+    <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 select-text">
+      {/* Prompt Suggestions (right above the chat box when empty) */}
+      {inputText.trim() === '' && promptSuggestions && promptSuggestions.length > 0 && (
+        <div className="mb-2.5 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+          {promptSuggestions.map((idea) => (
+            <button
+              key={idea.id}
+              type="button"
+              onClick={() =>
+                idea.id === 'idea-3'
+                  ? onSend(idea.prompt)
+                  : onChangeText(idea.prompt)
+              }
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#383531] bg-[#24221f]/90 hover:border-[#4d4a43] hover:bg-[#2d2b27] px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white transition-all duration-150 cursor-pointer shadow-xs"
+            >
+              <span className="text-xs shrink-0">{idea.icon}</span>
+              <span>{idea.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Main Floating Card matching image.png */}
       <div
         onClick={handleCardClick}
@@ -181,7 +209,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         }`}
       >
         {/* Top Textarea */}
-        <div className="p-3.5 pb-2">
+        <div className="p-2.5 sm:p-3 pb-2">
           {attachments.length > 0 && (
             <div
               className="mb-3 flex flex-wrap gap-2"
@@ -274,13 +302,13 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder="Tôi có thể giúp gì cho bạn hôm nay?"
-              rows={2}
-              className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans select-text"
+              rows={1}
+              className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[24px] max-h-[180px] leading-normal font-sans select-text py-0.5"
             />
           </div>
 
           {/* Middle Control Strip: +, Mode Pill [Chat | Cowork], Model Dropdown, Mic, Send */}
-          <div className="flex items-center justify-between pt-1.5 text-xs">
+          <div className="flex items-center justify-between pt-1 text-xs">
             {/* Left: Plus & Segmented Mode Switcher */}
             <div className="flex items-center gap-2">
               {onSelectFiles && (
@@ -357,87 +385,6 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 </button>
               )}
             </div>
-          </div>
-        </div>
-
-        {/* Bottom Sub-Strip matching image.png */}
-        <div className="px-3.5 py-2 bg-[#1f1e1c] border-t border-[#312f2b] flex items-center justify-between text-[11px] text-zinc-400">
-          {/* Left Context Pills */}
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-[#282623] hover:bg-[#32302c] rounded-lg text-zinc-300 transition-colors border border-zinc-700/50 cursor-pointer text-xs"
-              >
-                {activeProject ? (
-                  <>
-                    <Folder
-                      className="w-3 h-3 shrink-0"
-                      style={{ color: activeProject.color || '#d97757' }}
-                      fill="currentColor"
-                    />
-                    <span className="text-zinc-200 font-medium max-w-[120px] truncate">
-                      {activeProject.name}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <FolderKanban className="w-3 h-3 text-zinc-400" />
-                    <span>Dự án hoặc thư mục</span>
-                  </>
-                )}
-                <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
-              </button>
-
-              {isProjectDropdownOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setIsProjectDropdownOpen(false)}
-                  />
-                  <div className="absolute left-0 bottom-full mb-1.5 w-52 bg-[#22201d] border border-[#383531] rounded-xl shadow-2xl z-50 py-1.5 text-xs select-none">
-                    <div className="px-3 py-1 text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-                      Chọn ngữ cảnh dự án
-                    </div>
-                    {projects?.map((project) => (
-                      <button
-                        key={project.id}
-                        type="button"
-                        onClick={() => {
-                          onSelectProject?.(project.id);
-                          setIsProjectDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-[#2c2a26] text-left transition-colors cursor-pointer ${
-                          activeProject?.id === project.id ? 'text-white font-semibold bg-[#2a2825]' : 'text-zinc-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Folder
-                            className="w-3.5 h-3.5 shrink-0"
-                            style={{ color: project.color || '#d97757' }}
-                            fill="currentColor"
-                          />
-                          <span className="truncate">
-                            {project.icon && project.icon !== '📁' ? `${project.icon} ` : ''}
-                            {project.name}
-                          </span>
-                        </div>
-                        {activeProject?.id === project.id && (
-                          <Check className="w-3.5 h-3.5 text-[#d97757] shrink-0" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button className="flex items-center gap-1.5 px-2.5 py-1 bg-[#282623] hover:bg-[#32302c] rounded-lg text-zinc-300 transition-colors border border-zinc-700/50 cursor-pointer">
-              <Hand className="w-3 h-3 text-zinc-400" />
-              <span>Thủ công</span>
-              <ChevronDown className="w-3 h-3 text-zinc-500" />
-            </button>
           </div>
         </div>
       </div>
