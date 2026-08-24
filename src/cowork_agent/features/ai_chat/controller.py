@@ -38,6 +38,12 @@ from cowork_agent.domain.chat_contracts import (
     transition_activity_snapshot,
 )
 from cowork_agent.domain.project_documents import ProjectDocumentEvidence, ProjectDocumentResponse
+from cowork_agent.domain.report_artifacts import (
+    DEFAULT_REPORT_STEM,
+    ReportArtifact,
+    ReportArtifactStore,
+    ReportFilename,
+)
 from cowork_agent.domain.target_contracts import ValidationStatus
 
 from .generation_context import (
@@ -397,10 +403,12 @@ class ChatController:
         routing: ChatRoutingService | None = None,
         company_rag_enabled: bool = True,
         history: ChatHistoryPort | None = None,
+        reports: ReportArtifactStore | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
         self._reply = reply
+        self._reports = reports
         self._new_id = new_id
         self._clock = clock
         self._episode_retention_seconds = episode_retention_seconds
@@ -881,33 +889,41 @@ class ChatController:
                 and _is_report_request(request.user_message)
                 and len(assistant_message.strip()) > 50
             ):
-                filename = _fallback_report_filename(request.user_message, conversation_title)
-                title = conversation_title or "Báo cáo tổng hợp"
                 generated_report = GeneratedReportArtifact(
-                    filename=filename,
-                    title=title,
+                    filename=_fallback_report_filename(
+                        request.user_message, conversation_title
+                    ),
+                    title=conversation_title or "Báo cáo tổng hợp",
                     content=assistant_message,
                 )
 
-            if generated_report is not None:
+            if generated_report is not None and self._reports is not None:
+                # ``sanitize``, not ``parse``: the provider names this file, so an
+                # unusable name has to degrade to a safe slug rather than drop a
+                # report the user asked for. Either way the name that reaches the
+                # store cannot address anything outside the report folder.
+                filename = ReportFilename.sanitize(generated_report.filename)
                 try:
-                    from pathlib import Path
-                    reports_dir = Path(__file__).resolve().parents[4] / "data" / "reports"
-                    reports_dir.mkdir(parents=True, exist_ok=True)
-                    report_file = reports_dir / generated_report.filename
-                    report_file.write_text(generated_report.content, encoding="utf-8")
+                    stored = await self._reports.save(
+                        ReportArtifact(
+                            filename=filename,
+                            content=generated_report.content,
+                            title=generated_report.title,
+                        )
+                    )
+                except (OSError, ValueError) as save_err:
+                    logger.warning("Failed to save generated report artifact: %s", save_err)
+                else:
                     generated_artifact_refs = (
                         {
-                            "ref_id": generated_report.filename,
+                            "ref_id": stored.filename.value,
                             "checksum": "",
                             "provenance": {
-                                "upload_filename": generated_report.filename,
+                                "upload_filename": stored.filename.value,
                                 "title": generated_report.title,
                             },
                         },
                     )
-                except Exception as save_err:
-                    logger.warning("Failed to save generated report artifact: %s", save_err)
 
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
@@ -1351,17 +1367,16 @@ def _is_report_request(message: str) -> bool:
 
 
 def _fallback_report_filename(message: str, title: str | None) -> str:
-    import re
-    import unicodedata
+    """Name a report the provider produced without naming.
 
-    raw = title or message
-    text = unicodedata.normalize("NFKD", raw)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    slug = re.sub(r"[^\w\s-]", "", text.lower()).strip()
-    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
-    if not slug:
-        slug = "bao-cao-tong-hop"
-    if not slug.startswith("bao-cao"):
-        slug = f"bao-cao-{slug}"
-    return f"{slug}.md"
+    The slug rule lives in ``ReportFilename.sanitize``; this only adds the
+    ``bao-cao-`` prefix the artifacts view sorts on, and keeps the stem short
+    enough to stay readable in the file list.
+    """
+    stem = ReportFilename.sanitize(title or message).value.removesuffix(".md")[:40].strip("-")
+    if not stem:
+        stem = DEFAULT_REPORT_STEM
+    if not stem.startswith("bao-cao"):
+        stem = f"bao-cao-{stem}"
+    return f"{stem}.md"
 

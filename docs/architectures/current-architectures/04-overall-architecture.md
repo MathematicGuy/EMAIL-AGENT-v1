@@ -17,6 +17,7 @@
 | **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
 | **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes`), and Semantic memory scopes. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
 | **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
+| **Report Artifact Store** | Report Folder Owner (`data/reports/`) | Single naming rule (`ReportFilename`) and single store port behind `/api/v1/reports`, shared by the artifacts view and the AI Chat turn that generates a report. | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py), [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) & [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
 | **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
 | **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Turbovec 4-bit + BM25 + RRF over committed Markdown (`data/extracted/*.md`). | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
 | **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set. | [`persistence/repositories`](../../../src/cowork_agent/persistence/repositories) |
@@ -49,7 +50,8 @@
 | `POST /v1/cowork/chat/sessions/{id}/mail-scans` | Persists aggregate email scan summaries into chat history | AI Chat Subsystem |
 | `GET /v1/cowork/chat/document-health` | Diagnostic health endpoint for User Document RAG stack | User Documents Subsystem |
 | `POST /v1/cowork/projects` & `POST /v1/cowork/projects/{id}/documents` | Project workspace management & document ingestion | User Documents Subsystem |
-| `GET/POST /api/v1/raw-documents/*` & `/api/v1/reports/*` | Document editing & markdown report generation | Raw Documents Subsystem |
+| `GET/POST /api/v1/raw-documents/*` | Raw DOCX/PDF viewing, editing, and save history | Raw Documents Subsystem |
+| `GET/POST /api/v1/reports`, `POST /api/v1/reports/open-folder`, `GET /api/v1/reports/{filename}/download`, `GET /api/v1/reports/{filename}/pdf`, `DELETE /api/v1/reports/{filename}` | Lists, saves, reveals, downloads, and deletes Markdown report artifacts in `data/reports/`. PDF export answers `501 pdf_export_unavailable` until a `ReportPdfRenderer` is registered. | Report Artifact Store |
 
 ### 1.4 External Providers & Services
 

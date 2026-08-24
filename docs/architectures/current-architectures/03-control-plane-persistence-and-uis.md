@@ -2,7 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-08-25
 **Primary Owner:** `src/cowork_agent/persistence` & `src/cowork_agent/app.py`  
 **Target Alignment:** Core control plane is aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md); linked Outlook is an additive SQLite-only provider variance.
 
@@ -10,7 +10,7 @@
 
 ## 1. Subsystem Overview
 
-The Control Plane orchestrates HTTP and SSE request routes, manages tenant/user identity and opaque session security, provides dual-mode data persistence (SQLite/Local vs Supabase Postgres), dispatches background digest and document workers, and serves the React 19 web application. Email operations are served on `/v1/mail-todo`; Gmail remains the identity owner and an optional Outlook mailbox is linked to that owner in SQLite mode. AI Chat and Project Document operations remain on `/v1/cowork/*`.
+The Control Plane orchestrates HTTP and SSE request routes, manages tenant/user identity and opaque session security, provides dual-mode data persistence (SQLite/Local vs Supabase Postgres), dispatches background digest and document workers, and serves the React 19 web application. Email operations are served on `/v1/mail-todo`; Gmail remains the identity owner and an optional Outlook mailbox is linked to that owner in SQLite mode. AI Chat and Project Document operations remain on `/v1/cowork/*`, and report artifacts (the Markdown documents kept in `data/reports/`) are served on `/api/v1/reports`.
 
 ```mermaid
 flowchart TB
@@ -21,7 +21,7 @@ flowchart TB
     subgraph CONTROL["Control Plane & API (FastAPI)"]
         APP["FastAPI Application<br/>(app.py / mail-todo-api)"]
         AUTH["Identity & Session Security<br/>(identity.py)"]
-        ROUTES["REST / SSE Mounts<br/>(/v1/mail-todo, /v1/cowork/*)"]
+        ROUTES["REST / SSE Mounts<br/>(/v1/mail-todo, /v1/cowork/*, /api/v1/reports)"]
     end
 
     subgraph WORKERS["Background Orchestration"]
@@ -50,12 +50,29 @@ flowchart TB
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root for persistence, LLM routing, semantic indexes, storage, and the mail/chat/project/document APIs. |
+| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root for persistence, LLM routing, semantic indexes, storage, and the mail/chat/project/document/report APIs. |
 | **Identity & Security** | [`identity.py`](../../../src/cowork_agent/identity.py) & [`config.py`](../../../src/cowork_agent/config.py) | Resolves `VerifiedPrincipal`; session cookies and central ownership guards enforce authorization. |
 | **Mailbox OAuth & Availability** | [`app.py`](../../../src/cowork_agent/app.py), [`outlook/provider.py`](../../../src/cowork_agent/integrations/outlook/provider.py) | Gmail OAuth plus optional Microsoft OAuth with PKCE, signed one-time owner state, encrypted rotating refresh tokens, and `Mail.Read` only. `/connections` exposes stable availability; Outlook is `not_configured` or `sqlite_only` when unavailable and never creates a user/session or changes the login cookie. |
 | **Persistence Repositories** | [`repositories`](../../../src/cowork_agent/persistence/repositories) | In-memory test fakes, SQLite adapters for local mode, and Postgres adapters for durable cloud/local control-plane mode. |
 | **Orchestration Workers** | [`orchestration`](../../../src/cowork_agent/orchestration) | In-process digest worker and durable recovery/document workers. |
 | **React 19 Web SPA** | [`frontend/`](../../../frontend) | Manages Gmail/Outlook accounts, remembers one selection per provider, and dispatches `@email`, `@outlook`, and `@mail` without making mail an AI Chat tool or persisting raw mail into chat memory. |
+| **Report Artifact Store** | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py), [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py), [`api/reports.py`](../../../src/cowork_agent/api/reports.py) | Owns `data/reports/`. `ReportFilename` is the only way to name a report; `FileSystemReportArtifactStore` takes its root by injection and containment-checks every resolved target. `InMemoryReportArtifactStore` is the test double. |
+
+### 2.1 Report Artifact Surface (`/api/v1/reports`)
+
+`REPORTS_DIR` is a module-level constant in [`app.py`](../../../src/cowork_agent/app.py) next to `RAW_DOCS_DIR` and `EXTRACTED_DIR`. The store is composed **once** in `lifespan` as `app.state.report_store = FileSystemReportArtifactStore(REPORTS_DIR)`, and `create_report_router()` is mounted from `create_app()` alongside the chat, project, and evaluation routers. Both writers read that one instance: the HTTP handlers pull it off `app.state`, and `_chat_controller_factory` passes it into `ChatController(reports=...)`, so the folder location and the filename rule cannot diverge between them. Handlers name every report through `ReportFilename.parse` and answer `400` on an unusable name; an absent store answers `503`.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v1/reports` | Lists stored reports newest first, with content inline. |
+| `POST /api/v1/reports` | Saves a report supplied by the artifacts view (`filename` + `content`). |
+| `POST /api/v1/reports/open-folder` | Reveals the report folder in the host file manager (`reveal_directory`); failures return `500` with a Vietnamese message. |
+| `GET /api/v1/reports/{filename}/download` | `FileResponse` as an attachment, media type derived from the suffix. |
+| `GET /api/v1/reports/{filename}/pdf` | Renders through a `ReportPdfRenderer` registered on `app.state.report_pdf_renderer`. No implementation ships, so this returns `501 pdf_export_unavailable` and the artifacts view falls back to the source download. |
+| `DELETE /api/v1/reports/{filename}` | Deletes one report. |
+
+> [!NOTE]
+> The missing PDF renderer is a deliberate open decision, not an oversight: rendering Vietnamese Markdown faithfully requires an embedded Unicode font, and that dependency choice was left open. The route is mounted and typed so an implementation can be registered without a transport change.
 
 ---
 
@@ -86,7 +103,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
 
 ## 4. Alignment & Diff vs Target Architecture
 
-- **Clean API & Product Surfaces:** Presentation layers consume REST and SSE endpoints exclusively. Standalone Email digest workflow operates on `/v1/mail-todo`; AI Chat and Project Document features operate on `/v1/cowork/*` ([TARGET §1 & §2](../TARGET-ARCHITECTURE.md)).
+- **Clean API & Product Surfaces:** Presentation layers consume REST and SSE endpoints exclusively. Standalone Email digest workflow operates on `/v1/mail-todo`; AI Chat and Project Document features operate on `/v1/cowork/*`; report artifacts operate on `/api/v1/reports` ([TARGET §1 & §2](../TARGET-ARCHITECTURE.md)).
 - **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. The React client projects polled mail progress into that shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn.
 - **Security & Identity Isolation:** OAuth tokens are stored encrypted using Fernet (`TokenCipher`). Session cookies are opaque, HttpOnly, and hashed at rest. Caller-supplied tenant/user identifiers are never trusted for authorization; all operations derive tenancy from `VerifiedPrincipal`.
 - **Memory & Durability Alignment:** Bounded short-term chat context resides in-process (`InMemoryChatSessionBuffer`), while durable long-term declarative profiles, episodic TaskEpisodes, chat turns, and document chunks are persisted in PostgreSQL (or isolated local SQLite files).

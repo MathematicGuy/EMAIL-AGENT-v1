@@ -42,6 +42,7 @@ from cowork_agent.config import (
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
+from cowork_agent.domain.report_artifacts import ReportArtifactStore
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -130,6 +131,7 @@ from cowork_agent.integrations.rag.project_documents import (
 from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
+from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
@@ -148,6 +150,7 @@ from .api.chat import create_chat_router
 from .api.evaluation_jobs import create_evaluation_router
 from .api.handlers import _jsonable
 from .api.projects import create_project_router
+from .api.reports import create_report_router
 
 # ``uvicorn cowork_agent.app:create_app --factory`` bypasses ``main()``. Set
 # the policy during module import as well, before Uvicorn creates its loop.
@@ -178,6 +181,9 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 
 RAW_DOCS_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
+#: Default report folder. The store is constructed from this once in ``lifespan``
+#: and injected from there; nothing downstream resolves the location again.
+REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 
 def _resolve_raw_document(filename: str) -> tuple[str, Path]:
@@ -205,11 +211,6 @@ class CreateRunRequest(BaseModel):
 class KnowledgeChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     top_k: int = Field(default=5, ge=1, le=20)
-
-
-class SaveReportRequest(BaseModel):
-    filename: str
-    content: str
 
 
 def _chat_controller_factory(
@@ -240,6 +241,10 @@ def _chat_controller_factory(
                 memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
             ),
             reply=cast(ChatReplyPort, app.state.chat_reply),
+            reports=cast(
+                ReportArtifactStore | None,
+                getattr(app.state, "report_store", None),
+            ),
             history=cast(
                 ChatHistoryPort | None,
                 getattr(app.state, "chat_history_repository", None),
@@ -312,6 +317,12 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 logger.warning("Corpus skill tree auto-update skipped: %s", exc)
 
+            # One report folder, resolved once. Both writers — the artifacts
+            # view and the AI Chat turn that generates a report — go through
+            # this store, so the filename rule cannot diverge between them.
+            # Composed before any credentialed settings are read: reports need
+            # no provider, so a missing Gmail key must not take them offline.
+            app.state.report_store = FileSystemReportArtifactStore(REPORTS_DIR)
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
             outlook_settings: OutlookSettings | None = None
@@ -733,6 +744,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
     app.include_router(create_project_router())
+    app.include_router(create_report_router())
     # The evaluation API is internal-only and disabled by default; its routes
     # are mounted exclusively when explicitly enabled with a bearer token.
     evaluation_settings = EvaluationSettings.from_env()
@@ -1207,86 +1219,6 @@ def create_app() -> FastAPI:
         )
         response = await memory.retrieve(retrieval_request)
         return response.to_dict()
-
-    # ── Artifacts / Reports endpoints for chat-generated document display ──
-
-    REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
-    # EXTRACTED_DIR is module-level. A local copy here silently shadowed it for every
-    # closure in create_app, including the raw-document handlers further down.
-
-    @app.get("/api/v1/reports")
-    async def list_reports() -> list[dict[str, Any]]:
-        reports: list[dict[str, Any]] = []
-        if not REPORTS_DIR.exists():
-            return reports
-
-        for item in sorted(
-            REPORTS_DIR.iterdir(),
-            key=lambda p: p.stat().st_mtime if p.is_file() else 0,
-            reverse=True,
-        ):
-            if item.is_file() and not item.name.startswith("."):
-                try:
-                    stat = item.stat()
-                    content = item.read_text(encoding="utf-8", errors="replace")
-                    mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-                    reports.append(
-                        {
-                            "filename": item.name,
-                            "content": content,
-                            "size": stat.st_size,
-                            "updated_at": mtime,
-                        }
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to read report file %s: %s", item.name, exc)
-        return reports
-
-    @app.post("/api/v1/reports/open-folder")
-    async def open_reports_folder() -> dict[str, Any]:
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        folder_path = REPORTS_DIR.resolve()
-        try:
-            if hasattr(os, "startfile"):
-                os.startfile(str(folder_path))
-            elif sys.platform == "darwin":
-                import subprocess
-
-                subprocess.Popen(["open", str(folder_path)])
-            else:
-                import subprocess
-
-                subprocess.Popen(["xdg-open", str(folder_path)])
-            return {"status": "success", "path": str(folder_path)}
-        except Exception as exc:
-            logger.warning("Failed to open reports folder %s: %s", folder_path, exc)
-            raise HTTPException(status_code=500, detail=f"Không thể mở thư mục: {exc}") from exc
-
-    @app.post("/api/v1/reports")
-    async def save_report(body: SaveReportRequest) -> dict[str, Any]:
-        safe_name = Path(body.filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        target_path = REPORTS_DIR / safe_name
-        target_path.write_text(body.content, encoding="utf-8")
-        stat = target_path.stat()
-        return {
-            "filename": safe_name,
-            "content": body.content,
-            "size": stat.st_size,
-            "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
-        }
-
-    @app.delete("/api/v1/reports/{filename}")
-    async def delete_report(filename: str) -> dict[str, str]:
-        safe_name = Path(filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        target_path = REPORTS_DIR / safe_name
-        if target_path.is_file():
-            target_path.unlink()
-        return {"status": "success", "message": f"Deleted {safe_name}"}
 
     # ── Raw process documents (data/raw) endpoints for procedure viewer ──
     # RAW_DOCS_DIR / EXTRACTED_DIR are module-level so tests and handlers agree on

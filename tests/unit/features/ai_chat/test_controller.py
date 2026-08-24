@@ -43,6 +43,7 @@ from cowork_agent.features.ai_chat.memory_gateway import (
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 from cowork_agent.features.ai_chat.retrieval_policy import select_memory_reads
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.persistence.report_artifacts import InMemoryReportArtifactStore
 
 NOW = datetime(2026, 8, 10, 12, tzinfo=UTC)
 
@@ -281,6 +282,7 @@ def _controller(
     episodes: EpisodeWriter | None = None,
     semantic: SemanticReader | None = None,
     history: HistoryWriter | None = None,
+    reports: InMemoryReportArtifactStore | None = None,
 ) -> tuple[ChatController, InMemoryChatSessionBuffer]:
     ids = iter(f"id-{number}" for number in range(1, 30))
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
@@ -299,6 +301,10 @@ def _controller(
             new_id=lambda: next(ids),
             clock=lambda: NOW,
             history=history,
+            # Always a store, never the real folder: before this seam existed the
+            # controller wrote generated reports straight into the repository's
+            # tracked ``data/reports`` whenever this suite ran.
+            reports=reports if reports is not None else InMemoryReportArtifactStore(),
         ),
         buffer,
     )
@@ -1169,10 +1175,12 @@ def test_generated_report_artifact_is_saved_and_emitted_in_completed_event() -> 
         )
     )
     history = HistoryWriter()
+    store = InMemoryReportArtifactStore()
     controller, _ = _controller(
         reply=fake_reply,
         profile=ProfileReader(_profile()),
         history=history,
+        reports=store,
     )
 
     req = _request(user_message="tạo báo cáo từ tài liệu")
@@ -1184,9 +1192,75 @@ def test_generated_report_artifact_is_saved_and_emitted_in_completed_event() -> 
     prov = cast(dict[str, object], completed.artifact_refs[0]["provenance"])
     assert prov["title"] == "Báo cáo tổng hợp quy trình CCCD"
 
+    # The document reached the store, not just the event.
+    stored = asyncio.run(store.list_reports())
+    assert [item.filename.value for item in stored] == ["bao-cao-test-cccd.md"]
+    assert stored[0].content == report.content
+
     # Also verify turn in history
     assert len(history.updates) > 0
     persisted_turn = history.updates[-1][1]
     assert len(persisted_turn.artifact_refs) == 1
     assert persisted_turn.artifact_refs[0]["ref_id"] == "bao-cao-test-cccd.md"
+
+
+def test_a_traversing_provider_filename_is_confined_to_the_report_store() -> None:
+    """The model names this file. A hostile name degrades; it does not escape."""
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Đã tạo báo cáo.",
+                generated_report=GeneratedReportArtifact(
+                    filename="../../../../etc/cron.d/pwned",
+                    title="Báo cáo",
+                    content="payload",
+                ),
+            ),
+        )
+    )
+    store = InMemoryReportArtifactStore()
+    controller, _ = _controller(
+        reply=fake_reply, profile=ProfileReader(_profile()), reports=store
+    )
+
+    events = asyncio.run(_collect(controller, _request(user_message="tạo báo cáo")))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    ref_id = cast(str, completed.artifact_refs[0]["ref_id"])
+    assert ref_id == "pwned.md"
+    assert "/" not in ref_id and "\\" not in ref_id
+
+    stored = asyncio.run(store.list_reports())
+    assert [item.filename.value for item in stored] == ["pwned.md"]
+
+
+def test_a_failing_report_store_does_not_fail_the_turn() -> None:
+    """A report that cannot be written must not cost the user their answer."""
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    class BrokenStore(InMemoryReportArtifactStore):
+        async def save(self, artifact):  # type: ignore[override]
+            raise OSError("disk full")
+
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Đã tạo báo cáo.",
+                generated_report=GeneratedReportArtifact(
+                    filename="bao-cao.md", title="Báo cáo", content="noi dung"
+                ),
+            ),
+        )
+    )
+    controller, _ = _controller(
+        reply=fake_reply, profile=ProfileReader(_profile()), reports=BrokenStore()
+    )
+
+    events = asyncio.run(_collect(controller, _request(user_message="tạo báo cáo")))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    assert completed.artifact_refs == ()
+    assert not any(e.event_type is ChatEventType.ERROR for e in events)
 
