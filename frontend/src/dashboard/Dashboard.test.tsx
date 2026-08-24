@@ -165,7 +165,7 @@ describe('Dashboard Project chat', () => {
       return undefined;
     }));
     render(<Dashboard />);
-    fireEvent.click((await screen.findAllByText('Default Project'))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand Default Project' }));
     fireEvent.click((await screen.findAllByText('Chat 1'))[0]);
     expect(await screen.findByText('Saved question')).toBeTruthy();
     expect(screen.getByText('Saved answer')).toBeTruthy();

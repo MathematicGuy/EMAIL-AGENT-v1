@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { Taskbar } from './Taskbar';
@@ -151,5 +151,52 @@ describe('Taskbar', () => {
 
     deleteButton.click();
     expect(onDeleteProject).toHaveBeenCalledWith(customProject);
+  });
+
+  it('clicking project button starts a new chat and switches to chat view without toggling expand state', () => {
+    const onSelectProject = vi.fn();
+    const onNewChatInProject = vi.fn();
+    const onChangeView = vi.fn();
+    const project = {
+      id: 'project-custom',
+      name: 'Beta Project',
+      isDefault: false,
+      createdAt: '2026-01-01T00:00:00Z',
+    };
+    const chat = {
+      id: 'chat-1',
+      title: 'Project Chat 1',
+      projectId: 'project-custom',
+    } as RecentChat;
+
+    render(
+      <Taskbar
+        {...baseProps}
+        sidebarState="expanded"
+        projects={[project]}
+        recentChats={[chat]}
+        initialExpandedProjectIds={[]}
+        onSelectProject={onSelectProject}
+        onNewChatInProject={onNewChatInProject}
+        onChangeView={onChangeView}
+      />,
+    );
+
+    // Initial state: not expanded, chat should not be visible
+    expect(screen.queryByText('Project Chat 1')).toBeNull();
+
+    // Click project button
+    const projectButton = screen.getByText('Beta Project').closest('button')!;
+    fireEvent.click(projectButton);
+
+    expect(onNewChatInProject).toHaveBeenCalledWith('project-custom');
+
+    // Should NOT have expanded the project dropdown on project click
+    expect(screen.queryByText('Project Chat 1')).toBeNull();
+
+    // Clicking chevron explicitly DOES expand
+    const chevronButton = screen.getByRole('button', { name: 'Expand Beta Project' });
+    fireEvent.click(chevronButton);
+    expect(screen.getByText('Project Chat 1')).toBeTruthy();
   });
 });

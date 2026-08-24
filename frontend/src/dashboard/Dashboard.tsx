@@ -98,6 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
+    resetChat();
     setActiveView('chat');
   };
 

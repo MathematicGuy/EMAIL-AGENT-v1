@@ -130,7 +130,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   initialExpandedProjectIds,
 }) => {
   void isHistoryLoading;
-  void onNewChatInProject;
+  void onSelectProject;
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
     () => new Set(initialExpandedProjectIds ?? [])
   );
@@ -338,15 +338,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                       {isProjectExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                     </button>
                     <button
-                      onClick={() => {
-                        onSelectProject(project.id);
-                        setExpandedProjects((current) => {
-                          const next = new Set(current);
-                          if (isProjectExpanded) next.delete(project.id);
-                          else next.add(project.id);
-                          return next;
-                        });
-                      }}
+                      onClick={() => onNewChatInProject(project.id)}
                       className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-xs font-medium cursor-pointer"
                     >
                       <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: project.color || '#d97757' }} fill="currentColor" />
