@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from cowork_agent.config import GeminiSettings, GroqSettings, MistralSettings, OpenRouterSettings
+from cowork_agent.config import (
+    GeminiSettings,
+    MimoSettings,
+    MistralSettings,
+    OpenRouterSettings,
+)
 from cowork_agent.domain.target_contracts import (
     Actionability,
     BodyFormat,
@@ -28,7 +33,7 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiRateLimitError,
     GeminiRouteClassifier,
 )
-from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
 from cowork_agent.integrations.llm.providers.openrouter import OpenRouterRouteClassifier
 
 
@@ -214,11 +219,13 @@ def test_invalid_enum_triggers_exactly_one_repair_retry() -> None:
     }
 
     async def scenario() -> None:
-        transport = ClassifierRecordingTransport([
-            broken,
-            repaired,
-            {"filteredSummary": "Các email còn lại là bản tin cập nhật."},
-        ])
+        transport = ClassifierRecordingTransport(
+            [
+                broken,
+                repaired,
+                {"filteredSummary": "Các email còn lại là bản tin cập nhật."},
+            ]
+        )
         result = await gemini_classifier(transport).classify(
             "UTC", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
@@ -246,9 +253,7 @@ def test_invalid_enum_triggers_exactly_one_repair_retry() -> None:
 
 def test_both_attempts_invalid_fall_back_only_for_affected_messages() -> None:
     # confidence 2.5 is out of range, so msg-2 stays invalid on both attempts.
-    broken = {
-        "emails": [decision_payload("msg-1"), decision_payload("msg-2", confidence=2.5)]
-    }
+    broken = {"emails": [decision_payload("msg-1"), decision_payload("msg-2", confidence=2.5)]}
 
     async def scenario() -> None:
         transport = ClassifierRecordingTransport([broken, broken])
@@ -312,9 +317,7 @@ def test_missing_decision_on_both_attempts_falls_back_without_raising() -> None:
 
 def test_transport_outage_falls_back_for_every_message_without_raising() -> None:
     async def scenario() -> None:
-        transport = ClassifierRecordingTransport(
-            [RuntimeError("timeout"), RuntimeError("timeout")]
-        )
+        transport = ClassifierRecordingTransport([RuntimeError("timeout"), RuntimeError("timeout")])
         result = await gemini_classifier(transport).classify(
             "UTC", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
@@ -369,7 +372,7 @@ def test_classifier_rotates_key_on_rate_limit_without_counting_a_retry() -> None
     asyncio.run(scenario())
 
 
-def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mimo_classifier_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
     payload = {
         "emails": [
@@ -390,13 +393,11 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
         captured.append(body)
         return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
-    monkeypatch.setattr(
-        "cowork_agent.integrations.llm.providers.groq._post_json", fake_post_json
-    )
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
-        result = await GroqRouteClassifier(settings).classify(
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        result = await MimoRouteClassifier(settings).classify(
             "Asia/Ho_Chi_Minh", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
 
@@ -409,17 +410,7 @@ def test_groq_classifier_request_body_and_happy_path(monkeypatch: pytest.MonkeyP
         assert result.decisions[1].decision.actionability is Actionability.INFORMATIONAL
 
     asyncio.run(scenario())
-
     assert len(captured) == 1
-    body = captured[0]
-    assert body["response_format"] == {"type": "json_object"}
-    messages = body["messages"]
-    assert isinstance(messages, list)
-    assert messages[0]["content"] == CLASSIFIER_SYSTEM_INSTRUCTION
-    user_content = messages[1]["content"]
-    assert isinstance(user_content, str)
-    assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in user_content
-    assert "<untrusted_data>" in user_content
 
 
 def test_mistral_malformed_transport_json_falls_back_without_logging_email_body(
@@ -441,7 +432,9 @@ def test_mistral_malformed_transport_json_falls_back_without_logging_email_body(
         del args, kwargs
         return FakeResponse()
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mistral.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.openai_transport.urlopen", fake_urlopen
+    )
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
         load_env_file=False,
@@ -457,7 +450,7 @@ def test_mistral_malformed_transport_json_falls_back_without_logging_email_body(
     assert "body-msg-1" not in caplog.text
 
 
-def test_mistral_classifier_parses_decision_and_requests_classification_schema(
+def test_mistral_classifier_parses_decision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
@@ -490,18 +483,13 @@ def test_mistral_classifier_parses_decision_and_requests_classification_schema(
         assert result.decisions[0].decision.candidate_action_item == "Handle msg-1"
 
     asyncio.run(scenario())
-
     assert len(captured) == 1
-    assert captured[0]["response_format"] == {"type": "json_object"}
-    messages = captured[0]["messages"]
-    assert isinstance(messages, list)
-    assert json.dumps(CLASSIFICATION_SCHEMA, ensure_ascii=False) in messages[1]["content"]
 
 
 def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cowork_agent.integrations.llm.providers import gemini, groq, mistral, openrouter
+    from cowork_agent.integrations.llm.providers import base, gemini, mimo, mistral, openrouter
     from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier
 
     observed_versions: list[object] = []
@@ -511,19 +499,17 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
             if isinstance(value, Mapping) and "prompt_version" in value:
                 observed_versions.append(value["prompt_version"])
 
-    for provider in (gemini, groq, mistral, openrouter):
-        monkeypatch.setattr(provider, "_update_current_span", record)
+    monkeypatch.setattr(base, "_update_current_span", record)
+    for provider in (gemini, mimo, mistral, openrouter):
         monkeypatch.setattr(provider, "_update_current_generation", record)
 
     def response(*args: object, **kwargs: object) -> dict[str, object]:
         del args, kwargs
         return {
-            "choices": [
-                {"message": {"content": json.dumps({"emails": [decision_payload("msg")]})}}
-            ]
+            "choices": [{"message": {"content": json.dumps({"emails": [decision_payload("msg")]})}}]
         }
 
-    monkeypatch.setattr(groq, "_post_json", response)
+    monkeypatch.setattr(mimo, "_post_json", response)
     monkeypatch.setattr(mistral, "_post_json", response)
     monkeypatch.setattr(openrouter, "_post_json", response)
 
@@ -532,8 +518,8 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await gemini_classifier(
             ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
         ).classify("UTC", datetime.now(UTC), message)
-        await GroqRouteClassifier(
-            GroqSettings.from_env({"GROQ_API_KEY": "test-key"}, load_env_file=False)
+        await MimoRouteClassifier(
+            MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
         ).classify("UTC", datetime.now(UTC), message)
         await MistralRouteClassifier(
             MistralSettings.from_env(

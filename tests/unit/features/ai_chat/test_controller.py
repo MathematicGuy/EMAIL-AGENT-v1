@@ -6,9 +6,13 @@ from datetime import UTC, datetime
 import pytest
 
 from cowork_agent.domain.chat_contracts import (
+    ChatActivityCode,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
+    ChatMessageStreamEvent,
     ChatTurn,
     DeclarativeProfile,
     MemoryNamespace,
@@ -20,6 +24,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatReplyUnavailable,
+    ChatResponseInvalid,
     ChatScopeMismatch,
     ChatSessionAccessDenied,
     InMemoryChatSessionRegistry,
@@ -64,6 +69,22 @@ class ProfileReader:
         return existed
 
 
+class ActivityInspectingProfile(ProfileReader):
+    def __init__(self, history: "HistoryWriter") -> None:
+        super().__init__(_profile())
+        self.history = history
+        self.activity_status_during_read: ChatActivityStatus | None = None
+
+    async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
+        latest = self.history.updates[-1][1]
+        self.activity_status_during_read = next(
+            item.status
+            for item in latest.activities
+            if item.code is ChatActivityCode.REVIEWING_CONTEXT
+        )
+        return await super().read_profile(namespace)
+
+
 class FakeReply:
     def __init__(
         self, chunks: tuple[str | ChatReplyChunk, ...] = ("Hello", " there")
@@ -88,9 +109,24 @@ class BrokenReply:
         yield  # pragma: no cover - keeps this method an async iterator
 
 
+class InvalidResponseReply:
+    async def stream_reply(
+        self, request: ChatMessageRequest, context: GenerationContext
+    ) -> AsyncIterator[str]:
+        del request, context
+        raise ChatResponseInvalid("chat response failed validation")
+        yield  # pragma: no cover - keeps this method an async iterator
+
+
 class EpisodeWriter:
     def __init__(self) -> None:
         self.writes: list[TaskEpisode] = []
+
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        # A task-creation turn now reads episodic memory so a revision can name
+        # the episode it replaces; this double has nothing stored to return.
+        del namespace, query
+        return ()
 
     async def write_task_episode(
         self, namespace: object, episode: TaskEpisode, *, expires_at: object
@@ -271,6 +307,16 @@ async def _collect(controller: ChatController, request: ChatMessageRequest):
     return [event async for event in controller.stream_message(request)]
 
 
+def _without_activity(
+    events: list[ChatMessageStreamEvent],
+) -> list[ChatMessageStreamEvent]:
+    return [
+        event
+        for event in events
+        if getattr(event, "event_type", None) is not ChatEventType.ACTIVITY
+    ]
+
+
 def test_controller_streams_deltas_then_completed_and_records_one_complete_turn() -> None:
     reply = FakeReply()
     profile = ProfileReader(_profile())
@@ -279,7 +325,7 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     events = asyncio.run(_collect(controller, _request()))
     context = reply.calls[0][1]
 
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.DELTA,
@@ -303,6 +349,101 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     assert len(profile.reads) == 1
 
 
+def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply(("Answer",)), profile=ProfileReader(_profile()), history=history
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+    snapshots = [event.activities for event in events if event.event_type is ChatEventType.ACTIVITY]
+
+    assert [activity.code for activity in snapshots[-1]] == [
+        ChatActivityCode.UNDERSTANDING_REQUEST,
+        ChatActivityCode.REVIEWING_CONTEXT,
+        ChatActivityCode.PREPARING_RESPONSE,
+    ]
+    assert all(
+        activity.status is ChatActivityStatus.COMPLETED for activity in snapshots[-1]
+    )
+    assert history.updates[-1][1].activities == snapshots[-1]
+    assert history.updates[-1][1].completed_at == NOW
+
+
+def test_controller_marks_context_review_running_before_memory_read() -> None:
+    history = HistoryWriter()
+    profile = ActivityInspectingProfile(history)
+    controller, _ = _controller(
+        reply=FakeReply(("Answer",)), profile=profile, history=history
+    )
+
+    asyncio.run(_collect(controller, _request()))
+
+    assert profile.activity_status_during_read is ChatActivityStatus.RUNNING
+
+
+def test_controller_reports_retrieval_result_as_a_safe_aggregate() -> None:
+    semantic = SemanticReader(
+        {
+            "source_label": "current_company_evidence",
+            "retrieval_status": "no_results",
+            "chunks": (),
+            "citations": (),
+            "scores": (),
+        }
+    )
+    controller, _ = _controller(
+        reply=FakeReply(("Answer",)),
+        profile=ProfileReader(_profile()),
+        semantic=semantic,
+    )
+
+    events = asyncio.run(
+        _collect(controller, _request(user_message="What does company policy say?"))
+    )
+    final_snapshot = next(
+        event.activities
+        for event in reversed(events)
+        if event.event_type is ChatEventType.ACTIVITY
+    )
+    search = next(
+        item
+        for item in final_snapshot
+        if item.code is ChatActivityCode.SEARCHING_RELEVANT_INFORMATION
+    )
+
+    assert search.outcome is ChatActivityOutcome.NO_RESULTS
+    assert search.detail is not None
+    assert search.detail.to_dict() == {
+        "kind": "documents_found",
+        "current": 0,
+        "total": None,
+    }
+    assert "provider" not in str(search.to_dict()).lower()
+
+
+def test_controller_persists_partial_activity_history_when_generation_fails() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=BrokenReply(), profile=ProfileReader(_profile()), history=history
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+    terminal = next(
+        event.activities
+        for event in reversed(events)
+        if event.event_type is ChatEventType.ACTIVITY
+    )
+
+    assert [item.status for item in terminal] == [
+        ChatActivityStatus.COMPLETED,
+        ChatActivityStatus.COMPLETED,
+        ChatActivityStatus.FAILED,
+    ]
+    assert history.updates[-1][1].status.value == "failed"
+    assert history.updates[-1][1].completed_at == NOW
+
+
 def test_controller_persists_completed_turn_with_the_llm_generated_conversation_title() -> None:
     history = HistoryWriter()
     controller, _ = _controller(
@@ -320,8 +461,7 @@ def test_controller_persists_completed_turn_with_the_llm_generated_conversation_
     assert pending.status.value == "generating"
     assert idempotency_key == "idem-1"
     assert temporary_title == "Help me plan today."
-    assert len(history.updates) == 1
-    scope, turn, title = history.updates[0]
+    scope, turn, title = history.updates[-1]
     assert scope == _scope()
     assert turn.assistant_message == "Reply"
     assert turn.turn_id == pending.turn_id
@@ -354,12 +494,11 @@ def test_controller_marks_the_durable_turn_failed_when_the_provider_is_unavailab
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
         ChatEventType.STARTED,
         ChatEventType.ERROR,
     ]
-    assert len(history.updates) == 1
-    failed = history.updates[0][1]
+    failed = history.updates[-1][1]
     assert failed.turn_id == history.begins[0][1].turn_id
     assert failed.user_message == "Help me plan today."
     assert failed.assistant_message is None
@@ -415,7 +554,7 @@ def test_controller_persists_and_completes_with_ranked_company_rag_evidence() ->
             scope=_scope(), memory_type=MemoryType.SHORT_TERM, record_id="session-1", source_id=None
         )
     )[0]
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
@@ -531,16 +670,30 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     assert written.action_plan == ("Draft the report", "Send it for review")
     assert written.record_id
     assert "Please create" not in written.record_id
-    assert [event.event_type for event in task_events] == [
+    visible_task_events = _without_activity(task_events)
+    assert [event.event_type for event in visible_task_events] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,
         ChatEventType.COMPLETED,
     ]
-    assert task_events[2].source_id == written.episode_id
-    assert task_events[3].proposal is not None
-    assert task_events[3].proposal["episode_id"] == written.episode_id
+    assert visible_task_events[2].source_id == written.episode_id
+    assert visible_task_events[3].proposal is not None
+    assert visible_task_events[3].proposal["episode_id"] == written.episode_id
+    proposal_index = next(
+        index
+        for index, event in enumerate(task_events)
+        if event.event_type is ChatEventType.TASK_PROPOSAL
+    )
+    completed_activity_index = next(
+        index
+        for index, event in enumerate(task_events)
+        if event.event_type is ChatEventType.ACTIVITY
+        and event.activities[-1].code is ChatActivityCode.PREPARING_ACTION_PLAN
+        and event.activities[-1].status is ChatActivityStatus.COMPLETED
+    )
+    assert completed_activity_index > proposal_index
 
 
 @pytest.mark.parametrize(
@@ -569,14 +722,15 @@ def test_controller_emits_a_safe_degraded_warning_and_continues_without_profile(
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
         ChatEventType.STARTED,
         ChatEventType.ERROR,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
-    assert events[1].code == "optional_memory_degraded"
-    assert events[1].safe_message == "Một phần bộ nhớ tùy chọn hiện không khả dụng."
+    assert visible_events[1].code == "optional_memory_degraded"
+    assert visible_events[1].safe_message == "Một phần bộ nhớ tùy chọn hiện không khả dụng."
     assert reply.calls[0][1].stored_preference is None
 
 
@@ -605,6 +759,8 @@ def test_disconnect_after_a_delta_does_not_append_a_partial_turn() -> None:
         started = await anext(stream)
         assert started.event_type is ChatEventType.STARTED
         first = await anext(stream)
+        while first.event_type is ChatEventType.ACTIVITY:
+            first = await anext(stream)
         assert first.event_type is ChatEventType.DELTA
         disconnected = True
         assert [event async for event in stream] == []
@@ -694,7 +850,7 @@ def test_completed_event_is_not_emitted_when_durable_completion_fails() -> None:
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.ERROR,
@@ -717,12 +873,13 @@ def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() ->
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
         ChatEventType.STARTED,
         ChatEventType.ERROR,
     ]
-    assert events[1].code == "chat_provider_unavailable"
-    assert "sensitive" not in events[1].safe_message
+    assert visible_events[1].code == "chat_provider_unavailable"
+    assert "sensitive" not in visible_events[1].safe_message
     assert buffer.read(
         MemoryNamespace(
             scope=_scope(),
@@ -765,12 +922,13 @@ def test_durable_completed_idempotent_request_replays_without_calling_the_provid
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
-    assert events[1].text == "Previously completed answer"
+    assert visible_events[1].text == "Previously completed answer"
     assert reply.calls == []
     assert history.updates == []
 
@@ -800,13 +958,22 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     retry = asyncio.run(_collect(controller, request))
     replay = asyncio.run(_collect(controller, request))
 
-    assert [event.event_type for event in first] == [
+    first_terminal_activity = next(
+        event.activities[-1]
+        for event in reversed(first)
+        if event.event_type is ChatEventType.ACTIVITY
+    )
+    assert first_terminal_activity.code is ChatActivityCode.PREPARING_ACTION_PLAN
+    assert first_terminal_activity.status is ChatActivityStatus.COMPLETED
+    assert first_terminal_activity.outcome is ChatActivityOutcome.DEGRADED
+
+    assert [event.event_type for event in _without_activity(first)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.ERROR,
         ChatEventType.COMPLETED,
     ]
-    assert [event.event_type for event in retry] == [
+    assert [event.event_type for event in _without_activity(retry)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
@@ -912,7 +1079,7 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
         user_message="Tạo task các bước nộp hồ sơ xin cấp lại CCCD",
     )
     task_events = asyncio.run(_collect(controller, task_request))
-    assert [e.event_type for e in task_events] == [
+    assert [e.event_type for e in _without_activity(task_events)] == [
         ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
@@ -934,3 +1101,20 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
     assert approved_episode.validation_status is ValidationStatus.USER_APPROVED
     assert approved_episode.retrieval_eligible is True
 
+
+
+def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
+    """The memory evaluation counted these as dropouts and aborted runs over them."""
+
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=InvalidResponseReply(),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert events[-1].code == "chat_response_invalid"
+    assert history.updates[-1][1].error_code == "chat_response_invalid"
+    assert "validation" not in events[-1].safe_message

@@ -57,6 +57,43 @@ export interface ChatMessage {
   /** Reused when retrying the same logical turn. */
   idempotencyKey?: string;
   turnId?: string;
+  activities?: ChatActivity[];
+  completedAt?: string;
+}
+
+export type ChatActivityCode =
+  | 'understanding_request'
+  | 'searching_relevant_information'
+  | 'reviewing_context'
+  | 'preparing_response'
+  | 'preparing_action_plan'
+  | 'checking_mail'
+  | 'processing_email'
+  | 'preparing_mail_results';
+
+export type ChatActivityStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped';
+
+export type ChatActivityOutcome = 'success' | 'no_results' | 'partial' | 'degraded';
+
+export interface ChatActivityDetail {
+  kind: 'documents_found' | 'emails_processed' | 'action_items_prepared';
+  current: number;
+  total?: number;
+}
+
+export interface ChatActivity {
+  code: ChatActivityCode;
+  status: ChatActivityStatus;
+  outcome?: ChatActivityOutcome;
+  startedAt?: string;
+  completedAt?: string;
+  detail?: ChatActivityDetail;
 }
 
 export type ChatGenerationStatus =

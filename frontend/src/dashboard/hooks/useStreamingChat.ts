@@ -20,6 +20,10 @@ import {
 import type { StepView, TaskDetail } from '../../modules/work-intake/types';
 import type {
   ChatCitation,
+  ChatActivity,
+  ChatActivityCode,
+  ChatActivityOutcome,
+  ChatActivityStatus,
   ChatComposerAttachment,
   ChatGenerationStatus,
   ChatMessage,
@@ -50,6 +54,8 @@ interface ChatTurn {
   status?: string;
   idempotency_key?: string;
   error_code?: string;
+  activities?: unknown;
+  completed_at?: string;
 }
 
 interface SseEvent {
@@ -72,6 +78,8 @@ interface SseEvent {
   idempotency_key?: string;
   turn_id?: string;
   error_code?: string;
+  activities?: unknown;
+  completed_at?: string;
 }
 
 interface ChatRuntime {
@@ -91,6 +99,17 @@ const MAIL_UNREAD_QUERY = 'is:unread in:inbox category:primary';
 const MAIL_SCAN_MAX_EMAILS = 10;
 const MAIL_POLL_INTERVAL_MS = 1_500;
 const MAIL_TERMINAL_STATUSES = new Set(['succeeded', 'partial', 'failed']);
+const ACTIVITY_CODES = new Set<ChatActivityCode>([
+  'understanding_request', 'searching_relevant_information', 'reviewing_context',
+  'preparing_response', 'preparing_action_plan', 'checking_mail', 'processing_email',
+  'preparing_mail_results',
+]);
+const ACTIVITY_STATUSES = new Set<ChatActivityStatus>([
+  'pending', 'running', 'completed', 'failed', 'cancelled', 'skipped',
+]);
+const ACTIVITY_OUTCOMES = new Set<ChatActivityOutcome>([
+  'success', 'no_results', 'partial', 'degraded',
+]);
 
 export function validateAttachmentFile(file: File): string | null {
   if (file.size > MAX_ATTACHMENT_BYTES) return `${file.name} exceeds the 25 MiB limit.`;
@@ -149,6 +168,74 @@ function mailScanFromPayload(value: unknown): MailScanProgress | undefined {
       ? scan.action_items_count as number
       : undefined,
   };
+}
+
+function mailActivities(scan: MailScanProgress, previous: ChatActivity[] = []): ChatActivity[] {
+  const now = new Date().toISOString();
+  const old = new Map(previous.map((item) => [item.code, item]));
+  const activity = (
+    code: ChatActivityCode,
+    status: ChatActivityStatus,
+    outcome?: ChatActivityOutcome,
+    detail?: ChatActivity['detail'],
+  ): ChatActivity => {
+    const prior = old.get(code);
+    return {
+      code,
+      status,
+      outcome,
+      detail,
+      startedAt: prior?.startedAt ?? (status === 'running' || status === 'completed' ? now : undefined),
+      completedAt: prior?.completedAt ?? (status === 'completed' || status === 'failed' ? now : undefined),
+    };
+  };
+  const processingDetail = {
+    kind: 'emails_processed' as const, current: scan.emailsProcessed, total: scan.emailsToProcess,
+  };
+  if (scan.status === 'connecting') {
+    return [
+      activity('checking_mail', 'running'),
+      activity('processing_email', 'pending'),
+      activity('preparing_mail_results', 'pending'),
+    ];
+  }
+  if (scan.status === 'queued' || scan.status === 'running') {
+    return [
+      activity('checking_mail', 'completed', 'success'),
+      activity('processing_email', 'running', undefined, processingDetail),
+      activity('preparing_mail_results', 'pending'),
+    ];
+  }
+  const failed = scan.status === 'failed';
+  return [
+    activity('checking_mail', 'completed', 'success'),
+    activity('processing_email', failed ? 'failed' : 'completed',
+      failed ? undefined : scan.status === 'partial' ? 'partial' : 'success', processingDetail),
+    activity('preparing_mail_results', failed ? 'skipped' : 'completed',
+      failed ? undefined : scan.status === 'partial' ? 'partial' : 'success', {
+        kind: 'action_items_prepared', current: scan.actionItemsCount ?? 0, total: scan.actionItemsCount ?? 0,
+      }),
+  ];
+}
+
+function activityWire(activities: ChatActivity[]): Array<Record<string, unknown>> {
+  return activities.map((item) => ({
+    code: item.code,
+    status: item.status,
+    ...(item.outcome ? { outcome: item.outcome } : {}),
+    ...(item.detail ? { detail: item.detail } : {}),
+  }));
+}
+
+function stopActivities(
+  activities: ChatActivity[] | undefined,
+  status: 'failed' | 'cancelled',
+): ChatActivity[] | undefined {
+  if (!activities?.length) return activities;
+  const now = new Date().toISOString();
+  return activities.map((item) => item.status === 'running'
+    ? { ...item, status, completedAt: item.completedAt ?? now }
+    : item.status === 'pending' ? { ...item, status: 'skipped' } : item);
 }
 
 function waitForMailPoll(signal: AbortSignal): Promise<void> {
@@ -220,6 +307,48 @@ function generationStatus(value: unknown): ChatGenerationStatus | undefined {
     : undefined;
 }
 
+export function activitiesFromPayload(value: unknown): ChatActivity[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<ChatActivityCode>();
+  return value.flatMap((item): ChatActivity[] => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    if (!ACTIVITY_CODES.has(raw.code as ChatActivityCode) ||
+        !ACTIVITY_STATUSES.has(raw.status as ChatActivityStatus) ||
+        seen.has(raw.code as ChatActivityCode)) return [];
+    const outcome = raw.outcome === null || raw.outcome === undefined
+      ? undefined
+      : ACTIVITY_OUTCOMES.has(raw.outcome as ChatActivityOutcome)
+        ? raw.outcome as ChatActivityOutcome
+        : undefined;
+    let detail: ChatActivity['detail'];
+    if (raw.detail && typeof raw.detail === 'object') {
+      const value = raw.detail as Record<string, unknown>;
+      if (['documents_found', 'emails_processed', 'action_items_prepared'].includes(value.kind as string) &&
+          Number.isInteger(value.current) &&
+          (value.total === null || value.total === undefined || Number.isInteger(value.total)) &&
+          (value.current as number) >= 0 &&
+          (value.total === null || value.total === undefined || (value.total as number) >= 0)) {
+        detail = {
+          kind: value.kind as NonNullable<ChatActivity['detail']>['kind'],
+          current: value.current as number,
+          total: typeof value.total === 'number' ? value.total : undefined,
+        };
+      }
+    }
+    const code = raw.code as ChatActivityCode;
+    seen.add(code);
+    return [{
+      code,
+      status: raw.status as ChatActivityStatus,
+      outcome,
+      startedAt: typeof raw.started_at === 'string' ? raw.started_at : undefined,
+      completedAt: typeof raw.completed_at === 'string' ? raw.completed_at : undefined,
+      detail,
+    }];
+  }).slice(0, 8);
+}
+
 function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
   return turns.flatMap((turn) => {
     const citations = (turn.citation_coordinates ?? [])
@@ -252,6 +381,8 @@ function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
         errorCode: turn.error_code,
         idempotencyKey: turn.idempotency_key,
         turnId: turn.turn_id,
+        activities: activitiesFromPayload(turn.activities),
+        completedAt: turn.completed_at,
       },
     ];
   });
@@ -425,6 +556,7 @@ export function useStreamingChat(
   const prefetchInFlightRef = useRef(new Set<string>());
   const attachmentPollsRef = useRef(new Map<string, AbortController>());
   const pendingProjectChatRef = useRef<{ projectId: string; sessionId: string } | null>(null);
+  const mailPersistQueueRef = useRef(new Map<string, Promise<void>>());
 
   const runtimeFor = useCallback((key: string): ChatRuntime => {
     const existing = runtimesRef.current.get(key);
@@ -663,6 +795,7 @@ export function useStreamingChat(
     assistantId: string,
     abort: AbortController,
     providers: MailProvider[],
+    onProgress?: (content: string, scan: MailScanProgress, activities: ChatActivity[]) => void,
   ): Promise<{ content: string; mailScan: MailScanProgress }> => {
     const updateAssistant = (
       content: string,
@@ -672,9 +805,17 @@ export function useStreamingChat(
       updateRuntime(sessionId, (current) => ({
         ...current,
         messages: current.messages.map((message) =>
-          message.id === assistantId ? { ...message, content, mailScan, isStreaming } : message
+          message.id === assistantId ? {
+            ...message,
+            content,
+            mailScan,
+            activities: mailActivities(mailScan, message.activities),
+            isStreaming,
+          } : message
         ),
       }));
+      const currentMessage = runtimeFor(sessionId).messages.find((message) => message.id === assistantId);
+      onProgress?.(content, mailScan, mailActivities(mailScan, currentMessage?.activities));
     };
     interface ProviderOutcome {
       provider: MailProvider;
@@ -798,7 +939,7 @@ export function useStreamingChat(
           return {
             provider,
             content: [
-              `${resultLabel}: đã quét ${run.progress.emailsProcessed} email và tạo ${finalCount} action item.`,
+              `${resultLabel}: đã quét ${run.progress.emailsProcessed} email và tạo ${finalCount} công việc.`,
               run.progress.filteredSummary?.trim(),
             ].filter(Boolean).join(' '),
             progress: { ...progress, actionItemsCount: finalCount },
@@ -823,15 +964,20 @@ export function useStreamingChat(
     const content = outcomes.map((outcome) => `${label(outcome.provider)}: ${outcome.content}`).join('\n');
     updateAssistant(content, mailScan, false);
     return { content, mailScan };
-  }, [updateRuntime]);
+  }, [runtimeFor, updateRuntime]);
 
   const persistMailScanTurn = useCallback(async (
     sessionId: string,
     turnId: string,
     userMessage: string,
-    assistantMessage: string,
+    assistantMessage: string | null,
     mailScan: MailScanProgress,
     signal: AbortSignal,
+    options?: {
+      idempotencyKey?: string;
+      turnStatus?: ChatGenerationStatus;
+      activities?: ChatActivity[];
+    },
   ) => {
     let targetSessionId = sessionId;
     let response = await fetch(
@@ -841,8 +987,10 @@ export function useStreamingChat(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           turn_id: turnId,
+          idempotency_key: options?.idempotencyKey,
           user_message: userMessage,
           assistant_message: assistantMessage,
+          turn_status: options?.turnStatus,
           mail_scan: {
             status: mailScan.status,
             emails_matched: mailScan.emailsMatched,
@@ -850,6 +998,7 @@ export function useStreamingChat(
             emails_to_process: mailScan.emailsToProcess,
             action_items_count: mailScan.actionItemsCount ?? null,
           },
+          activities: activityWire(options?.activities ?? []),
         }),
         signal,
       }
@@ -873,8 +1022,10 @@ export function useStreamingChat(
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 turn_id: turnId,
+                idempotency_key: options?.idempotencyKey,
                 user_message: userMessage,
                 assistant_message: assistantMessage,
+                turn_status: options?.turnStatus,
                 mail_scan: {
                   status: mailScan.status,
                   emails_matched: mailScan.emailsMatched,
@@ -882,6 +1033,7 @@ export function useStreamingChat(
                   emails_to_process: mailScan.emailsToProcess,
                   action_items_count: mailScan.actionItemsCount ?? null,
                 },
+                activities: activityWire(options?.activities ?? []),
               }),
               signal,
             }
@@ -893,8 +1045,23 @@ export function useStreamingChat(
     }
     if (!response.ok) {
       console.warn(`Could not save mail scan (HTTP ${response.status}).`);
+      return;
     }
-  }, [activateConversation, projectId]);
+    try {
+      const turn = await response.json() as ChatTurn;
+      const canonicalActivities = activitiesFromPayload(turn.activities);
+      updateRuntime(targetSessionId, (current) => ({ ...current,
+        messages: current.messages.map((message) => message.id === turnId ? {
+          ...message,
+          ...(canonicalActivities.length > 0 ? { activities: canonicalActivities } : {}),
+          completedAt: turn.completed_at ?? message.completedAt,
+          turnId: turn.turn_id ?? message.turnId,
+        } : message),
+      }));
+    } catch {
+      // Older compatible responses may not return the canonical turn body.
+    }
+  }, [activateConversation, projectId, updateRuntime]);
 
   const setChatStatus = useCallback((
     sessionId: string,
@@ -946,6 +1113,7 @@ export function useStreamingChat(
       return;
     }
     const now = Date.now();
+    const mailRequest = isMailCommand(text);
     const navigationEpoch = navigationEpochRef.current;
     let sessionId: string | null = originSessionId;
     const assistantId = retry?.assistantId ?? `assistant-${now}`;
@@ -964,6 +1132,9 @@ export function useStreamingChat(
           ? {
               ...message, content: '', isStreaming: true, generationStatus: 'generating' as const,
               errorCode: undefined, idempotencyKey,
+              activities: mailRequest
+                ? mailActivities({ status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0 })
+                : message.activities,
             }
           : message)
         : [...current.messages, userMessage, {
@@ -974,6 +1145,9 @@ export function useStreamingChat(
             isStreaming: true,
             generationStatus: 'generating' as const,
             idempotencyKey,
+            activities: mailRequest
+              ? mailActivities({ status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0 })
+              : undefined,
           }];
       return { ...current, messages, draft: '', status: 'generating' };
     });
@@ -1014,22 +1188,62 @@ export function useStreamingChat(
       }, ...current.filter((chat) => chat.id !== sessionId && chat.id !== originKey)]);
       abortRefs.current.set(sessionId, abort);
 
-      if (isMailCommand(text)) {
+      if (mailRequest) {
         mailSessionId = sessionId;
+        const queueKey = `${sessionId}:${assistantId}`;
+        let latestPersist = Promise.resolve();
+        let lastPersistSignature = '';
+        const persistProgress = (
+          content: string,
+          scan: MailScanProgress,
+          activities: ChatActivity[],
+        ) => {
+          const turnStatus: ChatGenerationStatus = MAIL_TERMINAL_STATUSES.has(scan.status)
+            ? scan.status === 'failed' ? 'failed' : 'completed'
+            : 'generating';
+          const signature = JSON.stringify({ scan, turnStatus, activities: activityWire(activities) });
+          if (signature === lastPersistSignature) return;
+          lastPersistSignature = signature;
+          const previous = mailPersistQueueRef.current.get(queueKey) ?? Promise.resolve();
+          latestPersist = previous.catch(() => undefined).then(() => persistMailScanTurn(
+            sessionId as string,
+            assistantId,
+            text,
+            turnStatus === 'generating' ? null : content,
+            scan,
+            abort.signal,
+            { idempotencyKey, turnStatus, activities },
+          ));
+          mailPersistQueueRef.current.set(queueKey, latestPersist);
+        };
+        const initialScan: MailScanProgress = {
+          status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0,
+        };
+        persistProgress('', initialScan, mailActivities(initialScan));
         const result = await runMailScan(
-          sessionId, assistantId, abort, mailCommandProviders(text)
+          sessionId, assistantId, abort, mailCommandProviders(text), persistProgress
         );
         try {
-          await persistMailScanTurn(
-            sessionId, assistantId, text, result.content, result.mailScan, abort.signal
-          );
+          await latestPersist;
         } catch (persistErr) {
           console.warn('Failed to persist mail scan turn to chat history:', persistErr);
+        } finally {
+          if (mailPersistQueueRef.current.get(queueKey) === latestPersist) {
+            mailPersistQueueRef.current.delete(queueKey);
+          }
         }
         setApiStatus('online');
         const completedInBackground = activeConversationRef.current !== sessionId;
-        setChatStatus(sessionId, 'completed', completedInBackground);
-        if (completedInBackground) window.dispatchEvent(new CustomEvent('chat-background-completed', {
+        const mailTurnStatus: ChatGenerationStatus = result.mailScan.status === 'failed'
+          ? 'failed'
+          : 'completed';
+        updateRuntime(sessionId, (current) => ({ ...current,
+          messages: current.messages.map((message) => message.id === assistantId
+            ? { ...message, generationStatus: mailTurnStatus, isStreaming: false }
+            : message),
+        }));
+        setChatStatus(sessionId, mailTurnStatus, completedInBackground && mailTurnStatus === 'completed');
+        if (completedInBackground && mailTurnStatus === 'completed') window.dispatchEvent(new CustomEvent('chat-background-completed', {
           detail: { sessionId, title: temporaryTitle },
         }));
         void refreshHistory();
@@ -1070,6 +1284,17 @@ export function useStreamingChat(
           updateRuntime(sessionId as string, (current) => ({ ...current,
             messages: current.messages.map((message) => message.id === assistantId
               ? { ...message, content: message.content + event.text }
+              : message),
+          }));
+        } else if (event.event_type === 'activity') {
+          const activities = activitiesFromPayload(event.activities);
+          updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId
+              ? {
+                  ...message,
+                  activities,
+                  completedAt: event.completed_at ?? message.completedAt,
+                }
               : message),
           }));
         } else if (event.event_type === 'memory_citation') {
@@ -1164,9 +1389,10 @@ export function useStreamingChat(
           updateRuntime(targetKey, (current) => ({ ...current, status: 'cancelled',
             messages: current.messages.map((message) => message.id === assistantId ? {
                 ...message,
-                content: [message.content, 'Chat cancelled.'].filter(Boolean).join('\n\n'),
+                content: [message.content, 'Đã hủy.'].filter(Boolean).join('\n\n'),
                 isStreaming: false,
                 generationStatus: 'cancelled',
+                activities: stopActivities(message.activities, 'cancelled'),
               }
               : message),
           }));
@@ -1174,6 +1400,38 @@ export function useStreamingChat(
           else setRecentChats((current) => current.map((chat) => chat.id === originKey
             ? { ...chat, generationStatus: 'cancelled' }
             : chat));
+        }
+        if (mailRequest && sessionId) {
+          const cancelledMessage = runtimeFor(sessionId).messages.find(
+            (message) => message.id === assistantId,
+          );
+          const cancelledScan = cancelledMessage?.mailScan ?? {
+            status: 'connecting' as const,
+            emailsMatched: 0,
+            emailsProcessed: 0,
+            emailsToProcess: 0,
+          };
+          const cancelledActivities = stopActivities(
+            cancelledMessage?.activities ?? mailActivities(cancelledScan),
+            'cancelled',
+          ) ?? [];
+          const queueKey = `${sessionId}:${assistantId}`;
+          const previous = mailPersistQueueRef.current.get(queueKey) ?? Promise.resolve();
+          const cancelledWrite = previous.catch(() => undefined).then(() => persistMailScanTurn(
+            sessionId as string,
+            assistantId,
+            text,
+            null,
+            cancelledScan,
+            new AbortController().signal,
+            { idempotencyKey, turnStatus: 'cancelled', activities: cancelledActivities },
+          ));
+          mailPersistQueueRef.current.set(queueKey, cancelledWrite);
+          void cancelledWrite.finally(() => {
+            if (mailPersistQueueRef.current.get(queueKey) === cancelledWrite) {
+              mailPersistQueueRef.current.delete(queueKey);
+            }
+          }).catch(() => undefined);
         }
       } else {
         const error = cause instanceof Error ? cause.message : 'Chat backend unavailable.';
@@ -1199,12 +1457,19 @@ export function useStreamingChat(
                 isStreaming: false,
                 mailScan: mailScan ?? message.mailScan,
                 generationStatus: status,
+                activities: failedMailScan
+                  ? mailActivities(mailScan as MailScanProgress, message.activities)
+                  : stopActivities(message.activities, 'failed'),
               }
             : message),
         }));
         if (failedMailScan && mailSessionId && mailScan) {
           void persistMailScanTurn(
-            mailSessionId, assistantId, text, error, mailScan, abort.signal
+            mailSessionId, assistantId, text, error, mailScan, abort.signal, {
+              idempotencyKey,
+              turnStatus: 'failed',
+              activities: mailActivities(mailScan),
+            }
           ).then(refreshHistory).catch(() => undefined);
         }
         if (sessionId) setChatStatus(sessionId, status);

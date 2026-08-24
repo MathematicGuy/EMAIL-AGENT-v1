@@ -58,6 +58,12 @@ class EpisodeStore:
         self.transitions: list[EpisodeTransition] = []
         self.deletes: list[str] = []
 
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        # A task-creation turn now reads episodic memory so a revision can name
+        # the episode it replaces; this double has nothing stored to return.
+        del namespace, query
+        return ()
+
     async def write_task_episode(
         self, namespace: object, episode: TaskEpisode, *, expires_at: object
     ) -> TaskEpisode:
@@ -283,13 +289,19 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         events = _events(response.text)
-        assert [event["event_type"] for event in events] == [
+        non_activity_events = [
+            event for event in events if event["event_type"] != "activity"
+        ]
+        assert [event["event_type"] for event in non_activity_events] == [
             "started",
             "error",
             "delta",
             "completed",
         ]
-        assert events[1]["code"] == "optional_memory_degraded"
+        assert non_activity_events[1]["code"] == "optional_memory_degraded"
+        activity_events = [event for event in events if event["event_type"] == "activity"]
+        assert activity_events
+        assert activity_events[-1]["activities"][-1]["status"] == "completed"
         assert all(event["session_id"] == "session-1" for event in events)
 
     asyncio.run(scenario())
@@ -532,7 +544,10 @@ def test_task_episode_controls_use_only_the_originating_session_and_gateway_life
             assert len(episodes.writes) == 1
             episode_id = episodes.writes[0].episode_id
             events = _events(created.text)
-            assert [event["event_type"] for event in events] == [
+            non_activity_events = [
+                event for event in events if event["event_type"] != "activity"
+            ]
+            assert [event["event_type"] for event in non_activity_events] == [
                 "started",
                 "error",
                 "delta",
@@ -540,8 +555,8 @@ def test_task_episode_controls_use_only_the_originating_session_and_gateway_life
                 "task_proposal",
                 "completed",
             ]
-            assert events[3]["source_id"] == episode_id
-            proposal = events[4]["proposal"]
+            assert non_activity_events[3]["source_id"] == episode_id
+            proposal = non_activity_events[4]["proposal"]
             assert proposal["episode_id"] == episode_id
             assert proposal["task_title"] == "Chat task"
             assert proposal["validation_status"] == "system_generated"
@@ -689,6 +704,215 @@ def test_mail_scan_turn_is_saved_without_calling_the_llm_and_reloads_with_its_ca
         assert app.state.chat_test_reply.calls == 0
         assert history.status_code == 200
         assert history.json()["turns"] == [saved.json()]
+
+    asyncio.run(scenario())
+
+
+def test_mail_scan_activity_lifecycle_is_server_stamped_and_reloads() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        base = {
+            "turn_id": "mail-turn-live",
+            "idempotency_key": "mail-idem-live",
+            "user_message": "@mail",
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            started = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "assistant_message": None,
+                    "turn_status": "generating",
+                    "mail_scan": {
+                        "status": "connecting",
+                        "emails_matched": 0,
+                        "emails_processed": 0,
+                        "emails_to_process": 0,
+                    },
+                    "activities": [
+                        {"code": "checking_mail", "status": "running"},
+                        {"code": "processing_email", "status": "pending"},
+                        {"code": "preparing_mail_results", "status": "pending"},
+                    ],
+                },
+            )
+            running = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "assistant_message": None,
+                    "turn_status": "generating",
+                    "mail_scan": {
+                        "status": "running",
+                        "emails_matched": 10,
+                        "emails_processed": 4,
+                        "emails_to_process": 10,
+                    },
+                    "activities": [
+                        {
+                            "code": "checking_mail",
+                            "status": "completed",
+                            "outcome": "success",
+                        },
+                        {
+                            "code": "processing_email",
+                            "status": "running",
+                            "detail": {
+                                "kind": "emails_processed",
+                                "current": 4,
+                                "total": 10,
+                            },
+                        },
+                        {"code": "preparing_mail_results", "status": "pending"},
+                    ],
+                },
+            )
+            completed = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "assistant_message": "Đã xử lý 10 email và chuẩn bị 3 công việc.",
+                    "turn_status": "completed",
+                    "mail_scan": {
+                        "status": "succeeded",
+                        "emails_matched": 10,
+                        "emails_processed": 10,
+                        "emails_to_process": 10,
+                        "action_items_count": 3,
+                    },
+                    "activities": [
+                        {
+                            "code": "checking_mail",
+                            "status": "completed",
+                            "outcome": "success",
+                        },
+                        {
+                            "code": "processing_email",
+                            "status": "completed",
+                            "outcome": "success",
+                            "detail": {
+                                "kind": "emails_processed",
+                                "current": 10,
+                                "total": 10,
+                            },
+                        },
+                        {
+                            "code": "preparing_mail_results",
+                            "status": "completed",
+                            "outcome": "success",
+                            "detail": {
+                                "kind": "action_items_prepared",
+                                "current": 3,
+                                "total": 3,
+                            },
+                        },
+                    ],
+                },
+            )
+            history = await client.get("/v1/cowork/chat/sessions/session-1/messages")
+
+        assert started.status_code == running.status_code == completed.status_code == 201
+        assert started.json()["status"] == "generating"
+        assert started.json()["activities"][0]["started_at"] is not None
+        assert running.json()["activities"][0]["started_at"] == started.json()["activities"][0][
+            "started_at"
+        ]
+        saved = completed.json()
+        assert saved["status"] == "completed"
+        assert saved["completed_at"] is not None
+        assert [item["status"] for item in saved["activities"]] == [
+            "completed",
+            "completed",
+            "completed",
+        ]
+        assert history.json()["turns"] == [saved]
+        assert app.state.chat_test_reply.calls == 0
+
+    asyncio.run(scenario())
+
+
+def test_mail_scan_failure_is_terminalized_and_cannot_regress() -> None:
+    async def scenario() -> None:
+        app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
+        base = {
+            "turn_id": "mail-turn-failed",
+            "idempotency_key": "mail-idem-failed",
+            "user_message": "@mail",
+            "activities": [
+                {"code": "checking_mail", "status": "running"},
+                {"code": "processing_email", "status": "pending"},
+                {"code": "preparing_mail_results", "status": "pending"},
+            ],
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
+        ) as client:
+            await client.post("/v1/cowork/chat/sessions")
+            started = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "turn_status": "generating",
+                    "mail_scan": {
+                        "status": "connecting",
+                        "emails_matched": 0,
+                        "emails_processed": 0,
+                        "emails_to_process": 0,
+                    },
+                },
+            )
+            failed = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "turn_status": "failed",
+                    "mail_scan": {
+                        "status": "failed",
+                        "emails_matched": 0,
+                        "emails_processed": 0,
+                        "emails_to_process": 0,
+                    },
+                },
+            )
+            replay = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "turn_status": "failed",
+                    "mail_scan": {
+                        "status": "failed",
+                        "emails_matched": 99,
+                        "emails_processed": 0,
+                        "emails_to_process": 0,
+                    },
+                },
+            )
+            regression = await client.post(
+                "/v1/cowork/chat/sessions/session-1/mail-scans",
+                json={
+                    **base,
+                    "turn_status": "generating",
+                    "mail_scan": {
+                        "status": "running",
+                        "emails_matched": 1,
+                        "emails_processed": 0,
+                        "emails_to_process": 1,
+                    },
+                },
+            )
+
+        assert started.status_code == failed.status_code == replay.status_code == 201
+        assert failed.json()["status"] == "failed"
+        assert [item["status"] for item in failed.json()["activities"]] == [
+            "failed",
+            "skipped",
+            "skipped",
+        ]
+        assert replay.json() == failed.json()
+        assert regression.status_code == 409
 
     asyncio.run(scenario())
 

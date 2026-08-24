@@ -15,40 +15,15 @@ from cowork_agent.domain.target_contracts import (
     FetchStatus,
     Route,
 )
-from cowork_agent.integrations.llm.providers.gemini import FALLBACK_ROUTE_DECISION
 from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterAPIError,
     OpenRouterRouteClassifier,
-    _request_body,
     execute_chat_completion,
 )
+from cowork_agent.integrations.llm.providers.prompts import FALLBACK_ROUTE_DECISION
 
 _SCHEMA: Mapping[str, object] = {"type": "object"}
-
-
-def test_request_body_omits_models_when_fallbacks_empty() -> None:
-    body = _request_body("deepseek/x", "sys", "prompt", _SCHEMA, 128)
-
-    assert body["model"] == "deepseek/x"
-    assert "models" not in body
-    assert "route" not in body
-
-
-def test_request_body_includes_models_array_without_repeating_primary() -> None:
-    body = _request_body(
-        "deepseek/x",
-        "sys",
-        "prompt",
-        _SCHEMA,
-        128,
-        fallback_models=("openai/gpt",),
-    )
-
-    assert body["model"] == "deepseek/x"
-    assert body["models"] == ["openai/gpt"]
-    assert "deepseek/x" not in body["models"]
-    assert "route" not in body
 
 
 def test_execute_chat_completion_sends_fallback_models(

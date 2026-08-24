@@ -247,7 +247,11 @@ def select_memory_reads(
     # The cue decides WHETHER to search; the content words decide FOR WHAT. The
     # whole message used to be both, and since the store ANDs every term of it,
     # no natural question could match anything at any threshold.
-    episodic_terms = episodic_search_text(query) if _contains_cue(query, _EPISODIC_CUES) else ""
+    # A task-creation request carries no episodic cue, and Concern D needs one:
+    # a revision can only declare which episode it replaces if the write turn is
+    # shown the episodes it might be replacing.
+    episodic_wanted = _contains_cue(query, _EPISODIC_CUES) or is_explicit_task_request(request)
+    episodic_terms = episodic_search_text(query) if episodic_wanted else ""
     episodic = (
         EpisodicMemoryQuery(
             query=episodic_terms,

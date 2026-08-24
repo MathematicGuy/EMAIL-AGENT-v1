@@ -98,6 +98,11 @@ Before writing a test, check if its invariant is already owned.
 | Postgres pre-flight safe fallback | `unit/test_pg_probe.py` | persistence modules |
 | Embedding key rotation pacing | `unit/integrations/rag/test_embeddings.py` | — |
 | OpenRouter fallback to Google Gemini | `unit/integrations/llm/test_last_resort.py` + `test_openrouter.py` | chat controllers |
+| Evaluation API recursive error/content redaction | `integration/api/test_evaluation_jobs_api.py` | job service, plug-ins, frontend |
+| Evaluation credential alias secrecy and exclusive lease lifecycle | `unit/features/batch_evaluation/test_credentials.py` + `unit/integrations/llm/test_evaluation_mistral.py` | API, runner, smoke CLI |
+| Evaluation SQLite shard isolation | `unit/features/batch_evaluation/plugins/test_memory_eval.py` | runner, API, scripts |
+| Memory baseline metadata privacy | `unit/scripts/test_evaluate_memory.py` | report builders and API |
+| Mistral key-independence smoke metadata and 429 gate | `unit/scripts/test_smoke_test_mistral_evaluation_keys.py` | provider/lease unit tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.
@@ -116,9 +121,17 @@ Before writing a test, check if its invariant is already owned.
 
 ---
 
-## 5. Verification & Fast Gates
+## 5. Verification & Pre-PR Gates
 
-Before submitting changes, run:
+Before submitting changes or opening a PR to `main`, run and pass the full CI + E2E gate suite:
+
 ```bash
-uv run pytest -q ; uv run ruff check . ; uv run mypy src
+# 1. Backend CI checks
+uv run ruff check . && uv run mypy src && uv run pytest -q
+
+# 2. Frontend CI checks
+cd frontend && pnpm lint && pnpm check-types && pnpm test && pnpm build
+
+# 3. Playwright E2E tests
+pnpm run test:e2e
 ```

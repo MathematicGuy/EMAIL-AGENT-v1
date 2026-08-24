@@ -4,7 +4,7 @@
 > **Map:** [CAPABILITY-MAP-ingestion-pipeline.md](../specs/CAPABILITY-MAP-ingestion-pipeline.md)
 > **Module id:** `document-loading`
 > **Created:** 2026-08-16
-> **Task list:** this file (implementation session). Not filed to Linear unless asked.
+> **Task list:** this file (implementation session).
 
 ## Overview
 

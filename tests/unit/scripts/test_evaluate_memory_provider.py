@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from scripts.evaluate_memory import _build_chat_reply, _default_provider
+from tests.unit.scripts.cli_harness import load_script, run_cli
 
 
 def _probe_set_file(tmp_path: Path) -> Path:
@@ -57,6 +58,13 @@ def test_openrouter_reports_its_own_model() -> None:
     assert model == "vendor/model-under-test"
 
 
+def test_mimo_reports_its_own_model() -> None:
+    environ = {"MIMO_API_KEY": "tp-mimo-test", "MIMO_MODEL": "mimo-v2.5-pro"}
+    _reply, provider, model = _build_chat_reply("mimo", environ)
+    assert provider == "mimo"
+    assert model == "mimo-v2.5-pro"
+
+
 def test_unknown_provider_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported"):
         _build_chat_reply("no-such-provider", {})
@@ -85,3 +93,28 @@ def test_selecting_a_provider_without_its_key_exits_one(
         ["--provider", "openrouter", "--probe-set", str(_probe_set_file(tmp_path))]
     )
     assert code == 1
+
+
+@pytest.mark.parametrize("provider", ("gemini", "openrouter", "mimo"))
+def test_non_mistral_parallel_workers_are_rejected_before_environment_probe(
+    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = load_script("evaluate_memory")
+    monkeypatch.setattr(
+        script,
+        "probe_environment",
+        lambda environ: (_ for _ in ()).throw(AssertionError("would spend")),
+    )
+
+    result = run_cli(
+        "evaluate_memory",
+        "--provider",
+        provider,
+        "--max-workers",
+        "2",
+        "--probe-set",
+        str(_probe_set_file(tmp_path)),
+    )
+
+    assert result.returncode == 2
+    assert "--max-workers is only supported for provider=mistral" in result.stderr

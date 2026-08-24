@@ -11,12 +11,13 @@
 
 The AI Chat Subsystem is a multi-turn assistant: it streams replies, reads four typed memory scopes through the Memory Gateway, and persists a chat-native `TaskEpisode` only after an explicit user task request ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)). User documents represent a secondary semantic **plane** (project-scoped), never merged with company RAG ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
 
-For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` records without storing raw email content.
+For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Each turn also owns a bounded, server-stamped user-facing activity snapshot that is streamed over SSE and stored with chat history. Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` plus the same safe activity metadata, without storing raw email content.
 
 ```mermaid
 flowchart TB
     CLIENT["Chat UI / API Client"] --> SSE["Chat API & SSE Stream<br/>(/v1/cowork/chat)"]
     SSE --> CHAT["Chat Controller"]
+    CHAT --> HISTORY[("Durable Turn History<br/>reply + user-facing activity")]
     CHAT --> CLS["Intent Classifier<br/>(ChatRoutingService)"]
     CLS --> CHAT
     CHAT <--> GATEWAY["Memory Gateway Facade<br/>(Policy & Namespace Enforcement)"]
@@ -43,8 +44,8 @@ flowchart TB
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **Chat API Router** | [`chat.py`](../../../src/cowork_agent/api/chat.py) | Exposes `/v1/cowork/chat/sessions`, `/messages` SSE, profile CRUD, mail scan recording, and TaskEpisode lifecycle (approve/complete/reject). |
-| **Chat Controller** | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) | Orchestrates one turn in-process: classify → optional user-doc retrieve → assemble → stream → persist. Writes a `TaskEpisode` only when `is_explicit_task_request` is true. |
+| **Chat API Router** | [`chat.py`](../../../src/cowork_agent/api/chat.py) | Exposes `/v1/cowork/chat/sessions`, `/messages` SSE, profile CRUD, aggregate mail-scan lifecycle recording, and TaskEpisode lifecycle (approve/complete/reject). |
+| **Chat Controller** | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) | Orchestrates one turn in-process: classify → optional user-doc retrieve → assemble → stream → persist. Emits bounded semantic activity snapshots at real workflow boundaries and writes a `TaskEpisode` only when `is_explicit_task_request` is true. |
 | **Memory Gateway** | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) | Fail-closed facade for tenant/session namespacing across the four memory types plus a retrieval-only user-document port. |
 | **Intent Classifier & Resolver** | [`service.py`](../../../src/cowork_agent/features/ai_chat/intent/service.py) & [`resolver.py`](../../../src/cowork_agent/features/ai_chat/intent/resolver.py) | Sole user-document routing authority (`ChatRoutingService`). Executes `CHAT` / `RAG` / `CLARIFY`. The precondition gate narrows `RAG` → `CHAT` when no ready documents exist in the project catalog. |
 | **Retrieval / Episode Policy** | [`retrieval_policy.py`](../../../src/cowork_agent/features/ai_chat/retrieval_policy.py) & [`episode_policy.py`](../../../src/cowork_agent/features/ai_chat/episode_policy.py) | Cue-gated company-RAG and episodic reads; TaskEpisode writes must be `system_generated` / `retrieval_eligible=false` / `explicit_user_task_request`. |
@@ -70,7 +71,8 @@ flowchart TB
 - **Company RAG in chat:** Aligned with TARGET §3. Consumer is the standalone Email Agent plus AI Chat behind `CHAT_COMPANY_RAG_ENABLED` (env default `false`).
 - **User-document gating:** Aligned with [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md). Hierarchy is `tenant → user → project → documents + sessions`. Classifier is the sole route origin; the readiness gate only narrows. Feature flags `USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED` default true.
 - **User-document store:** Aligned with [ADR-008](../../../tasks/adr/ADR-008-turbovec-project-document-plane.md). Postgres or SQLite chunks ([`sqlite_project_document_chunks.py`](../../../src/cowork_agent/persistence/repositories/sqlite_project_document_chunks.py)) plus per-project `.tvim` ([`project_index.py`](../../../src/cowork_agent/integrations/rag/project_index.py)); no silent company-index fallback.
-- **Email Capability Integration:** Standalone Email Agent runs independently for email action planning. AI Chat persists aggregate mail scan results (`MailScanSummary` via `/sessions/{session_id}/mail-scans`), keeping chat memory free of raw email bodies or attachment contents.
+- **User-facing progress:** Durable activity uses stable semantic codes and aggregate counts only. Vietnamese labels are owned by the React presentation layer; provider/component names and model reasoning never enter the public activity contract.
+- **Email Capability Integration:** Standalone Email Agent runs independently for email action planning. The React client maps its existing poll results into the shared activity view and AI Chat history persists aggregate mail scan results (`MailScanSummary` via `/sessions/{session_id}/mail-scans`), keeping raw email bodies and attachment contents out of chat history and memory.
 - **OCR on the user-document plane:** Aligned with TARGET §3.4. Pages needing OCR fail closed as `ocr_unavailable`; mixed-PDF native pages are not indexed alone. `document-health` reports `ocr: optional_unavailable`.
 - **Local fallback:** With `POSTGRES_MODE=off`, chat sessions, history, profile memory, task episodic memory, projects, document jobs, and document chunks persist in SQLite. The bounded working-memory buffer stays in-process.
 

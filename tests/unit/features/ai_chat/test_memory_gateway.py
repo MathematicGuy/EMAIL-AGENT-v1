@@ -115,10 +115,15 @@ def _profile() -> DeclarativeProfile:
 
 
 def _episode(
-    *, episode_id: str, status: ValidationStatus, session_id: str = "session-1"
+    *,
+    episode_id: str,
+    status: ValidationStatus,
+    session_id: str = "session-1",
+    supersedes: str | None = None,
 ) -> TaskEpisode:
     return TaskEpisode(
         episode_id=episode_id,
+        supersedes=supersedes,
         record_id=episode_id,
         user_id="user@example.com",
         chat_session_id=session_id,
@@ -365,6 +370,22 @@ def test_gateway_fails_closed_on_lifecycle_and_truncates_an_overreturn() -> None
     assert response.degraded_sources == ()
     assert episodes.calls[0][1] == _request(_scope()).reads.episodic
     assert semantic.calls[0][1] == _request(_scope()).reads.semantic
+
+
+def test_gateway_drops_an_episode_superseded_by_a_newer_one() -> None:
+    """Concern D: a corrected task must not ship its own superseded ancestor."""
+    original = _episode(episode_id="original", status=ValidationStatus.USER_APPROVED)
+    revision = _episode(
+        episode_id="revision",
+        status=ValidationStatus.USER_APPROVED,
+        supersedes="original",
+    )
+    episodes = EpisodeReader((revision, original))
+    gateway = _gateway(episode_reader=episodes)
+
+    response = asyncio.run(gateway.read_context(_request(_scope())))
+
+    assert response.episodes == (revision,)
 
 
 @pytest.mark.parametrize(

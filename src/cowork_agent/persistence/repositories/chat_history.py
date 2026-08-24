@@ -35,9 +35,11 @@ class PostgresChatHistoryRepository:
                 INSERT INTO chat_turns (
                     session_id, turn_id, user_message, assistant_message,
                     citation_coordinates, rag_evidence, retrieval_status, mail_scan,
-                    created_at, status, idempotency_key, error_code
+                    created_at, status, idempotency_key, error_code, activities,
+                    completed_at
                 )
-                SELECT sessions.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                SELECT sessions.id, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       %s, %s
                 FROM chat_sessions AS sessions
                 WHERE sessions.id = %s
                   AND sessions.workspace_id = %s
@@ -46,7 +48,7 @@ class PostgresChatHistoryRepository:
                 SET idempotency_key = EXCLUDED.idempotency_key
                 RETURNING turn_id, session_id, user_message, assistant_message, created_at,
                           citation_coordinates, rag_evidence, retrieval_status, mail_scan,
-                          status, idempotency_key, error_code
+                          status, idempotency_key, error_code, activities, completed_at
                 """,
                 (
                     turn.turn_id,
@@ -60,6 +62,8 @@ class PostgresChatHistoryRepository:
                     turn.status,
                     idempotency_key,
                     turn.error_code,
+                    Jsonb([item.to_dict() for item in turn.activities]),
+                    turn.completed_at,
                     scope.session_id,
                     scope.tenant_id,
                     scope.user_id,
@@ -95,7 +99,9 @@ class PostgresChatHistoryRepository:
                     retrieval_status = %s,
                     mail_scan = %s,
                     status = %s,
-                    error_code = %s
+                    error_code = %s,
+                    activities = %s,
+                    completed_at = %s
                 FROM chat_sessions AS sessions
                 WHERE turns.session_id = sessions.id
                   AND turns.session_id = %s
@@ -106,7 +112,8 @@ class PostgresChatHistoryRepository:
                           turns.assistant_message, turns.created_at,
                           turns.citation_coordinates, turns.rag_evidence,
                           turns.retrieval_status, turns.mail_scan, turns.status,
-                          turns.idempotency_key, turns.error_code
+                          turns.idempotency_key, turns.error_code, turns.activities,
+                          turns.completed_at
                 """,
                 (
                     turn.assistant_message,
@@ -116,6 +123,8 @@ class PostgresChatHistoryRepository:
                     Jsonb(turn.mail_scan.to_dict()) if turn.mail_scan is not None else None,
                     turn.status,
                     turn.error_code,
+                    Jsonb([item.to_dict() for item in turn.activities]),
+                    turn.completed_at,
                     scope.session_id,
                     turn.turn_id,
                     scope.tenant_id,
@@ -159,7 +168,8 @@ class PostgresChatHistoryRepository:
                    turns.assistant_message, turns.created_at,
                    turns.citation_coordinates, turns.rag_evidence,
                    turns.retrieval_status, turns.mail_scan, turns.status,
-                   turns.idempotency_key, turns.error_code
+                   turns.idempotency_key, turns.error_code, turns.activities,
+                   turns.completed_at
             FROM chat_turns AS turns
             JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
             WHERE turns.session_id = %s
@@ -240,7 +250,8 @@ class PostgresChatHistoryRepository:
                        turns.assistant_message, turns.created_at,
                        turns.citation_coordinates, turns.rag_evidence,
                        turns.retrieval_status, turns.mail_scan, turns.status,
-                       turns.idempotency_key, turns.error_code
+                       turns.idempotency_key, turns.error_code, turns.activities,
+                       turns.completed_at
                 FROM chat_turns AS turns
                 JOIN chat_sessions AS sessions ON sessions.id = turns.session_id
                 WHERE turns.session_id = ANY(%s)
@@ -258,6 +269,7 @@ class PostgresChatHistoryRepository:
 def _turn_from_row(row: Sequence[object]) -> ChatTurn:
     citations = cast(list[object], row[5])
     evidence = cast(list[object], row[6])
+    activities = cast(list[object], row[12])
     return ChatTurn.from_dict(
         {
             "turn_id": str(row[0]),
@@ -272,6 +284,10 @@ def _turn_from_row(row: Sequence[object]) -> ChatTurn:
             "status": str(row[9]),
             "idempotency_key": str(row[10]),
             "error_code": None if row[11] is None else str(row[11]),
+            "activities": activities,
+            "completed_at": (
+                None if row[13] is None else cast(datetime, row[13]).isoformat()
+            ),
         }
     )
 

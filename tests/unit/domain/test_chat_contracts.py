@@ -29,6 +29,11 @@ from cowork_agent.domain.chat_contracts import (
     MAX_TASK_RAG_CITATIONS,
     MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
     MAX_TASK_TITLE_LENGTH,
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityDetail,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
@@ -55,8 +60,11 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryRead,
     TaskEpisode,
     stream_event_from_dict,
+    transition_activity_snapshot,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
+
+ACTIVITY_NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 
 
 def _namespace(*, record_id: str | None = "record-1") -> MemoryNamespace:
@@ -100,6 +108,18 @@ def _episode() -> TaskEpisode:
         prompt_version=None,
         confidence=0.87,
     )
+
+
+def test_task_episode_round_trips_a_supersedes_link_and_rejects_a_self_reference() -> None:
+    """Concern D: the link is what lets retrieval retire a corrected episode."""
+    revision = replace(_episode(), episode_id="episode-2", supersedes="episode-1")
+
+    assert revision.to_dict()["supersedes"] == "episode-1"
+    assert TaskEpisode.from_dict(revision.to_dict()) == revision
+    assert _episode().supersedes is None
+
+    with pytest.raises(ValueError, match="supersedes must not reference the episode itself"):
+        replace(_episode(), supersedes="episode-1")
 
 
 def _task_proposal_payload() -> dict[str, object]:
@@ -1204,6 +1224,91 @@ def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively(
 ) -> None:
     with pytest.raises(ValueError, match="raw email"):
         TaskEpisode.from_dict(payload)
+
+
+def test_chat_activity_snapshot_round_trips_through_turn_and_stream_event() -> None:
+    started = ChatActivity.pending(ChatActivityCode.UNDERSTANDING_REQUEST).transition(
+        ChatActivityStatus.RUNNING, at=ACTIVITY_NOW
+    )
+    activities = transition_activity_snapshot(
+        (started,),
+        ChatActivityCode.UNDERSTANDING_REQUEST,
+        ChatActivityStatus.COMPLETED,
+        at=ACTIVITY_NOW,
+        outcome=ChatActivityOutcome.SUCCESS,
+        detail=ChatActivityDetail(kind="documents_found", current=3),
+    )
+    turn = ChatTurn(
+        turn_id="turn-activity",
+        session_id="session-1",
+        user_message="Find the policy",
+        assistant_message="Here it is",
+        created_at=ACTIVITY_NOW,
+        activities=activities,
+        completed_at=ACTIVITY_NOW,
+    )
+    event = ChatMessageStreamEvent.activity(
+        event_id="event-activity",
+        session_id="session-1",
+        turn_id="turn-activity",
+        activities=activities,
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert stream_event_from_dict(json.loads(json.dumps(event.to_dict()))) == event
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"kind": "provider_name", "current": 1},
+        {"kind": "documents_found", "current": -1},
+        {"kind": "documents_found", "current": 2, "total": 1},
+        {"kind": "documents_found", "current": 1, "label": "Hybrid Retriever"},
+        {"kind": "documents_found", "current": 1, "body": "raw email"},
+    ],
+)
+def test_chat_activity_detail_rejects_unbounded_or_developer_payloads(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        ChatActivityDetail.from_dict(payload)
+
+
+def test_chat_activity_enforces_unique_bounded_monotonic_snapshot() -> None:
+    pending = ChatActivity.pending(ChatActivityCode.REVIEWING_CONTEXT)
+    running = pending.transition(ChatActivityStatus.RUNNING, at=ACTIVITY_NOW)
+    completed = running.transition(
+        ChatActivityStatus.COMPLETED,
+        at=ACTIVITY_NOW,
+        outcome=ChatActivityOutcome.DEGRADED,
+    )
+    assert completed.started_at == ACTIVITY_NOW
+    assert completed.completed_at == ACTIVITY_NOW
+
+    with pytest.raises(ValueError, match="invalid activity transition"):
+        completed.transition(ChatActivityStatus.RUNNING, at=ACTIVITY_NOW)
+    with pytest.raises(ValueError, match="unique"):
+        ChatTurn(
+            turn_id="turn-duplicate",
+            session_id="session-1",
+            user_message="Hello",
+            assistant_message=None,
+            created_at=ACTIVITY_NOW,
+            activities=(pending, pending),
+        )
+    with pytest.raises(ValueError, match="8 items"):
+        ChatTurn(
+            turn_id="turn-too-many",
+            session_id="session-1",
+            user_message="Hello",
+            assistant_message=None,
+            created_at=ACTIVITY_NOW,
+            activities=tuple(
+                ChatActivity.pending(code)
+                for code in (*tuple(ChatActivityCode), ChatActivityCode.UNDERSTANDING_REQUEST)
+            ),
+        )
 
 
 def test_contracts_are_frozen() -> None:

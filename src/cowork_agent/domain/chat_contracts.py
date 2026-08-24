@@ -1,5 +1,15 @@
 """Framework-free V2-M1 contracts for chat and the Memory Gateway boundary."""
 
+from ._chat_activity_contracts import (
+    MAX_CHAT_ACTIVITIES,
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityDetail,
+    ChatActivityOutcome,
+    ChatActivityStatus,
+    transition_activity_snapshot,
+    validate_chat_activities,
+)
 from ._chat_contracts_chat import (
     ChatMessageRequest,
     ChatMessageStreamEvent,
@@ -84,6 +94,12 @@ from .target_contracts import ValidationStatus
 
 __all__ = [
     "AI_CHAT_FEATURE",
+    "MAX_CHAT_ACTIVITIES",
+    "ChatActivity",
+    "ChatActivityCode",
+    "ChatActivityDetail",
+    "ChatActivityOutcome",
+    "ChatActivityStatus",
     "CHAT_CONTRACTS_VERSION",
     "MAX_CHAT_MESSAGE_LENGTH",
     "MAX_CHAT_RAG_EVIDENCE_ITEMS",
@@ -154,4 +170,6 @@ __all__ = [
     "deterministic_default_project_id",
     "stream_event_from_dict",
     "classifier_decision_from_dict",
+    "transition_activity_snapshot",
+    "validate_chat_activities",
 ]

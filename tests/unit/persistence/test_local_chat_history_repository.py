@@ -1,4 +1,6 @@
 import asyncio
+import json
+import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -6,6 +8,10 @@ from pathlib import Path
 import pytest
 
 from cowork_agent.domain.chat_contracts import (
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatMemoryScope,
     ChatTurn,
     ChatTurnStatus,
@@ -52,7 +58,21 @@ def test_local_chat_history_persists_idempotent_lifecycle_and_latest_turn() -> N
             )
         completed = await repository.update_turn(
             scope,
-            replace(begun, assistant_message="Done.", status=ChatTurnStatus.COMPLETED),
+            replace(
+                begun,
+                assistant_message="Done.",
+                status=ChatTurnStatus.COMPLETED,
+                activities=(
+                    ChatActivity(
+                        code=ChatActivityCode.UNDERSTANDING_REQUEST,
+                        status=ChatActivityStatus.COMPLETED,
+                        outcome=ChatActivityOutcome.SUCCESS,
+                        started_at=begun.created_at,
+                        completed_at=begun.created_at + timedelta(seconds=1),
+                    ),
+                ),
+                completed_at=begun.created_at + timedelta(seconds=1),
+            ),
             title="Generated title",
         )
         second = await repository.begin_turn(
@@ -122,7 +142,21 @@ def test_sqlite_chat_repository_survives_restart_with_history_and_memory(tmp_pat
         )
         completed = await repository.update_turn(
             scope,
-            replace(begun, assistant_message="Done.", status=ChatTurnStatus.COMPLETED),
+            replace(
+                begun,
+                assistant_message="Done.",
+                status=ChatTurnStatus.COMPLETED,
+                activities=(
+                    ChatActivity(
+                        code=ChatActivityCode.UNDERSTANDING_REQUEST,
+                        status=ChatActivityStatus.COMPLETED,
+                        outcome=ChatActivityOutcome.SUCCESS,
+                        started_at=now,
+                        completed_at=now + timedelta(seconds=1),
+                    ),
+                ),
+                completed_at=now + timedelta(seconds=1),
+            ),
         )
         profile_namespace = MemoryNamespace(
             scope=scope,
@@ -187,5 +221,51 @@ def test_sqlite_chat_repository_survives_restart_with_history_and_memory(tmp_pat
             )
             == ()
         )
+
+    asyncio.run(scenario())
+
+
+def test_sqlite_chat_repository_loads_turn_payload_from_before_activity_fields(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        path = tmp_path / "legacy-chat.db"
+        repository = SQLiteChatRepository(path)
+        await repository.initialize()
+        scope = await repository.create(user_id="owner")
+        turn = ChatTurn(
+            turn_id="turn-legacy",
+            session_id=scope.session_id,
+            user_message="Legacy prompt",
+            assistant_message="Legacy reply",
+            created_at=datetime(2026, 8, 18, 9, tzinfo=UTC),
+            idempotency_key="legacy-submission",
+        )
+        await repository.begin_turn(
+            scope,
+            turn,
+            idempotency_key="legacy-submission",
+            title="Legacy prompt",
+        )
+
+        with sqlite3.connect(path) as database:
+            row = database.execute(
+                "SELECT payload FROM chat_turns WHERE turn_id = ?", (turn.turn_id,)
+            ).fetchone()
+            assert row is not None
+            payload = json.loads(str(row[0]))
+            payload.pop("activities")
+            payload.pop("completed_at")
+            database.execute(
+                "UPDATE chat_turns SET payload = ? WHERE turn_id = ?",
+                (json.dumps(payload), turn.turn_id),
+            )
+
+        restarted = SQLiteChatRepository(path)
+        await restarted.initialize()
+
+        stored = await restarted.list_turns(scope)
+        assert stored[0].activities == ()
+        assert stored[0].completed_at is None
 
     asyncio.run(scenario())

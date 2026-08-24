@@ -76,6 +76,8 @@ class InMemoryChatHistoryRepository:
             mail_scan=turn.mail_scan,
             status=turn.status,
             error_code=turn.error_code,
+            activities=turn.activities,
+            completed_at=turn.completed_at,
         )
         self._turns[key] = stored
         if title is not None:

@@ -568,7 +568,7 @@ class PostgresTaskEpisodeRepository:
                 INSERT INTO task_episodes ({_TASK_EPISODE_WRITE_COLUMNS})
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (tenant_id, user_id, feature, chat_session_id, record_id)
                 DO UPDATE SET
@@ -594,6 +594,9 @@ class PostgresTaskEpisodeRepository:
                     project_id = CASE WHEN task_episodes.validation_status = 'system_generated'
                         AND excluded.updated_at >= task_episodes.updated_at
                         THEN excluded.project_id ELSE task_episodes.project_id END,
+                    supersedes = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.supersedes ELSE task_episodes.supersedes END,
                     expires_at = CASE
                     WHEN task_episodes.validation_status = 'system_generated'
                     AND excluded.updated_at >= task_episodes.updated_at
@@ -841,13 +844,14 @@ _TASK_EPISODE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, retrieval_eligible, source_type, created_at,"
-    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence, project_id"
+    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence, project_id,"
+    " supersedes"
 )
 _TASK_EPISODE_WRITE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, source_type, created_at, updated_at, expires_at,"
-    " pipeline_version, model_id, prompt_version, confidence, project_id"
+    " pipeline_version, model_id, prompt_version, confidence, project_id, supersedes"
 )
 
 
@@ -940,6 +944,7 @@ def _task_episode_params(
         episode.prompt_version,
         episode.confidence,
         episode.project_id,
+        episode.supersedes,
     )
 
 
@@ -969,6 +974,7 @@ def _task_episode_from_row(row: Sequence[object]) -> TaskEpisode:
         prompt_version=None if row[21] is None else str(row[21]),
         confidence=None if row[22] is None else float(cast(float, row[22])),
         project_id=None if row[23] is None else str(row[23]),
+        supersedes=None if row[24] is None else str(row[24]),
     )
 
 

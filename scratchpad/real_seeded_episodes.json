@@ -1,0 +1,129 @@
+[
+  {
+    "action_plan": [
+      "Xác nhận danh sách nhân viên cần gia hạn CCCD tại văn phòng Đà Nẵng",
+      "Thu thập hồ sơ cá nhân (CCCD cũ, giấy tờ tùy thân, ảnh thẻ)",
+      "Lên lịch hẹn với cơ quan chức năng tại Đà Nẵng",
+      "Nộp hồ sơ và theo dõi tiến độ gia hạn",
+      "Cập nhật kết quả vào hệ thống quản lý nhân sự"
+    ],
+    "chat_session_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full-seed",
+    "chat_turn_id": "79290c2f-2e2c-44e5-902e-b71ab5a7209d",
+    "confidence": 0.9,
+    "created_at": "2026-08-23T01:57:27.159864+00:00",
+    "creation_reason": "explicit_user_task_request",
+    "episode_id": "fb36ff10-8951-4563-bd25-897d7ab2f5c5",
+    "minimal_request_paraphrase": "Tạo tác vụ gia hạn CCCD cho văn phòng Đà Nẵng",
+    "missing_information": [
+      "Danh sách nhân viên cần gia hạn CCCD",
+      "Thời hạn gia hạn mong muốn",
+      "Người phụ trách tác vụ"
+    ],
+    "model_id": "mistral-medium-3-5",
+    "pipeline_version": "v2-m4",
+    "project_id": "default-project",
+    "prompt_version": null,
+    "rag_citations": [],
+    "record_id": "36f414ae6c85324ab6e752bc5e85377eb8d876ed74fad1e069db763f4321026e",
+    "retrieval_eligible": true,
+    "source_type": "system_generated_chat_task",
+    "supersedes": null,
+    "task_title": "Gia hạn CCCD cho văn phòng Đà Nẵng",
+    "updated_at": "2026-08-23T01:57:27.169076+00:00",
+    "user_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full",
+    "validation_status": "user_approved"
+  },
+  {
+    "action_plan": [
+      "Chuẩn bị hồ sơ cấp lại hộ chiếu theo quy định",
+      "Xác nhận ngày nộp hồ sơ: 5 tháng 9",
+      "Giao nhiệm vụ cho anh Phạm Quốc Huy phụ trách",
+      "Theo dõi tiến độ và thông báo kết quả sau khi nộp"
+    ],
+    "chat_session_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full-seed",
+    "chat_turn_id": "41a542c6-7355-48b6-bafd-d83aa40ff444",
+    "confidence": 0.95,
+    "created_at": "2026-08-23T01:57:30.737001+00:00",
+    "creation_reason": "explicit_user_task_request",
+    "episode_id": "9ce18fa7-8226-4376-b2e0-25bce84e8b00",
+    "minimal_request_paraphrase": "Tạo tác vụ cấp lại hộ chiếu cho văn phòng Cần Thơ, nộp hồ sơ ngày 5 tháng 9, giao cho anh Phạm Quốc Huy.",
+    "missing_information": [
+      "Danh sách giấy tờ cần thiết cho thủ tục cấp lại hộ chiếu",
+      "Thời gian xử lý dự kiến sau khi nộp hồ sơ"
+    ],
+    "model_id": "mistral-medium-3-5",
+    "pipeline_version": "v2-m4",
+    "project_id": "default-project",
+    "prompt_version": null,
+    "rag_citations": [],
+    "record_id": "08825c90a41f74cf53e097dd648ca42c0eb98121024a3ec5c0d289c29749e54a",
+    "retrieval_eligible": true,
+    "source_type": "system_generated_chat_task",
+    "supersedes": null,
+    "task_title": "Cấp lại hộ chiếu cho văn phòng Cần Thơ",
+    "updated_at": "2026-08-23T01:57:30.742646+00:00",
+    "user_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full",
+    "validation_status": "user_approved"
+  },
+  {
+    "action_plan": [
+      "Cập nhật ngày nộp hồ sơ hộ chiếu từ 5 tháng 9 sang 12 tháng 9",
+      "Thông báo cho anh Phạm Quốc Huy về thay đổi lịch trình",
+      "Xác nhận lại tiến độ và điều chỉnh kế hoạch theo dõi"
+    ],
+    "chat_session_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full-seed",
+    "chat_turn_id": "b727ae0b-6457-40f3-9d78-ec2fe93e8c08",
+    "confidence": 1.0,
+    "created_at": "2026-08-23T01:57:33.141279+00:00",
+    "creation_reason": "explicit_user_task_request",
+    "episode_id": "55696469-6e41-4b14-840c-6bc61c6d9196",
+    "minimal_request_paraphrase": "Dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9",
+    "missing_information": [],
+    "model_id": "mistral-medium-3-5",
+    "pipeline_version": "v2-m4",
+    "project_id": "default-project",
+    "prompt_version": null,
+    "rag_citations": [],
+    "record_id": "2fc457da9142c38d873274c348fdae43a45c7214c1748110c84de5d93e89c799",
+    "retrieval_eligible": true,
+    "source_type": "system_generated_chat_task",
+    "supersedes": "9ce18fa7-8226-4376-b2e0-25bce84e8b00",
+    "task_title": "Dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9",
+    "updated_at": "2026-08-23T01:57:33.147961+00:00",
+    "user_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full",
+    "validation_status": "user_approved"
+  },
+  {
+    "action_plan": [
+      "Xác nhận danh sách nhân viên cần gia hạn CCCD tại văn phòng Hải Phòng",
+      "Thu thập hồ sơ cá nhân (CCCD cũ, giấy tờ tùy thân, ảnh thẻ)",
+      "Lên lịch hẹn với cơ quan chức năng tại Hải Phòng",
+      "Nộp hồ sơ và theo dõi tiến độ gia hạn",
+      "Cập nhật kết quả vào hệ thống quản lý nhân sự"
+    ],
+    "chat_session_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full-seed",
+    "chat_turn_id": "23beb2a9-642c-4523-aed8-5476acb56548",
+    "confidence": 0.95,
+    "created_at": "2026-08-23T01:57:35.877709+00:00",
+    "creation_reason": "explicit_user_task_request",
+    "episode_id": "8680084a-a752-408b-a4c1-3481e2feb29a",
+    "minimal_request_paraphrase": "Tạo tác vụ gia hạn CCCD cho văn phòng Hải Phòng",
+    "missing_information": [
+      "Ngày cụ thể nộp hồ sơ",
+      "Người phụ trách tác vụ"
+    ],
+    "model_id": "mistral-medium-3-5",
+    "pipeline_version": "v2-m4",
+    "project_id": "default-project",
+    "prompt_version": null,
+    "rag_citations": [],
+    "record_id": "009a879871f0b8d338f7f3277a6473717dcaaa4f4ea8e85b9e8f763ddb1e4100",
+    "retrieval_eligible": true,
+    "source_type": "system_generated_chat_task",
+    "supersedes": null,
+    "task_title": "Gia hạn CCCD cho văn phòng Hải Phòng",
+    "updated_at": "2026-08-23T01:57:35.884723+00:00",
+    "user_id": "memeval-d3e488f2d4bb-f863a9aa-ep_update_r01-full",
+    "validation_status": "user_approved"
+  }
+]

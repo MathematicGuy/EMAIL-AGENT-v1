@@ -437,8 +437,8 @@ def test_result_has_explicit_empty_state_message() -> None:
 
 def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
     class PublicClassifierError(RuntimeError):
-        error_code = "GROQ_API_ERROR"
-        safe_message = "Groq từ chối yêu cầu (HTTP 400)."
+        error_code = "MIMO_API_ERROR"
+        safe_message = "Mimo từ chối yêu cầu (HTTP 400)."
 
     class FailingClassifier:
         async def classify(self, *args: object) -> ClassificationResult:
@@ -464,8 +464,8 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.FAILED
-        assert completed.error_code == "GROQ_API_ERROR"
-        assert completed.error_message_safe == "Groq từ chối yêu cầu (HTTP 400)."
+        assert completed.error_code == "MIMO_API_ERROR"
+        assert completed.error_message_safe == "Mimo từ chối yêu cầu (HTTP 400)."
         assert "private diagnostic" not in completed.error_message_safe
 
     asyncio.run(scenario())

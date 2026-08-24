@@ -151,7 +151,10 @@ Same ids. Difficulty is crowded neighbours, not new rows.
    real seeded name into “người nhận”.
 2. **Episodic ranking is same-shape.** v2 CCCD vs hộ chiếu is an easy retrieve.
    v3 adds a second **gia hạn CCCD** (Hải Phòng, no assignee). `ep_recall_01`
-   can now return the wrong CCCD. Phạm Quốc Huy is assigned on the **passport**
+   can now return the wrong CCCD. Its original wording asked which office the
+   CCCD task was for and expected Đà Nẵng; both episodes score **1.000** on
+   that question, so no ranking could deliver it. The question now asks for the
+   **newest** CCCD task — parent §15.1 item 18. Phạm Quốc Huy is assigned on the **passport**
    episode, so naming him on a CCCD-assignee question is a cross-task
    near-miss — not a true recall. Putting the assignee on Hải Phòng CCCD was
    rejected: the restraint question does not name Đà Nẵng, and a true retrieve
@@ -283,7 +286,7 @@ buffer. Ranking must separate two CCCD episodes.
 
 | id | test | question | expects |
 |---|---|---|---|
-| `ep_recall_01` | recall | Tác vụ trước về gia hạn CCCD là cho văn phòng nào? | `Đà Nẵng`, `Da Nang` — Hải Phòng is a ranking miss |
+| `ep_recall_01` | recall | Tác vụ trước về gia hạn CCCD mới nhất là cho văn phòng nào? | `Hải Phòng`, `Hai Phong` — Đà Nẵng is a ranking miss. **Retired expectation**, see parent §15.1 item 18 |
 | `ep_recall_02` | recall | Tác vụ trước về cấp lại hộ chiếu là cho văn phòng nào? | `Cần Thơ`, `Can Tho` |
 | `ep_update_01` | update | Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào? | `12 tháng 9`, `12/9`; stale `5 tháng 9`, `5/9` |
 | `ep_restraint_01` | restraint | Số hồ sơ trên tác vụ trước về gia hạn CCCD là bao nhiêu? | refusal; `refusal_about`: `số hồ sơ`, `mã hồ sơ` |

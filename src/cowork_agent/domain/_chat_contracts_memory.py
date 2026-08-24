@@ -9,6 +9,7 @@ from enum import StrEnum
 from math import isfinite
 from typing import ClassVar, Literal, Self, cast
 
+from ._chat_activity_contracts import ChatActivity, validate_chat_activities
 from ._chat_contracts_common import (
     AI_CHAT_FEATURE,
     MAX_CHAT_SUMMARY_LENGTH,
@@ -649,6 +650,7 @@ class TaskEpisode:
     prompt_version: str | None
     confidence: float | None
     project_id: str | None = None
+    supersedes: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -740,6 +742,10 @@ class TaskEpisode:
             raise TypeError("confidence must be a number or None")
         if self.project_id is not None:
             _require_string(self.project_id, "project_id")
+        if self.supersedes is not None:
+            _require_string(self.supersedes, "supersedes")
+            if self.supersedes == self.episode_id:
+                raise ValueError("supersedes must not reference the episode itself")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -769,6 +775,7 @@ class TaskEpisode:
             "prompt_version",
             "confidence",
             "project_id",
+            "supersedes",
         }
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
@@ -834,6 +841,11 @@ class TaskEpisode:
             project_id=(
                 _require_string(data["project_id"], "project_id")
                 if data.get("project_id") is not None
+                else None
+            ),
+            supersedes=(
+                _require_string(data["supersedes"], "supersedes")
+                if data.get("supersedes") is not None
                 else None
             ),
         )
@@ -1008,6 +1020,8 @@ class ChatTurn:
     status: ChatTurnStatus = ChatTurnStatus.COMPLETED
     idempotency_key: str | None = None
     error_code: str | None = None
+    activities: tuple[ChatActivity, ...] = ()
+    completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -1046,6 +1060,12 @@ class ChatTurn:
             _require_string(self.idempotency_key, "idempotency_key")
         if self.error_code is not None:
             _require_string(self.error_code, "error_code")
+        object.__setattr__(self, "activities", validate_chat_activities(self.activities))
+        if self.completed_at is not None:
+            if self.completed_at.utcoffset() is None:
+                raise ValueError("completed_at must be timezone-aware")
+            if self.completed_at < self.created_at:
+                raise ValueError("completed_at must not precede created_at")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -1094,6 +1114,15 @@ class ChatTurn:
             error_code=(
                 _require_string(data["error_code"], "error_code")
                 if data.get("error_code") is not None
+                else None
+            ),
+            activities=tuple(
+                ChatActivity.from_dict(_as_mapping(item, "activity"))
+                for item in _as_sequence(data.get("activities", ()), "activities")
+            ),
+            completed_at=(
+                _as_datetime(data["completed_at"], "completed_at")
+                if data.get("completed_at") is not None
                 else None
             ),
         )

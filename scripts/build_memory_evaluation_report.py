@@ -124,8 +124,14 @@ def _is_anomaly_requiring_investigation(v: Mapping[str, Any]) -> bool:
     if verdict == "scope_earned_it" and full_res == "pass":
         return False
 
-    # Clean successful restraint passes:
-    if verdict == "scope_did_nothing" and test_type == "restraint" and full_res == "pass":
+    # Clean successful restraint passes. `restraint_held` is the verdict from
+    # report schema 2.2.0 on; baselines at 2.1.0 and earlier put the same rows
+    # under `scope_did_nothing`, so both are accepted here.
+    if (
+        verdict in ("restraint_held", "scope_did_nothing")
+        and test_type == "restraint"
+        and full_res == "pass"
+    ):
         return False
 
     return True
@@ -208,31 +214,55 @@ def diagnose_needs_reading_probe(
     has_refusal_phrase = any(marker in full_lower for marker in refusal_markers)
 
     if verdict == "dangerous" and test_type == "restraint":
-        if has_refusal_phrase:
+        # Scoring checks invented_any before refusal. A refusal substring in the
+        # full reply is wrap-invention when blind arms still refuse cleanly
+        # (invented, pass, pass) — the grader is right; adding patterns would
+        # swallow the near-miss. Concern A only if a blind arm also invented.
+        wrap_signature = (
+            full_outcome == "invented"
+            and ablated_outcome == "pass"
+            and control_outcome == "pass"
+        )
+        if wrap_signature:
             snippet = full_reply[:50].replace("\n", " ")
             return (
-                "🟡 `[Concern A - Bộ chấm điểm hiểu nhầm]`",
+                "🔴 `[Concern D - Wrap-invention / Prompt]`",
                 (
-                    "AI thực tế đã từ chối đúng nhưng bộ chấm điểm tự động chưa nhận diện được "
-                    "cách diễn đạt này."
+                    "AI từ chối rồi vẫn nêu thông tin lân cận (wrap-invention). "
+                    "Lỗi prompt, không phải bộ chấm điểm."
                 ),
                 (
-                    f"Phản hồi Full arm thực tế đã từ chối (\"{snippet}...\") nhưng mẫu từ chối "
-                    "chưa khớp với regex của bộ chấm điểm, dẫn đến bị tính nhầm là ảo giác. "
-                    "Cần bổ sung mẫu câu cho bộ chấm điểm."
+                    f"Full arm `invented` (\"{snippet}...\"); Ablated và Control `pass`. "
+                    "Cùng tín hiệu `prompt_fault`: bộ nhớ đã giao hàng, generation dùng nhầm. "
+                    "Không bổ sung mẫu từ chối cho grader. Siết prompt (refuse-means-stop) "
+                    f"trên vùng nhớ `{target_scope}`."
                 ),
             )
+        if not has_refusal_phrase:
+            return (
+                "🔴 `[Concern D - Tự bịa thông tin]`",
+                "AI tự ý bịa đặt thông tin khi gặp câu hỏi ngoài phạm vi dữ liệu thay vì từ chối.",
+                (
+                    f"Mô hình tự ý bịa đặt thông tin khi gặp câu hỏi kiểm thử từ chối (restraint) "
+                    f"trên vùng nhớ `{target_scope}` thay vì từ chối như kỳ vọng. Cần siết prompt "
+                    "hướng dẫn từ chối."
+                ),
+            )
+        snippet = full_reply[:50].replace("\n", " ")
         return (
-            "🔴 `[Concern D - Tự bịa thông tin]`",
-            "AI tự ý bịa đặt thông tin khi gặp câu hỏi ngoài phạm vi dữ liệu thay vì từ chối.",
+            "🟡 `[Concern A - Bộ chấm điểm hiểu nhầm]`",
             (
-                f"Mô hình tự ý bịa đặt thông tin khi gặp câu hỏi kiểm thử từ chối (restraint) "
-                f"trên vùng nhớ `{target_scope}` thay vì từ chối như kỳ vọng. Cần siết prompt "
-                "hướng dẫn từ chối."
+                "AI thực tế đã từ chối đúng nhưng bộ chấm điểm tự động chưa nhận diện được "
+                "cách diễn đạt này."
+            ),
+            (
+                f"Phản hồi Full arm thực tế đã từ chối (\"{snippet}...\") nhưng mẫu từ chối "
+                "chưa khớp với regex của bộ chấm điểm, dẫn đến bị tính nhầm là ảo giác. "
+                "Cần bổ sung mẫu câu cho bộ chấm điểm."
             ),
         )
 
-    if test_type == "restraint" and verdict == "scope_did_nothing":
+    if test_type == "restraint" and verdict in ("restraint_held", "scope_did_nothing"):
         return (
             "🟢 `[Từ chối an toàn - Đạt]`",
             "AI từ chối an toàn và chuẩn xác khi không có dữ liệu (không tự ý bịa đặt).",
@@ -322,6 +352,7 @@ def build_markdown_report(
     total_full_pass = sum(scope.get("pass", 0) for scope in per_scope.values())
     total_earned_it = sum(scope.get("earned_it", 0) for scope in per_scope.values())
     total_did_nothing = sum(scope.get("did_nothing", 0) for scope in per_scope.values())
+    total_restraint_held = sum(scope.get("restraint_held", 0) for scope in per_scope.values())
     total_unreadable = sum(scope.get("unreadable", 0) for scope in per_scope.values())
     total_dangerous = sum(scope.get("dangerous", 0) for scope in per_scope.values())
 
@@ -462,9 +493,10 @@ def build_markdown_report(
     lines.append("## 3. BẢNG ĐIỂM ĐỊNH LƯỢNG CHI TIẾT (SCORECARD BY SCOPE)\n")
     lines.append(
         "| Scope | Số Probe | Full Pass Rate | Scope Earned It $(P, F, F)$ | "
-        "Scope Did Nothing $(P, P, P)$ | Unreadable | Dangerous | Đánh giá Trạng thái |"
+        "Restraint Held $(P, P, P)$ | Scope Did Nothing $(P, P, P)$ | Unreadable | "
+        "Dangerous | Đánh giá Trạng thái |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
 
     for scope_name, scope_data in per_scope.items():
         cnt = scope_data.get("probes", 0)
@@ -472,17 +504,19 @@ def build_markdown_report(
         p_pct = (p_cnt / cnt * 100) if cnt > 0 else 0
         e_cnt = scope_data.get("earned_it", 0)
         d_cnt = scope_data.get("did_nothing", 0)
+        rh_cnt = scope_data.get("restraint_held", 0)
         u_cnt = scope_data.get("unreadable", 0)
         dang_cnt = scope_data.get("dangerous", 0)
         status_str = _scope_status_emoji(scope_data)
         lines.append(
             f"| **`{scope_name}`** | {cnt} | {p_cnt} / {cnt} ({p_pct:.0f}%) | "
-            f"{e_cnt} | {d_cnt} | {u_cnt} | {dang_cnt} | {status_str} |"
+            f"{e_cnt} | {rh_cnt} | {d_cnt} | {u_cnt} | {dang_cnt} | {status_str} |"
         )
 
     lines.append(
         f"| **TỔNG CỘNG** | **{probe_count}** | **{total_full_pass} / {probe_count} "
-        f"({pass_rate_pct:.1f}%)** | **{total_earned_it}** | **{total_did_nothing}** | "
+        f"({pass_rate_pct:.1f}%)** | **{total_earned_it}** | **{total_restraint_held}** | "
+        f"**{total_did_nothing}** | "
         f"**{total_unreadable}** | **{total_dangerous}** | **🟢 Đạt chuẩn cốt lõi** |\n"
     )
     lines.append("---\n")

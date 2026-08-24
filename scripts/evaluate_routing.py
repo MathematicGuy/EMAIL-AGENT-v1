@@ -107,14 +107,14 @@ def build_envelopes(cases):
 def build_live_classifier():
     """Return the configured Route Classifier, or None when keys are missing."""
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    from cowork_agent.config import GeminiSettings, GroqSettings
+    from cowork_agent.config import GeminiSettings, MimoSettings
 
     try:
-        if provider == "groq":
-            from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+        if provider == "mimo":
+            from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
 
-            settings = GroqSettings.from_env()
-            return GroqRouteClassifier(settings), provider, settings.model
+            settings = MimoSettings.from_env()
+            return MimoRouteClassifier(settings), provider, settings.model
         from cowork_agent.integrations.llm.providers.gemini import GeminiRouteClassifier
 
         settings = GeminiSettings.from_env()

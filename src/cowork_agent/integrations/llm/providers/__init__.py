@@ -1,11 +1,20 @@
 """Concrete LLM provider adapters."""
 
 from .gemini import GeminiActionPlanGenerator, GeminiRouteClassifier
-from .groq import GroqActionPlanGenerator, GroqRouteClassifier
+from .mimo import (
+    MimoActionPlanGenerator,
+    MimoAPIError,
+    MimoGatewayError,
+    MimoRateLimitError,
+    MimoRouteClassifier,
+)
 
 __all__ = [
     "GeminiActionPlanGenerator",
     "GeminiRouteClassifier",
-    "GroqActionPlanGenerator",
-    "GroqRouteClassifier",
+    "MimoAPIError",
+    "MimoActionPlanGenerator",
+    "MimoGatewayError",
+    "MimoRateLimitError",
+    "MimoRouteClassifier",
 ]

@@ -14,7 +14,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 
-from cowork_agent.config import ChatIntentSettings, GeminiSettings, GroqSettings, MistralSettings
+from cowork_agent.config import (
+    ChatIntentSettings,
+    GeminiSettings,
+    MimoSettings,
+    MistralSettings,
+)
 from cowork_agent.domain.chat_contracts import (
     ChatIntent,
     ChatMemoryScope,
@@ -33,7 +38,7 @@ from cowork_agent.features.ai_chat.intent.prompt import INTENT_PROMPT_VERSION
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.integrations.llm.chat_intent import (
     GeminiIntentClassifier,
-    GroqIntentClassifier,
+    MimoIntentClassifier,
     MistralIntentClassifier,
 )
 
@@ -142,15 +147,15 @@ def build_live_classifier():
         provider = GeminiSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
         return GeminiIntentClassifier.from_settings(provider, intent), intent.model
-    if provider_name == "groq":
-        provider = GroqSettings.from_env()
+    if provider_name == "mimo":
+        provider = MimoSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return GroqIntentClassifier.from_settings(provider, intent), intent.model
+        return MimoIntentClassifier.from_settings(provider, intent), intent.model
     if provider_name == "mistral":
         provider = MistralSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
         return MistralIntentClassifier.from_settings(provider, intent), intent.model
-    raise ValueError("LLM_PROVIDER must be gemini, groq, or mistral")
+    raise ValueError("LLM_PROVIDER must be gemini, mimo, or mistral")
 
 
 def build_report(

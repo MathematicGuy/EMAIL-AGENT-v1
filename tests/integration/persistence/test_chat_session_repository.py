@@ -18,7 +18,15 @@ try:
 except ImportError:  # pragma: no cover - environment-dependent
     pytest.skip("psycopg is not installed (pip install '.[postgres]')", allow_module_level=True)
 
-from cowork_agent.domain.chat_contracts import ChatTurn, ChatTurnStatus, MailScanSummary
+from cowork_agent.domain.chat_contracts import (
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityOutcome,
+    ChatActivityStatus,
+    ChatTurn,
+    ChatTurnStatus,
+    MailScanSummary,
+)
 from cowork_agent.features.ai_chat.controller import ChatSessionAccessDenied
 from cowork_agent.persistence.migrate import apply_migrations
 from cowork_agent.persistence.repositories.chat_history import PostgresChatHistoryRepository
@@ -178,12 +186,24 @@ def test_chat_history_begin_is_idempotent_and_completion_updates_in_place() -> N
                     user_message=first.user_message, assistant_message="The reply completed.",
                     created_at=first.created_at, status=ChatTurnStatus.COMPLETED,
                     idempotency_key=first.idempotency_key,
+                    activities=(
+                        ChatActivity(
+                            code=ChatActivityCode.UNDERSTANDING_REQUEST,
+                            status=ChatActivityStatus.COMPLETED,
+                            outcome=ChatActivityOutcome.SUCCESS,
+                            started_at=first.created_at,
+                            completed_at=first.created_at,
+                        ),
+                    ),
+                    completed_at=first.created_at,
                 ),
                 title="Generated title",
             )
 
             assert replay == first
             assert completed.status is ChatTurnStatus.COMPLETED
+            assert completed.activities[0].code is ChatActivityCode.UNDERSTANDING_REQUEST
+            assert completed.completed_at == first.created_at
             assert await repository.list_turns(scope) == (completed,)
             assert await repository.titles_for((scope,)) == {
                 scope.session_id: "Generated title"

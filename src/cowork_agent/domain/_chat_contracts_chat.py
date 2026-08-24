@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Self
 
+from ._chat_activity_contracts import ChatActivity, validate_chat_activities
 from ._chat_contracts_common import (
     MAX_CHAT_MESSAGE_LENGTH,
     ChatEventType,
@@ -177,6 +178,7 @@ class ChatMessageStreamEvent:
     page_end: int | None = None
     rag_evidence: tuple[ChatRagEvidence, ...] = ()
     retrieval_status: str | None = None
+    activities: tuple[ChatActivity, ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
@@ -191,6 +193,7 @@ class ChatMessageStreamEvent:
                 f"rag_evidence must contain at most {MAX_CHAT_RAG_EVIDENCE_ITEMS} "
                 "ChatRagEvidence items"
             )
+        object.__setattr__(self, "activities", validate_chat_activities(self.activities))
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -210,9 +213,11 @@ class ChatMessageStreamEvent:
             "page_end": self.page_end,
             "rag_evidence": self.rag_evidence or None,
             "retrieval_status": self.retrieval_status,
+            "activities": self.activities or None,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.STARTED: (),
+            ChatEventType.ACTIVITY: ("activities",),
             ChatEventType.DELTA: ("text",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
             ChatEventType.TASK_PROPOSAL: ("proposal",),
@@ -278,6 +283,23 @@ class ChatMessageStreamEvent:
     @classmethod
     def delta(cls, *, event_id: str, session_id: str, turn_id: str, text: str) -> Self:
         return cls(event_id, session_id, turn_id, ChatEventType.DELTA, text=text)
+
+    @classmethod
+    def activity(
+        cls,
+        *,
+        event_id: str,
+        session_id: str,
+        turn_id: str,
+        activities: tuple[ChatActivity, ...],
+    ) -> Self:
+        return cls(
+            event_id,
+            session_id,
+            turn_id,
+            ChatEventType.ACTIVITY,
+            activities=activities,
+        )
 
     @classmethod
     def memory_citation(
@@ -383,6 +405,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "page_end",
         "rag_evidence",
         "retrieval_status",
+        "activities",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -429,6 +452,10 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
             str(data["retrieval_status"])
             if data.get("retrieval_status") is not None
             else None
+        ),
+        activities=tuple(
+            ChatActivity.from_dict(_as_mapping(item, "activity"))
+            for item in _as_sequence(data.get("activities", ()), "activities")
         ),
     )
 
