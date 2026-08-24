@@ -17,7 +17,7 @@ import {
   type MailProvider,
   type MailboxConnection,
 } from '../../modules/mail/api';
-import type { StepView, TaskDetail } from '../../modules/work-intake/types';
+import type { SourceSnapshotRef, StepView, TaskDetail } from '../../modules/work-intake/types';
 import type {
   ChatCitation,
   ChatActivity,
@@ -58,6 +58,7 @@ interface ChatTurn {
   activities?: unknown;
   completed_at?: string;
   execution_trace?: unknown;
+  artifact_refs?: unknown;
 }
 
 interface SseEvent {
@@ -83,6 +84,7 @@ interface SseEvent {
   activities?: unknown;
   completed_at?: string;
   execution_trace?: unknown;
+  artifact_refs?: unknown;
 }
 
 interface ChatRuntime {
@@ -407,8 +409,28 @@ function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
         activities: activitiesFromPayload(turn.activities),
         completedAt: turn.completed_at,
         executionTrace: executionTraceFromPayload(turn.execution_trace),
+        artifactRefs: artifactRefsFromPayload(turn.artifact_refs),
       },
     ];
+  });
+}
+
+function artifactRefsFromPayload(value: unknown): SourceSnapshotRef[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  return value.flatMap((ref) => {
+    if (!ref || typeof ref !== 'object') return [];
+    const obj = ref as Record<string, unknown>;
+    const prov = (obj.provenance && typeof obj.provenance === 'object' ? obj.provenance : {}) as Record<string, unknown>;
+    const refId = String(obj.ref_id || obj.filename || '');
+    if (!refId) return [];
+    return [{
+      ref_id: refId,
+      checksum: String(obj.checksum || ''),
+      provenance: {
+        upload_filename: String(prov.upload_filename || obj.filename || refId),
+        title: typeof prov.title === 'string' ? prov.title : undefined,
+      },
+    }];
   });
 }
 
@@ -1334,17 +1356,17 @@ export function useStreamingChat(
           terminalStatus = 'completed';
           const status = retrievalStatus(event.retrieval_status);
           const executionTrace = executionTraceFromPayload(event.execution_trace);
-          if (status || Array.isArray(event.rag_evidence) || executionTrace) {
-            updateRuntime(sessionId as string, (current) => ({ ...current,
-              messages: current.messages.map((message) => message.id === assistantId ? {
-                    ...message,
-                    ragEvidence: ragEvidenceFromPayload(event.rag_evidence),
-                    retrievalStatus: status,
-                    executionTrace: executionTrace ?? message.executionTrace,
-                  }
-                : message),
-            }));
-          }
+          const artifactRefs = artifactRefsFromPayload(event.artifact_refs);
+          updateRuntime(sessionId as string, (current) => ({ ...current,
+            messages: current.messages.map((message) => message.id === assistantId ? {
+                  ...message,
+                  ragEvidence: ragEvidenceFromPayload(event.rag_evidence),
+                  retrievalStatus: status,
+                  executionTrace: executionTrace ?? message.executionTrace,
+                  artifactRefs: artifactRefs ?? message.artifactRefs,
+                }
+              : message),
+          }));
         } else if (event.event_type === 'warning' && event.safe_message) {
           updateRuntime(sessionId as string, (current) => ({ ...current,
             messages: current.messages.map((message) => message.id === assistantId ? {

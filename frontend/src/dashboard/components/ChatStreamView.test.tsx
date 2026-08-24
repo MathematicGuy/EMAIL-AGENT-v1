@@ -53,4 +53,30 @@ describe('ChatStreamView assistant content marker', () => {
     expect(screen.getByTestId('assistant-message-content').textContent)
       .toContain('First streamed token');
   });
+
+  it('mounts the inline reasoning card above the assistant answer', () => {
+    renderStream([
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        content: 'Câu trả lời cuối cùng.',
+        timestamp: '10:16',
+        generationStatus: 'completed',
+        executionTrace: {
+          provider: 'mimo',
+          model: 'mimo-v2.5-pro',
+          mode: 'reasoning',
+          reasoning: 'Suy luận nội bộ của mô hình.',
+          reasoningTruncated: false,
+          retrievedFilenames: [],
+        },
+      },
+    ]);
+
+    const card = screen.getByLabelText('Suy luận của mô hình');
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain('mimo-v2.5-pro');
+    expect(screen.getByTestId('assistant-message-content').textContent)
+      .toContain('Câu trả lời cuối cùng.');
+  });
 });

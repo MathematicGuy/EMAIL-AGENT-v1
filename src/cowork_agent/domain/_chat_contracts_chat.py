@@ -189,6 +189,7 @@ class ChatMessageStreamEvent:
     retrieval_status: str | None = None
     activities: tuple[ChatActivity, ...] = ()
     execution_trace: ChatExecutionTrace | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
@@ -204,6 +205,12 @@ class ChatMessageStreamEvent:
                 "ChatRagEvidence items"
             )
         object.__setattr__(self, "activities", validate_chat_activities(self.activities))
+        artifacts = _as_sequence(self.artifact_refs, "artifact_refs")
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_frozen_mapping(item, "artifact ref") for item in artifacts),
+        )
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -225,6 +232,7 @@ class ChatMessageStreamEvent:
             "retrieval_status": self.retrieval_status,
             "activities": self.activities or None,
             "execution_trace": self.execution_trace.to_dict() if self.execution_trace else None,
+            "artifact_refs": self.artifact_refs or None,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
             ChatEventType.STARTED: (),
@@ -240,6 +248,7 @@ class ChatMessageStreamEvent:
             self.rag_evidence
             or self.retrieval_status is not None
             or self.execution_trace is not None
+            or self.artifact_refs
         ):
             raise ValueError("rag_evidence is supported only on completed events")
         citation_fields = {
@@ -253,7 +262,7 @@ class ChatMessageStreamEvent:
         }
         for name, value in payloads.items():
             if (
-                name in {"rag_evidence", "retrieval_status", "execution_trace"}
+                name in {"rag_evidence", "retrieval_status", "execution_trace", "artifact_refs"}
                 and self.event_type is ChatEventType.COMPLETED
             ):
                 continue
@@ -357,6 +366,7 @@ class ChatMessageStreamEvent:
         rag_evidence: tuple[ChatRagEvidence, ...] = (),
         retrieval_status: str | None = None,
         execution_trace: ChatExecutionTrace | None = None,
+        artifact_refs: tuple[Mapping[str, object], ...] = (),
     ) -> Self:
         return cls(
             event_id,
@@ -366,6 +376,7 @@ class ChatMessageStreamEvent:
             rag_evidence=rag_evidence,
             retrieval_status=retrieval_status,
             execution_trace=execution_trace,
+            artifact_refs=artifact_refs,
         )
 
     @classmethod
@@ -433,6 +444,7 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "retrieval_status",
         "activities",
         "execution_trace",
+        "artifact_refs",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -486,6 +498,10 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
             ChatExecutionTrace.from_dict(_as_mapping(data["execution_trace"], "execution_trace"))
             if data.get("execution_trace") is not None
             else None
+        ),
+        artifact_refs=tuple(
+            _as_mapping(item, "artifact ref")
+            for item in _as_sequence(data.get("artifact_refs", ()), "artifact_refs")
         ),
     )
 

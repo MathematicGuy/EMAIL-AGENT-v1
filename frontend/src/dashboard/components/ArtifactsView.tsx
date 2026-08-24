@@ -361,11 +361,11 @@ export const ArtifactsView: React.FC = () => {
           <button
             type="button"
             onClick={handleOpenFolder}
-            title="Mở thư mục workspace/reports trong máy tính"
+            title="Mở thư mục data/reports trong máy tính"
             className="flex items-center gap-1.5 text-zinc-400 hover:text-[#d97757] transition-colors cursor-pointer group"
           >
             <FolderOpen className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#d97757]" />
-            <span className="group-hover:underline">Thư mục: workspace/reports</span>
+            <span className="group-hover:underline">Thư mục: data/reports</span>
             <ExternalLink className="w-3 h-3 opacity-60 group-hover:opacity-100" />
           </button>
           <span>{files.length} file</span>

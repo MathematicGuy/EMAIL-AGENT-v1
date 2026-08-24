@@ -1,5 +1,23 @@
-import { X, BrainCircuit, Files, Check, LoaderCircle, Circle, AlertCircle, Layers } from 'lucide-react';
-import type { ChatActivity, ChatExecutionTrace, ChatGenerationStatus } from '../types';
+import { useEffect, useState } from 'react';
+import {
+  X,
+  Files,
+  Check,
+  Copy,
+  LoaderCircle,
+  Circle,
+  AlertCircle,
+  Layers,
+  BrainCircuit,
+} from 'lucide-react';
+import type {
+  ChatActivity,
+  ChatActivityCode,
+  ChatActivityStatus,
+  ChatExecutionTrace,
+  ChatGenerationStatus,
+} from '../types';
+import { formatSecondsVi, spanMilliseconds } from './reasoningDuration';
 
 export interface ExecutionTraceDrawerProps {
   trace?: ChatExecutionTrace;
@@ -8,45 +26,39 @@ export interface ExecutionTraceDrawerProps {
   onClose: () => void;
 }
 
-const ACTIVITY_LABELS: Record<string, string> = {
-  understanding_request: 'Hiểu yêu cầu',
-  reviewing_context: 'Xem lại ngữ cảnh liên quan',
-  searching_relevant_information: 'Tìm thông tin liên quan',
-  preparing_response: 'Tổng hợp câu trả lời',
-  preparing_action_plan: 'Chuẩn bị kế hoạch hành động',
-  checking_mail: 'Kiểm tra hộp thư',
-  processing_email: 'Phân tích email liên quan',
-  preparing_mail_results: 'Chuẩn bị kết quả',
-};
+type DrawerTab = 'process' | 'memory';
 
-const ACTIVITY_DESCRIPTIONS: Record<string, string> = {
-  understanding_request: 'Phân tích ý định của câu hỏi và xác định luồng định tuyến (Router).',
-  reviewing_context: 'Đối chiếu ngữ cảnh hội thoại (Episodic Memory) và hồ sơ dự án.',
-  searching_relevant_information: 'Truy xuất ngữ nghĩa (Hybrid RAG) các tài liệu dự án phù hợp.',
-  preparing_response: 'Mô hình AI tổng hợp dữ liệu và sinh câu trả lời hoàn chỉnh.',
-  preparing_action_plan: 'Mô hình AI phân tích và cấu trúc danh sách công việc cần thực hiện.',
-  checking_mail: 'Kiểm tra và nạp danh sách email từ hộp thư của bạn.',
-  processing_email: 'Đọc và trích xuất nội dung từ các email được chọn.',
-  preparing_mail_results: 'Tổng hợp kết quả phân tích email thành kế hoạch công việc.',
-};
+const TABS: Array<{ id: DrawerTab; icon: string; label: string }> = [
+  { id: 'process', icon: '✦', label: 'Tiến trình xử lý' },
+  { id: 'memory', icon: '🧠', label: 'Bộ nhớ' },
+];
 
-function isModelReasoningStep(code: string): boolean {
-  return code === 'preparing_response' || code === 'preparing_action_plan';
+function findActivity(
+  activities: ChatActivity[] | undefined,
+  ...codes: ChatActivityCode[]
+): ChatActivity | undefined {
+  return activities?.find((activity) => codes.includes(activity.code));
 }
 
-function activityDetailText(activity: ChatActivity): string | null {
-  const detail = activity.detail;
-  if (activity.outcome === 'no_results') return 'Không tìm thấy tài liệu phù hợp';
-  if (activity.outcome === 'degraded') return 'Một phần dữ liệu hiện không khả dụng';
-  if (!detail) return null;
-  if (detail.kind === 'documents_found') return `Tìm thấy ${detail.current} tài liệu liên quan`;
-  if (detail.kind === 'emails_processed') {
-    return detail.total === undefined
-      ? `Đã xử lý ${detail.current} email`
-      : `Đã xử lý ${detail.current}/${detail.total} email`;
-  }
-  if (detail.kind === 'action_items_prepared') return `Đã chuẩn bị ${detail.current} công việc`;
-  return null;
+function stepStatus(activity: ChatActivity | undefined, trace?: ChatExecutionTrace): ChatActivityStatus {
+  if (activity) return activity.status;
+  return trace ? 'completed' : 'pending';
+}
+
+function StatusNode({ status }: { status: ChatActivityStatus }) {
+  return (
+    <span className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#413b34] bg-[#181715]">
+      {status === 'completed' ? (
+        <Check className="h-3.5 w-3.5 text-emerald-400" />
+      ) : status === 'running' ? (
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#e8a78f] motion-reduce:animate-none" />
+      ) : status === 'failed' || status === 'cancelled' ? (
+        <AlertCircle className="h-3.5 w-3.5 text-rose-400" />
+      ) : (
+        <Circle className="h-3 w-3 text-zinc-600" />
+      )}
+    </span>
+  );
 }
 
 export function ExecutionTraceDrawer({
@@ -56,7 +68,32 @@ export function ExecutionTraceDrawer({
   onClose,
 }: ExecutionTraceDrawerProps) {
   const isGenerating = generationStatus === 'generating';
-  const hasActivities = Boolean(activities && activities.length > 0);
+  const [activeTab, setActiveTab] = useState<DrawerTab>('process');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const understandingActivity = findActivity(activities, 'understanding_request');
+  const searchActivity = findActivity(activities, 'searching_relevant_information');
+  const contextActivity = findActivity(activities, 'reviewing_context');
+  const modelActivity = findActivity(activities, 'preparing_response', 'preparing_action_plan');
+
+  const filenames = trace?.retrievedFilenames ?? [];
+  const isRagRoute = filenames.length > 0 || Boolean(searchActivity);
+  const chunkCount =
+    searchActivity?.detail?.kind === 'documents_found' ? searchActivity.detail.current : filenames.length;
+  const reasoningMs = spanMilliseconds(modelActivity?.startedAt, modelActivity?.completedAt);
+  const isMemoryDegraded = contextActivity?.outcome === 'degraded';
+
+  const handleCopyReasoning = () => {
+    if (!trace?.reasoning) return;
+    void navigator.clipboard?.writeText(trace.reasoning);
+    setCopied(true);
+  };
 
   return (
     <aside
@@ -93,192 +130,196 @@ export function ExecutionTraceDrawer({
         </button>
       </header>
 
+      {/* Segmented slider control */}
+      <div className="px-5 pt-4">
+        <div
+          role="tablist"
+          aria-label="Chế độ xem chi tiết xử lý"
+          className="relative flex rounded-lg border border-[#413b34] bg-[#181715] p-1"
+        >
+          <span
+            aria-hidden="true"
+            className={`absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-md bg-[#33302a] transition-transform duration-200 motion-reduce:transition-none ${
+              activeTab === 'memory' ? 'translate-x-full' : 'translate-x-0'
+            }`}
+          />
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`trace-tab-${tab.id}`}
+              aria-selected={activeTab === tab.id}
+              aria-controls={`trace-panel-${tab.id}`}
+              onClick={() => setActiveTab(tab.id)}
+              className={`relative z-10 flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === tab.id ? 'text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span aria-hidden="true">{tab.icon}</span> {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Drawer Content */}
-      <div className="min-h-0 space-y-6 overflow-y-auto p-5">
-        {/* Section 1: Per-Step Activity & Reasoning */}
-        {hasActivities ? (
-          <section className="space-y-4">
-            <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              <BrainCircuit className="h-4 w-4 text-[#e8a78f]" /> Tiến trình xử lý theo bước
-            </h2>
+      <div className="min-h-0 overflow-y-auto p-5">
+        {activeTab === 'process' ? (
+          <div role="tabpanel" id="trace-panel-process" aria-labelledby="trace-tab-process">
+            <ol aria-label="Tiến trình xử lý" className="relative space-y-6">
+              {/* Continuous connector line behind the status nodes */}
+              <span aria-hidden="true" className="absolute left-3 top-3 bottom-3 w-px bg-[#413b34]" />
 
-            <ol className="space-y-3" aria-label="Danh sách các bước xử lý">
-              {activities!.map((activity, index) => {
-                const isModelStep = isModelReasoningStep(activity.code);
-                const label = ACTIVITY_LABELS[activity.code] ?? activity.code;
-                const defaultDesc = ACTIVITY_DESCRIPTIONS[activity.code] ?? '';
-                const detail = activityDetailText(activity);
-                const isStepRunning = activity.status === 'running';
-                const isStepCompleted = activity.status === 'completed';
-                const isStepFailed = activity.status === 'failed' || activity.status === 'cancelled';
+              {/* Step 1 — Hiểu yêu cầu */}
+              <li className="relative flex gap-3">
+                <StatusNode status={stepStatus(understandingActivity, trace)} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p className="text-sm font-medium text-zinc-200">1. Hiểu yêu cầu</p>
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <span>Định tuyến:</span>
+                    <span
+                      className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
+                        isRagRoute
+                          ? 'border-[#6d3e2e] bg-[#38231a] text-[#e8a78f]'
+                          : 'border-[#413b34] bg-[#24211d] text-zinc-300'
+                      }`}
+                    >
+                      {isRagRoute ? 'RAG · Truy xuất tài liệu' : 'Direct · Hội thoại trực tiếp'}
+                    </span>
+                  </div>
+                </div>
+              </li>
 
-                return (
-                  <li
-                    key={`${activity.code}-${index}`}
-                    className="rounded-lg border border-[#413b34] bg-[#181715] p-3.5 space-y-2.5 transition-all"
-                  >
-                    {/* Step Header */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        {isStepCompleted ? (
-                          <Check className="h-4 w-4 text-emerald-400 shrink-0" />
-                        ) : isStepRunning ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin text-[#e8a78f] shrink-0" />
-                        ) : isStepFailed ? (
-                          <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
-                        ) : (
-                          <Circle className="h-4 w-4 text-zinc-600 shrink-0" />
-                        )}
-                        <span className="text-sm font-medium text-zinc-200">
-                          {index + 1}. {label}
+              {/* Step 2 — Tìm thông tin liên quan */}
+              <li className="relative flex gap-3">
+                <StatusNode status={stepStatus(searchActivity, trace)} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p className="text-sm font-medium text-zinc-200">2. Tìm thông tin liên quan</p>
+                  {isRagRoute ? (
+                    <>
+                      <p className="text-xs text-zinc-400">
+                        Đã tìm thấy{' '}
+                        <span className="font-medium text-zinc-200">{chunkCount}</span> đoạn nội dung liên quan
+                      </p>
+                      {filenames.length > 0 && (
+                        <ul className="flex flex-wrap gap-1.5">
+                          {filenames.map((filename) => (
+                            <li
+                              key={filename}
+                              className="inline-flex items-center gap-1 rounded border border-[#413b34] bg-[#181715] px-2 py-0.5 font-mono text-xs text-zinc-300"
+                            >
+                              <Files className="h-3 w-3 shrink-0 text-[#e8a78f]" aria-hidden="true" />
+                              <span className="truncate max-w-[220px]">{filename}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-zinc-400">Không yêu cầu truy xuất tài liệu</p>
+                  )}
+                </div>
+              </li>
+
+              {/* Step 3 — Tổng hợp câu trả lời */}
+              <li className="relative flex gap-3">
+                <StatusNode status={stepStatus(modelActivity, trace)} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p className="text-sm font-medium text-zinc-200">3. Tổng hợp câu trả lời</p>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    {trace && (
+                      <span className="rounded border border-[#6d3e2e] bg-[#38231a] px-2 py-0.5 font-medium text-[#e8a78f]">
+                        {trace.model}
+                      </span>
+                    )}
+                    {reasoningMs !== null && (
+                      <span className="text-zinc-400">Suy luận trong {formatSecondsVi(reasoningMs)} giây</span>
+                    )}
+                  </div>
+
+                  {trace?.reasoning ? (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-zinc-300">
+                          Chuỗi suy luận (Chain of Thought):
                         </span>
+                        <div className="flex items-center gap-2">
+                          {trace.reasoningTruncated && (
+                            <span className="text-[10px] text-amber-300">Đã rút gọn</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleCopyReasoning}
+                            aria-label="Sao chép chuỗi suy luận"
+                            className="inline-flex items-center gap-1 rounded border border-[#413b34] bg-[#181715] px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:text-zinc-100"
+                          >
+                            {copied ? (
+                              <>
+                                <Check className="h-3 w-3 text-emerald-400" aria-hidden="true" /> Đã sao chép!
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" aria-hidden="true" /> Sao chép
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
-
-                      {/* Source tag */}
-                      {isModelStep ? (
-                        <span className="rounded border border-[#6d3e2e] bg-[#38231a] px-2 py-0.5 text-[11px] font-medium text-[#e8a78f] shrink-0">
-                          Lập luận mô hình
-                        </span>
-                      ) : (
-                        <span className="rounded border border-[#413b34] bg-[#24211d] px-2 py-0.5 text-[11px] font-medium text-zinc-400 shrink-0">
-                          Hệ thống
-                        </span>
+                      <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-[#413b34] bg-[#121110] p-3 font-mono text-xs leading-5 text-zinc-300">
+                        {trace.reasoning}
+                      </pre>
+                      {trace.reasoningTruncated && (
+                        <p className="text-xs text-amber-300">Reasoning đã được rút gọn để lưu an toàn.</p>
                       )}
                     </div>
-
-                    {/* Step Description / Detail */}
-                    <p className="text-xs text-zinc-400 leading-relaxed pl-6">
-                      {defaultDesc}
-                      {detail && <span className="block mt-1 font-medium text-zinc-300">└─ {detail}</span>}
-                    </p>
-
-                    {/* Step 1 System Detail Card */}
-                    {activity.code === 'understanding_request' && (
-                      <div className="mt-2 pl-6">
-                        <div className="rounded border border-[#38332c] bg-[#141311] px-3 py-2 text-xs">
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Phân tích yêu cầu:</span>
-                            <span className="font-medium text-zinc-200">
-                              {trace && trace.retrievedFilenames.length > 0 ? 'RAG' : 'Direct'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Step 2 System Detail Card */}
-                    {activity.code === 'reviewing_context' && (
-                      <div className="mt-2 pl-6">
-                        <div className="rounded border border-[#38332c] bg-[#141311] px-3 py-2 text-xs space-y-1">
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Bộ nhớ ngữ cảnh:</span>
-                            <span className="font-medium text-zinc-200">Episodic & Working Memory</span>
-                          </div>
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Trạng thái ngữ cảnh:</span>
-                            <span className={activity.outcome === 'degraded' ? 'text-amber-400 font-medium' : 'text-emerald-400/90 font-medium'}>
-                              {activity.outcome === 'degraded' ? 'Một phần suy giảm' : 'Sẵn sàng & Đồng bộ'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Step 3 System Detail Card */}
-                    {activity.code === 'searching_relevant_information' && trace && trace.retrievedFilenames.length > 0 && (
-                      <div className="mt-2 pl-6">
-                        <div className="rounded border border-[#38332c] bg-[#141311] px-3 py-2 text-xs space-y-1.5">
-                          <div className="flex items-center justify-between text-zinc-400">
-                            <span>Tài liệu đã truy xuất:</span>
-                            <span className="font-medium text-zinc-300">{trace.retrievedFilenames.length} tệp</span>
-                          </div>
-                          <ul className="flex flex-wrap gap-1.5 pt-0.5">
-                            {trace.retrievedFilenames.map((filename) => (
-                              <li
-                                key={filename}
-                                className="inline-flex items-center gap-1 rounded border border-[#413b34] bg-[#201e1b] px-2 py-0.5 text-xs text-zinc-300 font-mono"
-                              >
-                                <Files className="h-3 w-3 text-[#e8a78f] shrink-0" />
-                                <span className="truncate max-w-[240px]">{filename}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Model Reasoning / Chain of Thought content under model step */}
-                    {isModelStep && (
-                      <div className="mt-2 pl-6 space-y-2">
-                        {trace?.reasoning ? (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-zinc-300">Chuỗi suy luận (Chain of Thought):</span>
-                              {trace.reasoningTruncated && (
-                                <span className="text-[10px] text-amber-300">Đã rút gọn</span>
-                              )}
-                            </div>
-                            <pre className="whitespace-pre-wrap break-words rounded-lg border border-[#413b34] bg-[#121110] p-3 font-mono text-xs leading-5 text-zinc-300 max-h-96 overflow-y-auto">
-                              {trace.reasoning}
-                            </pre>
-                            {trace.reasoningTruncated && (
-                              <p className="text-xs text-amber-300">Reasoning đã được rút gọn để lưu an toàn.</p>
-                            )}
-                          </div>
-                        ) : trace?.mode === 'fast' ? (
-                          <div className="rounded border border-[#413b34] bg-[#141312] p-2.5 text-xs text-zinc-400">
-                            <span className="font-semibold text-zinc-300">Chế độ Nhanh:</span> Mô hình sinh câu trả lời trực tiếp không qua bước suy luận sâu (Thinking disabled).
-                          </div>
-                        ) : isStepRunning ? (
-                          <div className="rounded border border-[#52382c] bg-[#1e1713] p-2.5 text-xs text-[#e8a78f] animate-pulse">
-                            Đang chờ mô hình thực hiện suy luận...
-                          </div>
-                        ) : (
-                          <p className="text-xs text-zinc-500">Nhà cung cấp không trả reasoning cho lượt này.</p>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
+                  ) : trace?.mode === 'fast' ? (
+                    <div className="rounded border border-[#413b34] bg-[#141312] p-2.5 text-xs text-zinc-400">
+                      <span className="font-semibold text-zinc-300">Chế độ Nhanh:</span> Mô hình sinh câu trả lời
+                      trực tiếp không qua bước suy luận sâu (Thinking disabled).
+                    </div>
+                  ) : isGenerating ? (
+                    <div className="rounded border border-[#52382c] bg-[#1e1713] p-2.5 text-xs text-[#e8a78f] animate-pulse">
+                      Đang chờ mô hình thực hiện suy luận...
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500">Nhà cung cấp không trả reasoning cho lượt này.</p>
+                  )}
+                </div>
+              </li>
             </ol>
-          </section>
+          </div>
         ) : (
-          /* Fallback when no activities array is supplied (e.g. minimal trace mode) */
-          <>
-            <section>
-              <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-                <BrainCircuit className="h-4 w-4 text-[#e8a78f]" /> Lập luận mô hình
-              </h2>
-              {trace?.reasoning ? (
-                <pre className="mt-3 whitespace-pre-wrap break-words rounded-lg border border-[#413b34] bg-[#181715] p-3 font-sans text-xs leading-5 text-zinc-300">
-                  {trace.reasoning}
-                </pre>
-              ) : (
-                <p className="mt-2 text-sm text-zinc-500">Nhà cung cấp không trả reasoning cho lượt này.</p>
-              )}
-              {trace?.reasoningTruncated && (
-                <p className="mt-2 text-xs text-amber-300">Reasoning đã được rút gọn để lưu an toàn.</p>
-              )}
-            </section>
-
-            <section>
-              <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-                <Files className="h-4 w-4 text-[#e8a78f]" /> Tài liệu đã truy xuất
-              </h2>
-              {trace?.retrievedFilenames.length ? (
-                <ul className="mt-3 space-y-2">
-                  {trace.retrievedFilenames.map((filename) => (
-                    <li key={filename} className="rounded-md border border-[#413b34] bg-[#181715] px-3 py-2 text-sm text-zinc-300 font-mono">
-                      {filename}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-zinc-500">Không có tệp nào được truy xuất.</p>
-              )}
-            </section>
-          </>
+          <section
+            role="tabpanel"
+            id="trace-panel-memory"
+            aria-labelledby="trace-tab-memory"
+            className="space-y-3"
+          >
+            <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              <BrainCircuit className="h-4 w-4 text-[#e8a78f]" /> Trạng thái bộ nhớ
+            </h2>
+            {contextActivity ? (
+              <dl className="space-y-2 rounded-lg border border-[#413b34] bg-[#181715] p-3.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-zinc-400">Bộ nhớ tình tiết (Episodic):</dt>
+                  <dd className={isMemoryDegraded ? 'font-medium text-amber-400' : 'font-medium text-emerald-400/90'}>
+                    {isMemoryDegraded ? 'Một phần suy giảm' : 'Sẵn sàng & Đồng bộ'}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-zinc-400">Bộ nhớ làm việc (Working):</dt>
+                  <dd className={isMemoryDegraded ? 'font-medium text-amber-400' : 'font-medium text-emerald-400/90'}>
+                    {isMemoryDegraded ? 'Một phần suy giảm' : 'Sẵn sàng & Đồng bộ'}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-xs text-zinc-500">Lượt này không sử dụng bộ nhớ ngữ cảnh.</p>
+            )}
+            <p className="text-xs leading-relaxed text-zinc-500">
+              Bộ nhớ ngữ cảnh đối chiếu lịch sử hội thoại và hồ sơ dự án trước khi mô hình sinh câu trả lời.
+            </p>
+          </section>
         )}
       </div>
     </aside>

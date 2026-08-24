@@ -47,7 +47,13 @@ from .generation_context import (
 )
 from .intent.service import ChatRoutingService
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
-from .ports import ChatHistoryPort, ChatReplyChunk, ChatReplyPort, ChatTaskProposal
+from .ports import (
+    ChatHistoryPort,
+    ChatReplyChunk,
+    ChatReplyPort,
+    ChatTaskProposal,
+    GeneratedReportArtifact,
+)
 from .retention import compute_expires_at
 from .retrieval_policy import (
     clarification_memory_reads,
@@ -784,6 +790,7 @@ class ChatController:
 
             chunks: list[str] = []
             task_proposal: ChatTaskProposal | None = None
+            generated_report: GeneratedReportArtifact | None = None
             conversation_title: str | None = None
             selected_citation_ids: list[str] = []
             trace_provider: str | None = None
@@ -811,6 +818,8 @@ class ChatController:
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
                             task_proposal = chunk.task_proposal
+                        if chunk.generated_report is not None:
+                            generated_report = chunk.generated_report
                         if chunk.conversation_title is not None:
                             conversation_title = chunk.conversation_title
                         trace_provider = chunk.provider or trace_provider
@@ -865,6 +874,27 @@ class ChatController:
                     safe_message="Câu trả lời trả về rỗng.",
                 )
                 return
+
+            generated_artifact_refs: tuple[Mapping[str, object], ...] = ()
+            if generated_report is not None:
+                try:
+                    from pathlib import Path
+                    reports_dir = Path(__file__).resolve().parents[4] / "data" / "reports"
+                    reports_dir.mkdir(parents=True, exist_ok=True)
+                    report_file = reports_dir / generated_report.filename
+                    report_file.write_text(generated_report.content, encoding="utf-8")
+                    generated_artifact_refs = (
+                        {
+                            "ref_id": generated_report.filename,
+                            "checksum": "",
+                            "provenance": {
+                                "upload_filename": generated_report.filename,
+                                "title": generated_report.title,
+                            },
+                        },
+                    )
+                except Exception as save_err:
+                    logger.warning("Failed to save generated report artifact: %s", save_err)
 
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
@@ -930,6 +960,7 @@ class ChatController:
                     rag_evidence=rag_evidence,
                     retrieval_status=retrieval_status,
                     execution_trace=execution_trace,
+                    artifact_refs=generated_artifact_refs,
                     completed_at=None if task_requested else self._clock(),
             )
             if self._history is not None:
@@ -1085,6 +1116,7 @@ class ChatController:
                 rag_evidence=rag_evidence,
                 retrieval_status=retrieval_status,
                 execution_trace=turn.execution_trace,
+                artifact_refs=turn.artifact_refs,
             )
             emitted.append(completed)
             completed_stream = tuple(emitted)

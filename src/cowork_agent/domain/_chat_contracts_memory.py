@@ -1092,6 +1092,7 @@ class ChatTurn:
     activities: tuple[ChatActivity, ...] = ()
     completed_at: datetime | None = None
     execution_trace: ChatExecutionTrace | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -1135,6 +1136,12 @@ class ChatTurn:
             self.execution_trace, ChatExecutionTrace
         ):
             raise TypeError("execution_trace must be a ChatExecutionTrace")
+        artifacts = _as_sequence(self.artifact_refs, "artifact_refs")
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_frozen_mapping(item, "artifact ref") for item in artifacts),
+        )
         if self.completed_at is not None:
             if self.completed_at.utcoffset() is None:
                 raise ValueError("completed_at must be timezone-aware")
@@ -1205,6 +1212,10 @@ class ChatTurn:
                 )
                 if data.get("execution_trace") is not None
                 else None
+            ),
+            artifact_refs=tuple(
+                _as_mapping(item, "artifact ref")
+                for item in _as_sequence(data.get("artifact_refs", ()), "artifact_refs")
             ),
         )
 

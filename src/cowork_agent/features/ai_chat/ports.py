@@ -47,6 +47,15 @@ class ChatTaskProposal:
 
 
 @dataclass(frozen=True, slots=True)
+class GeneratedReportArtifact:
+    """Artifact document generated during chat to be saved as report."""
+
+    filename: str
+    title: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class ChatReplyChunk:
     """One typed assistant chunk with an optional proposal from the configured reply provider."""
 
@@ -58,6 +67,7 @@ class ChatReplyChunk:
     model: str | None = None
     reasoning_mode: str | None = None
     reasoning: str | None = None
+    generated_report: GeneratedReportArtifact | None = None
 
 
 class ChatReplyPort(Protocol):

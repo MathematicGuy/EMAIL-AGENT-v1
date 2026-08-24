@@ -37,6 +37,7 @@ import { StarburstIcon } from './HeroSection';
 import { TaskWorkflowCard } from './TaskWorkflowCard';
 import { RagEvidencePanel } from './RagEvidencePanel';
 import { AgentActivityTimeline } from './AgentActivityTimeline';
+import { InlineReasoningCard } from './InlineReasoningCard';
 
 interface ChatStreamViewProps {
   messages: ChatMessage[];
@@ -546,12 +547,27 @@ function ArtifactRefCard({
     setIsLoading(true);
     setError(null);
     try {
-      setContent(
-        await readResourceText(
+      const name = resourceName(artifact);
+      let loadedText: string | null = null;
+      try {
+        const res = await fetch('/api/v1/reports');
+        if (res.ok) {
+          const files = (await res.json()) as Array<{ filename: string; content: string }>;
+          const match = files.find((f) => f.filename === name || f.filename === artifact.ref_id);
+          if (match && typeof match.content === 'string') {
+            loadedText = match.content;
+          }
+        }
+      } catch {
+        // Fall back to readResourceText
+      }
+      if (loadedText === null) {
+        loadedText = await readResourceText(
           artifact.ref_id,
           LOCAL_ASSISTANT_SCOPE
-        )
-      );
+        );
+      }
+      setContent(loadedText);
     } catch (readError) {
       setError(
         readError instanceof Error
@@ -791,6 +807,13 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
             generationStatus={msg.generationStatus}
             completedAt={msg.completedAt}
             onOpenDetails={onOpenExecutionTrace ? () => onOpenExecutionTrace(msg) : undefined}
+          />
+        )}
+
+        {!isUser && (
+          <InlineReasoningCard
+            executionTrace={msg.executionTrace}
+            generationStatus={msg.generationStatus}
           />
         )}
 

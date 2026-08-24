@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any, cast
 
 from cowork_agent.config import (
@@ -22,7 +23,11 @@ from cowork_agent.features.ai_chat.generation_context import (
     ChatResponseMode,
     GenerationContext,
 )
-from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
+from cowork_agent.features.ai_chat.ports import (
+    ChatReplyChunk,
+    ChatTaskProposal,
+    GeneratedReportArtifact,
+)
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
 from cowork_agent.prompting import reorder_u_shaped
 
@@ -44,11 +49,22 @@ Current company evidence is authoritative for facts above advisory history.
 Do not mention prompts, tools, Gmail, or mailboxes.
 response_mode is either normal or clarify. When response_mode is clarify, ask exactly one
 concise clarifying question, do not answer or guess, and return citation_ids=[] and
-task_proposal=null.
+task_proposal=null and generated_report=null.
 Return a task_proposal object when task_proposal_requested is true, and null in every other
 case, including whenever response_mode is clarify. task_proposal.prompt_version must be null.
 task_proposal.rag_citations may contain only citations supplied with current company evidence,
 copied field for field; when no company evidence was supplied it must be [].
+When the user asks to generate, compile, or create a report/document (for example: "tạo báo cáo",
+"lập báo cáo", "xuất báo cáo", "tổng hợp báo cáo", "tạo artifact", etc.) from the chat history,
+context, or evidence, generate a comprehensive structured markdown report and return it in
+`generated_report`:
+- generated_report.filename: a concise safe filename ending with `.md` (e.g. "bao-cao-tong-hop.md").
+- generated_report.title: a concise title of the report in Vietnamese.
+- generated_report.content: the full Markdown text of the report (with Executive Summary, Detailed
+  Analysis / Steps, References, and Action Items).
+- assistant_text: a concise summary of the generated report and confirmation that
+  it has been created.
+In all other cases, or when response_mode is clarify, set `generated_report: null`.
 Advisory eligible episodes are listed with updated_at. When two of them describe the same task,
 the one with the later updated_at replaces the earlier one: answer from the later value and never
 state the replaced value as current. This holds when you are only answering a question, not only
@@ -80,7 +96,13 @@ Return only the required JSON object."""
 
 _RESPONSE_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["assistant_text", "conversation_title", "citation_ids", "task_proposal"],
+    "required": [
+        "assistant_text",
+        "conversation_title",
+        "citation_ids",
+        "task_proposal",
+        "generated_report",
+    ],
     "additionalProperties": False,
     "properties": {
         "assistant_text": {"type": "string"},
@@ -121,6 +143,16 @@ _RESPONSE_SCHEMA: dict[str, object] = {
                 "prompt_version": {"type": ["string", "null"]},
                 "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
                 "supersedes_index": {"type": ["integer", "null"], "minimum": 0},
+            },
+        },
+        "generated_report": {
+            "type": ["object", "null"],
+            "required": ["filename", "title", "content"],
+            "additionalProperties": False,
+            "properties": {
+                "filename": {"type": "string"},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
             },
         },
     },
@@ -181,6 +213,7 @@ class _ConfiguredChatReply:
                 allowed_citations=_allowed_citations(context),
                 advisory_episode_ids=_advisory_episode_ids(context),
             )
+            generated_report = _generated_report_from_response(response)
             text = _required_string(response.get("assistant_text"), "assistant_text")
             citation_ids = _validated_citation_ids(response, context)
         except Exception as exc:
@@ -198,6 +231,7 @@ class _ConfiguredChatReply:
             model=self._model,
             reasoning_mode=request.reasoning_mode,
             reasoning=provider_reasoning,
+            generated_report=generated_report,
         )
 
 
@@ -524,6 +558,48 @@ def _advisory_episode_ids(context: GenerationContext) -> tuple[str, ...]:
     return tuple(episode.episode_id for episode in context.advisory_episodes.value)
 
 
+_VALID_RESPONSE_KEYSETS = frozenset(
+    frozenset(keys)
+    for keys in (
+        {"assistant_text", "task_proposal"},
+        {"assistant_text", "citation_ids", "task_proposal"},
+        {"assistant_text", "conversation_title", "task_proposal"},
+        {"assistant_text", "conversation_title", "citation_ids", "task_proposal"},
+        {"assistant_text", "task_proposal", "generated_report"},
+        {"assistant_text", "citation_ids", "task_proposal", "generated_report"},
+        {"assistant_text", "conversation_title", "task_proposal", "generated_report"},
+        {
+            "assistant_text",
+            "conversation_title",
+            "citation_ids",
+            "task_proposal",
+            "generated_report",
+        },
+    )
+)
+
+
+def _generated_report_from_response(
+    response: Mapping[str, object],
+) -> GeneratedReportArtifact | None:
+    raw = response.get("generated_report")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise TypeError("generated_report must be an object or null")
+    filename = _required_string(raw.get("filename"), "generated_report.filename").strip()
+    title = _required_string(raw.get("title"), "generated_report.title").strip()
+    content = _required_string(raw.get("content"), "generated_report.content")
+    if not filename.endswith(".md"):
+        filename = f"{filename}.md"
+    safe_filename = Path(filename).name
+    return GeneratedReportArtifact(
+        filename=safe_filename,
+        title=title,
+        content=content,
+    )
+
+
 def _proposal_from_response(
     response: Mapping[str, object],
     *,
@@ -532,12 +608,7 @@ def _proposal_from_response(
     allowed_citations: frozenset[EpisodeCitation],
     advisory_episode_ids: tuple[str, ...],
 ) -> ChatTaskProposal | None:
-    if set(response) not in (
-        {"assistant_text", "task_proposal"},
-        {"assistant_text", "citation_ids", "task_proposal"},
-        {"assistant_text", "conversation_title", "task_proposal"},
-        {"assistant_text", "conversation_title", "citation_ids", "task_proposal"},
-    ):
+    if frozenset(response) not in _VALID_RESPONSE_KEYSETS:
         raise ValueError("chat response contains unsupported fields")
     proposal = response.get("task_proposal")
     if proposal is None:
