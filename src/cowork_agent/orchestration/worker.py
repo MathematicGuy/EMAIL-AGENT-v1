@@ -178,10 +178,20 @@ async def run_worker() -> None:
                     embedder,
                     vector_size=vector_size,
                 )
+                from cowork_agent.integrations.knowledge_ingestion.ocr import (
+                    MistralOcrExtractor,
+                )
+                from cowork_agent.integrations.knowledge_ingestion.project_documents import (
+                    ProjectDocumentExtractor,
+                )
+
+                ocr_key = os.getenv("MISTRAL_API_KEY", "").strip()
+                ocr_extractor = MistralOcrExtractor(api_key=ocr_key) if ocr_key else None
+                extractor = ProjectDocumentExtractor(ocr_extractor=ocr_extractor)
                 document_worker = ProjectDocumentIngestionWorker(
                     projects,
                     private_storage,
-                    ProjectDocumentExtractor(),
+                    extractor,
                     document_vectors,
                     max_pages=document_settings.max_pages,
                 )
@@ -216,6 +226,9 @@ async def run_worker() -> None:
 
 async def run_sqlite_worker() -> None:
     """Poll the single-machine SQLite document queue without Postgres extras."""
+    from cowork_agent.integrations.knowledge_ingestion.ocr import (
+        MistralOcrExtractor,
+    )
     from cowork_agent.integrations.knowledge_ingestion.project_documents import (
         ProjectDocumentExtractor,
     )
@@ -250,10 +263,13 @@ async def run_sqlite_worker() -> None:
     )
     await projects.initialize()
     await chunks.initialize()
+    ocr_key = os.getenv("MISTRAL_API_KEY", "").strip()
+    ocr_extractor = MistralOcrExtractor(api_key=ocr_key) if ocr_key else None
+    extractor = ProjectDocumentExtractor(ocr_extractor=ocr_extractor)
     worker = ProjectDocumentIngestionWorker(
         projects,
         LocalPrivateStorage(root / "project-documents"),
-        ProjectDocumentExtractor(),
+        extractor,
         vectors,
         max_pages=document_settings.max_pages,
     )
