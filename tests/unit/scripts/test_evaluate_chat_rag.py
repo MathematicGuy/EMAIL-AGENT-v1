@@ -152,8 +152,13 @@ def test_ragas_fails_clearly_when_the_optional_dependency_is_absent(tmp_path: Pa
         "--ragas",
     )
 
-    if result.returncode == 0:
+    try:
+        import ragas  # noqa: F401
+
         pytest.skip("ragas is installed in this environment; the missing-dependency path is moot")
+    except ImportError:
+        pass
+
     assert "requires the optional ragas and datasets packages" in result.stderr
 
 

@@ -7,6 +7,8 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
+from langfuse import observe
+
 from cowork_agent.config import (
     GeminiSettings,
     GroqSettings,
@@ -21,6 +23,10 @@ from cowork_agent.features.ai_chat.generation_context import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
+from cowork_agent.integrations.llm.providers.gemini import (
+    _langfuse_configured,
+    _update_current_generation,
+)
 from cowork_agent.prompting import reorder_u_shaped
 
 Completion = Callable[[dict[str, object]], Awaitable[Mapping[str, object]]]
@@ -109,6 +115,22 @@ class _ConfiguredChatReply:
         self._model = model
         self._complete = complete
 
+    @observe(as_type="generation", name="chat_reply_llm")
+    async def _execute_completion(
+        self, payload: dict[str, object]
+    ) -> Mapping[str, object]:
+        response = await self._complete(payload)
+        if _langfuse_configured():
+            output_data = (
+                dict(response) if isinstance(response, Mapping) else {"output": response}
+            )
+            _update_current_generation(
+                input_data=payload,
+                output_data=output_data,
+                model=self._model,
+            )
+        return response
+
     async def stream_reply(
         self, request: ChatMessageRequest, context: GenerationContext
     ) -> AsyncIterator[ChatReplyChunk]:
@@ -119,7 +141,7 @@ class _ConfiguredChatReply:
             yield ChatReplyChunk(_safe_evidence_message(unavailable=True), None, ())
             return
         try:
-            response = await self._complete(_request_payload(request, context))
+            response = await self._execute_completion(_request_payload(request, context))
             proposal = _proposal_from_response(
                 response,
                 required=(
@@ -173,6 +195,16 @@ class MistralChatReply(_ConfiguredChatReply):
                 ),
                 settings.timeout_seconds,
             )
+            usage = response.get("usage")
+            if isinstance(usage, Mapping) and _langfuse_configured():
+                _update_current_generation(
+                    model=settings.model,
+                    usage_details={
+                        "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                        "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                    },
+                )
             return _completion_json(response)
 
         return cls(model=settings.model, complete=complete)
@@ -245,6 +277,16 @@ class GroqChatReply(_ConfiguredChatReply):
                 },
                 settings.timeout_seconds,
             )
+            usage = response.get("usage")
+            if isinstance(usage, Mapping) and _langfuse_configured():
+                _update_current_generation(
+                    model=settings.model,
+                    usage_details={
+                        "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                        "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                    },
+                )
             content = response["choices"][0]["message"]["content"]
             parsed = json.loads(str(content))
             if not isinstance(parsed, Mapping):

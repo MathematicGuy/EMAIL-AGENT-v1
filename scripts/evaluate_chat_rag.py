@@ -362,7 +362,7 @@ def init_evaluator(
         evaluator_llm = llm_factory(llm_id, provider=provider)
         evaluator_embeddings = embedding_factory(provider=provider, model=emb_id)
         return evaluator_llm, evaluator_embeddings
-    except (ImportError, AttributeError):
+    except (ImportError, AttributeError, TypeError):
         pass
 
     try:

@@ -700,6 +700,18 @@ class ChatController:
                     return
             self._memory.append_turn(turn)
             self._turns_by_id[turn_id] = turn
+            try:
+                from langfuse import get_client
+
+                get_client().update_current_span(
+                    output={
+                        "assistant_message": assistant_message,
+                        "status": "completed",
+                        "turn_id": turn_id,
+                    }
+                )
+            except Exception:
+                pass
             if project_documents is not None:
                 evidence_by_id = {item.citation_id: item for item in project_documents.evidence}
                 for citation_id in selected_citation_ids:

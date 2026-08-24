@@ -38,6 +38,7 @@ from .gemini import (
     _build_prompt,
     _classified_messages_for,
     _generate_with_schema_repair,
+    _langfuse_configured,
     _parse_action_plan_output,
     _task_source_links,
     _update_current_generation,
@@ -319,6 +320,16 @@ async def execute_chat_completion(
         ),
         timeout_seconds,
     )
+    usage = response.get("usage")
+    if isinstance(usage, Mapping) and _langfuse_configured():
+        _update_current_generation(
+            model=model,
+            usage_details={
+                "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+                "total_tokens": int(usage.get("total_tokens", 0) or 0),
+            },
+        )
     return _completion_json(response)
 
 
