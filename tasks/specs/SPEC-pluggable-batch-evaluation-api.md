@@ -373,6 +373,21 @@ Current status: the shared utility can parse these names, but the Mistral
 evaluation adapter still uses the single `MISTRAL_API_KEY` field.
 Implementation connects the evaluation-only Mistral transport to the pool.
 
+Worker resolution is deterministic:
+
+```text
+effective_workers = min(
+  requested_max_workers or active_key_count,
+  active_key_count,
+  ready_work_unit_count,
+  plugin_concurrency_limit,
+)
+```
+
+`max_workers < 1` is rejected before job creation. Requesting more workers than
+available keys or ready units is valid and clamps to the effective value; the
+manifest records the reason. No code path assumes exactly three keys.
+
 The existing round-robin rotator is evolved into or wrapped by a lease-aware
 pool with these states:
 

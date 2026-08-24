@@ -28,7 +28,7 @@ Tài liệu này đặc tả một **khung đánh giá RAGAS (Retrieval Augmente
 ## 2. Công nghệ & Thư viện sử dụng
 
 - **Ngôn ngữ & Môi trường:** Python 3.11+ (thực thi qua `uv run`)
-- **Khung đánh giá:** `ragas` (v0.2+ / v0.4+) cùng với `datasets` (tùy chọn cài đặt khi cần chạy đánh giá trực tiếp)
+- **Khung đánh giá:** `ragas` với một phiên bản được chọn và ghim chính xác trước khi kích hoạt; `datasets` chỉ cần nếu phiên bản/API đã chọn còn dùng đường legacy.
 - **Nhà cung cấp mô hình giám khảo (Evaluator LLM):**
   - **Google Gemini:** `gemini-2.0-flash` / `gemini-1.5-flash` qua `google-genai` / `ragas.llms.llm_factory` / `LangchainLLMWrapper`
   - **Mistral AI:** `mistral-large-latest` / `mistral-small-latest` & `mistral-embed` qua `mistralai` / `LangchainLLMWrapper(ChatMistralAI)` hoặc LiteLLM (`mistral/...`)
@@ -256,7 +256,10 @@ uv run python scripts/evaluate_chat_rag.py --input var/eval/chat-ragas.local.jso
 # 3. Chỉ định đường dẫn file báo cáo baseline
 uv run python scripts/evaluate_chat_rag.py --input var/eval/chat-ragas.local.json --ragas --output evaluations/CHAT-RAGAS/baselines/chat-rag-eval-2026-08-22-synthetic-gemini-2.0-flash.json
 
-# 4. Cập nhật lại dashboard tổng hợp
+# 4. Sau khi custom batch integration được triển khai: tối đa 5 Mistral worker
+uv run python scripts/evaluate_chat_rag.py --input var/eval/chat-ragas.local.json --ragas --evaluator-provider mistral --max-workers 5
+
+# 5. Cập nhật lại dashboard tổng hợp
 uv run python scripts/build_evaluation_dashboard.py
 ```
 
@@ -352,6 +355,26 @@ def run_ragas_evaluation(
     return result
 ```
 
+Đoạn bulk `evaluate()` trên mô tả đường chuyển tiếp hiện tại, không phải đích
+thực thi nhiều key. Khi cắm vào
+[`SPEC-pluggable-batch-evaluation-api.md`](./SPEC-pluggable-batch-evaluation-api.md),
+Chat-RAGAS dùng một case làm một work unit. Mỗi worker lease đúng một Mistral
+key, chấm `faithfulness` rồi `answer_relevancy` tuần tự cho case đó và trả kết
+quả có `case_id` để bộ tổng hợp sắp lại theo thứ tự dataset.
+
+`--max-workers` là upper bound của custom scheduler:
+
+```text
+effective_workers = min(requested_max_workers, active_key_count, ready_case_count, plugin_limit)
+```
+
+Không được truyền giá trị này vào RAGAS như một tầng song song thứ hai. Nếu API
+RAGAS đã ghim có `RunConfig.max_workers`, adapter đặt nó bằng `1`; nếu dùng scorer
+single-turn/collection hiện đại, mỗi worker chỉ await một metric call tại một
+thời điểm. Judge LLM và embedding của một case phải dùng credential lease của
+cùng worker. Manifest ghi `requested_max_workers`, `effective_workers`, số key
+hoạt động và alias key, tuyệt đối không ghi key thật.
+
 ### 7.1 Hiệu chuẩn Tiếng Việt & Truy vết Langfuse (Obligations)
 
 1. **Hiệu chuẩn Tiếng Việt:** Prompt tách mệnh đề nguyên tử và prompt NLI của `faithfulness` phải được chuyển ngữ sang tiếng Việt và commit phiên bản chính thức tại `evaluations/CHAT-RAGAS/prompts/`. Đối chiếu với ít nhất 30 case do con người chấm tay; nếu độ đồng thuận thấp, metric ghi nhận là chưa hiệu chuẩn và không được dùng làm điều kiện chặn.
@@ -393,23 +416,26 @@ def run_ragas_evaluation(
 - [ ] Bổ sung tham số dòng lệnh CLI:
   - `--evaluator-provider` (`google` [mặc định], `mistral`)
   - `--evaluator-model` (nạp từ `config.py`, cho phép ghi đè qua CLI)
-  - `--max-workers` (giới hạn số luồng gọi mô hình giám khảo đồng thời)
+  - `--max-workers` (số worker tối đa của custom batch scheduler; không phải concurrency nội bộ của RAGAS)
   - `--save-per-case-scores` (bật/tắt lưu điểm số chi tiết từng case vào báo cáo)
 - [ ] Cập nhật hàm `run_ragas()` hỗ trợ nạp mô hình từ `cowork_agent.config` và bao bọc wrapper chuẩn.
 - [ ] Chuyển đổi định dạng dữ liệu sang `SingleTurnSample` / `EvaluationDataset`.
 - [ ] Thiết lập cơ chế cách ly lỗi (`raise_exceptions=False`) và thống kê số case đánh giá thành công/thất bại.
+- [ ] Mỗi case là một work unit; metric trong một case chạy tuần tự và NaN được tính là lỗi metric, không phải thành công.
+- [ ] Tính `effective_workers` động từ `--max-workers`, số key hoạt động, số case sẵn sàng và giới hạn plug-in; không hard-code `3`.
 - [ ] Đảm bảo đầy đủ type annotations và vượt qua kiểm tra nghiêm ngặt của `mypy`.
 
 ### Giai đoạn 3: Bộ Fixture & Unit Test
 - [ ] Tạo file fixture giả lập `tests/fixtures/chat_rag/sample_chat_ragas_dataset.json`.
-- [ ] Viết unit test xác thực kết quả đánh giá giả lập RAGAS với các trường `faithfulness`, `answer_relevancy`, `context_precision`, `context_recall`.
+- [ ] Viết unit test xác thực kết quả đánh giá giả lập RAGAS với hai trường `faithfulness`, `answer_relevancy`.
+- [ ] Viết unit test cho `--max-workers` bằng `1`, `3`, `5`, trường hợp yêu cầu nhiều hơn số key, và bảo đảm RAGAS concurrency bên trong worker luôn bằng `1`.
 - [ ] Viết unit test đệ quy xác thực không có trường văn bản gốc nào lọt vào báo cáo đầu ra.
 - [ ] Viết unit test xử lý thông báo lỗi thân thiện khi chưa cài đặt thư viện RAGAS.
 - [ ] Chạy kiểm thử toàn diện: `uv run pytest tests/unit/scripts/test_evaluate_chat_rag.py -n 4 --dist loadfile`.
 
 ### Giai đoạn 4: Tích hợp Bảng điều khiển (`scripts/build_evaluation_dashboard.py`)
 - [ ] Nâng cấp `build_evaluation_dashboard.py` để quét các file JSON trong `evaluations/CHAT-RAGAS/baselines/`.
-- [ ] Hiển thị bảng Markdown tóm tắt lịch sử đánh giá Chat-RAGAS (Hit@1, MRR, Faithfulness, Relevancy, Precision, Recall, Latency).
+- [ ] Hiển thị bảng Markdown tóm tắt lịch sử đánh giá Chat-RAGAS (Hit@1, Hit@5, MRR, Recall@5, Faithfulness, Relevancy, Citation Valid Rate, Abstention, Latency).
 - [ ] Tự động cập nhật nội dung file `evaluations/CHAT-RAGAS/dashboard.md`.
 
 ### Giai đoạn 5: Kiểm tra Toàn diện & Xác thực Thực tế
