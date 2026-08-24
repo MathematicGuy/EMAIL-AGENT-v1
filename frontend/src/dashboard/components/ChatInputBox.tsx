@@ -12,6 +12,7 @@ import {
   LoaderCircle,
   X,
   Mail,
+  Clipboard,
 } from 'lucide-react';
 import type {
   ChatComposerAttachment,
@@ -104,12 +105,81 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     textareaRef.current?.focus();
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const clipboardFiles = Array.from(e.clipboardData.files || []);
+    if (clipboardFiles.length > 0 && onSelectFiles) {
+      const validFiles = clipboardFiles.filter(
+        (file) =>
+          file.name.toLowerCase().endsWith('.pdf') ||
+          file.name.toLowerCase().endsWith('.docx') ||
+          file.type === 'application/pdf' ||
+          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+      if (validFiles.length > 0) {
+        e.preventDefault();
+        onSelectFiles(validFiles);
+        return;
+      }
+    }
+
+    if (e.target !== textareaRef.current) {
+      const pastedText = e.clipboardData.getData('text');
+      if (pastedText) {
+        e.preventDefault();
+        const nextText = inputText ? `${inputText}\n${pastedText}` : pastedText;
+        onChangeText(nextText);
+        textareaRef.current?.focus();
+      }
+    }
+  };
+
+  const handleClipboardPasteClick = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const textarea = textareaRef.current;
+          if (textarea) {
+            const start = textarea.selectionStart ?? inputText.length;
+            const end = textarea.selectionEnd ?? inputText.length;
+            const updated = inputText.substring(0, start) + text + inputText.substring(end);
+            onChangeText(updated);
+            setTimeout(() => {
+              textarea.focus();
+              textarea.setSelectionRange(start + text.length, start + text.length);
+            }, 0);
+          } else {
+            onChangeText(inputText ? `${inputText}\n${text}` : text);
+          }
+        }
+      }
+    } catch {
+      textareaRef.current?.focus();
+    }
+  };
+
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      !target.closest('button') &&
+      !target.closest('input') &&
+      !target.closest('[role="listbox"]') &&
+      target !== textareaRef.current
+    ) {
+      textareaRef.current?.focus();
+    }
+  };
+
   return (
     <div className="w-full max-w-3xl md:max-w-4xl mx-auto px-4 select-text">
       {/* Main Floating Card matching image.png */}
-      <div className={`bg-[#242320] border border-[#35332f] hover:border-[#44413c] focus-within:border-[#524f4a] rounded-2xl shadow-2xl transition-all duration-150 ${
-        showMailMention ? 'overflow-visible' : 'overflow-hidden'
-      }`}>
+      <div
+        onClick={handleCardClick}
+        onPaste={handlePaste}
+        className={`bg-[#242320] border border-[#35332f] hover:border-[#44413c] focus-within:border-[#524f4a] rounded-2xl shadow-2xl transition-all duration-150 cursor-text ${
+          showMailMention ? 'overflow-visible' : 'overflow-hidden'
+        }`}
+      >
         {/* Top Textarea */}
         <div className="p-3.5 pb-2">
           {attachments.length > 0 && (
@@ -202,9 +272,10 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               value={inputText}
               onChange={(e) => onChangeText(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder="Tôi có thể giúp gì cho bạn hôm nay?"
               rows={2}
-              className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans"
+              className="w-full bg-transparent text-[#f3f2ef] placeholder-zinc-500 text-sm focus:outline-none resize-none min-h-[48px] max-h-[220px] leading-relaxed font-sans select-text"
             />
           </div>
 
@@ -239,7 +310,16 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
                 </>
               )}
 
-
+              <button
+                type="button"
+                title="Dán từ Clipboard (Ctrl+V)"
+                aria-label="Dán từ Clipboard"
+                onClick={handleClipboardPasteClick}
+                disabled={isGenerating}
+                className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#32302c] rounded-md transition-colors cursor-pointer"
+              >
+                <Clipboard className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Right Controls: Model dropdown, Mic, Send */}

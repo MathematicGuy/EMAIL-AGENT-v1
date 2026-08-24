@@ -52,23 +52,22 @@ class ProjectDocumentExtractor:
     def extract(self, path: Path, media_type: str) -> ExtractedProjectDocument:
         try:
             pages: tuple[tuple[int, str], ...]
-            if self._ocr_extractor is not None and media_type in (
-                _DOCX_MEDIA_TYPE,
-                "application/pdf",
-            ):
-                markdown = self._ocr_extractor.extract(path.name, path.read_bytes())
-                pages = ((1, markdown),)
-            elif media_type == _DOCX_MEDIA_TYPE:
+            if media_type == _DOCX_MEDIA_TYPE:
                 result = self._docx_extractor.extract(path)
                 pages = ((1, result.markdown),)
             elif media_type == "application/pdf":
                 inspection = self._pdf_inspector.inspect(path)
                 if inspection.pages_needing_ocr:
-                    raise ProjectDocumentExtractionError("ocr_unavailable")
-                pages = tuple(
-                    (number, inspection.native_markdown_by_page.get(number, ""))
-                    for number in range(1, inspection.page_count + 1)
-                )
+                    if self._ocr_extractor is not None:
+                        markdown = self._ocr_extractor.extract(path.name, path.read_bytes())
+                        pages = ((1, markdown),)
+                    else:
+                        raise ProjectDocumentExtractionError("ocr_unavailable")
+                else:
+                    pages = tuple(
+                        (number, inspection.native_markdown_by_page.get(number, ""))
+                        for number in range(1, inspection.page_count + 1)
+                    )
             else:
                 raise ProjectDocumentExtractionError("unsupported_media_type")
         except ProjectDocumentExtractionError:

@@ -1,0 +1,204 @@
+{
+  "dataset_name": "OCR_RAG_Golden_Dataset_Designing_ML_Systems",
+  "version": "2.0.0",
+  "created_at": "2026-08-24T13:35:00+07:00",
+  "source_document": "design machine learning systems.pdf",
+  "description": "Golden dataset for evaluating OCR extraction, semantic indexing, and Multimodal RAG QA over scanned book diagrams and text sections without referencing arbitrary data image filenames.",
+  "test_cases": [
+    {
+      "id": "OCR-01",
+      "figure_id": "Figure 1-1",
+      "figure_name": "Different components of an ML system",
+      "image_file": "figure_1_1_components_of_an_ml_system.png",
+      "legacy_file": "1.png",
+      "question_vi": "Trong tài liệu, sơ đồ Figure 1-1 mô tả các thành phần nào cấu thành một hệ thống ML (ML system) và từng thành phần được trình bày ở những chương (Chapter) nào trong sách?",
+      "question_en": "In the document, what components make up an ML system according to Figure 1-1, and in which chapters are they discussed throughout the book?",
+      "target_answer": {
+        "summary": "Sơ đồ Figure 1-1 chỉ ra rằng thuật toán ML chỉ là một phần nhỏ của toàn bộ hệ thống ML, bao gồm các thành phần: ML system users (Chapter 11), Business requirements (Chapters 1 & 2), ML system developers (toàn bộ sách), Deployment, monitoring, updating of logics (Chapters 7, 8 & 9), Feature engineering (Chapter 5), ML algorithms & Evaluation (Chapter 6), Data (Chapters 3 & 4), và Infrastructure (Chapter 10).",
+        "key_facts": [
+          "ML system users: Chapter 11",
+          "Business requirements: Chapters 1 & 2",
+          "Deployment, monitoring, updating of logics: Chapters 7, 8 & 9",
+          "Feature engineering: Chapter 5",
+          "ML algorithms & Evaluation: Chapter 6",
+          "Data: Chapters 3 & 4",
+          "Infrastructure: Chapter 10",
+          "ML system developers: Entire book"
+        ]
+      },
+      "evaluation_keywords": [
+        "Figure 1-1",
+        "Chapter 11",
+        "Chapter 5",
+        "Chapter 6",
+        "Chapter 10",
+        "Feature engineering",
+        "Infrastructure",
+        "Deployment"
+      ]
+    },
+    {
+      "id": "OCR-02",
+      "figure_id": "Figure 1-2",
+      "figure_name": "Traditional software vs Machine learning",
+      "image_file": "figure_1_2_traditional_software_vs_machine_learning.png",
+      "legacy_file": "2.png",
+      "question_vi": "Theo sơ đồ Figure 1-2 trong tài liệu, điểm khác biệt cốt lõi về đầu vào (Inputs) và đầu ra (Outputs) giữa phần mềm truyền thống (Traditional software) và Học máy (Machine learning) là gì?",
+      "question_en": "According to Figure 1-2 in the document, what is the core difference regarding inputs and outputs between traditional software and machine learning?",
+      "target_answer": {
+        "summary": "Trong phần mềm truyền thống (Traditional software), đầu vào là Inputs và Patterns (quy tắc/mẫu viết tay) để tạo ra Outputs. Ngược lại, trong Machine Learning, đầu vào là Inputs và Outputs để mô hình tự học và sinh ra Patterns.",
+        "key_facts": [
+          "Traditional software: Inputs + Patterns -> Outputs",
+          "Machine learning: Inputs + Outputs -> Patterns",
+          "ML solutions learn patterns from inputs and outputs instead of requiring hand-specified patterns"
+        ]
+      },
+      "evaluation_keywords": [
+        "Figure 1-2",
+        "Traditional software",
+        "Machine learning",
+        "Inputs",
+        "Outputs",
+        "Patterns",
+        "learn patterns"
+      ]
+    },
+    {
+      "id": "OCR-03",
+      "figure_id": "Figure 1-3",
+      "figure_name": "2020 state of enterprise machine learning (Algorithmia)",
+      "image_file": "figure_1_3_state_of_enterprise_ml_algorithmia.png",
+      "legacy_file": "3.png",
+      "question_vi": "Dựa vào biểu đồ Figure 1-3 (khảo sát của Algorithmia 2020) trong tài liệu, 3 mục tiêu ứng dụng Machine Learning hàng đầu trong doanh nghiệp chiếm tỷ lệ phần trăm cao nhất là những mục tiêu nào?",
+      "question_en": "Based on Figure 1-3 (Algorithmia 2020 survey) in the document, what are the top 3 enterprise machine learning use cases with the highest percentages?",
+      "target_answer": {
+        "summary": "Top 3 mục tiêu ứng dụng ML hàng đầu trong doanh nghiệp năm 2020 theo Algorithmia là: 1. Reducing costs (Giảm chi phí) chiếm 38%; 2. Generating customer insights/intelligence (Tạo thông tin chi tiết/thấu hiểu khách hàng) chiếm 37%; 3. Improving customer experience (Cải thiện trải nghiệm khách hàng) chiếm 34%.",
+        "key_facts": [
+          "Top 1: Reducing costs - 38%",
+          "Top 2: Generating customer insights/intelligence - 37%",
+          "Top 3: Improving customer experience - 34%",
+          "Source: Adapted from an image by Algorithmia"
+        ]
+      },
+      "evaluation_keywords": [
+        "38%",
+        "37%",
+        "34%",
+        "Reducing costs",
+        "Generating customer insights",
+        "Improving customer experience",
+        "Algorithmia"
+      ]
+    },
+    {
+      "id": "OCR-04",
+      "figure_id": "Figure 1-4",
+      "figure_name": "Latency vs Throughput in single query vs batched queries",
+      "image_file": "figure_1_4_latency_vs_throughput_batching.png",
+      "legacy_file": "4.png",
+      "question_vi": "Theo Figure 1-4 trong tài liệu, khi xử lý truy vấn đơn lẻ so với xử lý theo lô (batching), mối quan hệ giữa độ trễ (latency) và thông lượng (throughput) thay đổi như thế nào? Nêu ví dụ số liệu minh chứng.",
+      "question_en": "According to Figure 1-4 in the document, how does the relationship between latency and throughput change when processing queries one at a time versus in batches? Provide numerical examples.",
+      "target_answer": {
+        "summary": "Khi xử lý từng truy vấn một (One query at a time), độ trễ cao hơn làm giảm thông lượng (10ms -> 100 queries/s; 20ms -> 50 queries/s). Tuy nhiên, khi xử lý theo lô (Batched queries), độ trễ cao hơn vẫn có thể mang lại thông lượng cao hơn rất nhiều (10ms với 10 queries -> 1,000 queries/s; 20ms với 50 queries -> 2,500 queries/s).",
+        "key_facts": [
+          "One query at a time: 10ms = 100 queries/s, 20ms = 50 queries/s",
+          "Batched queries: 10ms (10 queries) = 1,000 queries/s, 20ms (50 queries) = 2,500 queries/s",
+          "With batching, higher latency can yield significantly higher throughput"
+        ]
+      },
+      "evaluation_keywords": [
+        "100 queries/s",
+        "50 queries/s",
+        "1,000 queries/s",
+        "2,500 queries/s",
+        "Batched queries",
+        "One query at a time",
+        "Latency",
+        "Throughput"
+      ]
+    },
+    {
+      "id": "OCR-05",
+      "figure_id": "Figure 1-5",
+      "figure_name": "Data in research versus data in production (Andrej Karpathy)",
+      "image_file": "figure_1_5_data_in_research_vs_production_karpathy.png",
+      "legacy_file": "5.png",
+      "question_vi": "Dựa vào biểu đồ Figure 1-5 trích dẫn từ Andrej Karpathy trong tài liệu, sự khác biệt về mối bận tâm/mất ngủ giữa nghiên cứu tiến sĩ (PhD) và môi trường sản xuất tại Tesla đối với Datasets và Models/algorithms là gì?",
+      "question_en": "Based on Figure 1-5 adapted from Andrej Karpathy in the document, what is the difference in sleep lost over Datasets versus Models and algorithms between PhD research and production at Tesla?",
+      "target_answer": {
+        "summary": "Biểu đồ \"Amount of sleep lost over...\" chỉ ra rằng trong nghiên cứu học thuật (PhD), người ta dành phần lớn thời gian (~95%) cho Mô hình và Thuật toán (Models and algorithms) và chỉ một phần rất nhỏ (~5%) cho Dữ liệu (Datasets). Ngược lại, tại Tesla (Production), Dữ liệu (Datasets) chiếm tới khoảng 75% (3/4) mối bận tâm, còn Mô hình và Thuật toán chỉ chiếm 25%.",
+        "key_facts": [
+          "PhD: Datasets (~5%) vs Models and algorithms (~95%)",
+          "Tesla: Datasets (~75% / 3 quarters) vs Models and algorithms (~25% / 1 quarter)",
+          "Source: Adapted from an image by Andrej Karpathy"
+        ]
+      },
+      "evaluation_keywords": [
+        "Andrej Karpathy",
+        "PhD",
+        "Tesla",
+        "Datasets",
+        "Models and algorithms",
+        "Amount of sleep lost"
+      ]
+    },
+    {
+      "id": "OCR-06",
+      "figure_id": "Chapter 1 Summary",
+      "figure_name": "Summary of ML in enterprise, research vs production differences, and system approach",
+      "image_file": "chapter_1_summary_research_vs_production.png",
+      "legacy_file": "6.png",
+      "question_vi": "Trong phần tóm tắt (Summary) của Chương 1 trong tài liệu, tác giả đã nêu những khía cạnh khác biệt nào giữa ML trong nghiên cứu (research) và ML trong thực tế (production)?",
+      "question_en": "In the Chapter 1 Summary in the document, what specific differences between ML in research and ML in production were highlighted by the author?",
+      "target_answer": {
+        "summary": "Phần Summary của Chương 1 chỉ ra các điểm khác biệt giữa ML trong nghiên cứu và ML trong production bao gồm: sự tham gia của các bên liên quan (stakeholder involvement), mức độ ưu tiên tính toán (computational priority), đặc tính của dữ liệu được sử dụng (properties of data used), mức độ nghiêm trọng của vấn đề công bằng (gravity of fairness issues), và các yêu cầu về khả năng diễn giải (requirements for interpretability).",
+        "key_facts": [
+          "Stakeholder involvement",
+          "Computational priority",
+          "Properties of data used",
+          "Gravity of fairness issues",
+          "Requirements for interpretability",
+          "Focusing only on ML algorithms is far from enough; a holistic system approach is required"
+        ]
+      },
+      "evaluation_keywords": [
+        "stakeholder involvement",
+        "computational priority",
+        "properties of data",
+        "fairness issues",
+        "interpretability",
+        "system approach",
+        "holistically"
+      ]
+    },
+    {
+      "id": "OCR-07",
+      "figure_id": "Chapter 2 Summary",
+      "figure_name": "Four general requirements of ML systems and the role of data",
+      "image_file": "chapter_2_summary_requirements_and_data.png",
+      "legacy_file": "7.png",
+      "question_vi": "Theo phần tóm tắt (Summary) của Chương 2 trong tài liệu, 4 yêu cầu tổng quát (four most general requirements) của một hệ thống ML tốt là gì và những mô hình nào được dẫn chứng để chứng minh tầm quan trọng của dữ liệu?",
+      "question_en": "According to the Chapter 2 Summary in the document, what are the four most general requirements of a good ML system, and which models were cited to demonstrate the critical role of data?",
+      "target_answer": {
+        "summary": "Bốn yêu cầu tổng quát của một hệ thống ML tốt là: 1. Reliability (Độ tin cậy), 2. Scalability (Khả năng mở rộng), 3. Maintainability (Khả năng bảo trì), và 4. Adaptability (Khả năng thích ứng). Các hệ thống được dẫn chứng chứng minh tiến bộ của ML phụ thuộc vào lượng dữ liệu khổng lồ gồm: AlexNet, BERT, và GPT.",
+        "key_facts": [
+          "4 general requirements: Reliability, Scalability, Maintainability, Adaptability",
+          "Business objectives must motivate ML objectives (businesses don't care about ML metrics unless they move business metrics)",
+          "Building an ML system is an iterative process",
+          "Cited systems for data progress: AlexNet, BERT, and GPT"
+        ]
+      },
+      "evaluation_keywords": [
+        "Reliability",
+        "Scalability",
+        "Maintainability",
+        "Adaptability",
+        "AlexNet",
+        "BERT",
+        "GPT",
+        "iterative process",
+        "business objectives"
+      ]
+    }
+  ]
+}
