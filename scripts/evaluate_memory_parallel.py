@@ -41,6 +41,10 @@ from cowork_agent.features.ai_chat.memory_eval.live_env import (
     run_with_selector_loop,
     unavailable_scopes,
 )
+from cowork_agent.features.ai_chat.memory_eval.live_execution import (
+    _attach_stream_errors,
+    _build_adapters,
+)
 from cowork_agent.features.ai_chat.memory_eval.live_runner import (
     LiveSession,
     ask_live,
@@ -55,8 +59,6 @@ from scripts.evaluate_memory import (
     _DEFAULT_OUTPUT_DIR,
     _DETAIL_DIR,
     _SUPPORTED_PROVIDERS,
-    _attach_stream_errors,
-    _build_adapters,
     _build_chat_reply,
     _default_provider,
     _stamp_probe_set_identity,
