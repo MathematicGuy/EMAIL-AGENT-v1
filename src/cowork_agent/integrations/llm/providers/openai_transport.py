@@ -1,4 +1,4 @@
-"""OpenAI-compatible HTTP JSON transport shared by Vyce, Mistral, and OpenRouter."""
+"""OpenAI-compatible HTTP JSON transport shared by Mimo, Mistral, and OpenRouter."""
 
 from __future__ import annotations
 

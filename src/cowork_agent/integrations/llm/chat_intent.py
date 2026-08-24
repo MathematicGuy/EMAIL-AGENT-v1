@@ -12,9 +12,9 @@ from typing import cast
 from cowork_agent.config import (
     ChatIntentSettings,
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
     OpenRouterSettings,
-    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import (
     IntentClassifierInput,
@@ -134,12 +134,12 @@ class GeminiIntentClassifier(ConfiguredIntentClassifier):
         return cls(complete)
 
 
-class VyceIntentClassifier(ConfiguredIntentClassifier):
+class MimoIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: VyceSettings, intent: ChatIntentSettings
-    ) -> VyceIntentClassifier:
-        from .providers.vyce import execute_chat_completion
+        cls, provider: MimoSettings, intent: ChatIntentSettings
+    ) -> MimoIntentClassifier:
+        from .providers.mimo import execute_chat_completion
 
         timeout_sec = max(1, ceil(intent.timeout_ms / 1000))
         effective_settings = replace(
@@ -157,9 +157,6 @@ class VyceIntentClassifier(ConfiguredIntentClassifier):
             )
 
         return cls(complete)
-
-
-VyneIntentClassifier = VyceIntentClassifier
 
 
 class MistralIntentClassifier(ConfiguredIntentClassifier):

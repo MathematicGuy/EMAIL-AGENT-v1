@@ -17,8 +17,8 @@ from time import monotonic
 from cowork_agent.config import (
     ChatIntentSettings,
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
-    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import (
     ChatIntent,
@@ -38,8 +38,8 @@ from cowork_agent.features.ai_chat.intent.prompt import INTENT_PROMPT_VERSION
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.integrations.llm.chat_intent import (
     GeminiIntentClassifier,
+    MimoIntentClassifier,
     MistralIntentClassifier,
-    VyceIntentClassifier,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -147,15 +147,15 @@ def build_live_classifier():
         provider = GeminiSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
         return GeminiIntentClassifier.from_settings(provider, intent), intent.model
-    if provider_name in ("vyce", "vyne"):
-        provider = VyceSettings.from_env()
+    if provider_name == "mimo":
+        provider = MimoSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return VyceIntentClassifier.from_settings(provider, intent), intent.model
+        return MimoIntentClassifier.from_settings(provider, intent), intent.model
     if provider_name == "mistral":
         provider = MistralSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
         return MistralIntentClassifier.from_settings(provider, intent), intent.model
-    raise ValueError("LLM_PROVIDER must be gemini, vyce, or mistral")
+    raise ValueError("LLM_PROVIDER must be gemini, mimo, or mistral")
 
 
 def build_report(

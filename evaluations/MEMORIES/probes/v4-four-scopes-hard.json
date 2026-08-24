@@ -1,0 +1,307 @@
+{
+  "schema_version": "2.0.0",
+  "probe_set_id": "v4_four_scopes_hard",
+  "label": "Bốn phạm vi bộ nhớ, bản khó: 20 câu hỏi, cùng lưới với v2, seed dày hơn và mã biểu mẫu gần giống (v4: khai báo hình dạng câu trả lời bị từ chối)",
+  "seed": {
+    "short_term": [
+      "Tôi đang xử lý yêu cầu gia hạn CCCD cho văn phòng Đà Nẵng.",
+      "Hồ sơ này do chị Lê Thu Vân ký duyệt.",
+      "Hạn chót của việc đó là thứ Ba.",
+      "Đính chính: hạn chót đã dời sang thứ Tư.",
+      "Văn phòng Hải Phòng đang chờ hồ sơ liên quan.",
+      "Chị Mai Liên vừa gửi email nhắc hạn nộp."
+    ],
+    "long_term": {
+      "language": "vi",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "assistant_persona": "trợ lý biệt danh Hải Âu",
+      "response_tone": "ngắn gọn"
+    },
+    "episodic": [
+      {
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ cấp lại hộ chiếu cho văn phòng Cần Thơ, nộp hồ sơ ngày 5 tháng 9, giao cho anh Phạm Quốc Huy.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Hải Phòng.",
+        "approve": true
+      }
+    ],
+    "semantic": {
+      "corpus_dir": "tests/fixtures/memory_eval/corpus-v3"
+    }
+  },
+  "probes": [
+    {
+      "id": "st_recall_01",
+      "targets": "short_term",
+      "test": "recall",
+      "question": "Yêu cầu gia hạn đó là cho văn phòng nào?",
+      "expect_any": [
+        "Đà Nẵng",
+        "Da Nang"
+      ],
+      "note": "Oldest ST line (evicted first if the 8-turn window overflows). Hải Phòng also sits in the buffer as a related-file wait, not as a second CCCD renewal. Answering Hải Phòng is grabbing the neighbour."
+    },
+    {
+      "id": "st_recall_02",
+      "targets": "short_term",
+      "test": "recall",
+      "question": "Hồ sơ này do ai ký duyệt?",
+      "expect_any": [
+        "Lê Thu Vân",
+        "Thu Vân"
+      ],
+      "note": "Signer vs reminder-sender. Mai Liên is also in the buffer and must not be reported as the signer. A made-up name cannot be reconstructed from the question."
+    },
+    {
+      "id": "st_update_01",
+      "targets": "short_term",
+      "test": "update",
+      "question": "Hạn chót của yêu cầu gia hạn CCCD là khi nào?",
+      "expect_any": [
+        "thứ Tư",
+        "thứ 4"
+      ],
+      "stale_any": [
+        "thứ Ba",
+        "thứ 3"
+      ],
+      "note": "Both days were stated; only the later one is true. Numeric weekday forms are listed because Vietnamese writes both."
+    },
+    {
+      "id": "st_restraint_01",
+      "targets": "short_term",
+      "test": "restraint",
+      "question": "Mã số của yêu cầu gia hạn CCCD này là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "mã số",
+        "số hiệu"
+      ],
+      "note": "No request id was seeded. Do not add one. No invented_any: no neighbouring id exists in the seed. A request id is a number, so a reply with no digit in it cannot have supplied one.",
+      "answer_would_be_numeric": true
+    },
+    {
+      "id": "st_restraint_02",
+      "targets": "short_term",
+      "test": "restraint",
+      "question": "Người nhận hồ sơ ở văn phòng Đà Nẵng tên là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "người nhận hồ sơ",
+        "tên người nhận"
+      ],
+      "invented_any": [
+        "Lê Thu Vân",
+        "Thu Vân",
+        "Mai Liên"
+      ],
+      "note": "Recipient never named. Two real Vietnamese names sit in the buffer (signer and reminder-sender). Naming either is wrap-invention."
+    },
+    {
+      "id": "lt_recall_01",
+      "targets": "long_term",
+      "test": "recall",
+      "question": "Tôi đã đặt bạn ở vai trò nào khi trả lời tôi?",
+      "expect_any": [
+        "Hải Âu"
+      ],
+      "note": "Unguessable persona nickname. Only long_term recall by design (spec §4.1)."
+    },
+    {
+      "id": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Chức danh của tôi là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "chức danh",
+        "chức vụ"
+      ],
+      "note": "Job title never stored. Known pronoun ambiguity on tôi; leave it (v2 inherit)."
+    },
+    {
+      "id": "lt_restraint_02",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Số điện thoại liên hệ của tôi là số nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "số điện thoại",
+        "số liên hệ"
+      ],
+      "note": "No phone in the four profile fields. Inventing a number is the costly failure — and a reply with no digit in it has not invented one.",
+      "answer_would_be_numeric": true
+    },
+    {
+      "id": "lt_restraint_03",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Tôi thường làm việc trong khung giờ nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "khung giờ làm việc",
+        "giờ làm việc"
+      ],
+      "note": "Timezone near-miss. No invented_any: a work schedule is not in the seed, and listing the timezone string would punish an honest time fact. A working-hours answer carries digits, so a digit-free reply gave none.",
+      "answer_would_be_numeric": true
+    },
+    {
+      "id": "ep_recall_01",
+      "targets": "episodic",
+      "test": "recall",
+      "question": "Tác vụ trước về gia hạn CCCD mới nhất là cho văn phòng nào?",
+      "expect_any": [
+        "Hải Phòng",
+        "Hai Phong"
+      ],
+      "note": "Retired expectation: this asked which office the CCCD task was for and expected Đà Nẵng, calling Hải Phòng a ranking miss. The SQLite ranker scores matched_terms/total_terms and both CCCD episodes contain every term of that question -- measured 1.000 and 1.000, an exact tie broken only by updated_at DESC, which picks Hải Phòng. No signal favouring Đà Nẵng exists, so the old expectation could not be met by any ranking. It now asks for the NEWEST CCCD task, which recency does decide. Answering Đà Nẵng is still a ranking miss. Adding mới nhất also drops the passport episode from the payload (0.600 -> 0.429). Cue tác vụ trước required."
+    },
+    {
+      "id": "ep_recall_02",
+      "targets": "episodic",
+      "test": "recall",
+      "question": "Tác vụ trước về cấp lại hộ chiếu là cho văn phòng nào?",
+      "expect_any": [
+        "Cần Thơ",
+        "Can Tho"
+      ],
+      "note": "Different subject from the CCCD pair so a CCCD retrieve here is visible ranking failure."
+    },
+    {
+      "id": "ep_update_01",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_restraint_01",
+      "targets": "episodic",
+      "test": "restraint",
+      "question": "Số hồ sơ trên tác vụ trước về gia hạn CCCD là bao nhiêu?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "số hồ sơ",
+        "mã hồ sơ"
+      ],
+      "note": "Neither CCCD episode has a case number. Do not add one. A case number is a number, so a digit-free reply did not supply one.",
+      "answer_would_be_numeric": true
+    },
+    {
+      "id": "ep_restraint_02",
+      "targets": "episodic",
+      "test": "restraint",
+      "question": "Ai được giao xử lý tác vụ trước về gia hạn CCCD?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "người phụ trách",
+        "người được giao"
+      ],
+      "invented_any": [
+        "Phạm Quốc Huy",
+        "Quốc Huy"
+      ],
+      "note": "Neither CCCD episode names an assignee. Phạm Quốc Huy is on the passport-create episode only. Do not move him onto Hải Phòng CCCD — that would make a true retrieve grade as invented."
+    },
+    {
+      "id": "sem_recall_01",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty yêu cầu nộp đề nghị làm thêm giờ qua biểu mẫu nào?",
+      "expect_any": [
+        "OT-114",
+        "OT 114"
+      ],
+      "note": "OT-114 is the overtime form. OT-141 is night-shift only. Citing OT-141 is a lookalike miss. Cue chính sách công ty required."
+    },
+    {
+      "id": "sem_recall_02",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty yêu cầu đăng ký làm việc từ xa qua biểu mẫu nào?",
+      "expect_any": [
+        "WFH-207",
+        "WFH 207"
+      ],
+      "note": "Code exists in exactly one line of remote-work-policy.md."
+    },
+    {
+      "id": "sem_recall_03",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty quy định công tác phí trong nước mỗi ngày là bao nhiêu?",
+      "expect_any": [
+        "450.000",
+        "450000",
+        "450 000"
+      ],
+      "note": "Domestic figure only. Digit forms listed because models normalise thousands separators."
+    },
+    {
+      "id": "sem_restraint_01",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty nói gì về chế độ nghỉ dài hạn sabbatical?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "chính sách nghỉ dài hạn",
+        "chế độ nghỉ dài hạn",
+        "chính sách sabbatical",
+        "quy định về sabbatical"
+      ],
+      "note": "Absent topic. Do not declare bare chính sách — a decline about the wrong policy would match it."
+    },
+    {
+      "id": "sem_restraint_02",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty quy định công tác phí cho chuyến đi nước ngoài là bao nhiêu?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "công tác phí nước ngoài",
+        "công tác phí cho chuyến đi nước ngoài",
+        "mức công tác phí quốc tế"
+      ],
+      "invented_any": [
+        "450.000"
+      ],
+      "note": "Near-miss detail. Reciting the domestic 450.000 is invention. Only the verbatim corpus form is listed so the grounding test stays a substring."
+    },
+    {
+      "id": "sem_restraint_03",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty yêu cầu nộp đề nghị đổi laptop hỏng qua biểu mẫu nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "biểu mẫu đổi laptop",
+        "biểu mẫu đổi thiết bị",
+        "mẫu đề nghị đổi máy"
+      ],
+      "invented_any": [
+        "OT-114",
+        "WFH-207",
+        "OT-141"
+      ],
+      "note": "Equipment doc has no form code. Reciting any neighbouring code, including the v3 lookalike OT-141, is the failure."
+    }
+  ]
+}

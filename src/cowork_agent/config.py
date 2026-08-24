@@ -5,11 +5,15 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
 from cowork_agent.integrations.key_rotation import APIKeyRotator
+
+if TYPE_CHECKING:
+    from cowork_agent.features.batch_evaluation.bootstrap import EvaluationRuntimeConfig
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 MICROSOFT_MAIL_READ_SCOPE = "https://graph.microsoft.com/Mail.Read"
@@ -705,10 +709,67 @@ class EmailRagQualitySettings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EvaluationSettings:
+    """Internal-only evaluation control-plane API configuration.
+
+    The API is disabled unless explicitly enabled, and enabling it without a
+    strong bearer token is a startup configuration error. The token is kept
+    out of every representation and log line.
+    """
+
+    enabled: bool
+    api_token: str = field(repr=False, default="")
+    job_db_path: str = ".data/evaluation-jobs.db"
+    artifact_root: str = ".data/evaluation-jobs"
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "EvaluationSettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        enabled = _evaluation_flag(environ, "EVALUATION_API_ENABLED", default=False)
+        api_token = environ.get("EVALUATION_API_TOKEN", "").strip()
+        if enabled:
+            if not api_token:
+                raise ValueError(
+                    "EVALUATION_API_TOKEN must be configured when the evaluation API is enabled"
+                )
+            if len(api_token) < 32:
+                raise ValueError("EVALUATION_API_TOKEN must be at least 32 characters long")
+        return cls(
+            enabled=enabled,
+            api_token=api_token,
+            job_db_path=_non_empty_value(
+                environ, "EVALUATION_JOB_DB_PATH", ".data/evaluation-jobs.db"
+            ),
+            artifact_root=_non_empty_value(
+                environ, "EVALUATION_ARTIFACT_ROOT", ".data/evaluation-jobs"
+            ),
+        )
+
+    def to_runtime_config(self) -> "EvaluationRuntimeConfig":
+        """Resolve the configured storage locations for one local runtime."""
+
+        from cowork_agent.features.batch_evaluation.bootstrap import (
+            EvaluationRuntimeConfig,
+        )
+
+        return EvaluationRuntimeConfig(
+            job_db_path=Path(self.job_db_path),
+            artifact_root=Path(self.artifact_root),
+        )
+
 
 @dataclass(frozen=True, slots=True)
-class VyceSettings:
-    """Configuration for the Vyce (VyceAI) chat-completions provider with key rotation."""
+class MimoSettings:
+    """Configuration for the Xiaomi MiMo chat-completions provider with key rotation."""
 
     rotator: APIKeyRotator = field(repr=False)
     model: str
@@ -725,53 +786,45 @@ class VyceSettings:
         environ: Mapping[str, str] | None = None,
         *,
         load_env_file: bool = True,
-    ) -> "VyceSettings":
+    ) -> "MimoSettings":
         if environ is None:
             if load_env_file:
                 load_runtime_environment()
             environ = os.environ
-        # Check VYCE_API_KEY first, fallback to VYNE_API_KEY
-        key_prefix = "VYCE_API_KEY"
-        if not any(k.startswith("VYCE_API_KEY") for k in environ) and any(
-            k.startswith("VYNE_API_KEY") for k in environ
-        ):
-            key_prefix = "VYNE_API_KEY"
-
+        key_prefix = "MIMO_API_KEY"
         rotator = APIKeyRotator.from_env(
-            key_prefix, environ=environ, provider_name="Vyce"
+            key_prefix, environ=environ, provider_name="Mimo"
         )
         model = (
-            environ.get("VYCE_MODEL")
-            or environ.get("VYNE_MODEL")
-            or "gpt-5.6-luna"
+            environ.get("MIMO_MODEL")
+            or "mimo-v2.5-pro"
         ).strip()
         if not model or model.startswith("replace-with-"):
-            raise ValueError("VYCE_MODEL must be a real Vyce model name")
+            raise ValueError("MIMO_MODEL must be a real Mimo model name")
         base_url = (
-            environ.get("VYCE_BASE_URL")
-            or environ.get("VYNE_BASE_URL")
-            or "https://vyceai.com/v1"
+            environ.get("MIMO_BASE_URL")
+            or "https://token-plan-ams.xiaomimimo.com/v1"
         ).strip()
         rotate_on_rate_limit = _boolean(
             environ,
-            "VYCE_ROTATE_ON_RATE_LIMIT",
-            _boolean(environ, "VYNE_ROTATE_ON_RATE_LIMIT", True),
+            "MIMO_ROTATE_ON_RATE_LIMIT",
+            True,
         )
         max_emails = _positive_int(
             environ,
-            "VYCE_MAX_EMAILS_PER_BATCH",
-            _positive_int(environ, "VYNE_MAX_EMAILS_PER_BATCH", 5),
+            "MIMO_MAX_EMAILS_PER_BATCH",
+            5,
         )
         max_tokens = _bounded_positive_int(
             environ,
-            "VYCE_MAX_OUTPUT_TOKENS",
-            _bounded_positive_int(environ, "VYNE_MAX_OUTPUT_TOKENS", 4096, maximum=8192),
+            "MIMO_MAX_OUTPUT_TOKENS",
+            4096,
             maximum=8192,
         )
         timeout = _bounded_positive_int(
             environ,
-            "VYCE_TIMEOUT_SECONDS",
-            _bounded_positive_int(environ, "VYNE_TIMEOUT_SECONDS", 60, maximum=120),
+            "MIMO_TIMEOUT_SECONDS",
+            60,
             maximum=120,
         )
         return cls(
@@ -784,9 +837,6 @@ class VyceSettings:
             rotate_on_rate_limit=rotate_on_rate_limit,
             max_attempts=len(rotator.keys),
         )
-
-
-VyneSettings = VyceSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -872,7 +922,8 @@ class OpenRouterSettings:
 
 
 def _positive_int(environ: Mapping[str, str], name: str, default: int) -> int:
-    value = int(environ.get(name, str(default)))
+    raw = environ.get(name, str(default)).strip().replace(",", "")
+    value = int(raw)
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
@@ -911,6 +962,17 @@ def _boolean(environ: Mapping[str, str], name: str, default: bool) -> bool:
     if value not in {"true", "false"}:
         raise ValueError(f"{name} must be true or false")
     return value == "true"
+
+
+def _evaluation_flag(environ: Mapping[str, str], name: str, *, default: bool) -> bool:
+    value = environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    if value in {"1", "true"}:
+        return True
+    if value in {"0", "false"}:
+        return False
+    raise ValueError(f"{name} must be one of 0, 1, true, or false")
 
 
 def _non_empty_value(environ: Mapping[str, str], name: str, default: str) -> str:

@@ -5,9 +5,9 @@ import pytest
 
 from cowork_agent.config import (
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
     OpenRouterSettings,
-    VyceSettings,
 )
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -27,14 +27,16 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalResponse,
     ValidationStatus,
 )
-from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable
+from cowork_agent.features.ai_chat.controller import ChatReplyUnavailable, ChatResponseInvalid
 from cowork_agent.features.ai_chat.generation_context import assemble_generation_context
 from cowork_agent.integrations.key_rotation import APIKeyRotator
+from cowork_agent.integrations.llm import chat_reply
 from cowork_agent.integrations.llm.chat_reply import (
     GeminiChatReply,
+    MimoChatReply,
     MistralChatReply,
     OpenRouterChatReply,
-    VyceChatReply,
+    system_prompt_sha,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 
@@ -88,10 +90,17 @@ def test_configured_provider_settings_select_the_matching_chat_reply_adapter() -
         GeminiChatReply,
     )
     assert isinstance(
-        VyceChatReply.from_settings(
-            VyceSettings(APIKeyRotator(["key"], "Vyce"), "model", "https://vyceai.com/v1", 1, 1, 1)
+        MimoChatReply.from_settings(
+            MimoSettings(
+                APIKeyRotator(["key"], "Mimo"),
+                "model",
+                "https://token-plan-ams.xiaomimimo.com/v1",
+                1,
+                1,
+                1,
+            )
         ),
-        VyceChatReply,
+        MimoChatReply,
     )
     assert isinstance(
         MistralChatReply.from_settings(MistralSettings("key", "model", 1, 1, 1)),
@@ -670,3 +679,54 @@ def test_advisory_episodes_carry_the_recency_the_store_ranked_them_by() -> None:
         "2026-08-21T19:31:00+00:00",
         "2026-08-21T19:30:00+00:00",
     ]
+
+
+def test_system_prompt_sha_is_stable_across_calls() -> None:
+    assert system_prompt_sha() == system_prompt_sha()
+    assert len(system_prompt_sha()) == 64
+
+
+def test_system_prompt_sha_changes_when_the_prompt_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fingerprint that survives an edit would make two runs look comparable."""
+
+    before = system_prompt_sha()
+    monkeypatch.setattr(chat_reply, "_SYSTEM_INSTRUCTION", "a different instruction")
+    assert system_prompt_sha() != before
+
+
+def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
+    """The memory evaluation triaged three of these as network dropouts."""
+
+    request, context = _grounded_task_context()
+
+    async def uncitable(payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        return _task_response(
+            [
+                {
+                    "document_id": "invented",
+                    "document_title": "Invented",
+                    "section": None,
+                    "source_url": "https://invalid.example.com",
+                }
+            ]
+        )
+
+    reply = MistralChatReply(model="mistral-small-2603", complete=uncitable)
+    with pytest.raises(ChatResponseInvalid):
+        asyncio.run(_collect(reply, request, context))
+
+
+def test_a_provider_that_raises_is_still_a_provider_outage() -> None:
+    request, context = _grounded_task_context()
+
+    async def down(payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        raise TimeoutError("connection reset")
+
+    reply = MistralChatReply(model="mistral-small-2603", complete=down)
+    with pytest.raises(ChatReplyUnavailable) as caught:
+        asyncio.run(_collect(reply, request, context))
+    assert not isinstance(caught.value, ChatResponseInvalid)

@@ -28,7 +28,7 @@ Two decoupled workflows — do not merge them:
 ```text
 src/cowork_agent/
 ├── app.py                       # FastAPI composition root; entry point `mail-todo-api`
-├── config.py                    # env settings loaders (Gmail, Gemini, Vyce)
+├── config.py                    # env settings loaders (Gmail, Gemini, Mimo)
 ├── prompting.py                 # shared untrusted/retrieved block delimiters for prompts
 ├── api/                         # HTTP handlers / response serialization
 ├── domain/models.py             # pure domain models (no framework imports)
@@ -111,14 +111,6 @@ keeps spec, scope, and the Definition of Done.
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 
 ## Agent skills
-### Issue tracker
-
-Linear team Heval1st (`HEV-` issues), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default five roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
 ### Domain docs
 
 Single-context: root `CONTEXT.md` plus ADRs in `tasks/adr/`. See `docs/agents/domain.md`.

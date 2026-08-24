@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,6 +25,7 @@ from cowork_agent.features.ai_chat.memory_eval.probes import (
     ProbeTest,
     SeedSpec,
 )
+from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
 from cowork_agent.features.ai_chat.memory_eval.seeding import SeedOutcome
 
 
@@ -150,6 +152,83 @@ def _session(reply: object, seed: SeedSpec | None = None) -> LiveSession:
         reply=reply,
         seed=seed if seed is not None else SeedSpec((), {}, (), None),
     )
+
+
+def test_run_probe_set_preserves_the_serial_report_contract() -> None:
+    probe_set = ProbeSet(
+        schema_version="2.0.0",
+        probe_set_id="characterization",
+        label="characterization",
+        seed=SeedSpec((), {}, (), None),
+        probes=(
+            Probe(
+                probe_id="probe-1",
+                targets=MemoryType.EPISODIC,
+                test=ProbeTest.RECALL,
+                question="first?",
+                expect_any=("alpha",),
+            ),
+            Probe(
+                probe_id="probe-2",
+                targets=MemoryType.LONG_TERM,
+                test=ProbeTest.RECALL,
+                question="second?",
+                expect_any=("new bravo",),
+                stale_any=("old bravo",),
+            ),
+        ),
+    )
+
+    async def ask(probe: Probe, arm: Arm, masked: MemoryType | None) -> tuple[str, int]:
+        replies = {
+            ("probe-1", Arm.FULL): ("alpha", 11),
+            ("probe-1", Arm.ABLATED): ("no match", 12),
+            ("probe-1", Arm.CONTROL): ("no match", 13),
+            ("probe-2", Arm.FULL): ("new bravo", 21),
+            ("probe-2", Arm.ABLATED): ("old bravo", 22),
+            ("probe-2", Arm.CONTROL): ("no match", 23),
+        }
+        assert masked is probe.targets if arm is Arm.ABLATED else masked is None
+        return replies[(probe.probe_id, arm)]
+
+    report = asyncio.run(
+        run_probe_set(
+            probe_set,
+            ask,
+            provider="provider",
+            model="model",
+            ran_at=datetime(2026, 8, 23, tzinfo=UTC),
+            seed_failures=("z", "a"),
+            nonce="nonce",
+        )
+    )
+
+    assert report["nonce"] == "nonce"
+    assert report["seed_failures"] == ["a", "z"]
+    assert report["verdicts"] == [
+        {
+            "probe": "probe-2",
+            "targets": "long_term",
+            "test": "recall",
+            "full": "pass",
+            "ablated": "stale",
+            "control": "miss",
+            "verdict": "dangerous",
+            "certain": True,
+            "latency_ms": 66,
+        },
+        {
+            "probe": "probe-1",
+            "targets": "episodic",
+            "test": "recall",
+            "full": "pass",
+            "ablated": "miss",
+            "control": "miss",
+            "verdict": "scope_earned_it",
+            "certain": True,
+            "latency_ms": 36,
+        },
+    ]
 
 
 def test_ask_live_returns_text_and_latency() -> None:
@@ -474,4 +553,3 @@ def test_consecutive_ask_once_provider_failures_abort(monkeypatch: pytest.Monkey
     with pytest.raises(ExcessiveSeedFailuresError):
         for index in range(3):
             asyncio.run(ask_live(session, _probe(probe_id=f"p{index}"), Arm.FULL, None))
-

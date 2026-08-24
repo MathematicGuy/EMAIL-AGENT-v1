@@ -76,6 +76,16 @@ class Probe:
     #: wrap-invention shape (decline, then supply a nearby name). Only
     #: meaningful with ``expect_refusal``.
     invented_any: tuple[str, ...] = ()
+    #: Whether the answer this probe declines to give would have to carry a
+    #: digit — a case number, a phone number, a form code, a working hour.
+    #: Half the restraint probes cannot name the invention they guard against
+    #: because the seed holds no near-miss to name, and those rows stay
+    #: uncertain forever: a person rereads the same honest refusal every run.
+    #: Shape is what is left to check. A decline that carries no digit at all
+    #: cannot have supplied a number, whatever words it used. Only meaningful
+    #: with ``expect_refusal``, and only ever ADDS certainty — a reply with a
+    #: digit falls back to the uncertain branch, which is where it belongs.
+    answer_would_be_numeric: bool = False
     note: str = ""
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +163,9 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     expect_refusal = _bool(data.get("expect_refusal"), f"probe {probe_id}: expect_refusal")
     refusal_about = _string_tuple(data.get("refusal_about"), f"probe {probe_id}: refusal_about")
     invented_any = _string_tuple(data.get("invented_any"), f"probe {probe_id}: invented_any")
+    answer_would_be_numeric = _bool(
+        data.get("answer_would_be_numeric"), f"probe {probe_id}: answer_would_be_numeric"
+    )
 
     # Declared without a refusal expected, it would silently do nothing: the
     # noun is only ever combined with a word for having nothing on the refusal
@@ -164,6 +177,10 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
     if invented_any and not expect_refusal:
         raise ProbeSetError(
             f"probe {probe_id}: invented_any is only meaningful with expect_refusal"
+        )
+    if answer_would_be_numeric and not expect_refusal:
+        raise ProbeSetError(
+            f"probe {probe_id}: answer_would_be_numeric is only meaningful with expect_refusal"
         )
 
     # A probe with no expectation always passes, which is worse than no probe.
@@ -186,6 +203,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         expect_refusal=expect_refusal,
         refusal_about=refusal_about,
         invented_any=invented_any,
+        answer_would_be_numeric=answer_would_be_numeric,
         note=note,
     )
 

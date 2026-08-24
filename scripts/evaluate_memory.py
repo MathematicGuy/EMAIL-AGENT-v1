@@ -3,8 +3,11 @@
 
 Exit codes:
   0 - the run completed and a report was written
-  1 - the run could not produce a scorable result (no usable model)
-  2 - the probe set could not be loaded
+  1 - the run could not produce a scorable result: no usable model, the
+      Mistral evaluation could not start or finish safely, or the job
+      finished without a scorable report
+  2 - the probe set could not be loaded, or a flag was invalid (including
+      --max-workers > 1 on a provider other than mistral)
 
 Exit code 0 does NOT mean the memory system is good. It means the harness ran.
 Verdicts are read by a human; this harness reports, it does not gate.
@@ -23,38 +26,52 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from cowork_agent.config import (
     GeminiSettings,
     load_runtime_environment,
 )
+from cowork_agent.features.ai_chat.memory_eval import live_execution
 from cowork_agent.features.ai_chat.memory_eval.arms import Arm
-from cowork_agent.features.ai_chat.memory_eval.default_project import (
-    NullDefaultProjectEpisodes,
-)
-from cowork_agent.features.ai_chat.memory_eval.live_controller import AdapterSet
 from cowork_agent.features.ai_chat.memory_eval.live_env import (
     LiveEnvironment,
     UnsafeTargetError,
     probe_environment,
     run_with_selector_loop,
-    unavailable_scopes,
 )
-from cowork_agent.features.ai_chat.memory_eval.live_runner import (
-    ExcessiveSeedFailuresError,
-    LiveSession,
-    ask_live,
-    build_identity,
-    teardown,
+from cowork_agent.features.ai_chat.memory_eval.live_execution import (
+    build_memory_report,
+    execute_memory_shard,
 )
-from cowork_agent.features.ai_chat.memory_eval.live_seeding import seed_semantic
 from cowork_agent.features.ai_chat.memory_eval.probes import Probe, ProbeSet, load_probe_set
-from cowork_agent.features.ai_chat.memory_eval.report import REPORT_SCHEMA_VERSION
 from cowork_agent.features.ai_chat.memory_eval.runner import run_probe_set
-from cowork_agent.features.ai_chat.memory_eval.scoring import score
+from cowork_agent.features.batch_evaluation.bootstrap import (
+    EvaluationRuntime,
+    EvaluationRuntimeConfig,
+    build_evaluation_runtime,
+)
+from cowork_agent.features.batch_evaluation.contracts import (
+    EvaluationBudget,
+    EvaluationRequest,
+    ExecutionMode,
+    JobState,
+)
+from cowork_agent.features.batch_evaluation.service import (
+    EvaluationConflict,
+    EvaluationValidationError,
+)
+from cowork_agent.features.batch_evaluation.supervisor import EvaluationSupervisorError
+from cowork_agent.persistence.repositories.evaluation_jobs import EvaluationJob
 
 _ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES = "MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES"
 _DEFAULT_MAX_CONSECUTIVE_PROVIDER_FAILURES = 3
+_ENV_JOB_WAIT_IDLE_SECONDS = "MEMEVAL_JOB_WAIT_IDLE_SECONDS"
+# Must outlast the unit-to-unit gaps of a full single-worker wide-set run
+# (tens of minutes of provider calls); only a job whose durable unit rows
+# stop moving for this long is treated as stranded.
+_DEFAULT_JOB_WAIT_IDLE_SECONDS = 1800.0
+_JOB_POLL_INTERVAL_SECONDS = 0.05
 
 
 def _positive_int(value: str) -> int:
@@ -98,9 +115,54 @@ def _resolve_max_consecutive_provider_failures(
         )
     return parsed
 
+
+def _resolve_job_wait_idle_seconds(environ: Mapping[str, str]) -> float:
+    """How long a Mistral job may stay in one non-terminal snapshot.
+
+    The poll loop is otherwise unbounded: a job stranded in a state recovery
+    cannot drive (e.g. VALIDATING/ACCEPTED) never updates, so the wait must
+    give up on its behalf.
+    """
+
+    raw = environ.get(_ENV_JOB_WAIT_IDLE_SECONDS, "").strip()
+    if not raw:
+        return _DEFAULT_JOB_WAIT_IDLE_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{_ENV_JOB_WAIT_IDLE_SECONDS} must be a number of seconds > 0, got {raw!r}"
+        ) from None
+    if parsed <= 0:
+        raise ValueError(
+            f"{_ENV_JOB_WAIT_IDLE_SECONDS} must be a number of seconds > 0, got {raw!r}"
+        )
+    return parsed
+
+
 _DEFAULT_PROBES_DIR = Path("evaluations/MEMORIES/probes")
 _DEFAULT_OUTPUT_DIR = Path("evaluations/MEMORIES/baselines")
 _DETAIL_DIR = Path("evaluations/MEMORIES/runs")
+_DEFAULT_EVALUATION_JOB_DB = Path(".data/evaluation-jobs.db")
+_DEFAULT_EVALUATION_ARTIFACT_ROOT = Path(".data/evaluation-jobs")
+_DEFAULT_MISTRAL_MODEL = "mistral-small-2603"
+_MISTRAL_DATASET_REFS = {
+    "v1_four_scopes": "v1-four-scopes",
+    "v2_four_scopes_wide": "v2-four-scopes-wide",
+    "v3_four_scopes_hard": "v3-four-scopes-hard",
+}
+_MISTRAL_EVALUATION_BUDGET = EvaluationBudget(
+    max_provider_requests=180,
+    max_total_tokens=500_000,
+)
+_TERMINAL_JOB_STATES = frozenset(
+    {
+        JobState.SUCCEEDED,
+        JobState.PARTIALLY_SUCCEEDED,
+        JobState.FAILED,
+        JobState.CANCELLED,
+    }
+)
 
 
 def resolve_latest_probe_set(probes_dir: Path | None = None) -> Path:
@@ -137,8 +199,22 @@ def _stamp_probe_set_identity(report: dict[str, object], probe_set_path: Path) -
     report["probe_set_sha256"] = hashlib.sha256(probe_set_path.read_bytes()).hexdigest()
 
 
+def _stamp_prompt_identity(report: dict[str, object]) -> None:
+    """Record which system prompt this baseline was scored against.
+
+    Two runs are comparable only if the prompt was the same, and nothing else in
+    the artifact says what it was. Imported here rather than at module scope for
+    the same reason `_build_chat_reply` defers its imports: the provider modules
+    pull in SDKs the offline paths do not need.
+    """
+
+    from cowork_agent.integrations.llm.chat_reply import system_prompt_sha
+
+    report["system_prompt_sha"] = system_prompt_sha()
+
+
 #: Chat providers this harness can drive, mirroring `evaluate_email_golden.py`.
-_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "vyce", "vyne", "mistral")
+_SUPPORTED_PROVIDERS = ("gemini", "openrouter", "mimo", "mistral")
 
 
 def _default_provider(environ: Mapping[str, str]) -> str:
@@ -181,14 +257,14 @@ def _build_chat_reply(
         if model:
             openrouter = replace(openrouter, model=model, allowed_models=(model,))
         return OpenRouterChatReply.from_settings(openrouter), provider, openrouter.model
-    if provider in ("vyce", "vyne"):
-        from cowork_agent.config import VyceSettings
-        from cowork_agent.integrations.llm.chat_reply import VyceChatReply
+    if provider == "mimo":
+        from cowork_agent.config import MimoSettings
+        from cowork_agent.integrations.llm.chat_reply import MimoChatReply
 
-        vyce = VyceSettings.from_env(environ)
+        mimo = MimoSettings.from_env(environ)
         if model:
-            vyce = replace(vyce, model=model)
-        return VyceChatReply.from_settings(vyce), provider, vyce.model
+            mimo = replace(mimo, model=model)
+        return MimoChatReply.from_settings(mimo), provider, mimo.model
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.chat_reply import MistralChatReply
@@ -239,127 +315,6 @@ async def _dry_run(probe_set: object) -> dict[str, object]:
     )
 
 
-async def _build_adapters(
-    env: LiveEnvironment, probe_set: ProbeSet
-) -> tuple[AdapterSet, list[str], Any]:
-    """Build every adapter the environment can support. Absences are findings.
-
-    Nothing here raises on a missing dependency. A scope whose adapter could not
-    be built fails closed at the gateway, which is what an unavailable scope
-    should look like, and the reason travels into the report instead of ending
-    the run for the scopes that were fine. `unavailable_scopes` names the
-    missing infrastructure; this function only reports what it tried and could
-    not finish, so the two never say the same thing twice.
-    """
-
-    failures: list[str] = []
-    declarative: object | None = None
-    episodic: object | None = None
-    pool: object | None = None
-    if env.postgres_url is not None:
-        from psycopg_pool import AsyncConnectionPool
-
-        from cowork_agent.persistence.migrate import apply_migrations
-        from cowork_agent.persistence.repositories.postgres import (
-            PostgresChatProfileRepository,
-            PostgresTaskEpisodeRepository,
-        )
-
-        pool = AsyncConnectionPool(env.postgres_url, min_size=1, max_size=4, open=False)
-        await pool.open(wait=True)
-        await apply_migrations(pool)
-        declarative = PostgresChatProfileRepository(pool)
-        # The harness builds its scopes directly, so they carry the legacy
-        # "default-project" sentinel that the app resolves to a real UUID before
-        # any episode is written. `task_episodes.project_id` is `uuid`, so the
-        # sentinel would fail every write here. See `default_project`.
-        episodic = NullDefaultProjectEpisodes(PostgresTaskEpisodeRepository(pool))
-        print("[memeval] Initialized PostgreSQL repositories", file=sys.stderr, flush=True)
-    elif env.sqlite_path is not None:
-        # The product backs long_term and episodic with SQLite whenever
-        # database_url() is empty, and one SQLiteChatRepository serves both
-        # roles — exactly as app.py wires them. Building only the Postgres pair
-        # here would report two working scopes as unavailable.
-        from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
-
-        env.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        sqlite_chat = SQLiteChatRepository(env.sqlite_path)
-        await sqlite_chat.initialize()
-        declarative = sqlite_chat
-        episodic = sqlite_chat
-        print(
-            f"[memeval] Initialized SQLite repository at {env.sqlite_path}",
-            file=sys.stderr,
-            flush=True,
-        )
-
-    semantic: object | None = None
-    if env.embeddings_ready:
-        # Use the app's own factory rather than naming a provider here. It
-        # honours DOCUMENT_EMBEDDING_PROVIDER, so the corpus is embedded by
-        # whatever the product embeds documents with. Hardcoding one provider
-        # would measure a retrieval path the product no longer uses, which is
-        # the "same system as shipped" rule in SPEC 12.1.
-        from cowork_agent.integrations.rag.bootstrap import build_document_embedder
-
-        print("[memeval] Seeding semantic memory corpus...", file=sys.stderr, flush=True)
-        embedder, _dimensions = build_document_embedder()
-        outcome, adapter = await seed_semantic(
-            probe_set.seed,
-            embedder,
-            corpus_root=Path("."),
-        )
-        if outcome.ok:
-            semantic = adapter
-            print("[memeval] Semantic memory seeded successfully", file=sys.stderr, flush=True)
-        else:
-            failures.append(f"semantic: {outcome.reason}")
-            print(
-                f"[memeval] Semantic memory seeding failed: {outcome.reason}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-    return AdapterSet(declarative, episodic, semantic), failures, pool
-
-
-def _attach_stream_errors(
-    session: LiveSession, recorded: list[dict[str, object]]
-) -> None:
-    for record in recorded:
-        record["stream_errors"] = [
-            item
-            for item in session.ask_errors
-            if item["probe"] == record["probe"] and item["arm"] == record["arm"]
-        ]
-
-
-def _aborted_report(
-    probe_set: ProbeSet,
-    *,
-    provider: str,
-    model: str,
-    identity: Any,
-    seed_failures: Sequence[str],
-) -> dict[str, object]:
-    return {
-        "schema_version": REPORT_SCHEMA_VERSION,
-        "probe_set_id": probe_set.probe_set_id,
-        "probe_count": len(probe_set.probes),
-        "provider": provider,
-        "model": model,
-        "ran_at": datetime.now(UTC).isoformat(),
-        "run_key": identity.run_key,
-        "nonce": identity.nonce,
-        "per_scope": {},
-        "verdicts": [],
-        "leaked_probes": [],
-        "needs_reading": 0,
-        "seed_failures": sorted(seed_failures),
-        "aborted": True,
-    }
-
-
 async def run_live(
     probe_set: ProbeSet,
     env: LiveEnvironment,
@@ -370,111 +325,169 @@ async def run_live(
     transcript: list[dict[str, object]] | None = None,
     max_consecutive_provider_failures: int = 3,
 ) -> dict[str, object]:
-    """Seed, probe under three arms, report, then delete everything created.
+    """Compatibility wrapper around one full-set live shard."""
 
-    `transcript` collects the full question and reply for every arm. The
-    committed report is metadata-only by design, so without this the replies a
-    human has to read to resolve an uncertain refusal do not survive the run.
+    transcript_size = len(transcript) if transcript is not None else 0
+    result = await execute_memory_shard(
+        probe_set,
+        env,
+        reply,
+        provider=provider,
+        model=model,
+        max_consecutive_provider_failures=max_consecutive_provider_failures,
+        private_transcript_sink=transcript,
+    )
+    # Compatibility for callers/tests using an older shard adapter which
+    # returns its evidence rather than writing to the caller-owned sink.
+    if transcript is not None and len(transcript) == transcript_size:
+        transcript.extend(result.private_transcript)
+    report = build_memory_report(
+        probe_set,
+        (result,),
+        provider=provider,
+        model=model,
+        ran_at=datetime.now(UTC),
+    )
+    return report
+
+
+def _resolve_mistral_model(model: str | None, environ: Mapping[str, str]) -> str:
+    candidate = model if model is not None else environ.get("MISTRAL_MODEL", _DEFAULT_MISTRAL_MODEL)
+    resolved = candidate.strip()
+    if not resolved or resolved.startswith("replace-with-"):
+        raise ValueError("MISTRAL_MODEL must be a real Mistral model name")
+    return resolved
+
+
+def _mistral_dataset_ref(probe_set: ProbeSet) -> str:
+    return _MISTRAL_DATASET_REFS.get(probe_set.probe_set_id, probe_set.probe_set_id)
+
+
+def _mistral_request(
+    probe_set: ProbeSet,
+    *,
+    model: str,
+    max_workers: int,
+) -> EvaluationRequest:
+    return EvaluationRequest(
+        evaluation_type="memory-eval",
+        provider="mistral",
+        target_model=model,
+        dataset_ref=_mistral_dataset_ref(probe_set),
+        credential_pool="mistral-eval",
+        execution_mode=ExecutionMode.WORKFLOW_SHARDS,
+        max_workers=max_workers,
+        max_attempts_per_unit=1,
+        budget=_MISTRAL_EVALUATION_BUDGET,
+        parameters={},
+    )
+
+
+async def _wait_for_terminal_mistral_job(
+    runtime: EvaluationRuntime,
+    job_id: str,
+    *,
+    idle_timeout_seconds: float,
+) -> EvaluationJob:
+    """Poll one job until it is terminal, failing cleanly if it stops moving.
+
+    A replayed idempotency key can return a job stranded in a non-terminal
+    state that recovery cannot drive; without a bound this loop would spin
+    forever. Progress means the state, its durable timestamp, or any unit row
+    changed: during a healthy RUNNING phase only the unit rows move, so a
+    run with advancing units must never trip the bound.
     """
 
-    total_calls = len(probe_set.probes) * 3
-    print(
-        f"[memeval] Starting evaluation run: probe_set={probe_set.probe_set_id} "
-        f"({len(probe_set.probes)} probes, {total_calls} calls) | "
-        f"provider={provider} | model={model}",
-        file=sys.stderr,
-        flush=True,
+    repository = runtime.repository
+    loop = asyncio.get_running_loop()
+    last_progress: tuple[object, object, object] | None = None
+    last_progress_at = loop.time()
+    while True:
+        job = await repository.get_job(job_id)
+        if job is None:
+            raise RuntimeError("evaluation job disappeared before reaching a terminal state")
+        if job.state in _TERMINAL_JOB_STATES:
+            return job
+        units = await repository.list_units(job_id)
+        unit_progress = tuple(
+            sorted((unit.unit_id, unit.state.value) for unit in units)
+        )
+        progress = (job.state, job.updated_at, unit_progress)
+        if progress != last_progress:
+            last_progress = progress
+            last_progress_at = loop.time()
+        elif loop.time() - last_progress_at > idle_timeout_seconds:
+            raise ValueError(
+                f"Mistral evaluation job {job_id} made no progress for "
+                f"{idle_timeout_seconds:g}s in state {job.state.value}; "
+                "it will not finish without manual intervention"
+            )
+        await asyncio.sleep(_JOB_POLL_INTERVAL_SECONDS)
+
+
+def _is_memory_eval_report(report: Mapping[str, object]) -> bool:
+    """Real reports carry the report schema; runner stub manifests do not.
+
+    On unplanned failure or failed aggregation the runner persists a bare
+    ``{"state": "failed"}``-style stub. That is a durable job record, not a
+    baseline report, and must never be written under baselines/.
+    """
+
+    schema_version = report.get("schema_version")
+    return isinstance(schema_version, str) and bool(schema_version)
+
+
+async def _run_mistral_evaluation(
+    probe_set: ProbeSet,
+    *,
+    model: str,
+    max_workers: int,
+    idempotency_key: str,
+    environ: Mapping[str, str],
+    job_wait_idle_seconds: float,
+) -> tuple[dict[str, object], JobState, tuple[object, ...]]:
+    runtime = build_evaluation_runtime(
+        EvaluationRuntimeConfig(
+            job_db_path=_DEFAULT_EVALUATION_JOB_DB,
+            artifact_root=_DEFAULT_EVALUATION_ARTIFACT_ROOT,
+        ),
+        environ,
     )
-
-    identity = build_identity(probe_set, model)
-    adapters, failures, pool = await _build_adapters(env, probe_set)
-    failures.extend(item.reason for item in unavailable_scopes(env))
-    session = LiveSession(
-        identity=identity,
-        adapters=adapters,
-        reply=reply,
-        seed=probe_set.seed,
-        max_consecutive_provider_failures=max_consecutive_provider_failures,
-    )
-    recorded = transcript if transcript is not None else []
-    call_idx = 0
-
-    async def ask(probe: Probe, arm: Arm, masked: Any) -> tuple[str, int]:
-        nonlocal call_idx
-        call_idx += 1
-        current_idx = call_idx
-        target_name = probe.targets.value
-        arm_name = arm.value
-        print(
-            f"[{current_idx:02d}/{total_calls:02d}] Asking probe '{probe.probe_id}' "
-            f"(target: {target_name}, arm: {arm_name})...",
-            file=sys.stderr,
-            flush=True,
-        )
-        text, latency_ms = await ask_live(session, probe, arm, masked)
-        result = score(text, probe)
-        certainty = "certain" if result.certain else "uncertain"
-        print(
-            f"[{current_idx:02d}/{total_calls:02d}] Done probe '{probe.probe_id}' "
-            f"[{arm_name}] -> outcome: {result.outcome.value} ({certainty}) [{latency_ms}ms]",
-            file=sys.stderr,
-            flush=True,
-        )
-        recorded.append(
-            {
-                "probe": probe.probe_id,
-                "targets": probe.targets.value,
-                "arm": arm.value,
-                "masked": None if masked is None else str(masked.value),
-                "question": probe.question,
-                "reply": text,
-                "outcome": result.outcome.value,
-                "certain": result.certain,
-                "why": result.why,
-                "latency_ms": latency_ms,
-            }
-        )
-        return text, latency_ms
-
-    report: dict[str, object] | None = None
     try:
-        report = await run_probe_set(
-            probe_set,
-            ask,
-            provider=provider,
-            model=model,
-            ran_at=datetime.now(UTC),
-            seed_failures=failures,
-            nonce=identity.nonce,
+        await runtime.initialize()
+        # A replayed idempotency key can map to a job a previous process left
+        # stranded in a recoverable state; resume those before waiting.
+        await runtime.recover()
+        job = await runtime.service.submit(
+            _mistral_request(probe_set, model=model, max_workers=max_workers),
+            idempotency_key=idempotency_key,
         )
-        # Seeding happens inside ask_live, so session.seed_failures is only
-        # complete once run_probe_set has returned. Passing it as an argument
-        # above would capture an empty list on every run, because arguments are
-        # evaluated before the call.
-        report["seed_failures"] = sorted({*failures, *session.seed_failures})
-        _attach_stream_errors(session, recorded)
-    except ExcessiveSeedFailuresError as error:
-        _attach_stream_errors(session, recorded)
-        if not recorded:
-            raise
-        print(f"ERROR: {error}", file=sys.stderr)
-        report = _aborted_report(
-            probe_set,
-            provider=provider,
-            model=model,
-            identity=identity,
-            seed_failures=sorted({*failures, *session.seed_failures}),
+        terminal = await _wait_for_terminal_mistral_job(
+            runtime, job.job_id, idle_timeout_seconds=job_wait_idle_seconds
         )
+        report = dict(await runtime.service.get_result(job.job_id))
+        if not _is_memory_eval_report(report):
+            raise ValueError(
+                f"Mistral evaluation finished in state {terminal.state.value} but "
+                "produced no scorable report; the durable job manifest carries "
+                "the failure record"
+            )
+        # Execution details belong to the job manifest and must not change the
+        # established baseline-report schema.
+        report.pop("execution_manifest", None)
+        return report, terminal.state, tuple(terminal.warnings)
     finally:
-        # Teardown runs even when a probe raised. A run that created stores must
-        # not leave them behind, and a partial cleanup still beats none.
-        print("[memeval] Tearing down evaluation stores...", file=sys.stderr, flush=True)
-        await teardown(session.gateways)
-        if pool is not None:
-            await pool.close()
-        print("[memeval] Teardown complete", file=sys.stderr, flush=True)
-    assert report is not None
-    return report
+        await runtime.close()
+
+
+def _print_worker_warnings(warnings: Sequence[object]) -> None:
+    for warning in warnings:
+        code = getattr(warning, "code", None)
+        details = getattr(warning, "details", None)
+        if not isinstance(code, str) or not isinstance(details, Mapping):
+            continue
+        values = " ".join(f"{key}={value}" for key, value in sorted(details.items()))
+        print(f"WARNING: {code} {values}".rstrip(), file=sys.stderr)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -501,6 +514,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Model name override for the provider.",
     )
     parser.add_argument(
+        "--max-workers",
+        type=_positive_int,
+        default=1,
+        help="Maximum Mistral evaluation workers; defaults to 1.",
+    )
+    parser.add_argument(
+        "--idempotency-key",
+        help="Optional stable key for retrying one Mistral evaluation intent.",
+    )
+    parser.add_argument(
         "--max-consecutive-provider-failures",
         type=_positive_int,
         default=None,
@@ -515,6 +538,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_consecutive = _resolve_max_consecutive_provider_failures(
             args.max_consecutive_provider_failures, dict(os.environ)
         )
+        # Validated before any provider spend: a malformed bound must abort
+        # the run before submit, not after it.
+        job_wait_idle_seconds = _resolve_job_wait_idle_seconds(dict(os.environ))
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -531,52 +557,88 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"ERROR: cannot load probe set: {error}", file=sys.stderr)
         return 2
 
+    terminal_state: JobState | None = None
     if args.dry_run:
         report = asyncio.run(_dry_run(probe_set))
     else:
-        # A missing Postgres or Jina key is a per-scope finding the report
-        # carries. A missing model is not: with no reply there is nothing to
-        # score, so there is no run at all.
-        try:
-            env = probe_environment(dict(os.environ))
-        except UnsafeTargetError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 2
-        provider = args.provider or _default_provider(dict(os.environ))
-        if provider == "gemini" and not env.gemini_ready:
+        environ = dict(os.environ)
+        provider = args.provider or _default_provider(environ)
+        if provider != "mistral" and args.max_workers > 1:
             print(
-                "ERROR: no GEMINI_API_KEY. Without a model there is no reply to "
-                "score, so there is no run.",
+                "ERROR: --max-workers is only supported for provider=mistral; "
+                "other providers remain serial.",
                 file=sys.stderr,
             )
-            return 1
-        try:
-            reply, provider, model = _build_chat_reply(
-                provider, dict(os.environ), model=args.model
-            )
-        except ValueError as error:
-            # A provider is selected but unusable - a missing key, an unset
-            # model, or a name this harness cannot drive. The same outcome as no
-            # model at all, said differently so it is not mistaken for one.
-            print(f"ERROR: {provider} is configured but unusable: {error}", file=sys.stderr)
-            return 1
-        try:
-            report = run_with_selector_loop(
-                run_live(
-                    probe_set,
-                    env,
-                    reply,
-                    provider=provider,
-                    model=model,
-                    transcript=transcript,
-                    max_consecutive_provider_failures=max_consecutive,
+            return 2
+        if provider == "mistral":
+            try:
+                model = _resolve_mistral_model(args.model, environ)
+                report, terminal_state, warnings = run_with_selector_loop(
+                    _run_mistral_evaluation(
+                        probe_set,
+                        model=model,
+                        max_workers=args.max_workers,
+                        idempotency_key=args.idempotency_key or f"memeval-{uuid4().hex}",
+                        environ=environ,
+                        job_wait_idle_seconds=job_wait_idle_seconds,
+                    )
                 )
-            )
-        except ExcessiveSeedFailuresError as error:
-            print(f"ERROR: {error}", file=sys.stderr)
-            return 1
+            except (
+                EvaluationConflict,
+                EvaluationSupervisorError,
+                EvaluationValidationError,
+                ValueError,
+            ) as error:
+                # These messages are deliberately sanitized upstream, so they
+                # are safe to surface.
+                print(
+                    f"ERROR: Mistral evaluation could not start or finish safely: {error}",
+                    file=sys.stderr,
+                )
+                return 1
+            _print_worker_warnings(warnings)
+        else:
+            # A missing Postgres or Jina key is a per-scope finding the report
+            # carries. A missing model is not: with no reply there is nothing to
+            # score, so there is no run at all.
+            try:
+                env = probe_environment(environ)
+            except UnsafeTargetError as error:
+                print(f"ERROR: {error}", file=sys.stderr)
+                return 2
+            if provider == "gemini" and not env.gemini_ready:
+                print(
+                    "ERROR: no GEMINI_API_KEY. Without a model there is no reply to "
+                    "score, so there is no run.",
+                    file=sys.stderr,
+                )
+                return 1
+            try:
+                reply, provider, model = _build_chat_reply(provider, environ, model=args.model)
+            except ValueError as error:
+                # A provider is selected but unusable - a missing key, an unset
+                # model, or a name this harness cannot drive. The same outcome as no
+                # model at all, said differently so it is not mistaken for one.
+                print(f"ERROR: {provider} is configured but unusable: {error}", file=sys.stderr)
+                return 1
+            try:
+                report = run_with_selector_loop(
+                    run_live(
+                        probe_set,
+                        env,
+                        reply,
+                        provider=provider,
+                        model=model,
+                        transcript=transcript,
+                        max_consecutive_provider_failures=max_consecutive,
+                    )
+                )
+            except live_execution.ExcessiveSeedFailuresError as error:
+                print(f"ERROR: {error}", file=sys.stderr)
+                return 1
 
     _stamp_probe_set_identity(report, probe_set_path)
+    _stamp_prompt_identity(report)
 
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     output = args.output
@@ -611,7 +673,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"detail written to {detail}", file=sys.stderr)
 
     print(json.dumps(report, indent=2))
-    return 1 if report.get("aborted") else 0
+    failed_terminal_state = terminal_state in {JobState.FAILED, JobState.CANCELLED}
+    return 1 if report.get("aborted") or failed_terminal_state else 0
 
 
 if __name__ == "__main__":
@@ -628,4 +691,3 @@ if __name__ == "__main__":
     # checkout, which would turn that unit test into a real billed run.
     load_runtime_environment()
     raise SystemExit(main())
-

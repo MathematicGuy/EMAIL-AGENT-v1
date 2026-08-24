@@ -11,8 +11,8 @@ import pytest
 
 from cowork_agent.config import (
     GeminiSettings,
+    MimoSettings,
     MistralSettings,
-    VyceSettings,
 )
 from cowork_agent.domain import Priority
 from cowork_agent.domain.target_contracts import (
@@ -35,13 +35,13 @@ from cowork_agent.integrations.llm.providers.gemini import (
     GeminiActionPlanGenerator,
     GenerationSchemaError,
 )
+from cowork_agent.integrations.llm.providers.mimo import (
+    MimoActionPlanGenerator,
+    MimoAPIError,
+)
 from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
     MistralAPIError,
-)
-from cowork_agent.integrations.llm.providers.vyce import (
-    VyceActionPlanGenerator,
-    VyceAPIError,
 )
 
 CURRENT_TIME = datetime(2026, 8, 3, 8, tzinfo=UTC)
@@ -321,7 +321,7 @@ def test_generator_raises_safe_error_after_failed_repair_retry() -> None:
     asyncio.run(scenario())
 
 
-def test_vyce_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mimo_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[dict[str, object]] = []
 
     def fake_post_json(
@@ -331,11 +331,11 @@ def test_vyce_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         captured.append(body)
         return {"choices": [{"message": {"content": json.dumps({"task": task_payload()})}}]}
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json)
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
-        generator = VyceActionPlanGenerator(settings)
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        generator = MimoActionPlanGenerator(settings)
         output = await generator.generate(
             user_timezone="Asia/Ho_Chi_Minh",
             current_time=CURRENT_TIME,
@@ -352,7 +352,7 @@ def test_vyce_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(captured) == 1
 
 
-def test_vyce_generator_raises_safe_error_after_failed_repair(
+def test_mimo_generator_raises_safe_error_after_failed_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_post_json(
@@ -361,12 +361,12 @@ def test_vyce_generator_raises_safe_error_after_failed_repair(
         del url, api_key, timeout_seconds
         return {"choices": [{"message": {"content": json.dumps({"task": {}})}}]}
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.vyce._post_json", fake_post_json)
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = VyceSettings.from_env({"VYCE_API_KEY": "test-key"}, load_env_file=False)
-        with pytest.raises(VyceAPIError):
-            await VyceActionPlanGenerator(settings).generate(
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        with pytest.raises(MimoAPIError):
+            await MimoActionPlanGenerator(settings).generate(
                 user_timezone="Asia/Ho_Chi_Minh",
                 current_time=CURRENT_TIME,
                 run_context=RUN_CONTEXT,

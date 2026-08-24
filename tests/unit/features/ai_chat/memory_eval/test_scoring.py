@@ -410,3 +410,41 @@ def test_the_rest_of_the_declared_noun_must_still_appear_in_the_reply() -> None:
     )
     reply = "Hiện không có chính sách; theo quy định nghỉ phép năm nhân viên được 12 ngày."
     assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_a_refusal_with_no_digit_is_certain_when_the_answer_would_have_carried_one() -> None:
+    """Half of v3's restraint rows were reread every run for want of this."""
+
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("mã số",),
+        answer_would_be_numeric=True,
+    )
+    result = score("Không có mã số nào được ghi nhận cho yêu cầu này.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is True
+
+
+def test_a_refusal_carrying_a_digit_stays_uncertain() -> None:
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("mã số",),
+        answer_would_be_numeric=True,
+    )
+    result = score("Không có mã số, nhưng hồ sơ mang số 118.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_a_refusal_probe_that_declared_no_shape_is_still_uncertain() -> None:
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("chức danh",),
+    )
+    assert score("Không có thông tin về chức danh của bạn.", probe).certain is False
