@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView, ChatMessage, ReasoningMode } from './types';
 import type { Project } from './types/projectTypes';
 import { AVAILABLE_MODELS } from './data/mockData';
@@ -142,6 +142,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     retryTurn,
   } = useStreamingChat(selectedModel.id, activeProjectId, projectIds, reasoningMode);
 
+  const [cachedTraceMessage, setCachedTraceMessage] = useState<ChatMessage | null>(null);
+  const activeTraceMessage = selectedTraceMessage
+    ? (messages.find((m) => m.id === selectedTraceMessage.id) ?? selectedTraceMessage)
+    : null;
+
+  if (activeTraceMessage && activeTraceMessage !== cachedTraceMessage) {
+    setCachedTraceMessage(activeTraceMessage);
+  }
+
+  const displayedTraceMessage = activeTraceMessage ?? cachedTraceMessage;
+
+  const handleToggleExecutionTrace = useCallback((msg: ChatMessage) => {
+    setSelectedTraceMessage((prev) => (prev?.id === msg.id ? null : msg));
+  }, []);
+
   const handleToggleSidebar = () => {
     setSidebarState((prev) => (prev === 'collapsed' ? 'expanded' : 'collapsed'));
   };
@@ -234,8 +249,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           <RawDocumentsView />
         )}
 
-        <div className={`flex-1 grid min-h-0 transition-[grid-template-columns] duration-200 ${activeView === 'chat' ? '' : 'hidden'} ${selectedTraceMessage ? 'grid-cols-[minmax(0,1fr)_minmax(340px,38%)]' : 'grid-cols-[minmax(0,1fr)_0fr]'}`}>
-          <div className="min-w-0 min-h-0 flex flex-col overflow-hidden">
+        <div className={`flex-1 flex min-h-0 relative overflow-hidden ${activeView === 'chat' ? '' : 'hidden'}`}>
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
           {isTranscriptLoading || messages.length > 0 ? (
             <ChatStreamView
               messages={messages}
@@ -264,7 +279,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               projects={projects}
               onSelectProject={handleSelectProject}
               onOpenMailInbox={() => setActiveView('mail')}
-              onOpenExecutionTrace={setSelectedTraceMessage}
+              selectedTraceMessageId={selectedTraceMessage?.id}
+              onOpenExecutionTrace={handleToggleExecutionTrace}
             />
           ) : (
             <HeroSection
@@ -285,17 +301,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
             />
           )}
           </div>
-          {selectedTraceMessage && (() => {
-            const liveMessage = messages.find((m) => m.id === selectedTraceMessage.id) ?? selectedTraceMessage;
-            return (
-              <ExecutionTraceDrawer
-                trace={liveMessage.executionTrace}
-                activities={liveMessage.activities}
-                generationStatus={liveMessage.generationStatus}
-                onClose={() => setSelectedTraceMessage(null)}
-              />
-            );
-          })()}
+
+          {/* Smooth Slide-in / Slide-out Execution Trace Drawer */}
+          <div
+            className={`min-h-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden z-20 shrink-0 border-[#413b34] bg-[#201e1b] ${
+              selectedTraceMessage
+                ? 'w-[360px] sm:w-[420px] max-w-[90vw] border-l opacity-100'
+                : 'w-0 border-l-0 opacity-0 pointer-events-none'
+            }`}
+          >
+            {displayedTraceMessage && (
+              <div className="w-[360px] sm:w-[420px] max-w-[90vw] h-full flex flex-col min-h-0 overflow-hidden">
+                <ExecutionTraceDrawer
+                  trace={displayedTraceMessage.executionTrace}
+                  activities={displayedTraceMessage.activities}
+                  generationStatus={displayedTraceMessage.generationStatus}
+                  onClose={() => setSelectedTraceMessage(null)}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </main>
 

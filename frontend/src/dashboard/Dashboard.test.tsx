@@ -193,7 +193,7 @@ describe('Dashboard Project chat', () => {
     fireEvent.change(screen.getByLabelText('Chọn tài liệu từ máy'), {
       target: { files: [file] },
     });
-    expect(await screen.findByRole('dialog', { name: 'Project documents' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Project documents' })).toBeNull();
     expect((await screen.findAllByText('policy.pdf')).length).toBeGreaterThan(0);
     await waitFor(() => expect(
       fetchMock.mock.calls.some(([url, init]) =>

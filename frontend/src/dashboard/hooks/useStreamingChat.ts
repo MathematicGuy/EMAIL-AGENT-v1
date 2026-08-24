@@ -765,7 +765,6 @@ export function useStreamingChat(
       updateError('Select a Project before uploading documents.');
       return;
     }
-    window.dispatchEvent(new CustomEvent('open-project-documents'));
     for (const file of files) {
       const validation = validateAttachmentFile(file);
       const id = `upload_${crypto.randomUUID?.() ?? Date.now()}`;

@@ -64,6 +64,7 @@ interface ChatStreamViewProps {
   projects?: Project[];
   onSelectProject?: (projectId: string) => void;
   onOpenMailInbox?: () => void;
+  selectedTraceMessageId?: string | null;
   onOpenExecutionTrace?: (message: ChatMessage) => void;
 }
 
@@ -749,6 +750,7 @@ interface ChatMessageItemProps {
   onOpenMailInbox?: () => void;
   onRetryMessage?: (msg: ChatMessage) => void;
   onLoadFullEvidence?: (chunkId: string) => Promise<ChatRagEvidence | null>;
+  isDetailsOpen?: boolean;
   onOpenExecutionTrace?: (message: ChatMessage) => void;
 }
 
@@ -766,6 +768,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
   onOpenMailInbox,
   onRetryMessage,
   onLoadFullEvidence,
+  isDetailsOpen,
   onOpenExecutionTrace,
 }) => {
   const isUser = msg.role === 'user';
@@ -819,6 +822,7 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
             activities={msg.activities}
             generationStatus={msg.generationStatus}
             completedAt={msg.completedAt}
+            isDetailsOpen={isDetailsOpen}
             onOpenDetails={onOpenExecutionTrace ? () => onOpenExecutionTrace(msg) : undefined}
           />
         )}
@@ -1034,6 +1038,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   projects,
   onSelectProject,
   onOpenMailInbox,
+  selectedTraceMessageId,
   onOpenExecutionTrace,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1140,6 +1145,7 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
               onOpenMailInbox={onOpenMailInbox}
               onRetryMessage={handleRetryMessage}
               onLoadFullEvidence={onLoadFullEvidence}
+              isDetailsOpen={selectedTraceMessageId === msg.id}
               onOpenExecutionTrace={onOpenExecutionTrace}
             />
           ))}
