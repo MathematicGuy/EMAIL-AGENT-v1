@@ -122,3 +122,6 @@ var/
 .agents/skills/grill-with-docs/
 .agents/skills/grilling/
 .agents/skills/domain-modeling/
+
+.codex/
+.agents/
