@@ -284,7 +284,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
             }`}
           >
-            <Mail className="w-3.5 h-3.5 text-[#d97757]" />
+            <Mail className={`w-3.5 h-3.5 ${activeView === 'mail' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
             <span>Hộp thư</span>
           </button>
 
