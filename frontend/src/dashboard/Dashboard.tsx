@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView } from './types';
+import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView, ChatMessage, ReasoningMode } from './types';
 import type { Project } from './types/projectTypes';
 import { AVAILABLE_MODELS } from './data/mockData';
 import { useStreamingChat } from './hooks/useStreamingChat';
@@ -12,6 +12,7 @@ import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { RawDocumentsView } from './components/RawDocumentsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
+import { ExecutionTraceDrawer } from './components/ExecutionTraceDrawer';
 import { VoiceModal } from './components/VoiceModal';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
@@ -32,7 +33,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     return 'chat';
   });
   const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(
+    () => AVAILABLE_MODELS.find((model) => model.id === 'mimo-v2.5-pro') ?? AVAILABLE_MODELS[0],
+  );
+  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>('fast');
+  const [selectedTraceMessage, setSelectedTraceMessage] = useState<ChatMessage | null>(null);
   const [modelAnchor, setModelAnchor] = useState<Pick<
     DOMRect,
     'left' | 'right' | 'top' | 'bottom'
@@ -135,7 +140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     reviseWorkflowPlan,
     retryWorkflowStep,
     retryTurn,
-  } = useStreamingChat(selectedModel.id, activeProjectId, projectIds);
+  } = useStreamingChat(selectedModel.id, activeProjectId, projectIds, reasoningMode);
 
   const handleToggleSidebar = () => {
     setSidebarState((prev) => (prev === 'collapsed' ? 'expanded' : 'collapsed'));
@@ -229,7 +234,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           <RawDocumentsView />
         )}
 
-        <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>
+        <div className={`flex-1 grid min-h-0 transition-[grid-template-columns] duration-200 ${activeView === 'chat' ? '' : 'hidden'} ${selectedTraceMessage ? 'grid-cols-[minmax(0,1fr)_minmax(340px,38%)]' : 'grid-cols-[minmax(0,1fr)_0fr]'}`}>
+          <div className="min-w-0 min-h-0 flex flex-col overflow-hidden">
           {isTranscriptLoading || messages.length > 0 ? (
             <ChatStreamView
               messages={messages}
@@ -258,6 +264,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               projects={projects}
               onSelectProject={handleSelectProject}
               onOpenMailInbox={() => setActiveView('mail')}
+              onOpenExecutionTrace={setSelectedTraceMessage}
             />
           ) : (
             <HeroSection
@@ -277,6 +284,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
               onSelectProject={handleSelectProject}
             />
           )}
+          </div>
+          {selectedTraceMessage && <ExecutionTraceDrawer trace={selectedTraceMessage.executionTrace} onClose={() => setSelectedTraceMessage(null)} />}
         </div>
       </main>
 
@@ -285,6 +294,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         onClose={() => setIsModelModalOpen(false)}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
+        reasoningMode={reasoningMode}
+        onSelectReasoningMode={setReasoningMode}
         anchor={modelAnchor}
       />
 

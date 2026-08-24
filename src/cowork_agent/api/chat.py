@@ -124,6 +124,7 @@ class _ChatMessagePayload(BaseModel):
     user_message: str
     idempotency_key: str = Field(min_length=1, max_length=128)
     document_ids: list[str] = []
+    reasoning_mode: Literal["fast", "reasoning"] = "fast"
 
 
 class _CreateSessionPayload(BaseModel):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -27,7 +28,7 @@ from cowork_agent.prompting import reorder_u_shaped
 
 logger = logging.getLogger(__name__)
 
-Completion = Callable[[dict[str, object]], Awaitable[Mapping[str, object]]]
+Completion = Callable[..., Awaitable[Mapping[str, object]]]
 
 _SYSTEM_INSTRUCTION = """You are the Cowork AI Chat Assistant.
 Use only the labeled context supplied by the application. The conflict_precedence array in that
@@ -139,9 +140,13 @@ def system_prompt_sha() -> str:
 
 
 class _ConfiguredChatReply:
-    def __init__(self, *, model: str, complete: Completion) -> None:
+    def __init__(
+        self, *, provider: str = "mistral", model: str, complete: Completion
+    ) -> None:
+        self._provider = provider
         self._model = model
         self._complete = complete
+        self._complete_accepts_mode = len(inspect.signature(complete).parameters) > 1
 
     async def stream_reply(
         self, request: ChatMessageRequest, context: GenerationContext
@@ -153,10 +158,19 @@ class _ConfiguredChatReply:
             yield ChatReplyChunk(_safe_evidence_message(unavailable=True), None, ())
             return
         try:
-            response = await self._complete(_request_payload(request, context))
+            payload = _request_payload(request, context)
+            response = await (
+                self._complete(payload, request.reasoning_mode)
+                if self._complete_accepts_mode
+                else self._complete(payload)
+            )
         except Exception as exc:
             raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
         try:
+            provider_reasoning = _provider_reasoning(response)
+            response = {
+                key: value for key, value in response.items() if key != "__provider_reasoning__"
+            }
             proposal = _proposal_from_response(
                 response,
                 required=(
@@ -176,10 +190,14 @@ class _ConfiguredChatReply:
             logger.warning("chat response failed validation: %r", exc)
             raise ChatResponseInvalid(f"chat response failed validation: {exc!r}") from exc
         yield ChatReplyChunk(
-            text,
-            proposal,
-            citation_ids,
-            _conversation_title(response.get("conversation_title")),
+            text=text,
+            task_proposal=proposal,
+            citation_ids=citation_ids,
+            conversation_title=_conversation_title(response.get("conversation_title")),
+            provider=self._provider,
+            model=self._model,
+            reasoning_mode=request.reasoning_mode,
+            reasoning=provider_reasoning,
         )
 
 
@@ -189,6 +207,61 @@ def _safe_evidence_message(*, unavailable: bool) -> str:
     if unavailable:
         return "Hiện không thể truy xuất bằng chứng từ tài liệu. Vui lòng thử lại sau."
     return "Không tìm thấy thông tin trả lời trong các tài liệu đã chọn."
+
+
+def _provider_reasoning(response: Mapping[str, object]) -> str | None:
+    value = response.get("__provider_reasoning__")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _mistral_reasoning(response: Mapping[str, object]) -> str | None:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
+        return None
+    message = choices[0].get("message")
+    if not isinstance(message, Mapping):
+        return None
+    raw_content = message.get("content")
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for block in raw_content:
+            if not isinstance(block, Mapping) or block.get("type") != "thinking":
+                continue
+            for item in block.get("thinking", []):
+                if isinstance(item, Mapping) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+        joined = "\n".join(parts).strip()
+        return joined or None
+    value = message.get("reasoning_content")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _mistral_text_response(response: Mapping[str, object]) -> Mapping[str, object]:
+    """Normalize Mistral content blocks for the existing JSON response parser."""
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return response
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice, Mapping) else None
+    if (
+        not isinstance(choices, list)
+        or not isinstance(choice, Mapping)
+        or not isinstance(message, Mapping)
+    ):
+        return response
+    content = message.get("content")
+    if not isinstance(content, list):
+        return response
+    text = "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, Mapping)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+    normalized_choice = {**choice, "message": {**message, "content": text}}
+    return {**response, "choices": [normalized_choice, *choices[1:]]}
 
 
 class MistralChatReply(_ConfiguredChatReply):
@@ -201,7 +274,7 @@ class MistralChatReply(_ConfiguredChatReply):
             _request_body,
         )
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
             response = await asyncio.to_thread(
                 _post_json,
                 MISTRAL_CHAT_COMPLETIONS_URL,
@@ -211,13 +284,18 @@ class MistralChatReply(_ConfiguredChatReply):
                     cast(str, payload["system"]),
                     json.dumps(payload["context"], ensure_ascii=False),
                     _RESPONSE_SCHEMA,
-                    settings.max_output_tokens,
+                    max(settings.max_output_tokens, 4096)
+                    if mode == "reasoning"
+                    else settings.max_output_tokens,
+                    reasoning_effort="high" if mode == "reasoning" else "none",
                 ),
                 settings.timeout_seconds,
             )
-            return _completion_json(response)
+            parsed = dict(_completion_json(_mistral_text_response(response)))
+            parsed["__provider_reasoning__"] = _mistral_reasoning(response)
+            return parsed
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="mistral", model=settings.model, complete=complete)
 
 
 class OpenRouterChatReply(_ConfiguredChatReply):
@@ -230,7 +308,8 @@ class OpenRouterChatReply(_ConfiguredChatReply):
         from .last_resort import complete_with_gemini_last_resort, gemini_json_complete
         from .providers.openrouter import execute_chat_completion
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
+            del mode
             prompt = json.dumps(payload["context"], ensure_ascii=False)
             system_instruction = cast(str, payload["system"])
 
@@ -260,7 +339,7 @@ class OpenRouterChatReply(_ConfiguredChatReply):
                 primary, fallback if last_resort else None
             )
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="openrouter", model=settings.model, complete=complete)
 
 
 class MimoChatReply(_ConfiguredChatReply):
@@ -268,15 +347,17 @@ class MimoChatReply(_ConfiguredChatReply):
     def from_settings(cls, settings: MimoSettings) -> MimoChatReply:
         from .providers.mimo import execute_chat_completion
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
             return await execute_chat_completion(
                 settings,
                 cast(str, payload["system"]),
                 json.dumps(payload["context"], ensure_ascii=False),
                 _RESPONSE_SCHEMA,
+                reasoning_mode=mode,
+                capture_reasoning=True,
             )
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="mimo", model=settings.model, complete=complete)
 
 
 class GeminiChatReply(_ConfiguredChatReply):
@@ -295,7 +376,8 @@ class GeminiChatReply(_ConfiguredChatReply):
         resolved_transport = transport or GoogleGenAITransport()
         rotator = GeminiKeyRotator(settings.api_keys)
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
+            del mode
             keys = await rotator.candidates(settings.max_attempts)
             last_error: Exception | None = None
             for key in keys:
@@ -315,7 +397,7 @@ class GeminiChatReply(_ConfiguredChatReply):
                     await asyncio.sleep(0.5)
             raise last_error or ChatReplyUnavailable("no Gemini API key was attempted")
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="gemini", model=settings.model, complete=complete)
 
 
 def _request_payload(request: ChatMessageRequest, context: GenerationContext) -> dict[str, object]:
@@ -495,9 +577,7 @@ def _proposal_from_response(
         model_id=configured_model_id,
         prompt_version=_optional_string(proposal.get("prompt_version"), "prompt_version"),
         confidence=_optional_confidence(proposal.get("confidence")),
-        supersedes=_resolved_supersedes(
-            proposal.get("supersedes_index"), advisory_episode_ids
-        ),
+        supersedes=_resolved_supersedes(proposal.get("supersedes_index"), advisory_episode_ids),
     )
 
 

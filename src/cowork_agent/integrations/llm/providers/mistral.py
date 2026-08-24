@@ -149,8 +149,10 @@ def _request_body(
     prompt: str,
     schema: Mapping[str, object],
     max_output_tokens: int,
+    *,
+    reasoning_effort: str | None = None,
 ) -> dict[str, object]:
-    return openai_request_body(
+    body = openai_request_body(
         model,
         system_instruction,
         prompt,
@@ -158,6 +160,11 @@ def _request_body(
         max_output_tokens,
         task_proposal_guard=True,
     )
+    if reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
+        if reasoning_effort == "high":
+            body["top_p"] = 1.0
+    return body
 
 
 def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:

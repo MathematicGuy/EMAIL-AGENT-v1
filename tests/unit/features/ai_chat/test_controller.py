@@ -370,6 +370,37 @@ def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
     assert history.updates[-1][1].completed_at == NOW
 
 
+def test_controller_persists_provider_reasoning_and_filename_only_trace() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply((ChatReplyChunk(
+            text="Answer",
+            provider="mimo",
+            model="mimo-v2.5-pro",
+            reasoning_mode="fast",
+            reasoning="Use the supplied context.",
+        ),)),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    completed = next(
+        event for event in reversed(events) if event.event_type is ChatEventType.COMPLETED
+    )
+    assert completed.execution_trace is not None
+    assert completed.execution_trace.to_dict() == {
+        "provider": "mimo",
+        "model": "mimo-v2.5-pro",
+        "mode": "fast",
+        "reasoning": "Use the supplied context.",
+        "reasoning_truncated": False,
+        "retrieved_filenames": [],
+    }
+    assert history.updates[-1][1].execution_trace == completed.execution_trace
+
+
 def test_controller_marks_context_review_running_before_memory_read() -> None:
     history = HistoryWriter()
     profile = ActivityInspectingProfile(history)

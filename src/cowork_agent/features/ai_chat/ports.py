@@ -54,6 +54,10 @@ class ChatReplyChunk:
     task_proposal: ChatTaskProposal | None = None
     citation_ids: tuple[str, ...] = ()
     conversation_title: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    reasoning_mode: str | None = None
+    reasoning: str | None = None
 
 
 class ChatReplyPort(Protocol):

@@ -41,7 +41,8 @@ export const AgentActivityTimeline: React.FC<{
   activities: ChatActivity[];
   generationStatus?: ChatGenerationStatus;
   completedAt?: string;
-}> = ({ activities, generationStatus, completedAt }) => {
+  onOpenDetails?: () => void;
+}> = ({ activities, generationStatus, completedAt, onOpenDetails }) => {
   const isLive = generationStatus === 'generating';
   const beganLive = useRef(isLive);
   const [expanded, setExpanded] = useState(isLive);
@@ -72,8 +73,8 @@ export const AgentActivityTimeline: React.FC<{
     <section className="mb-4 rounded-xl border border-[#413b34] bg-[#24211d]" aria-label="Tiến độ xử lý">
       <button
         type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={onOpenDetails ? undefined : expanded}
+        onClick={onOpenDetails ?? (() => setExpanded((value) => !value))}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm text-zinc-200"
       >
         <span className="flex items-center gap-2 font-medium">
@@ -81,8 +82,8 @@ export const AgentActivityTimeline: React.FC<{
           {isLive ? 'Đang làm việc' : summary}
         </span>
         <span className="flex items-center gap-2 text-xs text-zinc-400">
-          {!isLive && (expanded ? 'Ẩn hoạt động' : 'Xem hoạt động')}
-          <ChevronDown className={`h-4 w-4 transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} />
+          {!isLive && (onOpenDetails ? 'Xem chi tiết' : (expanded ? 'Ẩn hoạt động' : 'Xem hoạt động'))}
+          <ChevronDown className={`h-4 w-4 transition-transform motion-reduce:transition-none ${expanded && !onOpenDetails ? 'rotate-180' : ''}`} />
         </span>
       </button>
       {expanded && (

@@ -16,11 +16,13 @@ from langfuse import observe
 
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_RAG_EVIDENCE_ITEMS,
+    MAX_EXECUTION_REASONING_LENGTH,
     ChatActivity,
     ChatActivityCode,
     ChatActivityDetail,
     ChatActivityOutcome,
     ChatActivityStatus,
+    ChatExecutionTrace,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
@@ -653,6 +655,7 @@ class ChatController:
                     turn_id=turn_id,
                     rag_evidence=pending_turn.rag_evidence,
                     retrieval_status=pending_turn.retrieval_status,
+                    execution_trace=pending_turn.execution_trace,
                 )
                 emitted.extend((delta, completed))
                 self._completed[request.idempotency_key] = (request, tuple(emitted))
@@ -783,6 +786,10 @@ class ChatController:
             task_proposal: ChatTaskProposal | None = None
             conversation_title: str | None = None
             selected_citation_ids: list[str] = []
+            trace_provider: str | None = None
+            trace_model: str | None = None
+            trace_mode: str | None = None
+            reasoning_parts: list[str] = []
             pending_task_episode: _PendingTaskEpisode | None = None
             generation_context = assemble_generation_context(
                 request,
@@ -806,6 +813,11 @@ class ChatController:
                             task_proposal = chunk.task_proposal
                         if chunk.conversation_title is not None:
                             conversation_title = chunk.conversation_title
+                        trace_provider = chunk.provider or trace_provider
+                        trace_model = chunk.model or trace_model
+                        trace_mode = chunk.reasoning_mode or trace_mode
+                        if chunk.reasoning:
+                            reasoning_parts.append(chunk.reasoning)
                         for citation_id in chunk.citation_ids:
                             if citation_id not in selected_citation_ids:
                                 selected_citation_ids.append(citation_id)
@@ -857,6 +869,27 @@ class ChatController:
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
             )
+            reasoning = "\n".join(reasoning_parts).strip() or None
+            reasoning_truncated = bool(
+                reasoning and len(reasoning) > MAX_EXECUTION_REASONING_LENGTH
+            )
+            if reasoning_truncated:
+                assert reasoning is not None
+                reasoning = reasoning[:MAX_EXECUTION_REASONING_LENGTH]
+            execution_trace = (
+                ChatExecutionTrace(
+                    provider=trace_provider,
+                    model=trace_model,
+                    mode=cast(Literal["fast", "reasoning"], trace_mode),
+                    reasoning=reasoning,
+                    reasoning_truncated=reasoning_truncated,
+                    retrieved_filenames=tuple(
+                        dict.fromkeys(item.document_title for item in rag_evidence)
+                    ),
+                )
+                if trace_provider is not None and trace_model is not None and trace_mode is not None
+                else None
+            )
             task_requested = (
                 response_mode is ChatResponseMode.NORMAL
                 and is_explicit_task_request(request)
@@ -896,6 +929,7 @@ class ChatController:
                     ),
                     rag_evidence=rag_evidence,
                     retrieval_status=retrieval_status,
+                    execution_trace=execution_trace,
                     completed_at=None if task_requested else self._clock(),
             )
             if self._history is not None:
@@ -1050,6 +1084,7 @@ class ChatController:
                 turn_id=turn_id,
                 rag_evidence=rag_evidence,
                 retrieval_status=retrieval_status,
+                execution_trace=turn.execution_trace,
             )
             emitted.append(completed)
             completed_stream = tuple(emitted)
@@ -1099,10 +1134,12 @@ class ChatController:
             turn_id=episode.chat_turn_id,
             proposal=_proposal_payload(episode),
         )
+        completed_turn = self._turns_by_id.get(episode.chat_turn_id)
         completed = ChatMessageStreamEvent.completed(
             event_id=self._new_id(),
             session_id=self._scope.session_id,
             turn_id=episode.chat_turn_id,
+            execution_trace=completed_turn.execution_trace if completed_turn is not None else None,
         )
         replay = (*pending.replay_prefix, citation, proposal_event, completed)
         self._completed[pending.request.idempotency_key] = (pending.request, replay)

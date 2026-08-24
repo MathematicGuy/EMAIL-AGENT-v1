@@ -25,6 +25,7 @@ import type {
   ChatActivityOutcome,
   ChatActivityStatus,
   ChatComposerAttachment,
+  ChatExecutionTrace,
   ChatGenerationStatus,
   ChatMessage,
   ChatRagEvidence,
@@ -56,6 +57,7 @@ interface ChatTurn {
   error_code?: string;
   activities?: unknown;
   completed_at?: string;
+  execution_trace?: unknown;
 }
 
 interface SseEvent {
@@ -80,6 +82,7 @@ interface SseEvent {
   error_code?: string;
   activities?: unknown;
   completed_at?: string;
+  execution_trace?: unknown;
 }
 
 interface ChatRuntime {
@@ -349,6 +352,26 @@ export function activitiesFromPayload(value: unknown): ChatActivity[] {
   }).slice(0, 8);
 }
 
+function executionTraceFromPayload(value: unknown): ChatExecutionTrace | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.provider !== 'string' || typeof raw.model !== 'string' ||
+      (raw.mode !== 'fast' && raw.mode !== 'reasoning') ||
+      !Array.isArray(raw.retrieved_filenames)) return undefined;
+  const retrievedFilenames = raw.retrieved_filenames.filter(
+    (item): item is string => typeof item === 'string',
+  );
+  if (retrievedFilenames.length !== raw.retrieved_filenames.length) return undefined;
+  return {
+    provider: raw.provider,
+    model: raw.model,
+    mode: raw.mode,
+    reasoning: typeof raw.reasoning === 'string' ? raw.reasoning : undefined,
+    reasoningTruncated: raw.reasoning_truncated === true,
+    retrievedFilenames,
+  };
+}
+
 function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
   return turns.flatMap((turn) => {
     const citations = (turn.citation_coordinates ?? [])
@@ -383,6 +406,7 @@ function messagesFromTurns(turns: ChatTurn[]): ChatMessage[] {
         turnId: turn.turn_id,
         activities: activitiesFromPayload(turn.activities),
         completedAt: turn.completed_at,
+        executionTrace: executionTraceFromPayload(turn.execution_trace),
       },
     ];
   });
@@ -529,7 +553,8 @@ async function parseSse(
 export function useStreamingChat(
   modelId = 'gemini-3.5-flash-lite',
   projectId = '',
-  projectIds: string[] = projectId ? [projectId] : []
+  projectIds: string[] = projectId ? [projectId] : [],
+  reasoningMode: 'fast' | 'reasoning' = 'fast',
 ) {
   void modelId;
   void projectIds;
@@ -1263,6 +1288,7 @@ export function useStreamingChat(
               .filter((item) => item.status === 'ready')
               .map((item) => item.documentId)
               .filter((documentId): documentId is string => Boolean(documentId)),
+            reasoning_mode: reasoningMode,
           }),
           signal: abort.signal,
         }
@@ -1307,12 +1333,14 @@ export function useStreamingChat(
         } else if (event.event_type === 'completed') {
           terminalStatus = 'completed';
           const status = retrievalStatus(event.retrieval_status);
-          if (status || Array.isArray(event.rag_evidence)) {
+          const executionTrace = executionTraceFromPayload(event.execution_trace);
+          if (status || Array.isArray(event.rag_evidence) || executionTrace) {
             updateRuntime(sessionId as string, (current) => ({ ...current,
               messages: current.messages.map((message) => message.id === assistantId ? {
                     ...message,
                     ragEvidence: ragEvidenceFromPayload(event.rag_evidence),
                     retrievalStatus: status,
+                    executionTrace: executionTrace ?? message.executionTrace,
                   }
                 : message),
             }));
@@ -1485,7 +1513,7 @@ export function useStreamingChat(
       }
       cancelRequestedRefs.current.delete(abortKey);
     }
-  }, [activateConversation, ensureSession, persistMailScanTurn, projectId, refreshHistory,
+  }, [activateConversation, ensureSession, persistMailScanTurn, projectId, reasoningMode, refreshHistory,
     requestTurnCancellation, runMailScan, runtimeFor, selectedAttachments, setChatStatus, updateRuntime]);
 
   const loadExistingChat = useCallback(async (sessionId: string, loadedProjectId?: string) => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, Info } from 'lucide-react';
-import type { ModelOption } from '../types';
+import type { ModelOption, ReasoningMode } from '../types';
 import { AVAILABLE_MODELS } from '../data/mockData';
 
 interface ModelSelectorModalProps {
@@ -9,6 +9,8 @@ interface ModelSelectorModalProps {
   selectedModel: ModelOption;
   onSelectModel: (model: ModelOption) => void;
   anchor: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'> | null;
+  reasoningMode: ReasoningMode;
+  onSelectReasoningMode: (mode: ReasoningMode) => void;
 }
 
 export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
@@ -17,6 +19,8 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
   selectedModel,
   onSelectModel,
   anchor,
+  reasoningMode,
+  onSelectReasoningMode,
 }) => {
   if (!isOpen || !anchor) return null;
 
@@ -52,6 +56,17 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         </div>
 
         <div className="max-h-[72vh] overflow-y-auto py-0.5">
+          <div className="border-b border-[#393939] px-2.5 py-2">
+            <p className="mb-1.5 text-[12px] text-zinc-500">Mức suy luận</p>
+            <div className="grid grid-cols-2 rounded-md bg-[#222] p-0.5">
+              {(['fast', 'reasoning'] as const).map((mode) => (
+                <button key={mode} type="button" onClick={() => onSelectReasoningMode(mode)}
+                  className={`rounded px-2 py-1.5 text-xs ${reasoningMode === mode ? 'bg-[#484848] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                  {mode === 'fast' ? 'Nhanh' : 'Suy luận'}
+                </button>
+              ))}
+            </div>
+          </div>
           {AVAILABLE_MODELS.map((model) => {
             const isSelected = selectedModel.id === model.id;
             const speedLabel =

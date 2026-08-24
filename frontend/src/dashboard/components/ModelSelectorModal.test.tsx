@@ -7,6 +7,7 @@ describe('ModelSelectorModal', () => {
   it('renders one compact row per model and applies one selection', () => {
     const onClose = vi.fn();
     const onSelectModel = vi.fn();
+    const onSelectReasoningMode = vi.fn();
 
     render(
       <ModelSelectorModal
@@ -14,6 +15,8 @@ describe('ModelSelectorModal', () => {
         onClose={onClose}
         selectedModel={AVAILABLE_MODELS[0]}
         onSelectModel={onSelectModel}
+        reasoningMode="fast"
+        onSelectReasoningMode={onSelectReasoningMode}
         anchor={{ left: 100, right: 300, top: 500, bottom: 530 }}
       />
     );
