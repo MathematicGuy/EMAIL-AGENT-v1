@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
 import type { ModelOption, ReasoningMode } from '../types';
 import { AVAILABLE_MODELS } from '../data/mockData';
 
@@ -60,8 +60,16 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
             <p className="mb-1.5 text-[12px] text-zinc-500">Mức suy luận</p>
             <div className="grid grid-cols-2 rounded-md bg-[#222] p-0.5">
               {(['fast', 'reasoning'] as const).map((mode) => (
-                <button key={mode} type="button" onClick={() => onSelectReasoningMode(mode)}
-                  className={`rounded px-2 py-1.5 text-xs ${reasoningMode === mode ? 'bg-[#484848] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onSelectReasoningMode(mode)}
+                  className={`rounded px-2 py-1.5 text-xs ${
+                    reasoningMode === mode
+                      ? 'bg-[#484848] text-zinc-100'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
                   {mode === 'fast' ? 'Nhanh' : 'Suy luận'}
                 </button>
               ))}
@@ -85,7 +93,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
                 }}
                 className={`flex h-8 w-full items-center gap-2 px-2.5 text-left text-[13px] transition-colors ${
                   isSelected
-                    ? 'bg-[#3a3a3a] text-zinc-100'
+                    ? 'bg-[#3a3a3a] text-zinc-100 font-medium'
                     : 'text-zinc-300 hover:bg-[#333333] hover:text-zinc-100'
                 }`}
               >
@@ -94,12 +102,6 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
                   {speedLabel}
                   <Info className="h-3 w-3" aria-hidden="true" />
                 </span>
-                {isSelected && (
-                  <Check
-                    className="h-3.5 w-3.5 shrink-0 text-zinc-400"
-                    aria-hidden="true"
-                  />
-                )}
               </button>
             );
           })}

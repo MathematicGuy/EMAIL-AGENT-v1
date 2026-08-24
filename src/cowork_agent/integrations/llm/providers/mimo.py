@@ -145,6 +145,9 @@ async def execute_chat_completion(
     )
     if reasoning_mode == "fast":
         body["thinking"] = {"type": "disabled"}
+    elif reasoning_mode == "reasoning":
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = "high"
 
     for key in keys:
         try:

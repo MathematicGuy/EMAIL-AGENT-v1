@@ -285,7 +285,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
             />
           )}
           </div>
-          {selectedTraceMessage && <ExecutionTraceDrawer trace={selectedTraceMessage.executionTrace} onClose={() => setSelectedTraceMessage(null)} />}
+          {selectedTraceMessage && (() => {
+            const liveMessage = messages.find((m) => m.id === selectedTraceMessage.id) ?? selectedTraceMessage;
+            return (
+              <ExecutionTraceDrawer
+                trace={liveMessage.executionTrace}
+                activities={liveMessage.activities}
+                generationStatus={liveMessage.generationStatus}
+                onClose={() => setSelectedTraceMessage(null)}
+              />
+            );
+          })()}
         </div>
       </main>
 

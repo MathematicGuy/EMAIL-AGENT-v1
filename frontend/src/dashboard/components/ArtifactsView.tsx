@@ -13,7 +13,9 @@ import {
   HardDrive,
   AlertCircle,
   FileCheck2,
-  Download
+  Download,
+  FolderOpen,
+  ExternalLink
 } from 'lucide-react';
 import { API_BASE_URL } from '../../lib/apiConfig';
 
@@ -164,6 +166,21 @@ export const ArtifactsView: React.FC = () => {
     }
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/reports/open-folder`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Không thể mở thư mục');
+      }
+    } catch (err: unknown) {
+      console.error('Lỗi khi mở thư mục:', err);
+      alert(err instanceof Error ? err.message : 'Lỗi khi mở thư mục');
+    }
+  };
+
   const handleDelete = async (filename: string, e: React.MouseEvent) => {
     e.stopPropagation(); // prevent selecting the deleted file
     if (!confirm(`Bạn có chắc chắn muốn xóa file ${filename} không?`)) return;
@@ -172,7 +189,10 @@ export const ArtifactsView: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/v1/reports/${encodeURIComponent(filename)}`, {
         method: 'DELETE'
       });
-      if (!res.ok) throw new Error('Không thể xóa tài liệu');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Không thể xóa tài liệu');
+      }
       
       // If we deleted the currently selected file, reset selection
       if (selectedFile?.filename === filename) {
@@ -338,10 +358,16 @@ export const ArtifactsView: React.FC = () => {
         
         {/* FOOTER STATS */}
         <div className="p-3 border-t border-[#2d2b27] bg-[#171614] text-[10px] text-zinc-500 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <HardDrive className="w-3 h-3 text-zinc-400" />
-            <span>Thư mục: workspace/reports</span>
-          </div>
+          <button
+            type="button"
+            onClick={handleOpenFolder}
+            title="Mở thư mục workspace/reports trong máy tính"
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-[#d97757] transition-colors cursor-pointer group"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#d97757]" />
+            <span className="group-hover:underline">Thư mục: workspace/reports</span>
+            <ExternalLink className="w-3 h-3 opacity-60 group-hover:opacity-100" />
+          </button>
           <span>{files.length} file</span>
         </div>
       </aside>

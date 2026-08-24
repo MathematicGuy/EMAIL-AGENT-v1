@@ -38,7 +38,7 @@ def test_run_dev_stops_the_other_service_when_one_exits() -> None:
         return (api, worker)[len(commands) - 1]
 
     assert run_dev(spawn=spawn, sleep=lambda _: None) == 2
-    assert commands[0][-1] == "cowork_agent.app"
+    assert list(commands[0][-2:]) == ["cowork_agent.app", "--reload"]
     assert commands[1][-1] == "cowork_agent.orchestration.worker"
     assert worker.terminated
 
@@ -52,7 +52,7 @@ def test_run_dev_passes_reload_flag_to_api() -> None:
         commands.append(command)
         return (api, worker)[len(commands) - 1]
 
-    assert run_dev(reload=True, spawn=spawn, sleep=lambda _: None) == 1
-    assert list(commands[0][-2:]) == ["cowork_agent.app", "--reload"]
+    assert run_dev(reload=False, spawn=spawn, sleep=lambda _: None) == 1
+    assert commands[0][-1] == "cowork_agent.app"
     assert commands[1][-1] == "cowork_agent.orchestration.worker"
 
