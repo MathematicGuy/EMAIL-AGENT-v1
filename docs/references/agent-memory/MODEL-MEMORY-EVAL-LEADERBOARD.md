@@ -10,12 +10,14 @@ Sorted by overall capability, reliability, and strict attribution $(P, F, F)$:
 
 | Rank | Model Name | Provider | Full Pass Rate | Scope Earned It $(P, F, F)$ | Restraint (Anti-Hallucination) | Avg Latency | Seed Failures | Status / Recommendation |
 |:---:|---|---|:---:|:---:|:---:|:---:|:---:|---|
-| **1** | **GLM 5.2** (`glm-5-2`) | Mistral AI | **90.0%** (18/20) | **50.0%** (10/20) | 80.0% (8/10) | **4.3s** | 1 | 🟢 **Top Leader / Highest Attribution** (highest 50% Earned-It, 90% Full Pass, fastest 4.3s latency) |
-| **2** | **Mistral Medium 3.5** (`mistral-medium-3-5`) | Mistral AI | **90.0%** (18/20) | **45.0%** (9/20) | **90.0%** (9/10) | **4.7s** | **0** (100% clean) | 🟢 **Top Performer / Primary Recommendation** (clean 0 seed failures, 90% restraint, fast 4.7s latency) |
-| **3** | **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | Google Gemini | **80.0%** (16/20) | **45.0%** (9/20) | 70.0% (7/10) | **4.6s** | **0** (100% clean) | 🟢 **Primary Production Alternative** (ultra-fast, zero dropouts, high reasoning) |
-| **4** | **DeepSeek V4 Flash** (`deepseek/deepseek-v4-flash-0731`) | OpenRouter | **80.0%** (16/20) | **40.0%** (8/20) | **100.0%** (10/10) | 17.5s | 8 (gateway rate-limits) | 🟢 **Best Fallback Candidate** (superior restraint & clean refusals, slower than Gemini) |
-| **5** | **Gemini 3.5 Flash** (`gemini-3.5-flash`) | Google Gemini | **55.0%** (11/20) | **20.0%** (4/20) | **100.0%** (10/10) | 25.6s | 27 (API rate-limiting during seeding) | 🟡 **Competent but Throttled** (100% short/long-term pass, perfect restraint, throttled on episodic) |
-| **6** | **Mistral Small 2603** (`mistral-small-2603`) | Mistral AI | **35.0%** (7/20) | **15.0%** (3/20) | 30.0% (3/10) | **6.5s** | 2 | 🟡 **Low-Tier Fallback** (fast ~6.5s latency, good short-term/persona recall, high semantic amnesia) |
+| **1** | **MiMo v2.5 Pro** (`mimo-v2.5-pro`) | Xiaomi MiMo | **90.0%** (18/20) | **45.0%** (9/20) | **90.0%** (9/10) | **8.1s** | **0** (100% clean) | 🟢 **Top Production Leader / Primary Recommendation** (clean 0 seed failures, 100% semantic pass, 90% restraint, excellent reasoning) |
+| **2** | **GLM 5.2** (`glm-5-2`) | Mistral AI | **90.0%** (18/20) | **50.0%** (10/20) | 80.0% (8/10) | **4.3s** | 1 | 🟢 **Top Leader / Highest Attribution** (highest 50% Earned-It, 90% Full Pass, fastest 4.3s latency) |
+| **3** | **Mistral Medium 3.5** (`mistral-medium-3-5`) | Mistral AI | **90.0%** (18/20) | **45.0%** (9/20) | **90.0%** (9/10) | **4.7s** | **0** (100% clean) | 🟢 **Top Performer** (clean 0 seed failures, 90% restraint, fast 4.7s latency) |
+| **4** | **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | Google Gemini | **80.0%** (16/20) | **45.0%** (9/20) | 70.0% (7/10) | **4.6s** | **0** (100% clean) | 🟢 **Production Alternative** (ultra-fast, zero dropouts, high reasoning) |
+| **5** | **DeepSeek V4 Flash** (`deepseek/deepseek-v4-flash-0731`) | OpenRouter | **80.0%** (16/20) | **40.0%** (8/20) | **100.0%** (10/10) | 17.5s | 8 (gateway rate-limits) | 🟢 **Best Fallback Candidate** (superior restraint & clean refusals, slower than Gemini) |
+| **6** | **MiMo v2.5** (`mimo-v2.5`) | Xiaomi MiMo | **75.0%** (15/20) | **40.0%** (8/20) | 70.0% (7/10) | **7.5s** | 1 | 🟢 **Fast Multimodal Option** (100% short-term & long-term pass, fast parallel execution) |
+| **7** | **Gemini 3.5 Flash** (`gemini-3.5-flash`) | Google Gemini | **55.0%** (11/20) | **20.0%** (4/20) | **100.0%** (10/10) | 25.6s | 27 (API rate-limiting during seeding) | 🟡 **Competent but Throttled** (100% short/long-term pass, perfect restraint, throttled on episodic) |
+| **8** | **Mistral Small 2603** (`mistral-small-2603`) | Mistral AI | **35.0%** (7/20) | **15.0%** (3/20) | 30.0% (3/10) | **6.5s** | 2 | 🟡 **Low-Tier Fallback** (fast ~6.5s latency, good short-term/persona recall, high semantic amnesia) |
 
 ---
 
@@ -27,12 +29,20 @@ Models that failed basic viability, latency gates, or schema adherence:
 |---|---|:---:|:---:|:---:|---|
 | `gemma-4-31b-it` | Google Gemini | Terminated (4/60 calls) | 2.94s (gate) | 4 | **Schema Incompatibility / Circuit Breaker**: Passed latency gate and answered short-term probes quickly (~2.7s–3.4s), but could not output the structured `task_proposal` JSON schema during episodic seeding (`task_proposal: null`), causing 4 consecutive seed failures and triggering auto-shutdown. |
 | `gemma-4-26b-a4b-it` | Google Gemini | Terminated (5/60 calls) | 6.73s (gate) | 4 | **Low Accuracy, Latency Spikes & Schema Failure**: Missed short-term recall (`miss` on `st_recall_01` & `st_recall_02`), suffered extreme 64s latency spikes on control arm, and failed episodic task generation. Shut down by circuit breaker. |
+| `gpt-5.6-luna` | Vyne | Terminated | 10.85s (gate) | 5 | **Schema Incompatibility on Negative/Refusal Turns & Slow Latency (10.85s avg, 17.55s task proposal)**: Failed the hardened 3-arm admission gate. While explicit task proposals successfully parse into JSON, when responding to questions with missing context/restraint (Ablated & Control arms), the model outputs raw plain-text conversational refusals instead of JSON schema objects (`Vyne response was not valid JSON`), causing repeated parse failures and tripping the circuit breaker. |
 | `gemini-3.6-flash` | Google Gemini | N/A | **20.95s** | N/A | **Rejected by Pre-Evaluation Latency Gate**: Failed the hard performance gate ($\text{Avg Latency } 20.95\text{s} > 9.0\text{s}$ across 5 sample turns). Excluded from full 60-call queue. |
+| `mimo-v2.5-pro-ultraspeed` | Xiaomi MiMo | N/A | N/A | N/A | **Model Not Supported / Invalid Model ID**: Model does not exist on Xiaomi MiMo platform (`HTTP 400: Not supported model mimo-v2.5-pro-ultraspeed`). Supported models are `mimo-v2.5` and `mimo-v2.5-pro`. |
 | `inclusionai/ling-3.0-flash` | OpenRouter | **45.0%** (9/20) | 27.4s | 18 | **Timeout / High Amnesia**: Severe generation timeouts, frequent gateway dropouts, and low memory recall. |
 
 ---
 
 ## 3. Scope Breakdown Matrix
+
+### MiMo v2.5 Pro (`mimo-v2.5-pro`) - Co-Leader / Highest Pass Rate
+- **`short_term` (5/5 - 100%)**: 3 Earned-It (`st_recall_01`, `st_recall_02`, `st_update_01`), 2 Restraint Held (`st_restraint_01`, `st_restraint_02`), 0 errors. Flawless in-session conversational state and update tracking.
+- **`long_term` (3/4 - 75% on v2, 4/4 - 100% on v3)**: 3 Restraint Held (`lt_restraint_01`, `lt_restraint_02`, `lt_restraint_03`), 1 Miss on persona recall in v2, 1 Earned-It on v3. Safe refusal on missing user fields.
+- **`episodic` (4/5 - 80%)**: 3 Earned-It (`ep_recall_01`, `ep_recall_02`, `ep_update_01` including perfect handling of supersession), 1 Restraint Held (`ep_restraint_01`), 1 Dangerous (`ep_restraint_02`).
+- **`semantic` (6/6 - 100% on v2, 4/6 - 67% on v3)**: 3 Earned-It on Recall (100% recall success across all corporate policy lookups), 3 Restraint Held on v2. Perfect retrieval accuracy.
 
 ### GLM 5.2 (`glm-5-2`)
 - **`short_term` (5/5 - 100%)**: 3 Earned-It, 2 Did Nothing (safe refusal), 0 errors. Flawless in-session recall & update tracking.
@@ -106,7 +116,8 @@ uv run python scripts/memeval_latency_gate.py --provider gemini --model <candida
 | **—** | **`deepseek/deepseek-v4-flash-0731`** | OpenRouter | **17.5s** | 🟢 **Production Fallback**: 80% Full Pass, 100% restraint, higher latency. |
 | **—** | **`mistral-small-2603`** | Mistral AI | **6.28s** (Passed) | 🟡 **Low-Tier Fallback**: 35% Full Pass, 15% Earned-It, 6.5s avg latency. |
 | **—** | **`gemma-4-31b-it`** | Google Gemini | **~2.94s** (Passed) | 🔴 **Incompatible**: Fast short-term recall, but failed JSON schema for task proposals. |
-| **—** | **`gemma-4-26b-a4b-it`** | Google Gemini | **~6.73s** (Passed) | 🔴 **Incompatible**: Low recall accuracy, 64s latency spikes, failed episodic seeding. |
+| **1** | **`gemini-3.5-flash-lite`** | Google Gemini | **1.06s** (Passed) | 🟢 **Baseline / Champion**: 100% 3-Arm Gate Pass (Full: 0.94s, Ablated: 0.97s, Control: 0.95s, Task Schema: 1.38s). |
+| **—** | **`mimo-v2.5-pro`** | Xiaomi MiMo | **8.56s** (Passed < 9s) | 🟢 **Admitted via Admission Gate**: 100% 3-Arm Gate Pass (Full: 9.17s, Ablated: 10.75s, Control: 6.35s, Task Schema: 7.96s). Admitted to evaluation queue. |
 | **—** | **`gemini-3.6-flash`** | Google Gemini | **20.95s** (Failed < 9s) | 🔴 **Rejected at Gate**: Exceeded 9.0s latency budget. |
 
 > *Note: Antigravity is dedicated as an Agentic Framework / Task Engine for broader operational tasks and is excluded from memory evaluation.*
@@ -125,14 +136,14 @@ To prevent runs from spinning and wasting dozens of calls when a provider has se
 ## 7. Standard Evaluation Execution Commands
 
 ```bash
-# 1. First verify model with Light Latency Gate:
-uv run python scripts/memeval_latency_gate.py --provider gemini --model <model-slug>
+# 1. First verify candidate model with Light Latency Gate:
+uv run python scripts/memeval_latency_gate.py --provider vyce --model gpt-5.6-luna
 
 # 2. Run full 20-probe evaluation on SQLite scratch backend:
 uv run python scripts/evaluate_memory.py \
   --probe-set evaluations/MEMORIES/probes/v2-four-scopes-wide.json \
-  --provider gemini \
-  --model <model-slug>
+  --provider vyce \
+  --model gpt-5.6-luna
 
 # 3. Build synthesized markdown evaluation report:
 uv run python scripts/build_memory_evaluation_report.py

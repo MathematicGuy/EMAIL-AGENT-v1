@@ -182,3 +182,25 @@ def test_unaccented_text_does_not_match_an_accented_cue() -> None:
     reads = select_memory_reads(_request("chinh sach cong ty noi gi ve lam them gio?"))
 
     assert isinstance(reads.semantic, SemanticMemoryRead)
+
+
+def test_a_task_creation_request_reads_episodic_memory_for_a_revision_ancestor() -> None:
+    """Concern D: the writer cannot declare a supersedes link it was never shown.
+
+    Task creation carries no episodic cue - "Tạo một tác vụ dời ngày nộp hồ sơ
+    hộ chiếu Cần Thơ sang ngày 12 tháng 9" asks for a new task, not for a past
+    one - so the cue gate left the write turn with no advisory episodes at all.
+    The model had nothing to point at, and every revision was stored as an
+    unrelated third fact.
+    """
+
+    reads = select_memory_reads(
+        ChatMessageRequest(
+            "session-1",
+            "Tạo một tác vụ dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9.",
+            "idem-1",
+        )
+    )
+
+    assert isinstance(reads.episodic, EpisodicMemoryQuery)
+    assert "hộ chiếu" in reads.episodic.query

@@ -2,12 +2,22 @@
 
 from .chat_intent import (
     GeminiIntentClassifier,
-    GroqIntentClassifier,
+    MimoIntentClassifier,
     MistralIntentClassifier,
+)
+from .provider_factory import (
+    ChatProviderBundle,
+    EmailProviderBundle,
+    resolve_chat_providers,
+    resolve_email_providers,
 )
 
 __all__ = [
+    "ChatProviderBundle",
+    "EmailProviderBundle",
     "GeminiIntentClassifier",
-    "GroqIntentClassifier",
+    "MimoIntentClassifier",
     "MistralIntentClassifier",
+    "resolve_chat_providers",
+    "resolve_email_providers",
 ]

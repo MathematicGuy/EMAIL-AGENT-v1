@@ -20,6 +20,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatReplyUnavailable,
+    ChatResponseInvalid,
     ChatScopeMismatch,
     ChatSessionAccessDenied,
     InMemoryChatSessionRegistry,
@@ -88,9 +89,24 @@ class BrokenReply:
         yield  # pragma: no cover - keeps this method an async iterator
 
 
+class InvalidResponseReply:
+    async def stream_reply(
+        self, request: ChatMessageRequest, context: GenerationContext
+    ) -> AsyncIterator[str]:
+        del request, context
+        raise ChatResponseInvalid("chat response failed validation")
+        yield  # pragma: no cover - keeps this method an async iterator
+
+
 class EpisodeWriter:
     def __init__(self) -> None:
         self.writes: list[TaskEpisode] = []
+
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        # A task-creation turn now reads episodic memory so a revision can name
+        # the episode it replaces; this double has nothing stored to return.
+        del namespace, query
+        return ()
 
     async def write_task_episode(
         self, namespace: object, episode: TaskEpisode, *, expires_at: object
@@ -934,3 +950,20 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
     assert approved_episode.validation_status is ValidationStatus.USER_APPROVED
     assert approved_episode.retrieval_eligible is True
 
+
+
+def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
+    """The memory evaluation counted these as dropouts and aborted runs over them."""
+
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=InvalidResponseReply(),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert events[-1].code == "chat_response_invalid"
+    assert history.updates[0][1].error_code == "chat_response_invalid"
+    assert "validation" not in events[-1].safe_message

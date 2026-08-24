@@ -113,7 +113,7 @@ flowchart TD
 
     subgraph Scoring ["Phase 3: Multi-State Grading & Verdict Collapse"]
         GRADE["Grade Each Reply<br/>(PASS / MISS / STALE / INVENTED / NO_ANSWER)"]
-        COLLAPSE["Collapse 3 Grades into 1 Verdict<br/>(scope_earned_it / scope_did_nothing / leaked / broken / dangerous)"]
+        COLLAPSE["Collapse 3 Grades into 1 Verdict<br/>(restraint_held / scope_earned_it / scope_did_nothing / leaked / broken / dangerous)"]
     end
 
     subgraph Reporting ["Phase 4: Artifact Generation & Teardown"]
@@ -359,7 +359,8 @@ Every probe's three arm outcomes collapse into exactly **one authoritative verdi
 | **PASS** | **FAIL** | **FAIL** | `scope_earned_it` | **ATTRIBUTION CONFIRMED.** The target scope is both necessary and sufficient. Memory works flawlessly. | None. Target behavior verified. |
 | **PASS** | **PASS** | **FAIL** | `scope_did_nothing` | **REDUNDANCY / LEAK.** The system answered despite the target scope being disabled. Information leaked from an unablated scope or prompt context. | Audit prompt templates; check cross-scope overlap. |
 | **PASS** | **FAIL** | **PASS** | `leaked` | **BASELINE GUESSABLE / PROMPT LEAK.** The empty control passed. The model guessed the answer from pre-training or prompt phrasing. | Rewrite probe question to use non-guessable facts. |
-| **PASS** | **PASS** | **PASS** | `leaked` | **ZERO-SHOT SOLVABLE.** The probe question does not require memory at all. Probe is invalid. | Discard or redesign probe. |
+| **PASS** | **PASS** | **PASS** | `leaked` *(recall probe)* | **ZERO-SHOT SOLVABLE.** The probe question does not require memory at all. Probe is invalid. | Discard or redesign probe. |
+| **PASS** | **PASS** | **PASS** | `restraint_held` *(refusal probe)* | **RESTRAINT HELD.** A refusal probe is passed by declining, and an empty store declines too, so all-pass is the behaviour we wanted. Leak detection excludes these on purpose (SPEC §7.2). | None. Sorts last of all verdicts. |
 | **FAIL** | **FAIL** | **FAIL** | `broken` | **TOTAL RECALL FAILURE / AMNESIA.** The model failed to recall memory even when fully seeded and enabled. | Check `seed_failures`, embedding distance, or FTS query. |
 | **FAIL** | **PASS** | **FAIL** | `broken` | **INVERTED ATTRIBUTION / HARMFUL MEMORY.** Seeding memory broke the model; masking it allowed it to pass (context distraction). | Inspect prompt formatting and retrieval payload size. |
 | **FAIL** | **FAIL** | **PASS** | `leaked` / `broken` | **INVERTED CONTROL CONTRADICTION.** Model answers when blank, but fails when memory is present. | Severe prompt distraction or model confusion. |
@@ -401,7 +402,9 @@ When compiling final reports, probes are sorted **worst-first** so dangerous def
 ├──────────────────────────────┤
 │ 5. SCOPE_DID_NOTHING         │ ──> Right answer, but ablated arm passed too
 ├──────────────────────────────┤
-│ 6. SCOPE_EARNED_IT  (Best)   │ ──> Clean (PASS, FAIL, FAIL) causal attribution
+│ 6. SCOPE_EARNED_IT           │ ──> Clean (PASS, FAIL, FAIL) causal attribution
+├──────────────────────────────┤
+│ 7. RESTRAINT_HELD   (Best)   │ ──> A refusal probe declined on every arm
 └──────────────────────────────┘
 ```
 

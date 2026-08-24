@@ -11,12 +11,7 @@ import httpx
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.config import (
-    GeminiSettings,
     GmailSettings,
-    GroqSettings,
-    JinaEmbeddingSettings,
-    MistralSettings,
-    OpenRouterSettings,
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
@@ -27,8 +22,6 @@ from cowork_agent.features.email_action_plan.observability import (
     dev_trace_sink_from_env,
 )
 from cowork_agent.features.email_action_plan.ports import (
-    ActionPlanGeneratorPort,
-    RouteClassifierPort,
     RunRepository,
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
@@ -36,25 +29,7 @@ from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailMailboxAdapter
-from cowork_agent.integrations.llm.last_resort import load_optional_gemini_settings
-from cowork_agent.integrations.llm.providers.gemini import (
-    GeminiActionPlanGenerator,
-    GeminiRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.groq import (
-    GroqActionPlanGenerator,
-    GroqRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.mistral import (
-    MistralActionPlanGenerator,
-    MistralRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.openrouter import (
-    OpenRouterActionPlanGenerator,
-    OpenRouterRouteClassifier,
-)
-from cowork_agent.integrations.rag.bootstrap import build_semantic_memory
-from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.llm.provider_factory import resolve_email_providers
 from cowork_agent.orchestration.document_recovery import (
     ProjectDocumentLeaseRepository,
     recover_stale_document_jobs,
@@ -99,6 +74,7 @@ class ProjectDocumentWorkerHeartbeat:
     async def run(self) -> None:
         await self._projects.record_document_worker_heartbeat()
 
+
 async def run_worker() -> None:
     # Lazy imports: the durable extras are optional, so the friendly URL
     # check in main() must run even without them installed.
@@ -132,48 +108,10 @@ async def run_worker() -> None:
         settings = GmailSettings.from_env()
         connection_repository = PostgresMailboxConnectionRepository(pool)
         provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-        classifier: RouteClassifierPort
-        generator: ActionPlanGeneratorPort
-        if provider == "gemini":
-            gemini_settings = GeminiSettings.from_env()
-            classifier = GeminiRouteClassifier(gemini_settings)
-            generator = GeminiActionPlanGenerator(gemini_settings)
-            jina_embedding_settings = JinaEmbeddingSettings.from_env()
-            semantic_memory = await build_semantic_memory(jina_embedding_settings)
-        elif provider == "groq":
-            groq_settings = GroqSettings.from_env()
-            classifier = GroqRouteClassifier(groq_settings)
-            generator = GroqActionPlanGenerator(groq_settings)
-            semantic_memory = NullSemanticMemory()
-        elif provider == "mistral":
-            mistral_settings = MistralSettings.from_env()
-            classifier = MistralRouteClassifier(mistral_settings)
-            generator = MistralActionPlanGenerator(mistral_settings)
-            semantic_memory = NullSemanticMemory()
-        elif provider == "openrouter":
-            openrouter_settings = OpenRouterSettings.from_env()
-            gemini_last_resort = load_optional_gemini_settings()
-            if gemini_last_resort is None:
-                logger.info(
-                    "OpenRouter Gemini last-resort is off; "
-                    "no numbered GEMINI_API_KEY_* configured"
-                )
-            else:
-                logger.info(
-                    "OpenRouter Gemini last-resort is on (%s)",
-                    gemini_last_resort.model,
-                )
-            classifier = OpenRouterRouteClassifier(
-                openrouter_settings, last_resort=gemini_last_resort
-            )
-            generator = OpenRouterActionPlanGenerator(
-                openrouter_settings, last_resort=gemini_last_resort
-            )
-            semantic_memory = NullSemanticMemory()
-        else:
-            raise ValueError(
-                "LLM_PROVIDER must be 'gemini', 'groq', 'mistral', or 'openrouter'"
-            )
+        email_providers = await resolve_email_providers(provider)
+        classifier = email_providers.classifier
+        generator = email_providers.generator
+        semantic_memory = email_providers.semantic_memory
         digest_worker = DigestWorker(
             runs,
             InMemoryResultRepository(),
@@ -351,4 +289,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

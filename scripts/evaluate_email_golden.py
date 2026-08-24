@@ -390,12 +390,12 @@ def build_live_classifier() -> tuple[Any, str, str]:
             provider,
             settings.model,
         )
-    if provider == "groq":
-        from cowork_agent.config import GroqSettings
-        from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+    if provider == "mimo":
+        from cowork_agent.config import MimoSettings
+        from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
 
-        settings = GroqSettings.from_env()
-        return GroqRouteClassifier(settings), provider, settings.model
+        settings = MimoSettings.from_env()
+        return MimoRouteClassifier(settings), provider, settings.model
     if provider == "mistral":
         from cowork_agent.config import MistralSettings
         from cowork_agent.integrations.llm.providers.mistral import MistralRouteClassifier

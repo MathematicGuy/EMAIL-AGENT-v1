@@ -60,6 +60,64 @@ def test_refusal_expected_and_answered_is_invented_and_uncertain() -> None:
     assert result.certain is False
 
 
+def test_a_declared_bait_that_stayed_absent_makes_the_refusal_certain() -> None:
+    # The uncertainty SPEC §6.3 describes runs one way: a phrasing we did not
+    # write down grades an honest refusal as invention. A probe that declares
+    # `invented_any` closes the other way too — the specific invention its
+    # author feared is provably not in the text — and with the adjacency rule
+    # covering hedged inventions, nothing is left for a human to settle.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        invented_any=("Phạm Quốc Huy",),
+    )
+    result = score("I don't have that information.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is True
+
+
+def test_a_refusal_with_no_declared_bait_stays_uncertain() -> None:
+    # Nothing was declared, so nothing was checked. Some v3 restraint probes
+    # cannot declare one — st_restraint_01 has no neighbouring id to name — and
+    # for those the honest report is still `needs_reading`.
+    probe = _probe(expect_any=(), expect_refusal=True, test=ProbeTest.RESTRAINT)
+    result = score("I don't have that information.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_a_reply_that_names_the_bait_is_invented_and_still_uncertain() -> None:
+    # A correct decline may MENTION the bait to say where it really belongs —
+    # v3's ep_restraint_02 note warns about exactly this. A bait hit is a
+    # substring match, not a reading of the sentence, so it must not be called
+    # certain in the direction that produces our worst verdict.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        invented_any=("Phạm Quốc Huy",),
+    )
+    result = score("I have no assignee for that; Phạm Quốc Huy is on the passport task.", probe)
+    assert result.outcome is Outcome.INVENTED
+    assert result.certain is False
+
+
+def test_an_unrecognised_decline_is_invented_and_still_uncertain() -> None:
+    # This is the §6.3 failure mode itself: the phrase list can never be
+    # complete. Declaring bait does not make this branch safe, because the
+    # branch is reached by NOT matching the refusal grid.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        invented_any=("Phạm Quốc Huy",),
+    )
+    result = score("That is not something on file anywhere.", probe)
+    assert result.outcome is Outcome.INVENTED
+    assert result.certain is False
+
+
 def test_empty_reply_is_not_an_answer_and_is_not_graded_as_memory() -> None:
     # A turn that produced no text tells you nothing about memory. Grading it
     # MISS put a provider outage into the same bucket as an amnesiac store, and
@@ -220,7 +278,9 @@ def test_st_restraint_02_full_arm_refusal_is_a_pass() -> None:
     )
     result = score(reply, probe)
     assert result.outcome is Outcome.PASS
-    assert result.certain is False
+    # Certain: it matched the grid AND neither declared name is in it. This is
+    # one of the real v3 rows that used to land in `needs_reading` for nothing.
+    assert result.certain is True
 
 
 def test_st_restraint_02_wrap_invention_is_invented() -> None:
@@ -235,6 +295,24 @@ def test_st_restraint_02_wrap_invention_is_invented() -> None:
         "Các tài liệu không cung cấp thông tin đầy đủ; người nhận là Lê Thu Vân."
     )
     assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_an_inverted_absence_in_the_supplied_context_is_a_refusal() -> None:
+    """mimo v5: 'Thông tin về X không có trong dữ liệu được cung cấp' — noun first."""
+
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("người nhận hồ sơ", "tên người nhận"),
+        invented_any=("Lê Thu Vân", "Thu Vân"),
+    )
+    reply = (
+        "Thông tin về người nhận hồ sơ ở văn phòng Đà Nẵng không có trong dữ liệu được cung cấp."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is True
 
 
 def test_lt_restraint_01_control_arm_du_hedge_is_a_pass() -> None:
@@ -293,3 +371,98 @@ def test_sem_restraint_01_wrong_policy_with_khong_co_chinh_sach_stays_invented()
     # Reply uses bare "chính sách" (not the refusal_about compounds) so the
     # guard targets shared _WHAT_IS_MISSING widening, not probe-specific cells.
     assert score(reply, probe).outcome is Outcome.INVENTED
+
+def test_sem_restraint_03_grounded_refusal_about_a_specific_form_is_a_pass() -> None:
+    # The v3 full-arm reply, verbatim. It is grounded in the equipment doc, it
+    # names no form code, and it says outright that no form is mentioned — an
+    # honest refusal graded INVENTED, which is the worst direction to be wrong
+    # in. The gap: the model declined about "biểu mẫu cụ thể" and the probe
+    # declares "biểu mẫu đổi laptop", so the adjacency rule saw no cell.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("biểu mẫu đổi laptop", "biểu mẫu đổi thiết bị", "mẫu đề nghị đổi máy"),
+        invented_any=("OT-114", "WFH-207", "OT-141"),
+    )
+    reply = (
+        "Theo Chính sách thiết bị làm việc, nhân viên báo trực tiếp cho bộ phận "
+        "công nghệ thông tin qua cổng nội bộ khi laptop hỏng. Không có biểu mẫu "
+        "cụ thể được đề cập cho việc đổi laptop hỏng."
+    )
+    result = score(reply, probe)
+    assert result.outcome is Outcome.PASS
+    # Certain: none of the three declared form codes appear. The same row.
+    assert result.certain is True
+
+
+def test_a_split_noun_refusal_that_recites_a_form_code_is_still_invented() -> None:
+    # The guard on the widening above. Declining about the head noun and then
+    # supplying a neighbouring code is the wrap-invention shape, and
+    # invented_any is checked first precisely so the widening cannot rescue it.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=("biểu mẫu đổi laptop", "biểu mẫu đổi thiết bị", "mẫu đề nghị đổi máy"),
+        invented_any=("OT-114", "WFH-207", "OT-141"),
+    )
+    reply = "Không có biểu mẫu cụ thể cho việc đổi laptop hỏng; hãy dùng mẫu OT-141."
+    assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_the_rest_of_the_declared_noun_must_still_appear_in_the_reply() -> None:
+    # The head alone is not the topic. "không có chính sách" next to a
+    # recitation about a DIFFERENT policy must stay INVENTED, which is what
+    # sem_restraint_01's note asks for: bare "chính sách" is not a refusal.
+    probe = _probe(
+        expect_any=(),
+        expect_refusal=True,
+        test=ProbeTest.RESTRAINT,
+        refusal_about=(
+            "chính sách nghỉ dài hạn",
+            "chế độ nghỉ dài hạn",
+            "chính sách sabbatical",
+            "quy định về sabbatical",
+        ),
+    )
+    reply = "Hiện không có chính sách; theo quy định nghỉ phép năm nhân viên được 12 ngày."
+    assert score(reply, probe).outcome is Outcome.INVENTED
+
+
+def test_a_refusal_with_no_digit_is_certain_when_the_answer_would_have_carried_one() -> None:
+    """Half of v3's restraint rows were reread every run for want of this."""
+
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("mã số",),
+        answer_would_be_numeric=True,
+    )
+    result = score("Không có mã số nào được ghi nhận cho yêu cầu này.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is True
+
+
+def test_a_refusal_carrying_a_digit_stays_uncertain() -> None:
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("mã số",),
+        answer_would_be_numeric=True,
+    )
+    result = score("Không có mã số, nhưng hồ sơ mang số 118.", probe)
+    assert result.outcome is Outcome.PASS
+    assert result.certain is False
+
+
+def test_a_refusal_probe_that_declared_no_shape_is_still_uncertain() -> None:
+    probe = _probe(
+        test=ProbeTest.RESTRAINT,
+        expect_any=(),
+        expect_refusal=True,
+        refusal_about=("chức danh",),
+    )
+    assert score("Không có thông tin về chức danh của bạn.", probe).certain is False

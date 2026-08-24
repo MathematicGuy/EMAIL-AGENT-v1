@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from email.message import Message
+from urllib.error import HTTPError
 from urllib.request import Request
 
 import pytest
@@ -36,9 +38,7 @@ def test_mistral_settings_require_configured_key_and_model_without_exposing_key(
 def test_mistral_settings_reject_values_above_resource_bounds() -> None:
     base = {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}
     with pytest.raises(ValueError, match="MISTRAL_MAX_OUTPUT_TOKENS must not exceed 4096"):
-        MistralSettings.from_env(
-            {**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False
-        )
+        MistralSettings.from_env({**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False)
     with pytest.raises(ValueError, match="MISTRAL_TIMEOUT_SECONDS must not exceed 120"):
         MistralSettings.from_env({**base, "MISTRAL_TIMEOUT_SECONDS": "121"}, load_env_file=False)
 
@@ -64,7 +64,9 @@ def test_mistral_completion_uses_fixed_url_and_bounded_request(
         captured["body"] = json.loads((request.data or b"").decode())
         return FakeResponse()
 
-    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mistral.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.openai_transport.urlopen", fake_urlopen
+    )
 
     response = _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
 
@@ -74,6 +76,58 @@ def test_mistral_completion_uses_fixed_url_and_bounded_request(
         "timeout": 12,
         "body": {"model": "test"},
     }
+
+
+def test_mistral_http_errors_keep_only_safe_status_and_integer_retry_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Retry-After"] = "17"
+
+    def raise_http_error(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise HTTPError(
+            MISTRAL_CHAT_COMPLETIONS_URL,
+            429,
+            "raw body must not escape",
+            headers,
+            None,
+        )
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral.post_json", raise_http_error
+    )
+
+    with pytest.raises(MistralAPIError) as excinfo:
+        _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
+
+    error = excinfo.value
+    assert error.status_code == 429
+    assert error.retry_after_seconds == 17
+    assert not hasattr(error, "headers")
+    assert "raw body must not escape" not in repr(error)
+
+
+@pytest.mark.parametrize("retry_after", ["invalid", "Wed, 21 Oct 2015 07:28:00 GMT"])
+def test_mistral_ignores_non_integer_retry_after_metadata(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str
+) -> None:
+    headers = Message()
+    headers["Retry-After"] = retry_after
+
+    def raise_http_error(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise HTTPError(MISTRAL_CHAT_COMPLETIONS_URL, 503, "error", headers, None)
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral.post_json", raise_http_error
+    )
+
+    with pytest.raises(MistralAPIError) as excinfo:
+        _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.retry_after_seconds is None
 
 
 def test_mistral_generator_rejects_missing_chat_completion_shape(
@@ -107,9 +161,7 @@ def test_mistral_generator_requests_json_with_bounded_output_tokens(
     def fake_post_json(
         url: str, api_key: str, body: dict[str, object], timeout_seconds: int
     ) -> dict[str, object]:
-        captured.update(
-            {"url": url, "api_key": api_key, "body": body, "timeout": timeout_seconds}
-        )
+        captured.update({"url": url, "api_key": api_key, "body": body, "timeout": timeout_seconds})
         return {"choices": [{"message": {"content": "{}"}}]}
 
     monkeypatch.setattr(

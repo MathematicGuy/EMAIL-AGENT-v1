@@ -19,11 +19,11 @@ GMAIL_CONNECTION_DB_PATH=.data/mail_todo.db
 OAUTH_STATE_TTL_SECONDS=600
 OAUTHLIB_INSECURE_TRANSPORT=1
 
-# LLM Provider Selection (openrouter | gemini | groq | mistral)
-# mistral: mistral-medium-3-5 | glm-5-2 | 
-# groq: qwen/qwen3.6-27b
+# LLM Provider Selection (openrouter | gemini | mimo | mistral)
+# mistral: mistral-medium-3-5 | glm-5-2
+# mimo: mimo-v2.5-pro | mimo-v2.5
 # gemini: gemini-3.5-flash-lite | gemma-4-31b (fast and reliable)
-LLM_PROVIDER=mistral
+LLM_PROVIDER=mimo
 
 # Gemini Action Extractor & Key Rotation Settings
 # Active Candidate Models for Memory Evaluation:
@@ -44,8 +44,10 @@ GEMINI_TIMEOUT_SECONDS=60
 DOCUMENT_EMBEDDING_PROVIDER=gemini
 EMBEDDING_MODEL=jina-embeddings-v3
 EMBEDDING_DIMENSIONS=1024
+
 GEMINI_EMBEDDING_MODEL=gemini-embedding-2
-GEMINI_EMBEDDING_DIMENSIONS=1024
+GEMINI_EMBEDDING_DIMENSIONS=3,072
+
 GEMINI_EMBEDDING_TIMEOUT_SECONDS=30
 GEMINI_EMBEDDING_BATCH_SIZE=100
 
@@ -63,19 +65,22 @@ EMAIL_RAG_MIN_RERANK_SCORE=0.30
 EMAIL_RAG_RELATIVE_CUTOFF_RATIO=0.85
 
 # OpenRouter Configuration (LLM & AI Judge)
-OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
-OPENROUTER_ALLOWED_MODELS=["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash-0731"]
+OPENROUTER_MODEL=openai/gpt-oss-120b
+OPENROUTER_ALLOWED_MODELS=["openai/gpt-oss-120b", "deepseek/deepseek-v4-flash-0731"]
 OPENROUTER_MAX_EMAILS_PER_BATCH=5
 OPENROUTER_MAX_OUTPUT_TOKENS=2048
 OPENROUTER_TIMEOUT_SECONDS=60
 
-# Groq Configuration
-GROQ_MODEL=qwen/qwen3.6-27b
-GROQ_MAX_EMAILS_PER_BATCH=5
-GROQ_TIMEOUT_SECONDS=60
+# Xiaomi Mimo Configuration
+MIMO_MODEL=mimo-v2.5-pro
+MIMO_BASE_URL=https://token-plan-ams.xiaomimimo.com/v1
+MIMO_MAX_EMAILS_PER_BATCH=5
+MIMO_MAX_OUTPUT_TOKENS=4096
+MIMO_TIMEOUT_SECONDS=60
+MIMO_ROTATE_ON_RATE_LIMIT=true
 
-# Mistral Configuration
-MISTRAL_MODEL=mistral-small-2603
+# Mistral Configuration: glm-5-2 | mistral-medium-3-5
+MISTRAL_MODEL=mistral-medium-3-5
 MISTRAL_MAX_EMAILS_PER_BATCH=5
 MISTRAL_MAX_OUTPUT_TOKENS=2048
 MISTRAL_TIMEOUT_SECONDS=60
@@ -104,7 +109,7 @@ CHAT_EPISODE_RETENTION_SECONDS=7776000
 
 # AI Chat Intent Routing & Feature Flags
 CHAT_INTENT_CLASSIFIER_ENABLED=true
-CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000
+CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000 # 10s
 CHAT_COMPANY_RAG_ENABLED=false
 USER_DOCUMENTS_ENABLED=true
 USER_DOCUMENTS_TOOL_AXIS_ENABLED=false

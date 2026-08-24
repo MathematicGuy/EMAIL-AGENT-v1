@@ -4,9 +4,9 @@
 |---|---|
 | Phạm vi | Chỉ đánh giá **phía sinh câu trả lời** của RAG (faithfulness, response relevancy) |
 | Ngoài phạm vi | Đánh giá retrieval — thuộc về `scripts/evaluate_retrieval.py` với 100 case gán nhãn tay |
-| Trạng thái | **Chưa kích hoạt.** Package chưa cài, chưa có baseline nào trong `evaluations/CHAT-RAG/baselines/` |
+| Trạng thái | **Chưa kích hoạt.** Package chưa cài, chưa có baseline nào trong `evaluations/CHAT-RAGAS/baselines/` |
 | Chỗ gọi | `scripts/evaluate_chat_rag.py` → `run_ragas()`, bật bằng cờ `--ragas` |
-| Hợp đồng bắt buộc | `evaluations/CHAT-RAG/README.md` § "RAGAS Adoption Gate" |
+| Hợp đồng bắt buộc | `evaluations/CHAT-RAGAS/README.md` § "RAGAS Adoption Gate" |
 | Kế hoạch triển khai | `docs/superpowers/plans/2026-08-20-rag-procedure-document-quality.md` § 4.3 |
 
 ---
@@ -96,7 +96,7 @@ Thư mục `.deepeval/` đang rỗng và không file `.py` nào import deepeval.
 
 ### 4.1 Dataset
 
-File dataset là **local-only, không bao giờ commit**. Schema (theo `evaluations/CHAT-RAG/README.md`):
+File dataset là **local-only, không bao giờ commit**. Schema (theo `evaluations/CHAT-RAGAS/README.md`):
 
 ```json
 {
@@ -132,10 +132,42 @@ uv run python scripts/evaluate_chat_rag.py --input <local-only>.json
 
 # Bật judge, ghi báo cáo vào baselines
 uv run python scripts/evaluate_chat_rag.py --input <local-only>.json --ragas `
-  --output evaluations/CHAT-RAG/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json
+  --output evaluations/CHAT-RAGAS/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json
 ```
 
 Chế độ tất định luôn tính sẵn: Hit@1/Hit@5/MRR/Recall@5 theo document ID, tỉ lệ citation hợp lệ (ID trích dẫn ⊆ ID đã truy xuất), độ chính xác từ chối trả lời, và p50/p95 cho từng chặng độ trễ. **Chạy chế độ này trước** — nếu các chỉ số tất định đã tệ thì chưa cần đến judge.
+
+### 4.3 Chạy song song bằng batch module của dự án (đích triển khai)
+
+`--max-workers` là giới hạn của **custom batch scheduler**, không phải cờ chuyển
+thẳng vào cơ chế song song nội bộ của RAGAS. Mỗi worker giữ một lease trên một
+Mistral key và chấm các case được giao tuần tự. RAGAS phải chạy concurrency `1`
+bên trong worker để tránh nhân đôi mức song song.
+
+```text
+effective_workers = min(
+  requested_max_workers,
+  active_key_count,
+  ready_case_count,
+  chat_ragas_plugin_limit,
+)
+```
+
+Nếu không truyền `--max-workers`, `requested_max_workers` mặc định bằng số key
+đang hoạt động. Nếu yêu cầu `5` nhưng chỉ có `3` key, job chạy `3` worker và ghi
+cả `requested_max_workers=5` lẫn `effective_workers=3` vào manifest. Khi có
+`MISTRAL_API_KEY` đến `MISTRAL_API_KEY5` và ít nhất năm case sẵn sàng, cùng lệnh
+sẽ chạy năm worker mà không sửa code.
+
+```powershell
+# Sau khi custom batch integration được triển khai
+uv run python scripts/evaluate_chat_rag.py --input <local-only>.json --ragas `
+  --evaluator-provider mistral --max-workers 5
+```
+
+**Trạng thái hiện tại:** CLI chưa nhận `--max-workers`; `run_ragas()` vẫn gửi cả
+dataset vào một lần `evaluate()`. Vì vậy đoạn này là hợp đồng triển khai, không
+phải tuyên bố rằng chạy song song đã hoạt động hôm nay.
 
 ---
 
@@ -207,7 +239,7 @@ Báo cáo được commit **đã** loại bỏ nội dung văn bản. Nhưng b�
 | Nguồn dữ liệu | Trạng thái |
 |---|---|
 | Corpus thủ tục hành chính công khai (`data/extracted`) | Chấp nhận được |
-| `project_documents` của tenant | **Cần quyết định tường minh, ghi vào `evaluations/CHAT-RAG/README.md` trước lần chạy đầu.** Chạy khi chưa có quyết định này bị coi là lỗi |
+| `project_documents` của tenant | **Cần quyết định tường minh, ghi vào `evaluations/CHAT-RAGAS/README.md` trước lần chạy đầu.** Chạy khi chưa có quyết định này bị coi là lỗi |
 
 ---
 
@@ -225,7 +257,7 @@ Adoption gate yêu cầu mỗi lần chạy phải ghi lại:
 - [ ] Context đến từ user documents, company knowledge, hay cả hai
 - [ ] Mức đồng thuận với người chấm (từ § 5.2)
 
-Đường dẫn báo cáo: `evaluations/CHAT-RAG/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json`
+Đường dẫn báo cáo: `evaluations/CHAT-RAGAS/baselines/chat-rag-eval-YYYY-MM-DD-<dataset>-<model>.json`
 
 ---
 

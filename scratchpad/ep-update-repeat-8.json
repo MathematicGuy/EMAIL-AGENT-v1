@@ -1,0 +1,164 @@
+{
+  "schema_version": "2.0.0",
+  "probe_set_id": "ep_update_repeat_8",
+  "label": "ep_update_01 lặp 8 lần: đo tỉ lệ mô hình khai báo liên kết supersedes",
+  "seed": {
+    "short_term": [
+      "Tôi đang xử lý yêu cầu gia hạn CCCD cho văn phòng Đà Nẵng.",
+      "Hồ sơ này do chị Lê Thu Vân ký duyệt.",
+      "Hạn chót của việc đó là thứ Ba.",
+      "Đính chính: hạn chót đã dời sang thứ Tư.",
+      "Văn phòng Hải Phòng đang chờ hồ sơ liên quan.",
+      "Chị Mai Liên vừa gửi email nhắc hạn nộp."
+    ],
+    "long_term": {
+      "language": "vi",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "assistant_persona": "trợ lý biệt danh Hải Âu",
+      "response_tone": "ngắn gọn"
+    },
+    "episodic": [
+      {
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ cấp lại hộ chiếu cho văn phòng Cần Thơ, nộp hồ sơ ngày 5 tháng 9, giao cho anh Phạm Quốc Huy.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Hải Phòng.",
+        "approve": true
+      }
+    ],
+    "semantic": {
+      "corpus_dir": "tests/fixtures/memory_eval/corpus-v3"
+    }
+  },
+  "probes": [
+    {
+      "id": "ep_update_r01",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r02",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r03",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r04",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r05",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r06",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r07",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    },
+    {
+      "id": "ep_update_r08",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "Both dates are live approved rows. Prefer the later. Assignee on the 5 Sep create must not be treated as a date."
+    }
+  ]
+}

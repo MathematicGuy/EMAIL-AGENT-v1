@@ -78,6 +78,19 @@ def test_postgres_mode_off_selects_sqlite_and_dials_nothing() -> None:
     assert unavailable_scopes(env) == ()
 
 
+def test_concurrent_sqlite_attempts_receive_distinct_owned_scratch_paths() -> None:
+    first = probe_environment({"POSTGRES_MODE": "off"})
+    second = probe_environment({"POSTGRES_MODE": "off"})
+
+    assert first.sqlite_path is not None
+    assert second.sqlite_path is not None
+    assert first.sqlite_path != second.sqlite_path
+    assert first.sqlite_path_owned is True
+    assert second.sqlite_path_owned is True
+    assert first.sqlite_path.name.startswith("memeval-")
+    assert second.sqlite_path.name.startswith("memeval-")
+
+
 def test_a_configured_but_unreachable_server_is_an_outage_not_a_sqlite_choice() -> None:
     # A URL was set and did not answer. Silently falling back to SQLite would
     # measure a different store than the one the run was pointed at.
@@ -191,6 +204,7 @@ def test_postgres_mode_off_wins_over_database_url_in_live_env() -> None:
     env = probe_environment(environ, postgres_probe=lambda url: True)
     assert env.postgres_url is None
     assert env.sqlite_path is not None
+    assert env.sqlite_path_owned is True
     assert env.durable_memory_available is True
 
 
@@ -203,4 +217,3 @@ def test_pg_test_url_overrides_postgres_mode_off_in_live_env() -> None:
     assert env.postgres_url == "postgresql://127.0.0.1:5432/cowork_memeval"
     assert env.sqlite_path is None
     assert env.durable_memory_available is True
-

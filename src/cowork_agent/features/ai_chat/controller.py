@@ -233,6 +233,19 @@ class ChatReplyUnavailable(RuntimeError):
     """The configured chat-response provider cannot serve this turn."""
 
 
+class ChatResponseInvalid(ChatReplyUnavailable):
+    """The provider answered, but the answer broke the response contract.
+
+    A subclass rather than a sibling so every existing handler still catches it
+    and the turn still fails closed. What changes is what the failure is called:
+    the provider being down and the model returning an uncitable answer produce
+    the same empty turn, and calling both "provider unavailable" sent the memory
+    evaluation's triage looking for a network fault that was never there. It
+    also fed a circuit breaker that exists to stop spending calls on a dead
+    provider — a breaker a validation bug must not trip.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class _PendingTaskEpisode:
     request: ChatMessageRequest
@@ -630,14 +643,19 @@ class ChatController:
                     )
                     emitted.append(event)
                     yield event
-            except ChatReplyUnavailable:
-                await self._fail_turn(
-                    pending_turn,
-                    code="chat_provider_unavailable",
+            except ChatReplyUnavailable as exc:
+                # The user-facing message is the same either way; the code is
+                # not. A validation failure that reads as an outage sends the
+                # next person to the wrong system.
+                code = (
+                    "chat_response_invalid"
+                    if isinstance(exc, ChatResponseInvalid)
+                    else "chat_provider_unavailable"
                 )
+                await self._fail_turn(pending_turn, code=code)
                 yield self._error(
                     turn_id=turn_id,
-                    code="chat_provider_unavailable",
+                    code=code,
                     safe_message="Dịch vụ sinh câu trả lời hiện không khả dụng.",
                 )
                 return
@@ -928,6 +946,7 @@ class ChatController:
             prompt_version=proposal.prompt_version,
             confidence=proposal.confidence,
             project_id=self._scope.project_id,
+            supersedes=proposal.supersedes,
         )
 
     async def _transition_task_episode(
