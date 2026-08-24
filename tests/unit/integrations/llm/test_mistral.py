@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from email.message import Message
+from urllib.error import HTTPError
 from urllib.request import Request
 
 import pytest
@@ -74,6 +76,58 @@ def test_mistral_completion_uses_fixed_url_and_bounded_request(
         "timeout": 12,
         "body": {"model": "test"},
     }
+
+
+def test_mistral_http_errors_keep_only_safe_status_and_integer_retry_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Retry-After"] = "17"
+
+    def raise_http_error(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise HTTPError(
+            MISTRAL_CHAT_COMPLETIONS_URL,
+            429,
+            "raw body must not escape",
+            headers,
+            None,
+        )
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral.post_json", raise_http_error
+    )
+
+    with pytest.raises(MistralAPIError) as excinfo:
+        _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
+
+    error = excinfo.value
+    assert error.status_code == 429
+    assert error.retry_after_seconds == 17
+    assert not hasattr(error, "headers")
+    assert "raw body must not escape" not in repr(error)
+
+
+@pytest.mark.parametrize("retry_after", ["invalid", "Wed, 21 Oct 2015 07:28:00 GMT"])
+def test_mistral_ignores_non_integer_retry_after_metadata(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str
+) -> None:
+    headers = Message()
+    headers["Retry-After"] = retry_after
+
+    def raise_http_error(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise HTTPError(MISTRAL_CHAT_COMPLETIONS_URL, 503, "error", headers, None)
+
+    monkeypatch.setattr(
+        "cowork_agent.integrations.llm.providers.mistral.post_json", raise_http_error
+    )
+
+    with pytest.raises(MistralAPIError) as excinfo:
+        _post_json(MISTRAL_CHAT_COMPLETIONS_URL, "test-key", {"model": "test"}, 12)
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.retry_after_seconds is None
 
 
 def test_mistral_generator_rejects_missing_chat_completion_shape(

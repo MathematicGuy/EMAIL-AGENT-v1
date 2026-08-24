@@ -35,6 +35,52 @@ interpreter `.venv/Scripts/python.exe` — bare `python` hits the Windows App
 Execution Alias and fails. The eval provider/model is loaded from configuration
 (`LLM_PROVIDER` in `.env`, e.g. `gemini`) by default.
 
+## Mistral multi-key gate
+
+Number Mistral keys as `MISTRAL_API_KEY`, `MISTRAL_API_KEY2`,
+`MISTRAL_API_KEY3`, and so on. The evaluation credential pool discovers and
+deduplicates those names; it exposes only aliases such as `mistral-1` in
+reports. Never put a key value in a command, report, issue, or committed file.
+
+Before requesting more than one Mistral evaluation worker, run the opt-in smoke
+gate once with the intended concurrency:
+
+```powershell
+uv run python scripts/smoke_test_mistral_evaluation_keys.py --workers 3 --output .data/evaluation-key-smoke.json
+```
+
+It sends exactly one ordinary chat completion per selected alias using a fixed
+synthetic prompt, without retries. The ignored report contains only alias,
+safe status class, latency, and cross-key `429` timing. Exit `0` is observed
+evidence that the selected aliases completed independently enough for this
+smoke gate; it is not proof supplied by configuration alone. Exit `1` means
+keep evaluation concurrency at one.
+
+`WORKER_COUNT_REDUCED` means `--workers` exceeded currently healthy discovered
+keys; use the reported `effective_workers`, never the requested count.
+`KEY_INDEPENDENCE_NOT_DEMONSTRATED` means all aliases did not complete, or a
+cross-key rate-limit pattern did not establish independent capacity. Do not
+raise worker count after either warning. `rate_limited`,
+`authentication_failed`, `provider_unavailable`, and `timed_out` are safe
+status classes for triage, not transport diagnostics.
+
+For a smoke-gated Mistral memory evaluation, `--max-workers` is available
+after Task 9. It is the requested upper bound, capped by healthy leased
+aliases, and may emit
+`WORKER_COUNT_REDUCED`. Parallel memory evaluation is **SQLite-only**:
+set `POSTGRES_MODE=off` before using `--max-workers` above one. PostgreSQL
+memory evaluations always use `--max-workers 1`, including local throwaway
+databases, because their migration and shared-store semantics are serial.
+
+The smoke report at `.data/evaluation-key-smoke.json` and the evaluation job DB
+at `.data/evaluation-jobs.db` are ignored operational artifacts. Private
+per-attempt transcripts belong under
+`evaluations/MEMORIES/runs/{job_id}/{attempt_id}/`; legacy detail files remain
+under `evaluations/MEMORIES/runs/`. Inspect private artifacts only locally, then
+remove the exact completed job/attempt directory and temporary smoke report
+when no longer needed. Do not delete the whole `runs/` directory while another
+evaluation is active.
+
 ---
 
 ## 1. Pre-check — prove every dependency answers
