@@ -37,7 +37,6 @@ import { StarburstIcon } from './HeroSection';
 import { TaskWorkflowCard } from './TaskWorkflowCard';
 import { RagEvidencePanel } from './RagEvidencePanel';
 import { AgentActivityTimeline } from './AgentActivityTimeline';
-import { InlineReasoningCard } from './InlineReasoningCard';
 
 interface ChatStreamViewProps {
   messages: ChatMessage[];
@@ -821,13 +820,6 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
             generationStatus={msg.generationStatus}
             completedAt={msg.completedAt}
             onOpenDetails={onOpenExecutionTrace ? () => onOpenExecutionTrace(msg) : undefined}
-          />
-        )}
-
-        {!isUser && (
-          <InlineReasoningCard
-            executionTrace={msg.executionTrace}
-            generationStatus={msg.generationStatus}
           />
         )}
 

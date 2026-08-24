@@ -54,7 +54,7 @@ describe('ChatStreamView assistant content marker', () => {
       .toContain('First streamed token');
   });
 
-  it('mounts the inline reasoning card above the assistant answer', () => {
+  it('keeps the reasoning trace out of the answer bubble', () => {
     renderStream([
       {
         id: 'assistant-2',
@@ -73,9 +73,10 @@ describe('ChatStreamView assistant content marker', () => {
       },
     ]);
 
-    const card = screen.getByLabelText('Suy luận của mô hình');
-    expect(card).not.toBeNull();
-    expect(card.textContent).toContain('mimo-v2.5-pro');
+    // Reasoning lives only in the execution trace drawer, never in the stream.
+    expect(screen.queryByLabelText('Suy luận của mô hình')).toBeNull();
+    expect(screen.queryByText(/Suy luận nội bộ của mô hình/)).toBeNull();
+    expect(screen.queryByText(/Chuỗi suy luận/)).toBeNull();
     expect(screen.getByTestId('assistant-message-content').textContent)
       .toContain('Câu trả lời cuối cùng.');
   });
