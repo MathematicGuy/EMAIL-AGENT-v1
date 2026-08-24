@@ -392,6 +392,7 @@ class SQLiteChatRepository(ChatSessionRegistryPort):
                 activities=turn.activities,
                 completed_at=turn.completed_at,
                 execution_trace=turn.execution_trace,
+                artifact_refs=turn.artifact_refs,
             )
             database.execute(
                 "UPDATE chat_turns SET payload = ? WHERE session_id = ? AND turn_id = ?",

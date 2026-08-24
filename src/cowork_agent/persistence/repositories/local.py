@@ -78,6 +78,8 @@ class InMemoryChatHistoryRepository:
             error_code=turn.error_code,
             activities=turn.activities,
             completed_at=turn.completed_at,
+            execution_trace=turn.execution_trace,
+            artifact_refs=turn.artifact_refs,
         )
         self._turns[key] = stored
         if title is not None:

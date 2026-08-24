@@ -536,8 +536,11 @@ function ArtifactRefCard({
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const filename = resourceName(artifact);
+  const title = typeof artifact.provenance?.title === 'string' ? artifact.provenance.title : filename;
+
   const toggle = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Tránh kích hoạt click của Card cha để link sang Artifacts
+    e.stopPropagation();
     if (isOpen) {
       setIsOpen(false);
       return;
@@ -547,13 +550,12 @@ function ArtifactRefCard({
     setIsLoading(true);
     setError(null);
     try {
-      const name = resourceName(artifact);
       let loadedText: string | null = null;
       try {
         const res = await fetch('/api/v1/reports');
         if (res.ok) {
           const files = (await res.json()) as Array<{ filename: string; content: string }>;
-          const match = files.find((f) => f.filename === name || f.filename === artifact.ref_id);
+          const match = files.find((f) => f.filename === filename || f.filename === artifact.ref_id);
           if (match && typeof match.content === 'string') {
             loadedText = match.content;
           }
@@ -572,80 +574,94 @@ function ArtifactRefCard({
       setError(
         readError instanceof Error
           ? readError.message
-          : 'Không đọc được báo cáo.'
+          : 'Không đọc được nội dung báo cáo.'
       );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleLinkToArtifact = () => {
-    const name = resourceName(artifact);
-    if (name) {
-      localStorage.setItem('selected_artifact_filename', name);
+  const handleLinkToArtifact = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (filename) {
+      localStorage.setItem('selected_artifact_filename', filename);
       window.dispatchEvent(new CustomEvent('navigate-to-artifacts'));
     }
   };
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-[#413d37] bg-[#24221f]">
-      <div
-        onClick={handleLinkToArtifact}
-        className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left transition-colors hover:bg-[#2d2a26] cursor-pointer"
-      >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <FileText className="h-4 w-4 shrink-0 text-[#d97757]" />
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-semibold text-zinc-100">
-              {resourceName(artifact)}
-            </span>
-            {(() => {
-              const name = resourceName(artifact);
-              const isFriendly = name && !name.startsWith('slot_') && !name.startsWith('staged_') && !name.startsWith('source_');
-              return (!isFriendly || name === artifact.ref_id) && (
-                <span className="block truncate font-mono text-[10px] text-zinc-500">
-                  {artifact.ref_id}
-                </span>
-              );
-            })()}
-            {grounding && (
-              <span
-                className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  grounding.status === 'GROUNDED'
-                    ? 'bg-emerald-950 text-emerald-300'
-                    : 'bg-amber-950 text-amber-300'
-                }`}
-              >
-                {grounding.status === 'GROUNDED' ? '🟢 ' : '🟡 '}
-                {grounding.label}
+    <div className="mt-3 overflow-hidden rounded-xl border border-[#484139] bg-[#24211d] shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#352a22] border border-[#5d3f31]">
+            <FileText className="h-5 w-5 text-[#d97757]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-[#38261e] border border-[#6b4534] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#e89b82]">
+                Artifact Báo cáo
               </span>
+              {grounding && (
+                <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    grounding.status === 'GROUNDED'
+                      ? 'bg-emerald-950 text-emerald-300'
+                      : 'bg-amber-950 text-amber-300'
+                  }`}
+                >
+                  {grounding.status === 'GROUNDED' ? '🟢 ' : '🟡 '}
+                  {typeof grounding.label === 'string' ? grounding.label : ''}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 truncate text-xs font-semibold text-zinc-100">
+              {title}
+            </p>
+            {title !== filename && (
+              <p className="truncate font-mono text-[11px] text-zinc-400">
+                {filename}
+              </p>
             )}
-          </span>
-        </span>
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-[#e29a7e] bg-[#2d2a26] hover:bg-[#3d3a36] border border-[#413d37] cursor-pointer transition-colors"
-          title="Mở rộng xem tại chỗ"
-        >
-          {isLoading ? (
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <>
-              <span>{isOpen ? 'Đóng' : 'Mở báo cáo'}</span>
-              <ChevronDown
-                className={`h-3.5 w-3.5 transition-transform ${
-                  isOpen ? 'rotate-180' : ''
-                }`}
-              />
-            </>
-          )}
-        </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex items-center gap-1 rounded-lg border border-[#413d37] bg-[#1a1917] px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-[#2e2a25] hover:text-zinc-100 cursor-pointer"
+            title="Xem trước nội dung tại chỗ"
+          >
+            {isLoading ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <>
+                <span>{isOpen ? 'Đóng xem trước' : 'Xem trước'}</span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${
+                    isOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLinkToArtifact}
+            className="flex items-center gap-1.5 rounded-lg border border-[#6b4231] bg-[#3c251b] px-3 py-1.5 text-xs font-medium text-[#f2a891] transition-colors hover:bg-[#523325] hover:text-white cursor-pointer"
+            title="Mở trong trang Artifacts"
+          >
+            <span>Xem trong Artifacts</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
+
       {isOpen && (
-        <div className="max-h-96 overflow-y-auto border-t border-[#38342f] px-4 py-3 text-sm">
+        <div className="max-h-96 overflow-y-auto border-t border-[#38342f] bg-[#1a1917] px-4 py-3 text-sm">
           {error ? (
-            <p role="alert" className="text-rose-300">
+            <p role="alert" className="text-rose-300 text-xs">
               {error}
             </p>
           ) : content !== null ? (
@@ -654,7 +670,7 @@ function ArtifactRefCard({
               sourceIdPrefix={artifact.ref_id}
             />
           ) : (
-            <p className="text-zinc-500">Đang đọc immutable artifact…</p>
+            <p className="text-xs text-zinc-400">Đang đọc nội dung báo cáo…</p>
           )}
         </div>
       )}
@@ -723,7 +739,6 @@ const CodeBlockItem: React.FC<CodeBlockItemProps> = React.memo(({
 interface ChatMessageItemProps {
   msg: ChatMessage;
   selectedModel: ModelOption;
-  isVietnamese: boolean;
   copiedId: string | null;
   onCopy: (text: string, id: string) => void;
   onSend: (text?: string) => void;
@@ -741,7 +756,6 @@ interface ChatMessageItemProps {
 const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
   msg,
   selectedModel,
-  isVietnamese,
   copiedId,
   onCopy,
   onSend,
@@ -869,22 +883,25 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
           </div>
         )}
 
-        {!isUser && msg.citations && msg.citations.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2" aria-label="Document citations">
-            {msg.citations.map((citation) => (
-              <span
-                key={citation.citationId}
-                title={citation.section}
-                className="inline-flex items-center gap-1.5 rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1.5 text-[11px] text-zinc-200"
-              >
-                <FileText className="h-3 w-3 text-[#d97757]" />
-                {citation.unavailable
-                  ? `${citation.documentTitle} · ${isVietnamese ? 'không khả dụng' : 'unavailable'}`
-                  : `${citation.documentTitle}${citation.section ? ` · ${citation.section}` : ''} · ${isVietnamese ? 'trang' : 'page'} ${citation.pageStart}${citation.pageEnd !== citation.pageStart ? `–${citation.pageEnd}` : ''}`}
-              </span>
-            ))}
-          </div>
-        )}
+        {!isUser && msg.citations && msg.citations.length > 0 && (() => {
+          const uniqueFiles = Array.from(
+            new Set(msg.citations.map((c) => c.documentTitle).filter(Boolean))
+          );
+          if (uniqueFiles.length === 0) return null;
+          return (
+            <div className="mt-3 flex flex-wrap gap-2" aria-label="Tài liệu đã trích xuất">
+              {uniqueFiles.map((docTitle) => (
+                <span
+                  key={docTitle}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#5a5149] bg-[#2b2925] px-3 py-1 text-xs text-zinc-200"
+                >
+                  <FileText className="h-3.5 w-3.5 text-[#d97757]" />
+                  <span className="font-medium">{docTitle}</span>
+                </span>
+              ))}
+            </div>
+          );
+        })()}
 
         {!isUser && (msg.ragEvidence || msg.retrievalStatus) && (
           <RagEvidencePanel
@@ -1033,7 +1050,6 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
   const prevLastMessageRef = useRef<ChatMessage | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const isVietnamese = navigator.language.toLowerCase().startsWith('vi');
 
   // Detect when user scrolls up
   const handleScroll = () => {
@@ -1121,7 +1137,6 @@ export const ChatStreamView: React.FC<ChatStreamViewProps> = ({
               key={msg.id}
               msg={msg}
               selectedModel={selectedModel}
-              isVietnamese={isVietnamese}
               copiedId={copiedId}
               onCopy={handleCopy}
               onSend={onSend}

@@ -876,6 +876,19 @@ class ChatController:
                 return
 
             generated_artifact_refs: tuple[Mapping[str, object], ...] = ()
+            if (
+                generated_report is None
+                and _is_report_request(request.user_message)
+                and len(assistant_message.strip()) > 50
+            ):
+                filename = _fallback_report_filename(request.user_message, conversation_title)
+                title = conversation_title or "Báo cáo tổng hợp"
+                generated_report = GeneratedReportArtifact(
+                    filename=filename,
+                    title=title,
+                    content=assistant_message,
+                )
+
             if generated_report is not None:
                 try:
                     from pathlib import Path
@@ -1306,3 +1319,37 @@ class ChatController:
             code=code,
             safe_message=safe_message,
         )
+
+
+def _is_report_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        kw in lowered
+        for kw in (
+            "tạo báo cáo",
+            "lập báo cáo",
+            "xuất báo cáo",
+            "tổng hợp báo cáo",
+            "viết báo cáo",
+            "tạo artifact",
+            "generate report",
+            "create report",
+        )
+    )
+
+
+def _fallback_report_filename(message: str, title: str | None) -> str:
+    import re
+    import unicodedata
+
+    raw = title or message
+    text = unicodedata.normalize("NFKD", raw)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    slug = re.sub(r"[^\w\s-]", "", text.lower()).strip()
+    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
+    if not slug:
+        slug = "bao-cao-tong-hop"
+    if not slug.startswith("bao-cao"):
+        slug = f"bao-cao-{slug}"
+    return f"{slug}.md"
+
