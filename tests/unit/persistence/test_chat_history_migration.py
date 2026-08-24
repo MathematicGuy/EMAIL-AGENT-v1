@@ -41,3 +41,18 @@ def test_chat_turn_lifecycle_down_migration_restores_completed_turn_shape() -> N
     assert "DROP COLUMN IF EXISTS status" in sql
     assert "DROP COLUMN IF EXISTS idempotency_key" in sql
     assert "DROP COLUMN IF EXISTS error_code" in sql
+
+
+def test_chat_turn_activity_migration_stores_durable_activity_snapshots() -> None:
+    sql = (MIGRATIONS / "016_chat_turn_activity.sql").read_text(encoding="utf-8")
+
+    assert "ADD COLUMN activities jsonb NOT NULL DEFAULT '[]'::jsonb" in sql
+    assert "jsonb_typeof(activities) = 'array'" in sql
+    assert "ADD COLUMN completed_at timestamptz" in sql
+
+
+def test_chat_turn_activity_down_migration_removes_activity_storage() -> None:
+    sql = (MIGRATIONS / "016_chat_turn_activity.down.sql").read_text(encoding="utf-8")
+
+    assert "DROP COLUMN IF EXISTS activities" in sql
+    assert "DROP COLUMN IF EXISTS completed_at" in sql

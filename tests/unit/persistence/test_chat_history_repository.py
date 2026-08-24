@@ -1,7 +1,15 @@
 import asyncio
 from datetime import UTC, datetime
 
-from cowork_agent.domain.chat_contracts import ChatMemoryScope, ChatTurn, ChatTurnStatus
+from cowork_agent.domain.chat_contracts import (
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityOutcome,
+    ChatActivityStatus,
+    ChatMemoryScope,
+    ChatTurn,
+    ChatTurnStatus,
+)
 from cowork_agent.persistence.repositories.chat_history import PostgresChatHistoryRepository
 
 
@@ -61,11 +69,18 @@ class _Pool:
         return _ConnectionContext(self._connection)
 
 
-def _row(*, status: str, assistant: str | None, error_code: str | None) -> tuple[object, ...]:
+def _row(
+    *,
+    status: str,
+    assistant: str | None,
+    error_code: str | None,
+    activities: list[object] | None = None,
+    completed_at: datetime | None = None,
+) -> tuple[object, ...]:
     return (
         "turn-1", "session-1", "Keep this prompt.", assistant,
         datetime(2026, 8, 17, 9, tzinfo=UTC), [], [], None, None,
-        status, "submission-1", error_code,
+        status, "submission-1", error_code, activities or [], completed_at,
     )
 
 
@@ -124,5 +139,38 @@ def test_latest_turns_for_returns_one_latest_lifecycle_per_session() -> None:
         assert result["session-1"].status is ChatTurnStatus.FAILED
         assert result["session-1"].error_code == "provider_error"
         assert result["session-1"].idempotency_key == "submission-1"
+
+    asyncio.run(scenario())
+
+
+def test_latest_turns_for_restores_durable_activity_and_completion_time() -> None:
+    async def scenario() -> None:
+        started_at = datetime(2026, 8, 17, 9, tzinfo=UTC)
+        completed_at = datetime(2026, 8, 17, 9, 0, 4, tzinfo=UTC)
+        activity = ChatActivity(
+            code=ChatActivityCode.UNDERSTANDING_REQUEST,
+            status=ChatActivityStatus.COMPLETED,
+            outcome=ChatActivityOutcome.SUCCESS,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        latest = _row(
+            status="completed",
+            assistant="Done.",
+            error_code=None,
+            activities=[activity.to_dict()],
+            completed_at=completed_at,
+        )
+        repository = PostgresChatHistoryRepository(  # type: ignore[arg-type]
+            _Pool([], latest_rows=[latest])
+        )
+        scope = ChatMemoryScope(
+            tenant_id="workspace-1", user_id="user-1", session_id="session-1"
+        )
+
+        result = await repository.latest_turns_for((scope,))
+
+        assert result["session-1"].activities == (activity,)
+        assert result["session-1"].completed_at == completed_at
 
     asyncio.run(scenario())

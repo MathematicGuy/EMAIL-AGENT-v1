@@ -36,6 +36,7 @@ import { ChatInputBox } from './ChatInputBox';
 import { StarburstIcon } from './HeroSection';
 import { TaskWorkflowCard } from './TaskWorkflowCard';
 import { RagEvidencePanel } from './RagEvidencePanel';
+import { AgentActivityTimeline } from './AgentActivityTimeline';
 
 interface ChatStreamViewProps {
   messages: ChatMessage[];
@@ -90,7 +91,7 @@ const MailScanCard: React.FC<{
       </div>
       <div className="mt-3 flex justify-between text-xs text-zinc-400">
         <span>{scan.emailsProcessed}/{scan.emailsToProcess || scan.emailsProcessed} email</span>
-        {scan.actionItemsCount !== undefined && <span>{scan.actionItemsCount} action item</span>}
+        {scan.actionItemsCount !== undefined && <span>{scan.actionItemsCount} công việc</span>}
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded bg-zinc-800">
         <div className="h-full bg-[#d97757] transition-all duration-300" style={{ width: `${percentage}%` }} />
@@ -105,7 +106,7 @@ const MailScanCard: React.FC<{
           }}
           className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#e8a78f] hover:text-[#f2b9a4]"
         >
-          <ExternalLink className="h-3.5 w-3.5" /> Mở Mail Inbox
+          <ExternalLink className="h-3.5 w-3.5" /> Mở hộp thư
         </a>
       )}
     </section>
@@ -781,6 +782,14 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
           <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#d97757]/40 to-transparent" />
         )}
 
+        {!isUser && msg.activities && msg.activities.length > 0 && (
+          <AgentActivityTimeline
+            activities={msg.activities}
+            generationStatus={msg.generationStatus}
+            completedAt={msg.completedAt}
+          />
+        )}
+
         <div data-testid={!isUser ? 'assistant-message-content' : undefined}>
           {parts.map((part, pIdx) => {
             const isLastPart = pIdx === parts.length - 1;
@@ -815,7 +824,9 @@ const ChatMessageItem: React.FC<ChatMessageItemProps> = React.memo(({
             <span className="inline-block w-2 h-4 bg-[#d97757] animate-caret align-middle select-none shadow-[0_0_8px_rgba(217,119,87,0.8)]" />
           )}
         </div>
-        {msg.mailScan && <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />}
+        {msg.mailScan && ['succeeded', 'partial', 'failed'].includes(msg.mailScan.status) && (
+          <MailScanCard scan={msg.mailScan} onOpenMailInbox={onOpenMailInbox} />
+        )}
 
         {msg.attachmentRefs && msg.attachmentRefs.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">

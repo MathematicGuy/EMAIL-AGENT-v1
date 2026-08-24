@@ -68,7 +68,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
   - `mail_todo.db` (OAuth / mailbox connections, configured by `GMAIL_CONNECTION_DB_PATH`)
   - `runs.db` (digest run state, progress counters, error tracking)
   - `tasks.db` (synthesized action plans)
-  - `chat.db` (chat session registry, turns/history, declarative profiles, summaries, and TaskEpisodes)
+  - `chat.db` (chat session registry, turns/history with user-facing activity, declarative profiles, summaries, and TaskEpisodes)
   - `chat_identity.db` (guest principal resolution and hashed opaque browser sessions)
   - `projects.db` (project metadata, document catalog, and ingestion/cleanup lease queues)
   - `project_chunks.db` (private document chunk text and full-text search index)
@@ -87,7 +87,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
 ## 4. Alignment & Diff vs Target Architecture
 
 - **Clean API & Product Surfaces:** Presentation layers consume REST and SSE endpoints exclusively. Standalone Email digest workflow operates on `/v1/mail-todo`; AI Chat and Project Document features operate on `/v1/cowork/*` ([TARGET §1 & §2](../TARGET-ARCHITECTURE.md)).
-- **Email & Chat Capabilities:** Email RAG operates as a standalone pipeline while AI Chat supports rich multi-turn interactions, inline citation tracking, TaskEpisode proposals, and mail scan execution summaries (`MailScanCard` and turn `mail_scan` metadata).
+- **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. The React client projects polled mail progress into that shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn.
 - **Security & Identity Isolation:** OAuth tokens are stored encrypted using Fernet (`TokenCipher`). Session cookies are opaque, HttpOnly, and hashed at rest. Caller-supplied tenant/user identifiers are never trusted for authorization; all operations derive tenancy from `VerifiedPrincipal`.
 - **Memory & Durability Alignment:** Bounded short-term chat context resides in-process (`InMemoryChatSessionBuffer`), while durable long-term declarative profiles, episodic TaskEpisodes, chat turns, and document chunks are persisted in PostgreSQL (or isolated local SQLite files).
 - **Presentation Layer:** Production React 19 + Vite + Tailwind 4 web application is the authoritative user interface. Legacy Streamlit developer GUI has been retired.
