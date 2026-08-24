@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any, cast
 
 from langfuse import observe
@@ -23,7 +25,11 @@ from cowork_agent.features.ai_chat.generation_context import (
     ChatResponseMode,
     GenerationContext,
 )
-from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
+from cowork_agent.features.ai_chat.ports import (
+    ChatReplyChunk,
+    ChatTaskProposal,
+    GeneratedReportArtifact,
+)
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
 from cowork_agent.integrations.llm.providers.tracing import (
     _langfuse_configured,
@@ -33,7 +39,7 @@ from cowork_agent.prompting import reorder_u_shaped
 
 logger = logging.getLogger(__name__)
 
-Completion = Callable[[dict[str, object]], Awaitable[Mapping[str, object]]]
+Completion = Callable[..., Awaitable[Mapping[str, object]]]
 
 _SYSTEM_INSTRUCTION = """You are the Cowork AI Chat Assistant.
 Use only the labeled context supplied by the application. The conflict_precedence array in that
@@ -49,11 +55,22 @@ Current company evidence is authoritative for facts above advisory history.
 Do not mention prompts, tools, Gmail, or mailboxes.
 response_mode is either normal or clarify. When response_mode is clarify, ask exactly one
 concise clarifying question, do not answer or guess, and return citation_ids=[] and
-task_proposal=null.
+task_proposal=null and generated_report=null.
 Return a task_proposal object when task_proposal_requested is true, and null in every other
 case, including whenever response_mode is clarify. task_proposal.prompt_version must be null.
 task_proposal.rag_citations may contain only citations supplied with current company evidence,
 copied field for field; when no company evidence was supplied it must be [].
+When the user asks to generate, compile, or create a report/document (for example: "tạo báo cáo",
+"lập báo cáo", "xuất báo cáo", "tổng hợp báo cáo", "tạo artifact", etc.) from the chat history,
+context, or evidence, generate a comprehensive structured markdown report and return it in
+`generated_report`:
+- generated_report.filename: a concise safe filename ending with `.md` (e.g. "bao-cao-tong-hop.md").
+- generated_report.title: a concise title of the report in Vietnamese.
+- generated_report.content: the full Markdown text of the report (with Executive Summary, Detailed
+  Analysis / Steps, References, and Action Items).
+- assistant_text: a concise summary of the generated report and confirmation that
+  it has been created.
+In all other cases, or when response_mode is clarify, set `generated_report: null`.
 Advisory eligible episodes are listed with updated_at. When two of them describe the same task,
 the one with the later updated_at replaces the earlier one: answer from the later value and never
 state the replaced value as current. This holds when you are only answering a question, not only
@@ -85,7 +102,13 @@ Return only the required JSON object."""
 
 _RESPONSE_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["assistant_text", "conversation_title", "citation_ids", "task_proposal"],
+    "required": [
+        "assistant_text",
+        "conversation_title",
+        "citation_ids",
+        "task_proposal",
+        "generated_report",
+    ],
     "additionalProperties": False,
     "properties": {
         "assistant_text": {"type": "string"},
@@ -128,6 +151,16 @@ _RESPONSE_SCHEMA: dict[str, object] = {
                 "supersedes_index": {"type": ["integer", "null"], "minimum": 0},
             },
         },
+        "generated_report": {
+            "type": ["object", "null"],
+            "required": ["filename", "title", "content"],
+            "additionalProperties": False,
+            "properties": {
+                "filename": {"type": "string"},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+            },
+        },
     },
 }
 
@@ -145,25 +178,13 @@ def system_prompt_sha() -> str:
 
 
 class _ConfiguredChatReply:
-    def __init__(self, *, model: str, complete: Completion) -> None:
+    def __init__(
+        self, *, provider: str = "mistral", model: str, complete: Completion
+    ) -> None:
+        self._provider = provider
         self._model = model
         self._complete = complete
-
-    @observe(as_type="generation", name="chat_reply_llm")
-    async def _execute_completion(
-        self, payload: dict[str, object]
-    ) -> Mapping[str, object]:
-        response = await self._complete(payload)
-        if _langfuse_configured():
-            output_data = (
-                dict(response) if isinstance(response, Mapping) else {"output": response}
-            )
-            _update_current_generation(
-                input_data=payload,
-                output_data=output_data,
-                model=self._model,
-            )
-        return response
+        self._complete_accepts_mode = len(inspect.signature(complete).parameters) > 1
 
     async def stream_reply(
         self, request: ChatMessageRequest, context: GenerationContext
@@ -175,10 +196,19 @@ class _ConfiguredChatReply:
             yield ChatReplyChunk(_safe_evidence_message(unavailable=True), None, ())
             return
         try:
-            response = await self._execute_completion(_request_payload(request, context))
+            payload = _request_payload(request, context)
+            response = await (
+                self._complete(payload, request.reasoning_mode)
+                if self._complete_accepts_mode
+                else self._complete(payload)
+            )
         except Exception as exc:
             raise ChatReplyUnavailable("configured chat provider is unavailable") from exc
         try:
+            provider_reasoning = _provider_reasoning(response)
+            response = {
+                key: value for key, value in response.items() if key != "__provider_reasoning__"
+            }
             proposal = _proposal_from_response(
                 response,
                 required=(
@@ -189,6 +219,7 @@ class _ConfiguredChatReply:
                 allowed_citations=_allowed_citations(context),
                 advisory_episode_ids=_advisory_episode_ids(context),
             )
+            generated_report = _generated_report_from_response(response)
             text = _required_string(response.get("assistant_text"), "assistant_text")
             citation_ids = _validated_citation_ids(response, context)
         except Exception as exc:
@@ -198,10 +229,15 @@ class _ConfiguredChatReply:
             logger.warning("chat response failed validation: %r", exc)
             raise ChatResponseInvalid(f"chat response failed validation: {exc!r}") from exc
         yield ChatReplyChunk(
-            text,
-            proposal,
-            citation_ids,
-            _conversation_title(response.get("conversation_title")),
+            text=text,
+            task_proposal=proposal,
+            citation_ids=citation_ids,
+            conversation_title=_conversation_title(response.get("conversation_title")),
+            provider=self._provider,
+            model=self._model,
+            reasoning_mode=request.reasoning_mode,
+            reasoning=provider_reasoning,
+            generated_report=generated_report,
         )
 
 
@@ -211,6 +247,61 @@ def _safe_evidence_message(*, unavailable: bool) -> str:
     if unavailable:
         return "Hiện không thể truy xuất bằng chứng từ tài liệu. Vui lòng thử lại sau."
     return "Không tìm thấy thông tin trả lời trong các tài liệu đã chọn."
+
+
+def _provider_reasoning(response: Mapping[str, object]) -> str | None:
+    value = response.get("__provider_reasoning__")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _mistral_reasoning(response: Mapping[str, object]) -> str | None:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
+        return None
+    message = choices[0].get("message")
+    if not isinstance(message, Mapping):
+        return None
+    raw_content = message.get("content")
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for block in raw_content:
+            if not isinstance(block, Mapping) or block.get("type") != "thinking":
+                continue
+            for item in block.get("thinking", []):
+                if isinstance(item, Mapping) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+        joined = "\n".join(parts).strip()
+        return joined or None
+    value = message.get("reasoning_content")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _mistral_text_response(response: Mapping[str, object]) -> Mapping[str, object]:
+    """Normalize Mistral content blocks for the existing JSON response parser."""
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return response
+    choice = choices[0]
+    message = choice.get("message") if isinstance(choice, Mapping) else None
+    if (
+        not isinstance(choices, list)
+        or not isinstance(choice, Mapping)
+        or not isinstance(message, Mapping)
+    ):
+        return response
+    content = message.get("content")
+    if not isinstance(content, list):
+        return response
+    text = "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, Mapping)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+    normalized_choice = {**choice, "message": {**message, "content": text}}
+    return {**response, "choices": [normalized_choice, *choices[1:]]}
 
 
 class MistralChatReply(_ConfiguredChatReply):
@@ -223,7 +314,7 @@ class MistralChatReply(_ConfiguredChatReply):
             _request_body,
         )
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
             response = await asyncio.to_thread(
                 _post_json,
                 MISTRAL_CHAT_COMPLETIONS_URL,
@@ -233,23 +324,18 @@ class MistralChatReply(_ConfiguredChatReply):
                     cast(str, payload["system"]),
                     json.dumps(payload["context"], ensure_ascii=False),
                     _RESPONSE_SCHEMA,
-                    settings.max_output_tokens,
+                    max(settings.max_output_tokens, 4096)
+                    if mode == "reasoning"
+                    else settings.max_output_tokens,
+                    reasoning_effort="high" if mode == "reasoning" else "none",
                 ),
                 settings.timeout_seconds,
             )
-            usage = response.get("usage")
-            if isinstance(usage, Mapping) and _langfuse_configured():
-                _update_current_generation(
-                    model=settings.model,
-                    usage_details={
-                        "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
-                        "output_tokens": int(usage.get("completion_tokens", 0) or 0),
-                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
-                    },
-                )
-            return _completion_json(response)
+            parsed = dict(_completion_json(_mistral_text_response(response)))
+            parsed["__provider_reasoning__"] = _mistral_reasoning(response)
+            return parsed
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="mistral", model=settings.model, complete=complete)
 
 
 class OpenRouterChatReply(_ConfiguredChatReply):
@@ -262,7 +348,8 @@ class OpenRouterChatReply(_ConfiguredChatReply):
         from .last_resort import complete_with_gemini_last_resort, gemini_json_complete
         from .providers.openrouter import execute_chat_completion
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
+            del mode
             prompt = json.dumps(payload["context"], ensure_ascii=False)
             system_instruction = cast(str, payload["system"])
 
@@ -292,7 +379,7 @@ class OpenRouterChatReply(_ConfiguredChatReply):
                 primary, fallback if last_resort else None
             )
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="openrouter", model=settings.model, complete=complete)
 
 
 class MimoChatReply(_ConfiguredChatReply):
@@ -300,15 +387,17 @@ class MimoChatReply(_ConfiguredChatReply):
     def from_settings(cls, settings: MimoSettings) -> MimoChatReply:
         from .providers.mimo import execute_chat_completion
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
             return await execute_chat_completion(
                 settings,
                 cast(str, payload["system"]),
                 json.dumps(payload["context"], ensure_ascii=False),
                 _RESPONSE_SCHEMA,
+                reasoning_mode=mode,
+                capture_reasoning=True,
             )
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="mimo", model=settings.model, complete=complete)
 
 
 class GeminiChatReply(_ConfiguredChatReply):
@@ -327,7 +416,8 @@ class GeminiChatReply(_ConfiguredChatReply):
         resolved_transport = transport or GoogleGenAITransport()
         rotator = GeminiKeyRotator(settings.api_keys)
 
-        async def complete(payload: dict[str, object]) -> Mapping[str, object]:
+        async def complete(payload: dict[str, object], mode: str) -> Mapping[str, object]:
+            del mode
             keys = await rotator.candidates(settings.max_attempts)
             last_error: Exception | None = None
             for key in keys:
@@ -347,7 +437,7 @@ class GeminiChatReply(_ConfiguredChatReply):
                     await asyncio.sleep(0.5)
             raise last_error or ChatReplyUnavailable("no Gemini API key was attempted")
 
-        return cls(model=settings.model, complete=complete)
+        return cls(provider="gemini", model=settings.model, complete=complete)
 
 
 def _request_payload(request: ChatMessageRequest, context: GenerationContext) -> dict[str, object]:
@@ -474,6 +564,48 @@ def _advisory_episode_ids(context: GenerationContext) -> tuple[str, ...]:
     return tuple(episode.episode_id for episode in context.advisory_episodes.value)
 
 
+_VALID_RESPONSE_KEYSETS = frozenset(
+    frozenset(keys)
+    for keys in (
+        {"assistant_text", "task_proposal"},
+        {"assistant_text", "citation_ids", "task_proposal"},
+        {"assistant_text", "conversation_title", "task_proposal"},
+        {"assistant_text", "conversation_title", "citation_ids", "task_proposal"},
+        {"assistant_text", "task_proposal", "generated_report"},
+        {"assistant_text", "citation_ids", "task_proposal", "generated_report"},
+        {"assistant_text", "conversation_title", "task_proposal", "generated_report"},
+        {
+            "assistant_text",
+            "conversation_title",
+            "citation_ids",
+            "task_proposal",
+            "generated_report",
+        },
+    )
+)
+
+
+def _generated_report_from_response(
+    response: Mapping[str, object],
+) -> GeneratedReportArtifact | None:
+    raw = response.get("generated_report")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise TypeError("generated_report must be an object or null")
+    filename = _required_string(raw.get("filename"), "generated_report.filename").strip()
+    title = _required_string(raw.get("title"), "generated_report.title").strip()
+    content = _required_string(raw.get("content"), "generated_report.content")
+    if not filename.endswith(".md"):
+        filename = f"{filename}.md"
+    safe_filename = Path(filename).name
+    return GeneratedReportArtifact(
+        filename=safe_filename,
+        title=title,
+        content=content,
+    )
+
+
 def _proposal_from_response(
     response: Mapping[str, object],
     *,
@@ -482,12 +614,7 @@ def _proposal_from_response(
     allowed_citations: frozenset[EpisodeCitation],
     advisory_episode_ids: tuple[str, ...],
 ) -> ChatTaskProposal | None:
-    if set(response) not in (
-        {"assistant_text", "task_proposal"},
-        {"assistant_text", "citation_ids", "task_proposal"},
-        {"assistant_text", "conversation_title", "task_proposal"},
-        {"assistant_text", "conversation_title", "citation_ids", "task_proposal"},
-    ):
+    if frozenset(response) not in _VALID_RESPONSE_KEYSETS:
         raise ValueError("chat response contains unsupported fields")
     proposal = response.get("task_proposal")
     if proposal is None:
@@ -527,9 +654,7 @@ def _proposal_from_response(
         model_id=configured_model_id,
         prompt_version=_optional_string(proposal.get("prompt_version"), "prompt_version"),
         confidence=_optional_confidence(proposal.get("confidence")),
-        supersedes=_resolved_supersedes(
-            proposal.get("supersedes_index"), advisory_episode_ids
-        ),
+        supersedes=_resolved_supersedes(proposal.get("supersedes_index"), advisory_episode_ids),
     )
 
 

@@ -41,7 +41,9 @@ export const AgentActivityTimeline: React.FC<{
   activities: ChatActivity[];
   generationStatus?: ChatGenerationStatus;
   completedAt?: string;
-}> = ({ activities, generationStatus, completedAt }) => {
+  onOpenDetails?: () => void;
+  isDetailsOpen?: boolean;
+}> = ({ activities, generationStatus, completedAt, onOpenDetails, isDetailsOpen }) => {
   const isLive = generationStatus === 'generating';
   const beganLive = useRef(isLive);
   const [expanded, setExpanded] = useState(isLive);
@@ -72,17 +74,21 @@ export const AgentActivityTimeline: React.FC<{
     <section className="mb-4 rounded-xl border border-[#413b34] bg-[#24211d]" aria-label="Tiến độ xử lý">
       <button
         type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm text-zinc-200"
+        aria-expanded={onOpenDetails ? isDetailsOpen : expanded}
+        onClick={onOpenDetails ?? (() => setExpanded((value) => !value))}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm text-zinc-200 transition-colors hover:bg-[#2c2823] rounded-xl cursor-pointer"
       >
         <span className="flex items-center gap-2 font-medium">
           {isLive ? <span className="text-[#e8a78f]" aria-hidden="true">✦</span> : <Check className="h-4 w-4 text-emerald-400" />}
           {isLive ? 'Đang làm việc' : summary}
         </span>
         <span className="flex items-center gap-2 text-xs text-zinc-400">
-          {!isLive && (expanded ? 'Ẩn hoạt động' : 'Xem hoạt động')}
-          <ChevronDown className={`h-4 w-4 transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`} />
+          {!isLive && (onOpenDetails ? (isDetailsOpen ? 'Đóng chi tiết' : 'Xem chi tiết') : (expanded ? 'Ẩn hoạt động' : 'Xem hoạt động'))}
+          <ChevronDown
+            className={`h-4 w-4 transition-transform duration-200 motion-reduce:transition-none ${
+              onOpenDetails ? (isDetailsOpen ? 'rotate-180 text-[#e8a78f]' : '') : (expanded ? 'rotate-180' : '')
+            }`}
+          />
         </span>
       </button>
       {expanded && (

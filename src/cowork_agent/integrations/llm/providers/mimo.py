@@ -125,6 +125,9 @@ async def execute_chat_completion(
     system_instruction: str,
     prompt: str,
     schema: Mapping[str, object],
+    *,
+    reasoning_mode: str | None = None,
+    capture_reasoning: bool = False,
 ) -> Mapping[str, Any]:
     """Execute chat completion with Gemini-style immediate key rotation (0.5s pause on failure)."""
     url = f"{settings.base_url.rstrip('/')}/chat/completions"
@@ -140,6 +143,11 @@ async def execute_chat_completion(
         schema,
         settings.max_output_tokens,
     )
+    if reasoning_mode == "fast":
+        body["thinking"] = {"type": "disabled"}
+    elif reasoning_mode == "reasoning":
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = "high"
 
     for key in keys:
         try:
@@ -150,7 +158,10 @@ async def execute_chat_completion(
                 body,
                 settings.timeout_seconds,
             )
-            return _completion_json(response)
+            payload = dict(_completion_json(response))
+            if capture_reasoning:
+                payload["__provider_reasoning__"] = _reasoning_content(response)
+            return payload
         except MimoRateLimitError as exc:
             last_error = exc
             if not settings.rotate_on_rate_limit:
@@ -200,6 +211,14 @@ def _completion_json(response: Mapping[str, Any]) -> Mapping[str, Any]:
         coerce_plain_text=True,
         empty_response="Mimo returned an empty response",
     )
+
+
+def _reasoning_content(response: Mapping[str, Any]) -> str | None:
+    try:
+        value = response["choices"][0]["message"].get("reasoning_content")
+    except (IndexError, KeyError, TypeError, AttributeError):
+        return None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _post_json(

@@ -44,6 +44,9 @@ MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH = 256
 MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH = 300
 MAX_EPISODE_CITATION_SECTION_LENGTH = 300
 MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
+MAX_EXECUTION_REASONING_LENGTH = 12_000
+MAX_EXECUTION_TRACE_FILENAMES = 20
+MAX_EXECUTION_TRACE_FILENAME_LENGTH = 300
 #: Retrieval widens a fused ranking to whole sections, so one article cut
 #: into several chunks arrives as several evidence items. The cap follows
 #: that ceiling (``top_k`` 8 x ``_SECTION_HEADROOM`` 2) rather than the
@@ -1005,6 +1008,72 @@ class ChatTurnStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ChatExecutionTrace:
+    """Bounded, user-readable provider execution details for one completed turn."""
+
+    provider: str
+    model: str
+    mode: Literal["fast", "reasoning"]
+    reasoning: str | None = None
+    reasoning_truncated: bool = False
+    retrieved_filenames: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_bounded_string(self.provider, "provider", 100)
+        _require_bounded_string(self.model, "model", 200)
+        if self.mode not in {"fast", "reasoning"}:
+            raise ValueError("mode must be fast or reasoning")
+        if self.reasoning is not None:
+            _require_bounded_string(
+                self.reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH
+            )
+        filenames = _as_sequence(self.retrieved_filenames, "retrieved_filenames")
+        if len(filenames) > MAX_EXECUTION_TRACE_FILENAMES:
+            raise ValueError(
+                f"retrieved_filenames must not exceed {MAX_EXECUTION_TRACE_FILENAMES} items"
+            )
+        normalized = tuple(
+            _require_bounded_string(
+                item, "retrieved_filenames item", MAX_EXECUTION_TRACE_FILENAME_LENGTH
+            )
+            for item in filenames
+        )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("retrieved_filenames must be unique")
+        object.__setattr__(self, "retrieved_filenames", normalized)
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        reasoning = data.get("reasoning")
+        return cls(
+            provider=_require_bounded_string(data["provider"], "provider", 100),
+            model=_require_bounded_string(data["model"], "model", 200),
+            mode=cast(Literal["fast", "reasoning"], data["mode"]),
+            reasoning=(
+                _require_bounded_string(
+                    reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH
+                )
+                if reasoning is not None
+                else None
+            ),
+            reasoning_truncated=bool(data.get("reasoning_truncated", False)),
+            retrieved_filenames=tuple(
+                _require_bounded_string(
+                    item,
+                    "retrieved_filenames item",
+                    MAX_EXECUTION_TRACE_FILENAME_LENGTH,
+                )
+                for item in _as_sequence(
+                    data.get("retrieved_filenames", ()), "retrieved_filenames"
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ChatTurn:
     """Transient, bounded session-turn value for the later working-memory buffer."""
 
@@ -1022,6 +1091,8 @@ class ChatTurn:
     error_code: str | None = None
     activities: tuple[ChatActivity, ...] = ()
     completed_at: datetime | None = None
+    execution_trace: ChatExecutionTrace | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -1061,6 +1132,16 @@ class ChatTurn:
         if self.error_code is not None:
             _require_string(self.error_code, "error_code")
         object.__setattr__(self, "activities", validate_chat_activities(self.activities))
+        if self.execution_trace is not None and not isinstance(
+            self.execution_trace, ChatExecutionTrace
+        ):
+            raise TypeError("execution_trace must be a ChatExecutionTrace")
+        artifacts = _as_sequence(self.artifact_refs, "artifact_refs")
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_frozen_mapping(item, "artifact ref") for item in artifacts),
+        )
         if self.completed_at is not None:
             if self.completed_at.utcoffset() is None:
                 raise ValueError("completed_at must be timezone-aware")
@@ -1124,6 +1205,17 @@ class ChatTurn:
                 _as_datetime(data["completed_at"], "completed_at")
                 if data.get("completed_at") is not None
                 else None
+            ),
+            execution_trace=(
+                ChatExecutionTrace.from_dict(
+                    _as_mapping(data["execution_trace"], "execution_trace")
+                )
+                if data.get("execution_trace") is not None
+                else None
+            ),
+            artifact_refs=tuple(
+                _as_mapping(item, "artifact ref")
+                for item in _as_sequence(data.get("artifact_refs", ()), "artifact_refs")
             ),
         )
 

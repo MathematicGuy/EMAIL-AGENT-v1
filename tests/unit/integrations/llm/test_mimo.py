@@ -89,6 +89,40 @@ async def test_mimo_execute_chat_completion_rotates_on_rate_limit(
 
 
 @pytest.mark.asyncio
+async def test_mimo_fast_mode_disables_thinking_and_captures_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = MimoSettings.from_env({"MIMO_API_KEY": "key-1"}, load_env_file=False)
+    received: dict[str, object] = {}
+
+    def mock_post_json(
+        url: str, key: str, body: Mapping[str, object], timeout: int
+    ) -> Mapping[str, object]:
+        del url, key, timeout
+        received.update(body)
+        return {
+            "choices": [{"message": {
+                "content": '{"answer": true}',
+                "reasoning_content": "provider reasoning",
+            }}]
+        }
+
+    monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", mock_post_json)
+
+    result = await execute_chat_completion(
+        settings,
+        "System prompt",
+        "User prompt",
+        {"type": "object"},
+        reasoning_mode="fast",
+        capture_reasoning=True,
+    )
+
+    assert received["thinking"] == {"type": "disabled"}
+    assert result == {"answer": True, "__provider_reasoning__": "provider reasoning"}
+
+
+@pytest.mark.asyncio
 async def test_mimo_execute_chat_completion_rotates_on_502_gateway_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

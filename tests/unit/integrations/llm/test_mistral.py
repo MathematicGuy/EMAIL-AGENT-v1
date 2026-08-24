@@ -14,6 +14,7 @@ from cowork_agent.integrations.llm.providers.mistral import (
     MistralActionPlanGenerator,
     MistralAPIError,
     _post_json,
+    _request_body,
 )
 
 
@@ -41,6 +42,20 @@ def test_mistral_settings_reject_values_above_resource_bounds() -> None:
         MistralSettings.from_env({**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False)
     with pytest.raises(ValueError, match="MISTRAL_TIMEOUT_SECONDS must not exceed 120"):
         MistralSettings.from_env({**base, "MISTRAL_TIMEOUT_SECONDS": "121"}, load_env_file=False)
+
+
+def test_mistral_reasoning_request_sets_high_effort_and_top_p() -> None:
+    body = _request_body(
+        "mistral-medium-3-5",
+        "system",
+        "prompt",
+        {"type": "object"},
+        4096,
+        reasoning_effort="high",
+    )
+
+    assert body["reasoning_effort"] == "high"
+    assert body["top_p"] == 1.0
 
 
 def test_mistral_completion_uses_fixed_url_and_bounded_request(

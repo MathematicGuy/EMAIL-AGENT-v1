@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -368,6 +369,37 @@ def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
     )
     assert history.updates[-1][1].activities == snapshots[-1]
     assert history.updates[-1][1].completed_at == NOW
+
+
+def test_controller_persists_provider_reasoning_and_filename_only_trace() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply((ChatReplyChunk(
+            text="Answer",
+            provider="mimo",
+            model="mimo-v2.5-pro",
+            reasoning_mode="fast",
+            reasoning="Use the supplied context.",
+        ),)),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    completed = next(
+        event for event in reversed(events) if event.event_type is ChatEventType.COMPLETED
+    )
+    assert completed.execution_trace is not None
+    assert completed.execution_trace.to_dict() == {
+        "provider": "mimo",
+        "model": "mimo-v2.5-pro",
+        "mode": "fast",
+        "reasoning": "Use the supplied context.",
+        "reasoning_truncated": False,
+        "retrieved_filenames": [],
+    }
+    assert history.updates[-1][1].execution_trace == completed.execution_trace
 
 
 def test_controller_marks_context_review_running_before_memory_read() -> None:
@@ -1118,3 +1150,43 @@ def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
     assert events[-1].code == "chat_response_invalid"
     assert history.updates[-1][1].error_code == "chat_response_invalid"
     assert "validation" not in events[-1].safe_message
+
+
+def test_generated_report_artifact_is_saved_and_emitted_in_completed_event() -> None:
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    report = GeneratedReportArtifact(
+        filename="bao-cao-test-cccd.md",
+        title="Báo cáo tổng hợp quy trình CCCD",
+        content="# Báo cáo tổng hợp quy trình CCCD\n\nNội dung chi tiết...",
+    )
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Tôi đã tạo báo cáo thành công.",
+                generated_report=report,
+            ),
+        )
+    )
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=fake_reply,
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    req = _request(user_message="tạo báo cáo từ tài liệu")
+    events = asyncio.run(_collect(controller, req))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    assert len(completed.artifact_refs) == 1
+    assert completed.artifact_refs[0]["ref_id"] == "bao-cao-test-cccd.md"
+    prov = cast(dict[str, object], completed.artifact_refs[0]["provenance"])
+    assert prov["title"] == "Báo cáo tổng hợp quy trình CCCD"
+
+    # Also verify turn in history
+    assert len(history.updates) > 0
+    persisted_turn = history.updates[-1][1]
+    assert len(persisted_turn.artifact_refs) == 1
+    assert persisted_turn.artifact_refs[0]["ref_id"] == "bao-cao-test-cccd.md"
+

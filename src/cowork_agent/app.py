@@ -1217,31 +1217,50 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/reports")
     async def list_reports() -> list[dict[str, Any]]:
         reports: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        dirs_to_scan = [d for d in (REPORTS_DIR, EXTRACTED_DIR) if d.exists()]
-        for folder in dirs_to_scan:
-            for item in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if (
-                    item.is_file()
-                    and item.name != "ingestion-manifest.json"
-                    and item.name not in seen
-                ):
-                    try:
-                        seen.add(item.name)
-                        stat = item.stat()
-                        content = item.read_text(encoding="utf-8", errors="replace")
-                        mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-                        reports.append(
-                            {
-                                "filename": item.name,
-                                "content": content,
-                                "size": stat.st_size,
-                                "updated_at": mtime,
-                            }
-                        )
-                    except Exception as exc:
-                        logger.warning("Failed to read report file %s: %s", item.name, exc)
+        if not REPORTS_DIR.exists():
+            return reports
+
+        for item in sorted(
+            REPORTS_DIR.iterdir(),
+            key=lambda p: p.stat().st_mtime if p.is_file() else 0,
+            reverse=True,
+        ):
+            if item.is_file() and not item.name.startswith("."):
+                try:
+                    stat = item.stat()
+                    content = item.read_text(encoding="utf-8", errors="replace")
+                    mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
+                    reports.append(
+                        {
+                            "filename": item.name,
+                            "content": content,
+                            "size": stat.st_size,
+                            "updated_at": mtime,
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to read report file %s: %s", item.name, exc)
         return reports
+
+    @app.post("/api/v1/reports/open-folder")
+    async def open_reports_folder() -> dict[str, Any]:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        folder_path = REPORTS_DIR.resolve()
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(str(folder_path))
+            elif sys.platform == "darwin":
+                import subprocess
+
+                subprocess.Popen(["open", str(folder_path)])
+            else:
+                import subprocess
+
+                subprocess.Popen(["xdg-open", str(folder_path)])
+            return {"status": "success", "path": str(folder_path)}
+        except Exception as exc:
+            logger.warning("Failed to open reports folder %s: %s", folder_path, exc)
+            raise HTTPException(status_code=500, detail=f"Không thể mở thư mục: {exc}") from exc
 
     @app.post("/api/v1/reports")
     async def save_report(body: SaveReportRequest) -> dict[str, Any]:
@@ -1262,6 +1281,8 @@ def create_app() -> FastAPI:
     @app.delete("/api/v1/reports/{filename}")
     async def delete_report(filename: str) -> dict[str, str]:
         safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
         target_path = REPORTS_DIR / safe_name
         if target_path.is_file():
             target_path.unlink()

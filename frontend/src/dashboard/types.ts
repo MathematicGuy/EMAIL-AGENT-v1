@@ -29,6 +29,18 @@ export interface ModelOption {
   description: string;
   badge?: string;
   icon?: string;
+  speedLabel?: string;
+}
+
+export type ReasoningMode = 'fast' | 'reasoning';
+
+export interface ChatExecutionTrace {
+  provider: string;
+  model: string;
+  mode: ReasoningMode;
+  reasoning?: string;
+  reasoningTruncated: boolean;
+  retrievedFilenames: string[];
 }
 
 export interface ChatMessage {
@@ -59,6 +71,7 @@ export interface ChatMessage {
   turnId?: string;
   activities?: ChatActivity[];
   completedAt?: string;
+  executionTrace?: ChatExecutionTrace;
 }
 
 export type ChatActivityCode =

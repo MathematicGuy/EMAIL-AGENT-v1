@@ -16,11 +16,13 @@ from langfuse import observe
 
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_RAG_EVIDENCE_ITEMS,
+    MAX_EXECUTION_REASONING_LENGTH,
     ChatActivity,
     ChatActivityCode,
     ChatActivityDetail,
     ChatActivityOutcome,
     ChatActivityStatus,
+    ChatExecutionTrace,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
@@ -45,7 +47,13 @@ from .generation_context import (
 )
 from .intent.service import ChatRoutingService
 from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
-from .ports import ChatHistoryPort, ChatReplyChunk, ChatReplyPort, ChatTaskProposal
+from .ports import (
+    ChatHistoryPort,
+    ChatReplyChunk,
+    ChatReplyPort,
+    ChatTaskProposal,
+    GeneratedReportArtifact,
+)
 from .retention import compute_expires_at
 from .retrieval_policy import (
     clarification_memory_reads,
@@ -653,6 +661,7 @@ class ChatController:
                     turn_id=turn_id,
                     rag_evidence=pending_turn.rag_evidence,
                     retrieval_status=pending_turn.retrieval_status,
+                    execution_trace=pending_turn.execution_trace,
                 )
                 emitted.extend((delta, completed))
                 self._completed[request.idempotency_key] = (request, tuple(emitted))
@@ -781,8 +790,13 @@ class ChatController:
 
             chunks: list[str] = []
             task_proposal: ChatTaskProposal | None = None
+            generated_report: GeneratedReportArtifact | None = None
             conversation_title: str | None = None
             selected_citation_ids: list[str] = []
+            trace_provider: str | None = None
+            trace_model: str | None = None
+            trace_mode: str | None = None
+            reasoning_parts: list[str] = []
             pending_task_episode: _PendingTaskEpisode | None = None
             generation_context = assemble_generation_context(
                 request,
@@ -804,8 +818,15 @@ class ChatController:
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
                             task_proposal = chunk.task_proposal
+                        if chunk.generated_report is not None:
+                            generated_report = chunk.generated_report
                         if chunk.conversation_title is not None:
                             conversation_title = chunk.conversation_title
+                        trace_provider = chunk.provider or trace_provider
+                        trace_model = chunk.model or trace_model
+                        trace_mode = chunk.reasoning_mode or trace_mode
+                        if chunk.reasoning:
+                            reasoning_parts.append(chunk.reasoning)
                         for citation_id in chunk.citation_ids:
                             if citation_id not in selected_citation_ids:
                                 selected_citation_ids.append(citation_id)
@@ -854,8 +875,63 @@ class ChatController:
                 )
                 return
 
+            generated_artifact_refs: tuple[Mapping[str, object], ...] = ()
+            if (
+                generated_report is None
+                and _is_report_request(request.user_message)
+                and len(assistant_message.strip()) > 50
+            ):
+                filename = _fallback_report_filename(request.user_message, conversation_title)
+                title = conversation_title or "Báo cáo tổng hợp"
+                generated_report = GeneratedReportArtifact(
+                    filename=filename,
+                    title=title,
+                    content=assistant_message,
+                )
+
+            if generated_report is not None:
+                try:
+                    from pathlib import Path
+                    reports_dir = Path(__file__).resolve().parents[4] / "data" / "reports"
+                    reports_dir.mkdir(parents=True, exist_ok=True)
+                    report_file = reports_dir / generated_report.filename
+                    report_file.write_text(generated_report.content, encoding="utf-8")
+                    generated_artifact_refs = (
+                        {
+                            "ref_id": generated_report.filename,
+                            "checksum": "",
+                            "provenance": {
+                                "upload_filename": generated_report.filename,
+                                "title": generated_report.title,
+                            },
+                        },
+                    )
+                except Exception as save_err:
+                    logger.warning("Failed to save generated report artifact: %s", save_err)
+
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
+            )
+            reasoning = "\n".join(reasoning_parts).strip() or None
+            reasoning_truncated = bool(
+                reasoning and len(reasoning) > MAX_EXECUTION_REASONING_LENGTH
+            )
+            if reasoning_truncated:
+                assert reasoning is not None
+                reasoning = reasoning[:MAX_EXECUTION_REASONING_LENGTH]
+            execution_trace = (
+                ChatExecutionTrace(
+                    provider=trace_provider,
+                    model=trace_model,
+                    mode=cast(Literal["fast", "reasoning"], trace_mode),
+                    reasoning=reasoning,
+                    reasoning_truncated=reasoning_truncated,
+                    retrieved_filenames=tuple(
+                        dict.fromkeys(item.document_title for item in rag_evidence)
+                    ),
+                )
+                if trace_provider is not None and trace_model is not None and trace_mode is not None
+                else None
             )
             task_requested = (
                 response_mode is ChatResponseMode.NORMAL
@@ -896,6 +972,8 @@ class ChatController:
                     ),
                     rag_evidence=rag_evidence,
                     retrieval_status=retrieval_status,
+                    execution_trace=execution_trace,
+                    artifact_refs=generated_artifact_refs,
                     completed_at=None if task_requested else self._clock(),
             )
             if self._history is not None:
@@ -1062,6 +1140,8 @@ class ChatController:
                 turn_id=turn_id,
                 rag_evidence=rag_evidence,
                 retrieval_status=retrieval_status,
+                execution_trace=turn.execution_trace,
+                artifact_refs=turn.artifact_refs,
             )
             emitted.append(completed)
             completed_stream = tuple(emitted)
@@ -1111,10 +1191,12 @@ class ChatController:
             turn_id=episode.chat_turn_id,
             proposal=_proposal_payload(episode),
         )
+        completed_turn = self._turns_by_id.get(episode.chat_turn_id)
         completed = ChatMessageStreamEvent.completed(
             event_id=self._new_id(),
             session_id=self._scope.session_id,
             turn_id=episode.chat_turn_id,
+            execution_trace=completed_turn.execution_trace if completed_turn is not None else None,
         )
         replay = (*pending.replay_prefix, citation, proposal_event, completed)
         self._completed[pending.request.idempotency_key] = (pending.request, replay)
@@ -1249,3 +1331,37 @@ class ChatController:
             code=code,
             safe_message=safe_message,
         )
+
+
+def _is_report_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        kw in lowered
+        for kw in (
+            "tạo báo cáo",
+            "lập báo cáo",
+            "xuất báo cáo",
+            "tổng hợp báo cáo",
+            "viết báo cáo",
+            "tạo artifact",
+            "generate report",
+            "create report",
+        )
+    )
+
+
+def _fallback_report_filename(message: str, title: str | None) -> str:
+    import re
+    import unicodedata
+
+    raw = title or message
+    text = unicodedata.normalize("NFKD", raw)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    slug = re.sub(r"[^\w\s-]", "", text.lower()).strip()
+    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
+    if not slug:
+        slug = "bao-cao-tong-hop"
+    if not slug.startswith("bao-cao"):
+        slug = f"bao-cao-{slug}"
+    return f"{slug}.md"
+

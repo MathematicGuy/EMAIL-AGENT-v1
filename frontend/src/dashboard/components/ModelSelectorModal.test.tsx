@@ -7,6 +7,7 @@ describe('ModelSelectorModal', () => {
   it('renders one compact row per model and applies one selection', () => {
     const onClose = vi.fn();
     const onSelectModel = vi.fn();
+    const onSelectReasoningMode = vi.fn();
 
     render(
       <ModelSelectorModal
@@ -14,22 +15,26 @@ describe('ModelSelectorModal', () => {
         onClose={onClose}
         selectedModel={AVAILABLE_MODELS[0]}
         onSelectModel={onSelectModel}
+        reasoningMode="fast"
+        onSelectReasoningMode={onSelectReasoningMode}
         anchor={{ left: 100, right: 300, top: 500, bottom: 530 }}
       />
     );
 
     expect(screen.getByText('Mô hình')).toBeTruthy();
-    expect(screen.getByText('Gemini 3.6 Flash')).toBeTruthy();
+    expect(screen.getByText('Gemini 3.5 Flash Lite')).toBeTruthy();
+    expect(screen.getByText('MiMo v2.5 Pro')).toBeTruthy();
+    expect(screen.getByText('Mistral Medium 3.5')).toBeTruthy();
     expect(screen.queryByText(/\((High|Medium|Low)\)/)).toBeNull();
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: /DeepSeek · NVIDIA/,
+        name: /GPT OSS 120B/,
       })
     );
 
     expect(onSelectModel).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'deepseek-nvidia' })
+      expect.objectContaining({ id: 'openai/gpt-oss-120b' })
     );
     expect(onClose).toHaveBeenCalledOnce();
   });
