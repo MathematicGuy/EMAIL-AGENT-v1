@@ -83,7 +83,8 @@ flowchart TB
     end
 
     CFG["config.py · Settings.from_env<br/>re-reads .env on every call · 38 sites in src/<br/><b>C05 · open</b>"]
-    CORPUS[("data/raw/ · 18 documents<br/>17 administrative + 1 ML textbook<br/><b>C09 · open</b>")]
+    CORPUS[("data/extracted/ · 17 documents<br/>the retrieval corpus · RAG_CORPUS_PATH")]
+    RAWDIR[("data/raw/ · 18 files<br/>user-facing store + ingestion input<br/><b>C09 · open, minor</b>")]
 
     HOOK -->|"HTTP + SSE"| CHAT
     APP --> CHAT
@@ -95,7 +96,9 @@ flowchart TB
     SIB -->|"runtime(request)"| RT
     RT --> CTRL
     RT --> RA
-    RT --> CORPUS
+    RT -->|"load_corpus"| CORPUS
+    SIB -->|"/api/v1/raw-documents/*"| RAWDIR
+    RAWDIR -. "ingest force=True" .-> CORPUS
     CHAT -. "last untyped reads" .-> SURV
     SIB -. "last untyped reads" .-> SURV
     CFG -. "read behind the caller" .-> RT
@@ -104,8 +107,8 @@ flowchart TB
     classDef open fill:#fef3c7,stroke:#b45309,color:#78350f;
     classDef outlier fill:#ffe4e6,stroke:#be123c,color:#881337,stroke-width:2px;
     classDef plain fill:#f5f5f4,stroke:#a8a29e,color:#44403c;
-    class APP,SIB,RT,CTRL,RA done;
-    class HOOK,CFG,CORPUS,SURV open;
+    class APP,SIB,RT,CTRL,RA,CORPUS done;
+    class HOOK,CFG,RAWDIR,SURV open;
     class CHAT outlier;
     class DEPS plain;
 ```
@@ -125,11 +128,11 @@ got enforced at the composition edge; everything above reads its dependencies th
 | **C02** | Composition is a 440-line closure and ~60 untyped `app.state` keys | Strong | **Done** — slices 02-1…02-8 | [ADR-013](../adr/ADR-013-composition-as-typed-value.md) |
 | **C04** | One chat turn is one 617-line generator | Strong | **Done, narrowed** — slices 04-1…04-3 | [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md) |
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
-| **C07** | `api/chat.py` is the new outlier — a mail-scan subject inside chat transport | Strong | **Open — awaiting a go/no-go from the user** | §4.5 |
+| **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Open — shape decided (move down to `features/ai_chat/`); payload-boundary question still open** | §4.5 |
 | **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Open — unscheduled** | §4.6 |
-| **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Open — unscheduled**, frontend-only, parallelisable | §4.7 |
+| **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Open — SCHEDULED 2026-08-25**, own agent, frontend-only | §4.7 |
 | **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
-| **C09** | The RAG corpus is no longer guarded by any test | — | **Open — discovered 2026-08-25** | §4.9 |
+| **C09** | A stray corpus input in `data/raw/` — latent re-ingest risk, 9.7 MB duplicated | Minor | **Open — awaiting the user's call** | §4.9 |
 | **C10** | Three `app.state` survivors, one of them undocumented | — | **Accepted debt**, with revisit criteria | §4.10 |
 
 Operational items from the post-merge decisions doc, for completeness — **not architecture
@@ -400,13 +403,81 @@ this section is measured.
 4. Amend ADR-015 with the module and the admission-rule reasoning, or write ADR-016 if the
    decision turns out broader than one module.
 
-**Do not** promote any helper into `api/dependencies.py` — see the admission rule in §4.4.
+**Do not** promote any of the *eight mail-scan helpers* into `api/dependencies.py` — see the
+admission rule in §4.4. That instruction does **not** extend to the seam helpers below, which
+are a different matter entirely.
+
+#### ⚠ The complication — the route is not as free-standing as the helpers
+
+The eight helpers are isolated. **`persist_mail_scan` is not.** It reaches six request-scoped
+seams that are private to `chat.py`:
+
+| Seam | Line | Reaches |
+|---|---|---|
+| `_verified_principal` | 822 | `runtime(request).chat.chat_principal_resolver` |
+| `_require_session` | 957 | `_sessions` → `_chat_group` |
+| `_sessions` | 976 | `_chat_group` |
+| `_chat_group` | 922 | `runtime(request).chat` |
+| `_buffer` | 935 | `_chat_group` |
+| `_history_repository` | 1009 | `_control_plane` |
+
+So moving the route to its own router module **triggers** ADR-015's admission rule rather than
+violating it: a second router would then need these, and they would have to move to
+`api/dependencies.py`. The slice is therefore not "one new file plus one `include_router`" —
+it also rewrites part of `chat.py`'s seam layer and grows a shared module.
+
+It is also a genuine argument *against* a router split. The route authenticates a **chat**
+principal, requires a **chat session** scope, and writes a **`ChatTurn`** to the chat history
+repository or the chat session buffer. By subject, it is a chat-session operation whose payload
+happens to be a mail scan.
+
+#### The alternative that the signatures point at
+
+Seven of the eight helpers are pure functions over domain values — no `Request`, no port:
+
+```text
+_validate_mail_turn_scan_status(turn_status: ChatTurnStatus, mail_scan: MailScanSummary) -> None
+_terminalize_mail_activities(activities, turn_status, *, at) -> tuple[ChatActivity, ...]
+_activity_detail(payload) -> ChatActivityDetail | None
+_transition_to_desired_activity(activity, desired, *, at) -> ChatActivity
+_merge_mail_activity_snapshot(existing, desired, *, at) -> tuple[ChatActivity, ...]
+_merge_mail_turn(existing, incoming, desired_activities, *, at) -> ChatTurn
+_upsert_buffer_mail_turn(buffer: ChatSessionBufferPort, scope, incoming, desired, *, at) -> ChatTurn
+```
+
+Only the last takes a port. That reframes the finding: this is not *a router module in the
+wrong place* — it is **turn-reconciliation logic living in the transport layer**, which
+ADR-001's direction (`domain ← features ← … ← app`) says belongs in `features/ai_chat/`,
+exactly where ADR-014 put `TurnJournal` and `TaskEpisodeSettler`.
+
+Moving the seven pure helpers down to `features/ai_chat/` takes ~275 of the 335 lines out of
+`chat.py`, leaves the route with its seams, changes no route and no transport, and needs no
+promotion into `dependencies.py`.
+
+**One wrinkle to decide either way:** those helpers take the Pydantic request models
+`_ActivitySnapshotPayload` / `_ActivityDetailPayload`. A `features/` module importing transport
+payload types points the dependency arrow the wrong way, so the move wants a conversion to a
+domain value at the route boundary — which makes the slice bigger than a pure code move.
 
 **Verification is not the test suite.** `POST /sessions/{id}/mail-scans` has thin direct
 coverage. Use the route-table oracle in §7.3; the table must stay **63 routes, byte-identical**.
 
-**Status:** the user asked for the finding to be recorded, not acted on. **Get explicit
-approval before writing code.**
+#### Status — shape decided 2026-08-25
+
+**The user chose option A:** move the seven pure helpers **down a layer** into
+`features/ai_chat/`, leaving `persist_mail_scan` and its six seams where they are.
+
+- The `api/mail_scans.py` router (option B) is **rejected** — it would drag the identity and
+  session seams into `api/dependencies.py` for a cosmetic file split. See §5.
+- Consequence: **the route table cannot change**, so the route oracle in §7.3 is a
+  belt-and-braces check here rather than the primary one. The backend gate is.
+- `chat.py` lands around 740 lines rather than 680, since the route and payload models stay.
+
+**Still open before code is written** — the dependency-direction wrinkle: the seven helpers
+take the Pydantic request models `_ActivitySnapshotPayload` / `_ActivityDetailPayload`. A
+`features/` module importing transport payloads points the arrow the wrong way. Either convert
+to a domain value at the route boundary (correct, bigger slice) or move the payload types too
+(fast, keeps a features → transport import). **Not yet decided — do not start until it is.**
 
 ---
 
@@ -434,7 +505,8 @@ grep -rn "load_env_file" src/ --include=*.py | wc -l
   friction showing up as a test failure.
 
 **Why unscheduled:** widest blast radius of any open item, and no forcing function yet. If it
-starts costing time during another workstream, schedule it then.
+starts costing time during another workstream, schedule it then. Re-confirmed parked
+2026-08-25.
 
 ---
 
@@ -448,6 +520,9 @@ backend.
 
 **Frontend-only and independent of every other row here** — it can be run by anyone at any time
 without conflicting with backend work. That is its main attraction, not its strength.
+
+**Scheduled 2026-08-25** as the next agent's only mandate, to run in parallel with C07. It
+touches no Python and no route, so it cannot conflict with the C07 slice.
 
 ```bash
 wc -l frontend/src/dashboard/hooks/useStreamingChat.ts
@@ -473,30 +548,54 @@ whoever ships the renderer should give it a typed `CoworkRuntime` field and dele
 
 ---
 
-### 4.9 C09 — The RAG corpus is no longer guarded · **Open, discovered 2026-08-25**
+### 4.9 C09 — A stray corpus input, already defused · **Open (minor), latent risk only**
 
-`data/raw/` holds **18** documents. Seventeen are Vietnamese administrative and legal
-procedures. The eighteenth is `design machine learning systems.pdf` (9.7 MB), added by
-`ed19c4f` *"fix read pdf and ORC"* (2026-08-24) — an OCR experiment that also dropped the same
-textbook into `books/` and `data/OCR/`.
+> **This entry was wrong when first written and is corrected here.** Two claims did not
+> survive checking: that the textbook is in the production retrieval corpus, and that no test
+> guards the corpus any more. Both are false. Rule 4 of §1 exists because of exactly this — the
+> original entry inferred from `ls data/raw/ | wc -l` instead of tracing what reads that
+> directory.
 
-Three tests asserted a 17-document corpus and began failing. They were fixed at `0040cab` /
-`216399e` by moving them onto **isolated synthetic fixtures**, which is the right call for test
-isolation — but it means **no test now asserts anything about the real corpus's composition.**
-The gate is green and the textbook is still in the production RAG corpus.
+**The two directories are not the same thing.**
+
+| Directory | What it is | Contents |
+|---|---|---|
+| `data/extracted/` | **the retrieval corpus.** `RAG_CORPUS_PATH` in `integrations/rag/bootstrap.py:32`; read by `load_corpus` at `composition.py:838` and `bootstrap.py:70` | **17** documents + `ingestion-manifest.json` (17 entries) |
+| `data/raw/` | **the user-facing raw document store.** `RAW_DOCS_DIR` in `api/knowledge.py:45`; users upload, list and download through `/api/v1/raw-documents/*`. Also the *input* to ingestion | **18** files |
+
+What actually happened:
+
+- `ed19c4f` *"fix read pdf and ORC"* (2026-08-24) added the textbook to `books/`, `data/OCR/`,
+  `data/raw/` **and** `data/extracted/design-machine-learning-systems.md` (5535 lines). That
+  last one put it in the retrieval corpus, 17 → 18, and broke the three tests.
+- `216399e` **deleted** `data/extracted/design-machine-learning-systems.md`. The retrieval
+  corpus is back to 17 and the textbook is **not** retrievable.
 
 ```bash
-ls data/raw/ | wc -l
-git log --oneline -3 -- data/raw/
+git log --oneline --follow --diff-filter=AD --name-status -- "data/extracted/design-machine-learning-systems.md"
+ls data/extracted/ | wc -l
 ```
 
-**The open question is a product one, not a test one:** is a machine-learning textbook meant to
-be retrievable by a Vietnamese administrative-procedure assistant? If no, remove it from
-`data/raw/` (leaving `books/` and `data/OCR/` alone — the OCR experiment is legitimate). If
-yes, say so somewhere durable, because the next person to read that directory will ask again.
+**The corpus guard is alive.** `tests/unit/scripts/test_evaluate_retrieval.py:975` runs the real
+evaluation CLI and asserts `report["corpus"]["document_count"] == 17`. It passes. Only
+`test_rag.py` moved to synthetic fixtures, and that test was never a corpus-composition guard.
 
-Either way, consider one cheap assertion that the corpus contains what the product intends —
-the previous 17-document assertions were doing that job by accident, and nothing replaced them.
+#### What is actually left
+
+Two things, both minor:
+
+1. **A latent re-entry path.** `data/raw/` is the ingestion input —
+   `scripts/evaluate_rag_pipeline_latency.py:94` calls
+   `service.ingest(raw_dir, extracted_dir, force=True)`. A full re-ingest would pull the
+   textbook back into `data/extracted/` and the corpus would silently become 18 again. The
+   test above would catch it, so this is a rediscovery cost, not a silent failure.
+2. **9.7 MB committed twice** — `books/` and `data/raw/` hold identical copies.
+
+**Not decided, and the user has asked for an explanation before approving anything.** The
+argument for removing it from `data/raw/` is weaker than this entry originally claimed: it is
+about ingestion hygiene and repository weight, **not** about retrieval quality, because the
+document is not in the retrieval corpus today. `books/` and `data/OCR/` are legitimate OCR
+work and should be left alone either way.
 
 ---
 
@@ -536,7 +635,8 @@ Recording these is the point of the file. Each was examined and rejected on evid
 | **Porting chat memory to SQLite, or extracting a shared abstraction over `postgres.py` + `sqlite_chat.py`** | ADR-010. The ~3,000 near-parallel lines look like a duplication finding but are not one to act on: extracting a shared abstraction invests in parity the project has decided not to want. Postgres is the control plane; SQLite is dev/eval only. |
 | **`domain/_chat_contracts_memory.py` (1,480 lines)** | A contracts file, not depth debt. Leave it. |
 | **`features/batch_evaluation/`** | Large and hot, but its commits read as *hardening* — lease ownership, cancellation cleanup, replay bounds, watchdog progress. A module converging, not fighting its shape. Re-review when it stops changing weekly. |
-| **Promoting C07's helpers into `api/dependencies.py`** | Violates that module's stated admission rule: a helper moves there when a *second* router needs it. None of these do. |
+| **A separate `api/mail_scans.py` router (C07 option B)** | Rejected 2026-08-25. `persist_mail_scan` reaches six seams private to `chat.py` (§4.5), so a second router would force the identity and session seams into `api/dependencies.py` — a real change to the shared seam layer bought for a cosmetic file split. The route is a chat-session operation by subject: it authenticates a chat principal, requires a chat session scope, and writes a `ChatTurn`. |
+| **Promoting the eight mail-scan helpers into `api/dependencies.py`** | Violates that module's stated admission rule: a helper moves there when a *second* router needs it. None of these do. (This does *not* apply to the six seam helpers, which the rule would legitimately admit — moot now that option B is rejected.) |
 | **ADR-001's dependency direction** | `domain ← features ← integrations/orchestration/persistence ← app`. Not up for renegotiation; C02 is where it finally got enforced at the composition edge. |
 
 ---
@@ -684,5 +784,8 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-25 | **Decisions.** C07 shape settled — option A, move the seven pure helpers down into `features/ai_chat/`; option B (a new router) rejected and recorded in §5. C06 scheduled as the next agent's sole mandate. C05 re-confirmed parked. C08 still blocked on the user. |
+| 2026-08-25 | **C09 corrected — the original entry was wrong.** `data/extracted/` (17 docs) is the retrieval corpus, not `data/raw/` (18 files, the user-facing store). `ed19c4f` did add the textbook to the retrieval corpus, but `216399e` **removed** it, and `test_evaluate_retrieval.py:975` still asserts a 17-document corpus and passes. Downgraded to a latent re-ingest risk plus 9.7 MB duplicated. |
+| 2026-08-25 | **C07 correction.** `persist_mail_scan` reaches six seams private to `chat.py`, so a router split *triggers* ADR-015's admission rule instead of avoiding it — the earlier "do not promote anything into `dependencies.py`" instruction was too broad and is now scoped to the eight mail-scan helpers. Recorded the alternative the signatures point at: seven of eight helpers are pure domain functions and belong in `features/ai_chat/`, not a new router. **The proposed shape in this section is now one of three options and none is approved.** |
 | 2026-08-25 | Enriched with architecture context: §2.1 program map pinning all ten workstreams to the modules they touch; §4.5 gained the 18-route/four-subject inventory, the before diagram, the call-graph tree, and the after diagram; §7.3 gained the `_IncludedRouter` diagram. No status changed. |
 | 2026-08-25 | Register opened at `216399e`. C01–C04 recorded as done (ADR-013/014/015). C07 opened, awaiting a go/no-go. C05 and C06 carried forward unscheduled. C08 confirmed blocked, with the new finding that no production writer for `report_pdf_renderer` exists. **C09 opened** — the corpus lost its test guard when the failing assertions moved to synthetic fixtures. **C10 opened** — two ADR-013 corrections identified. |

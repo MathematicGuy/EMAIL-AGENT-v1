@@ -9,11 +9,12 @@ Register: [SPEC-architecture-improvement-program.md](specs/SPEC-architecture-imp
 - [x] C02 Composition is a typed value — `CoworkRuntime` (ADR-013)
 - [x] C04 Turn pipeline stays one function; settlement extracted (ADR-014)
 - [x] C03 Routers own their transport; `app.py` 1581 → 507 (ADR-015)
-- [ ] C07 `api/chat.py` mail-scan cluster — **needs a go/no-go before any code**
-- [ ] C05 `Settings.from_env` reads disk behind the caller — unscheduled
-- [ ] C06 `useStreamingChat` runs two protocols — unscheduled, frontend-only
+- [ ] C07 Turn-reconciliation logic in the transport layer — shape decided: move the seven pure
+      helpers down to `features/ai_chat/`. **Payload-boundary question still open; no code yet.**
+- [ ] C06 `useStreamingChat` runs two protocols — **scheduled**, own agent, frontend-only
+- [ ] C05 `Settings.from_env` reads disk behind the caller — parked, no forcing function
 - [ ] C08 PDF renderer — blocked on a dependency decision (ask first)
-- [ ] C09 RAG corpus lost its test guard — product question, not a test one
+- [ ] C09 Stray textbook in `data/raw/` — latent re-ingest risk only; **awaiting approval**
 - [ ] C10 Three `app.state` survivors; two ADR-013 corrections pending
 
 ---
