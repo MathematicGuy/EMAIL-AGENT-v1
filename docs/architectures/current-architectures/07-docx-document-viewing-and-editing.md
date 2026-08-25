@@ -2,7 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Integration Flow  
 **Status:** Live / Implemented (Lightweight Continuous In-Browser Viewer with Direct Upload & Delete)  
-**Primary Owners:** [`frontend/src/dashboard/components/RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx), [`frontend/src/dashboard/components/DocxViewer.tsx`](../../../frontend/src/dashboard/components/DocxViewer.tsx), [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py)  
+**Primary Owner:** [`frontend/src/dashboard/components/RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx), [`frontend/src/dashboard/components/DocxViewer.tsx`](../../../frontend/src/dashboard/components/DocxViewer.tsx), [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py)  
 **Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---

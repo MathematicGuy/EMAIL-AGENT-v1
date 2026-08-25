@@ -11,13 +11,13 @@
 
 The AI Chat Subsystem is a multi-turn assistant: it streams replies, reads four typed memory scopes through the Memory Gateway, and persists a chat-native `TaskEpisode` only after an explicit user task request ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)). User documents represent a secondary semantic **plane** (project-scoped), never merged with company RAG ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
 
-For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Each turn also owns a bounded, server-stamped user-facing activity snapshot that is streamed over SSE and stored with chat history. Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` plus the same safe activity metadata, without storing raw email content.
+For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Turns support `reasoning_mode` (`fast` | `reasoning`), streaming live thinking traces alongside text deltas. The controller records a bounded execution trace (`ChatExecutionTrace`), auto-generates report artifacts (`GeneratedReportArtifact` scoped to the `reports/` folder), and emits a bounded, server-stamped user-facing activity snapshot that is streamed over SSE and stored with chat history. End-to-end LLM calls and memory operations are instrumented with Langfuse (`@observe`). Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` plus the same safe activity metadata, without storing raw email content.
 
 ```mermaid
 flowchart TB
-    CLIENT["Chat UI / API Client"] --> SSE["Chat API & SSE Stream<br/>(/v1/cowork/chat)"]
+    CLIENT["Chat UI / API Client<br/>(Execution Trace Drawer)"] --> SSE["Chat API & SSE Stream<br/>(/v1/cowork/chat)"]
     SSE --> CHAT["Chat Controller"]
-    CHAT --> HISTORY[("Durable Turn History<br/>reply + user-facing activity")]
+    CHAT --> HISTORY[("Durable Turn History<br/>turns + trace + artifacts + activity")]
     CHAT --> CLS["Intent Classifier<br/>(ChatRoutingService)"]
     CLS --> CHAT
     CHAT <--> GATEWAY["Memory Gateway Facade<br/>(Policy & Namespace Enforcement)"]
@@ -25,7 +25,7 @@ flowchart TB
     subgraph MEMORY["4-Type Memory Architecture"]
         SHORT[("1. Short-Term Buffer<br/>Active session turns")]
         DECL[("2. Declarative Profile<br/>Persona & preferences")]
-        EPISODE[("3. Episodic Memory<br/>Chat summaries & TaskEpisodes<br/>(retrieval_eligible=false)")]
+        EPISODE[("3. Episodic Memory<br/>Chat summaries & TaskEpisodes<br/>(supports supersedes)")]
         SEMANTIC[("4. Semantic Memory<br/>Company RAG flag-gated")]
     end
 
@@ -34,7 +34,7 @@ flowchart TB
     GATEWAY <--> EPISODE
     GATEWAY <--> SEMANTIC
 
-    CHAT -->|"RAG route only"| UDOC["User Documents Plane<br/>(Postgres chunks + per-project .tvim)"]
+    CHAT -->|"RAG route only"| UDOC["User Documents Plane<br/>(Postgres/SQLite chunks + .tvim)"]
     SEMANTIC -.->|"never merged"| UDOC
 ```
 
@@ -45,20 +45,22 @@ flowchart TB
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
 | **Chat API Router** | [`chat.py`](../../../src/cowork_agent/api/chat.py) | Exposes `/v1/cowork/chat/sessions`, `/messages` SSE, profile CRUD, aggregate mail-scan lifecycle recording, and TaskEpisode lifecycle (approve/complete/reject). |
-| **Chat Controller** | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) | Orchestrates one turn in-process: classify → optional user-doc retrieve → assemble → stream → persist. Emits bounded semantic activity snapshots at real workflow boundaries and writes a `TaskEpisode` only when `is_explicit_task_request` is true. |
+| **Chat Controller** | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) | Orchestrates one turn in-process: classify → optional user-doc retrieve → assemble → stream (with reasoning trace & text delta) → auto report artifact generation → execution trace capture → persist turn with activities. Writes a `TaskEpisode` only when `is_explicit_task_request` is true. |
 | **Memory Gateway** | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) | Fail-closed facade for tenant/session namespacing across the four memory types plus a retrieval-only user-document port. |
 | **Intent Classifier & Resolver** | [`service.py`](../../../src/cowork_agent/features/ai_chat/intent/service.py) & [`resolver.py`](../../../src/cowork_agent/features/ai_chat/intent/resolver.py) | Sole user-document routing authority (`ChatRoutingService`). Executes `CHAT` / `RAG` / `CLARIFY`. The precondition gate narrows `RAG` → `CHAT` when no ready documents exist in the project catalog. |
-| **Retrieval / Episode Policy** | [`retrieval_policy.py`](../../../src/cowork_agent/features/ai_chat/retrieval_policy.py) & [`episode_policy.py`](../../../src/cowork_agent/features/ai_chat/episode_policy.py) | Cue-gated company-RAG and episodic reads; TaskEpisode writes must be `system_generated` / `retrieval_eligible=false` / `explicit_user_task_request`. |
+| **Retrieval / Episode Policy** | [`retrieval_policy.py`](../../../src/cowork_agent/features/ai_chat/retrieval_policy.py) & [`episode_policy.py`](../../../src/cowork_agent/features/ai_chat/episode_policy.py) | Cue-gated company-RAG and episodic reads; TaskEpisode writes must be `system_generated` / `retrieval_eligible=false` / `explicit_user_task_request` with optional `supersedes` linking to prior episodes. |
 | **User Documents Plane** | [`ports.py`](../../../src/cowork_agent/features/user_documents/ports.py), [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py), [`project_index.py`](../../../src/cowork_agent/integrations/rag/project_index.py), [`projects.py`](../../../src/cowork_agent/api/projects.py) | Project-scoped upload/list/delete under `/v1/cowork/chat/projects/{id}/documents`. Hybrid store is Postgres chunks + per-project `.tvim` with no company-index fallback. Gated by `USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED`. |
+| **Observability & Tracing** | [`tracing.py`](../../../src/cowork_agent/integrations/llm/providers/tracing.py) & [`memory_observability.py`](../../../src/cowork_agent/features/ai_chat/memory_observability.py) | Langfuse `@observe` spans tracking LLM generation, chat turns, token usage, classifier decisions, and memory retrieval operations. |
 
 ---
 
 ## 3. The 4 Typed Memory System
 
-1. **Short-Term Memory (Session Buffer):** Bounded in-process store ([`session_buffer.py`](../../../src/cowork_agent/features/ai_chat/session_buffer.py) — `InMemoryChatSessionBuffer`). Postgres/SQLite `chat_turns` owns durable session turn metadata and replay history.
+1. **Short-Term Memory (Session Buffer):** Bounded in-process store ([`session_buffer.py`](../../../src/cowork_agent/features/ai_chat/session_buffer.py) — `InMemoryChatSessionBuffer`). Postgres/SQLite `chat_turns` owns durable session turn metadata, execution traces, report artifact references, user-facing activity timelines, and replay history.
 2. **Long-Term Declarative Memory:** Compact profile (language, timezone, persona, tone) written only with `explicit_user_config` provenance ([`profile_policy.py`](../../../src/cowork_agent/features/ai_chat/profile_policy.py)). User documents are never an inferred preference source.
 3. **Episodic Memory:** Chat-session summaries (always `retrieval_eligible=false`) and chat-native `TaskEpisode` records ([`episode_policy.py`](../../../src/cowork_agent/features/ai_chat/episode_policy.py)).
    - *Key Rule ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):* A TaskEpisode is created only after an explicit user request (`is_explicit_task_request`). New writes are `system_generated` / `retrieval_eligible=false`. Eligibility is derived from `validation_status` (`user_approved` or `completed` → true; `rejected` stays false). Ordinary chat, classifier output, and model-only inference cannot create an episode.
+   - *Supersedes Linking:* TaskEpisodes support a `supersedes` pointer (`015_episode_supersedes.sql`) referencing prior episodes replaced or refined by a new plan proposal.
 4. **Semantic Memory (two unmerged planes):**
    - **Company RAG:** Optional chat-side read of `data/extracted/*.md` through the Memory Gateway. Gated by `CHAT_COMPANY_RAG_ENABLED` (env default `false`). When enabled, [`retrieval_policy.py`](../../../src/cowork_agent/features/ai_chat/retrieval_policy.py) requires an explicit company-policy cue phrase.
    - **User Documents:** Separate project-scoped plane (Postgres or SQLite chunks + per-project Turbovec `.tvim`). Retrieved only on classifier route `RAG`. An unavailable project index degrades gracefully; it never falls back to the company index.
@@ -67,10 +69,13 @@ flowchart TB
 
 ## 4. Alignment & Diff vs Target Architecture
 
-- **TaskEpisode lifecycle:** Aligned with [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md). Explicit request only; new episodes start `retrieval_eligible=false`; eligibility atomically updated on approval/completion/rejection.
+- **TaskEpisode lifecycle:** Aligned with [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md). Explicit request only; new episodes start `retrieval_eligible=false`; eligibility atomically updated on approval/completion/rejection; optional `supersedes` support for evolutionary task updates.
 - **Company RAG in chat:** Aligned with TARGET §3. Consumer is the standalone Email Agent plus AI Chat behind `CHAT_COMPANY_RAG_ENABLED` (env default `false`).
 - **User-document gating:** Aligned with [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md). Hierarchy is `tenant → user → project → documents + sessions`. Classifier is the sole route origin; the readiness gate only narrows. Feature flags `USER_DOCUMENTS_ENABLED` and `CHAT_INTENT_CLASSIFIER_ENABLED` default true.
 - **User-document store:** Aligned with [ADR-008](../../../tasks/adr/ADR-008-turbovec-project-document-plane.md). Postgres or SQLite chunks ([`sqlite_project_document_chunks.py`](../../../src/cowork_agent/persistence/repositories/sqlite_project_document_chunks.py)) plus per-project `.tvim` ([`project_index.py`](../../../src/cowork_agent/integrations/rag/project_index.py)); no silent company-index fallback.
+- **Reasoning Trace & Execution Inspector:** User-toggleable `reasoning_mode` captures model reasoning stream in real-time and persists structured execution trace (`ChatExecutionTrace`) inside the turn for UI inspection.
+- **Report Artifact Generation:** Dedicated artifact generation for report synthesis saves markdown artifacts to the project's `reports/` folder, surfacing references in the SSE stream and persistent turn history.
+- **Observability:** Full Langfuse tracing instrumentation across chat turns, LLM provider calls, and memory gateway queries.
 - **User-facing progress:** Durable activity uses stable semantic codes and aggregate counts only. Vietnamese labels are owned by the React presentation layer; provider/component names and model reasoning never enter the public activity contract.
 - **Email Capability Integration:** Standalone Email Agent runs independently for email action planning. The React client maps its existing poll results into the shared activity view and AI Chat history persists aggregate mail scan results (`MailScanSummary` via `/sessions/{session_id}/mail-scans`), keeping raw email bodies and attachment contents out of chat history and memory.
 - **OCR on the user-document plane:** Aligned with TARGET §3.4. Pages needing OCR fail closed as `ocr_unavailable`; mixed-PDF native pages are not indexed alone. `document-health` reports `ocr: optional_unavailable`.
