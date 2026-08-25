@@ -1,6 +1,17 @@
 """Security adapters and inspectors for email links, attachments, and threat intelligence."""
 
-from .redirect_resolver import RedirectResolver, SSRFSecurityError, resolve_redirect_safe
+from .fakes import FakeEmailSecurityScanner, FakeThreatIntel
+from .redirect_resolver import (
+    FakeRedirectResolver,
+    RedirectResolver,
+    SSRFSecurityError,
+    resolve_redirect_safe,
+)
+from .threat_intel import (
+    CompositeThreatIntel,
+    GoogleWebRiskThreatIntel,
+    ThreatCache,
+)
 from .url_inspector import (
     inspect_url,
     is_homograph_spoof,
@@ -8,8 +19,14 @@ from .url_inspector import (
 )
 
 __all__ = [
+    "CompositeThreatIntel",
+    "FakeEmailSecurityScanner",
+    "FakeRedirectResolver",
+    "FakeThreatIntel",
+    "GoogleWebRiskThreatIntel",
     "RedirectResolver",
     "SSRFSecurityError",
+    "ThreatCache",
     "inspect_url",
     "is_homograph_spoof",
     "normalize_url",

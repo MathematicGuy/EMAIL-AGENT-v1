@@ -140,6 +140,36 @@ class SessionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SecuritySettings:
+    """Configuration for email security scanning, threat feeds, and quarantine policy."""
+
+    enabled: bool
+    webrisk_api_key: str = field(repr=False)
+    cache_ttl_seconds: int
+    quarantine_malicious_emails: bool
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "SecuritySettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        return cls(
+            enabled=_boolean(environ, "SECURITY_SCAN_ENABLED", True),
+            webrisk_api_key=environ.get("SECURITY_WEBRISK_API_KEY", "").strip(),
+            cache_ttl_seconds=_positive_int(environ, "SECURITY_CACHE_TTL_SECONDS", 86_400),
+            quarantine_malicious_emails=_boolean(
+                environ, "SECURITY_QUARANTINE_ENABLED", True
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeIngestionSettings:
     """Configuration for the administrator-operated knowledge ingestion CLI."""
 
