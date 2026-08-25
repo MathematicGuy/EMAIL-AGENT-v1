@@ -13,15 +13,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import uvicorn
 from fastapi import (
-    BackgroundTasks,
     FastAPI,
-    Header,
     HTTPException,
     Query,
     Request,
 )
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.composition import (
@@ -44,7 +41,6 @@ from cowork_agent.config import (
     database_url,
     load_runtime_environment,
 )
-from cowork_agent.domain import DigestRun
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
 from cowork_agent.features.ai_chat.controller import ChatController
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
@@ -53,7 +49,6 @@ from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
-from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.identity import (
     VerifiedPrincipal,
     principal_for_connection,
@@ -90,12 +85,11 @@ from .api.dependencies import (
     control_plane_required,
     issue_chat_guest_session,
     owned_connection,
-    require_owned_connection,
     session_settings,
     set_session_cookie,
 )
+from .api.digest_runs import create_digest_router
 from .api.evaluation_jobs import create_evaluation_router
-from .api.handlers import _jsonable
 from .api.knowledge import create_knowledge_router
 from .api.projects import create_project_router
 from .api.reports import create_report_router
@@ -138,12 +132,6 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 #: Default report folder. The store is constructed from this once in ``lifespan``
 #: and injected from there; nothing downstream resolves the location again.
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
-
-
-class CreateRunRequest(BaseModel):
-    mailbox_connection_id: str = Field(alias="mailboxConnectionId")
-    query: str = DEFAULT_QUERY
-    max_emails: int = Field(default=10, alias="maxEmails", ge=1, le=500)
 
 
 def _chat_controller_factory(
@@ -479,6 +467,7 @@ def create_app() -> FastAPI:
     app.include_router(create_project_router())
     app.include_router(create_report_router())
     app.include_router(create_knowledge_router())
+    app.include_router(create_digest_router())
     # The evaluation API is internal-only and disabled by default; its routes
     # are mounted exclusively when explicitly enabled with a bearer token.
     if evaluation_settings.enabled:
@@ -488,10 +477,6 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
-
-    @app.get("/v1/conversations")
-    async def legacy_list_conversations() -> dict[str, list[object]]:
-        return {"items": []}
 
     @app.get("/v1/mail-todo/oauth/gmail/connect")
     async def connect_gmail(request: Request) -> RedirectResponse:
@@ -708,140 +693,6 @@ def create_app() -> FastAPI:
                 detail=f"{connection.provider.title()} is temporarily unavailable",
             ) from exc
 
-    @app.get("/v1/mail-todo/runs")
-    async def list_digest_runs(
-        request: Request,
-        mailbox_connection_id: str = Query(alias="mailboxConnectionId", min_length=1),
-        limit: int = Query(default=20, ge=1, le=100),
-    ) -> dict[str, Any]:
-        connection = await owned_connection(
-            request, mailbox_connection_id, "Mailbox connection not found"
-        )
-        principal = await connection_principal(request, connection)
-        repository = control_plane_required(request).run_repository
-        runs = await repository.list_recent(
-            user_id=principal.user_id,
-            mailbox_connection_id=mailbox_connection_id,
-            limit=limit,
-        )
-        return {"runs": [_run_history_item(run) for run in runs]}
-
-    @app.post("/v1/mail-todo/runs", status_code=202)
-    async def create_digest_run(
-        payload: CreateRunRequest,
-        request: Request,
-        background_tasks: BackgroundTasks,
-        idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
-    ) -> dict[str, str]:
-        connection = await owned_connection(
-            request, payload.mailbox_connection_id, "Mailbox connection not found"
-        )
-        principal = await connection_principal(request, connection)
-        worker = _digest_worker(request)
-        if worker is None:
-            email_rag = runtime(request).email_rag
-            label = email_rag.llm_provider_label if email_rag is not None else "the LLM provider"
-            error = (
-                email_rag.llm_configuration_error
-                if email_rag is not None
-                else "the email-RAG group is not composed"
-            )
-            raise HTTPException(
-                status_code=503,
-                detail=f"{label} is not configured: {error}",
-            )
-        creator = control_plane_required(request).create_run
-        run = await creator.execute(
-            user_id=principal.user_id,
-            mailbox_connection_id=payload.mailbox_connection_id,
-            idempotency_key=idempotency_key,
-            query=payload.query,
-            max_emails=payload.max_emails,
-        )
-        control_plane = runtime(request).control_plane
-        run_queue = control_plane.run_queue if control_plane is not None else None
-        if run_queue is not None:
-            await cast(Any, run_queue).enqueue_digest_run(run.id, user_id=principal.user_id)
-        else:
-            background_tasks.add_task(worker.execute, run.id)
-        return {
-            "id": run.id,
-            "status": run.status.value,
-            "statusUrl": f"/v1/mail-todo/runs/{run.id}",
-        }
-
-    @app.get("/v1/mail-todo/runs/{run_id}")
-    async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
-        repository = control_plane_required(request).run_repository
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        response: dict[str, Any] = {
-            "id": run.id,
-            "status": run.status.value,
-            "progress": {
-                "emailsMatched": run.emails_matched,
-                "emailsProcessed": run.emails_processed,
-                "emailsToProcess": min(run.emails_matched, run.max_emails),
-                "maxEmails": run.max_emails,
-                "filteredSummary": run.filtered_summary,
-            },
-            "error": (
-                {"code": run.error_code, "message": run.error_message_safe}
-                if run.error_code
-                else None
-            ),
-        }
-        if _is_development():
-            results = control_plane_required(request).result_repository
-            processed = await results.list_processed_emails(run_id)
-            response["processedEmails"] = [
-                {
-                    "messageId": item.provider_message_id,
-                    "threadId": item.provider_thread_id,
-                    "subject": item.subject,
-                    "sender": item.sender_address,
-                    "receivedAt": item.received_at.isoformat(),
-                }
-                for item in processed
-            ]
-        return response
-
-    @app.get("/v1/mail-todo/runs/{run_id}/result")
-    async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
-        control_plane = control_plane_required(request)
-        repository = control_plane.run_repository
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        if run.status.value in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        result_service = control_plane.get_result
-        payload = cast(dict[str, Any], _jsonable(await result_service.execute(run_id)))
-        if not _is_development():
-            payload.pop("processedEmails", None)
-        return payload
-
-    @app.get("/v1/mail-todo/runs/{run_id}/tasks")
-    async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
-        """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
-        information, and confidences that the legacy result shape drops."""
-        control_plane = control_plane_required(request)
-        repository = control_plane.run_repository
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        if run.status.value in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        task_repository = control_plane.task_repository
-        records = await task_repository.list_for_run(run_id)
-        return {"tasks": [record.task.to_dict() for record in records]}
-
-    # ── Knowledge endpoints (V1-M3): corpus inspection + ad-hoc retrieval ──
-
     return app
 
 
@@ -855,15 +706,6 @@ def _connection_service(request: Request) -> GmailConnectionService:
 def _outlook_connection_service(request: Request) -> OutlookConnectionService | None:
     mailbox_group = runtime(request).mailbox
     return mailbox_group.outlook_connections if mailbox_group is not None else None
-
-
-async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
-    """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
-    connection = await owned_connection(request, run.mailbox_connection_id, detail)
-    principal = await connection_principal(request, connection)
-    if principal.user_id != run.user_id:
-        raise HTTPException(status_code=404, detail=detail)
-    require_owned_connection(principal, connection, detail=detail)
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
@@ -888,15 +730,6 @@ def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
     return mailbox_group.mailbox
 
 
-def _digest_worker(request: Request) -> DigestWorker | None:
-    email_rag = runtime(request).email_rag
-    return email_rag.digest_worker if email_rag is not None else None
-
-
-def _is_development() -> bool:
-    return os.getenv("APP_ENV", "development").lower() in {"development", "dev", "local"}
-
-
 def _public_connection(connection: Any) -> dict[str, Any]:
     return {
         "id": connection.id,
@@ -905,26 +738,6 @@ def _public_connection(connection: Any) -> dict[str, Any]:
         "scopes": list(connection.scopes),
         "status": connection.status,
         "createdAt": connection.created_at.isoformat(),
-    }
-
-
-def _run_history_item(run: DigestRun) -> dict[str, Any]:
-    return {
-        "id": run.id,
-        "mailboxConnectionId": run.mailbox_connection_id,
-        "status": run.status.value,
-        "createdAt": run.created_at.isoformat() if run.created_at else None,
-        "completedAt": run.completed_at.isoformat() if run.completed_at else None,
-        "progress": {
-            "emailsMatched": run.emails_matched,
-            "emailsProcessed": run.emails_processed,
-            "emailsToProcess": min(run.emails_matched, run.max_emails),
-            "maxEmails": run.max_emails,
-            "actionItemsCount": run.action_items_count,
-        },
-        "error": (
-            {"code": run.error_code, "message": run.error_message_safe} if run.error_code else None
-        ),
     }
 
 

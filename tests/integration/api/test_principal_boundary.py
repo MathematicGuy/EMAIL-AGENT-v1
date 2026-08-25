@@ -6,7 +6,7 @@ query parameters.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -18,8 +18,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from starlette.routing import BaseRoute
 
-from cowork_agent.app import CreateRunRequest, create_app
+from cowork_agent.api.digest_runs import CreateRunRequest
+from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import DigestRun, MailboxConnection, RunStatus, RunTrigger
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
@@ -216,11 +218,32 @@ def test_oauth_callback_redirects_to_configured_frontend(
     asyncio.run(scenario())
 
 
+def _mounted_api_routes(routes: Iterable[BaseRoute]) -> list[APIRoute]:
+    """Every APIRoute reachable from ``app.routes``, mounted routers included.
+
+    ``include_router`` does not copy a router's routes onto the app: FastAPI
+    leaves a lazy proxy in ``app.routes`` and resolves through it per request.
+    A plain scan therefore sees only the handlers still declared inline on
+    ``create_app`` -- which, after the router extractions, is none of the ones
+    this invariant cares about. Reach through each proxy to its own router.
+    """
+    found: list[APIRoute] = []
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            found.extend(_mounted_api_routes(included.routes))
+        elif isinstance(route, APIRoute):
+            found.append(route)
+    return found
+
+
 def test_no_route_accepts_caller_provided_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, _):
-            routes = [route for route in app.routes if isinstance(route, APIRoute)]
-            assert routes
+            routes = _mounted_api_routes(app.routes)
+            # The count is a floor, not the point: it fails loudly if the
+            # flattening above ever stops seeing the mounted routers.
+            assert len(routes) > 50, len(routes)
             for route in routes:
                 parameters = (
                     *route.dependant.path_params,
