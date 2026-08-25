@@ -11,8 +11,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from langfuse import observe
-
 from cowork_agent.config import (
     GeminiSettings,
     MimoSettings,
@@ -31,10 +29,6 @@ from cowork_agent.features.ai_chat.ports import (
     GeneratedReportArtifact,
 )
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
-from cowork_agent.integrations.llm.providers.tracing import (
-    _langfuse_configured,
-    _update_current_generation,
-)
 from cowork_agent.prompting import reorder_u_shaped
 
 logger = logging.getLogger(__name__)

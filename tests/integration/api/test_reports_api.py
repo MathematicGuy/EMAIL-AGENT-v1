@@ -22,7 +22,6 @@ def reports(tmp_path: Path):
     app = create_app()
     root = tmp_path / "reports"
     app.state.runtime = CoworkRuntime(reports=FileSystemReportArtifactStore(root))
-    app.state.report_store = app.state.runtime.reports
     return app, root
 
 

@@ -125,6 +125,7 @@ def _runtime_with(
         reports=None,
         control_plane=SimpleNamespace(project_repository=project_repository),
         mailbox=MailboxRuntime(
+            gmail_settings=None,
             gmail_connections=None,
             gmail_mailbox=None,
             outlook_connections=None,
@@ -160,7 +161,6 @@ def _runtime_with(
             document_embeddings_configured=False,
             project_document_vectors=project_document_vectors,
             project_document_index=None,
-            project_document_queue=None,
         ),
     )
 

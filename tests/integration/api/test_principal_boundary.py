@@ -58,19 +58,20 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
     try:
         # The digest route now reads the worker through the typed runtime
         # (ADR-013), so the fake worker must land on the composed group.
+        control_plane = app.state.runtime.control_plane
         app.state.runtime = replace(
             app.state.runtime,
             email_rag=replace(
                 app.state.runtime.email_rag,
                 digest_worker=DigestWorker(
-                    app.state.run_repository,
-                    app.state.result_repository,
+                    control_plane.run_repository,
+                    control_plane.result_repository,
                     FakeMailbox([]),
                     SafeTextAttachmentExtractor(),
                     FakeRouteClassifier(),
                     FakePlanGenerator(),
                     ShortTermStore(),
-                    app.state.task_repository,
+                    control_plane.task_repository,
                 ),
             ),
         )
@@ -121,17 +122,16 @@ def _seed_connection(user_id: str, email_address: str) -> MailboxConnection:
 def test_connect_flow_stores_verified_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
-            settings = app.state.gmail_settings
+            settings = app.state.runtime.mailbox.gmail_settings
             # The connect/callback routes now read the Gmail service through
-            # the typed mailbox group (ADR-013); swap it there, not just on
-            # the forwarded ``app.state`` key.
+            # the typed mailbox group (ADR-013); swap it there.
             app.state.runtime = replace(
                 app.state.runtime,
                 mailbox=replace(
                     app.state.runtime.mailbox,
                     gmail_connections=GmailConnectionService(
                         settings,
-                        app.state.connection_repository,
+                        app.state.runtime.control_plane.connection_repository,
                         TokenCipher(settings.token_encryption_key),
                         OAuthStateManager(
                             settings.oauth_state_secret, settings.oauth_state_ttl_seconds
@@ -151,7 +151,7 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
                 params={"state": state, "code": "test-code"},
             )
             assert callback.status_code == 200
-            connections = await app.state.connection_repository.list_all()
+            connections = await app.state.runtime.control_plane.connection_repository.list_all()
             assert len(connections) == 1
             connection = connections[0]
             assert connection.user_id == OWNER_EMAIL == connection.email_address
@@ -168,7 +168,7 @@ def test_oauth_callback_redirects_to_configured_frontend(
 
     async def scenario() -> None:
         async with running_app() as (app, client):
-            settings = app.state.gmail_settings
+            settings = app.state.runtime.mailbox.gmail_settings
             # Typed-runtime override: see the sibling connect-flow test.
             app.state.runtime = replace(
                 app.state.runtime,
@@ -176,7 +176,7 @@ def test_oauth_callback_redirects_to_configured_frontend(
                     app.state.runtime.mailbox,
                     gmail_connections=GmailConnectionService(
                         settings,
-                        app.state.connection_repository,
+                        app.state.runtime.control_plane.connection_repository,
                         TokenCipher(settings.token_encryption_key),
                         OAuthStateManager(
                             settings.oauth_state_secret, settings.oauth_state_ttl_seconds
@@ -238,7 +238,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id="legacy-caller-id", email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             legacy_run = DigestRun(
                 id="run_legacy",
                 user_id="legacy-caller-id",
@@ -249,7 +249,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
                 idempotency_key="legacy-key",
                 max_emails=10,
             )
-            await app.state.run_repository.save(legacy_run)
+            await app.state.runtime.control_plane.run_repository.save(legacy_run)
             orphan_run = DigestRun(
                 id="run_orphan",
                 user_id=OWNER_EMAIL,
@@ -260,7 +260,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
                 idempotency_key="orphan-key",
                 max_emails=10,
             )
-            await app.state.run_repository.save(orphan_run)
+            await app.state.runtime.control_plane.run_repository.save(orphan_run)
 
             assert (await client.get("/v1/mail-todo/runs/run_legacy")).status_code == 404
             assert (
@@ -270,7 +270,8 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
             assert (
                 await client.delete(f"/v1/mail-todo/connections/{CONNECTION_ID}")
             ).status_code == 404
-            assert await app.state.connection_repository.get(CONNECTION_ID) is not None
+            connections = app.state.runtime.control_plane.connection_repository
+            assert await connections.get(CONNECTION_ID) is not None
 
     asyncio.run(scenario())
 
@@ -279,7 +280,7 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             response = await client.post(
                 "/v1/mail-todo/runs",
                 json={"mailboxConnectionId": CONNECTION_ID},
@@ -289,7 +290,7 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
             payload = response.json()
             assert payload["statusUrl"] == f"/v1/mail-todo/runs/{payload['id']}"
             assert "user_id" not in payload["statusUrl"]
-            run = await app.state.run_repository.get(payload["id"])
+            run = await app.state.runtime.control_plane.run_repository.get(payload["id"])
             assert run is not None
             assert run.user_id == OWNER_EMAIL == connection.email_address
             assert run.max_emails == 10
@@ -309,7 +310,7 @@ def test_processed_emails_are_development_only(
 
     async def scenario() -> None:
         async with running_app() as (app, client):
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
             )
             created = await client.post(
@@ -341,7 +342,7 @@ def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             now = datetime.now(UTC)
             older = DigestRun(
                 id="run-old",
@@ -370,8 +371,8 @@ def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
                 created_at=now + timedelta(seconds=1),
                 completed_at=now + timedelta(seconds=2),
             )
-            await app.state.run_repository.create(older)
-            await app.state.run_repository.create(newer)
+            await app.state.runtime.control_plane.run_repository.create(older)
+            await app.state.runtime.control_plane.run_repository.create(newer)
 
             response = await client.get(
                 "/v1/mail-todo/runs",

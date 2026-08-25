@@ -41,6 +41,7 @@ from cowork_agent.composition import (
     upgrade_email_rag_providers,
 )
 from cowork_agent.config import (
+    ChatIntentSettings,
     EvaluationSettings,
     GmailSettings,
     OutlookSettings,
@@ -282,9 +283,8 @@ def create_app() -> FastAPI:
             # this store, so the filename rule cannot diverge between them.
             # Composed before any credentialed settings are read: reports need
             # no provider, so a missing Gmail key must not take them offline.
-            # The store is the first field of the typed runtime (ADR-013);
-            # ``report_store`` stays as a thin forward until later slices move
-            # the remaining consumers behind ``runtime(request)``.
+            # The store is the first field of the typed runtime (ADR-013); its
+            # consumers read it through ``runtime(request).reports``.
             report_store = FileSystemReportArtifactStore(REPORTS_DIR)
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
@@ -308,30 +308,11 @@ def create_app() -> FastAPI:
                 outlook_configuration_error = "Microsoft OAuth is not configured"
             # Control-plane group (ADR-013, slice 02-2): the Postgres/SQLite
             # repository decision, the pool and its migrations, and the
-            # run/task/result bookkeeping now compose as one typed value in
-            # ``composition.build_control_plane``. The ``app.state.<key>``
-            # forwards below are deliberate temporary duplication; later
-            # slices delete them one consumer at a time.
+            # run/task/result bookkeeping compose as one typed value in
+            # ``composition.build_control_plane``. Every consumer reads the
+            # group through ``runtime(request)`` — slice 02-8 deleted the
+            # legacy ``app.state.<key>`` forwards the cutover proved dead.
             control_plane = await build_control_plane(settings, control_plane_url)
-            app.state.report_store = report_store
-            app.state.gmail_settings = settings
-            app.state.session_settings = control_plane.session_settings
-            app.state.identity_repository = control_plane.identity_repository
-            app.state.session_repository = control_plane.session_repository
-            app.state.chat_identity_repository = control_plane.chat_identity_repository
-            app.state.chat_opaque_session_repository = (
-                control_plane.chat_opaque_session_repository
-            )
-            app.state.outbox_repository = control_plane.outbox_repository
-            app.state.chat_profile_repository = control_plane.chat_profile_repository
-            app.state.chat_task_episode_repository = (
-                control_plane.chat_task_episode_repository
-            )
-            app.state.project_repository = control_plane.project_repository
-            app.state.chat_history_repository = control_plane.chat_history_repository
-            app.state.chat_session_repository = control_plane.chat_session_repository
-            app.state.pg_pool = control_plane.pg_pool
-            app.state.connection_repository = control_plane.connection_repository
             repository = control_plane.connection_repository
             chat_session_registry = control_plane.chat_session_registry
             run_repository = control_plane.run_repository
@@ -339,11 +320,11 @@ def create_app() -> FastAPI:
             result_repository = control_plane.result_repository
             # Mailbox group (ADR-013, slice 02-3): the provider connection
             # and read adapters, the Outlook sqlite-only gate, the routing
-            # adapter, and the private document storage now compose as one
-            # typed value in ``composition.build_mailbox``. The outlook
-            # settings stay computed here because env validation runs before
-            # the control plane; the identity repository is passed in
-            # explicitly so the principal wiring moves with the group.
+            # adapter, and the private document storage compose as one typed
+            # value in ``composition.build_mailbox``. The outlook settings
+            # stay computed here because env validation runs before the
+            # control plane; the identity repository is passed in explicitly
+            # so the principal wiring moves with the group.
             mailbox_runtime = await build_mailbox(
                 settings,
                 outlook_settings,
@@ -353,30 +334,14 @@ def create_app() -> FastAPI:
                 control_plane.identity_repository,
                 UserDocumentsSettings.from_env(),
             )
-            app.state.gmail_connections = mailbox_runtime.gmail_connections
-            app.state.gmail_mailbox = mailbox_runtime.gmail_mailbox
-            app.state.outlook_connections = mailbox_runtime.outlook_connections
-            app.state.outlook_mailbox = mailbox_runtime.outlook_mailbox
-            app.state.outlook_settings = mailbox_runtime.outlook_settings
-            app.state.outlook_configuration_error = (
-                mailbox_runtime.outlook_configuration_error
-            )
-            app.state.provider_availability = mailbox_runtime.provider_availability
-            app.state.mailbox = mailbox_runtime.mailbox
             user_documents_settings = mailbox_runtime.user_documents_settings
-            app.state.private_storage_client = mailbox_runtime.private_storage_client
-            app.state.private_storage = mailbox_runtime.private_storage
             # Chat group (ADR-013, slice 02-4): the memory settings, session
             # buffer, observability sink, ready-document catalog, and identity
-            # callables now compose as one typed value in
-            # ``composition.build_chat``. The placeholder ``chat_reply`` /
-            # ``chat_routing_service`` forwards below keep the upgrade
-            # contract: the LLM provider block further down upgrades those
-            # keys, and the chat-group upgrade below reads them back into the
-            # group before the single assembly. ``chat_intent_settings`` has
-            # no placeholder today, so it gains none. The ``app.state.<key>``
-            # forwards are deliberate temporary duplication; later slices
-            # delete them one consumer at a time.
+            # callables compose as one typed value in
+            # ``composition.build_chat``. ``chat_reply`` /
+            # ``chat_routing_service`` boot as placeholders and the LLM
+            # provider block below upgrades them into the group through the
+            # local upgrade sequence — no ``app.state`` round-trip.
             chat_runtime = await build_chat(
                 pg_pool=control_plane.pg_pool,
                 project_repository=control_plane.project_repository,
@@ -385,39 +350,14 @@ def create_app() -> FastAPI:
                 principal_resolver=_resolve_chat_principal,
                 guest_session_issuer=_issue_chat_guest_session,
             )
-            app.state.chat_memory_settings = chat_runtime.chat_memory_settings
-            app.state.chat_sessions = chat_runtime.chat_sessions
-            app.state.chat_session_buffer = chat_runtime.chat_session_buffer
-            app.state.memory_metrics = chat_runtime.memory_metrics
-            app.state.memory_operation_sink = chat_runtime.memory_operation_sink
-            app.state.chat_reply = chat_runtime.chat_reply
-            app.state.chat_routing_service = chat_runtime.chat_routing_service
-            app.state.user_documents_settings = chat_runtime.user_documents_settings
-            app.state.ready_document_catalog = chat_runtime.ready_document_catalog
-            app.state.project_document_store = None
-            app.state.chat_principal_resolver = chat_runtime.chat_principal_resolver
-            app.state.chat_guest_session_issuer = chat_runtime.chat_guest_session_issuer
-
-            # Control-plane forwards (ADR-013, slice 02-2): same temporary
-            # duplication as the block above.
-            app.state.run_repository = control_plane.run_repository
-            app.state.create_run = control_plane.create_run
-            app.state.get_result = control_plane.get_result
-            app.state.result_repository = control_plane.result_repository
-            app.state.task_repository = control_plane.task_repository
-            app.state.redis_client = control_plane.redis_client
-            app.state.run_queue = control_plane.run_queue
-            app.state.raw_document_repository = control_plane.raw_document_repository
 
             # Email-RAG group (ADR-013, slice 02-5): the project-document
-            # vector plane now composes as one typed value in
+            # vector plane composes as one typed value in
             # ``composition.build_email_rag``, moved verbatim including its
             # swallow-and-log degrade. The provider half (semantic store,
             # corpus, digest worker) boots as placeholders here and is
             # upgraded by the LLM provider block below — the same
-            # placeholder-then-upgrade sequence the chat group uses. The
-            # ``app.state.<key>`` forwards are deliberate temporary
-            # duplication; later slices delete them one consumer at a time.
+            # placeholder-then-upgrade sequence the chat group uses.
             email_rag_runtime = await build_email_rag(
                 settings=settings,
                 control_plane_url=control_plane_url,
@@ -426,12 +366,14 @@ def create_app() -> FastAPI:
                 private_storage=mailbox_runtime.private_storage,
                 user_documents_settings=user_documents_settings,
             )
-            app.state.document_embeddings_configured = (
-                email_rag_runtime.document_embeddings_configured
-            )
-            app.state.project_document_vectors = email_rag_runtime.project_document_vectors
-            app.state.project_document_index = email_rag_runtime.project_document_index
-            app.state.project_document_queue = email_rag_runtime.project_document_queue
+            # The provider block's chat-half upgrades flow through these
+            # locals into the chat group below: on success the real adapters,
+            # on degrade whatever resolved before the failure — exactly the
+            # contract the old ``app.state`` publication provided, minus the
+            # round-trip through untyped keys.
+            chat_reply = chat_runtime.chat_reply
+            chat_intent_settings: ChatIntentSettings | None = None
+            chat_routing_service = chat_runtime.chat_routing_service
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
@@ -444,12 +386,13 @@ def create_app() -> FastAPI:
                 chat_providers = resolve_chat_providers(provider)
                 intent_classifier = chat_providers.intent_classifier
                 intent_settings = chat_providers.intent_settings
-                app.state.chat_reply = chat_providers.chat_reply
-                app.state.chat_intent_settings = intent_settings
-                app.state.chat_routing_service = (
+                chat_reply = chat_providers.chat_reply
+                chat_intent_settings = intent_settings
+                ready_document_catalog = chat_runtime.ready_document_catalog
+                chat_routing_service = (
                     ChatRoutingService(
                         classifier=intent_classifier,
-                        catalog=app.state.ready_document_catalog,
+                        catalog=ready_document_catalog,
                         model_id=intent_settings.model,
                         timeout_ms=intent_settings.timeout_ms,
                         max_attempts=intent_settings.max_attempts,
@@ -459,7 +402,7 @@ def create_app() -> FastAPI:
                     if (
                         intent_settings.enabled
                         and user_documents_settings.enabled
-                        and app.state.ready_document_catalog is not None
+                        and ready_document_catalog is not None
                     )
                     else None
                 )
@@ -479,60 +422,45 @@ def create_app() -> FastAPI:
                     mailbox=mailbox_runtime.mailbox,
                     outbox_repository=control_plane.outbox_repository,
                 )
-                app.state.semantic_memory = email_rag_runtime.semantic_memory
-                app.state.knowledge_documents = email_rag_runtime.knowledge_documents
-                app.state.digest_worker = email_rag_runtime.digest_worker
-                app.state.llm_configuration_error = (
-                    email_rag_runtime.llm_configuration_error
-                )
-                app.state.llm_provider_label = email_rag_runtime.llm_provider_label
             except ValueError as exc:
                 # The coupled degrade contract (ADR-013, slice 02-5): a
                 # ``ValueError`` from either half of this block degrades the
                 # email-RAG provider half; the chat half keeps whatever the
-                # block published before the failure, exactly as before the
+                # block resolved before the failure, exactly as before the
                 # group existed. The document plane is untouched.
                 email_rag_runtime = degrade_email_rag(
                     email_rag_runtime,
                     configuration_error=str(exc),
                     provider_label=provider_label,
                 )
-                app.state.digest_worker = email_rag_runtime.digest_worker
-                app.state.semantic_memory = email_rag_runtime.semantic_memory
-                app.state.knowledge_documents = email_rag_runtime.knowledge_documents
-                app.state.llm_configuration_error = (
-                    email_rag_runtime.llm_configuration_error
-                )
-                app.state.llm_provider_label = email_rag_runtime.llm_provider_label
-            # Chat group upgrade (ADR-013, slice 02-4): the provider block
-            # above publishes the chat half through ``app.state``; read those
-            # results back into the typed chat group so the full runtime
-            # assembled below carries the same final values the legacy keys
-            # already hold. On success the real ``chat_reply`` /
-            # ``chat_intent_settings`` / ``chat_routing_service``, on degrade
-            # the placeholders the chat group booted with (``chat_intent_settings``
-            # was never set). The email-RAG group (slice 02-5) was upgraded or
-            # degraded in the same block and joins the same assembly.
+            # Chat group upgrade (ADR-013, slice 02-4): the locals above carry
+            # the provider block's outcome into the typed chat group so the
+            # full runtime assembled below holds the final values. On success
+            # the real ``chat_reply`` / ``chat_intent_settings`` /
+            # ``chat_routing_service``, on degrade whatever resolved before
+            # the failure (``chat_intent_settings`` stays ``None`` unless the
+            # failure came after it). The email-RAG group (slice 02-5) was
+            # upgraded or degraded in the same block and joins the same
+            # assembly.
             chat_runtime = replace(
                 chat_runtime,
-                chat_reply=app.state.chat_reply,
-                chat_intent_settings=getattr(app.state, "chat_intent_settings", None),
-                chat_routing_service=app.state.chat_routing_service,
+                chat_reply=chat_reply,
+                chat_intent_settings=chat_intent_settings,
+                chat_routing_service=chat_routing_service,
             )
             # Evaluation group (ADR-013, slice 02-6): the internal evaluation
-            # control plane now composes in ``composition.build_evaluation``,
+            # control plane composes in ``composition.build_evaluation``,
             # moved verbatim including the close-before-re-raise recovery
             # contract. The settings arrive as an explicit capture from
             # ``create_app`` — no ``app.state`` round-trip — and the group
             # composes only when they are present and enabled, exactly the
-            # old gate. The ``app.state.<key>`` forwards are deliberate
-            # temporary duplication; later slices delete them one consumer
-            # at a time.
+            # old gate.
             evaluation_bundle = await build_evaluation(evaluation_settings)
-            # Single assembly point (ADR-013, slice 02-6): every group is
-            # built, so the full ``CoworkRuntime`` publishes here once. The
-            # legacy ``app.state.<key>`` forwards above stay alive until the
-            # cutover slice moves consumers behind ``runtime(request)``.
+            # Single assembly point (ADR-013): every group is built, so the
+            # full ``CoworkRuntime`` publishes here once. Slice 02-8 deleted
+            # the legacy ``app.state.<key>`` forwards the cutover proved
+            # dead; the survivors beside this assignment are the documented
+            # exceptions in ADR-013.
             app.state.runtime = CoworkRuntime(
                 reports=report_store,
                 control_plane=control_plane,
@@ -543,27 +471,35 @@ def create_app() -> FastAPI:
             )
             # The controller factory reads the composed runtime at controller
             # creation time (ADR-013, slice 02-7): publish it after the single
-            # assembly, never before the upgrade sequence completes.
+            # assembly, never before the upgrade sequence completes. It stays
+            # on ``app.state`` because the chat router's request-time cache
+            # reads it there (ADR-013's documented survivor).
             app.state.chat_controller_factory = _chat_controller_factory(app)
-            if evaluation_bundle is not None:
-                app.state.evaluation_runtime = evaluation_bundle.runtime
-                app.state.evaluation_service = evaluation_bundle.service
-                app.state.evaluation_supervisor = evaluation_bundle.supervisor
-                app.state.evaluation_api_token = evaluation_bundle.api_token
         except ValueError as exc:
             raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
-        evaluation_runtime_shutdown = getattr(app.state, "evaluation_runtime", None)
-        if evaluation_runtime_shutdown is not None:
-            await evaluation_runtime_shutdown.close()
-        # The project index holds no network handle of its own: it reads local
-        # .tvim files and borrows private_storage, which is closed below.
-        pg_pool = getattr(app.state, "pg_pool", None)
-        if pg_pool is not None:
-            await pg_pool.close()
-        private_storage_client = getattr(app.state, "private_storage_client", None)
-        if private_storage_client is not None:
-            await private_storage_client.aclose()
+        # Teardown reads its handles back from the assembled typed runtime —
+        # the forwards it used to read are gone (ADR-013, slice 02-8). The
+        # order is the old order exactly: evaluation first, then the
+        # control-plane pool, then the storage client.
+        state_runtime = cast(
+            CoworkRuntime | None, getattr(app.state, "runtime", None)
+        )
+        if state_runtime is not None:
+            evaluation = state_runtime.evaluation
+            if evaluation is not None:
+                await evaluation.runtime.close()
+            teardown_control_plane = state_runtime.control_plane
+            # The project index holds no network handle of its own: it reads
+            # local .tvim files and borrows private_storage, closed below.
+            if teardown_control_plane is not None and teardown_control_plane.pg_pool is not None:
+                await teardown_control_plane.pg_pool.close()
+            teardown_mailbox = state_runtime.mailbox
+            if (
+                teardown_mailbox is not None
+                and teardown_mailbox.private_storage_client is not None
+            ):
+                await teardown_mailbox.private_storage_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
@@ -573,7 +509,6 @@ def create_app() -> FastAPI:
     # are mounted exclusively when explicitly enabled with a bearer token.
     if evaluation_settings.enabled:
         app.include_router(create_evaluation_router())
-        app.state.evaluation_settings = evaluation_settings
 
     @app.get("/health")
     @app.get("/api/v1/health")
@@ -1356,8 +1291,8 @@ async def _raw_document_repo(request: Request) -> Any:
     # Read through the typed control-plane seam when it is composed; the
     # ``app.state`` memo remains the fallback (and the self-heal write-back
     # target) for the no-lifespan test path, where the runtime is never
-    # assembled. The request-time write stays on ``app.state`` because the
-    # frozen runtime cannot absorb a lazily constructed repository.
+    # assembled. This memo is a documented ``app.state`` survivor (ADR-013):
+    # the frozen runtime cannot absorb a lazily constructed repository.
     app_runtime = getattr(request.app.state, "runtime", None)
     control_plane = (
         cast(CoworkRuntime, app_runtime).control_plane if app_runtime is not None else None
@@ -1370,11 +1305,10 @@ async def _raw_document_repo(request: Request) -> Any:
             SQLiteRawDocumentRepository,
         )
 
-        # Mirror the startup path's location so a request that arrives before (or
-        # without) lifespan startup still reads the same version history.
-        settings = getattr(request.app.state, "gmail_settings", None)
-        parent = settings.connection_db_path.parent if settings is not None else Path.cwd() / "data"
-        repo = SQLiteRawDocumentRepository(parent / "raw_documents.db")
+        # The no-lifespan path only: without a composed control plane there
+        # is no startup location to mirror, so the memo heals under the
+        # process working directory's ``data`` root.
+        repo = SQLiteRawDocumentRepository(Path.cwd() / "data" / "raw_documents.db")
         # Without this the table is never created and every query raises
         # "no such table: raw_document_metadata".
         await repo.initialize()
@@ -1526,10 +1460,13 @@ async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, deta
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
-    # ``gmail_settings`` lives in no runtime group: the mailbox group owns the
-    # *outlook* settings, and this value is also the seed for the control plane.
-    # It stays a direct ``app.state`` read until a later slice finds it a home.
-    return cast(GmailSettings, request.app.state.gmail_settings)
+    # Slice 02-8 gave the settings a home: the mailbox group carries them
+    # (ADR-013), so the last ``app.state`` settings forward could die. An
+    # uncomposed group fails as loudly as the old missing-key read did.
+    mailbox_group = runtime(request).mailbox
+    if mailbox_group is None:
+        raise RuntimeError("the mailbox group is not composed")
+    return mailbox_group.gmail_settings
 
 
 def _outlook_settings(request: Request) -> OutlookSettings | None:

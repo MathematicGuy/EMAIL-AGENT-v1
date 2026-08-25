@@ -801,8 +801,10 @@ def test_create_app_wires_runtime_recovery_and_auth_when_enabled(
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
-            assert app.state.evaluation_service is not None
-            assert app.state.evaluation_supervisor is not None
+            evaluation = app.state.runtime.evaluation
+            assert evaluation is not None
+            assert evaluation.service is not None
+            assert evaluation.supervisor is not None
             assert (tmp_path / "evaluation-jobs.db").exists()
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

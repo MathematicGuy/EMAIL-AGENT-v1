@@ -15,11 +15,7 @@ plain call keeps the depth here — one module owns the whole
 Slice 02-1 wired the report store, the module that first needed a composition
 root. Slice 02-2 adds ``ControlPlane``, the group that owns the durable
 control-plane construction: the Postgres-vs-SQLite repository decision, the
-pool and its migrations, and the digest run/task/result bookkeeping. The group
-is built by ``build_control_plane`` and ``lifespan`` still forwards every
-legacy ``app.state.<key>`` from it — deliberate temporary duplication that
-later slices delete consumer by consumer (the deletion test: a forward
-disappears only when its last reader moves behind ``runtime(request)``).
+pool and its migrations, and the digest run/task/result bookkeeping.
 Slice 02-3 adds ``MailboxRuntime``, the group that owns the provider mailbox
 construction: the shared cipher, the Gmail and Outlook connection/mailbox
 adapters with the Outlook sqlite-only gate, the routing adapter, and the
@@ -28,8 +24,8 @@ the chat construction: the memory settings, session registry and buffer, the
 memory-observability sink, the ready-document catalog, the identity callables,
 and the reply/intent/routing adapter slots that the LLM provider block
 upgrades after boot. The ``chat_controller_factory`` reads the assembled
-runtime at controller creation time (slice 02-7), so those forwards now
-serve only the remaining legacy readers until later slices delete them.
+runtime at controller creation time (slice 02-7), so it never re-reads
+``app.state`` — the frozen group never observes a mid-flight swap.
 Slice 02-5 adds ``EmailRagRuntime``, the group that owns the email-RAG
 construction: the project-document vector plane, the committed corpus, the
 semantic store, and the digest worker. The group boots with its document plane
@@ -42,6 +38,13 @@ service and supervisor, and the bearer token that gates the internal-only
 routes. It is the only group absent on a normal boot — it composes only when
 the evaluation settings are present and enabled — and with it every group
 exists, so ``lifespan`` assembles the full ``CoworkRuntime`` at one point.
+Slice 02-8 finishes the strangler removal: every legacy ``app.state.<key>``
+forward that the cutover proved dead is deleted, so ``lifespan`` publishes
+exactly the typed runtime plus the documented survivors named in ADR-013,
+and teardown reads its handles back from the assembled value. The deletion
+test ran for each forward: a forward disappears only when its last reader
+moves behind ``runtime(request)``, and an always-``None`` key that nothing
+reads carries no meaning, so deletion concentrates rather than relocates.
 """
 
 from __future__ import annotations
@@ -183,7 +186,11 @@ class ControlPlane:
     Every field is what ``lifespan`` used to construct inline and publish as an
     untyped ``app.state`` key; the ``| None`` fields are capabilities that are
     genuinely absent in one boot mode (``pg_pool`` and the identity/session
-    repositories do not exist on the SQLite path). Field types name the real
+    repositories do not exist on the SQLite path). ``redis_client`` and
+    ``run_queue`` are always ``None`` in this process — the worker owns the
+    queue — yet they stay fields because the document-health and digest-run
+    routes read them through the group to choose their degrade behavior.
+    Field types name the real
     adapters, not ``Any``, so a missing dependency is a mypy error here at the
     composition root instead of a ``None`` found at request time.
     """
@@ -224,7 +231,11 @@ class MailboxRuntime:
     """The mailbox group: provider connections, read adapters, routing, storage.
 
     Every field is what ``lifespan`` used to construct inline and publish as an
-    untyped ``app.state`` key. The ``| None`` fields are capabilities that are
+    untyped ``app.state`` key. ``gmail_settings`` joins the group in slice
+    02-8: it seeds the whole construction (control plane included) and the
+    mailbox group is the one place every Gmail request path already reads,
+    so housing it here let the last settings forward die. The
+    ``| None`` fields are capabilities that are
     genuinely absent in one boot mode: the Outlook adapters exist only on the
     SQLite control plane with valid Microsoft OAuth configuration, and the
     Supabase storage client exists only when Postgres plus Storage is
@@ -232,6 +243,7 @@ class MailboxRuntime:
     Storage validation fails — the degrade path the old inline code had.
     """
 
+    gmail_settings: GmailSettings
     gmail_connections: GmailConnectionService
     gmail_mailbox: GmailMailboxAdapter
     outlook_connections: OutlookConnectionService | None
@@ -304,10 +316,9 @@ class EmailRagRuntime:
     ``upgrade_email_rag_providers`` once the LLM provider block resolves,
     mirroring the chat group's placeholder-then-upgrade sequence. The
     ``| None`` fields are capabilities genuinely absent in one boot mode:
-    ``digest_worker`` is ``None`` on the coupled degrade path, the vector
+    ``digest_worker`` is ``None`` on the coupled degrade path, and the vector
     plane fields are ``None`` when user documents are disabled or their
-    construction failed, and ``project_document_queue`` is a placeholder for
-    the worker queue that only the worker process owns today.
+    construction failed.
     """
 
     semantic_memory: SemanticMemoryPort
@@ -318,7 +329,6 @@ class EmailRagRuntime:
     document_embeddings_configured: bool
     project_document_vectors: CanonicalProjectDocumentRetriever | None
     project_document_index: TurbovecProjectIndexStore | None
-    project_document_queue: object | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -631,6 +641,7 @@ async def build_mailbox(
             settings.connection_db_path.parent / "project-documents"
         )
     return MailboxRuntime(
+        gmail_settings=settings,
         gmail_connections=gmail_connections,
         gmail_mailbox=gmail_mailbox,
         outlook_connections=outlook_connections,
@@ -796,7 +807,6 @@ async def build_email_rag(
         document_embeddings_configured=document_embeddings_configured,
         project_document_vectors=project_document_vectors,
         project_document_index=project_document_index,
-        project_document_queue=None,
     )
 
 

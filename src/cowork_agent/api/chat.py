@@ -978,8 +978,10 @@ def _sessions(request: Request) -> ChatSessionRegistryPort:
 
 
 def _controller_factory(request: Request) -> ControllerFactory:
-    # Not a runtime-group field: the factory is the chat seam rewired in the
-    # next slice, so it still reads its forwarded ``app.state`` key.
+    # A documented ``app.state`` survivor (ADR-013, slice 02-8): the factory
+    # is published once after the single runtime assembly and reads the
+    # composed runtime at controller-creation time, so it is not a group
+    # field — this cache's request-time readers reach it here.
     return cast(ControllerFactory, request.app.state.chat_controller_factory)
 
 
