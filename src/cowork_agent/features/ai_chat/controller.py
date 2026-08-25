@@ -702,7 +702,7 @@ class ChatController:
                 emitted.append(activity_event)
                 yield activity_event
             if routing_outcome is not None and routing_outcome.route is ChatRoute.RAG:
-                project_documents = await self._memory._read_project_documents(
+                project_documents = await self._memory.read_project_documents(
                     query=routing_outcome.retrieval_query or request.user_message,
                     document_ids=request.document_ids,
                 )
@@ -1220,7 +1220,7 @@ class ChatController:
         outcome = await self._routing.route(
             scope=self._scope,
             request=request,
-            recent_turns=self._memory._read_active_turns(),
+            recent_turns=self._memory.read_active_turns(),
         )
         self._routing_outcomes[request.idempotency_key] = outcome
         return outcome
@@ -1295,7 +1295,7 @@ class ChatController:
         episode = self._task_episodes.get(episode_id)
         if episode is not None:
             return episode
-        episode = await self._memory._read_task_episode(episode_id)
+        episode = await self._memory.read_task_episode(episode_id)
         if episode is not None:
             self._task_episodes[episode_id] = episode
         return episode

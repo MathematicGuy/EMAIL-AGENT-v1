@@ -76,7 +76,7 @@ def test_the_buffer_holds_every_seeded_turn() -> None:
     controller, gateway = _controller(_Reply())
     spec = SeedSpec(("alpha", "beta"), {}, (), None)
     asyncio.run(seed_short_term(controller, "s", spec, key_prefix="seed"))
-    turns = gateway._read_active_turns()
+    turns = gateway.read_active_turns()
     assert any("alpha" in (turn.user_message or "") for turn in turns)
     assert any("beta" in (turn.user_message or "") for turn in turns)
 
