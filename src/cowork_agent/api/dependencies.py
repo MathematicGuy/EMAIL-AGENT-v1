@@ -17,12 +17,36 @@ from cowork_agent.config import SessionSettings
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.identity import (
     ConnectionNotOwnedError,
+    OpaqueSessionResolver,
     VerifiedPrincipal,
     create_guest_session,
     ensure_principal_owns_connection,
     principal_for_connection,
     principal_from_opaque_session,
 )
+
+#: Where the per-request principal memo lives on ``request.state``.
+_RESOLVED_PRINCIPALS = "cowork_resolved_principals"
+
+
+def _resolved(request: Request) -> dict[str, VerifiedPrincipal]:
+    """The principals already resolved for this request.
+
+    A handler that verifies connection ownership resolves the caller, then the
+    handler it returns to resolves the caller again -- two session-store reads
+    for one cookie that cannot change mid-request. Memoizing on the request
+    removes the second read without touching a single call site. Only
+    successful resolutions are stored: a miss is a 401 either way, and caching
+    one would let a ``required=False`` probe poison a later required read.
+    """
+
+    resolved: dict[str, VerifiedPrincipal] | None = getattr(
+        request.state, _RESOLVED_PRINCIPALS, None
+    )
+    if resolved is None:
+        resolved = {}
+        setattr(request.state, _RESOLVED_PRINCIPALS, resolved)
+    return resolved
 
 
 def control_plane_required(request: Request) -> ControlPlane:
@@ -68,12 +92,7 @@ async def authenticated_principal(
     sessions = control_plane.session_repository if control_plane is not None else None
     if sessions is None:
         return None
-    principal = await principal_from_opaque_session(
-        request.cookies.get(session_settings(request).cookie_name), sessions
-    )
-    if principal is None and required:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return principal
+    return await _principal_from_session(request, sessions, "session", required=required)
 
 
 async def authenticated_chat_principal(
@@ -88,9 +107,22 @@ async def authenticated_chat_principal(
     )
     if sessions is None:
         return None
-    principal = await principal_from_opaque_session(
-        request.cookies.get(session_settings(request).cookie_name), sessions
-    )
+    return await _principal_from_session(request, sessions, "chat_session", required=required)
+
+
+async def _principal_from_session(
+    request: Request, sessions: OpaqueSessionResolver, memo_key: str, *, required: bool
+) -> VerifiedPrincipal | None:
+    """Resolve the opaque session cookie once per request, per session store."""
+
+    resolved = _resolved(request)
+    principal = resolved.get(memo_key)
+    if principal is None:
+        principal = await principal_from_opaque_session(
+            request.cookies.get(session_settings(request).cookie_name), sessions
+        )
+        if principal is not None:
+            resolved[memo_key] = principal
     if principal is None and required:
         raise HTTPException(status_code=401, detail="Authentication required")
     return principal

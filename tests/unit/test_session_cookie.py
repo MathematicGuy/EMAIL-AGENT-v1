@@ -128,3 +128,61 @@ def test_guest_bootstrap_preserves_an_existing_opaque_session() -> None:
     asyncio.run(issue_chat_guest_session(request, response))
 
     assert "set-cookie" not in response.headers
+
+
+def test_one_request_resolves_its_opaque_session_only_once() -> None:
+    """Ownership checks resolve the caller, then their handler resolves again.
+
+    Both reads hit the session store, for a cookie that cannot change inside
+    one request. The memo on ``request.state`` collapses them.
+    """
+    principal = VerifiedPrincipal(tenant_id="workspace-1", user_id="internal-user")
+    reads = 0
+
+    class CountingSessions:
+        async def resolve(self, token: str, *, now: datetime) -> VerifiedPrincipal:
+            nonlocal reads
+            del now, token
+            reads += 1
+            return principal
+
+    now = datetime.now(UTC)
+    connection = MailboxConnection(
+        id="mbx-1",
+        user_id="internal-user",
+        provider="gmail",
+        external_account_id="owner@example.com",
+        email_address="owner@example.com",
+        encrypted_refresh_token="encrypted",
+        scopes=("scope",),
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+    app = FastAPI()
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            session_repository=CountingSessions(),
+            session_settings=SessionSettings(3600, "cowork_session", True),
+            identity_repository=None,
+            chat_identity_repository=None,
+            chat_opaque_session_repository=None,
+            connection_repository=None,
+        ),
+    )
+    request = Request({
+        "type": "http",
+        "app": app,
+        "headers": [(b"cookie", b"cowork_session=live-token")],
+        "path": "/",
+    })
+
+    async def scenario() -> None:
+        assert await authenticated_principal(request) == principal
+        assert await connection_principal(request, connection) == principal
+        assert await authenticated_principal(request) == principal
+
+    asyncio.run(scenario())
+
+    assert reads == 1, reads
