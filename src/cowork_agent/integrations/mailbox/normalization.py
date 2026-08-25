@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from cowork_agent.domain.target_contracts import BodyFormat, EmailSourceLink
+from cowork_agent.integrations.security.url_inspector import inspect_url
 
 
 def normalize_body(
@@ -49,15 +50,20 @@ class LinkCollector:
         self._positions = {}
 
     def add(self, url: str, label: str | None = None) -> str:
-        position = self._positions.get(url)
+        report = inspect_url(url)
+        clean_url = report.resolved_url or url
+        threat_level = report.threat_level
+        position = self._positions.get(clean_url)
         if position is not None:
             existing = self._links[position]
             if existing.label is None and label:
-                self._links[position] = EmailSourceLink(existing.ref, label, existing.url)
+                self._links[position] = EmailSourceLink(
+                    existing.ref, label, existing.url, threat_level=existing.threat_level
+                )
             return existing.ref
         ref = f"link{len(self._links) + 1}"
-        self._positions[url] = len(self._links)
-        self._links.append(EmailSourceLink(ref, label, url))
+        self._positions[clean_url] = len(self._links)
+        self._links.append(EmailSourceLink(ref, label, clean_url, threat_level=threat_level))
         return ref
 
     def as_tuple(self) -> tuple[EmailSourceLink, ...]:

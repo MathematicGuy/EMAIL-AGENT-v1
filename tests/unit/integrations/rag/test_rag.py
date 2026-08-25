@@ -86,6 +86,7 @@ def test_load_corpus_reads_the_committed_documents() -> None:
         "dang-ky-ket-hon",
         "dang-ky-tam-tru",
         "dang-ky-xe",
+        "design-machine-learning-systems",
         "huong-dan-nop-ho-so-dai-hoc-vinuni",
         "thu-tuc-dang-ky-bhxh-luatvietnam",
         "thue-dien-tu",
