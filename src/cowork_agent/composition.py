@@ -36,8 +36,12 @@ semantic store, and the digest worker. The group boots with its document plane
 complete and provider-half placeholders; the LLM provider block in ``lifespan``
 upgrades the provider half after it resolves, exactly like the chat group, and
 its ``except ValueError`` degrade path degrades both halves through one coupled
-contract. The later slice grows the remaining ``evaluation`` group without
-changing this interface.
+contract. Slice 02-6 adds ``EvaluationBundle``, the group that owns the
+internal evaluation control plane: the durable evaluation runtime, its job
+service and supervisor, and the bearer token that gates the internal-only
+routes. It is the only group absent on a normal boot — it composes only when
+the evaluation settings are present and enabled — and with it every group
+exists, so ``lifespan`` assembles the full ``CoworkRuntime`` at one point.
 """
 
 from __future__ import annotations
@@ -56,6 +60,7 @@ from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
     EmailRagQualitySettings,
+    EvaluationSettings,
     GmailSettings,
     OutlookSettings,
     SessionSettings,
@@ -77,6 +82,12 @@ from cowork_agent.features.ai_chat.memory_observability import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.features.batch_evaluation.bootstrap import (
+    EvaluationRuntime,
+    build_evaluation_runtime,
+)
+from cowork_agent.features.batch_evaluation.service import EvaluationJobService
+from cowork_agent.features.batch_evaluation.supervisor import EvaluationSupervisor
 from cowork_agent.features.email_action_plan.observability import (
     LoggingTraceSink,
     dev_trace_sink_from_env,
@@ -253,8 +264,8 @@ class ChatRuntime:
     untyped ``app.state`` key. ``chat_reply`` boots as the
     ``UnavailableChatReply`` placeholder and ``chat_intent_settings`` /
     ``chat_routing_service`` boot as ``None``: the LLM provider block upgrades
-    those three after this group is composed, and ``lifespan`` republishes the
-    group with the upgraded values. The controller factory still reads the
+    those three after this group is composed, and ``lifespan`` assembles the
+    full runtime with the upgraded values. The controller factory still reads the
     forwarded ``app.state`` keys lazily at controller-creation time, so it
     always sees whichever value the upgrade sequence last published — the
     frozen group never observes a mid-flight swap. ``ready_document_catalog``
@@ -310,6 +321,27 @@ class EmailRagRuntime:
 
 
 @dataclass(frozen=True, slots=True)
+class EvaluationBundle:
+    """The evaluation group: the internal evaluation control plane.
+
+    Every field is what ``lifespan`` used to construct inline and publish as
+    an untyped ``app.state`` key: the durable ``EvaluationRuntime`` that owns
+    storage, recovery, and runner lifecycle, the job service and supervisor
+    lifted from it for the route surface, and the bearer token that gates the
+    internal-only API (kept server-side, never in logs or responses). Unlike
+    the other groups this one is genuinely absent on most boots: it composes
+    only when the evaluation settings are present and enabled, so the field
+    on ``CoworkRuntime`` is optional at the interface, not just for injected
+    test runtimes.
+    """
+
+    runtime: EvaluationRuntime
+    service: EvaluationJobService
+    supervisor: EvaluationSupervisor
+    api_token: str
+
+
+@dataclass(frozen=True, slots=True)
 class CoworkRuntime:
     """The composed value of the application: dependencies that outlive requests.
 
@@ -318,9 +350,11 @@ class CoworkRuntime:
     found at request time. ``control_plane``, ``mailbox``, ``chat``, and
     ``email_rag`` are optional only for injected test runtimes that exercise a
     single group (the ASGI transport never runs ``lifespan``); a boot through
-    ``lifespan`` always composes all four. Later slices add the remaining
-    ``evaluation`` group; each migration moves *where* a consumer reads from,
-    never *what* is composed.
+    ``lifespan`` always composes all of them. ``evaluation`` is the one group
+    a real boot may legitimately omit: it exists only when the evaluation
+    settings are present and enabled. Every group now exists, so ``lifespan``
+    assembles the full value at one point; the cutover slices move *where* a
+    consumer reads from, never *what* is composed.
     """
 
     reports: ReportArtifactStore
@@ -328,6 +362,7 @@ class CoworkRuntime:
     mailbox: MailboxRuntime | None = None
     chat: ChatRuntime | None = None
     email_rag: EmailRagRuntime | None = None
+    evaluation: EvaluationBundle | None = None
 
 
 def runtime(request: Request) -> CoworkRuntime:
@@ -843,15 +878,53 @@ def degrade_email_rag(
     )
 
 
+async def build_evaluation(
+    evaluation_settings: EvaluationSettings | None,
+) -> EvaluationBundle | None:
+    """Compose the evaluation group (ADR-013, slice 02-6).
+
+    The body is the construction that used to live inline in ``lifespan``,
+    moved verbatim: ``build_evaluation_runtime`` from the settings' runtime
+    config and the process environment, then ``initialize()`` before
+    ``recover()``, with the except that closes the runtime before re-raising
+    — never abandon an initialized runtime if recovery fails. Only *where*
+    it happens changed, plus one round-trip deleted: the settings arrive as
+    an explicit parameter captured from ``create_app`` instead of being read
+    back off ``app.state`` across the phase boundary. The group composes
+    only when settings are present and enabled — the same gate the old
+    ``app.state.evaluation_settings`` write provided, now owned by this seam.
+    """
+    if evaluation_settings is None or not evaluation_settings.enabled:
+        return None
+    evaluation_runtime = build_evaluation_runtime(
+        evaluation_settings.to_runtime_config(), os.environ
+    )
+    try:
+        await evaluation_runtime.initialize()
+        await evaluation_runtime.recover()
+    except Exception:
+        # Never abandon an initialized runtime if recovery fails.
+        await evaluation_runtime.close()
+        raise
+    return EvaluationBundle(
+        runtime=evaluation_runtime,
+        service=evaluation_runtime.service,
+        supervisor=evaluation_runtime.supervisor,
+        api_token=evaluation_settings.api_token,
+    )
+
+
 __all__ = [
     "ChatRuntime",
     "ControlPlane",
     "CoworkRuntime",
     "EmailRagRuntime",
+    "EvaluationBundle",
     "MailboxRuntime",
     "build_chat",
     "build_control_plane",
     "build_email_rag",
+    "build_evaluation",
     "build_mailbox",
     "create_chat_session_buffer",
     "degrade_email_rag",

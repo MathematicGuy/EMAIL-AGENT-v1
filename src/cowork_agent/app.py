@@ -33,6 +33,7 @@ from cowork_agent.composition import (
     build_chat,
     build_control_plane,
     build_email_rag,
+    build_evaluation,
     build_mailbox,
     degrade_email_rag,
     upgrade_email_rag_providers,
@@ -64,7 +65,6 @@ from cowork_agent.features.ai_chat.ports import (
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
 )
-from cowork_agent.features.batch_evaluation.bootstrap import build_evaluation_runtime
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
     MailboxConnectionRepository,
@@ -250,6 +250,12 @@ def create_app() -> FastAPI:
     )
     logging.getLogger("cowork_agent").setLevel(logging.INFO)
 
+    # The evaluation settings resolve once here and flow into ``lifespan`` as
+    # an explicit closure capture (ADR-013, slice 02-6): the old code wrote
+    # them onto ``app.state`` after this closure was defined and read them
+    # back inside it, a cross-phase round-trip the typed assembly deletes.
+    evaluation_settings = EvaluationSettings.from_env()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
@@ -307,10 +313,7 @@ def create_app() -> FastAPI:
             # forwards below are deliberate temporary duplication; later
             # slices delete them one consumer at a time.
             control_plane = await build_control_plane(settings, control_plane_url)
-            app.state.runtime = CoworkRuntime(
-                reports=report_store, control_plane=control_plane
-            )
-            app.state.report_store = app.state.runtime.reports
+            app.state.report_store = report_store
             app.state.gmail_settings = settings
             app.state.session_settings = control_plane.session_settings
             app.state.identity_repository = control_plane.identity_repository
@@ -350,9 +353,6 @@ def create_app() -> FastAPI:
                 control_plane.identity_repository,
                 UserDocumentsSettings.from_env(),
             )
-            app.state.runtime = CoworkRuntime(
-                reports=report_store, control_plane=control_plane, mailbox=mailbox_runtime
-            )
             app.state.gmail_connections = mailbox_runtime.gmail_connections
             app.state.gmail_mailbox = mailbox_runtime.gmail_mailbox
             app.state.outlook_connections = mailbox_runtime.outlook_connections
@@ -384,12 +384,6 @@ def create_app() -> FastAPI:
                 user_documents_settings=user_documents_settings,
                 principal_resolver=_resolve_chat_principal,
                 guest_session_issuer=_issue_chat_guest_session,
-            )
-            app.state.runtime = CoworkRuntime(
-                reports=report_store,
-                control_plane=control_plane,
-                mailbox=mailbox_runtime,
-                chat=chat_runtime,
             )
             app.state.chat_memory_settings = chat_runtime.chat_memory_settings
             app.state.chat_sessions = chat_runtime.chat_sessions
@@ -432,13 +426,6 @@ def create_app() -> FastAPI:
                 pg_pool=control_plane.pg_pool,
                 private_storage=mailbox_runtime.private_storage,
                 user_documents_settings=user_documents_settings,
-            )
-            app.state.runtime = CoworkRuntime(
-                reports=report_store,
-                control_plane=control_plane,
-                mailbox=mailbox_runtime,
-                chat=chat_runtime,
-                email_rag=email_rag_runtime,
             )
             app.state.document_embeddings_configured = (
                 email_rag_runtime.document_embeddings_configured
@@ -520,46 +507,46 @@ def create_app() -> FastAPI:
                 app.state.llm_provider_label = email_rag_runtime.llm_provider_label
             # Chat group upgrade (ADR-013, slice 02-4): the provider block
             # above publishes the chat half through ``app.state``; read those
-            # results back and republish the typed chat group so
-            # ``runtime(request)`` carries the same final values the legacy
-            # keys already hold. On success the real ``chat_reply`` /
+            # results back into the typed chat group so the full runtime
+            # assembled below carries the same final values the legacy keys
+            # already hold. On success the real ``chat_reply`` /
             # ``chat_intent_settings`` / ``chat_routing_service``, on degrade
             # the placeholders the chat group booted with (``chat_intent_settings``
             # was never set). The email-RAG group (slice 02-5) was upgraded or
-            # degraded in the same block and republishes alongside.
+            # degraded in the same block and joins the same assembly.
             chat_runtime = replace(
                 chat_runtime,
                 chat_reply=app.state.chat_reply,
                 chat_intent_settings=getattr(app.state, "chat_intent_settings", None),
                 chat_routing_service=app.state.chat_routing_service,
             )
+            # Evaluation group (ADR-013, slice 02-6): the internal evaluation
+            # control plane now composes in ``composition.build_evaluation``,
+            # moved verbatim including the close-before-re-raise recovery
+            # contract. The settings arrive as an explicit capture from
+            # ``create_app`` — no ``app.state`` round-trip — and the group
+            # composes only when they are present and enabled, exactly the
+            # old gate. The ``app.state.<key>`` forwards are deliberate
+            # temporary duplication; later slices delete them one consumer
+            # at a time.
+            evaluation_bundle = await build_evaluation(evaluation_settings)
+            # Single assembly point (ADR-013, slice 02-6): every group is
+            # built, so the full ``CoworkRuntime`` publishes here once. The
+            # legacy ``app.state.<key>`` forwards above stay alive until the
+            # cutover slice moves consumers behind ``runtime(request)``.
             app.state.runtime = CoworkRuntime(
                 reports=report_store,
                 control_plane=control_plane,
                 mailbox=mailbox_runtime,
                 chat=chat_runtime,
                 email_rag=email_rag_runtime,
+                evaluation=evaluation_bundle,
             )
-            evaluation_settings = getattr(app.state, "evaluation_settings", None)
-            if evaluation_settings is not None:
-                # Internal evaluation control plane: durable storage first,
-                # then restart recovery, then request handling. The bearer
-                # token stays server-side and never appears in logs or
-                # responses.
-                evaluation_runtime = build_evaluation_runtime(
-                    evaluation_settings.to_runtime_config(), os.environ
-                )
-                try:
-                    await evaluation_runtime.initialize()
-                    await evaluation_runtime.recover()
-                except Exception:
-                    # Never abandon an initialized runtime if recovery fails.
-                    await evaluation_runtime.close()
-                    raise
-                app.state.evaluation_runtime = evaluation_runtime
-                app.state.evaluation_service = evaluation_runtime.service
-                app.state.evaluation_supervisor = evaluation_runtime.supervisor
-                app.state.evaluation_api_token = evaluation_settings.api_token
+            if evaluation_bundle is not None:
+                app.state.evaluation_runtime = evaluation_bundle.runtime
+                app.state.evaluation_service = evaluation_bundle.service
+                app.state.evaluation_supervisor = evaluation_bundle.supervisor
+                app.state.evaluation_api_token = evaluation_bundle.api_token
         except ValueError as exc:
             raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
@@ -581,7 +568,6 @@ def create_app() -> FastAPI:
     app.include_router(create_report_router())
     # The evaluation API is internal-only and disabled by default; its routes
     # are mounted exclusively when explicitly enabled with a bearer token.
-    evaluation_settings = EvaluationSettings.from_env()
     if evaluation_settings.enabled:
         app.include_router(create_evaluation_router())
         app.state.evaluation_settings = evaluation_settings
