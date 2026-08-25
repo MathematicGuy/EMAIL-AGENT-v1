@@ -843,6 +843,39 @@ def test_cancel_turn_stops_only_the_named_durable_turn() -> None:
     asyncio.run(scenario())
 
 
+def test_cancel_turn_stops_a_turn_already_streaming_deltas() -> None:
+    """The explicit signal has to be honoured mid-generation, not only between phases."""
+
+    async def scenario() -> None:
+        history = HistoryWriter()
+        reply = FakeReply(("first", "second"))
+        controller, buffer = _controller(
+            reply=reply,
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+        event = await anext(stream)
+        while event.event_type is ChatEventType.ACTIVITY:
+            event = await anext(stream)
+        assert event.event_type is ChatEventType.DELTA
+
+        assert await controller.cancel_turn(started.turn_id) is True
+        assert [remaining async for remaining in stream] == []
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
+        ) == ()
+
+    asyncio.run(scenario())
+
+
 def test_cancel_turn_does_not_acknowledge_a_failed_durable_update() -> None:
     async def scenario() -> None:
         history = FailingUpdateHistory()

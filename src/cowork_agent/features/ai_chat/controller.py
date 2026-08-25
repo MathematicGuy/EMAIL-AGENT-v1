@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import logging
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol, cast
@@ -66,10 +66,15 @@ from .retrieval_policy import (
     is_explicit_task_request,
     select_memory_reads,
 )
+from .turn_journal import (
+    CancellationCheck,
+    CancellationGuard,
+    Clock,
+    IdFactory,
+    TurnJournal,
+    never_cancelled,
+)
 
-IdFactory = Callable[[], str]
-Clock = Callable[[], datetime]
-CancellationCheck = Callable[[], Awaitable[bool]]
 logger = logging.getLogger(__name__)
 
 
@@ -79,10 +84,6 @@ def _new_id() -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-async def _never_cancelled() -> bool:
-    return False
 
 
 def _fallback_conversation_title(message: str) -> str:
@@ -504,53 +505,19 @@ class ChatController:
             error_code=error_code,
         )
 
-    async def _set_activity(
-        self,
-        turn: ChatTurn,
-        code: ChatActivityCode,
-        status: ChatActivityStatus,
-        *,
-        outcome: ChatActivityOutcome | None = None,
-        detail: ChatActivityDetail | None = None,
-        append: tuple[ChatActivityCode, ...] = (),
-    ) -> tuple[ChatTurn, ChatMessageStreamEvent]:
-        activities = transition_activity_snapshot(
-            turn.activities,
-            code,
-            status,
-            at=self._clock(),
-            outcome=outcome,
-            detail=detail,
-        )
-        activities = (*activities, *(ChatActivity.pending(item) for item in append))
-        updated = replace(turn, activities=activities)
-        if self._history is not None:
-            try:
-                updated = await self._history.update_turn(self._scope, updated)
-            except Exception:
-                logger.exception("Unable to persist chat activity progress")
-        self._turns_by_id[updated.turn_id] = updated
-        return updated, self._activity_event(updated)
-
-    def _activity_event(self, turn: ChatTurn) -> ChatMessageStreamEvent:
-        return ChatMessageStreamEvent.activity(
-            event_id=self._new_id(),
-            session_id=self._scope.session_id,
-            turn_id=turn.turn_id,
-            activities=turn.activities,
-        )
-
     @observe(name="chat_stream_message")
     async def stream_message(
         self,
         request: ChatMessageRequest,
         *,
-        is_cancelled: CancellationCheck = _never_cancelled,
+        is_cancelled: CancellationCheck = never_cancelled,
     ) -> AsyncIterator[ChatMessageStreamEvent]:
         """Persist the user turn first, then stream and update that durable row."""
 
         if request.session_id != self._scope.session_id:
             raise ChatScopeMismatch("message session does not match the verified chat scope")
+
+        guard = CancellationGuard(is_cancelled, self._cancelled_turn_ids)
 
         async with self._turn_lock:
             pending = self._pending_task_episodes.get(request.idempotency_key)
@@ -562,7 +529,7 @@ class ChatController:
                         safe_message="Khóa idempotency này đã được dùng cho một tin nhắn khác.",
                     )
                     return
-                async for event in self._retry_pending_task_episode(pending, is_cancelled):
+                async for event in self._retry_pending_task_episode(pending, guard):
                     yield event
                 return
 
@@ -577,13 +544,13 @@ class ChatController:
                     )
                     return
                 for event in cached_events:
-                    if await is_cancelled():
+                    if await guard.tripped():
                         return
                     yield event
                 return
 
             turn_id = self._new_id()
-            if await is_cancelled():
+            if await guard.tripped():
                 return
 
             temporary_title = _fallback_conversation_title(request.user_message)
@@ -618,6 +585,7 @@ class ChatController:
                     )
                     return
             turn_id = pending_turn.turn_id
+            guard.watch(turn_id)
             replay_completed = pending_turn.status is ChatTurnStatus.COMPLETED
             if pending_turn.status not in {
                 ChatTurnStatus.GENERATING,
@@ -639,7 +607,14 @@ class ChatController:
                     pending_turn = await self._history.update_turn(
                         self._scope, pending_turn, title=temporary_title
                     )
-            self._turns_by_id[turn_id] = pending_turn
+            journal = TurnJournal(
+                pending_turn,
+                scope=self._scope,
+                history=self._history,
+                clock=self._clock,
+                new_id=self._new_id,
+                registry=self._turns_by_id,
+            )
             started = ChatMessageStreamEvent.started(
                 event_id=self._new_id(),
                 session_id=self._scope.session_id,
@@ -648,28 +623,28 @@ class ChatController:
             emitted: list[ChatMessageStreamEvent] = [started]
             yield started
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
-            if pending_turn.activities:
-                initial_activity = self._activity_event(pending_turn)
+            if journal.turn.activities:
+                initial_activity = journal.activity_event()
                 emitted.append(initial_activity)
                 yield initial_activity
 
-            if replay_completed and pending_turn.assistant_message is not None:
+            if replay_completed and journal.turn.assistant_message is not None:
                 # A durable replay carries its canonical terminal snapshot.
                 delta = ChatMessageStreamEvent.delta(
                     event_id=self._new_id(),
                     session_id=self._scope.session_id,
                     turn_id=turn_id,
-                    text=pending_turn.assistant_message,
+                    text=journal.turn.assistant_message,
                 )
                 completed = ChatMessageStreamEvent.completed(
                     event_id=self._new_id(),
                     session_id=self._scope.session_id,
                     turn_id=turn_id,
-                    rag_evidence=pending_turn.rag_evidence,
-                    retrieval_status=pending_turn.retrieval_status,
-                    execution_trace=pending_turn.execution_trace,
+                    rag_evidence=journal.turn.rag_evidence,
+                    retrieval_status=journal.turn.retrieval_status,
+                    execution_trace=journal.turn.execution_trace,
                 )
                 emitted.extend((delta, completed))
                 self._completed[request.idempotency_key] = (request, tuple(emitted))
@@ -677,7 +652,7 @@ class ChatController:
                 yield completed
                 return
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
 
             routing_outcome = await self._route_turn(request)
@@ -699,8 +674,7 @@ class ChatController:
                 ChatActivityCode.REVIEWING_CONTEXT,
                 final_activity,
             )
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.UNDERSTANDING_REQUEST,
                 ChatActivityStatus.COMPLETED,
                 outcome=ChatActivityOutcome.SUCCESS,
@@ -714,16 +688,14 @@ class ChatController:
                 else ChatResponseMode.NORMAL
             )
             project_documents: ProjectDocumentResponse | None = None
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.REVIEWING_CONTEXT,
                 ChatActivityStatus.RUNNING,
             )
             emitted.append(activity_event)
             yield activity_event
             if searches_information:
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     ChatActivityCode.SEARCHING_RELEVANT_INFORMATION,
                     ChatActivityStatus.RUNNING,
                 )
@@ -756,8 +728,7 @@ class ChatController:
                     "unavailable": ChatActivityOutcome.DEGRADED,
                     None: ChatActivityOutcome.NO_RESULTS,
                 }[retrieval_status]
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     ChatActivityCode.SEARCHING_RELEVANT_INFORMATION,
                     ChatActivityStatus.COMPLETED,
                     outcome=search_outcome,
@@ -767,8 +738,7 @@ class ChatController:
                 )
                 emitted.append(activity_event)
                 yield activity_event
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.REVIEWING_CONTEXT,
                 ChatActivityStatus.COMPLETED,
                 outcome=(
@@ -812,8 +782,7 @@ class ChatController:
                 response_mode=response_mode,
                 project_documents=project_documents,
             )
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 final_activity,
                 ChatActivityStatus.RUNNING,
             )
@@ -821,7 +790,7 @@ class ChatController:
             yield activity_event
             try:
                 async for chunk in self._reply.stream_reply(request, generation_context):
-                    if turn_id in self._cancelled_turn_ids or await is_cancelled():
+                    if await guard.tripped():
                         return
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
@@ -861,8 +830,8 @@ class ChatController:
                     if isinstance(exc, ChatResponseInvalid)
                     else "chat_provider_unavailable"
                 )
-                failed = await self._fail_turn(pending_turn, code=code)
-                yield self._activity_event(failed)
+                failed = await self._fail_turn(journal.turn, code=code)
+                yield journal.activity_event(failed)
                 yield self._error(
                     turn_id=turn_id,
                     code=code,
@@ -870,12 +839,12 @@ class ChatController:
                 )
                 return
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
             assistant_message = "".join(chunks)
             if not assistant_message:
-                failed = await self._fail_turn(pending_turn, code="empty_chat_response")
-                yield self._activity_event(failed)
+                failed = await self._fail_turn(journal.turn, code="empty_chat_response")
+                yield journal.activity_event(failed)
                 yield self._error(
                     turn_id=turn_id,
                     code="empty_chat_response",
@@ -954,8 +923,7 @@ class ChatController:
                 and is_explicit_task_request(request)
             )
             if not task_requested:
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     final_activity,
                     ChatActivityStatus.COMPLETED,
                     outcome=ChatActivityOutcome.SUCCESS,
@@ -963,7 +931,7 @@ class ChatController:
                 emitted.append(activity_event)
                 yield activity_event
             turn = replace(
-                    pending_turn,
+                    journal.turn,
                     assistant_message=assistant_message,
                     status=(
                         ChatTurnStatus.GENERATING
@@ -1012,7 +980,7 @@ class ChatController:
                     return
             if not task_requested:
                 self._memory.append_turn(turn)
-            self._turns_by_id[turn_id] = turn
+            journal.adopt(turn)
             try:
                 from langfuse import get_client
 
@@ -1108,8 +1076,7 @@ class ChatController:
                         )
                         emitted.append(proposal_event)
                         yield proposal_event
-                turn, activity_event = await self._set_activity(
-                    turn,
+                activity_event = await journal.record(
                     final_activity,
                     ChatActivityStatus.COMPLETED,
                     outcome=(
@@ -1119,7 +1086,7 @@ class ChatController:
                     ),
                 )
                 turn = replace(
-                    turn,
+                    journal.turn,
                     status=ChatTurnStatus.COMPLETED,
                     completed_at=self._clock(),
                 )
@@ -1141,7 +1108,7 @@ class ChatController:
                             safe_message="Không thể lưu câu trả lời. Vui lòng thử lại.",
                         )
                         return
-                self._turns_by_id[turn_id] = turn
+                journal.adopt(turn)
                 self._memory.append_turn(turn)
                 emitted.append(activity_event)
                 yield activity_event
@@ -1169,9 +1136,9 @@ class ChatController:
     async def _retry_pending_task_episode(
         self,
         pending: _PendingTaskEpisode,
-        is_cancelled: CancellationCheck,
+        guard: CancellationGuard,
     ) -> AsyncIterator[ChatMessageStreamEvent]:
-        if await is_cancelled():
+        if await guard.tripped():
             return
         try:
             episode = await self._memory.write_task_episode(
@@ -1180,7 +1147,7 @@ class ChatController:
         except MemorySourceUnavailableError:
             _, cached_events = self._completed[pending.request.idempotency_key]
             for event in cached_events:
-                if await is_cancelled():
+                if await guard.tripped():
                     return
                 yield event
             return
@@ -1188,7 +1155,7 @@ class ChatController:
             del self._pending_task_episodes[pending.request.idempotency_key]
             _, cached_events = self._completed[pending.request.idempotency_key]
             for event in cached_events:
-                if await is_cancelled():
+                if await guard.tripped():
                     return
                 yield event
             return
@@ -1218,7 +1185,7 @@ class ChatController:
         self._completed[pending.request.idempotency_key] = (pending.request, replay)
         del self._pending_task_episodes[pending.request.idempotency_key]
         for event in replay:
-            if await is_cancelled():
+            if await guard.tripped():
                 return
             yield event
 
