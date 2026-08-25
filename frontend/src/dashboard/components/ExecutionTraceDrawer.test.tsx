@@ -199,4 +199,117 @@ describe('ExecutionTraceDrawer', () => {
     expect(screen.getByText('Đang thu thập thông tin xử lý...')).toBeTruthy();
     expect(screen.getByText('Đang chờ mô hình thực hiện suy luận...')).toBeTruthy();
   });
+
+  it('displays the 4 memory tiers, project scope, and anti-leak guard in the memory tab', () => {
+    render(
+      <ExecutionTraceDrawer
+        onClose={vi.fn()}
+        activities={[{ code: 'reviewing_context', status: 'completed', outcome: 'success' }]}
+        activeProjectName="Finance Operations"
+        sessionTurnCount={5}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Bộ nhớ/ }));
+
+    expect(screen.getByText('4 Tầng Bộ Nhớ AI Đang Sử Dụng')).toBeTruthy();
+    expect(screen.getByText('Short-Term (Session Buffer)')).toBeTruthy();
+    expect(screen.getByText('Long-Term (Hồ sơ & Sở thích)')).toBeTruthy();
+    expect(screen.getByText('Episodic (Ký ức tình tiết & Tác vụ)')).toBeTruthy();
+    expect(screen.getByText('Semantic (Tri thức & RAG)')).toBeTruthy();
+    expect(screen.getByText('Finance Operations')).toBeTruthy();
+    expect(screen.getByText('5 lượt')).toBeTruthy();
+    expect(screen.getByText('Cơ chế cách ly bộ nhớ (Anti-Leak Guard)')).toBeTruthy();
+  });
+
+  it('renders detailed RAG evidence with search and expands content preview', () => {
+    const ragEvidence = [
+      {
+        source: 'company_knowledge' as const,
+        retrievalStatus: 'success' as const,
+        chunkId: 'chunk-001',
+        documentId: 'doc-hr',
+        documentTitle: 'Chính sách nghỉ phép 2026',
+        section: 'Điều 5. Nghỉ phép năm',
+        sourceUrl: 'https://internal.wiki/leave',
+        relevanceScore: 0.942,
+        rerankScore: 0.965,
+        preview: 'Nhân viên có 12 ngày phép năm tiêu chuẩn...',
+        content: 'Nhân viên có 12 ngày phép năm tiêu chuẩn. Sau 5 năm làm việc được cộng thêm 1 ngày...',
+      },
+    ];
+
+    render(
+      <ExecutionTraceDrawer
+        onClose={vi.fn()}
+        activities={[
+          {
+            code: 'searching_relevant_information',
+            status: 'completed',
+            detail: { kind: 'documents_found', current: 1 },
+          },
+        ]}
+        message={{
+          id: 'msg-1',
+          role: 'assistant',
+          content: 'Bạn có 12 ngày phép.',
+          timestamp: '2026-08-25T08:00:00Z',
+          ragEvidence,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Bộ nhớ/ }));
+
+    expect(screen.getByText('Chính sách nghỉ phép 2026')).toBeTruthy();
+    expect(screen.getByText('Điều 5. Nghỉ phép năm')).toBeTruthy();
+    expect(screen.getByText('94.2% khớp')).toBeTruthy();
+    expect(screen.getByText('Rerank: 97%')).toBeTruthy();
+    expect(screen.getByText('Nhân viên có 12 ngày phép năm tiêu chuẩn...')).toBeTruthy();
+
+    // Expand chunk content
+    const expandBtn = screen.getByRole('button', { name: /Xem đầy đủ/ });
+    fireEvent.click(expandBtn);
+    expect(
+      screen.getByText(
+        'Nhân viên có 12 ngày phép năm tiêu chuẩn. Sau 5 năm làm việc được cộng thêm 1 ngày...',
+      ),
+    ).toBeTruthy();
+
+    // Search filter
+    const searchInput = screen.getByPlaceholderText('Lọc đoạn trích dẫn tri thức...');
+    fireEvent.change(searchInput, { target: { value: 'nghỉ phép' } });
+    expect(screen.getByText('Chính sách nghỉ phép 2026')).toBeTruthy();
+
+    fireEvent.change(searchInput, { target: { value: 'không tồn tại' } });
+    expect(screen.queryByText('Chính sách nghỉ phép 2026')).toBeNull();
+  });
+
+  it('copies full memory context snapshot to clipboard', () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(
+      <ExecutionTraceDrawer
+        onClose={vi.fn()}
+        activeProjectName="Marketing Campaign"
+        sessionTurnCount={3}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Bộ nhớ/ }));
+
+    const copyBtn = screen.getByRole('button', { name: 'Sao chép bối cảnh bộ nhớ' });
+    fireEvent.click(copyBtn);
+
+    expect(writeText).toHaveBeenCalledOnce();
+    const calledArg = JSON.parse(writeText.mock.calls[0][0]);
+    expect(calledArg.project).toBe('Marketing Campaign');
+    expect(calledArg.session_turn_count).toBe(3);
+    expect(calledArg.memory_tiers.short_term.status).toBe('active');
+    expect(calledArg.isolation_guard.fail_closed).toBe(true);
+  });
 });

@@ -318,6 +318,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
                   trace={displayedTraceMessage.executionTrace}
                   activities={displayedTraceMessage.activities}
                   generationStatus={displayedTraceMessage.generationStatus}
+                  message={displayedTraceMessage}
+                  activeProjectName={activeProject?.name}
+                  sessionTurnCount={messages.length}
                   onClose={() => setSelectedTraceMessage(null)}
                 />
               </div>
