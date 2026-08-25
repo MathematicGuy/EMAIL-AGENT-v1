@@ -101,15 +101,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     };
   }, []);
 
+  const handleChangeView = (view: ActiveDashboardView) => {
+    setActiveView(view);
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
+  };
+
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
     resetChat();
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
   };
 
   useEffect(() => {
     const handleNavigate = () => {
-      setActiveView('artifacts');
+      handleChangeView('artifacts');
     };
     window.addEventListener('navigate-to-artifacts', handleNavigate);
     return () => window.removeEventListener('navigate-to-artifacts', handleNavigate);
@@ -176,6 +184,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     if (!activeProjectId) await ensureDefaultProject();
     resetChat();
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
   };
 
   const handleSendMessage = async (text?: string) => {
@@ -187,6 +197,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     if (chat.projectId) setActiveProjectId(chat.projectId);
     void loadExistingChat(chat.id, chat.projectId);
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
   };
 
   const handleDeleteChat = (chat: RecentChat) => {
@@ -224,7 +236,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         activeChatId={activeConversationId ?? undefined}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
-        onChangeView={setActiveView}
+        onChangeView={handleChangeView}
         initialExpandedProjectIds={projects.map((p) => p.id)}
         isGenerating={isGenerating}
       />
@@ -239,93 +251,108 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           onOpenProjectDocuments={() => setIsProjectDocumentsOpen(true)}
         />
 
-        {activeView === 'mail' && (
-          <MailInboxView />
-        )}
-
-        {activeView === 'artifacts' && (
-          <ArtifactsView />
-        )}
-
-        {activeView === 'raw-documents' && (
-          <RawDocumentsView />
-        )}
-
-        <div className={`flex-1 flex min-h-0 relative overflow-hidden ${activeView === 'chat' ? '' : 'hidden'}`}>
+        <div className="flex-1 flex min-h-0 relative overflow-hidden">
           <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
-          {isTranscriptLoading || messages.length > 0 ? (
-            <ChatStreamView
-              messages={messages}
-              isTranscriptLoading={isTranscriptLoading}
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={handleSendMessage}
-              isGenerating={isGenerating}
-              onStopGeneration={stopGeneration}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              workflows={workflows}
-              onApproveWorkflowPlan={approveWorkflowPlan}
-              onReviseWorkflowPlan={reviseWorkflowPlan}
-              onRetryWorkflowStep={(taskId, stepId) =>
-                void retryWorkflowStep(taskId, stepId)
-              }
-              onRetryTurn={retryTurn}
-              onLoadFullEvidence={loadFullEvidence}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
-              onOpenMailInbox={() => setActiveView('mail')}
-              selectedTraceMessageId={selectedTraceMessage?.id}
-              onOpenExecutionTrace={handleToggleExecutionTrace}
-            />
-          ) : (
-            <HeroSection
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={handleSendMessage}
-              isGenerating={isGenerating}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
+            {activeView === 'mail' && (
+              <MailInboxView />
+            )}
+
+            {activeView === 'artifacts' && (
+              <ArtifactsView />
+            )}
+
+            {activeView === 'raw-documents' && (
+              <RawDocumentsView />
+            )}
+
+            <div className={`flex-1 flex min-h-0 relative overflow-hidden ${activeView === 'chat' ? '' : 'hidden'}`}>
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+              {isTranscriptLoading || messages.length > 0 ? (
+                <ChatStreamView
+                  messages={messages}
+                  isTranscriptLoading={isTranscriptLoading}
+                  inputText={inputText}
+                  onChangeText={setInputText}
+                  onSend={handleSendMessage}
+                  isGenerating={isGenerating}
+                  onStopGeneration={stopGeneration}
+                  selectedModel={selectedModel}
+                  onOpenModelModal={openModelSelector}
+                  onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+                  attachments={selectedAttachments}
+                  attachmentError={attachmentError}
+                  onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+                  onRemoveAttachment={removeAttachment}
+                  workflows={workflows}
+                  onApproveWorkflowPlan={approveWorkflowPlan}
+                  onReviseWorkflowPlan={reviseWorkflowPlan}
+                  onRetryWorkflowStep={(taskId, stepId) =>
+                    void retryWorkflowStep(taskId, stepId)
+                  }
+                  onRetryTurn={retryTurn}
+                  onLoadFullEvidence={loadFullEvidence}
+                  activeProject={activeProject}
+                  projects={projects}
+                  onSelectProject={handleSelectProject}
+                  onOpenMailInbox={() => handleChangeView('mail')}
+                  selectedTraceMessageId={selectedTraceMessage?.id}
+                  onOpenExecutionTrace={handleToggleExecutionTrace}
+                />
+              ) : (
+                <HeroSection
+                  inputText={inputText}
+                  onChangeText={setInputText}
+                  onSend={handleSendMessage}
+                  isGenerating={isGenerating}
+                  selectedModel={selectedModel}
+                  onOpenModelModal={openModelSelector}
+                  onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+                  attachments={selectedAttachments}
+                  attachmentError={attachmentError}
+                  onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+                  onRemoveAttachment={removeAttachment}
+                  activeProject={activeProject}
+                  projects={projects}
+                  onSelectProject={handleSelectProject}
+                />
+              )}
+              </div>
+
+              {/* Smooth Slide-in / Slide-out Execution Trace Drawer */}
+              <div
+                className={`min-h-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden z-20 shrink-0 border-[#413b34] bg-[#201e1b] ${
+                  selectedTraceMessage
+                    ? 'w-[360px] sm:w-[420px] max-w-[90vw] border-l opacity-100'
+                    : 'w-0 border-l-0 opacity-0 pointer-events-none'
+                }`}
+              >
+                {displayedTraceMessage && (
+                  <div className="w-[360px] sm:w-[420px] max-w-[90vw] h-full flex flex-col min-h-0 overflow-hidden">
+                    <ExecutionTraceDrawer
+                      trace={displayedTraceMessage.executionTrace}
+                      activities={displayedTraceMessage.activities}
+                      generationStatus={displayedTraceMessage.generationStatus}
+                      message={displayedTraceMessage}
+                      activeProjectName={activeProject?.name}
+                      sessionTurnCount={messages.length}
+                      onClose={() => setSelectedTraceMessage(null)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Smooth Slide-in / Slide-out Project Document Panel (pushes page left) */}
+          {projectDocumentsEnabled && (
+            <ProjectDocumentPanel
+              projectId={activeProjectId}
+              projectName={activeProject?.name}
+              isOpen={isProjectDocumentsOpen}
+              onClose={() => setIsProjectDocumentsOpen(false)}
+              hideTrigger
             />
           )}
-          </div>
-
-          {/* Smooth Slide-in / Slide-out Execution Trace Drawer */}
-          <div
-            className={`min-h-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden z-20 shrink-0 border-[#413b34] bg-[#201e1b] ${
-              selectedTraceMessage
-                ? 'w-[360px] sm:w-[420px] max-w-[90vw] border-l opacity-100'
-                : 'w-0 border-l-0 opacity-0 pointer-events-none'
-            }`}
-          >
-            {displayedTraceMessage && (
-              <div className="w-[360px] sm:w-[420px] max-w-[90vw] h-full flex flex-col min-h-0 overflow-hidden">
-                <ExecutionTraceDrawer
-                  trace={displayedTraceMessage.executionTrace}
-                  activities={displayedTraceMessage.activities}
-                  generationStatus={displayedTraceMessage.generationStatus}
-                  message={displayedTraceMessage}
-                  activeProjectName={activeProject?.name}
-                  sessionTurnCount={messages.length}
-                  onClose={() => setSelectedTraceMessage(null)}
-                />
-              </div>
-            )}
-          </div>
         </div>
       </main>
 
@@ -354,16 +381,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
           resetChat();
         }}
       />
-
-      {projectDocumentsEnabled && (
-        <ProjectDocumentPanel
-          projectId={activeProjectId}
-          projectName={activeProject?.name}
-          isOpen={isProjectDocumentsOpen}
-          onClose={() => setIsProjectDocumentsOpen(false)}
-          hideTrigger
-        />
-      )}
 
       {backgroundCompletion && (
         <div

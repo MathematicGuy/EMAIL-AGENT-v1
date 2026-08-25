@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass, replace
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol, cast
 from uuid import uuid4
@@ -30,7 +29,6 @@ from cowork_agent.domain.chat_contracts import (
     ChatRoute,
     ChatTurn,
     ChatTurnStatus,
-    EpisodeSourceType,
     MemoryCitationType,
     MemoryContextRequest,
     RoutingOutcome,
@@ -38,6 +36,12 @@ from cowork_agent.domain.chat_contracts import (
     transition_activity_snapshot,
 )
 from cowork_agent.domain.project_documents import ProjectDocumentEvidence, ProjectDocumentResponse
+from cowork_agent.domain.report_artifacts import (
+    DEFAULT_REPORT_STEM,
+    ReportArtifact,
+    ReportArtifactStore,
+    ReportFilename,
+)
 from cowork_agent.domain.target_contracts import ValidationStatus
 
 from .generation_context import (
@@ -46,7 +50,7 @@ from .generation_context import (
     assemble_generation_context,
 )
 from .intent.service import ChatRoutingService
-from .memory_gateway import MemoryGateway, MemorySourceUnavailableError
+from .memory_gateway import MemoryGateway
 from .ports import (
     ChatHistoryPort,
     ChatReplyChunk,
@@ -54,16 +58,25 @@ from .ports import (
     ChatTaskProposal,
     GeneratedReportArtifact,
 )
-from .retention import compute_expires_at
 from .retrieval_policy import (
     clarification_memory_reads,
     is_explicit_task_request,
     select_memory_reads,
 )
+from .task_episode_settlement import (
+    PendingTaskEpisode,
+    TaskEpisodeSettler,
+    TurnAborted,
+)
+from .turn_journal import (
+    CancellationCheck,
+    CancellationGuard,
+    Clock,
+    IdFactory,
+    TurnJournal,
+    never_cancelled,
+)
 
-IdFactory = Callable[[], str]
-Clock = Callable[[], datetime]
-CancellationCheck = Callable[[], Awaitable[bool]]
 logger = logging.getLogger(__name__)
 
 
@@ -73,10 +86,6 @@ def _new_id() -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-async def _never_cancelled() -> bool:
-    return False
 
 
 def _fallback_conversation_title(message: str) -> str:
@@ -260,28 +269,6 @@ class ChatResponseInvalid(ChatReplyUnavailable):
     """
 
 
-@dataclass(frozen=True, slots=True)
-class _PendingTaskEpisode:
-    request: ChatMessageRequest
-    episode: TaskEpisode
-    replay_prefix: tuple[ChatMessageStreamEvent, ...]
-    expires_at: datetime | None = None
-
-
-def _proposal_payload(episode: TaskEpisode) -> dict[str, object]:
-    """Frontend-safe structured proposal for the task_proposal SSE event."""
-    return {
-        "episode_id": episode.episode_id,
-        "task_title": episode.task_title,
-        "minimal_request_paraphrase": episode.minimal_request_paraphrase,
-        "action_plan": list(episode.action_plan),
-        "missing_information": list(episode.missing_information),
-        "rag_citations": [citation.to_dict() for citation in episode.rag_citations],
-        "validation_status": episode.validation_status.value,
-        "retrieval_eligible": episode.retrieval_eligible,
-    }
-
-
 class UnavailableChatReply:
     """Fail-closed runtime default until a chat-capable LLM adapter is configured."""
 
@@ -397,10 +384,12 @@ class ChatController:
         routing: ChatRoutingService | None = None,
         company_rag_enabled: bool = True,
         history: ChatHistoryPort | None = None,
+        reports: ReportArtifactStore | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
         self._reply = reply
+        self._reports = reports
         self._new_id = new_id
         self._clock = clock
         self._episode_retention_seconds = episode_retention_seconds
@@ -410,12 +399,21 @@ class ChatController:
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
-        self._pending_task_episodes: dict[str, _PendingTaskEpisode] = {}
         self._task_episodes: dict[str, TaskEpisode] = {}
         self._routing_outcomes: dict[str, RoutingOutcome] = {}
         self._turns_by_id: dict[str, ChatTurn] = {}
         self._cancelled_turn_ids: set[str] = set()
         self._turn_lock = asyncio.Lock()
+        self._settler = TaskEpisodeSettler(
+            scope=scope,
+            memory=memory,
+            new_id=new_id,
+            clock=clock,
+            episode_retention_seconds=episode_retention_seconds,
+            episodes=self._task_episodes,
+            completed=self._completed,
+            turns_by_id=self._turns_by_id,
+        )
 
     async def cancel_turn(self, turn_id: str) -> bool:
         """Cancel only the named active turn; navigation never calls this method."""
@@ -496,56 +494,52 @@ class ChatController:
             error_code=error_code,
         )
 
-    async def _set_activity(
-        self,
-        turn: ChatTurn,
-        code: ChatActivityCode,
-        status: ChatActivityStatus,
-        *,
-        outcome: ChatActivityOutcome | None = None,
-        detail: ChatActivityDetail | None = None,
-        append: tuple[ChatActivityCode, ...] = (),
-    ) -> tuple[ChatTurn, ChatMessageStreamEvent]:
-        activities = transition_activity_snapshot(
-            turn.activities,
-            code,
-            status,
-            at=self._clock(),
-            outcome=outcome,
-            detail=detail,
-        )
-        activities = (*activities, *(ChatActivity.pending(item) for item in append))
-        updated = replace(turn, activities=activities)
-        if self._history is not None:
-            try:
-                updated = await self._history.update_turn(self._scope, updated)
-            except Exception:
-                logger.exception("Unable to persist chat activity progress")
-        self._turns_by_id[updated.turn_id] = updated
-        return updated, self._activity_event(updated)
+    async def _persist_completed_turn(self, turn: ChatTurn, *, title: str) -> ChatTurn:
+        """Write the finished turn, or abort the stream if the store refuses it.
 
-    def _activity_event(self, turn: ChatTurn) -> ChatMessageStreamEvent:
-        return ChatMessageStreamEvent.activity(
-            event_id=self._new_id(),
-            session_id=self._scope.session_id,
-            turn_id=turn.turn_id,
-            activities=turn.activities,
-        )
+        Both completion paths -- a normal turn and a task turn -- end here, so
+        the failure they report to the client cannot drift apart again.
+        """
+
+        if self._history is None:
+            return turn
+        try:
+            return await self._history.update_turn(self._scope, turn, title=title)
+        except Exception:
+            logger.exception("Unable to persist completed chat turn")
+            raise TurnAborted(
+                self._error(
+                    turn_id=turn.turn_id,
+                    code="chat_history_unavailable",
+                    safe_message="Không thể lưu câu trả lời. Vui lòng thử lại.",
+                )
+            ) from None
 
     @observe(name="chat_stream_message")
     async def stream_message(
         self,
         request: ChatMessageRequest,
         *,
-        is_cancelled: CancellationCheck = _never_cancelled,
+        is_cancelled: CancellationCheck = never_cancelled,
     ) -> AsyncIterator[ChatMessageStreamEvent]:
         """Persist the user turn first, then stream and update that durable row."""
 
         if request.session_id != self._scope.session_id:
             raise ChatScopeMismatch("message session does not match the verified chat scope")
 
+        guard = CancellationGuard(is_cancelled, self._cancelled_turn_ids)
+        try:
+            async for event in self._stream_turn(request, guard):
+                yield event
+        except TurnAborted as abort:
+            # A durable write refused the turn: report it once, and stop.
+            yield abort.event
+
+    async def _stream_turn(
+        self, request: ChatMessageRequest, guard: CancellationGuard
+    ) -> AsyncIterator[ChatMessageStreamEvent]:
         async with self._turn_lock:
-            pending = self._pending_task_episodes.get(request.idempotency_key)
+            pending = self._settler.pending_for(request.idempotency_key)
             if pending is not None:
                 if pending.request != request:
                     yield self._error(
@@ -554,7 +548,7 @@ class ChatController:
                         safe_message="Khóa idempotency này đã được dùng cho một tin nhắn khác.",
                     )
                     return
-                async for event in self._retry_pending_task_episode(pending, is_cancelled):
+                async for event in self._settler.replay(pending, guard):
                     yield event
                 return
 
@@ -569,13 +563,13 @@ class ChatController:
                     )
                     return
                 for event in cached_events:
-                    if await is_cancelled():
+                    if await guard.tripped():
                         return
                     yield event
                 return
 
             turn_id = self._new_id()
-            if await is_cancelled():
+            if await guard.tripped():
                 return
 
             temporary_title = _fallback_conversation_title(request.user_message)
@@ -610,6 +604,7 @@ class ChatController:
                     )
                     return
             turn_id = pending_turn.turn_id
+            guard.watch(turn_id)
             replay_completed = pending_turn.status is ChatTurnStatus.COMPLETED
             if pending_turn.status not in {
                 ChatTurnStatus.GENERATING,
@@ -631,7 +626,14 @@ class ChatController:
                     pending_turn = await self._history.update_turn(
                         self._scope, pending_turn, title=temporary_title
                     )
-            self._turns_by_id[turn_id] = pending_turn
+            journal = TurnJournal(
+                pending_turn,
+                scope=self._scope,
+                history=self._history,
+                clock=self._clock,
+                new_id=self._new_id,
+                registry=self._turns_by_id,
+            )
             started = ChatMessageStreamEvent.started(
                 event_id=self._new_id(),
                 session_id=self._scope.session_id,
@@ -640,28 +642,28 @@ class ChatController:
             emitted: list[ChatMessageStreamEvent] = [started]
             yield started
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
-            if pending_turn.activities:
-                initial_activity = self._activity_event(pending_turn)
+            if journal.turn.activities:
+                initial_activity = journal.activity_event()
                 emitted.append(initial_activity)
                 yield initial_activity
 
-            if replay_completed and pending_turn.assistant_message is not None:
+            if replay_completed and journal.turn.assistant_message is not None:
                 # A durable replay carries its canonical terminal snapshot.
                 delta = ChatMessageStreamEvent.delta(
                     event_id=self._new_id(),
                     session_id=self._scope.session_id,
                     turn_id=turn_id,
-                    text=pending_turn.assistant_message,
+                    text=journal.turn.assistant_message,
                 )
                 completed = ChatMessageStreamEvent.completed(
                     event_id=self._new_id(),
                     session_id=self._scope.session_id,
                     turn_id=turn_id,
-                    rag_evidence=pending_turn.rag_evidence,
-                    retrieval_status=pending_turn.retrieval_status,
-                    execution_trace=pending_turn.execution_trace,
+                    rag_evidence=journal.turn.rag_evidence,
+                    retrieval_status=journal.turn.retrieval_status,
+                    execution_trace=journal.turn.execution_trace,
                 )
                 emitted.extend((delta, completed))
                 self._completed[request.idempotency_key] = (request, tuple(emitted))
@@ -669,7 +671,7 @@ class ChatController:
                 yield completed
                 return
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
 
             routing_outcome = await self._route_turn(request)
@@ -691,8 +693,7 @@ class ChatController:
                 ChatActivityCode.REVIEWING_CONTEXT,
                 final_activity,
             )
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.UNDERSTANDING_REQUEST,
                 ChatActivityStatus.COMPLETED,
                 outcome=ChatActivityOutcome.SUCCESS,
@@ -706,23 +707,21 @@ class ChatController:
                 else ChatResponseMode.NORMAL
             )
             project_documents: ProjectDocumentResponse | None = None
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.REVIEWING_CONTEXT,
                 ChatActivityStatus.RUNNING,
             )
             emitted.append(activity_event)
             yield activity_event
             if searches_information:
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     ChatActivityCode.SEARCHING_RELEVANT_INFORMATION,
                     ChatActivityStatus.RUNNING,
                 )
                 emitted.append(activity_event)
                 yield activity_event
             if routing_outcome is not None and routing_outcome.route is ChatRoute.RAG:
-                project_documents = await self._memory._read_project_documents(
+                project_documents = await self._memory.read_project_documents(
                     query=routing_outcome.retrieval_query or request.user_message,
                     document_ids=request.document_ids,
                 )
@@ -748,8 +747,7 @@ class ChatController:
                     "unavailable": ChatActivityOutcome.DEGRADED,
                     None: ChatActivityOutcome.NO_RESULTS,
                 }[retrieval_status]
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     ChatActivityCode.SEARCHING_RELEVANT_INFORMATION,
                     ChatActivityStatus.COMPLETED,
                     outcome=search_outcome,
@@ -759,8 +757,7 @@ class ChatController:
                 )
                 emitted.append(activity_event)
                 yield activity_event
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 ChatActivityCode.REVIEWING_CONTEXT,
                 ChatActivityStatus.COMPLETED,
                 outcome=(
@@ -797,15 +794,14 @@ class ChatController:
             trace_model: str | None = None
             trace_mode: str | None = None
             reasoning_parts: list[str] = []
-            pending_task_episode: _PendingTaskEpisode | None = None
+            pending_task_episode: PendingTaskEpisode | None = None
             generation_context = assemble_generation_context(
                 request,
                 context,
                 response_mode=response_mode,
                 project_documents=project_documents,
             )
-            pending_turn, activity_event = await self._set_activity(
-                pending_turn,
+            activity_event = await journal.record(
                 final_activity,
                 ChatActivityStatus.RUNNING,
             )
@@ -813,7 +809,7 @@ class ChatController:
             yield activity_event
             try:
                 async for chunk in self._reply.stream_reply(request, generation_context):
-                    if turn_id in self._cancelled_turn_ids or await is_cancelled():
+                    if await guard.tripped():
                         return
                     if isinstance(chunk, ChatReplyChunk):
                         if chunk.task_proposal is not None:
@@ -853,8 +849,8 @@ class ChatController:
                     if isinstance(exc, ChatResponseInvalid)
                     else "chat_provider_unavailable"
                 )
-                failed = await self._fail_turn(pending_turn, code=code)
-                yield self._activity_event(failed)
+                failed = await self._fail_turn(journal.turn, code=code)
+                yield journal.activity_event(failed)
                 yield self._error(
                     turn_id=turn_id,
                     code=code,
@@ -862,12 +858,12 @@ class ChatController:
                 )
                 return
 
-            if turn_id in self._cancelled_turn_ids or await is_cancelled():
+            if await guard.tripped():
                 return
             assistant_message = "".join(chunks)
             if not assistant_message:
-                failed = await self._fail_turn(pending_turn, code="empty_chat_response")
-                yield self._activity_event(failed)
+                failed = await self._fail_turn(journal.turn, code="empty_chat_response")
+                yield journal.activity_event(failed)
                 yield self._error(
                     turn_id=turn_id,
                     code="empty_chat_response",
@@ -881,33 +877,41 @@ class ChatController:
                 and _is_report_request(request.user_message)
                 and len(assistant_message.strip()) > 50
             ):
-                filename = _fallback_report_filename(request.user_message, conversation_title)
-                title = conversation_title or "Báo cáo tổng hợp"
                 generated_report = GeneratedReportArtifact(
-                    filename=filename,
-                    title=title,
+                    filename=_fallback_report_filename(
+                        request.user_message, conversation_title
+                    ),
+                    title=conversation_title or "Báo cáo tổng hợp",
                     content=assistant_message,
                 )
 
-            if generated_report is not None:
+            if generated_report is not None and self._reports is not None:
+                # ``sanitize``, not ``parse``: the provider names this file, so an
+                # unusable name has to degrade to a safe slug rather than drop a
+                # report the user asked for. Either way the name that reaches the
+                # store cannot address anything outside the report folder.
+                filename = ReportFilename.sanitize(generated_report.filename)
                 try:
-                    from pathlib import Path
-                    reports_dir = Path(__file__).resolve().parents[4] / "data" / "reports"
-                    reports_dir.mkdir(parents=True, exist_ok=True)
-                    report_file = reports_dir / generated_report.filename
-                    report_file.write_text(generated_report.content, encoding="utf-8")
+                    stored = await self._reports.save(
+                        ReportArtifact(
+                            filename=filename,
+                            content=generated_report.content,
+                            title=generated_report.title,
+                        )
+                    )
+                except (OSError, ValueError) as save_err:
+                    logger.warning("Failed to save generated report artifact: %s", save_err)
+                else:
                     generated_artifact_refs = (
                         {
-                            "ref_id": generated_report.filename,
+                            "ref_id": stored.filename.value,
                             "checksum": "",
                             "provenance": {
-                                "upload_filename": generated_report.filename,
+                                "upload_filename": stored.filename.value,
                                 "title": generated_report.title,
                             },
                         },
                     )
-                except Exception as save_err:
-                    logger.warning("Failed to save generated report artifact: %s", save_err)
 
             rag_evidence, retrieval_status = _rag_evidence(
                 generation_context, project_documents
@@ -938,8 +942,7 @@ class ChatController:
                 and is_explicit_task_request(request)
             )
             if not task_requested:
-                pending_turn, activity_event = await self._set_activity(
-                    pending_turn,
+                activity_event = await journal.record(
                     final_activity,
                     ChatActivityStatus.COMPLETED,
                     outcome=ChatActivityOutcome.SUCCESS,
@@ -947,7 +950,7 @@ class ChatController:
                 emitted.append(activity_event)
                 yield activity_event
             turn = replace(
-                    pending_turn,
+                    journal.turn,
                     assistant_message=assistant_message,
                     status=(
                         ChatTurnStatus.GENERATING
@@ -976,27 +979,15 @@ class ChatController:
                     artifact_refs=generated_artifact_refs,
                     completed_at=None if task_requested else self._clock(),
             )
-            if self._history is not None:
-                try:
-                    turn = await self._history.update_turn(
-                        self._scope,
-                        turn,
-                        title=(
-                            conversation_title
-                            or _fallback_conversation_title(request.user_message)
-                        ),
-                    )
-                except Exception:
-                    logger.exception("Unable to persist completed chat turn")
-                    yield self._error(
-                        turn_id=turn_id,
-                        code="chat_history_unavailable",
-                        safe_message="Không thể lưu câu trả lời. Vui lòng thử lại.",
-                    )
-                    return
+            turn = await self._persist_completed_turn(
+                turn,
+                title=(
+                    conversation_title or _fallback_conversation_title(request.user_message)
+                ),
+            )
             if not task_requested:
                 self._memory.append_turn(turn)
-            self._turns_by_id[turn_id] = turn
+            journal.adopt(turn)
             try:
                 from langfuse import get_client
 
@@ -1032,100 +1023,38 @@ class ChatController:
                     emitted.append(citation)
                     yield citation
             if task_requested:
-                action_plan_degraded = False
-                if task_proposal is None:
-                    action_plan_degraded = True
-                    warning = self._error(
-                        turn_id=turn_id,
-                        code="task_episode_unavailable",
-                        safe_message="Không thể lưu đề xuất công việc.",
-                    )
-                    emitted.append(warning)
-                    yield warning
-                else:
-                    episode = self._new_task_episode(turn_id, task_proposal)
-                    expires_at = compute_expires_at(self._clock(), self._episode_retention_seconds)
-                    try:
-                        episode = await self._memory.write_task_episode(
-                            episode, expires_at=expires_at
-                        )
-                    except MemorySourceUnavailableError:
-                        action_plan_degraded = True
-                        pending_task_episode = _PendingTaskEpisode(
-                            request=request,
-                            episode=episode,
-                            replay_prefix=tuple(emitted),
-                            expires_at=expires_at,
-                        )
-                        warning = self._error(
-                            turn_id=turn_id,
-                            code="task_episode_unavailable",
-                            safe_message="Không thể lưu đề xuất công việc.",
-                        )
-                        emitted.append(warning)
-                        yield warning
-                    except ValueError:
-                        action_plan_degraded = True
-                        warning = self._error(
-                            turn_id=turn_id,
-                            code="task_episode_unavailable",
-                            safe_message="Không thể lưu đề xuất công việc.",
-                        )
-                        emitted.append(warning)
-                        yield warning
-                    else:
-                        self._task_episodes[episode.episode_id] = episode
-                        citation = ChatMessageStreamEvent.memory_citation(
-                            event_id=self._new_id(),
-                            session_id=self._scope.session_id,
-                            turn_id=turn_id,
-                            memory_type=MemoryCitationType.EPISODIC,
-                            source_id=episode.episode_id,
-                        )
-                        emitted.append(citation)
-                        yield citation
-                        proposal_event = ChatMessageStreamEvent.task_proposal(
-                            event_id=self._new_id(),
-                            session_id=self._scope.session_id,
-                            turn_id=turn_id,
-                            proposal=_proposal_payload(episode),
-                        )
-                        emitted.append(proposal_event)
-                        yield proposal_event
-                turn, activity_event = await self._set_activity(
-                    turn,
+                settlement = await self._settler.settle(
+                    request=request,
+                    turn_id=turn_id,
+                    proposal=task_proposal,
+                    replay_prefix=tuple(emitted),
+                )
+                pending_task_episode = settlement.pending
+                for event in settlement.events:
+                    emitted.append(event)
+                    yield event
+                activity_event = await journal.record(
                     final_activity,
                     ChatActivityStatus.COMPLETED,
                     outcome=(
                         ChatActivityOutcome.DEGRADED
-                        if action_plan_degraded
+                        if settlement.degraded
                         else ChatActivityOutcome.SUCCESS
                     ),
                 )
                 turn = replace(
-                    turn,
+                    journal.turn,
                     status=ChatTurnStatus.COMPLETED,
                     completed_at=self._clock(),
                 )
-                if self._history is not None:
-                    try:
-                        turn = await self._history.update_turn(
-                            self._scope,
-                            turn,
-                            title=(
-                                conversation_title
-                                or _fallback_conversation_title(request.user_message)
-                            ),
-                        )
-                    except Exception:
-                        logger.exception("Unable to persist completed chat turn")
-                        yield self._error(
-                            turn_id=turn_id,
-                            code="chat_history_unavailable",
-                            safe_message="Không thể lưu câu trả lời. Vui lòng thử lại.",
-                        )
-                        return
-                self._turns_by_id[turn_id] = turn
+                turn = await self._persist_completed_turn(
+                    turn,
+                    title=(
+                        conversation_title
+                        or _fallback_conversation_title(request.user_message)
+                    ),
+                )
+                journal.adopt(turn)
                 self._memory.append_turn(turn)
                 emitted.append(activity_event)
                 yield activity_event
@@ -1147,64 +1076,8 @@ class ChatController:
             completed_stream = tuple(emitted)
             self._completed[request.idempotency_key] = (request, completed_stream)
             if pending_task_episode is not None:
-                self._pending_task_episodes[request.idempotency_key] = pending_task_episode
+                self._settler.remember_pending(request.idempotency_key, pending_task_episode)
             yield completed
-
-    async def _retry_pending_task_episode(
-        self,
-        pending: _PendingTaskEpisode,
-        is_cancelled: CancellationCheck,
-    ) -> AsyncIterator[ChatMessageStreamEvent]:
-        if await is_cancelled():
-            return
-        try:
-            episode = await self._memory.write_task_episode(
-                pending.episode, expires_at=pending.expires_at
-            )
-        except MemorySourceUnavailableError:
-            _, cached_events = self._completed[pending.request.idempotency_key]
-            for event in cached_events:
-                if await is_cancelled():
-                    return
-                yield event
-            return
-        except ValueError:
-            del self._pending_task_episodes[pending.request.idempotency_key]
-            _, cached_events = self._completed[pending.request.idempotency_key]
-            for event in cached_events:
-                if await is_cancelled():
-                    return
-                yield event
-            return
-
-        self._task_episodes[episode.episode_id] = episode
-        citation = ChatMessageStreamEvent.memory_citation(
-            event_id=self._new_id(),
-            session_id=self._scope.session_id,
-            turn_id=episode.chat_turn_id,
-            memory_type=MemoryCitationType.EPISODIC,
-            source_id=episode.episode_id,
-        )
-        proposal_event = ChatMessageStreamEvent.task_proposal(
-            event_id=self._new_id(),
-            session_id=self._scope.session_id,
-            turn_id=episode.chat_turn_id,
-            proposal=_proposal_payload(episode),
-        )
-        completed_turn = self._turns_by_id.get(episode.chat_turn_id)
-        completed = ChatMessageStreamEvent.completed(
-            event_id=self._new_id(),
-            session_id=self._scope.session_id,
-            turn_id=episode.chat_turn_id,
-            execution_trace=completed_turn.execution_trace if completed_turn is not None else None,
-        )
-        replay = (*pending.replay_prefix, citation, proposal_event, completed)
-        self._completed[pending.request.idempotency_key] = (pending.request, replay)
-        del self._pending_task_episodes[pending.request.idempotency_key]
-        for event in replay:
-            if await is_cancelled():
-                return
-            yield event
 
     async def approve_task_episode(self, episode_id: str) -> TaskEpisode | None:
         return await self._transition_task_episode(episode_id, ValidationStatus.USER_APPROVED)
@@ -1237,7 +1110,7 @@ class ChatController:
         outcome = await self._routing.route(
             scope=self._scope,
             request=request,
-            recent_turns=self._memory._read_active_turns(),
+            recent_turns=self._memory.read_active_turns(),
         )
         self._routing_outcomes[request.idempotency_key] = outcome
         return outcome
@@ -1256,38 +1129,6 @@ class ChatController:
             session_id=self._scope.session_id,
             scope=self._scope,
             reads=reads,
-        )
-
-    def _new_task_episode(self, turn_id: str, proposal: ChatTaskProposal) -> TaskEpisode:
-        """Build a body-free task record from trusted scope and turn metadata only."""
-
-        created_at = self._clock()
-        record_input = "\x1f".join(
-            (self._scope.user_id, self._scope.session_id, turn_id)
-        )
-        return TaskEpisode(
-            episode_id=self._new_id(),
-            record_id=hashlib.sha256(record_input.encode("utf-8")).hexdigest(),
-            user_id=self._scope.user_id,
-            chat_session_id=self._scope.session_id,
-            chat_turn_id=turn_id,
-            creation_reason="explicit_user_task_request",
-            task_title=proposal.task_title,
-            minimal_request_paraphrase=proposal.minimal_request_paraphrase,
-            action_plan=proposal.action_plan,
-            rag_citations=proposal.rag_citations,
-            missing_information=proposal.missing_information,
-            validation_status=ValidationStatus.SYSTEM_GENERATED,
-            retrieval_eligible=False,
-            source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
-            created_at=created_at,
-            updated_at=created_at,
-            pipeline_version="v2-m4",
-            model_id=proposal.model_id,
-            prompt_version=proposal.prompt_version,
-            confidence=proposal.confidence,
-            project_id=self._scope.project_id,
-            supersedes=proposal.supersedes,
         )
 
     async def _transition_task_episode(
@@ -1312,7 +1153,7 @@ class ChatController:
         episode = self._task_episodes.get(episode_id)
         if episode is not None:
             return episode
-        episode = await self._memory._read_task_episode(episode_id)
+        episode = await self._memory.read_task_episode(episode_id)
         if episode is not None:
             self._task_episodes[episode_id] = episode
         return episode
@@ -1351,17 +1192,16 @@ def _is_report_request(message: str) -> bool:
 
 
 def _fallback_report_filename(message: str, title: str | None) -> str:
-    import re
-    import unicodedata
+    """Name a report the provider produced without naming.
 
-    raw = title or message
-    text = unicodedata.normalize("NFKD", raw)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    slug = re.sub(r"[^\w\s-]", "", text.lower()).strip()
-    slug = re.sub(r"[-\s]+", "-", slug)[:40].strip("-")
-    if not slug:
-        slug = "bao-cao-tong-hop"
-    if not slug.startswith("bao-cao"):
-        slug = f"bao-cao-{slug}"
-    return f"{slug}.md"
+    The slug rule lives in ``ReportFilename.sanitize``; this only adds the
+    ``bao-cao-`` prefix the artifacts view sorts on, and keeps the stem short
+    enough to stay readable in the file list.
+    """
+    stem = ReportFilename.sanitize(title or message).value.removesuffix(".md")[:40].strip("-")
+    if not stem:
+        stem = DEFAULT_REPORT_STEM
+    if not stem.startswith("bao-cao"):
+        stem = f"bao-cao-{stem}"
+    return f"{stem}.md"
 

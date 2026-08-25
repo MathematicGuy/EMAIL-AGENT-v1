@@ -13,10 +13,11 @@
 
 | Category | Implemented Component | Runtime Responsibility | Authoritative Code Location |
 |---|---|---|---|
-| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, Langfuse bootstrap, and API route mounts. | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) |
+| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, Langfuse bootstrap, and router mounts. Composed dependencies live in one typed `CoworkRuntime` value built by [`composition.py`](../../../src/cowork_agent/composition.py) and read through the `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). Transport lives in the routers, not here: `app.py` serves only `/health`, and OAuth, connections, digest runs and the document surfaces are `create_*_router()` modules under `api/` ([ADR-015](../../../tasks/adr/ADR-015-routers-own-their-transport.md)). | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py), [`src/cowork_agent/api/`](../../../src/cowork_agent/api) |
 | **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
 | **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes` with `supersedes`), and Semantic memory scopes, with live reasoning and report artifact generation. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
 | **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
+| **Report Artifact Store** | Report Folder Owner (`data/reports/`) | Single naming rule (`ReportFilename`) and single store port behind `/api/v1/reports`, shared by the artifacts view and the AI Chat turn that generates a report. | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py), [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) & [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
 | **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
 | **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Turbovec 4-bit + BM25 + RRF over committed Markdown (`data/extracted/*.md`). | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
 | **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set (migrations 001–016). | [`persistence/repositories`](../../../src/cowork_agent/persistence/repositories) |
@@ -49,7 +50,8 @@
 | `POST /v1/cowork/chat/sessions/{id}/mail-scans` | Persists aggregate email scan summaries into chat history | AI Chat Subsystem |
 | `GET /v1/cowork/chat/document-health` | Diagnostic health endpoint for User Document RAG stack | User Documents Subsystem |
 | `POST /v1/cowork/chat/projects` & `POST /v1/cowork/chat/projects/{id}/documents` | Project workspace management & document ingestion | User Documents Subsystem |
-| `GET/POST /api/v1/raw-documents/*` & `/api/v1/reports/*` | Document editing, DOCX viewing, and markdown report generation | Raw Documents Subsystem |
+| `GET/POST /api/v1/raw-documents/*` | Raw DOCX/PDF viewing, editing, and save history | Raw Documents Subsystem |
+| `GET/POST /api/v1/reports`, `POST /api/v1/reports/open-folder`, `GET /api/v1/reports/{filename}/download`, `GET /api/v1/reports/{filename}/pdf`, `DELETE /api/v1/reports/{filename}` | Lists, saves, reveals, downloads, and deletes Markdown report artifacts in `data/reports/`. PDF export answers `501 pdf_export_unavailable` until a `ReportPdfRenderer` is registered. | Report Artifact Store |
 
 ### 1.4 External Providers & Services
 
@@ -72,7 +74,7 @@ flowchart TB
         REACT["React 19 SPA Client<br/>(Execution Trace Drawer & DOCX Viewer)"]
     end
 
-    subgraph CONTROL_PLANE["FastAPI Control Plane (app.py)"]
+    subgraph CONTROL_PLANE["FastAPI Control Plane (app.py + api/ routers)"]
         AUTH["Identity & OAuth Handler<br/>(Google OAuth 2.0 PKCE)"]
         EMAIL_ROUTER["Email API Router<br/>(/v1/mail-todo/*)"]
         CHAT_ROUTER["AI Chat Router<br/>(/v1/cowork/chat/*)"]

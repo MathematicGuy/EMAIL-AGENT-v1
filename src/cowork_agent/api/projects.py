@@ -1,11 +1,12 @@
 """FastAPI project-document transport; storage credentials stay server-side."""
 
-from collections.abc import Awaitable, Callable
-from typing import Protocol, cast
+from typing import Protocol
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from cowork_agent.composition import runtime
+from cowork_agent.config import UserDocumentsSettings
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.integrations.storage.supabase import StorageUnavailable
 from cowork_agent.persistence.repositories.projects import (
@@ -13,8 +14,6 @@ from cowork_agent.persistence.repositories.projects import (
     Project,
     ProjectDocument,
 )
-
-PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 
 
 class ProjectRepository(Protocol):
@@ -99,8 +98,8 @@ def create_project_router() -> APIRouter:
         if await _projects(request).require_project(principal, project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
         try:
-            settings = request.app.state.user_documents_settings
-            if payload.byte_size > settings.max_file_bytes:
+            settings = _user_documents_settings(request)
+            if settings is None or payload.byte_size > settings.max_file_bytes:
                 raise HTTPException(status_code=413, detail="document_too_large")
             document, created = await _projects(request).create_or_get_document(
                 principal=principal,
@@ -228,7 +227,8 @@ def create_project_router() -> APIRouter:
         )
         if result is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        sessions = getattr(request.app.state, "chat_sessions", None)
+        chat = runtime(request).chat
+        sessions = chat.chat_sessions if chat is not None else None
         if sessions is not None and hasattr(sessions, "delete_project"):
             await sessions.delete_project(
                 user_id=principal.user_id,
@@ -264,17 +264,34 @@ def create_project_router() -> APIRouter:
     return router
 
 
+def _user_documents_settings(request: Request) -> UserDocumentsSettings | None:
+    # Typed read through the runtime seam (ADR-013): the settings belong to
+    # the chat group; an uncomposed group reads as absent exactly like the
+    # old missing-key getattr did.
+    chat = runtime(request).chat
+    return chat.user_documents_settings if chat is not None else None
+
+
 def _require_user_documents_enabled(request: Request) -> None:
-    settings = getattr(request.app.state, "user_documents_settings", None)
+    settings = _user_documents_settings(request)
     if settings is None or not bool(getattr(settings, "enabled", False)):
         raise HTTPException(status_code=503, detail="User documents are disabled")
 
 
 async def _require_user_documents_ready(request: Request) -> None:
+    # The readiness gate spans three groups: storage (mailbox), the vector
+    # plane (email-rag), and the routing provider (chat). An uncomposed group
+    # degrades to the same 503 as the old missing-key getattr did.
+    mailbox = runtime(request).mailbox
+    email_rag = runtime(request).email_rag
+    chat = runtime(request).chat
     if (
-        getattr(request.app.state, "private_storage", None) is None
-        or getattr(request.app.state, "project_document_vectors", None) is None
-        or getattr(request.app.state, "chat_routing_service", None) is None
+        mailbox is None
+        or mailbox.private_storage is None
+        or email_rag is None
+        or email_rag.project_document_vectors is None
+        or chat is None
+        or chat.chat_routing_service is None
     ):
         raise HTTPException(status_code=503, detail="Project document plane unavailable")
     repository = _projects(request)
@@ -293,27 +310,28 @@ async def _owned_document(request: Request, project_id: str, document_id: str) -
 
 
 async def _principal(request: Request) -> VerifiedPrincipal:
-    resolver = cast(
-        PrincipalResolver | None,
-        getattr(request.app.state, "chat_principal_resolver", None),
-    )
+    chat = runtime(request).chat
+    resolver = chat.chat_principal_resolver if chat is not None else None
     if resolver is None:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
     return await resolver(request)
 
 
 def _projects(request: Request) -> ProjectRepository:
-    repository = getattr(request.app.state, "project_repository", None)
-    if repository is None:
+    # The repository lives in the control-plane group; the routes only call
+    # through the narrow ``ProjectRepository`` interface published above.
+    control_plane = runtime(request).control_plane
+    if control_plane is None:
         raise HTTPException(status_code=503, detail="Project storage unavailable")
-    return cast(ProjectRepository, repository)
+    return control_plane.project_repository  # type: ignore[return-value]
 
 
 def _storage(request: Request) -> PrivateStorage:
-    storage = getattr(request.app.state, "private_storage", None)
+    mailbox = runtime(request).mailbox
+    storage = mailbox.private_storage if mailbox is not None else None
     if storage is None:
         raise HTTPException(status_code=503, detail="Private storage unavailable")
-    return cast(PrivateStorage, storage)
+    return storage
 
 
 def _project_response(project: Project) -> dict[str, object]:

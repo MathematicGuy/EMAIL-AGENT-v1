@@ -3,12 +3,15 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
 
 from cowork_agent.app import _chat_controller_factory, _resolve_chat_principal
+from cowork_agent.composition import ChatRuntime, CoworkRuntime
+from cowork_agent.config import ChatMemorySettings
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -139,19 +142,60 @@ def _connection(*, connection_id: str, email: str) -> MailboxConnection:
     )
 
 
+def _runtime(
+    reply: object,
+    semantic_memory: RecordingSemanticMemory,
+    episodes: RecordingEpisodes | None,
+    *,
+    memory_settings: ChatMemorySettings | None = None,
+    sink: object | None = None,
+) -> CoworkRuntime:
+    """The composed value the controller factory reads (ADR-013).
+
+    Fields the factory never touches stay ``None``: this is the R2 owner of
+    controller composition, and it injects a runtime instead of bare
+    ``app.state`` keys.
+    """
+    chat = ChatRuntime(
+        chat_memory_settings=(
+            memory_settings or ChatMemorySettings(max_turns=4, ttl_seconds=60)
+        ),
+        chat_sessions=None,  # type: ignore[arg-type]
+        chat_session_buffer=InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60),
+        memory_metrics=None,  # type: ignore[arg-type]
+        memory_operation_sink=sink,  # type: ignore[arg-type]
+        user_documents_settings=None,  # type: ignore[arg-type]
+        ready_document_catalog=None,
+        chat_principal_resolver=None,  # type: ignore[arg-type]
+        chat_guest_session_issuer=None,  # type: ignore[arg-type]
+        chat_reply=reply,  # type: ignore[arg-type]
+        chat_intent_settings=None,
+        chat_routing_service=None,
+    )
+    return CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            chat_profile_repository=None,
+            chat_task_episode_repository=episodes,
+            chat_history_repository=None,
+        ),
+        chat=chat,
+        email_rag=SimpleNamespace(
+            semantic_memory=semantic_memory,
+            project_document_vectors=None,
+        ),
+    )
+
+
 def _controller(
     semantic_memory: RecordingSemanticMemory,
     episodes: RecordingEpisodes | None = None,
 ) -> tuple[object, RecordingReply]:
     app = FastAPI()
     reply = RecordingReply()
-    app.state.chat_session_buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
-    app.state.chat_profile_repository = None
-    app.state.chat_task_episode_repository = episodes
-    app.state.chat_reply = reply
+    app.state.runtime = _runtime(reply, semantic_memory, episodes)
 
     factory = _chat_controller_factory(app)
-    app.state.semantic_memory = semantic_memory
     return factory(_scope()), reply
 
 
@@ -210,7 +254,15 @@ def test_runtime_composition_passes_eligible_cross_session_episodes_as_advisory_
 def test_runtime_chat_principal_requires_exactly_one_active_mailbox_connection() -> None:
     def request_for(connections: tuple[MailboxConnection, ...]) -> Request:
         app = FastAPI()
-        app.state.connection_repository = ConnectionRepository(connections)
+        # The resolver now reads the typed control-plane seam (ADR-013): inject
+        # a minimal runtime instead of a bare ``app.state`` key.
+        app.state.runtime = CoworkRuntime(
+            reports=None,  # type: ignore[arg-type]
+            control_plane=SimpleNamespace(
+                connection_repository=ConnectionRepository(connections),
+                chat_opaque_session_repository=None,
+            ),
+        )
         return Request({"type": "http", "app": app, "headers": []})
 
     principal = asyncio.run(
@@ -265,14 +317,9 @@ def _controller_with_sink(
 ) -> tuple[object, RecordingReply]:
     app = FastAPI()
     reply = RecordingReply()
-    app.state.chat_session_buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
-    app.state.chat_profile_repository = None
-    app.state.chat_task_episode_repository = episodes
-    app.state.chat_reply = reply
-    app.state.memory_operation_sink = sink
+    app.state.runtime = _runtime(reply, semantic_memory, episodes, sink=sink)
 
     factory = _chat_controller_factory(app)
-    app.state.semantic_memory = semantic_memory
     return factory(_scope()), reply
 
 
@@ -329,9 +376,9 @@ def test_runtime_sink_failure_isolation() -> None:
 
 
 def test_factory_passes_episode_retention_seconds_from_chat_memory_settings() -> None:
-    """app.state.chat_memory_settings.episode_retention_seconds reaches the controller."""
+    """The chat group's chat_memory_settings.episode_retention_seconds reaches
+    the controller."""
 
-    from cowork_agent.config import ChatMemorySettings
     from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 
     class RecordingEpisodicPort:
@@ -382,14 +429,14 @@ def test_factory_passes_episode_retention_seconds_from_chat_memory_settings() ->
 
     port = RecordingEpisodicPort()
     app = FastAPI()
-    app.state.chat_session_buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
-    app.state.chat_profile_repository = None
-    app.state.chat_task_episode_repository = port
-    app.state.chat_reply = TaskProposalReply()
-    app.state.chat_memory_settings = ChatMemorySettings(
-        max_turns=4, ttl_seconds=60, episode_retention_seconds=7200
+    app.state.runtime = _runtime(
+        TaskProposalReply(),
+        RecordingSemanticMemory(_response()),
+        port,
+        memory_settings=ChatMemorySettings(
+            max_turns=4, ttl_seconds=60, episode_retention_seconds=7200
+        ),
     )
-    app.state.semantic_memory = RecordingSemanticMemory(_response())
 
     factory = _chat_controller_factory(app)
     controller = factory(_scope())

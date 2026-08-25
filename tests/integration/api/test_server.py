@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -84,14 +85,17 @@ def test_sqlite_fallback_wires_chat_history_into_scoped_controllers(
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
-            assert isinstance(app.state.chat_history_repository, SQLiteChatRepository)
-            scope = await app.state.chat_sessions.create(tenant_id="local", user_id="owner")
+            history_repository = app.state.runtime.control_plane.chat_history_repository
+            assert isinstance(history_repository, SQLiteChatRepository)
+            scope = await app.state.runtime.chat.chat_sessions.create(
+                tenant_id="local", user_id="owner"
+            )
 
             class AssertPendingBeforeReply:
                 observed_pending = False
 
                 async def stream_reply(self, _request: object, _context: object):
-                    turns = await app.state.chat_history_repository.list_turns(scope)
+                    turns = await history_repository.list_turns(scope)
                     assert len(turns) == 1
                     assert turns[0].status is ChatTurnStatus.GENERATING
                     assert turns[0].assistant_message is None
@@ -99,9 +103,14 @@ def test_sqlite_fallback_wires_chat_history_into_scoped_controllers(
                     yield "Reply"
 
             reply = AssertPendingBeforeReply()
-            app.state.chat_reply = reply
+            # The controller factory reads the composed runtime at creation
+            # time (ADR-013), so the test reply must land on the chat group.
+            app.state.runtime = replace(
+                app.state.runtime,
+                chat=replace(app.state.runtime.chat, chat_reply=reply),
+            )
             controller = app.state.chat_controller_factory(scope)
-            assert controller._history is app.state.chat_history_repository
+            assert controller._history is history_repository
             events = [
                 event
                 async for event in controller.stream_message(
@@ -112,7 +121,7 @@ def test_sqlite_fallback_wires_chat_history_into_scoped_controllers(
                     )
                 )
             ]
-            stored = await app.state.chat_history_repository.list_turns(scope)
+            stored = await history_repository.list_turns(scope)
             assert reply.observed_pending is True
             assert events[-1].event_type.value == "completed"
             assert stored[0].status is ChatTurnStatus.COMPLETED
@@ -204,7 +213,7 @@ def test_invalid_mistral_configuration_returns_provider_accurate_safe_503(
         app = create_app()
         async with app.router.lifespan_context(app):
             now = datetime.now(UTC)
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 MailboxConnection(
                     id="mbx-mistral-invalid",
                     user_id="owner@example.com",

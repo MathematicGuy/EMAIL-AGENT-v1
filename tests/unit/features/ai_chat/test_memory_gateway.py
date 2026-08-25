@@ -785,9 +785,19 @@ def test_gateway_exposes_only_authorized_durable_write_operations() -> None:
     # list already performs. It is on this list because asking "is a row
     # stored" has to be possible without asking "can a query find it" - the two
     # were reported as one number, and a full store read as an empty one.
+    #
+    # `read_active_turns`, `read_project_documents` and `read_task_episode` are
+    # the three reads the chat controller needs that `read_context` does not
+    # answer: bounded classifier evidence, a routed retrieval query, and one
+    # episode by id. They were private and reached through `gateway._name`,
+    # which put the scope checks outside the interface that enforces them.
+    # Every one of them still authorizes against the verified scope.
     assert public_methods == {
         "append_turn",
         "read_context",
+        "read_active_turns",
+        "read_project_documents",
+        "read_task_episode",
         "list_task_episodes",
         "clear_session",
         "write_profile",

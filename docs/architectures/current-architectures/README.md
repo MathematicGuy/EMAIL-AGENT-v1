@@ -18,10 +18,11 @@ flowchart TB
         UI_REACT["React 19 SPA Client<br/>(Execution Trace Drawer & DOCX Viewer)"]
     end
 
-    subgraph API["FastAPI Control Plane (app.py)"]
+    subgraph API["FastAPI Control Plane (app.py + api/ routers)"]
         EMAIL_API["Email Action Plan API<br/>(/v1/mail-todo/*)"]
         CHAT_API["AI Chat API & SSE Stream<br/>(/v1/cowork/chat/*)"]
-        DOC_API["Project / Report / Raw Doc APIs<br/>(/v1/cowork/chat/projects, /api/v1/*)"]
+        DOC_API["Project / Raw Document APIs<br/>(/v1/cowork/chat/projects, /api/v1/raw-documents/*)"]
+        REPORT_API["Report Artifact API<br/>(/api/v1/reports/*)"]
     end
 
     subgraph SUBSYSTEMS["Core Subsystems"]
@@ -35,6 +36,7 @@ flowchart TB
         DB_LOCAL[("SQLite Local Engine<br/>(8 .data/*.db files)")]
         DB_PG[("Supabase PostgreSQL<br/>(Migrations 001-016)")]
         VECTOR[("Turbovec Vector Store<br/>(Company .tvim + Project .tvim)")]
+        REPORTS[("Report Artifact Folder<br/>(data/reports/)")]
     end
 
     CLIENTS --> API
@@ -42,6 +44,8 @@ flowchart TB
     CHAT_API --> SUB_CHAT
     DOC_API --> SUB_DOCS
     DOC_API --> SUB_RAW
+    REPORT_API --> REPORTS
+    SUB_CHAT --> REPORTS
     
     SUB_CHAT <--> SUB_DOCS
     SUB_EMAIL <--> VECTOR
@@ -64,7 +68,9 @@ flowchart TB
 | **User Documents Subsystem** | Project-scoped upload, index, and retrieval | **Live / Implemented** | Mostly Aligned | [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
 | **Document Ingestion Pipeline** | Offline document conversion and committed Markdown generation | **Live / Implemented** | Fully Aligned | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) |
 | **DOCX Viewing & Raw Ingestion** | In-browser Word/PDF viewer and direct upload | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
-| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Langfuse tracing; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`app.py`](../../../src/cowork_agent/app.py) |
+| **Report Artifact Store** | One `ReportFilename` rule and one store port behind `/api/v1/reports`; both writers (artifacts view and AI Chat turn) share it | **Live / Implemented** | Fully Aligned | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py) / [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) / [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
+| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Langfuse tracing; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`api/mailboxes.py`](../../../src/cowork_agent/api/mailboxes.py), [`api/dependencies.py`](../../../src/cowork_agent/api/dependencies.py) |
+| **Typed Composition Root** | One frozen `CoworkRuntime` value (`reports`, `control_plane`, `mailbox`, `chat`, `email_rag`, `evaluation` groups) built once by the group builders and read through `runtime(request)`; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)) | **Live / Implemented** | Fully Aligned | [`composition.py`](../../../src/cowork_agent/composition.py) |
 | **Dual Persistence Engine** | SQLite local mode and Supabase Postgres mode (migrations 001–016) | **Live / Implemented** | Fully Aligned | [`repositories`](../../../src/cowork_agent/persistence/repositories) |
 | **Presentation Layers** | React 19 + Vite + Tailwind 4 SPA (Execution Trace Drawer, Live Reasoning, Report Artifacts, DOCX Viewer/Editor) | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
 
@@ -82,7 +88,8 @@ flowchart TB
 | **Turn orchestration** | Small graph `classify → retrieve → assemble → generate → persist` | Same sequence lives in `ChatController.stream_message`. `features/ai_chat/graph/` exists but is not composed in `app.py`. | **Implementation variance — graph unused** |
 | **Persistence Flexibility** | Production Postgres; Redis or in-process short-term | SQLite persists local chat sessions/history/profile/task episodes and project-document metadata/chunks across 8 local `.db` files; short-term remains in-process. Durable cloud Postgres uses migrations 001–016. | **Mostly Aligned** — Redis unused; local and cloud data are separate |
 | **Observability & Tracing** | Standard application logging | Centralized Langfuse tracing provides span-level and generation-level observability across chat controller, LLM provider calls, and memory retrieval without leaking raw email bodies. | **Additive capability — fully instrumented** |
-| **Architecture Documentation** | Level 1 docs reflect the running system | All 7 subsystem modules (01–07) and dashboard audited and synchronized on 2026-08-25. | **0 Diff — 100% Synced** |
+| **Report Artifacts** | Not specified in TARGET; generated documents are a product surface | `data/reports/` is resolved once (`REPORTS_DIR`), owned by `FileSystemReportArtifactStore`, and reached only through `ReportFilename`. Both writers — the artifacts view and the AI Chat turn — share that store. PDF export returns 501 `pdf_export_unavailable` until a `ReportPdfRenderer` is registered. | **Additive — no TARGET counterpart; PDF renderer deliberately unshipped** |
+| **Architecture Documentation** | Level 1 docs reflect the running system | All 7 subsystem modules (01–07) and dashboard audited and synchronized on 2026-08-21; dashboard, 02, 03, and 04 re-synchronized on 2026-08-25 for the report artifact store and again for the typed `CoworkRuntime` composition root (ADR-013). | **0 Diff — 100% Synced** |
 
 ---
 

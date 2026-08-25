@@ -103,6 +103,9 @@ Before writing a test, check if its invariant is already owned.
 | Evaluation SQLite shard isolation | `unit/features/batch_evaluation/plugins/test_memory_eval.py` | runner, API, scripts |
 | Memory baseline metadata privacy | `unit/scripts/test_evaluate_memory.py` | report builders and API |
 | Mistral key-independence smoke metadata and 429 gate | `unit/scripts/test_smoke_test_mistral_evaluation_keys.py` | provider/lease unit tests |
+| Report filename rule (traversal, reserved names, slug fallback) | `unit/domain/test_report_artifacts.py` | store, route and chat-controller tests |
+| Report store stays inside its injected root | `unit/persistence/test_report_artifact_store.py` | API tests |
+| `runtime(request)` returns the composed `CoworkRuntime` value | `unit/test_composition.py` | API tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.

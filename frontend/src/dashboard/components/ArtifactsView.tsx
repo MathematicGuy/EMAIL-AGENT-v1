@@ -236,15 +236,53 @@ export const ArtifactsView: React.FC = () => {
 
 
 
-  const handleDownloadFile = () => {
-    if (!selectedFile) return;
-    const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/download`;
+  const triggerDownload = (href: string, filename: string) => {
     const link = document.createElement('a');
-    link.href = url;
-    link.download = selectedFile.filename;
+    link.href = href;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const downloadSource = () => {
+    if (!selectedFile) return;
+    // Tải trực tiếp bằng link của backend để trình duyệt tự xử lý stream nhị phân chuẩn xác
+    const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/download`;
+    triggerDownload(url, selectedFile.filename);
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!selectedFile) return;
+
+    if (selectedFile.filename.endsWith('.docx')) {
+      downloadSource();
+      return;
+    }
+
+    try {
+      const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/pdf`;
+      const res = await fetch(url);
+
+      // 501 nghĩa là bản triển khai này chưa đăng ký bộ kết xuất PDF — tải file
+      // gốc thay vì báo lỗi, vì tài liệu vẫn tồn tại trên server.
+      if (res.status === 501) {
+        downloadSource();
+        return;
+      }
+      if (!res.ok) throw new Error('Lỗi từ server khi tạo PDF');
+
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      triggerDownload(downloadUrl, selectedFile.filename.replace(/\.md$/, '.pdf'));
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err: unknown) {
+      console.error('Lỗi khi xuất file PDF:', err);
+      alert(
+        'Không thể tải file PDF từ server: ' +
+        (err instanceof Error ? err.message : String(err))
+      );
+    }
   };
 
   return (
@@ -380,7 +418,7 @@ export const ArtifactsView: React.FC = () => {
               <div className="flex items-center gap-2 shrink-0 ml-4">
                 {selectedFile && !isEditing && !isCreatingNew && (
                   <button
-                    onClick={handleDownloadFile}
+                    onClick={handleDownloadPDF}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />

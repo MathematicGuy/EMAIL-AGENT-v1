@@ -6,8 +6,9 @@ query parameters.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -17,8 +18,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from starlette.routing import BaseRoute
 
-from cowork_agent.app import CreateRunRequest, create_app
+from cowork_agent.api.digest_runs import CreateRunRequest
+from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import DigestRun, MailboxConnection, RunStatus, RunTrigger
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
@@ -55,15 +58,24 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
     lifespan = app.router.lifespan_context(app)
     await lifespan.__aenter__()
     try:
-        app.state.digest_worker = DigestWorker(
-            app.state.run_repository,
-            app.state.result_repository,
-            FakeMailbox([]),
-            SafeTextAttachmentExtractor(),
-            FakeRouteClassifier(),
-            FakePlanGenerator(),
-            ShortTermStore(),
-            app.state.task_repository,
+        # The digest route now reads the worker through the typed runtime
+        # (ADR-013), so the fake worker must land on the composed group.
+        control_plane = app.state.runtime.control_plane
+        app.state.runtime = replace(
+            app.state.runtime,
+            email_rag=replace(
+                app.state.runtime.email_rag,
+                digest_worker=DigestWorker(
+                    control_plane.run_repository,
+                    control_plane.result_repository,
+                    FakeMailbox([]),
+                    SafeTextAttachmentExtractor(),
+                    FakeRouteClassifier(),
+                    FakePlanGenerator(),
+                    ShortTermStore(),
+                    control_plane.task_repository,
+                ),
+            ),
         )
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://principal.test"
@@ -112,15 +124,23 @@ def _seed_connection(user_id: str, email_address: str) -> MailboxConnection:
 def test_connect_flow_stores_verified_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
-            settings = app.state.gmail_settings
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                app.state.connection_repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+            settings = app.state.runtime.mailbox.gmail_settings
+            # The connect/callback routes now read the Gmail service through
+            # the typed mailbox group (ADR-013); swap it there.
+            app.state.runtime = replace(
+                app.state.runtime,
+                mailbox=replace(
+                    app.state.runtime.mailbox,
+                    gmail_connections=GmailConnectionService(
+                        settings,
+                        app.state.runtime.control_plane.connection_repository,
+                        TokenCipher(settings.token_encryption_key),
+                        OAuthStateManager(
+                            settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                        ),
+                        FakeOAuthDriver(),
+                    ),
                 ),
-                FakeOAuthDriver(),
             )
             redirect = await client.get(
                 "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
@@ -133,7 +153,7 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
                 params={"state": state, "code": "test-code"},
             )
             assert callback.status_code == 200
-            connections = await app.state.connection_repository.list_all()
+            connections = await app.state.runtime.control_plane.connection_repository.list_all()
             assert len(connections) == 1
             connection = connections[0]
             assert connection.user_id == OWNER_EMAIL == connection.email_address
@@ -150,15 +170,22 @@ def test_oauth_callback_redirects_to_configured_frontend(
 
     async def scenario() -> None:
         async with running_app() as (app, client):
-            settings = app.state.gmail_settings
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                app.state.connection_repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+            settings = app.state.runtime.mailbox.gmail_settings
+            # Typed-runtime override: see the sibling connect-flow test.
+            app.state.runtime = replace(
+                app.state.runtime,
+                mailbox=replace(
+                    app.state.runtime.mailbox,
+                    gmail_connections=GmailConnectionService(
+                        settings,
+                        app.state.runtime.control_plane.connection_repository,
+                        TokenCipher(settings.token_encryption_key),
+                        OAuthStateManager(
+                            settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                        ),
+                        FakeOAuthDriver(),
+                    ),
                 ),
-                FakeOAuthDriver(),
             )
             connect = await client.get(
                 "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
@@ -191,11 +218,32 @@ def test_oauth_callback_redirects_to_configured_frontend(
     asyncio.run(scenario())
 
 
+def _mounted_api_routes(routes: Iterable[BaseRoute]) -> list[APIRoute]:
+    """Every APIRoute reachable from ``app.routes``, mounted routers included.
+
+    ``include_router`` does not copy a router's routes onto the app: FastAPI
+    leaves a lazy proxy in ``app.routes`` and resolves through it per request.
+    A plain scan therefore sees only the handlers still declared inline on
+    ``create_app`` -- which, after the router extractions, is none of the ones
+    this invariant cares about. Reach through each proxy to its own router.
+    """
+    found: list[APIRoute] = []
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            found.extend(_mounted_api_routes(included.routes))
+        elif isinstance(route, APIRoute):
+            found.append(route)
+    return found
+
+
 def test_no_route_accepts_caller_provided_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, _):
-            routes = [route for route in app.routes if isinstance(route, APIRoute)]
-            assert routes
+            routes = _mounted_api_routes(app.routes)
+            # The count is a floor, not the point: it fails loudly if the
+            # flattening above ever stops seeing the mounted routers.
+            assert len(routes) > 50, len(routes)
             for route in routes:
                 parameters = (
                     *route.dependant.path_params,
@@ -213,7 +261,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id="legacy-caller-id", email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             legacy_run = DigestRun(
                 id="run_legacy",
                 user_id="legacy-caller-id",
@@ -224,7 +272,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
                 idempotency_key="legacy-key",
                 max_emails=10,
             )
-            await app.state.run_repository.save(legacy_run)
+            await app.state.runtime.control_plane.run_repository.save(legacy_run)
             orphan_run = DigestRun(
                 id="run_orphan",
                 user_id=OWNER_EMAIL,
@@ -235,7 +283,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
                 idempotency_key="orphan-key",
                 max_emails=10,
             )
-            await app.state.run_repository.save(orphan_run)
+            await app.state.runtime.control_plane.run_repository.save(orphan_run)
 
             assert (await client.get("/v1/mail-todo/runs/run_legacy")).status_code == 404
             assert (
@@ -245,7 +293,8 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
             assert (
                 await client.delete(f"/v1/mail-todo/connections/{CONNECTION_ID}")
             ).status_code == 404
-            assert await app.state.connection_repository.get(CONNECTION_ID) is not None
+            connections = app.state.runtime.control_plane.connection_repository
+            assert await connections.get(CONNECTION_ID) is not None
 
     asyncio.run(scenario())
 
@@ -254,7 +303,7 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             response = await client.post(
                 "/v1/mail-todo/runs",
                 json={"mailboxConnectionId": CONNECTION_ID},
@@ -264,7 +313,7 @@ def test_create_run_persists_verified_identity(principal_env) -> None:
             payload = response.json()
             assert payload["statusUrl"] == f"/v1/mail-todo/runs/{payload['id']}"
             assert "user_id" not in payload["statusUrl"]
-            run = await app.state.run_repository.get(payload["id"])
+            run = await app.state.runtime.control_plane.run_repository.get(payload["id"])
             assert run is not None
             assert run.user_id == OWNER_EMAIL == connection.email_address
             assert run.max_emails == 10
@@ -284,7 +333,7 @@ def test_processed_emails_are_development_only(
 
     async def scenario() -> None:
         async with running_app() as (app, client):
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
             )
             created = await client.post(
@@ -316,7 +365,7 @@ def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             connection = _seed_connection(user_id=OWNER_EMAIL, email_address=OWNER_EMAIL)
-            await app.state.connection_repository.upsert(connection)
+            await app.state.runtime.control_plane.connection_repository.upsert(connection)
             now = datetime.now(UTC)
             older = DigestRun(
                 id="run-old",
@@ -345,8 +394,8 @@ def test_run_history_is_scoped_ordered_and_body_free(principal_env) -> None:
                 created_at=now + timedelta(seconds=1),
                 completed_at=now + timedelta(seconds=2),
             )
-            await app.state.run_repository.create(older)
-            await app.state.run_repository.create(newer)
+            await app.state.runtime.control_plane.run_repository.create(older)
+            await app.state.runtime.control_plane.run_repository.create(newer)
 
             response = await client.get(
                 "/v1/mail-todo/runs",
