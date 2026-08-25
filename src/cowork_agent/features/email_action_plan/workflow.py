@@ -29,6 +29,7 @@ from cowork_agent.domain.target_contracts import (
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     Task,
+    ThreatLevel,
     TraceEvent,
     TraceLatency,
     TraceStatus,
@@ -40,11 +41,12 @@ from cowork_agent.features.email_action_plan.policies import (
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
+from cowork_agent.integrations.llm.providers.tracing import _update_current_trace
 
 from .compat_mapper import legacy_result_shape
 from .correlation import TaskCandidate, correlate_candidates
 from .evidence import GATE_VERSION, EvidenceAssessment, EvidenceStatus, assess_retrieval_evidence
-from .observability import EncryptedDevTraceSink, TraceSink
+from .observability import EncryptedDevTraceSink, TraceSink, emit_security_scan_trace
 from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
@@ -313,10 +315,34 @@ class DigestWorker:
             quarantined_records: list[PersistedTask] = []
             safe_envelopes: list[EphemeralEmailEnvelope] = []
             if self._security_scanner is not None:
+                scan_started = time.monotonic()
                 scan_results = await self._security_scanner.scan_envelopes(envelopes)
+                scan_latency_ms = int((time.monotonic() - scan_started) * 1000)
                 scan_map = {res.email_id: res for res in scan_results}
+
+                total_urls = 0
+                total_threats = 0
+                highest_threat = ThreatLevel.CLEAN
+
                 for envelope in envelopes:
                     scan = scan_map.get(envelope.gmail_message_id)
+                    if scan:
+                        total_urls += len(scan.links)
+                        if scan.overall_threat_level != ThreatLevel.CLEAN:
+                            total_threats += 1
+                            if scan.overall_threat_level == ThreatLevel.BLOCKED:
+                                highest_threat = ThreatLevel.BLOCKED
+                            elif (
+                                scan.overall_threat_level == ThreatLevel.MALICIOUS
+                                and highest_threat != ThreatLevel.BLOCKED
+                            ):
+                                highest_threat = ThreatLevel.MALICIOUS
+                            elif (
+                                scan.overall_threat_level == ThreatLevel.SUSPICIOUS
+                                and highest_threat == ThreatLevel.CLEAN
+                            ):
+                                highest_threat = ThreatLevel.SUSPICIOUS
+
                     if scan and scan.quarantined:
                         logger.warning(
                             "🛡️ [SECURITY] Quarantining email %s (Threat: %s)",
@@ -333,6 +359,28 @@ class DigestWorker:
                         quarantined_records.append(q_task)
                     else:
                         safe_envelopes.append(envelope)
+
+                emit_security_scan_trace(
+                    self._trace_sink,
+                    run_id=run.id,
+                    user_id=run.user_id,
+                    urls_scanned_count=total_urls,
+                    attachments_scanned_count=sum(len(s.attachments) for s in scan_results),
+                    threats_detected_count=total_threats,
+                    quarantined_count=len(quarantined_records),
+                    highest_threat_level=highest_threat.value,
+                    latency_ms=scan_latency_ms,
+                )
+
+                if quarantined_records:
+                    _update_current_trace(
+                        tags=["security_quarantine"],
+                        metadata={
+                            "security_quarantine": True,
+                            "quarantined_count": len(quarantined_records),
+                            "highest_threat_level": highest_threat.value,
+                        },
+                    )
             else:
                 safe_envelopes = list(envelopes)
 
