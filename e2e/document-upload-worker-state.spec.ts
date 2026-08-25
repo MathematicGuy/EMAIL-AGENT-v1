@@ -41,7 +41,7 @@ test.describe('Document upload worker states and error handling', () => {
     await expect(composer).toBeVisible({ timeout: 15_000 });
 
     // 3. Upload the test document
-    const fileInput = page.getByLabel('Chọn tài liệu từ máy').or(page.locator('input[type="file"]'));
+    const fileInput = page.getByLabel('Chọn tài liệu từ máy').first();
     await fileInput.setInputFiles({
       name: '49_2019_QH14_402073.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -139,7 +139,7 @@ test.describe('Document upload worker states and error handling', () => {
     const composer = page.locator('textarea');
     await expect(composer).toBeVisible({ timeout: 15_000 });
 
-    const fileInput = page.getByLabel('Chọn tài liệu từ máy').or(page.locator('input[type="file"]'));
+    const fileInput = page.getByLabel('Chọn tài liệu từ máy').first();
     await fileInput.setInputFiles({
       name: '49_2019_QH14_402073.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

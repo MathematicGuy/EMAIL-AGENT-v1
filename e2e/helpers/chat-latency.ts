@@ -292,10 +292,9 @@ export async function openDashboard(page: Page): Promise<void> {
   });
   await page.goto('/#dashboard');
   const recents = page.getByTestId('recent-chat').first();
-  const toggle = page.getByRole('button', { name: /Show sidebar/i });
-  await expect(toggle.or(recents)).toBeVisible({ timeout: 20_000 });
-  if (await toggle.isVisible().catch(() => false)) {
-    await toggle.click();
+  const showSidebar = page.getByRole('button', { name: /Show sidebar|Hiện thanh bên/i });
+  if (await showSidebar.isVisible().catch(() => false)) {
+    await showSidebar.click();
   }
   await expect(recents).toBeVisible({ timeout: 20_000 });
 }
