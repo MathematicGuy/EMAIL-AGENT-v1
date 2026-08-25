@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-import httpx
 import uvicorn
 from fastapi import (
     BackgroundTasks,
@@ -28,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
-from cowork_agent.composition import CoworkRuntime, build_control_plane
+from cowork_agent.composition import CoworkRuntime, build_control_plane, build_mailbox
 from cowork_agent.config import (
     ChatMemorySettings,
     EmailRagQualitySettings,
@@ -36,7 +35,6 @@ from cowork_agent.config import (
     GmailSettings,
     OutlookSettings,
     SessionSettings,
-    SupabaseStorageSettings,
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
@@ -99,12 +97,8 @@ from cowork_agent.identity import (
     principal_for_connection,
     principal_from_opaque_session,
 )
-from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
-from cowork_agent.integrations.gmail.provider import (
-    GmailConnectionService,
-    GmailMailboxAdapter,
-)
+from cowork_agent.integrations.gmail.provider import GmailConnectionService
 from cowork_agent.integrations.llm.provider_factory import (
     resolve_chat_providers,
     resolve_email_providers,
@@ -116,7 +110,7 @@ from cowork_agent.integrations.mailbox import (
     MailboxTemporaryError,
     ProviderRoutingMailboxAdapter,
 )
-from cowork_agent.integrations.outlook import OutlookConnectionService, OutlookMailboxAdapter
+from cowork_agent.integrations.outlook import OutlookConnectionService
 from cowork_agent.integrations.rag.bootstrap import (
     RAG_CORPUS_PATH,
     build_document_embedder,
@@ -129,7 +123,6 @@ from cowork_agent.integrations.rag.project_documents import (
     HybridProjectDocumentStore,
 )
 from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
-from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
@@ -377,83 +370,39 @@ def create_app() -> FastAPI:
             run_repository = control_plane.run_repository
             task_repository = control_plane.task_repository
             result_repository = control_plane.result_repository
-            mailbox_cipher = TokenCipher(settings.token_encryption_key)
-            app.state.gmail_connections = GmailConnectionService(
+            # Mailbox group (ADR-013, slice 02-3): the provider connection
+            # and read adapters, the Outlook sqlite-only gate, the routing
+            # adapter, and the private document storage now compose as one
+            # typed value in ``composition.build_mailbox``. The outlook
+            # settings stay computed here because env validation runs before
+            # the control plane; the identity repository is passed in
+            # explicitly so the principal wiring moves with the group.
+            mailbox_runtime = await build_mailbox(
                 settings,
+                outlook_settings,
+                outlook_configuration_error,
+                control_plane_url,
                 repository,
-                mailbox_cipher,
-                OAuthStateManager(
-                    settings.oauth_state_secret,
-                    settings.oauth_state_ttl_seconds,
-                ),
-                principal_resolver=(
-                    app.state.identity_repository.resolve_or_create_principal
-                    if app.state.identity_repository is not None
-                    else None
-                ),
+                control_plane.identity_repository,
+                UserDocumentsSettings.from_env(),
             )
-            app.state.gmail_mailbox = GmailMailboxAdapter(
-                settings,
-                repository,
-                mailbox_cipher,
+            app.state.runtime = CoworkRuntime(
+                reports=report_store, control_plane=control_plane, mailbox=mailbox_runtime
             )
-            mailbox_adapters: dict[str, Any] = {"gmail": app.state.gmail_mailbox}
-            outlook_enabled = outlook_settings is not None and not control_plane_url
-            if outlook_enabled:
-                assert outlook_settings is not None
-                app.state.outlook_connections = OutlookConnectionService(
-                    outlook_settings,
-                    repository,
-                    mailbox_cipher,
-                    OAuthStateManager(
-                        outlook_settings.oauth_state_secret,
-                        outlook_settings.oauth_state_ttl_seconds,
-                    ),
-                )
-                app.state.outlook_mailbox = OutlookMailboxAdapter(
-                    outlook_settings,
-                    repository,
-                    mailbox_cipher,
-                )
-                mailbox_adapters["outlook"] = app.state.outlook_mailbox
-                outlook_reason: str | None = None
-            else:
-                app.state.outlook_connections = None
-                app.state.outlook_mailbox = None
-                outlook_reason = "sqlite_only" if outlook_settings is not None else "not_configured"
-            app.state.outlook_settings = outlook_settings
-            app.state.outlook_configuration_error = outlook_configuration_error
-            app.state.provider_availability = {
-                "gmail": {"enabled": True, "reason": None},
-                "outlook": {"enabled": outlook_enabled, "reason": outlook_reason},
-            }
-            app.state.mailbox = ProviderRoutingMailboxAdapter(repository, mailbox_adapters)
-            user_documents_settings = UserDocumentsSettings.from_env()
+            app.state.gmail_connections = mailbox_runtime.gmail_connections
+            app.state.gmail_mailbox = mailbox_runtime.gmail_mailbox
+            app.state.outlook_connections = mailbox_runtime.outlook_connections
+            app.state.outlook_mailbox = mailbox_runtime.outlook_mailbox
+            app.state.outlook_settings = mailbox_runtime.outlook_settings
+            app.state.outlook_configuration_error = (
+                mailbox_runtime.outlook_configuration_error
+            )
+            app.state.provider_availability = mailbox_runtime.provider_availability
+            app.state.mailbox = mailbox_runtime.mailbox
+            user_documents_settings = mailbox_runtime.user_documents_settings
+            app.state.private_storage_client = mailbox_runtime.private_storage_client
+            app.state.private_storage = mailbox_runtime.private_storage
             app.state.document_embeddings_configured = False
-            if control_plane_url and (
-                user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip()
-            ):
-                try:
-                    storage_settings = SupabaseStorageSettings.from_env()
-                    storage_client = httpx.AsyncClient(timeout=30.0)
-                    app.state.private_storage_client = storage_client
-                    app.state.private_storage = SupabasePrivateStorage(
-                        storage_settings.url,
-                        storage_settings.secret_key,
-                        storage_settings.bucket,
-                        storage_client,
-                    )
-                except ValueError:
-                    logger.warning("Project document storage is unavailable")
-                    app.state.private_storage_client = None
-                    app.state.private_storage = None
-            else:
-                app.state.private_storage_client = None
-                from cowork_agent.integrations.storage.local import LocalPrivateStorage
-
-                app.state.private_storage = LocalPrivateStorage(
-                    settings.connection_db_path.parent / "project-documents"
-                )
             chat_memory_settings = ChatMemorySettings.from_env()
             app.state.chat_memory_settings = chat_memory_settings
             app.state.chat_sessions = chat_session_registry
