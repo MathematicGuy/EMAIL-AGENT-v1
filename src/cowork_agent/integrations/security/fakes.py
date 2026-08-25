@@ -1,10 +1,11 @@
 """Deterministic test fakes for security ports."""
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from cowork_agent.domain.models import ExtractedAttachment, ExtractedUnit
 from cowork_agent.domain.target_contracts import (
     AttachmentSafetyReport,
     EphemeralEmailEnvelope,
@@ -13,6 +14,7 @@ from cowork_agent.domain.target_contracts import (
     ThreatCategory,
     ThreatLevel,
 )
+from cowork_agent.features.email_action_plan.schemas import ExtractionLimits
 from cowork_agent.integrations.security.url_inspector import inspect_url
 
 
@@ -221,4 +223,53 @@ class FakeClamAVScanner:
             )
         content = path.read_bytes()
         return await self.scan_bytes(content, filename=original_filename or path.name)
+
+
+class FakeAttachmentExtractor:
+    """Deterministic test fake implementing AttachmentExtractorPort."""
+
+    def __init__(
+        self,
+        *,
+        fixed_text: str = "Fake extracted text content",
+        forced_status: str = "ok",
+        forced_warning: str | None = None,
+    ) -> None:
+        self.fixed_text = fixed_text
+        self.forced_status = forced_status
+        self.forced_warning = forced_warning
+        self.extracted_attachments: list[str] = []
+
+    async def extract(
+        self,
+        attachment_id: str,
+        filename: str,
+        declared_mime_type: str,
+        content: AsyncIterator[bytes],
+        limits: ExtractionLimits,
+    ) -> ExtractedAttachment:
+        self.extracted_attachments.append(filename)
+        buffer = bytearray()
+        async for chunk in content:
+            buffer.extend(chunk)
+
+        sha256_hash = hashlib.sha256(buffer).hexdigest()
+        text = self.fixed_text if self.forced_status == "ok" else None
+        units = (
+            (ExtractedUnit(kind="text", label="Fake unit", text=self.fixed_text),)
+            if self.forced_status == "ok"
+            else ()
+        )
+
+        return ExtractedAttachment(
+            attachment_id=attachment_id,
+            filename=filename,
+            detected_mime_type=declared_mime_type,
+            sha256=sha256_hash,
+            status=self.forced_status,
+            text=text,
+            units=units,
+            warning_code=self.forced_warning,
+        )
+
 
