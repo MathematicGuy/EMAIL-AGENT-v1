@@ -1577,6 +1577,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "turbovec" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1625,6 +1626,7 @@ requires-dist = [
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "turbovec", specifier = ">=0.8.0" },
+    { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2025.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 provides-extras = ["dev", "postgres", "redis"]

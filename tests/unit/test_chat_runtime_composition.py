@@ -171,6 +171,7 @@ def _runtime(
         chat_reply=reply,  # type: ignore[arg-type]
         chat_intent_settings=None,
         chat_routing_service=None,
+        chat_tool_runner=None,
     )
     return CoworkRuntime(
         reports=None,  # type: ignore[arg-type]

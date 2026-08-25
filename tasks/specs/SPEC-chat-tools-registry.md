@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft implementation exists on a stale base; architecture port required before merge |
+| Status | M0-M4 implemented on current `dev`; flag-off. Outstanding: §11 fixtures, executable-chat-tool ADR |
 | Date | 2026-08-26 (synchronized with `dev` at `bf2fdee`) |
 | Scope | **Dev-grade slice.** One use case, one tool, flag-off by default. |
 | Use case | "Create a todo on my Google Calendar" — the agent picks the tool from its own turn context and creates the event. |
@@ -409,11 +409,11 @@ second is the failure mode that matters, because it writes to a real calendar.
 
 | # | Scope | Exit | Status |
 |---|---|---|---|
-| M0 | Port the dirty worktree onto current `dev` without regressing C02/C03/C04/C07/C10 | Typed runtime used; no new `app.state`; current architecture tests green | **Required first** |
-| M1 | `ToolRegistry`, `ToolResult`, `Tool`, tests with a dummy tool | R2 green, nothing composed | Draft implemented; reverify after M0 |
-| M2 | `CalendarPort` + fake + Google adapter | Event created against a real test calendar, manually, once | Draft implemented; reverify after M0 |
-| M3 | `chat-intent-v4` TIER 4.5, resolver narrowing, `fill_arguments` | R2+R4 green, fixtures spot-checked | Draft implemented; fixture spot-check outstanding (§13) |
-| M4 | Controller `TOOL` route, `GenerationContext.tool_result`, typed `ChatRuntime` composition | R15 + full backend gate green; end-to-end in dev with both flags on | Draft implemented on stale base; M0 port outstanding |
+| M0 | Port the dirty worktree onto current `dev` without regressing C02/C03/C04/C07/C10 | Typed runtime used; no new `app.state`; current architecture tests green | **Done** — see §14 |
+| M1 | `ToolRegistry`, `ToolResult`, `Tool`, tests with a dummy tool | R2 green, nothing composed | **Done** — reverified after M0 |
+| M2 | `CalendarPort` + fake + Google adapter | Event created against a real test calendar, manually, once | **Done** — reverified after M0; live event created and deleted before the port |
+| M3 | `chat-intent-v4` TIER 4.5, resolver narrowing, `fill_arguments` | R2+R4 green, fixtures spot-checked | **Done** except the §11 fixture cases, which need a human decision (§13) |
+| M4 | Controller `TOOL` route, `GenerationContext.tool_result`, typed `ChatRuntime` composition | R15 + full backend gate green; end-to-end in dev with both flags on | **Done** — composed through `ChatRuntime.chat_tool_runner`, not `app.state` |
 
 
 ---
@@ -489,3 +489,49 @@ loader test asserts all four groups hold exactly `len(cases) // 4` cases, so two
 cases cannot be added without either four filler cases or a fifth group -- and
 re-running the 60 labelled cases spends 60 live classifier calls. Both are
 decisions for a human, not defaults to pick.
+
+---
+
+## 14. The M0 port, as performed
+
+`dev` was merged into the registry branch and the preserved draft re-applied on top. Only
+`app.py` and `controller.py` conflicted; both were reset to `dev`'s version and the registry
+delta re-applied by hand, so no part of the stale worktree's structure survived. Every other
+file merged three-way cleanly, keeping both sides — `dev`'s classifier tier-2 rewrite and
+langfuse-import removal sit alongside the draft's TIER 4.5 and `tool_result` carve-out.
+
+What changed relative to the draft, and why:
+
+- **`ChatRuntime.chat_tool_runner`, not `app.state.chat_tool_runner`.** The runner is a
+  provider-upgrade slot exactly like `chat_reply`: it boots `None` in `build_chat` and is set in
+  the same `replace` after the provider block resolves, because filling a tool's arguments needs
+  those providers. C10 permits no new `app.state` survivor, and the controller factory reads it
+  as `chat.chat_tool_runner`.
+- **Calendar settings resolve once in `create_app`** and reach `lifespan` as a closure capture,
+  matching how `EvaluationSettings` is handled. `_chat_tool_runner` now takes the settings as a
+  parameter instead of calling `from_env()` itself, so no turn re-reads the environment.
+- **`self._memory.read_active_turns()`**, the public interface, replaces the draft's private
+  `_read_active_turns()` call.
+- **`tool_result` is threaded into the real `assemble_generation_context` only.** `dev` grew a
+  second, throwaway call inside the `searches_information` branch that exists to count evidence;
+  passing the tool result there would change nothing and imply it matters.
+- **Three test `ChatRuntime` constructions** gained `chat_tool_runner=None`. Giving the field a
+  default would have been less churn, but the other three upgrade-slot fields have no defaults
+  either, and a default is how the next added field gets silently forgotten.
+
+Verified on the ported tree:
+
+- `uv run pytest -q` — **2233 passed, 9 skipped, 0 failed**. The three corpus/fixture failures
+  that were baseline before the port are fixed on `dev` and no longer appear.
+- `uv run ruff check .` — clean. The three `chat_reply.py` F401s that were baseline are gone;
+  `dev` removed those imports.
+- `uv run mypy src` — clean, 210 files.
+- Route-table oracle (§7.3 of the architecture program): **63 routes, byte-identical before and
+  after**, SHA-256 `17923647a91b1d7c179ed4f7c3ea6cafe182337de8eaaaa700bcc750cb04d5ee` on both
+  sides. This slice adds no route.
+- No `app.state.chat_tool_runner`, no private `_read_active_turns`, no conflict markers, one
+  `stream_message`, `mail_scan_reconciliation.py` untouched.
+
+Still outstanding, unchanged by the port: §11's two fixture cases and their live label re-run,
+and the executable-chat-tool ADR that §9 requires before either flag is enabled outside local
+development.

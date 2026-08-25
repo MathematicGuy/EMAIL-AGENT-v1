@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from cowork_agent.domain.chat_contracts import IntentClassifierInput
 from cowork_agent.prompting import UNTRUSTED_DATA_TAG, wrap_json_block
 
-INTENT_PROMPT_VERSION = "chat-intent-v3"
+from ..tools.registry import Tool
+
+INTENT_PROMPT_VERSION = "chat-intent-v4"
 
 _DECISION_PRINCIPLE = """TIER 1 — DECISION PRINCIPLE
 Would the quality or correctness of the requested answer depend on retrieving
@@ -35,6 +39,10 @@ _CALIBRATION = """TIER 4 — CALIBRATION EXAMPLES
 - DISTRACTOR/CHAT: "I reviewed my notes earlier; now explain dependency injection."
 These examples are calibration only. Do not copy their wording into the output."""
 
+_AVAILABLE_ACTIONS_HEADER = """TIER 4.5 — AVAILABLE ACTIONS
+Set needs_tool=true and tool_name only when the user asks you to perform one of
+these actions. Asking *about* a calendar is not asking you to create an event."""
+
 _OUTPUT_SCHEMA = """TIER 5 — OUTPUT SCHEMA
 Return exactly one JSON object with no additional fields:
 {
@@ -61,8 +69,15 @@ when the current message is not, keeping proper names, technical terms and docum
 numbers exactly as they appear."""
 
 
-def build_intent_prompt(classifier_input: IntentClassifierInput) -> str:
-    """Render only bounded turns and ready-document titles into the provider prompt."""
+def build_intent_prompt(
+    classifier_input: IntentClassifierInput, tools: Sequence[Tool] = ()
+) -> str:
+    """Render only bounded turns and ready-document titles into the provider prompt.
+
+    `tools` is trusted system text and is rendered outside the untrusted block.
+    An empty registry omits the tier entirely, so a deployment with no tools
+    sends the prompt it sent before tools existed.
+    """
 
     evidence = {
         "current_message": classifier_input.current_message,
@@ -79,12 +94,14 @@ def build_intent_prompt(classifier_input: IntentClassifierInput) -> str:
     bounded_evidence = _BOUNDED_EVIDENCE_HEADER + "\n" + wrap_json_block(
         UNTRUSTED_DATA_TAG, evidence
     )
-    return "\n\n".join(
-        (
-            _DECISION_PRINCIPLE,
-            _PRECEDENCE_RULES,
-            bounded_evidence,
-            _CALIBRATION,
-            _OUTPUT_SCHEMA,
-        )
-    )
+    sections = [
+        _DECISION_PRINCIPLE,
+        _PRECEDENCE_RULES,
+        bounded_evidence,
+        _CALIBRATION,
+    ]
+    if tools:
+        listed = "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
+        sections.append(f"{_AVAILABLE_ACTIONS_HEADER}\n{listed}")
+    sections.append(_OUTPUT_SCHEMA)
+    return "\n\n".join(sections)

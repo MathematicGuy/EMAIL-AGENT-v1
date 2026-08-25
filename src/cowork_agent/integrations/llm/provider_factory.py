@@ -14,6 +14,7 @@ from cowork_agent.config import (
     OpenRouterSettings,
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort, IntentClassifierPort
+from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
@@ -49,6 +50,12 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
+from cowork_agent.integrations.llm.tool_arguments import (
+    gemini_tool_arguments,
+    mimo_tool_arguments,
+    mistral_tool_arguments,
+    openrouter_tool_arguments,
+)
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +76,7 @@ class ChatProviderBundle:
     intent_classifier: IntentClassifierPort
     chat_reply: ChatReplyPort
     intent_settings: ChatIntentSettings
+    tool_arguments: ToolArgumentCompletion
 
 
 def normalize_llm_provider(provider: str) -> str:
@@ -143,6 +151,7 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
             ),
             chat_reply=GeminiChatReply.from_settings(gemini_settings),
             intent_settings=intent_settings,
+            tool_arguments=gemini_tool_arguments(gemini_settings, intent_settings),
         )
     if name == "mimo":
         mimo_settings = MimoSettings.from_env()
@@ -151,6 +160,7 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
             intent_classifier=MimoIntentClassifier.from_settings(mimo_settings, intent_settings),
             chat_reply=MimoChatReply.from_settings(mimo_settings),
             intent_settings=intent_settings,
+            tool_arguments=mimo_tool_arguments(mimo_settings, intent_settings),
         )
     if name == "mistral":
         mistral_settings = MistralSettings.from_env()
@@ -161,6 +171,7 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
             ),
             chat_reply=MistralChatReply.from_settings(mistral_settings),
             intent_settings=intent_settings,
+            tool_arguments=mistral_tool_arguments(mistral_settings, intent_settings),
         )
     openrouter_settings = OpenRouterSettings.from_env()
     last_resort = _openrouter_last_resort(log_status=False)
@@ -171,4 +182,7 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
         ),
         chat_reply=OpenRouterChatReply.from_settings(openrouter_settings, last_resort=last_resort),
         intent_settings=intent_settings,
+        tool_arguments=openrouter_tool_arguments(
+            openrouter_settings, intent_settings, last_resort=last_resort
+        ),
     )

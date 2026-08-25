@@ -435,8 +435,20 @@ class GeminiChatReply(_ConfiguredChatReply):
         return cls(provider="gemini", model=settings.model, complete=complete)
 
 
-def _request_payload(request: ChatMessageRequest, context: GenerationContext) -> dict[str, object]:
-    return {
+_TOOL_RESULT_INSTRUCTION = """tool_result is the outcome of an action already carried out on
+the user's behalf, and is the one exception to the rule above about not mentioning tools.
+Report it plainly, including any link it contains. When it reports a failure, say the action
+did not happen and why. Never state or imply that an action succeeded unless tool_result
+says so."""
+
+
+def _request_payload(
+    request: ChatMessageRequest, context: GenerationContext
+) -> dict[str, object]:
+    # A turn with no tool result sends exactly the payload it sent before
+    # tools existed -- neither the extra instruction nor the extra key. That
+    # is what keeps the flag-off guarantee literal rather than approximate.
+    payload: dict[str, object] = {
         "system": _SYSTEM_INSTRUCTION,
         "context": {
             "current_instruction": context.current_instruction.value,
@@ -458,6 +470,12 @@ def _request_payload(request: ChatMessageRequest, context: GenerationContext) ->
             ),
         },
     }
+    if context.tool_result is not None:
+        payload["system"] = "\n".join((_SYSTEM_INSTRUCTION, _TOOL_RESULT_INSTRUCTION))
+        # A fact about the world, not evidence to weigh, so it stays outside
+        # conflict_precedence.
+        cast(dict[str, object], payload["context"])["tool_result"] = context.tool_result
+    return payload
 
 
 def _project_evidence(context: GenerationContext) -> list[dict[str, object]]:
