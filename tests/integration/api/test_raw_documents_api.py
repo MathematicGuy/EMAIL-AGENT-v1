@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import cowork_agent.app as app_module
+import cowork_agent.api.knowledge as knowledge_api
 from cowork_agent.app import create_app
 from cowork_agent.persistence.repositories.sqlite_raw_documents import (
     SQLiteRawDocumentRepository,
@@ -36,8 +36,10 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(app_module, "RAW_DOCS_DIR", raw_dir)
-    monkeypatch.setattr(app_module, "EXTRACTED_DIR", extracted_dir)
+    # The corpus locations moved to the knowledge router with the handlers
+    # that read them (slice 03-1); patch them where they are now defined.
+    monkeypatch.setattr(knowledge_api, "RAW_DOCS_DIR", raw_dir)
+    monkeypatch.setattr(knowledge_api, "EXTRACTED_DIR", extracted_dir)
     return raw_dir
 
 
