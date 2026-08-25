@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -99,7 +100,13 @@ def test_sqlite_fallback_wires_chat_history_into_scoped_controllers(
                     yield "Reply"
 
             reply = AssertPendingBeforeReply()
-            app.state.chat_reply = reply
+            # The controller factory reads the composed runtime at creation
+            # time (ADR-013), so the test reply must land on the chat group,
+            # not just on the forwarded ``app.state`` key.
+            app.state.runtime = replace(
+                app.state.runtime,
+                chat=replace(app.state.runtime.chat, chat_reply=reply),
+            )
             controller = app.state.chat_controller_factory(scope)
             assert controller._history is app.state.chat_history_repository
             events = [

@@ -51,7 +51,6 @@ from cowork_agent.config import (
 )
 from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
-from cowork_agent.domain.report_artifacts import ReportArtifactStore
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -61,12 +60,7 @@ from cowork_agent.features.ai_chat.controller import ChatController
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
-from cowork_agent.features.ai_chat.ports import (
-    ChatHistoryPort,
-    ChatReplyPort,
-    DeclarativeMemoryPort,
-    EpisodicMemoryPort,
-)
+from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
@@ -181,53 +175,59 @@ class KnowledgeChatRequest(BaseModel):
 def _chat_controller_factory(
     app: FastAPI,
 ) -> Callable[[ChatMemoryScope], ChatController]:
-    """Compose each scoped controller from runtime state at creation time."""
+    """Compose each scoped controller from the assembled typed runtime.
+
+    One typed read of the composed ``CoworkRuntime`` per controller creation
+    (ADR-013): the old version re-read a dozen untyped ``app.state`` keys and
+    leaned on the placeholder-then-upgrade dance to see final values. The
+    single assembly in ``lifespan`` means this read returns those same final
+    values, and because the read happens at creation time — not at publish
+    time — a ``dataclasses.replace`` override of the runtime stays visible.
+    """
 
     def factory(scope: ChatMemoryScope) -> ChatController:
-        semantic_memory = cast(
-            SemanticMemoryPort,
-            getattr(app.state, "semantic_memory", NullSemanticMemory()),
+        composed = cast(CoworkRuntime, app.state.runtime)
+        chat = composed.chat
+        if chat is None:
+            raise RuntimeError("the chat group is not composed")
+        control_plane = composed.control_plane
+        email_rag = composed.email_rag
+        semantic_memory: SemanticMemoryPort = (
+            email_rag.semantic_memory if email_rag is not None else NullSemanticMemory()
         )
+        intent_settings = chat.chat_intent_settings
         return ChatController(
             scope=scope,
             memory=MemoryGateway(
                 scope=scope,
-                session_buffer=app.state.chat_session_buffer,
-                declarative_memory=cast(
-                    DeclarativeMemoryPort | None,
-                    app.state.chat_profile_repository,
+                session_buffer=chat.chat_session_buffer,
+                declarative_memory=(
+                    control_plane.chat_profile_repository
+                    if control_plane is not None
+                    else None
                 ),
                 episodic_memory=cast(
                     EpisodicMemoryPort | None,
-                    app.state.chat_task_episode_repository,
+                    (
+                        control_plane.chat_task_episode_repository
+                        if control_plane is not None
+                        else None
+                    ),
                 ),
                 semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
-                project_documents=getattr(app.state, "project_document_vectors", None),
-                memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
+                project_documents=(
+                    email_rag.project_document_vectors if email_rag is not None else None
+                ),
+                memory_operation_sink=chat.memory_operation_sink,
             ),
-            reply=cast(ChatReplyPort, app.state.chat_reply),
-            reports=cast(
-                ReportArtifactStore | None,
-                getattr(app.state, "report_store", None),
+            reply=chat.chat_reply,
+            reports=composed.reports,
+            history=control_plane.chat_history_repository if control_plane is not None else None,
+            routing=chat.chat_routing_service,
+            company_rag_enabled=(
+                intent_settings.company_rag_enabled if intent_settings is not None else True
             ),
-            history=cast(
-                ChatHistoryPort | None,
-                getattr(app.state, "chat_history_repository", None),
-            ),
-            routing=cast(
-                ChatRoutingService | None,
-                getattr(app.state, "chat_routing_service", None),
-            ),
-            company_rag_enabled=getattr(
-                getattr(app.state, "chat_intent_settings", None),
-                "company_rag_enabled",
-                True,
-            ),
-            episode_retention_seconds=getattr(
-                getattr(app.state, "chat_memory_settings", None),
-                "episode_retention_seconds",
-                None,
-            ),
+            episode_retention_seconds=chat.chat_memory_settings.episode_retention_seconds,
         )
 
     return factory
@@ -370,13 +370,13 @@ def create_app() -> FastAPI:
             # buffer, observability sink, ready-document catalog, and identity
             # callables now compose as one typed value in
             # ``composition.build_chat``. The placeholder ``chat_reply`` /
-            # ``chat_routing_service`` forwards below keep the lazy-upgrade
-            # contract: ``_chat_controller_factory`` re-reads ``app.state`` on
-            # every controller creation, and the LLM provider block further
-            # down upgrades those keys after this point. ``chat_intent_settings``
-            # has no placeholder today, so it gains none. The
-            # ``app.state.<key>`` forwards are deliberate temporary duplication;
-            # later slices delete them one consumer at a time.
+            # ``chat_routing_service`` forwards below keep the upgrade
+            # contract: the LLM provider block further down upgrades those
+            # keys, and the chat-group upgrade below reads them back into the
+            # group before the single assembly. ``chat_intent_settings`` has
+            # no placeholder today, so it gains none. The ``app.state.<key>``
+            # forwards are deliberate temporary duplication; later slices
+            # delete them one consumer at a time.
             chat_runtime = await build_chat(
                 pg_pool=control_plane.pg_pool,
                 project_repository=control_plane.project_repository,
@@ -398,7 +398,6 @@ def create_app() -> FastAPI:
             app.state.chat_principal_resolver = chat_runtime.chat_principal_resolver
             app.state.chat_guest_session_issuer = chat_runtime.chat_guest_session_issuer
 
-            app.state.chat_controller_factory = _chat_controller_factory(app)
             # Control-plane forwards (ADR-013, slice 02-2): same temporary
             # duplication as the block above.
             app.state.run_repository = control_plane.run_repository
@@ -542,6 +541,10 @@ def create_app() -> FastAPI:
                 email_rag=email_rag_runtime,
                 evaluation=evaluation_bundle,
             )
+            # The controller factory reads the composed runtime at controller
+            # creation time (ADR-013, slice 02-7): publish it after the single
+            # assembly, never before the upgrade sequence completes.
+            app.state.chat_controller_factory = _chat_controller_factory(app)
             if evaluation_bundle is not None:
                 app.state.evaluation_runtime = evaluation_bundle.runtime
                 app.state.evaluation_service = evaluation_bundle.service

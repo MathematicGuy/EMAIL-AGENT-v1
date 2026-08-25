@@ -27,10 +27,10 @@ private document storage. Slice 02-4 adds ``ChatRuntime``, the group that owns
 the chat construction: the memory settings, session registry and buffer, the
 memory-observability sink, the ready-document catalog, the identity callables,
 and the reply/intent/routing adapter slots that the LLM provider block
-upgrades after boot. The legacy ``chat_controller_factory`` keeps its lazy
-``app.state`` reads through that upgrade (the deletion test on those forwards
-only passes once the factory moves behind ``runtime(request)`` in the cutover
-slice). Slice 02-5 adds ``EmailRagRuntime``, the group that owns the email-RAG
+upgrades after boot. The ``chat_controller_factory`` reads the assembled
+runtime at controller creation time (slice 02-7), so those forwards now
+serve only the remaining legacy readers until later slices delete them.
+Slice 02-5 adds ``EmailRagRuntime``, the group that owns the email-RAG
 construction: the project-document vector plane, the committed corpus, the
 semantic store, and the digest worker. The group boots with its document plane
 complete and provider-half placeholders; the LLM provider block in ``lifespan``
@@ -264,11 +264,12 @@ class ChatRuntime:
     untyped ``app.state`` key. ``chat_reply`` boots as the
     ``UnavailableChatReply`` placeholder and ``chat_intent_settings`` /
     ``chat_routing_service`` boot as ``None``: the LLM provider block upgrades
-    those three after this group is composed, and ``lifespan`` assembles the
-    full runtime with the upgraded values. The controller factory still reads the
-    forwarded ``app.state`` keys lazily at controller-creation time, so it
-    always sees whichever value the upgrade sequence last published — the
-    frozen group never observes a mid-flight swap. ``ready_document_catalog``
+    those three after this group is composed, and ``lifespan`` reads the
+    upgraded values back into the group before assembling the full runtime.
+    The controller factory reads the assembled runtime at controller-creation
+    time (slice 02-7), so it always sees those final values without re-reading
+    ``app.state`` — the frozen group never observes a mid-flight swap.
+    ``ready_document_catalog``
     is ``None`` only when there is no project repository; the principal
     resolver and guest session issuer arrive as callables because they are
     bound to the HTTP adapter surface in ``app.py`` and crossing that seam the
