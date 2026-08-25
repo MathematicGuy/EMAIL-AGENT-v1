@@ -3,12 +3,14 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
 
 from cowork_agent.app import _chat_controller_factory, _resolve_chat_principal
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
@@ -210,7 +212,15 @@ def test_runtime_composition_passes_eligible_cross_session_episodes_as_advisory_
 def test_runtime_chat_principal_requires_exactly_one_active_mailbox_connection() -> None:
     def request_for(connections: tuple[MailboxConnection, ...]) -> Request:
         app = FastAPI()
-        app.state.connection_repository = ConnectionRepository(connections)
+        # The resolver now reads the typed control-plane seam (ADR-013): inject
+        # a minimal runtime instead of a bare ``app.state`` key.
+        app.state.runtime = CoworkRuntime(
+            reports=None,  # type: ignore[arg-type]
+            control_plane=SimpleNamespace(
+                connection_repository=ConnectionRepository(connections),
+                chat_opaque_session_repository=None,
+            ),
+        )
         return Request({"type": "http", "app": app, "headers": []})
 
     principal = asyncio.run(

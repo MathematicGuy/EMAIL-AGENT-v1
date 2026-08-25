@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.composition import (
+    ControlPlane,
     CoworkRuntime,
     build_chat,
     build_control_plane,
@@ -36,6 +37,7 @@ from cowork_agent.composition import (
     build_evaluation,
     build_mailbox,
     degrade_email_rag,
+    runtime,
     upgrade_email_rag_providers,
 )
 from cowork_agent.config import (
@@ -66,17 +68,8 @@ from cowork_agent.features.ai_chat.ports import (
     EpisodicMemoryPort,
 )
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
-from cowork_agent.features.email_action_plan.ports import (
-    MailboxConnectionRepository,
-    RunRepository,
-    SemanticMemoryPort,
-    TaskRepository,
-)
-from cowork_agent.features.email_action_plan.workflow import (
-    CreateDigestRun,
-    DigestWorker,
-    GetDigestResult,
-)
+from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
+from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.identity import (
     ConnectionNotOwnedError,
     VerifiedPrincipal,
@@ -102,7 +95,6 @@ from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
-from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
 )
@@ -128,12 +120,20 @@ logger = logging.getLogger(__name__)
 async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
     """Resolve chat identity from a session, with the local MVP fallback."""
 
-    if getattr(request.app.state, "chat_opaque_session_repository", None) is not None:
+    # Both identity paths read the control-plane group through the typed
+    # runtime seam (ADR-013); an uncomposed group fails as loudly as the old
+    # missing-key reads did.
+    control_plane = runtime(request).control_plane
+    if control_plane is None:
+        raise RuntimeError("the control-plane group is not composed")
+    if control_plane.chat_opaque_session_repository is not None:
         principal = await _authenticated_chat_principal(request)
         assert principal is not None
         return principal
 
-    repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+    repository: SQLiteMailboxConnectionRepository = cast(
+        SQLiteMailboxConnectionRepository, control_plane.connection_repository
+    )
     candidates = tuple(
         connection
         for connection in await repository.list_all()
@@ -578,28 +578,39 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/v1/cowork/chat/document-health", response_model=None)
-    async def document_health() -> JSONResponse:
-        settings = app.state.user_documents_settings
+    async def document_health(request: Request) -> JSONResponse:
+        # Every check reads one composed group through the runtime seam
+        # (ADR-013); an absent group degrades to the disabled/unavailable
+        # states the old missing-key reads produced.
+        state_runtime = runtime(request)
+        chat = state_runtime.chat
+        mailbox = state_runtime.mailbox
+        email_rag = state_runtime.email_rag
+        control_plane = state_runtime.control_plane
+        settings = chat.user_documents_settings if chat is not None else None
+        redis_client = control_plane.redis_client if control_plane is not None else None
         checks: dict[str, str] = {
-            "feature": "enabled" if settings.enabled else "disabled",
+            "feature": "enabled" if settings is not None and settings.enabled else "disabled",
             "postgresql": "disabled",
             "supabase_storage": "disabled",
             "redis": "disabled",
-            "redis_mode": "redis" if app.state.redis_client is not None else "local",
+            "redis_mode": "redis" if redis_client is not None else "local",
             "project_index": "disabled",
             "gemini_embeddings": "disabled",
             "ocr": "optional_unavailable",
             "classifier": "disabled",
             "worker_queue": "unavailable",
         }
-        if not settings.enabled:
+        if settings is None or not settings.enabled:
             return JSONResponse({"status": "disabled", "checks": checks})
-        if app.state.document_embeddings_configured:
+        if email_rag is not None and email_rag.document_embeddings_configured:
             checks["gemini_embeddings"] = "configured"
         checks["classifier"] = (
-            "ready" if app.state.chat_routing_service is not None else "unavailable"
+            "ready"
+            if chat is not None and chat.chat_routing_service is not None
+            else "unavailable"
         )
-        pool = app.state.pg_pool
+        pool = control_plane.pg_pool if control_plane is not None else None
         if pool is not None:
             try:
                 async with pool.connection() as connection:
@@ -608,18 +619,19 @@ def create_app() -> FastAPI:
             except Exception:
                 checks["postgresql"] = "unavailable"
         checks["supabase_storage"] = (
-            "configured" if app.state.private_storage is not None else "unavailable"
+            "configured"
+            if mailbox is not None and mailbox.private_storage is not None
+            else "unavailable"
         )
-        redis_client = app.state.redis_client
         if redis_client is not None:
             try:
-                await redis_client.ping()
+                await redis_client.ping()  # type: ignore[attr-defined]
                 checks["redis"] = "ready"
             except Exception:
                 checks["redis"] = "unavailable"
         else:
             checks["redis"] = "local_fallback"
-        index_store = app.state.project_document_index
+        index_store = email_rag.project_document_index if email_rag is not None else None
         if index_store is not None:
             # A .tvim is pulled per project on demand, so the only thing that
             # can be checked without a project in hand is that the API can
@@ -631,7 +643,9 @@ def create_app() -> FastAPI:
                 )
             except OSError:
                 checks["project_index"] = "unavailable"
-        project_repository = app.state.project_repository
+        project_repository = (
+            control_plane.project_repository if control_plane is not None else None
+        )
         if project_repository is not None:
             try:
                 if await project_repository.worker_heartbeat_is_fresh(max_age_seconds=120):
@@ -695,8 +709,13 @@ def create_app() -> FastAPI:
                     "next": "Create a digest run with this mailbox connection ID.",
                 }
             )
-        identity_repository = getattr(request.app.state, "identity_repository", None)
-        session_repository = getattr(request.app.state, "session_repository", None)
+        control_plane = runtime(request).control_plane
+        identity_repository = (
+            control_plane.identity_repository if control_plane is not None else None
+        )
+        session_repository = (
+            control_plane.session_repository if control_plane is not None else None
+        )
         if identity_repository is not None and session_repository is not None:
             principal = await identity_repository.resolve_or_create_principal(
                 connection.email_address
@@ -716,7 +735,15 @@ def create_app() -> FastAPI:
     ) -> RedirectResponse:
         service = _outlook_connection_service(request)
         if service is None:
-            reason = request.app.state.provider_availability["outlook"]["reason"]
+            mailbox_group = runtime(request).mailbox
+            availability = (
+                mailbox_group.provider_availability if mailbox_group is not None else None
+            )
+            reason = (
+                availability["outlook"]["reason"]
+                if availability is not None
+                else "the mailbox group is not composed"
+            )
             raise HTTPException(
                 status_code=503,
                 detail=f"Outlook connection is unavailable: {reason}",
@@ -776,25 +803,29 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/connections")
     async def list_connections(request: Request) -> dict[str, Any]:
-        repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+        control_plane = _control_plane_required(request)
+        repository = control_plane.connection_repository
         principal = await _authenticated_principal(
-            request, required=getattr(request.app.state, "session_repository", None) is not None
+            request, required=control_plane.session_repository is not None
         )
         connections = (
             await repository.list_for_user(principal.user_id)
             if principal is not None
             else await cast(Any, repository).list_all()
         )
+        mailbox_group = runtime(request).mailbox
+        if mailbox_group is None:
+            raise RuntimeError("the mailbox group is not composed")
         return {
             "connections": [_public_connection(item) for item in connections],
-            "providerAvailability": request.app.state.provider_availability,
+            "providerAvailability": mailbox_group.provider_availability,
         }
 
     @app.delete("/v1/mail-todo/connections/{connection_id}")
     async def disconnect_mailbox(connection_id: str, request: Request) -> dict[str, bool]:
         connection = await _owned_connection(request, connection_id, "Mailbox connection not found")
         principal = await _connection_principal(request, connection)
-        repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+        repository = _control_plane_required(request).connection_repository
         deleted = await repository.delete(connection_id, principal.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Mailbox connection not found")
@@ -865,7 +896,7 @@ def create_app() -> FastAPI:
             request, mailbox_connection_id, "Mailbox connection not found"
         )
         principal = await _connection_principal(request, connection)
-        repository = cast(RunRepository, request.app.state.run_repository)
+        repository = _control_plane_required(request).run_repository
         runs = await repository.list_recent(
             user_id=principal.user_id,
             mailbox_connection_id=mailbox_connection_id,
@@ -886,14 +917,18 @@ def create_app() -> FastAPI:
         principal = await _connection_principal(request, connection)
         worker = _digest_worker(request)
         if worker is None:
+            email_rag = runtime(request).email_rag
+            label = email_rag.llm_provider_label if email_rag is not None else "the LLM provider"
+            error = (
+                email_rag.llm_configuration_error
+                if email_rag is not None
+                else "the email-RAG group is not composed"
+            )
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    f"{request.app.state.llm_provider_label} is not configured: "
-                    f"{request.app.state.llm_configuration_error}"
-                ),
+                detail=f"{label} is not configured: {error}",
             )
-        creator = cast(CreateDigestRun, request.app.state.create_run)
+        creator = _control_plane_required(request).create_run
         run = await creator.execute(
             user_id=principal.user_id,
             mailbox_connection_id=payload.mailbox_connection_id,
@@ -901,9 +936,10 @@ def create_app() -> FastAPI:
             query=payload.query,
             max_emails=payload.max_emails,
         )
-        run_queue = getattr(request.app.state, "run_queue", None)
+        control_plane = runtime(request).control_plane
+        run_queue = control_plane.run_queue if control_plane is not None else None
         if run_queue is not None:
-            await run_queue.enqueue_digest_run(run.id, user_id=principal.user_id)
+            await cast(Any, run_queue).enqueue_digest_run(run.id, user_id=principal.user_id)
         else:
             background_tasks.add_task(worker.execute, run.id)
         return {
@@ -914,7 +950,7 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}")
     async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(RunRepository, request.app.state.run_repository)
+        repository = _control_plane_required(request).run_repository
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
@@ -936,7 +972,7 @@ def create_app() -> FastAPI:
             ),
         }
         if _is_development():
-            results = cast(InMemoryResultRepository, request.app.state.result_repository)
+            results = _control_plane_required(request).result_repository
             processed = await results.list_processed_emails(run_id)
             response["processedEmails"] = [
                 {
@@ -952,14 +988,15 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}/result")
     async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(RunRepository, request.app.state.run_repository)
+        control_plane = _control_plane_required(request)
+        repository = control_plane.run_repository
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
         await _ensure_run_connection_owned(request, run, detail="Digest run not found")
         if run.status.value in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        result_service = cast(GetDigestResult, request.app.state.get_result)
+        result_service = control_plane.get_result
         payload = cast(dict[str, Any], _jsonable(await result_service.execute(run_id)))
         if not _is_development():
             payload.pop("processedEmails", None)
@@ -969,14 +1006,15 @@ def create_app() -> FastAPI:
     async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
         """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
         information, and confidences that the legacy result shape drops."""
-        repository = cast(RunRepository, request.app.state.run_repository)
+        control_plane = _control_plane_required(request)
+        repository = control_plane.run_repository
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
         await _ensure_run_connection_owned(request, run, detail="Digest run not found")
         if run.status.value in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        task_repository = cast(TaskRepository, request.app.state.task_repository)
+        task_repository = control_plane.task_repository
         records = await task_repository.list_for_run(run_id)
         return {"tasks": [record.task.to_dict() for record in records]}
 
@@ -984,13 +1022,12 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/knowledge/ready")
     async def knowledge_ready(request: Request) -> dict[str, Any]:
-        documents: tuple[KnowledgeDocument, ...] = cast(
-            tuple[KnowledgeDocument, ...],
-            getattr(request.app.state, "knowledge_documents", ()),
+        email_rag = runtime(request).email_rag
+        documents: tuple[KnowledgeDocument, ...] = (
+            email_rag.knowledge_documents if email_rag is not None else ()
         )
-        memory = cast(
-            SemanticMemoryPort,
-            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
+        memory: SemanticMemoryPort = (
+            email_rag.semantic_memory if email_rag is not None else NullSemanticMemory()
         )
         chunk_count = sum(len(doc.chunks) for doc in documents)
         is_null = type(memory).__name__ == "NullSemanticMemory"
@@ -1008,9 +1045,9 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/knowledge/documents")
     async def knowledge_documents(request: Request) -> dict[str, Any]:
-        documents: tuple[KnowledgeDocument, ...] = cast(
-            tuple[KnowledgeDocument, ...],
-            getattr(request.app.state, "knowledge_documents", ()),
+        email_rag = runtime(request).email_rag
+        documents: tuple[KnowledgeDocument, ...] = (
+            email_rag.knowledge_documents if email_rag is not None else ()
         )
         items = [
             {
@@ -1025,9 +1062,9 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/mail-todo/knowledge/chat")
     async def knowledge_chat(body: KnowledgeChatRequest, request: Request) -> dict[str, Any]:
-        memory = cast(
-            SemanticMemoryPort,
-            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
+        email_rag = runtime(request).email_rag
+        memory: SemanticMemoryPort = (
+            email_rag.semantic_memory if email_rag is not None else NullSemanticMemory()
         )
         retrieval_request = SemanticRetrievalRequest(
             run_id="knowledge-adhoc",
@@ -1313,7 +1350,18 @@ def create_app() -> FastAPI:
 
 
 async def _raw_document_repo(request: Request) -> Any:
-    repo = getattr(request.app.state, "raw_document_repository", None)
+    # Read through the typed control-plane seam when it is composed; the
+    # ``app.state`` memo remains the fallback (and the self-heal write-back
+    # target) for the no-lifespan test path, where the runtime is never
+    # assembled. The request-time write stays on ``app.state`` because the
+    # frozen runtime cannot absorb a lazily constructed repository.
+    app_runtime = getattr(request.app.state, "runtime", None)
+    control_plane = (
+        cast(CoworkRuntime, app_runtime).control_plane if app_runtime is not None else None
+    )
+    repo = control_plane.raw_document_repository if control_plane is not None else None
+    if repo is None:
+        repo = getattr(request.app.state, "raw_document_repository", None)
     if repo is None:
         from cowork_agent.persistence.repositories.sqlite_raw_documents import (
             SQLiteRawDocumentRepository,
@@ -1331,19 +1379,32 @@ async def _raw_document_repo(request: Request) -> Any:
     return repo
 
 
+def _control_plane_required(request: Request) -> ControlPlane:
+    """The control-plane group, or the loud failure its old direct reads had."""
+    control_plane = runtime(request).control_plane
+    if control_plane is None:
+        raise RuntimeError("the control-plane group is not composed")
+    return control_plane
+
+
 def _connection_service(request: Request) -> GmailConnectionService:
-    return cast(GmailConnectionService, request.app.state.gmail_connections)
+    mailbox_group = runtime(request).mailbox
+    if mailbox_group is None:
+        raise RuntimeError("the mailbox group is not composed")
+    return mailbox_group.gmail_connections
 
 
 def _outlook_connection_service(request: Request) -> OutlookConnectionService | None:
-    return cast(OutlookConnectionService | None, request.app.state.outlook_connections)
+    mailbox_group = runtime(request).mailbox
+    return mailbox_group.outlook_connections if mailbox_group is not None else None
 
 
 async def _authenticated_principal(
     request: Request, *, required: bool = True
 ) -> VerifiedPrincipal | None:
     """Resolve the opaque session only in the PostgreSQL multi-user runtime."""
-    sessions = getattr(request.app.state, "session_repository", None)
+    control_plane = runtime(request).control_plane
+    sessions = control_plane.session_repository if control_plane is not None else None
     if sessions is None:
         return None
     principal = await principal_from_opaque_session(
@@ -1358,9 +1419,12 @@ async def _authenticated_chat_principal(
     request: Request, *, required: bool = True
 ) -> VerifiedPrincipal | None:
     """Resolve a browser's opaque chat session in either persistence mode."""
-    sessions = getattr(request.app.state, "chat_opaque_session_repository", None)
-    if sessions is None:
-        sessions = getattr(request.app.state, "session_repository", None)
+    control_plane = runtime(request).control_plane
+    sessions = (
+        (control_plane.chat_opaque_session_repository or control_plane.session_repository)
+        if control_plane is not None
+        else None
+    )
     if sessions is None:
         return None
     principal = await principal_from_opaque_session(
@@ -1377,15 +1441,16 @@ async def _issue_chat_guest_session(request: Request, response: Response) -> Non
     if existing is not None:
         return
 
-    identities = getattr(
-        request.app.state,
-        "chat_identity_repository",
-        getattr(request.app.state, "identity_repository", None),
+    control_plane = runtime(request).control_plane
+    identities = (
+        (control_plane.chat_identity_repository or control_plane.identity_repository)
+        if control_plane is not None
+        else None
     )
-    sessions = getattr(
-        request.app.state,
-        "chat_opaque_session_repository",
-        getattr(request.app.state, "session_repository", None),
+    sessions = (
+        (control_plane.chat_opaque_session_repository or control_plane.session_repository)
+        if control_plane is not None
+        else None
     )
     if identities is None or sessions is None:
         raise HTTPException(status_code=503, detail="Guest chat is unavailable")
@@ -1403,7 +1468,8 @@ async def _connection_principal(
     request: Request, connection: MailboxConnection
 ) -> VerifiedPrincipal:
     """Use the opaque session in Postgres mode and legacy identity locally."""
-    if getattr(request.app.state, "session_repository", None) is not None:
+    control_plane = runtime(request).control_plane
+    if control_plane is not None and control_plane.session_repository is not None:
         principal = await _authenticated_principal(request)
         assert principal is not None
         return principal
@@ -1415,7 +1481,7 @@ async def _connection_principal(
 
 
 async def _owned_connection(request: Request, connection_id: str, detail: str) -> MailboxConnection:
-    repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
+    repository = _control_plane_required(request).connection_repository
     connection = await repository.get(connection_id)
     if connection is None:
         raise HTTPException(status_code=404, detail=detail)
@@ -1457,23 +1523,31 @@ async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, deta
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
+    # ``gmail_settings`` lives in no runtime group: the mailbox group owns the
+    # *outlook* settings, and this value is also the seed for the control plane.
+    # It stays a direct ``app.state`` read until a later slice finds it a home.
     return cast(GmailSettings, request.app.state.gmail_settings)
 
 
 def _outlook_settings(request: Request) -> OutlookSettings | None:
-    return cast(OutlookSettings | None, request.app.state.outlook_settings)
+    mailbox_group = runtime(request).mailbox
+    return mailbox_group.outlook_settings if mailbox_group is not None else None
 
 
 def _session_settings(request: Request) -> SessionSettings:
-    return cast(SessionSettings, request.app.state.session_settings)
+    return _control_plane_required(request).session_settings
 
 
 def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
-    return cast(ProviderRoutingMailboxAdapter, request.app.state.mailbox)
+    mailbox_group = runtime(request).mailbox
+    if mailbox_group is None:
+        raise RuntimeError("the mailbox group is not composed")
+    return mailbox_group.mailbox
 
 
 def _digest_worker(request: Request) -> DigestWorker | None:
-    return cast(DigestWorker | None, request.app.state.digest_worker)
+    email_rag = runtime(request).email_rag
+    return email_rag.digest_worker if email_rag is not None else None
 
 
 def _is_development() -> bool:

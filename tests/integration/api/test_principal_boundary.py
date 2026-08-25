@@ -8,6 +8,7 @@ query parameters.
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -55,15 +56,23 @@ async def running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
     lifespan = app.router.lifespan_context(app)
     await lifespan.__aenter__()
     try:
-        app.state.digest_worker = DigestWorker(
-            app.state.run_repository,
-            app.state.result_repository,
-            FakeMailbox([]),
-            SafeTextAttachmentExtractor(),
-            FakeRouteClassifier(),
-            FakePlanGenerator(),
-            ShortTermStore(),
-            app.state.task_repository,
+        # The digest route now reads the worker through the typed runtime
+        # (ADR-013), so the fake worker must land on the composed group.
+        app.state.runtime = replace(
+            app.state.runtime,
+            email_rag=replace(
+                app.state.runtime.email_rag,
+                digest_worker=DigestWorker(
+                    app.state.run_repository,
+                    app.state.result_repository,
+                    FakeMailbox([]),
+                    SafeTextAttachmentExtractor(),
+                    FakeRouteClassifier(),
+                    FakePlanGenerator(),
+                    ShortTermStore(),
+                    app.state.task_repository,
+                ),
+            ),
         )
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://principal.test"
@@ -113,14 +122,23 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
     async def scenario() -> None:
         async with running_app() as (app, client):
             settings = app.state.gmail_settings
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                app.state.connection_repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+            # The connect/callback routes now read the Gmail service through
+            # the typed mailbox group (ADR-013); swap it there, not just on
+            # the forwarded ``app.state`` key.
+            app.state.runtime = replace(
+                app.state.runtime,
+                mailbox=replace(
+                    app.state.runtime.mailbox,
+                    gmail_connections=GmailConnectionService(
+                        settings,
+                        app.state.connection_repository,
+                        TokenCipher(settings.token_encryption_key),
+                        OAuthStateManager(
+                            settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                        ),
+                        FakeOAuthDriver(),
+                    ),
                 ),
-                FakeOAuthDriver(),
             )
             redirect = await client.get(
                 "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
@@ -151,14 +169,21 @@ def test_oauth_callback_redirects_to_configured_frontend(
     async def scenario() -> None:
         async with running_app() as (app, client):
             settings = app.state.gmail_settings
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                app.state.connection_repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+            # Typed-runtime override: see the sibling connect-flow test.
+            app.state.runtime = replace(
+                app.state.runtime,
+                mailbox=replace(
+                    app.state.runtime.mailbox,
+                    gmail_connections=GmailConnectionService(
+                        settings,
+                        app.state.connection_repository,
+                        TokenCipher(settings.token_encryption_key),
+                        OAuthStateManager(
+                            settings.oauth_state_secret, settings.oauth_state_ttl_seconds
+                        ),
+                        FakeOAuthDriver(),
+                    ),
                 ),
-                FakeOAuthDriver(),
             )
             connect = await client.get(
                 "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
