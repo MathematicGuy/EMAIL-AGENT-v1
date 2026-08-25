@@ -291,10 +291,14 @@ export async function openDashboard(page: Page): Promise<void> {
     window.localStorage.setItem('v-assistant-active-project-id', 'project-latency');
   });
   await page.goto('/#dashboard');
-  const recents = page.getByTestId('recent-chat').first();
   const showSidebar = page.getByRole('button', { name: /Show sidebar|Hiện thanh bên/i });
   if (await showSidebar.isVisible().catch(() => false)) {
     await showSidebar.click();
   }
+  const expandBtn = page.getByRole('button', { name: /Expand Latency Project|Expand Default Project/i });
+  if (await expandBtn.isVisible().catch(() => false)) {
+    await expandBtn.click();
+  }
+  const recents = page.getByTestId('recent-chat').first();
   await expect(recents).toBeVisible({ timeout: 20_000 });
 }

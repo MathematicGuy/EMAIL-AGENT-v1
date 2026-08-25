@@ -732,6 +732,8 @@ def _gmail_env(tmp_path: Path) -> dict[str, str]:
         "OAUTH_STATE_SECRET": "state-secret-that-is-at-least-32-characters",
         "MICROSOFT_CLIENT_ID": "",
         "MICROSOFT_CLIENT_SECRET": "",
+        "MISTRAL_API_KEY": "dummy-test-key",
+        "GEMINI_API_KEY": "dummy-test-key",
     }
 
 

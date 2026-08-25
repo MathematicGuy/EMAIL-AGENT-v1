@@ -311,7 +311,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </div>
           <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar min-h-0">
             {projects.map((project) => {
-              const isProjectExpanded = expandedProjects.has(project.id) || activeProjectId === project.id;
+              const isProjectExpanded = expandedProjects.has(project.id);
               const isActive = activeProjectId === project.id;
               const chats = recentChats.filter(
                 (chat) => chat.projectId === project.id || (!chat.projectId && project.isDefault)
