@@ -70,8 +70,10 @@ class LinkCollector:
         return tuple(self._links)
 
 
-_URL = re.compile(r"https?://[^\s<>\"'\[\]]+", re.IGNORECASE)
-_MARKDOWN = re.compile(r"\[([^\]\r\n]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE)
+_URL = re.compile(r"(?:https?://|(?:javascript|data|file|vbscript):)[^\s<>\"'\[\]]+", re.IGNORECASE)
+_MARKDOWN = re.compile(
+    r"\[([^\]\r\n]+)\]\(((?:https?://|(?:javascript|data|file|vbscript):)[^\s)]+)\)", re.IGNORECASE
+)
 _HTML_LIKE = re.compile(
     r"(?is)<!--|</?(?:a|body|br|div|html|p|strong|table|tbody|td|th|thead|tr|v:[\w-]+|w:[\w-]+)\b"
 )
