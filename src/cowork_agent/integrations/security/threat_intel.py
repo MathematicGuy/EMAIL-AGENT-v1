@@ -205,9 +205,11 @@ class CompositeThreatIntel:
         self,
         *,
         cloud_intel: GoogleWebRiskThreatIntel | None = None,
+        hash_lookup: object | None = None,
         cache: ThreatCache | None = None,
     ) -> None:
         self._cloud_intel = cloud_intel
+        self._hash_lookup = hash_lookup
         self._cache = cache or ThreatCache()
 
     async def check_url(self, url: str) -> LinkSafetyReport:
@@ -235,10 +237,11 @@ class CompositeThreatIntel:
         if cached is not None:
             return cached
 
-        if self._cloud_intel is not None:
-            cloud_report = await self._cloud_intel.check_file_hash(sha256, filename)
-            self._cache.set_hash(sha256, cloud_report)
-            return cloud_report
+        if self._hash_lookup is not None and hasattr(self._hash_lookup, "check_hash"):
+            hash_report = await self._hash_lookup.check_hash(sha256, filename)
+            if isinstance(hash_report, AttachmentSafetyReport):
+                self._cache.set_hash(sha256, hash_report)
+                return hash_report
 
         clean_report = AttachmentSafetyReport(
             filename=filename,

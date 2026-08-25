@@ -147,6 +147,8 @@ class SecuritySettings:
     webrisk_api_key: str = field(repr=False)
     cache_ttl_seconds: int
     quarantine_malicious_emails: bool
+    virustotal_api_key: str = field(default="", repr=False)
+    malwarebazaar_enabled: bool = True
 
     @classmethod
     def from_env(
@@ -165,6 +167,10 @@ class SecuritySettings:
             cache_ttl_seconds=_positive_int(environ, "SECURITY_CACHE_TTL_SECONDS", 86_400),
             quarantine_malicious_emails=_boolean(
                 environ, "SECURITY_QUARANTINE_ENABLED", True
+            ),
+            virustotal_api_key=environ.get("SECURITY_VIRUSTOTAL_API_KEY", "").strip(),
+            malwarebazaar_enabled=_boolean(
+                environ, "SECURITY_MALWAREBAZAAR_ENABLED", True
             ),
         )
 
