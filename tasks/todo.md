@@ -3,20 +3,19 @@
 Register: [SPEC-architecture-improvement-program.md](specs/SPEC-architecture-improvement-program.md)
 — the source of truth for status. ADRs: [013](adr/ADR-013-composition-as-typed-value.md),
 [014](adr/ADR-014-turn-pipeline-stays-one-function.md),
-[015](adr/ADR-015-routers-own-their-transport.md).
+[015](adr/ADR-015-routers-own-their-transport.md),
+[016](adr/ADR-016-report-artifacts-are-validated-domain-values.md).
 
-- [x] C01 Report artifacts get a module (`9c4e5fc`)
+- [x] C01 Report artifacts get a module (`9c4e5fc`, ADR-016)
 - [x] C02 Composition is a typed value — `CoworkRuntime` (ADR-013)
 - [x] C04 Turn pipeline stays one function; settlement extracted (ADR-014)
 - [x] C03 Routers own their transport; `app.py` 1581 → 507 (ADR-015)
-- [ ] C07 Turn-reconciliation logic in the transport layer — shape agreed: seven pure helpers
-      move to `features/ai_chat/`, payloads converted to a domain value at the route boundary.
-      **Ready to implement; no code written yet.**
-- [ ] C06 `useStreamingChat` runs two protocols — **scheduled**, own agent, frontend-only
-- [ ] C05 `Settings.from_env` reads disk behind the caller — parked, no forcing function
+- [x] C07 Mail-scan reconciliation moved below transport (`48ac90e`)
+- [x] C06 Mail-poll protocol extracted from `useStreamingChat` (`ace5c26`)
+- [ ] C05 `Settings.from_env` reads disk behind the caller — scheduled next
 - [ ] C08 PDF renderer — blocked on a dependency decision (ask first)
 - [x] C09 Stray textbook moved out of `data/raw/` into `data/OCR/`
-- [ ] C10 Three `app.state` survivors; two ADR-013 corrections pending
+- [x] C10 Three `app.state` survivors accepted and documented; revisit with C08
 
 ---
 

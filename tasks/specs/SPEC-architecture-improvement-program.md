@@ -4,7 +4,7 @@
 **Date opened:** 2026-08-25
 **Baseline verified at:** `dev` @ `216399e` (backend gate green: ruff clean, mypy clean on 201 files, pytest 2135 passed / 9 skipped)
 **Vocabulary:** `codebase-design` — module, interface, depth, seam, adapter, leverage, locality, and the **deletion test**
-**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md)
+**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md), [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md)
 
 ---
 
@@ -46,7 +46,7 @@ Source documents, all outside the repo and all volatile:
 | Roadmap 02 → 04 → 03 | `%APPDATA%\Qoder\SharedClientCache\cache\plans\Runtime_Deepening_Roadmap_464a1314.md` | complete; superseded by §4 |
 | Post-merge decisions | `%TEMP%\decisions-runtime-deepening.html` | five decisions; four now resolved, see §3 |
 | Handoff — roadmap | `%TEMP%\handoff-architecture-roadmap-20260825.md` | historical; content absorbed here |
-| Handoff — C07 deep dive | `%TEMP%\handoff-runtime-deepening-roadmap.md` | **current**; the only live handoff |
+| Handoff — C07 deep dive | `%TEMP%\handoff-runtime-deepening-roadmap.md` | historical; C07 is complete and its durable record is §4.5 |
 | C07 before/after, illustrated | `%TEMP%\c07-chat-module-before-after.html` | a reading copy of §4.5 for humans; the diagrams here are the same ones |
 
 If any of those are gone, this file is sufficient to continue.
@@ -108,10 +108,12 @@ flowchart TB
 
     classDef done fill:#d1fae5,stroke:#047857,color:#064e3b;
     classDef open fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef debt fill:#e0e7ff,stroke:#4338ca,color:#312e81;
     classDef outlier fill:#ffe4e6,stroke:#be123c,color:#881337,stroke-width:2px;
     classDef plain fill:#f5f5f4,stroke:#a8a29e,color:#44403c;
-    class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR done;
-    class HOOK,CFG,SURV open;
+    class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR,HOOK,MAILP done;
+    class CFG open;
+    class SURV debt;
     class DEPS plain;
 ```
 
@@ -126,7 +128,7 @@ got enforced at the composition edge; everything above reads its dependencies th
 
 | ID | Workstream | Strength | Status | Record |
 |---|---|---|---|---|
-| **C01** | Report artifacts have no module — 3 hard-coded paths to `data/reports` | Strong | **Done** — `9c4e5fc` | §4.1 (no ADR; see note) |
+| **C01** | Report artifacts have no module — 3 hard-coded paths to `data/reports` | Strong | **Done** — `9c4e5fc` | [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md) |
 | **C02** | Composition is a 440-line closure and ~60 untyped `app.state` keys | Strong | **Done** — slices 02-1…02-8 | [ADR-013](../adr/ADR-013-composition-as-typed-value.md) |
 | **C04** | One chat turn is one 617-line generator | Strong | **Done, narrowed** — slices 04-1…04-3 | [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md) |
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
@@ -140,7 +142,8 @@ got enforced at the composition edge; everything above reads its dependencies th
 Operational items from the post-merge decisions doc, for completeness — **not architecture
 workstreams**, no ID, no tracking:
 
-- *Unpushed commits* — resolved. `dev` is ahead of `origin/dev` by 1 as of `216399e`.
+- *Unpushed commits* — resolved at the original baseline. This living register does not track
+  later branch divergence; inspect Git directly.
 - *E2E verification* — addressed at `216399e` (`test(e2e): fix locators and mocks…`). Playwright
   still needs a live server and credentials to run, so treat it as green-by-construction, not
   green-by-observation.
@@ -159,9 +162,9 @@ Closed by giving the artifact a module: `domain/report_artifacts.py` (the `Repor
 value object — `parse` raises, `sanitize` degrades — plus the `ReportArtifactStore` and
 `ReportPdfRenderer` **ports**), `persistence/report_artifacts.py`, and `api/reports.py`.
 
-**No ADR was written.** That is a gap, not a decision: C01 predates the ADR habit this program
-picked up at C02, and its two lasting contracts (the filename rule, and the store as an
-injected port) are recorded only in the commit. Cheap to fix if anyone touches reports again.
+The implementation predates this program's ADR habit. [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md)
+now records its two lasting contracts: filenames are validated domain values, and all report
+persistence crosses one injected store interface. C08 remains a separate renderer decision.
 
 ```bash
 git show 9c4e5fc --stat
@@ -620,7 +623,7 @@ whoever ships the renderer should give it a typed `CoworkRuntime` field and dele
 
 ---
 
-### 4.9 C09 — A stray corpus input, already defused · **Open (minor), latent risk only**
+### 4.9 C09 — A stray corpus input, already defused · **Done**
 
 > **This entry was wrong when first written and is corrected here.** Two claims did not
 > survive checking: that the textbook is in the production retrieval corpus, and that no test
@@ -697,20 +700,19 @@ Three live sites remain in `src/`:
 
 | Site | Key | Why it survives |
 |---|---|---|
-| `api/chat.py:969, 972` | `chat_controllers` | Request-time per-session controller cache. Created lazily on first request; a frozen value cannot hold it. Sanctioned by ADR-013 point 3. |
-| `api/chat.py:985` | `chat_controller_factory` | Published once after the single runtime assembly. Sanctioned by ADR-013. |
-| `api/reports.py:54` | `report_pdf_renderer` | **Undocumented.** A `getattr` read with no production writer — it exists so a test can inject a stub (C08). |
+| `api/chat.py:767, 770` | `chat_controllers` | Request-time per-session controller cache. Created lazily on first request; a frozen value cannot hold it. Sanctioned by ADR-013 point 3. |
+| `app.py:419`; `api/chat.py:783` | `chat_controller_factory` | Published once after the single runtime assembly and read by the request-time cache. Sanctioned by ADR-013. |
+| `api/reports.py:54` | `report_pdf_renderer` | Optional `getattr` read with no production writer — it exists so a test can inject a stub (C08), now documented in ADR-013. |
 
 ```bash
 grep -rn "app\.state" src/ --include=*.py
 ```
 
-**Two corrections ADR-013 needs**, both one-liners, best made by whoever next opens that ADR:
+**ADR-013 corrected 2026-08-26:**
 
-1. Its "Final shape" survivor list names `raw_document_repository`. That survivor is **gone** —
-   candidate 03 replaced it with a typed read at `api/knowledge.py:133`.
-2. It does not mention `report_pdf_renderer`, which is now the last untyped `app.state` read in
-   the codebase.
+1. The obsolete `raw_document_repository` survivor was removed; candidate 03 replaced it with a
+   typed control-plane read.
+2. `report_pdf_renderer`, the last untyped optional read, is recorded with its C08 revisit rule.
 
 **Revisit criterion:** when C08 is decided, the renderer becomes a typed runtime field and this
 row shrinks to the two request-time caches, which are correct as they are.
@@ -877,6 +879,7 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C01/C10 records completed and register drift repaired.** Added ADR-016 for the report filename/store contracts, corrected ADR-013's survivor list, and synchronized the C06/C07/C09/C10 checklist and section statuses with the register. No runtime behavior changed. |
 | 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
 | 2026-08-26 | **C06 closed.** Extracted the concurrent Gmail/Outlook mail-poll protocol from `useStreamingChat` into the deep `runMailScanProtocol` operation. The hook remains the React/persistence adapter; routes, mail client, cancellation semantics, provider ordering, and public hook interface are unchanged. Added protocol characterization and refreshed all four required Level 1 architecture documents. |
 | 2026-08-25 | **C09 closed.** Moved rather than deleted: `books/` was already gone (`e91486e`), so `data/raw/` held the only copy, and deleting reclaims nothing because the blob is permanent in history. The PDF now sits in `data/OCR/` beside its extraction and golden dataset. `data/raw/` back to 17 files; gate green (2137 passed). |
