@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
-from cowork_agent.composition import CoworkRuntime
+from cowork_agent.composition import CoworkRuntime, build_control_plane
 from cowork_agent.config import (
     ChatMemorySettings,
     EmailRagQualitySettings,
@@ -51,7 +51,6 @@ from cowork_agent.domain.target_contracts import (
 )
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
-    ChatSessionRegistryPort,
     UnavailableChatReply,
 )
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
@@ -131,7 +130,6 @@ from cowork_agent.integrations.rag.project_documents import (
 )
 from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
-from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
@@ -140,8 +138,6 @@ from cowork_agent.persistence.repositories.mailbox_connections import (
 from cowork_agent.persistence.repositories.project_document_chunks import (
     PostgresProjectDocumentChunkRepository,
 )
-from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
-from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
 from cowork_agent.runtime import (
     configure_windows_event_loop_policy,
     configure_windows_reload,
@@ -327,8 +323,6 @@ def create_app() -> FastAPI:
             # ``report_store`` stays as a thin forward until later slices move
             # the remaining consumers behind ``runtime(request)``.
             report_store = FileSystemReportArtifactStore(REPORTS_DIR)
-            app.state.runtime = CoworkRuntime(reports=report_store)
-            app.state.report_store = app.state.runtime.reports
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
             outlook_settings: OutlookSettings | None = None
@@ -349,114 +343,40 @@ def create_app() -> FastAPI:
                     logger.warning("Outlook connector is unavailable: %s", exc)
             else:
                 outlook_configuration_error = "Microsoft OAuth is not configured"
-            session_settings = SessionSettings.from_env()
-            repository: MailboxConnectionRepository = SQLiteMailboxConnectionRepository(
-                settings.connection_db_path
+            # Control-plane group (ADR-013, slice 02-2): the Postgres/SQLite
+            # repository decision, the pool and its migrations, and the
+            # run/task/result bookkeeping now compose as one typed value in
+            # ``composition.build_control_plane``. The ``app.state.<key>``
+            # forwards below are deliberate temporary duplication; later
+            # slices delete them one consumer at a time.
+            control_plane = await build_control_plane(settings, control_plane_url)
+            app.state.runtime = CoworkRuntime(
+                reports=report_store, control_plane=control_plane
             )
-            local_repository = cast(SQLiteMailboxConnectionRepository, repository)
-            await local_repository.initialize()
+            app.state.report_store = app.state.runtime.reports
             app.state.gmail_settings = settings
-            app.state.session_settings = session_settings
-            app.state.identity_repository = None
-            app.state.session_repository = None
-            app.state.chat_identity_repository = None
-            app.state.chat_opaque_session_repository = None
-            run_repository: RunRepository
-            task_repository: TaskRepository
-            chat_session_registry: ChatSessionRegistryPort
-            result_repository = InMemoryResultRepository()
-            if control_plane_url:
-                # V1-H T5.1 durable control plane: PostgreSQL is the source
-                # of truth for runs, tasks, and outbox events. Imports stay
-                # lazy so the app boots without the optional postgres extra.
-                from psycopg_pool import AsyncConnectionPool
-
-                from cowork_agent.persistence.migrate import apply_migrations
-                from cowork_agent.persistence.pool import control_plane_pool_kwargs
-                from cowork_agent.persistence.repositories.chat_history import (
-                    PostgresChatHistoryRepository,
-                )
-                from cowork_agent.persistence.repositories.chat_sessions import (
-                    PostgresChatSessionRegistry,
-                )
-                from cowork_agent.persistence.repositories.identity import (
-                    PostgresIdentityRepository,
-                    PostgresMailboxConnectionRepository,
-                    PostgresSessionRepository,
-                )
-                from cowork_agent.persistence.repositories.postgres import (
-                    PostgresChatProfileRepository,
-                    PostgresOutboxRepository,
-                    PostgresRunRepository,
-                    PostgresTaskEpisodeRepository,
-                    PostgresTaskRepository,
-                )
-                from cowork_agent.persistence.repositories.projects import (
-                    PostgresProjectRepository,
-                )
-
-                pool = AsyncConnectionPool(
-                    control_plane_url,
-                    **control_plane_pool_kwargs(),
-                )
-                await pool.open(wait=True)
-                await apply_migrations(pool)
-                run_repository = PostgresRunRepository(pool)
-                task_repository = PostgresTaskRepository(pool)
-                app.state.outbox_repository = PostgresOutboxRepository(pool)
-                app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
-                app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
-                app.state.project_repository = PostgresProjectRepository(pool)
-                chat_session_registry = PostgresChatSessionRegistry(pool)
-                app.state.chat_history_repository = PostgresChatHistoryRepository(pool)
-                app.state.chat_session_repository = chat_session_registry
-                app.state.pg_pool = pool
-                app.state.identity_repository = PostgresIdentityRepository(pool)
-                app.state.session_repository = PostgresSessionRepository(pool)
-                app.state.chat_identity_repository = app.state.identity_repository
-                app.state.chat_opaque_session_repository = app.state.session_repository
-                repository = PostgresMailboxConnectionRepository(pool)
-            else:
-                from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
-                from cowork_agent.persistence.repositories.sqlite_chat_identity import (
-                    SQLiteChatIdentityRepository,
-                )
-                from cowork_agent.persistence.repositories.sqlite_projects import (
-                    SQLiteProjectRepository,
-                )
-
-                task_repository = SQLiteTaskRepository(
-                    settings.connection_db_path.parent / "tasks.db"
-                )
-                await task_repository.initialize()
-                sqlite_run_repository = SQLiteRunRepository(
-                    settings.connection_db_path.parent / "runs.db"
-                )
-                await sqlite_run_repository.initialize()
-                run_repository = sqlite_run_repository
-                app.state.outbox_repository = InMemoryOutbox()
-                sqlite_chat_repository = SQLiteChatRepository(
-                    settings.connection_db_path.parent / "chat.db"
-                )
-                await sqlite_chat_repository.initialize()
-                sqlite_chat_identity_repository = SQLiteChatIdentityRepository(
-                    settings.connection_db_path.parent / "chat_identity.db"
-                )
-                await sqlite_chat_identity_repository.initialize()
-                app.state.chat_profile_repository = sqlite_chat_repository
-                app.state.chat_task_episode_repository = sqlite_chat_repository
-                app.state.chat_session_repository = sqlite_chat_repository
-                app.state.chat_history_repository = sqlite_chat_repository
-                app.state.pg_pool = None
-                sqlite_project_repository = SQLiteProjectRepository(
-                    settings.connection_db_path.parent / "projects.db"
-                )
-                await sqlite_project_repository.initialize()
-                app.state.project_repository = sqlite_project_repository
-                app.state.chat_identity_repository = sqlite_chat_identity_repository
-                app.state.chat_opaque_session_repository = sqlite_chat_identity_repository
-                chat_session_registry = sqlite_chat_repository
-            app.state.connection_repository = repository
+            app.state.session_settings = control_plane.session_settings
+            app.state.identity_repository = control_plane.identity_repository
+            app.state.session_repository = control_plane.session_repository
+            app.state.chat_identity_repository = control_plane.chat_identity_repository
+            app.state.chat_opaque_session_repository = (
+                control_plane.chat_opaque_session_repository
+            )
+            app.state.outbox_repository = control_plane.outbox_repository
+            app.state.chat_profile_repository = control_plane.chat_profile_repository
+            app.state.chat_task_episode_repository = (
+                control_plane.chat_task_episode_repository
+            )
+            app.state.project_repository = control_plane.project_repository
+            app.state.chat_history_repository = control_plane.chat_history_repository
+            app.state.chat_session_repository = control_plane.chat_session_repository
+            app.state.pg_pool = control_plane.pg_pool
+            app.state.connection_repository = control_plane.connection_repository
+            repository = control_plane.connection_repository
+            chat_session_registry = control_plane.chat_session_registry
+            run_repository = control_plane.run_repository
+            task_repository = control_plane.task_repository
+            result_repository = control_plane.result_repository
             mailbox_cipher = TokenCipher(settings.token_encryption_key)
             app.state.gmail_connections = GmailConnectionService(
                 settings,
@@ -559,25 +479,16 @@ def create_app() -> FastAPI:
             app.state.chat_guest_session_issuer = _issue_chat_guest_session
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
-            app.state.run_repository = run_repository
-            app.state.create_run = CreateDigestRun(run_repository)
-            app.state.get_result = GetDigestResult(
-                run_repository, result_repository, task_repository
-            )
-            app.state.result_repository = result_repository
-            app.state.task_repository = task_repository
-            app.state.redis_client = None
-            app.state.run_queue = None
-
-            from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-                SQLiteRawDocumentRepository,
-            )
-
-            raw_doc_repo = SQLiteRawDocumentRepository(
-                settings.connection_db_path.parent / "raw_documents.db"
-            )
-            await raw_doc_repo.initialize()
-            app.state.raw_document_repository = raw_doc_repo
+            # Control-plane forwards (ADR-013, slice 02-2): same temporary
+            # duplication as the block above.
+            app.state.run_repository = control_plane.run_repository
+            app.state.create_run = control_plane.create_run
+            app.state.get_result = control_plane.get_result
+            app.state.result_repository = control_plane.result_repository
+            app.state.task_repository = control_plane.task_repository
+            app.state.redis_client = control_plane.redis_client
+            app.state.run_queue = control_plane.run_queue
+            app.state.raw_document_repository = control_plane.raw_document_repository
 
             if user_documents_settings.enabled and app.state.project_repository is not None:
                 try:
