@@ -295,10 +295,11 @@ export async function openDashboard(page: Page): Promise<void> {
   if (await showSidebar.isVisible().catch(() => false)) {
     await showSidebar.click();
   }
-  const expandBtn = page.getByRole('button', { name: /Expand Latency Project|Expand Default Project/i });
+  const expandBtn = page.getByRole('button', { name: /Expand Latency Project|Expand Default Project|Expand/i });
+  const recents = page.getByTestId('recent-chat').first();
+  await expect(expandBtn.or(recents)).toBeVisible({ timeout: 20_000 });
   if (await expandBtn.isVisible().catch(() => false)) {
     await expandBtn.click();
   }
-  const recents = page.getByTestId('recent-chat').first();
   await expect(recents).toBeVisible({ timeout: 20_000 });
 }
