@@ -7,6 +7,7 @@ OAuth cryptography and Graph response mapping belong to the Outlook unit tests.
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -106,6 +107,18 @@ async def _running_app() -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
             yield app, client
 
 
+def _swap_mailbox(app: FastAPI, **overrides: object) -> None:
+    """Override the mailbox group inside the typed runtime (ADR-013).
+
+    The routes read through ``runtime(request)``, so a fixture override must
+    land on the composed group — the legacy ``app.state`` forwards are gone.
+    """
+    app.state.runtime = replace(
+        app.state.runtime,
+        mailbox=replace(app.state.runtime.mailbox, **overrides),
+    )
+
+
 def test_connections_report_outlook_not_configured_safely() -> None:
     async def scenario() -> None:
         async with _running_app() as (_, client):
@@ -140,8 +153,8 @@ def test_sqlite_only_unavailability_is_reported_before_owner_lookup(
         async with _running_app() as (app, client):
             # PostgreSQL composition exposes this same disabled capability state.
             # Override only that state here so this API test stays offline.
-            app.state.outlook_connections = None
-            app.state.provider_availability["outlook"] = {
+            _swap_mailbox(app, outlook_connections=None)
+            app.state.runtime.mailbox.provider_availability["outlook"] = {
                 "enabled": False,
                 "reason": "sqlite_only",
             }
@@ -174,7 +187,7 @@ def test_outlook_connect_requires_an_active_gmail_owner(
                 params={"ownerConnectionId": "missing"},
                 follow_redirects=False,
             )
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 _connection(OUTLOOK_ID, provider="outlook")
             )
             wrong_provider = await client.get(
@@ -182,7 +195,7 @@ def test_outlook_connect_requires_an_active_gmail_owner(
                 params={"ownerConnectionId": OUTLOOK_ID},
                 follow_redirects=False,
             )
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 _connection(OWNER_ID, provider="gmail", status="disconnected")
             )
             inactive = await client.get(
@@ -220,9 +233,10 @@ def test_outlook_connect_uses_the_selected_gmail_owner(
 
     async def scenario() -> None:
         async with _running_app() as (app, client):
-            await app.state.connection_repository.upsert(_connection(OWNER_ID, provider="gmail"))
+            connections = app.state.runtime.control_plane.connection_repository
+            await connections.upsert(_connection(OWNER_ID, provider="gmail"))
             service = RecordingOutlookConnections()
-            app.state.outlook_connections = service
+            _swap_mailbox(app, outlook_connections=service)
             response = await client.get(
                 "/v1/mail-todo/oauth/outlook/connect",
                 params={"ownerConnectionId": OWNER_ID},
@@ -259,9 +273,11 @@ def test_outlook_callback_links_under_owner_and_redirects_without_replacing_sess
 
     async def scenario() -> None:
         async with _running_app() as (app, client):
-            await app.state.connection_repository.upsert(_connection(OWNER_ID, provider="gmail"))
-            app.state.outlook_connections = CompletingOutlookConnections(
-                app.state.connection_repository
+            connections = app.state.runtime.control_plane.connection_repository
+            await connections.upsert(_connection(OWNER_ID, provider="gmail"))
+            _swap_mailbox(
+                app,
+                outlook_connections=CompletingOutlookConnections(connections),
             )
             response = await client.get(
                 "/v1/mail-todo/oauth/outlook/callback",
@@ -278,7 +294,7 @@ def test_outlook_callback_links_under_owner_and_redirects_without_replacing_sess
                 params={"state": "safe"},
                 follow_redirects=False,
             )
-            stored = await app.state.connection_repository.get(OUTLOOK_ID)
+            stored = await app.state.runtime.control_plane.connection_repository.get(OUTLOOK_ID)
 
         assert response.status_code == 302
         assert response.headers["location"] == (
@@ -345,7 +361,7 @@ def test_outlook_preview_and_disconnect_use_generic_mailbox_contract(
 
     async def scenario() -> None:
         async with _running_app() as (app, client):
-            await app.state.connection_repository.upsert(
+            await app.state.runtime.control_plane.connection_repository.upsert(
                 _connection(
                     OUTLOOK_ID,
                     provider="outlook",
@@ -353,12 +369,12 @@ def test_outlook_preview_and_disconnect_use_generic_mailbox_contract(
                 )
             )
             router = RecordingMailboxRouter()
-            app.state.mailbox = router
+            _swap_mailbox(app, mailbox=router)
             preview = await client.get(
                 f"/v1/mail-todo/connections/{OUTLOOK_ID}/unread-preview"
             )
             disconnected = await client.delete(f"/v1/mail-todo/connections/{OUTLOOK_ID}")
-            stored = await app.state.connection_repository.get(OUTLOOK_ID)
+            stored = await app.state.runtime.control_plane.connection_repository.get(OUTLOOK_ID)
 
         assert preview.status_code == 200
         assert preview.json() == {

@@ -7,12 +7,15 @@ tempts tests into writing into a tracked directory.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import cowork_agent.app as app_module
+import cowork_agent.api.knowledge as knowledge_api
 from cowork_agent.app import create_app
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.persistence.repositories.sqlite_raw_documents import (
     SQLiteRawDocumentRepository,
 )
@@ -36,16 +39,27 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(app_module, "RAW_DOCS_DIR", raw_dir)
-    monkeypatch.setattr(app_module, "EXTRACTED_DIR", extracted_dir)
+    # The corpus locations moved to the knowledge router with the handlers
+    # that read them (slice 03-1); patch them where they are now defined.
+    monkeypatch.setattr(knowledge_api, "RAW_DOCS_DIR", raw_dir)
+    monkeypatch.setattr(knowledge_api, "EXTRACTED_DIR", extracted_dir)
     return raw_dir
 
 
 async def _app_with_repo(tmp_path: Path):
+    """An app whose composed control plane owns a throwaway metadata store.
+
+    The write endpoints read the repository off the runtime like every other
+    group (ADR-013); the ``app.state.raw_document_repository`` memo they used
+    to fall back on is gone, so a test that writes has to compose one.
+    """
     app = create_app()
     repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
     await repo.initialize()
-    app.state.raw_document_repository = repo
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=cast(Any, SimpleNamespace(raw_document_repository=repo)),
+    )
     return app, repo
 
 
@@ -235,7 +249,7 @@ async def test_delete_removes_the_raw_file_and_its_extracted_markdown(
     assert res.json()["status"] == "deleted"
     assert not (corpus / "procedure.pdf").exists()
     assert not extracted.exists()
-    # Regression: `_raw_document_repo` is async, and the delete path used to call it
-    # without awaiting -- `hasattr(coroutine, "delete")` is False, so the metadata
-    # row silently survived the delete.
+    # Regression: the delete path once reached the repository through an
+    # unawaited coroutine behind a `hasattr(repo, "delete")` guard, so the
+    # metadata row silently survived the delete.
     assert await repo.get("procedure.pdf") is None

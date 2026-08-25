@@ -67,16 +67,16 @@ Live RUM against the real API was collected twice on 2026-08-17:
 
 <!-- LATENCY-TRACK:SYNTHETIC-START -->
 
-Last synthetic run: `2026-08-22T04:37:51.791Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-22T04-37-51-791Z.json`
+Last synthetic run: `2026-08-25T16:38:57.012Z` · browser `chromium` · report `evaluations/CHAT/latency/runs/2026-08-25T16-38-57-012Z.json`
 
 | Scenario | n | p50 click→visible (ms) | p95 | max | p50 API (ms) | p50 UI after API (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| mocked-instant-cold-switch | 1 | 435 | 435 | 435 | 38 | 24 |
-| mocked-2500ms-user-report | 1 | 3001 | 3001 | 3001 | 2514 | 403 |
-| mocked-repeat-first-a | 1 | 944 | 944 | 944 | 430 | 430 |
-| mocked-repeat-a-to-b | 1 | 920 | 920 | 920 | 414 | 443 |
-| mocked-repeat-b-to-a | 1 | 111 | 111 | 111 | 439 | 0 |
-| mocked-heavy-payload | 1 | 210 | 210 | 210 | 12 | 78 |
+| mocked-instant-cold-switch | 1 | 79 | 79 | 79 | 3 | 18 |
+| mocked-2500ms-user-report | 1 | 2901 | 2901 | 2901 | 2508 | 357 |
+| mocked-repeat-first-a | 1 | 860 | 860 | 860 | 420 | 401 |
+| mocked-repeat-a-to-b | 1 | 884 | 884 | 884 | 411 | 432 |
+| mocked-repeat-b-to-a | 1 | 53 | 53 | 53 | 417 | 0 |
+| mocked-heavy-payload | 1 | 145 | 145 | 145 | 5 | 71 |
 
 <!-- LATENCY-TRACK:SYNTHETIC-END -->
 

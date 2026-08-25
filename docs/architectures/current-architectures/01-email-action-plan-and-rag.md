@@ -2,15 +2,14 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
-**Last Updated:** 2026-08-21
 **Primary Owner:** `src/cowork_agent/features/email_action_plan`  
-**Target Alignment:** The workflow is fully aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md); Outlook is an additive SQLite-only provider extension.
+**Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md) (with additive SQLite-only Outlook provider)
 
 ---
 
 ## 1. Subsystem Overview
 
-The Email Action Plan & RAG Subsystem is a single-turn, memory-isolated pipeline that transforms unread Gmail or Outlook messages into structured, body-free action plans. A provider router dispatches mailbox reads to Gmail (`gmail.readonly`) or Microsoft Graph (`Mail.Read`); both adapters normalize mail into the same transient [`EphemeralEmailEnvelope`](../../../src/cowork_agent/domain/target_contracts.py). Gmail retains five-message reply-chain aggregation ([ADR-011](../../../tasks/adr/ADR-011-reply-chain-context-aggregation.md)); from the envelope boundary onward classifier, `NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG` routing, prompts, RAG, validation, and persistence are provider-independent and unchanged.
+The Email Action Plan & RAG Subsystem is a single-turn, memory-isolated pipeline that transforms unread Gmail or Outlook messages into structured, body-free action plans. A provider router dispatches mailbox reads to Gmail (`gmail.readonly`) or Microsoft Graph (`Mail.Read`); both adapters normalize mail into the same transient [`EphemeralEmailEnvelope`](../../../src/cowork_agent/domain/target_contracts.py). Gmail retains five-message reply-chain aggregation ([ADR-011](../../../tasks/adr/ADR-011-reply-chain-context-aggregation.md)); from the envelope boundary onward classifier, `NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG` routing, prompts, RAG, validation, and persistence are provider-independent and unchanged. End-to-end execution metrics and provider generations are traced with Langfuse (`@observe`) without persisting raw email contents.
 
 ```mermaid
 flowchart LR
@@ -46,7 +45,7 @@ flowchart LR
 | **Deterministic Route Resolver** | [`routing.py`](../../../src/cowork_agent/features/email_action_plan/routing.py) | Applies policy guards and resolves candidates (`RETRIEVE_RAG` > `DIRECT_PLAN` > `NO_ACTION`). |
 | **Deterministic Evidence Gate** | [`evidence.py`](../../../src/cowork_agent/features/email_action_plan/evidence.py) | Filters retrieval chunks and downgrades unsupported retrieval to partial direct plans. |
 | **Company Semantic Memory** | [`bootstrap.py`](../../../src/cowork_agent/integrations/rag/bootstrap.py) | Turbovec, BM25, RRF, and reranking over committed `data/extracted/*.md`; gracefully degrades to null memory. |
-| **Action Plan Workflow Orchestrator** | [`workflow.py`](../../../src/cowork_agent/features/email_action_plan/workflow.py) | Fetches threads, classifies, retrieves at most once, generates, validates, deduplicates, and persists. |
+| **Action Plan Workflow Orchestrator** | [`workflow.py`](../../../src/cowork_agent/features/email_action_plan/workflow.py) | Fetches threads, classifies, retrieves at most once, generates, validates, deduplicates, and persists with Langfuse tracing. |
 | **Action Plan Generator & Resilient LLM** | [`base.py`](../../../src/cowork_agent/integrations/llm/providers/base.py) (`ConfiguredActionPlanGenerator`) plus provider transports; OpenRouter last-resort | Synthesizes bounded context and uses the configured fallback hierarchy. Composition root: [`provider_factory.py`](../../../src/cowork_agent/integrations/llm/provider_factory.py). |
 | **Output Validator & Privacy Guard** | [`validation.py`](../../../src/cowork_agent/features/email_action_plan/validation.py) | Enforces output structure, citations, and body-leak protection. |
 

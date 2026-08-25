@@ -274,7 +274,7 @@ def test_a_non_short_term_probe_is_asked_in_a_session_that_was_never_seeded() ->
     session = _session(_Reply(), SeedSpec(("a seeded line",), {}, (), None))
     asyncio.run(ask_live(session, _probe(targets=MemoryType.EPISODIC), Arm.FULL, None))
     assert session.last_gateway is not None
-    turns = session.last_gateway._read_active_turns()
+    turns = session.last_gateway.read_active_turns()
     assert not any("a seeded line" in (turn.user_message or "") for turn in turns)
 
 
@@ -284,7 +284,7 @@ def test_a_short_term_probe_is_asked_in_the_seeded_session() -> None:
     session = _session(_Reply(), SeedSpec(("a seeded line",), {}, (), None))
     asyncio.run(ask_live(session, _probe(targets=MemoryType.SHORT_TERM), Arm.FULL, None))
     assert session.last_gateway is not None
-    turns = session.last_gateway._read_active_turns()
+    turns = session.last_gateway.read_active_turns()
     assert any("a seeded line" in (turn.user_message or "") for turn in turns)
 
 
@@ -337,7 +337,7 @@ def test_short_term_probe_buffer_does_not_contain_episodic_seed_text() -> None:
     session = _session(_Reply(), seed)
     asyncio.run(ask_live(session, _probe(targets=MemoryType.SHORT_TERM), Arm.FULL, None))
     assert session.last_gateway is not None
-    turns = session.last_gateway._read_active_turns()
+    turns = session.last_gateway.read_active_turns()
     assert any("a seeded line" in (turn.user_message or "") for turn in turns)
     assert not any("Tạo một tác vụ" in (turn.user_message or "") for turn in turns)
 

@@ -152,27 +152,32 @@ export const ProjectDocumentPanel: React.FC<Props> = ({
           <FileText className="h-4 w-4" /> {documentText('title')}
         </button>
       )}
-      {open && (
-        <aside
-          role="dialog"
-          aria-label={documentText('title')}
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-[#3b3833] bg-[#1f1e1b] shadow-2xl"
-        >
-          <header className="flex items-center justify-between border-b border-[#37342f] p-4">
+      <aside
+        role="dialog"
+        aria-label={documentText('title')}
+        aria-hidden={!open}
+        className={`min-h-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden z-20 shrink-0 border-[#3b3833] bg-[#1f1e1b] ${
+          open
+            ? 'w-[380px] sm:w-[420px] max-w-[90vw] border-l opacity-100'
+            : 'w-0 border-l-0 opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="w-[380px] sm:w-[420px] max-w-[90vw] h-full flex flex-col min-h-0 overflow-hidden">
+          <header className="flex items-center justify-between border-b border-[#37342f] p-4 shrink-0">
             <div>
               <h2 className="font-semibold text-zinc-100">{documentText('title')}</h2>
               <p className="text-xs text-zinc-500">{projectName ?? 'Active Project'}</p>
             </div>
             <button aria-label="Close project documents" onClick={() => setOpen(false)}>
-              <X className="h-5 w-5 text-zinc-400" />
+              <X className="h-5 w-5 text-zinc-400 hover:text-zinc-200 cursor-pointer" />
             </button>
           </header>
-          <div className="border-b border-[#37342f] p-4">
+          <div className="border-b border-[#37342f] p-4 shrink-0">
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#d97757] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#d97757] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 cursor-pointer hover:bg-[#e08862] transition-colors"
             >
               {uploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               {documentText('upload')}
@@ -190,7 +195,7 @@ export const ProjectDocumentPanel: React.FC<Props> = ({
             />
             <p className="mt-2 text-center text-[11px] text-zinc-500">{documentText('retention')}</p>
           </div>
-          <div className="flex-1 space-y-2 overflow-y-auto p-4">
+          <div className="flex-1 space-y-2 overflow-y-auto p-4 custom-scrollbar">
             {error && <p role="alert" className="rounded-lg bg-rose-950/40 p-3 text-xs text-rose-300">{error}</p>}
             {!error && documents.length === 0 && (
               <p className="py-10 text-center text-sm text-zinc-500">{documentText('empty')}</p>
@@ -226,7 +231,7 @@ export const ProjectDocumentPanel: React.FC<Props> = ({
                           void remove(document);
                         }}
                       >
-                        <Trash2 className="h-4 w-4 text-zinc-500 hover:text-rose-300" />
+                        <Trash2 className="h-4 w-4 text-zinc-500 hover:text-rose-300 cursor-pointer" />
                       </button>
                     )}
                   </div>
@@ -234,8 +239,8 @@ export const ProjectDocumentPanel: React.FC<Props> = ({
               </div>
             ))}
           </div>
-        </aside>
-      )}
+        </div>
+      </aside>
     </>
   );
 };

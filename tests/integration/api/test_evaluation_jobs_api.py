@@ -16,6 +16,7 @@ from fastapi import FastAPI
 import cowork_agent.api.evaluation_jobs as evaluation_jobs_api
 from cowork_agent.api.evaluation_jobs import create_evaluation_router
 from cowork_agent.app import create_app
+from cowork_agent.composition import CoworkRuntime, EvaluationBundle
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
@@ -200,8 +201,18 @@ async def build_harness(
 def build_app(harness: Harness) -> FastAPI:
     app = FastAPI()
     app.include_router(create_evaluation_router())
-    app.state.evaluation_service = harness.service
-    app.state.evaluation_api_token = TOKEN
+    # The routes read through the typed runtime seam (ADR-013): inject the
+    # evaluation group directly. ``runtime``/``reports`` are absent here and
+    # never reached by these routes, so None keeps the fixture minimal.
+    app.state.runtime = CoworkRuntime(
+        reports=None,
+        evaluation=EvaluationBundle(
+            runtime=None,
+            service=harness.service,
+            supervisor=harness.supervisor,
+            api_token=TOKEN,
+        ),
+    )
     return app
 
 
@@ -790,8 +801,10 @@ def test_create_app_wires_runtime_recovery_and_auth_when_enabled(
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
-            assert app.state.evaluation_service is not None
-            assert app.state.evaluation_supervisor is not None
+            evaluation = app.state.runtime.evaluation
+            assert evaluation is not None
+            assert evaluation.service is not None
+            assert evaluation.supervisor is not None
             assert (tmp_path / "evaluation-jobs.db").exists()
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

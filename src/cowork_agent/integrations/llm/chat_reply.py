@@ -11,8 +11,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from langfuse import observe
-
 from cowork_agent.config import (
     GeminiSettings,
     MimoSettings,
@@ -31,10 +29,6 @@ from cowork_agent.features.ai_chat.ports import (
     GeneratedReportArtifact,
 )
 from cowork_agent.features.ai_chat.retrieval_policy import is_explicit_task_request
-from cowork_agent.integrations.llm.providers.tracing import (
-    _langfuse_configured,
-    _update_current_generation,
-)
 from cowork_agent.prompting import reorder_u_shaped
 
 logger = logging.getLogger(__name__)
@@ -84,8 +78,9 @@ as current. Vietnamese revision cues include dời, hoãn, đổi, sửa, cập 
 supersedes_index=null only when no advisory episode covers the task being changed, and never use
 an index that was not listed under advisory eligible episodes.
 citation_ids may contain only IDs supplied with current project evidence, and never an invented
-ID. When current project evidence is supplied and response_mode is normal, citation_ids must
-contain at least one ID from that evidence, naming the IDs that support your factual claims.
+ID. When current project evidence is supplied and response_mode is normal, include the citation
+IDs that directly support your factual claims (or citation_ids=[] if the evidence does not contain
+the requested information).
 When no current project evidence is supplied, citation_ids must be []: company evidence chunk
 IDs do not belong there, and company evidence is credited through task_proposal.rag_citations.
 conversation_title must be a concise title of at most 120 characters.
@@ -503,8 +498,6 @@ def _validated_citation_ids(
         return ()
     if not set(ids).issubset(allowed):
         raise ValueError("citation_ids must match current project evidence")
-    if allowed and context.response_mode is ChatResponseMode.NORMAL and not ids:
-        raise ValueError("document-grounded responses require at least one citation")
     if context.response_mode is not ChatResponseMode.NORMAL and ids:
         raise ValueError("non-grounded response modes must not contain citations")
     return ids

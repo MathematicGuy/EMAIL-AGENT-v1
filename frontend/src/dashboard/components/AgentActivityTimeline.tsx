@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Circle, LoaderCircle, X } from 'lucide-react';
 import type { ChatActivity, ChatGenerationStatus } from '../types';
+import { formatShortSecondsVi, spanMilliseconds } from './reasoningDuration';
 
 const LABELS: Record<ChatActivity['code'], string> = {
   understanding_request: 'Hiểu yêu cầu',
@@ -96,6 +97,8 @@ export const AgentActivityTimeline: React.FC<{
           {activities.map((activity, index) => {
             const running = index === animatedIndex && !interrupted;
             const detail = detailLabel(activity);
+            const stepMs = spanMilliseconds(activity.startedAt, activity.completedAt);
+            const stepDuration = stepMs !== null ? formatShortSecondsVi(stepMs) : null;
             return (
               <li key={activity.code} className="relative flex gap-3 pb-4 last:pb-0">
                 {index < activities.length - 1 && <span className="absolute left-[7px] top-5 h-[calc(100%-0.5rem)] w-px bg-[#514a42]" />}
@@ -106,8 +109,13 @@ export const AgentActivityTimeline: React.FC<{
                         ? <X className="h-4 w-4 text-rose-400" />
                         : <Circle className="h-4 w-4 text-zinc-600" />}
                 </span>
-                <div className={activity.status === 'pending' || activity.status === 'skipped' ? 'text-zinc-500' : 'text-zinc-200'}>
-                  <div className="text-sm">{LABELS[activity.code]}</div>
+                <div className={`min-w-0 flex-1 ${activity.status === 'pending' || activity.status === 'skipped' ? 'text-zinc-500' : 'text-zinc-200'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm">{LABELS[activity.code]}</span>
+                    {stepDuration && activity.status === 'completed' && (
+                      <span className="font-mono text-xs text-zinc-400">{stepDuration}</span>
+                    )}
+                  </div>
                   {detail && <div className="mt-1 text-xs text-zinc-400">└─ {detail}</div>}
                 </div>
               </li>
