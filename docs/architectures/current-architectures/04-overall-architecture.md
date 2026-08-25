@@ -22,7 +22,7 @@
 | **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
 | **Enterprise RAG Engine** | Vector & Hybrid Knowledge Memory | Turbovec 4-bit + BM25 + RRF over committed Markdown (`data/extracted/*.md`). | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
 | **Dual Persistence Engine** | Repositories & Migrations | Dynamic persistence layer supporting process-local SQLite fallback or durable Supabase PostgreSQL when `DATABASE_URL` is set (migrations 001–016). | [`persistence/repositories`](../../../src/cowork_agent/persistence/repositories) |
-| **Presentation Clients** | React 19 Web SPA | Production React 19 + Vite + Tailwind SPA frontend application with Execution Trace Drawer, Live Reasoning stream, Report Artifact Viewer, and DOCX Viewer/Editor. | [`frontend/`](../../../frontend) |
+| **Presentation Clients** | React 19 Web SPA | Production React 19 + Vite + Tailwind SPA. `useStreamingChat` adapts React state, SSE, and persistence; `runMailScanProtocol` independently owns concurrent Gmail/Outlook digest polling and ordered snapshots. | [`useStreamingChat.ts`](../../../frontend/src/dashboard/hooks/useStreamingChat.ts), [`mailScanProtocol.ts`](../../../frontend/src/dashboard/hooks/mailScanProtocol.ts) |
 
 ### 1.2 State, Queues, Workers, and Persistence
 
@@ -72,7 +72,7 @@
 ```mermaid
 flowchart TB
     subgraph PRESENTATION["Presentation Layer"]
-        REACT["React 19 SPA Client<br/>(Execution Trace Drawer & DOCX Viewer)"]
+        REACT["React 19 SPA Client<br/>(SSE Adapter + Mail Scan Protocol)"]
     end
 
     subgraph CONTROL_PLANE["FastAPI Control Plane (app.py + api/ routers)"]
@@ -142,11 +142,18 @@ flowchart TB
 5. **Turn Persistence:** Complete turn, execution trace, report artifact refs, activity timeline, and deduped citations are stored atomically.
 6. **Aggregate Mail Cards:** `POST /sessions/{id}/mail-scans` maps its Pydantic activity payloads once into `DesiredMailActivity`. Feature policy validates scan/turn status and reconciles append-only activities before the route writes the turn to durable history or the in-process buffer.
 
+### 3.3 In-Chat Mail Scan Workflow (Client-Orchestrated)
+
+1. **Trigger:** `@email`, `@outlook`, or `@mail` is recognized by the React hook without entering the AI Chat tool loop.
+2. **Protocol:** `runMailScanProtocol` selects remembered active connections, creates Gmail/Outlook digest runs concurrently, and polls each run every 1.5 seconds with abort propagation and five-consecutive-error tolerance.
+3. **Projection:** Ordered snapshots aggregate provider progress and counts; `useStreamingChat` maps them into the assistant message and semantic mail activities.
+4. **Persistence:** The React adapter dedupes and sequences aggregate `MailScanSummary` lifecycle writes to `/sessions/{id}/mail-scans`. Raw email bodies and attachment contents never enter chat history or memory.
+
 ---
 
 ## 4. Architectural Boundaries & Decoupling Compliance
 
-1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. In-chat email integration is implemented via high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory. The chat router keeps transport and its six request-scoped seams; `features/ai_chat/mail_scan_reconciliation.py` owns the transport-free activity and turn rules.
+1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. The frontend mail protocol calls the digest REST surface directly, and the React adapter persists only high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory. The chat router keeps transport and its six request-scoped seams; `features/ai_chat/mail_scan_reconciliation.py` owns the transport-free activity and turn rules.
 2. **TaskEpisode Security:** System-proposed tasks created during chat interactions are marked `retrieval_eligible=false` to prevent unverified tasks from contaminating semantic memory context.
 3. **Transient Data Isolation:** Gmail contents and user attachments are processed ephemerally in-memory and are never stored in company vector indices or long-term databases.
 4. **Dual Persistence Strategy:** Zero-friction local development using SQLite plus an in-process bounded working-memory buffer; seamless production scaling using Supabase PostgreSQL when `DATABASE_URL` is supplied.

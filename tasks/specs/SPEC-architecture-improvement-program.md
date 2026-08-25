@@ -59,7 +59,8 @@ with the workstream that owns it and its state.
 ```mermaid
 flowchart TB
     subgraph PRESENTATION["Presentation · frontend/src"]
-        HOOK["useStreamingChat.ts · 1822 lines<br/>SSE reader + mail-scan/attachment polling<br/><b>C06 · open</b>"]
+        HOOK["useStreamingChat.ts · 1655 lines<br/>React state + SSE + persistence adapter<br/><b>C06 · done</b>"]
+        MAILP["mailScanProtocol.ts · 215 lines<br/>one operation + snapshot callback<br/><b>C06 · done</b>"]
     end
 
     subgraph TRANSPORT["Transport · app.py + api/ routers"]
@@ -87,6 +88,8 @@ flowchart TB
     RAWDIR[("data/raw/ · 17 files<br/>user-facing store + ingestion input<br/><b>C09 · done</b>")]
 
     HOOK -->|"HTTP + SSE"| CHAT
+    HOOK --> MAILP
+    MAILP -->|"digest REST + polling"| SIB
     APP --> CHAT
     APP --> SIB
     CHAT --> DEPS
@@ -129,7 +132,7 @@ got enforced at the composition edge; everything above reads its dependencies th
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
 | **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Done — C07 slice** | §4.5 |
 | **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Open — unscheduled** | §4.6 |
-| **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Open — SCHEDULED 2026-08-25**, own agent, frontend-only | §4.7 |
+| **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Done — frontend protocol extraction** | §4.7 |
 | **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
 | **C09** | A stray corpus input in `data/raw/` — latent re-ingest risk | Minor | **Done** — moved to `data/OCR/` | §4.9 |
 | **C10** | Three `app.state` survivors, one of them undocumented | — | **Accepted debt**, with revisit criteria | §4.10 |
@@ -564,22 +567,37 @@ starts costing time during another workstream, schedule it then. Re-confirmed pa
 
 ---
 
-### 4.7 C06 — `useStreamingChat` runs two protocols · **Open, unscheduled**
+### 4.7 C06 — `useStreamingChat` runs two protocols · **Done**
 
-`frontend/src/dashboard/hooks/useStreamingChat.ts` is **1822 lines** (its test file is another
-1090) and carries the SSE reader *and* the mail-scan/attachment polling loops, with 9
-`useState`, 13 `useRef`, 27 `useCallback`, and a returned object roughly 80 lines wide. A
-returned surface that wide is the frontend spelling of the shallow interface C02 fixed on the
-backend.
+The mail-poll protocol now lives behind one deep operation in
+`frontend/src/dashboard/hooks/mailScanProtocol.ts`:
 
-**Frontend-only and independent of every other row here** — it can be run by anyone at any time
-without conflicting with backend work. That is its main attraction, not its strength.
+```ts
+runMailScanProtocol({ providers, signal, onProgress }): Promise<MailScanSnapshot>
+```
 
-**Scheduled 2026-08-25** as the next agent's only mandate, to run in parallel with C07. It
-touches no Python and no route, so it cannot conflict with the C07 slice.
+Its three-field snapshot (`content`, aggregate `progress`, `terminal`) hides active connection
+lookup, remembered mailbox selection, provider-specific query construction, idempotent run
+creation, 1.5-second polling, five-error tolerance, cancellation, task-count fallback,
+concurrent provider execution, ordered copy, and aggregate terminal detection. The module
+imports the existing mail client directly; no speculative port was added for its one adapter.
+
+`useStreamingChat.ts` is now **1655 lines** (down from 1822) and remains the React adapter. It
+maps snapshots into message state and activities while retaining mail-scan persistence and
+dedupe sequencing, chat status, background completion, history refresh, cancellation,
+attachments, SSE parsing, and the hook's public returned object. The existing hook tests keep
+the integration contract; `mailScanProtocol.test.ts` owns protocol characterization through
+the same external interface callers use.
+
+Evidence:
 
 ```bash
-wc -l frontend/src/dashboard/hooks/useStreamingChat.ts
+cd frontend
+pnpm exec vitest run src/dashboard/hooks/mailScanProtocol.test.ts src/dashboard/hooks/useStreamingChat.test.tsx
+pnpm lint
+pnpm check-types
+pnpm test
+pnpm build
 ```
 
 ---
@@ -860,6 +878,7 @@ web search.
 | Date | Change |
 |---|---|
 | 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
+| 2026-08-26 | **C06 closed.** Extracted the concurrent Gmail/Outlook mail-poll protocol from `useStreamingChat` into the deep `runMailScanProtocol` operation. The hook remains the React/persistence adapter; routes, mail client, cancellation semantics, provider ordering, and public hook interface are unchanged. Added protocol characterization and refreshed all four required Level 1 architecture documents. |
 | 2026-08-25 | **C09 closed.** Moved rather than deleted: `books/` was already gone (`e91486e`), so `data/raw/` held the only copy, and deleting reclaims nothing because the blob is permanent in history. The PDF now sits in `data/OCR/` beside its extraction and golden dataset. `data/raw/` back to 17 files; gate green (2137 passed). |
 | 2026-08-25 | **C07 payload boundary decided** — convert to a domain value at the route boundary; `features/` must not import `api/` payload models. Slice now includes naming a new domain type. |
 | 2026-08-25 | **Decisions.** C07 shape settled — option A, move the seven pure helpers down into `features/ai_chat/`; option B (a new router) rejected and recorded in §5. C06 scheduled as the next agent's sole mandate. C05 re-confirmed parked. C08 still blocked on the user. |

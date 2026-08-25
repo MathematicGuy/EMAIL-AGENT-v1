@@ -5,17 +5,7 @@ import {
   waitForProjectDocument,
 } from '../../modules/project-documents/api';
 import {
-  createDigestRun,
-  getDigestRun,
-  getDigestTasks,
-  getSelectedMailboxId,
-  listConnections,
-  newIdempotencyKey,
-  setSelectedMailboxId,
-  type DigestRunView,
-  type DigestTask,
   type MailProvider,
-  type MailboxConnection,
 } from '../../modules/mail/api';
 import type { SourceSnapshotRef, StepView, TaskDetail } from '../../modules/work-intake/types';
 import type {
@@ -34,6 +24,7 @@ import type {
   RecentChat,
   TaskWorkflow,
 } from '../types';
+import { runMailScanProtocol } from './mailScanProtocol';
 
 interface ChatSession {
   session_id: string;
@@ -100,9 +91,6 @@ const NEW_CHAT_KEY = '__new_chat__';
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_FILE_EXTENSIONS = new Set(['docx', 'pdf']);
 const MAIL_COMMAND = /(?:^|\s)@(mail|email|outlook)\b/gi;
-const MAIL_UNREAD_QUERY = 'is:unread in:inbox category:primary';
-const MAIL_SCAN_MAX_EMAILS = 10;
-const MAIL_POLL_INTERVAL_MS = 1_500;
 const MAIL_TERMINAL_STATUSES = new Set(['succeeded', 'partial', 'failed']);
 const ACTIVITY_CODES = new Set<ChatActivityCode>([
   'understanding_request', 'searching_relevant_information', 'reviewing_context',
@@ -144,15 +132,6 @@ export function mailCommandProviders(value: string): MailProvider[] {
 
 function isMailCommand(value: string): boolean {
   return mailCommandProviders(value).length > 0;
-}
-
-function mailScanProgress(run: DigestRunView): MailScanProgress {
-  return {
-    status: run.status,
-    emailsMatched: run.progress.emailsMatched,
-    emailsProcessed: run.progress.emailsProcessed,
-    emailsToProcess: run.progress.emailsToProcess,
-  };
 }
 
 function mailScanFromPayload(value: unknown): MailScanProgress | undefined {
@@ -241,16 +220,6 @@ function stopActivities(
   return activities.map((item) => item.status === 'running'
     ? { ...item, status, completedAt: item.completedAt ?? now }
     : item.status === 'pending' ? { ...item, status: 'skipped' } : item);
-}
-
-function waitForMailPoll(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, MAIL_POLL_INTERVAL_MS);
-    signal.addEventListener('abort', () => {
-      window.clearTimeout(timer);
-      reject(new DOMException('Mail scan polling aborted', 'AbortError'));
-    }, { once: true });
-  });
 }
 
 function citationFromEvent(event: SseEvent): ChatCitation | null {
@@ -863,153 +832,17 @@ export function useStreamingChat(
       const currentMessage = runtimeFor(sessionId).messages.find((message) => message.id === assistantId);
       onProgress?.(content, mailScan, mailActivities(mailScan, currentMessage?.activities));
     };
-    interface ProviderOutcome {
-      provider: MailProvider;
-      content: string;
-      progress: MailScanProgress;
-    }
-    const label = (provider: MailProvider) => provider === 'gmail' ? 'Gmail' : 'Outlook';
-    const states = new Map<MailProvider, ProviderOutcome>();
-    const aggregate = (): MailScanProgress => {
-      const values = providers.map((provider) => states.get(provider)).filter(
-        (value): value is ProviderOutcome => Boolean(value)
-      );
-      const terminal = values.length === providers.length && values.every(
-        (value) => MAIL_TERMINAL_STATUSES.has(value.progress.status)
-      );
-      let status: MailScanProgress['status'];
-      if (terminal) {
-        const usable = values.filter((value) =>
-          value.progress.status === 'succeeded' || value.progress.status === 'partial'
-        );
-        status = usable.length === 0
-          ? 'failed'
-          : values.every((value) => value.progress.status === 'succeeded') ? 'succeeded' : 'partial';
-      } else if (values.some((value) => value.progress.status === 'running')) {
-        status = 'running';
-      } else if (values.some((value) => value.progress.status === 'queued')) {
-        status = 'queued';
-      } else {
-        status = 'connecting';
-      }
-      return {
-        status,
-        emailsMatched: values.reduce((sum, value) => sum + value.progress.emailsMatched, 0),
-        emailsProcessed: values.reduce((sum, value) => sum + value.progress.emailsProcessed, 0),
-        emailsToProcess: values.reduce((sum, value) => sum + value.progress.emailsToProcess, 0),
-        actionItemsCount: values.reduce(
-          (sum, value) => sum + (value.progress.actionItemsCount ?? 0), 0
-        ),
-      };
-    };
-    const publish = (provider: MailProvider, outcome: ProviderOutcome) => {
-      states.set(provider, outcome);
-      const lines = providers.map((item) => {
-        const state = states.get(item);
-        return `${label(item)}: ${state?.content ?? 'Đang chuẩn bị…'}`;
-      });
-      const progress = aggregate();
-      updateAssistant(
-        lines.join('\n'),
-        progress,
-        !MAIL_TERMINAL_STATUSES.has(progress.status)
-      );
-    };
-    const listed = await listConnections(abort.signal);
-    const activeConnections = listed.connections.filter(
-      (connection) => connection.status === 'active'
-    );
-    const selectedConnection = (provider: MailProvider): MailboxConnection | undefined => {
-      const candidates = activeConnections.filter((connection) => connection.provider === provider);
-      const remembered = getSelectedMailboxId(provider);
-      const selected = candidates.find((connection) => connection.id === remembered) ?? candidates[0];
-      if (selected) setSelectedMailboxId(provider, selected.id);
-      return selected;
-    };
-    const scanProvider = async (provider: MailProvider): Promise<ProviderOutcome> => {
-      const connection = selectedConnection(provider);
-      if (!connection) {
-        return {
-          provider,
-          content: `Chưa có tài khoản ${label(provider)} đang kết nối. Hãy mở Mail Inbox để kết nối ${label(provider)}.`,
-          progress: { status: 'failed', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0 },
-        };
-      }
-      publish(provider, {
-        provider,
-        content: 'Đang tạo lượt quét 10 email unread mới nhất…',
-        progress: { status: 'connecting', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0 },
-      });
-      try {
-        const accepted = await createDigestRun({
-          mailboxConnectionId: connection.id,
-          maxEmails: MAIL_SCAN_MAX_EMAILS,
-          query: provider === 'gmail' ? MAIL_UNREAD_QUERY : undefined,
-          idempotencyKey: newIdempotencyKey(),
-          signal: abort.signal,
-        });
-        let consecutiveErrors = 0;
-        while (!abort.signal.aborted) {
-          let run: DigestRunView;
-          try {
-            run = await getDigestRun(accepted.id, abort.signal);
-            consecutiveErrors = 0;
-          } catch (err) {
-            if ((err as { name?: string }).name === 'AbortError') throw err;
-            consecutiveErrors++;
-            if (consecutiveErrors >= 5) throw err;
-            await waitForMailPoll(abort.signal);
-            continue;
-          }
-          const progress = mailScanProgress(run);
-          if (!MAIL_TERMINAL_STATUSES.has(run.status)) {
-            publish(provider, { provider, content: 'Đang quét email unread mới nhất…', progress });
-            await waitForMailPoll(abort.signal);
-            continue;
-          }
-          if (run.status === 'failed') {
-            return {
-              provider,
-              content: run.error?.message ?? 'Không thể hoàn tất lượt quét email.',
-              progress,
-            };
-          }
-          let tasks: DigestTask[] = [];
-          try {
-            tasks = await getDigestTasks(run.id, abort.signal);
-          } catch (err) {
-            if ((err as { name?: string }).name === 'AbortError') throw err;
-          }
-          const finalCount = tasks.length || run.progress.actionItemsCount || 0;
-          const resultLabel = run.status === 'partial' ? 'Hoàn tất một phần' : 'Đã quét xong';
-          return {
-            provider,
-            content: [
-              `${resultLabel}: đã quét ${run.progress.emailsProcessed} email và tạo ${finalCount} công việc.`,
-              run.progress.filteredSummary?.trim(),
-            ].filter(Boolean).join(' '),
-            progress: { ...progress, actionItemsCount: finalCount },
-          };
-        }
-        throw new DOMException('Mail scan polling aborted', 'AbortError');
-      } catch (error) {
-        if ((error as { name?: string }).name === 'AbortError') throw error;
-        return {
-          provider,
-          content: error instanceof Error ? error.message : 'Không thể hoàn tất lượt quét email.',
-          progress: { status: 'failed', emailsMatched: 0, emailsProcessed: 0, emailsToProcess: 0 },
-        };
-      }
-    };
-    const outcomes = await Promise.all(providers.map(async (provider) => {
-      const outcome = await scanProvider(provider);
-      publish(provider, outcome);
-      return outcome;
-    }));
-    const mailScan = aggregate();
-    const content = outcomes.map((outcome) => `${label(outcome.provider)}: ${outcome.content}`).join('\n');
-    updateAssistant(content, mailScan, false);
-    return { content, mailScan };
+    const result = await runMailScanProtocol({
+      providers,
+      signal: abort.signal,
+      onProgress: (snapshot) => updateAssistant(
+        snapshot.content,
+        snapshot.progress,
+        !snapshot.terminal,
+      ),
+    });
+    updateAssistant(result.content, result.progress, false);
+    return { content: result.content, mailScan: result.progress };
   }, [runtimeFor, updateRuntime]);
 
   const persistMailScanTurn = useCallback(async (
