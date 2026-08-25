@@ -11,6 +11,7 @@ from cowork_agent.domain.target_contracts import (
     ThreatCategory,
     ThreatLevel,
 )
+from cowork_agent.integrations.security.resilience import CircuitBreaker
 from cowork_agent.integrations.security.url_inspector import inspect_url
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ class ThreatCache:
 
 
 class GoogleWebRiskThreatIntel:
-    """Threat intelligence adapter calling Google Web Risk API."""
+    """Threat intelligence adapter calling Google Web Risk API with Circuit Breaker protection."""
 
     def __init__(
         self,
@@ -105,13 +106,23 @@ class GoogleWebRiskThreatIntel:
         *,
         timeout_seconds: float = 3.0,
         threat_types: tuple[str, ...] = _DEFAULT_THREAT_TYPES,
+        circuit_breaker: CircuitBreaker | None = None,
     ) -> None:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._threat_types = threat_types
+        self._circuit_breaker = circuit_breaker or CircuitBreaker(
+            name="GoogleWebRisk",
+            failure_threshold=3,
+            recovery_timeout_seconds=30.0,
+        )
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        return self._circuit_breaker
 
     async def check_url(self, url: str) -> LinkSafetyReport:
-        """Query Google Web Risk API to check if a URL is known to host malware or phishing."""
+        """Query Google Web Risk API with circuit breaking and graceful local fallback."""
         static_report = inspect_url(url)
         if static_report.threat_level in (ThreatLevel.BLOCKED, ThreatLevel.MALICIOUS):
             return static_report
@@ -126,7 +137,7 @@ class GoogleWebRiskThreatIntel:
         for threat_type in self._threat_types:
             params.append(("threatTypes", threat_type))
 
-        try:
+        async def _fetch_webrisk() -> LinkSafetyReport:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
                 response = await client.get(_WEBRISK_API_URL, params=params)
                 if response.status_code == 200:
@@ -142,15 +153,29 @@ class GoogleWebRiskThreatIntel:
                         threat_level=ThreatLevel.CLEAN,
                         threat_category=ThreatCategory.NONE,
                     )
-                logger.warning(
-                    "Google Web Risk API error: HTTP %d %s",
-                    response.status_code,
-                    response.text,
+                raise httpx.HTTPStatusError(
+                    f"Google Web Risk API HTTP {response.status_code}",
+                    request=response.request,
+                    response=response,
                 )
-                return static_report
-        except Exception as exc:
-            logger.warning("Failed to query Google Web Risk API for '%s': %s", url, exc)
-            return static_report
+
+        report, is_degraded = await self._circuit_breaker.execute(
+            _fetch_webrisk,
+            fallback=static_report,
+        )
+
+        if is_degraded:
+            prefix = "[SECURITY_SCAN_DEGRADED: WebRisk circuit open/timeout]"
+            degraded_details = f"{prefix} {static_report.details or ''}".strip()
+            return LinkSafetyReport(
+                original_url=static_report.original_url,
+                resolved_url=static_report.resolved_url,
+                threat_level=static_report.threat_level,
+                threat_category=static_report.threat_category,
+                details=degraded_details,
+            )
+
+        return report
 
     async def check_file_hash(self, sha256: str, filename: str) -> AttachmentSafetyReport:
         """Fallback check for file hash."""
