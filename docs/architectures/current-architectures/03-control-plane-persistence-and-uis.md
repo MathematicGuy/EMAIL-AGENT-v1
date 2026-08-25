@@ -2,7 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-26
 **Primary Owner:** `src/cowork_agent/persistence` & `src/cowork_agent/api`  
 **Target Alignment:** Core control plane is aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md); linked Outlook is an additive SQLite-only provider variance.
 
@@ -15,7 +15,7 @@ The Control Plane orchestrates HTTP and SSE request routes, manages tenant/user 
 ```mermaid
 flowchart TB
     subgraph PRESENTATION["Presentation Layer"]
-        REACT["React 19 + Vite SPA<br/>(frontend/)"]
+        REACT["React 19 + Vite SPA<br/>(SSE adapter + Mail Scan Protocol)"]
     end
 
     subgraph CONTROL["Control Plane & API (FastAPI)"]
@@ -58,7 +58,7 @@ flowchart TB
 | **Persistence Repositories** | [`repositories`](../../../src/cowork_agent/persistence/repositories) | In-memory test fakes, SQLite adapters for local mode, and Postgres adapters for durable cloud/local control-plane mode. |
 | **Orchestration Workers** | [`worker.py`](../../../src/cowork_agent/orchestration/worker.py) & [`project_document_worker.py`](../../../src/cowork_agent/orchestration/project_document_worker.py) | In-process digest worker and durable recovery, document ingestion, chunking, and cleanup workers. |
 | **Reports & Raw Documents Subsystem** | [`api/reports.py`](../../../src/cowork_agent/api/reports.py) & [`api/knowledge.py`](../../../src/cowork_agent/api/knowledge.py) & [`sqlite_raw_documents.py`](../../../src/cowork_agent/persistence/repositories/sqlite_raw_documents.py) | Manages saved report artifacts (`/api/v1/reports`) with folder navigation and raw document upload/extraction/editing/viewing (`/api/v1/raw-documents`). |
-| **React 19 Web SPA** | [`frontend/`](../../../frontend) | Manages multi-turn AI Chat, execution trace drawer, live reasoning UI, report artifact rendering, document viewing/editing, Gmail/Outlook connections, and project navigation without persisting raw mail into chat memory. |
+| **React 19 Web SPA** | [`useStreamingChat.ts`](../../../frontend/src/dashboard/hooks/useStreamingChat.ts), [`mailScanProtocol.ts`](../../../frontend/src/dashboard/hooks/mailScanProtocol.ts), [`frontend/`](../../../frontend) | Manages multi-turn AI Chat, execution trace drawer, live reasoning UI, report artifact rendering, document viewing/editing, Gmail/Outlook connections, and project navigation. The hook is the React/SSE/persistence adapter; one deep protocol operation owns mail connection selection, digest polling, cancellation, and ordered snapshots without persisting raw mail into chat memory. |
 | **LLM Tracing & Observability** | [`langfuse_bootstrap.py`](../../../src/cowork_agent/integrations/llm/langfuse_bootstrap.py) & [`tracing.py`](../../../src/cowork_agent/integrations/llm/providers/tracing.py) | Bootstraps and routes Langfuse tracing across provider adapters, chat turns, classifier runs, and background workers. |
 | **Report Artifact Store** | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py), [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py), [`api/reports.py`](../../../src/cowork_agent/api/reports.py) | Owns `data/reports/`. `ReportFilename` is the only way to name a report; `FileSystemReportArtifactStore` takes its root by injection and containment-checks every resolved target. `InMemoryReportArtifactStore` is the test double. |
 
@@ -108,7 +108,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
 ## 4. Alignment & Diff vs Target Architecture
 
 - **Clean API & Product Surfaces:** Presentation layers consume REST and SSE endpoints exclusively. Standalone Email digest workflow operates on `/v1/mail-todo`; AI Chat and Project Document features operate on `/v1/cowork/*` ([TARGET §1 & §2](../TARGET-ARCHITECTURE.md)); report artifacts and raw document editing operate on `/api/v1/*`.
-- **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. The React client projects polled mail progress into that shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn.
+- **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. `runMailScanProtocol` owns concurrent provider polling behind one snapshot interface; the React hook projects those snapshots into the shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn.
 - **Security & Identity Isolation:** OAuth tokens are stored encrypted using Fernet (`TokenCipher`). Session cookies are opaque, HttpOnly, and hashed at rest. Caller-supplied tenant/user identifiers are never trusted for authorization; all operations derive tenancy from `VerifiedPrincipal`.
 - **Memory & Durability Alignment:** Bounded short-term chat context resides in-process (`InMemoryChatSessionBuffer`), while durable long-term declarative profiles, episodic TaskEpisodes (with `supersedes`), chat turns, and document chunks are persisted in PostgreSQL (or isolated local SQLite files).
 - **Presentation Layer:** Production React 19 + Vite + Tailwind 4 web application is the authoritative user interface, including Execution Trace Drawer, Live Reasoning stream, Report Artifact Viewer, and Document Viewer/Editor. Legacy Streamlit developer GUI has been retired.

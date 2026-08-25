@@ -1,7 +1,7 @@
 # System Architecture Dashboard & Status Tracker
 
 **Architecture level:** Level 1 — High-Level Component & System Overview (Least Complexity)  
-**Last Updated:** 2026-08-25  
+**Last Updated:** 2026-08-26
 **Target Reference:** [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---
@@ -9,7 +9,7 @@
 ## 1. System Overview Dashboard
 
 The Cowork Agent project consists of two primary product flows operating over a unified control plane and persistence engine:
-1. **Email Action Plan & RAG Subsystem (PRD-v1):** Standalone, single-turn, memory-free digest over unread Gmail (`gmail.readonly`) or SQLite-linked Outlook (`Mail.Read`), with one provider-neutral route resolver (`NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG`) and optional company RAG. The React UI dispatches mail scans and persists one `MailScanSummary` card; mail is not an AI Chat tool.
+1. **Email Action Plan & RAG Subsystem (PRD-v1):** Standalone, single-turn, memory-free digest over unread Gmail (`gmail.readonly`) or SQLite-linked Outlook (`Mail.Read`), with one provider-neutral route resolver (`NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG`) and optional company RAG. The React UI dispatches mail scans through one `runMailScanProtocol` operation and persists one `MailScanSummary` card; mail is not an AI Chat tool.
 2. **AI Chat Assistant with Typed Memory (V2):** Multi-turn SSE chat with four memory scopes, live reasoning streaming, execution trace inspector, report artifact generation, chat-native `TaskEpisode` proposals (with `supersedes` support, [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)), and classifier-gated project documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). Company RAG in chat is flag-gated (`CHAT_COMPANY_RAG_ENABLED`, default false).
 
 ```mermaid
@@ -64,6 +64,7 @@ flowchart TB
 | **Email Action Plan & RAG** | Unread Gmail or SQLite-linked Outlook; provider-neutral route resolver, attachment presence only, body-free plans | **Live / Implemented** | Aligned; Outlook is an additive variance | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
 | **Enterprise RAG Store** | Hybrid Turbovec + BM25 + RRF over committed `data/extracted/*.md` | **Live / Implemented** | Fully Aligned | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
 | **AI Chat Controller** | Multi-turn SSE chat with reasoning traces, report artifacts, and `MailScanSummary` cards | **Live / Implemented** | Mostly Aligned | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) |
+| **Frontend Mail Scan Protocol** | Concurrent Gmail/Outlook connection selection, digest creation, polling, ordered aggregation, and cancellation behind one snapshot interface | **Live / Implemented** | Fully Aligned | [`mailScanProtocol.ts`](../../../frontend/src/dashboard/hooks/mailScanProtocol.ts) |
 | **4-Type Memory Gateway** | Short-term, declarative, episodic (with `supersedes`), and flag-gated semantic memory | **Live / Implemented** | Mostly Aligned | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) |
 | **User Documents Subsystem** | Project-scoped upload, index, and retrieval | **Live / Implemented** | Mostly Aligned | [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
 | **Document Ingestion Pipeline** | Offline document conversion and committed Markdown generation | **Live / Implemented** | Fully Aligned | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) |
@@ -89,7 +90,7 @@ flowchart TB
 | **Persistence Flexibility** | Production Postgres; Redis or in-process short-term | SQLite persists local chat sessions/history/profile/task episodes and project-document metadata/chunks across 8 local `.db` files; short-term remains in-process. Durable cloud Postgres uses migrations 001–016. | **Mostly Aligned** — Redis unused; local and cloud data are separate |
 | **Observability & Tracing** | Standard application logging | Centralized Langfuse tracing provides span-level and generation-level observability across chat controller, LLM provider calls, and memory retrieval without leaking raw email bodies. | **Additive capability — fully instrumented** |
 | **Report Artifacts** | Not specified in TARGET; generated documents are a product surface | `data/reports/` is resolved once (`REPORTS_DIR`), owned by `FileSystemReportArtifactStore`, and reached only through `ReportFilename`. Both writers — the artifacts view and the AI Chat turn — share that store. PDF export returns 501 `pdf_export_unavailable` until a `ReportPdfRenderer` is registered. | **Additive — no TARGET counterpart; PDF renderer deliberately unshipped** |
-| **Architecture Documentation** | Level 1 docs reflect the running system | All 7 subsystem modules (01–07) and dashboard audited and synchronized on 2026-08-21; dashboard, 02, 03, and 04 re-synchronized on 2026-08-25 for the report artifact store and again for the typed `CoworkRuntime` composition root (ADR-013). | **0 Diff — 100% Synced** |
+| **Architecture Documentation** | Level 1 docs reflect the running system | All 7 subsystem modules (01–07) and dashboard audited and synchronized on 2026-08-21; dashboard, 02, 03, and 04 re-synchronized through 2026-08-26 for the report artifact store, typed `CoworkRuntime` composition root (ADR-013), and frontend mail-scan protocol extraction. | **0 Diff — 100% Synced** |
 
 ---
 
