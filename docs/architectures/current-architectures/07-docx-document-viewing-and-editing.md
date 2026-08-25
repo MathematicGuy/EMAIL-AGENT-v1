@@ -2,7 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Integration Flow  
 **Status:** Live / Implemented (Lightweight Continuous In-Browser Viewer with Direct Upload & Delete)  
-**Primary Owners:** [`frontend/src/dashboard/components/RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx), [`frontend/src/dashboard/components/DocxViewer.tsx`](../../../frontend/src/dashboard/components/DocxViewer.tsx), [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py)  
+**Primary Owners:** [`frontend/src/dashboard/components/RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx), [`frontend/src/dashboard/components/DocxViewer.tsx`](../../../frontend/src/dashboard/components/DocxViewer.tsx), [`src/cowork_agent/api/knowledge.py`](../../../src/cowork_agent/api/knowledge.py)  
 **Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---
@@ -75,5 +75,5 @@ sequenceDiagram
 |---|---|---|
 | **View Hub & Top Header** | [`RawDocumentsView.tsx`](../../../frontend/src/dashboard/components/RawDocumentsView.tsx) | Quản lý nút `+` upload tệp thô, nút xóa tệp thô, danh sách tệp `data/raw/`, điều phối on-demand giữa Preview và Markdown. |
 | **Docx Viewer** | [`DocxViewer.tsx`](../../../frontend/src/dashboard/components/DocxViewer.tsx) | Component hiển thị DOCX liền mạch với thanh điều khiển tinh gọn (Zoom in/out, 100%, Khớp, Toàn màn hình). |
-| **Upload & Delete Endpoints** | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) | `POST /api/v1/raw-documents/upload` và `DELETE /api/v1/raw-documents/{filename}`. |
-| **Binary Stream Endpoints** | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) | `GET /api/v1/raw-documents/{filename}`, `GET /api/v1/raw-documents/{filename}/extracted`. |
+| **Upload & Delete Endpoints** | [`src/cowork_agent/api/knowledge.py`](../../../src/cowork_agent/api/knowledge.py) | `POST /api/v1/raw-documents/upload` và `DELETE /api/v1/raw-documents/{filename}`. |
+| **Binary Stream Endpoints** | [`src/cowork_agent/api/knowledge.py`](../../../src/cowork_agent/api/knowledge.py) | `GET /api/v1/raw-documents/{filename}`, `GET /api/v1/raw-documents/{filename}/extracted`. |

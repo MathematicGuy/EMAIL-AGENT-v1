@@ -18,7 +18,7 @@ flowchart TB
         UI_REACT["React 19 SPA Client<br/>(frontend/)"]
     end
 
-    subgraph API["FastAPI Control Plane (app.py)"]
+    subgraph API["FastAPI Control Plane (app.py + api/ routers)"]
         EMAIL_API["Email Action Plan API<br/>(/v1/mail-todo/*)"]
         CHAT_API["AI Chat API & SSE Stream<br/>(/v1/cowork/chat/*)"]
         DOC_API["Project / Raw Document APIs"]
@@ -69,7 +69,7 @@ flowchart TB
 | **Document Ingestion Pipeline** | Offline document conversion and committed Markdown generation | **Live / Implemented** | Fully Aligned | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) |
 | **DOCX Viewing & Raw Ingestion** | In-browser Word/PDF viewer and direct upload | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
 | **Report Artifact Store** | One `ReportFilename` rule and one store port behind `/api/v1/reports`; both writers (artifacts view and AI Chat turn) share it | **Live / Implemented** | Fully Aligned | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py) / [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) / [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
-| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`app.py`](../../../src/cowork_agent/app.py) |
+| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`api/mailboxes.py`](../../../src/cowork_agent/api/mailboxes.py), [`api/dependencies.py`](../../../src/cowork_agent/api/dependencies.py) |
 | **Typed Composition Root** | One frozen `CoworkRuntime` value (`reports`, `control_plane`, `mailbox`, `chat`, `email_rag`, `evaluation` groups) built once by the group builders and read through `runtime(request)`; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)) | **Live / Implemented** | Fully Aligned | [`composition.py`](../../../src/cowork_agent/composition.py) |
 | **Dual Persistence Engine** | SQLite local mode and Supabase Postgres mode | **Live / Implemented** | Fully Aligned | [`repositories`](../../../src/cowork_agent/persistence/repositories) |
 | **Presentation Layers** | React 19 + Vite + Tailwind 4 SPA | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |

@@ -13,7 +13,7 @@
 
 | Category | Implemented Component | Runtime Responsibility | Authoritative Code Location |
 |---|---|---|---|
-| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, and API route mounts. Composed dependencies live in one typed `CoworkRuntime` value built by [`composition.py`](../../../src/cowork_agent/composition.py) and read through the `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) |
+| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root and router mounts. Composed dependencies live in one typed `CoworkRuntime` value built by [`composition.py`](../../../src/cowork_agent/composition.py) and read through the `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). Transport lives in the routers, not here: `app.py` serves only `/health`, and OAuth, connections, digest runs and the document surfaces are `create_*_router()` modules under `api/` ([ADR-015](../../../tasks/adr/ADR-015-routers-own-their-transport.md)). | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py), [`src/cowork_agent/api/`](../../../src/cowork_agent/api) |
 | **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
 | **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes`), and Semantic memory scopes. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
 | **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
@@ -73,7 +73,7 @@ flowchart TB
         REACT["React 19 SPA Client<br/>(frontend/)"]
     end
 
-    subgraph CONTROL_PLANE["FastAPI Control Plane (app.py)"]
+    subgraph CONTROL_PLANE["FastAPI Control Plane (app.py + api/ routers)"]
         AUTH["Identity & OAuth Handler<br/>(Google OAuth 2.0 PKCE)"]
         EMAIL_ROUTER["Email API Router<br/>(/v1/mail-todo/*)"]
         CHAT_ROUTER["AI Chat Router<br/>(/v1/cowork/chat/*)"]

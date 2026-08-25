@@ -19,13 +19,13 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from cowork_agent.composition import CoworkRuntime, runtime
+from cowork_agent.composition import runtime
 from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
@@ -34,6 +34,11 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.persistence.repositories.sqlite_raw_documents import (
+    SQLiteRawDocumentRepository,
+)
+
+from .dependencies import control_plane_required
 
 logger = logging.getLogger(__name__)
 
@@ -113,34 +118,19 @@ def _resolve_extracted_doc(filename: str, manifest: dict[str, str]) -> str | Non
     return matches[0].name if matches else None
 
 
-async def _raw_document_repo(request: Request) -> Any:
-    # Read through the typed control-plane seam when it is composed; the
-    # ``app.state`` memo remains the fallback (and the self-heal write-back
-    # target) for the no-lifespan test path, where the runtime is never
-    # assembled. This memo is a documented ``app.state`` survivor (ADR-013):
-    # the frozen runtime cannot absorb a lazily constructed repository.
-    app_runtime = getattr(request.app.state, "runtime", None)
-    control_plane = (
-        cast(CoworkRuntime, app_runtime).control_plane if app_runtime is not None else None
-    )
-    repo = control_plane.raw_document_repository if control_plane is not None else None
-    if repo is None:
-        repo = getattr(request.app.state, "raw_document_repository", None)
-    if repo is None:
-        from cowork_agent.persistence.repositories.sqlite_raw_documents import (
-            SQLiteRawDocumentRepository,
-        )
+def _raw_document_repo(request: Request) -> SQLiteRawDocumentRepository:
+    """The raw-document store the composed control plane owns.
 
-        # The no-lifespan path only: without a composed control plane there
-        # is no startup location to mirror, so the memo heals under the
-        # process working directory's ``data`` root.
-        repo = SQLiteRawDocumentRepository(Path.cwd() / "data" / "raw_documents.db")
-        # Without this the table is never created and every query raises
-        # "no such table: raw_document_metadata".
-        await repo.initialize()
-        request.app.state.raw_document_repository = repo
-    return repo
+    ADR-013 kept a self-heal ``app.state`` memo here while the routes still
+    lived on ``create_app``: a no-lifespan test could reach a handler with no
+    runtime assembled, so the helper built a repository under the process
+    working directory and cached it on the app. That was the last untyped
+    fallback, and it is gone -- the read is now the same typed read as every
+    other group access, which also means the return type is concrete rather
+    than ``Any``.
+    """
 
+    return control_plane_required(request).raw_document_repository
 
 
 def create_knowledge_router() -> APIRouter:
@@ -320,7 +310,7 @@ def create_knowledge_router() -> APIRouter:
             raise HTTPException(status_code=400, detail="Tệp rỗng")
 
         target_raw.write_bytes(content)
-        repo = await _raw_document_repo(request)
+        repo = _raw_document_repo(request)
         await repo.record_save(safe_name, status=2)
         logger.info("Uploaded raw document %s into data/raw/ (%d bytes)", safe_name, len(content))
 
@@ -452,7 +442,7 @@ def create_knowledge_router() -> APIRouter:
             raise HTTPException(status_code=400, detail="Empty document payload")
 
         target_raw.write_bytes(content)
-        repo = await _raw_document_repo(request)
+        repo = _raw_document_repo(request)
         await repo.record_save(safe_name, status=2)
         logger.info("Saved raw document %s directly (%d bytes)", safe_name, len(content))
 
@@ -491,12 +481,11 @@ def create_knowledge_router() -> APIRouter:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
 
-        repo = await _raw_document_repo(request)
-        if hasattr(repo, "delete"):
-            try:
-                await repo.delete(safe_name)
-            except Exception as repo_err:
-                logger.warning("Could not delete metadata for %s: %s", safe_name, repo_err)
+        repo = _raw_document_repo(request)
+        try:
+            await repo.delete(safe_name)
+        except Exception as repo_err:
+            logger.warning("Could not delete metadata for %s: %s", safe_name, repo_err)
 
         manifest = _load_raw_manifest()
         deleted_extracted: list[str] = []
