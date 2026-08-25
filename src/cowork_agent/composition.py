@@ -30,8 +30,14 @@ and the reply/intent/routing adapter slots that the LLM provider block
 upgrades after boot. The legacy ``chat_controller_factory`` keeps its lazy
 ``app.state`` reads through that upgrade (the deletion test on those forwards
 only passes once the factory moves behind ``runtime(request)`` in the cutover
-slice). Later slices grow the remaining groups — ``email_rag``,
-``evaluation`` — without changing this interface.
+slice). Slice 02-5 adds ``EmailRagRuntime``, the group that owns the email-RAG
+construction: the project-document vector plane, the committed corpus, the
+semantic store, and the digest worker. The group boots with its document plane
+complete and provider-half placeholders; the LLM provider block in ``lifespan``
+upgrades the provider half after it resolves, exactly like the chat group, and
+its ``except ValueError`` degrade path degrades both halves through one coupled
+contract. The later slice grows the remaining ``evaluation`` group without
+changing this interface.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
 import httpx
@@ -49,6 +55,7 @@ from starlette.responses import Response
 from cowork_agent.config import (
     ChatIntentSettings,
     ChatMemorySettings,
+    EmailRagQualitySettings,
     GmailSettings,
     OutlookSettings,
     SessionSettings,
@@ -70,33 +77,56 @@ from cowork_agent.features.ai_chat.memory_observability import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.features.email_action_plan.observability import (
+    LoggingTraceSink,
+    dev_trace_sink_from_env,
+)
 from cowork_agent.features.email_action_plan.ports import (
     MailboxConnectionRepository,
     MailboxPort,
     RunRepository,
+    SemanticMemoryPort,
     TaskRepository,
 )
+from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
+    DigestWorker,
     GetDigestResult,
 )
-from cowork_agent.identity import PrincipalRepository, VerifiedPrincipal
+from cowork_agent.identity import LOCAL_TENANT_ID, PrincipalRepository, VerifiedPrincipal
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
+from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
     GmailMailboxAdapter,
     GmailPrincipalResolver,
 )
+from cowork_agent.integrations.llm.provider_factory import EmailProviderBundle
 from cowork_agent.integrations.mailbox.router import ProviderRoutingMailboxAdapter
 from cowork_agent.integrations.outlook import (
     OutlookConnectionService,
     OutlookMailboxAdapter,
+)
+from cowork_agent.integrations.rag.bootstrap import RAG_CORPUS_PATH, build_document_embedder
+from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
+from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.rag.project_documents import (
+    CanonicalProjectDocumentRetriever,
+    HybridProjectDocumentStore,
+)
+from cowork_agent.integrations.rag.project_index import (
+    SnapshotStorage,
+    TurbovecProjectIndexStore,
 )
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
+)
+from cowork_agent.persistence.repositories.project_document_chunks import (
+    PostgresProjectDocumentChunkRepository,
 )
 from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
 from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
@@ -249,23 +279,55 @@ class ChatRuntime:
 
 
 @dataclass(frozen=True, slots=True)
+class EmailRagRuntime:
+    """The email-RAG group: the document plane plus the digest worker.
+
+    Every field is what ``lifespan`` used to construct inline and publish as
+    an untyped ``app.state`` key. The group has two halves with different
+    arrival times. The document plane — the project-document vector plane and
+    its index — composes at boot inside ``build_email_rag`` with its
+    swallow-and-log degrade. The provider half — the semantic store, the
+    committed corpus, and the ``DigestWorker`` — boots as placeholders
+    (``NullSemanticMemory``, empty corpus, no worker) and is upgraded by
+    ``upgrade_email_rag_providers`` once the LLM provider block resolves,
+    mirroring the chat group's placeholder-then-upgrade sequence. The
+    ``| None`` fields are capabilities genuinely absent in one boot mode:
+    ``digest_worker`` is ``None`` on the coupled degrade path, the vector
+    plane fields are ``None`` when user documents are disabled or their
+    construction failed, and ``project_document_queue`` is a placeholder for
+    the worker queue that only the worker process owns today.
+    """
+
+    semantic_memory: SemanticMemoryPort
+    knowledge_documents: tuple[KnowledgeDocument, ...]
+    digest_worker: DigestWorker | None
+    llm_configuration_error: str | None
+    llm_provider_label: str
+    document_embeddings_configured: bool
+    project_document_vectors: CanonicalProjectDocumentRetriever | None
+    project_document_index: TurbovecProjectIndexStore | None
+    project_document_queue: object | None
+
+
+@dataclass(frozen=True, slots=True)
 class CoworkRuntime:
     """The composed value of the application: dependencies that outlive requests.
 
     Frozen so no code path can swap a field mid-flight, and typed so a missing
     dependency is a mypy error at the composition root instead of a ``None``
-    found at request time. ``control_plane``, ``mailbox``, and ``chat`` are
-    optional only for injected test runtimes that exercise a single group (the
-    ASGI transport never runs ``lifespan``); a boot through ``lifespan``
-    always composes all three. Later slices add the remaining groups
-    (``email_rag``, ``evaluation``); each migration moves *where* a consumer
-    reads from, never *what* is composed.
+    found at request time. ``control_plane``, ``mailbox``, ``chat``, and
+    ``email_rag`` are optional only for injected test runtimes that exercise a
+    single group (the ASGI transport never runs ``lifespan``); a boot through
+    ``lifespan`` always composes all four. Later slices add the remaining
+    ``evaluation`` group; each migration moves *where* a consumer reads from,
+    never *what* is composed.
     """
 
     reports: ReportArtifactStore
     control_plane: ControlPlane | None = None
     mailbox: MailboxRuntime | None = None
     chat: ChatRuntime | None = None
+    email_rag: EmailRagRuntime | None = None
 
 
 def runtime(request: Request) -> CoworkRuntime:
@@ -596,14 +658,203 @@ async def build_chat(
     )
 
 
+async def build_email_rag(
+    *,
+    settings: GmailSettings,
+    control_plane_url: str,
+    project_repository: PostgresProjectRepository | SQLiteProjectRepository | None,
+    pg_pool: AsyncConnectionPool | None,
+    private_storage: SupabasePrivateStorage | LocalPrivateStorage | None,
+    user_documents_settings: UserDocumentsSettings,
+) -> EmailRagRuntime:
+    """Compose the email-RAG group's document plane (ADR-013, slice 02-5).
+
+    The body is the project-document vector-plane construction that used to
+    live inline in ``lifespan``, moved verbatim — the embedder resolution, the
+    Postgres-vs-sqlite chunk repository decision, the ``.tvim`` index store,
+    and the canonical retriever, gated on user documents being enabled with a
+    project repository present and wrapped in the same swallow-and-log
+    degrade. Only *where* it happens changed. The provider half cannot
+    compose here: it depends on the LLM provider block, whose ``ValueError``
+    degrade contract is coupled with the chat half, so it boots as
+    placeholders and arrives through ``upgrade_email_rag_providers`` after
+    that block resolves. The group's inputs arrive explicitly because the
+    email-RAG group leans on the control plane (pool, project repository) and
+    the mailbox group (private storage, user-document settings) without
+    owning either.
+    """
+    document_embeddings_configured = False
+    project_document_vectors: CanonicalProjectDocumentRetriever | None = None
+    project_document_index: TurbovecProjectIndexStore | None = None
+    if user_documents_settings.enabled and project_repository is not None:
+        try:
+            embedder, vector_size = build_document_embedder()
+            document_embeddings_configured = True
+            if control_plane_url:
+                # The API only reads .tvim snapshots; mail-todo-worker owns
+                # writing them. Both sides exchange them through Supabase
+                # Storage, so a missing local file is pulled on demand. The
+                # cast names the seam's consumer-side type: on this branch the
+                # mailbox group only ever composes the Supabase adapter (or
+                # ``None``), but its field carries the wider union.
+                assert pg_pool is not None
+                index_store = TurbovecProjectIndexStore(
+                    user_documents_settings.index_root,
+                    storage=cast(SnapshotStorage | None, private_storage),
+                    vector_size=vector_size,
+                )
+                vector_store = HybridProjectDocumentStore(
+                    PostgresProjectDocumentChunkRepository(pg_pool),
+                    index_store,
+                    embedder,
+                    vector_size=vector_size,
+                )
+                project_document_index = index_store
+                project_document_vectors = CanonicalProjectDocumentRetriever(
+                    project_repository,
+                    vector_store,
+                    top_k=user_documents_settings.top_k,
+                    min_score=user_documents_settings.min_score,
+                    timeout_ms=user_documents_settings.retrieval_timeout_ms,
+                )
+            else:
+                from cowork_agent.persistence.repositories import (
+                    sqlite_project_document_chunks,
+                )
+
+                local_chunks = (
+                    sqlite_project_document_chunks.SQLiteProjectDocumentChunkRepository(
+                        settings.connection_db_path.parent / "project_chunks.db",
+                        settings.connection_db_path.parent / "projects.db",
+                    )
+                )
+                await local_chunks.initialize()
+                local_index = TurbovecProjectIndexStore(
+                    user_documents_settings.index_root,
+                    vector_size=vector_size,
+                )
+                local_vectors = HybridProjectDocumentStore(
+                    local_chunks,
+                    local_index,
+                    embedder,
+                    vector_size=vector_size,
+                )
+                project_document_index = local_index
+                project_document_vectors = CanonicalProjectDocumentRetriever(
+                    project_repository,
+                    local_vectors,
+                    top_k=user_documents_settings.top_k,
+                    min_score=user_documents_settings.min_score,
+                    timeout_ms=user_documents_settings.retrieval_timeout_ms,
+                )
+        except Exception:
+            logger.exception(
+                "Project document vector store is unavailable; API remains online"
+            )
+    return EmailRagRuntime(
+        semantic_memory=NullSemanticMemory(),
+        knowledge_documents=(),
+        digest_worker=None,
+        llm_configuration_error=None,
+        llm_provider_label="LLM provider",
+        document_embeddings_configured=document_embeddings_configured,
+        project_document_vectors=project_document_vectors,
+        project_document_index=project_document_index,
+        project_document_queue=None,
+    )
+
+
+def upgrade_email_rag_providers(
+    email_rag: EmailRagRuntime,
+    *,
+    email_providers: EmailProviderBundle,
+    provider_label: str,
+    settings: GmailSettings,
+    run_repository: RunRepository,
+    result_repository: InMemoryResultRepository,
+    task_repository: TaskRepository,
+    mailbox: MailboxPort,
+    outbox_repository: PostgresOutboxRepository | InMemoryOutbox,
+) -> EmailRagRuntime:
+    """Upgrade the group's provider half once the LLM block resolves.
+
+    The body is the email half of the old mixed LLM provider block in
+    ``lifespan``, moved verbatim and in the same statement order: the semantic
+    store from the resolved bundle, the committed-corpus load with its
+    swallow-to-empty fallback, and the ``DigestWorker`` construct-only. The
+    call sits inside ``lifespan``'s provider try-block, so a ``ValueError``
+    here (for example an invalid generation concurrency from the provider or
+    the settings) propagates to the shared except and degrades both halves
+    through the coupled contract — the same behavior as the old single block.
+    """
+    semantic_memory = email_providers.semantic_memory
+    try:
+        knowledge_documents = load_corpus(RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID)
+    except Exception:
+        knowledge_documents = ()
+    digest_worker = DigestWorker(
+        run_repository,
+        result_repository,
+        mailbox,
+        SafeTextAttachmentExtractor(),
+        email_providers.classifier,
+        email_providers.generator,
+        ShortTermStore(),
+        task_repository,
+        semantic_memory=semantic_memory,
+        query_rewriter=email_providers.query_rewriter,
+        quality_settings=EmailRagQualitySettings.from_env(),
+        trace_sink=LoggingTraceSink(),
+        dev_trace=dev_trace_sink_from_env(
+            settings.connection_db_path.parent, settings.token_encryption_key
+        ),
+        completion_outbox=outbox_repository,
+        mailbox_fetch_concurrency=settings.fetch_concurrency,
+        generation_concurrency=email_providers.generation_concurrency,
+    )
+    return replace(
+        email_rag,
+        semantic_memory=semantic_memory,
+        knowledge_documents=knowledge_documents,
+        digest_worker=digest_worker,
+        llm_configuration_error=None,
+        llm_provider_label=provider_label,
+    )
+
+
+def degrade_email_rag(
+    email_rag: EmailRagRuntime, *, configuration_error: str, provider_label: str
+) -> EmailRagRuntime:
+    """The coupled degrade outcome for the provider half (ADR-013, slice 02-5).
+
+    The ``except ValueError`` path of the LLM provider block: null memory,
+    empty corpus, no worker, and the configuration diagnostic kept
+    server-side. The document plane survives untouched — a degraded provider
+    half never takes the project-document vector plane offline, exactly as
+    before the group existed.
+    """
+    return replace(
+        email_rag,
+        semantic_memory=NullSemanticMemory(),
+        knowledge_documents=(),
+        digest_worker=None,
+        llm_configuration_error=configuration_error,
+        llm_provider_label=provider_label,
+    )
+
+
 __all__ = [
     "ChatRuntime",
     "ControlPlane",
     "CoworkRuntime",
+    "EmailRagRuntime",
     "MailboxRuntime",
     "build_chat",
     "build_control_plane",
+    "build_email_rag",
     "build_mailbox",
     "create_chat_session_buffer",
+    "degrade_email_rag",
     "runtime",
+    "upgrade_email_rag_providers",
 ]

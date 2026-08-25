@@ -32,10 +32,12 @@ from cowork_agent.composition import (
     CoworkRuntime,
     build_chat,
     build_control_plane,
+    build_email_rag,
     build_mailbox,
+    degrade_email_rag,
+    upgrade_email_rag_providers,
 )
 from cowork_agent.config import (
-    EmailRagQualitySettings,
     EvaluationSettings,
     GmailSettings,
     OutlookSettings,
@@ -63,10 +65,6 @@ from cowork_agent.features.ai_chat.ports import (
     EpisodicMemoryPort,
 )
 from cowork_agent.features.batch_evaluation.bootstrap import build_evaluation_runtime
-from cowork_agent.features.email_action_plan.observability import (
-    LoggingTraceSink,
-    dev_trace_sink_from_env,
-)
 from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import (
     MailboxConnectionRepository,
@@ -74,14 +72,12 @@ from cowork_agent.features.email_action_plan.ports import (
     SemanticMemoryPort,
     TaskRepository,
 )
-from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
     DigestWorker,
     GetDigestResult,
 )
 from cowork_agent.identity import (
-    LOCAL_TENANT_ID,
     ConnectionNotOwnedError,
     VerifiedPrincipal,
     create_guest_session,
@@ -89,7 +85,6 @@ from cowork_agent.identity import (
     principal_for_connection,
     principal_from_opaque_session,
 )
-from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
 from cowork_agent.integrations.gmail.provider import GmailConnectionService
 from cowork_agent.integrations.llm.provider_factory import (
     resolve_chat_providers,
@@ -103,25 +98,13 @@ from cowork_agent.integrations.mailbox import (
     ProviderRoutingMailboxAdapter,
 )
 from cowork_agent.integrations.outlook import OutlookConnectionService
-from cowork_agent.integrations.rag.bootstrap import (
-    RAG_CORPUS_PATH,
-    build_document_embedder,
-)
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
-from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
+from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
-from cowork_agent.integrations.rag.project_documents import (
-    CanonicalProjectDocumentRetriever,
-    HybridProjectDocumentStore,
-)
-from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
-)
-from cowork_agent.persistence.repositories.project_document_chunks import (
-    PostgresProjectDocumentChunkRepository,
 )
 from cowork_agent.runtime import (
     configure_windows_event_loop_policy,
@@ -383,7 +366,6 @@ def create_app() -> FastAPI:
             user_documents_settings = mailbox_runtime.user_documents_settings
             app.state.private_storage_client = mailbox_runtime.private_storage_client
             app.state.private_storage = mailbox_runtime.private_storage
-            app.state.document_embeddings_configured = False
             # Chat group (ADR-013, slice 02-4): the memory settings, session
             # buffer, observability sink, ready-document catalog, and identity
             # callables now compose as one typed value in
@@ -419,8 +401,6 @@ def create_app() -> FastAPI:
             app.state.user_documents_settings = chat_runtime.user_documents_settings
             app.state.ready_document_catalog = chat_runtime.ready_document_catalog
             app.state.project_document_store = None
-            app.state.project_document_vectors = None
-            app.state.project_document_index = None
             app.state.chat_principal_resolver = chat_runtime.chat_principal_resolver
             app.state.chat_guest_session_issuer = chat_runtime.chat_guest_session_issuer
 
@@ -436,68 +416,36 @@ def create_app() -> FastAPI:
             app.state.run_queue = control_plane.run_queue
             app.state.raw_document_repository = control_plane.raw_document_repository
 
-            if user_documents_settings.enabled and app.state.project_repository is not None:
-                try:
-                    embedder, vector_size = build_document_embedder()
-                    app.state.document_embeddings_configured = True
-                    if control_plane_url:
-                        # The API only reads .tvim snapshots; mail-todo-worker owns
-                        # writing them. Both sides exchange them through Supabase
-                        # Storage, so a missing local file is pulled on demand.
-                        index_store = TurbovecProjectIndexStore(
-                            user_documents_settings.index_root,
-                            storage=app.state.private_storage,
-                            vector_size=vector_size,
-                        )
-                        vector_store = HybridProjectDocumentStore(
-                            PostgresProjectDocumentChunkRepository(app.state.pg_pool),
-                            index_store,
-                            embedder,
-                            vector_size=vector_size,
-                        )
-                        app.state.project_document_index = index_store
-                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                            app.state.project_repository,
-                            vector_store,
-                            top_k=user_documents_settings.top_k,
-                            min_score=user_documents_settings.min_score,
-                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                        )
-                    else:
-                        from cowork_agent.persistence.repositories import (
-                            sqlite_project_document_chunks,
-                        )
-
-                        local_chunks = (
-                            sqlite_project_document_chunks.SQLiteProjectDocumentChunkRepository(
-                                settings.connection_db_path.parent / "project_chunks.db",
-                                settings.connection_db_path.parent / "projects.db",
-                            )
-                        )
-                        await local_chunks.initialize()
-                        local_index = TurbovecProjectIndexStore(
-                            user_documents_settings.index_root,
-                            vector_size=vector_size,
-                        )
-                        local_vectors = HybridProjectDocumentStore(
-                            local_chunks,
-                            local_index,
-                            embedder,
-                            vector_size=vector_size,
-                        )
-                        app.state.project_document_index = local_index
-                        app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                            app.state.project_repository,
-                            local_vectors,
-                            top_k=user_documents_settings.top_k,
-                            min_score=user_documents_settings.min_score,
-                            timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                        )
-                except Exception:
-                    logger.exception(
-                        "Project document vector store is unavailable; API remains online"
-                    )
-            app.state.project_document_queue = None
+            # Email-RAG group (ADR-013, slice 02-5): the project-document
+            # vector plane now composes as one typed value in
+            # ``composition.build_email_rag``, moved verbatim including its
+            # swallow-and-log degrade. The provider half (semantic store,
+            # corpus, digest worker) boots as placeholders here and is
+            # upgraded by the LLM provider block below — the same
+            # placeholder-then-upgrade sequence the chat group uses. The
+            # ``app.state.<key>`` forwards are deliberate temporary
+            # duplication; later slices delete them one consumer at a time.
+            email_rag_runtime = await build_email_rag(
+                settings=settings,
+                control_plane_url=control_plane_url,
+                project_repository=control_plane.project_repository,
+                pg_pool=control_plane.pg_pool,
+                private_storage=mailbox_runtime.private_storage,
+                user_documents_settings=user_documents_settings,
+            )
+            app.state.runtime = CoworkRuntime(
+                reports=report_store,
+                control_plane=control_plane,
+                mailbox=mailbox_runtime,
+                chat=chat_runtime,
+                email_rag=email_rag_runtime,
+            )
+            app.state.document_embeddings_configured = (
+                email_rag_runtime.document_embeddings_configured
+            )
+            app.state.project_document_vectors = email_rag_runtime.project_document_vectors
+            app.state.project_document_index = email_rag_runtime.project_document_index
+            app.state.project_document_queue = email_rag_runtime.project_document_queue
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
@@ -508,12 +456,7 @@ def create_app() -> FastAPI:
                 }.get(provider, "LLM provider")
                 email_providers = await resolve_email_providers(provider)
                 chat_providers = resolve_chat_providers(provider)
-                classifier = email_providers.classifier
-                generator = email_providers.generator
                 intent_classifier = chat_providers.intent_classifier
-                generation_concurrency = email_providers.generation_concurrency
-                query_rewriter = email_providers.query_rewriter
-                semantic_memory = email_providers.semantic_memory
                 intent_settings = chat_providers.intent_settings
                 app.state.chat_reply = chat_providers.chat_reply
                 app.state.chat_intent_settings = intent_settings
@@ -534,53 +477,56 @@ def create_app() -> FastAPI:
                     )
                     else None
                 )
-                app.state.semantic_memory = semantic_memory
-                try:
-                    app.state.knowledge_documents = load_corpus(
-                        RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID
-                    )
-                except Exception:
-                    app.state.knowledge_documents = ()
-                app.state.digest_worker = DigestWorker(
-                    run_repository,
-                    result_repository,
-                    app.state.mailbox,
-                    SafeTextAttachmentExtractor(),
-                    classifier,
-                    generator,
-                    ShortTermStore(),
-                    task_repository,
-                    semantic_memory=semantic_memory,
-                    query_rewriter=query_rewriter,
-                    quality_settings=EmailRagQualitySettings.from_env(),
-                    trace_sink=LoggingTraceSink(),
-                    dev_trace=dev_trace_sink_from_env(
-                        settings.connection_db_path.parent, settings.token_encryption_key
-                    ),
-                    completion_outbox=app.state.outbox_repository,
-                    mailbox_fetch_concurrency=settings.fetch_concurrency,
-                    generation_concurrency=generation_concurrency,
+                # Email half of this block (ADR-013, slice 02-5): the semantic
+                # store, the corpus, and the digest worker now compose in
+                # ``composition.upgrade_email_rag_providers``, called here in
+                # the same statement order as before so a ``ValueError`` from
+                # either half still reaches the one coupled except below.
+                email_rag_runtime = upgrade_email_rag_providers(
+                    email_rag_runtime,
+                    email_providers=email_providers,
+                    provider_label=provider_label,
+                    settings=settings,
+                    run_repository=run_repository,
+                    result_repository=result_repository,
+                    task_repository=task_repository,
+                    mailbox=mailbox_runtime.mailbox,
+                    outbox_repository=control_plane.outbox_repository,
                 )
-                app.state.llm_configuration_error = None
-                app.state.llm_provider_label = provider_label
+                app.state.semantic_memory = email_rag_runtime.semantic_memory
+                app.state.knowledge_documents = email_rag_runtime.knowledge_documents
+                app.state.digest_worker = email_rag_runtime.digest_worker
+                app.state.llm_configuration_error = (
+                    email_rag_runtime.llm_configuration_error
+                )
+                app.state.llm_provider_label = email_rag_runtime.llm_provider_label
             except ValueError as exc:
-                app.state.digest_worker = None
-                app.state.semantic_memory = NullSemanticMemory()
-                app.state.knowledge_documents = ()
-                app.state.llm_configuration_error = str(exc)
-                app.state.llm_provider_label = provider_label
-            # Chat group upgrade (ADR-013, slice 02-4): the LLM provider block
-            # above is deliberately left intact this slice — it mixes chat and
-            # email wiring, and its ``except ValueError`` degrade path must
-            # keep both halves behaving exactly as before (the email half moves
-            # in slice 02-5). Whatever the block published is final: on success
-            # the real ``chat_reply`` / ``chat_intent_settings`` /
-            # ``chat_routing_service``, on degrade the placeholders the chat
-            # group booted with (``chat_intent_settings`` was never set). Read
-            # those results back and republish the typed chat group so
+                # The coupled degrade contract (ADR-013, slice 02-5): a
+                # ``ValueError`` from either half of this block degrades the
+                # email-RAG provider half; the chat half keeps whatever the
+                # block published before the failure, exactly as before the
+                # group existed. The document plane is untouched.
+                email_rag_runtime = degrade_email_rag(
+                    email_rag_runtime,
+                    configuration_error=str(exc),
+                    provider_label=provider_label,
+                )
+                app.state.digest_worker = email_rag_runtime.digest_worker
+                app.state.semantic_memory = email_rag_runtime.semantic_memory
+                app.state.knowledge_documents = email_rag_runtime.knowledge_documents
+                app.state.llm_configuration_error = (
+                    email_rag_runtime.llm_configuration_error
+                )
+                app.state.llm_provider_label = email_rag_runtime.llm_provider_label
+            # Chat group upgrade (ADR-013, slice 02-4): the provider block
+            # above publishes the chat half through ``app.state``; read those
+            # results back and republish the typed chat group so
             # ``runtime(request)`` carries the same final values the legacy
-            # ``app.state`` keys already hold; the legacy forwards happened
-            # inside the block, so nothing else moves.
+            # keys already hold. On success the real ``chat_reply`` /
+            # ``chat_intent_settings`` / ``chat_routing_service``, on degrade
+            # the placeholders the chat group booted with (``chat_intent_settings``
+            # was never set). The email-RAG group (slice 02-5) was upgraded or
+            # degraded in the same block and republishes alongside.
             chat_runtime = replace(
                 chat_runtime,
                 chat_reply=app.state.chat_reply,
@@ -592,6 +538,7 @@ def create_app() -> FastAPI:
                 control_plane=control_plane,
                 mailbox=mailbox_runtime,
                 chat=chat_runtime,
+                email_rag=email_rag_runtime,
             )
             evaluation_settings = getattr(app.state, "evaluation_settings", None)
             if evaluation_settings is not None:
