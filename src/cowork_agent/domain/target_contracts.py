@@ -26,7 +26,7 @@ from typing import Literal, Self, TypeVar
 
 from .models import Priority
 
-TARGET_CONTRACTS_VERSION = "1.3.0"
+TARGET_CONTRACTS_VERSION = "1.4.0"
 
 #: Pipeline version — fourth component of the idempotent task persistence key
 #: ``tenant_id:user_id:gmail_message_id:pipeline_version`` (V1-M4 T4.1).
@@ -118,6 +118,27 @@ class RetrievalStatus(StrEnum):
     AUTHORIZATION_DENIED = "authorization_denied"
     PARTIAL = "partial"
     UNAVAILABLE = "unavailable"
+
+
+class ThreatLevel(StrEnum):
+    """Security threat level assigned to links, attachments, or overall emails."""
+
+    CLEAN = "clean"
+    SUSPICIOUS = "suspicious"
+    MALICIOUS = "malicious"
+    BLOCKED = "blocked"
+
+
+class ThreatCategory(StrEnum):
+    """Categorization of detected security threats."""
+
+    NONE = "none"
+    PHISHING = "phishing"
+    MALWARE = "malware"
+    MACRO_SCRIPT = "macro_script"
+    PARSER_EXPLOIT = "parser_exploit"
+    PROMPT_INJECTION = "prompt_injection"
+    HOMOGRAPH_SPOOF = "homograph_spoof"
 
 
 _T = TypeVar("_T")
@@ -232,6 +253,7 @@ class EmailSourceLink:
     ref: str
     label: str | None
     url: str
+    threat_level: ThreatLevel = ThreatLevel.CLEAN
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -242,6 +264,97 @@ class EmailSourceLink:
             ref=_as_str(data["ref"]),
             label=_optional(data.get("label"), _as_str),
             url=_as_str(data["url"]),
+            threat_level=_as_enum(
+                data.get("threat_level", ThreatLevel.CLEAN.value), ThreatLevel
+            )
+            if "threat_level" in data
+            else ThreatLevel.CLEAN,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LinkSafetyReport:
+    """Security analysis report for one extracted link."""
+
+    original_url: str
+    resolved_url: str
+    threat_level: ThreatLevel
+    threat_category: ThreatCategory
+    details: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            original_url=_as_str(data["original_url"]),
+            resolved_url=_as_str(data["resolved_url"]),
+            threat_level=_as_enum(data["threat_level"], ThreatLevel),
+            threat_category=_as_enum(data["threat_category"], ThreatCategory),
+            details=_optional(data.get("details"), _as_str),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentSafetyReport:
+    """Security analysis report for one email attachment."""
+
+    filename: str
+    sha256: str
+    detected_mime_type: str
+    threat_level: ThreatLevel
+    threat_category: ThreatCategory
+    is_safe_to_extract: bool
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            filename=_as_str(data["filename"]),
+            sha256=_as_str(data["sha256"]),
+            detected_mime_type=_as_str(data["detected_mime_type"]),
+            threat_level=_as_enum(data["threat_level"], ThreatLevel),
+            threat_category=_as_enum(data["threat_category"], ThreatCategory),
+            is_safe_to_extract=_as_bool(data["is_safe_to_extract"]),
+            reason=_optional(data.get("reason"), _as_str),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SecurityScanResult:
+    """Composite security scan result for an email."""
+
+    email_id: str
+    overall_threat_level: ThreatLevel
+    scanned_at: datetime
+    links: tuple[LinkSafetyReport, ...] = ()
+    attachments: tuple[AttachmentSafetyReport, ...] = ()
+    quarantined: bool = False
+    recommended_action: str = "allow"  # allow | warn | quarantine | drop
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            email_id=_as_str(data["email_id"]),
+            overall_threat_level=_as_enum(data["overall_threat_level"], ThreatLevel),
+            scanned_at=_as_datetime(data["scanned_at"]),
+            links=tuple(
+                LinkSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("links", ()))
+            ),
+            attachments=tuple(
+                AttachmentSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("attachments", ()))
+            ),
+            quarantined=_as_bool(data.get("quarantined", False)),
+            recommended_action=_as_str(data.get("recommended_action", "allow")),
         )
 
 
@@ -422,6 +535,9 @@ class Task:
     validation_status: ValidationStatus
     created_at: datetime
     source_links: tuple[EmailSourceLink, ...] = ()
+    security_threat_level: ThreatLevel = ThreatLevel.CLEAN
+    quarantined: bool = False
+    security_reports: tuple[LinkSafetyReport, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -456,6 +572,16 @@ class Task:
             source_links=tuple(
                 EmailSourceLink.from_dict(_as_mapping(item))
                 for item in _as_sequence(data.get("source_links", ()))
+            ),
+            security_threat_level=_as_enum(
+                data.get("security_threat_level", ThreatLevel.CLEAN.value), ThreatLevel
+            )
+            if "security_threat_level" in data
+            else ThreatLevel.CLEAN,
+            quarantined=_as_bool(data.get("quarantined", False)),
+            security_reports=tuple(
+                LinkSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("security_reports", ()))
             ),
         )
 
