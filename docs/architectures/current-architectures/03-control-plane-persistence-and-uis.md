@@ -50,7 +50,8 @@ flowchart TB
 
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
-| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root for persistence, LLM routing, semantic indexes, storage, and the mail/chat/project/document/report APIs. |
+| **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root for persistence, LLM routing, semantic indexes, storage, and the mail/chat/project/document/report APIs. Construction is delegated to the typed composition module; `lifespan` assembles one runtime value and teardown reads its handles back from it. |
+| **Typed Composition Module** | [`composition.py`](../../../src/cowork_agent/composition.py) | Builds `CoworkRuntime` — one frozen, slotted value holding the `reports` store and the `control_plane`, `mailbox`, `chat`, `email_rag`, and `evaluation` groups — once at startup via the group builders. Handlers read it through the plain `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). |
 | **Identity & Security** | [`identity.py`](../../../src/cowork_agent/identity.py) & [`config.py`](../../../src/cowork_agent/config.py) | Resolves `VerifiedPrincipal`; session cookies and central ownership guards enforce authorization. |
 | **Mailbox OAuth & Availability** | [`app.py`](../../../src/cowork_agent/app.py), [`outlook/provider.py`](../../../src/cowork_agent/integrations/outlook/provider.py) | Gmail OAuth plus optional Microsoft OAuth with PKCE, signed one-time owner state, encrypted rotating refresh tokens, and `Mail.Read` only. `/connections` exposes stable availability; Outlook is `not_configured` or `sqlite_only` when unavailable and never creates a user/session or changes the login cookie. |
 | **Persistence Repositories** | [`repositories`](../../../src/cowork_agent/persistence/repositories) | In-memory test fakes, SQLite adapters for local mode, and Postgres adapters for durable cloud/local control-plane mode. |
@@ -60,7 +61,7 @@ flowchart TB
 
 ### 2.1 Report Artifact Surface (`/api/v1/reports`)
 
-`REPORTS_DIR` is a module-level constant in [`app.py`](../../../src/cowork_agent/app.py) next to `RAW_DOCS_DIR` and `EXTRACTED_DIR`. The store is composed **once** in `lifespan` as `app.state.report_store = FileSystemReportArtifactStore(REPORTS_DIR)`, and `create_report_router()` is mounted from `create_app()` alongside the chat, project, and evaluation routers. Both writers read that one instance: the HTTP handlers pull it off `app.state`, and `_chat_controller_factory` passes it into `ChatController(reports=...)`, so the folder location and the filename rule cannot diverge between them. Handlers name every report through `ReportFilename.parse` and answer `400` on an unusable name; an absent store answers `503`.
+`REPORTS_DIR` is a module-level constant in [`app.py`](../../../src/cowork_agent/app.py) next to `RAW_DOCS_DIR` and `EXTRACTED_DIR`. The store is composed **once** in `lifespan` as the first field of the typed `CoworkRuntime` value ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)), and `create_report_router()` is mounted from `create_app()` alongside the chat, project, and evaluation routers. Both writers read that one instance: the HTTP handlers reach it through the `runtime(request).reports` accessor, and `_chat_controller_factory` passes it into `ChatController(reports=...)`, so the folder location and the filename rule cannot diverge between them. Handlers name every report through `ReportFilename.parse` and answer `400` on an unusable name; an absent store answers `503`.
 
 | Route | Purpose |
 |---|---|
