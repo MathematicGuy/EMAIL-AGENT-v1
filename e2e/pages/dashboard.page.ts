@@ -17,7 +17,7 @@ export class DashboardPage {
     this.composer = page.getByPlaceholder('Tôi có thể giúp gì cho bạn hôm nay?')
       .or(page.getByPlaceholder('How can I help you today?'))
       .or(page.locator('textarea'));
-    this.fileInput = page.getByLabel('Chọn tài liệu từ máy').or(page.locator('input[type="file"]'));
+    this.fileInput = page.locator('input[type="file"]').first();
     this.sendButton = page.getByTestId('chat-send');
   }
 
@@ -44,23 +44,23 @@ export class DashboardPage {
 
     // Expand sidebar if collapsed
     const toggle = this.page.getByRole('button', { name: 'Show sidebar' });
-    if (await toggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await toggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await toggle.click();
-      await expect(this.page.getByText('DỰ ÁN', { exact: true })).toBeVisible({ timeout: 10_000 });
+      await expect(this.page.getByText('DỰ ÁN', { exact: true })).toBeVisible({ timeout: 5_000 });
     }
 
-    // Expand project accordion – wait up to 10s since projects load async
+    // Expand project accordion if not already expanded
     const expandBtn = this.page.getByRole('button', { name: /Expand Latency Project/i });
-    try {
-      await expandBtn.waitFor({ state: 'visible', timeout: 10_000 });
+    if (await expandBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await expandBtn.click();
-    } catch {
-      // Already expanded – fall through
     }
   }
 
   async openRecent(title: string): Promise<void> {
-    await this.expandSidebar();
-    await this.recentChat(title).click();
+    const item = this.recentChat(title);
+    if (!await item.isVisible().catch(() => false)) {
+      await this.expandSidebar();
+    }
+    await item.click();
   }
 }

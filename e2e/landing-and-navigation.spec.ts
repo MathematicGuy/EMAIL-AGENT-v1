@@ -51,7 +51,7 @@ test.describe('Landing Page & Full Navigation Suite', () => {
     await expect(page.getByText('DỰ ÁN', { exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
-  test('navigation between views: Chat, Mail Inbox, Project Documents, Raw Documents', async ({ page }) => {
+  test('navigation between views: Chat, Mail Inbox, Artifacts, Raw Documents', async ({ page }) => {
     await page.goto('/#dashboard');
     await expect(page.locator('textarea')).toBeVisible({ timeout: 15_000 });
 
@@ -59,8 +59,8 @@ test.describe('Landing Page & Full Navigation Suite', () => {
     await page.getByRole('button', { name: 'Hộp thư' }).first().click();
     await expect(page.getByText('Mail Inbox').first()).toBeVisible({ timeout: 10_000 });
 
-    // 2. Switch to Project Documents view (sets activeView='project-documents', chat div hidden)
-    await page.getByRole('button', { name: 'Tài liệu dự án' }).first().click();
+    // 2. Switch to Artifacts view (sets activeView='artifacts', chat div hidden)
+    await page.getByRole('button', { name: 'Artifacts' }).first().click();
     // Sidebar aside is always present — confirm the view switched (chat composer now hidden)
     await expect(page.locator('textarea')).toBeHidden({ timeout: 5_000 });
 
@@ -70,7 +70,7 @@ test.describe('Landing Page & Full Navigation Suite', () => {
     await expect(page.locator('aside').first()).toBeVisible({ timeout: 5_000 });
 
     // 4. Switch back to Chat view – textarea may be hidden in mail/doc views, wait for visible
-    await page.getByRole('button', { name: 'Đoạn chat' }).first().click();
+    await page.getByRole('button', { name: 'Đoạn chat', exact: true }).click();
     await expect(page.locator('textarea')).toBeVisible({ timeout: 10_000 });
   });
 

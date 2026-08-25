@@ -52,9 +52,9 @@ test.describe('AI Chat & Multi-Turn Reasoning Workflow Suite', () => {
     await page.route('**/sessions/*/messages', async (route) => {
       if (route.request().method() === 'POST') {
         const sseBody = [
-          'event: message_start\ndata: {"message_id": "msg-1", "role": "assistant"}\n\n',
-          'event: content_delta\ndata: {"delta": "Câu trả lời từ AI."}\n\n',
-          'event: message_end\ndata: {"turn_id": "turn-1", "finish_reason": "stop"}\n\n',
+          'data: {"event_type": "started", "turn_id": "turn-1"}\n\n',
+          'data: {"event_type": "delta", "text": "Câu trả lời từ AI."}\n\n',
+          'data: {"event_type": "completed", "retrieval_status": "complete"}\n\n',
         ].join('');
         await route.fulfill({
           status: 200,
@@ -67,7 +67,7 @@ test.describe('AI Chat & Multi-Turn Reasoning Workflow Suite', () => {
     });
 
     // Also mock the session creation endpoint
-    await page.route(`**/v1/cowork/chat/projects/${DEFAULT_PROJECT_ID}/sessions`, async (route) => {
+    await page.route(`**/v1/cowork/chat/sessions`, async (route) => {
       if (route.request().method() === 'POST') {
         await route.fulfill({
           status: 201,
@@ -110,7 +110,7 @@ test.describe('AI Chat & Multi-Turn Reasoning Workflow Suite', () => {
 
     // Verify heavy session loaded – first user message has the marker
     await expect(
-      page.locator('[data-testid="chat-message"][data-role="user"]').filter({ hasText: 'LATENCY-MARKER-HEAVY' })
+      page.locator('[data-testid="chat-message"][data-role="user"]').filter({ hasText: 'LATENCY-MARKER-HEAVY' }).first()
     ).toBeVisible({ timeout: 10_000 });
 
     // Open citation badge if present

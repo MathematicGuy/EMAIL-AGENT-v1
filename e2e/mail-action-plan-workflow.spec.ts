@@ -147,8 +147,10 @@ test.describe('Mail Intake & Action Plan Workflow Suite', () => {
     await page.getByRole('button', { name: 'Hộp thư' }).first().click();
     await expect(page.getByText('Mail Inbox')).toBeVisible({ timeout: 10_000 });
 
-    // With no active connection, the UI always shows both connect buttons
-    await expect(page.getByRole('button', { name: 'Kết nối Gmail' })).toBeVisible({ timeout: 10_000 });
+    // With no active connection, the UI always shows both connect buttons / links
+    await expect(
+      page.getByRole('link', { name: 'Kết nối Gmail' }).or(page.getByRole('button', { name: 'Kết nối Gmail' }))
+    ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('button', { name: 'Kết nối Outlook' })).toBeVisible({ timeout: 10_000 });
   });
 
