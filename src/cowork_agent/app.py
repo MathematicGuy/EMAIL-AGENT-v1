@@ -34,6 +34,7 @@ from cowork_agent.config import (
     EvaluationSettings,
     GmailSettings,
     OutlookSettings,
+    SecuritySettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
@@ -128,6 +129,12 @@ from cowork_agent.integrations.rag.project_documents import (
     HybridProjectDocumentStore,
 )
 from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
+from cowork_agent.integrations.security import (
+    CompositeThreatIntel,
+    EmailSecurityScanner,
+    GoogleWebRiskThreatIntel,
+    ThreatCache,
+)
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
@@ -667,6 +674,22 @@ def create_app() -> FastAPI:
                     )
                 except Exception:
                     app.state.knowledge_documents = ()
+                security_settings = SecuritySettings.from_env()
+                security_scanner = None
+                if security_settings.enabled:
+                    threat_cache = ThreatCache(
+                        default_ttl_seconds=security_settings.cache_ttl_seconds
+                    )
+                    webrisk_intel = (
+                        GoogleWebRiskThreatIntel(api_key=security_settings.webrisk_api_key)
+                        if security_settings.webrisk_api_key
+                        else None
+                    )
+                    composite_intel = CompositeThreatIntel(
+                        cloud_intel=webrisk_intel, cache=threat_cache
+                    )
+                    security_scanner = EmailSecurityScanner(threat_intel=composite_intel)
+
                 app.state.digest_worker = DigestWorker(
                     run_repository,
                     result_repository,
@@ -684,6 +707,7 @@ def create_app() -> FastAPI:
                         settings.connection_db_path.parent, settings.token_encryption_key
                     ),
                     completion_outbox=app.state.outbox_repository,
+                    security_scanner=security_scanner,
                     mailbox_fetch_concurrency=settings.fetch_concurrency,
                     generation_concurrency=generation_concurrency,
                 )

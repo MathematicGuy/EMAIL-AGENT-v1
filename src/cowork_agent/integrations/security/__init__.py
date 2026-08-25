@@ -7,6 +7,7 @@ from .redirect_resolver import (
     SSRFSecurityError,
     resolve_redirect_safe,
 )
+from .scanner import EmailSecurityScanner
 from .threat_intel import (
     CompositeThreatIntel,
     GoogleWebRiskThreatIntel,
@@ -20,6 +21,7 @@ from .url_inspector import (
 
 __all__ = [
     "CompositeThreatIntel",
+    "EmailSecurityScanner",
     "FakeEmailSecurityScanner",
     "FakeRedirectResolver",
     "FakeThreatIntel",

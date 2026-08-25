@@ -50,6 +50,7 @@ from .ports import (
     ActionPlanGeneratorPort,
     AttachmentExtractorPort,
     CompletionOutboxPort,
+    EmailSecurityScannerPort,
     MailboxPort,
     MailboxTemporaryError,
     PersistedTask,
@@ -71,6 +72,7 @@ from .routing import (
     resolve_candidate_after_retrieval,
 )
 from .schemas import ExtractionLimits, GenerationContext, MessageRef
+from .security_policy import create_quarantined_task
 from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
@@ -229,6 +231,7 @@ class DigestWorker:
         dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
         completion_outbox: CompletionOutboxPort | None = None,
+        security_scanner: EmailSecurityScannerPort | None = None,
         mailbox_fetch_concurrency: int = 6,
         generation_concurrency: int = 1,
     ) -> None:
@@ -245,6 +248,7 @@ class DigestWorker:
         self._trace_sink = trace_sink
         self._dev_trace = dev_trace
         self._completion_outbox = completion_outbox
+        self._security_scanner = security_scanner
         if mailbox_fetch_concurrency < 1:
             raise ValueError("mailbox_fetch_concurrency must be positive")
         if generation_concurrency < 1:
@@ -306,7 +310,33 @@ class DigestWorker:
                 email_ms,
             )
 
-            self._short_term.put(run.id, envelopes)
+            quarantined_records: list[PersistedTask] = []
+            safe_envelopes: list[EphemeralEmailEnvelope] = []
+            if self._security_scanner is not None:
+                scan_results = await self._security_scanner.scan_envelopes(envelopes)
+                scan_map = {res.email_id: res for res in scan_results}
+                for envelope in envelopes:
+                    scan = scan_map.get(envelope.gmail_message_id)
+                    if scan and scan.quarantined:
+                        logger.warning(
+                            "🛡️ [SECURITY] Quarantining email %s (Threat: %s)",
+                            envelope.gmail_message_id,
+                            scan.overall_threat_level.value,
+                        )
+                        q_task = create_quarantined_task(
+                            envelope,
+                            scan,
+                            run.id,
+                            run.mailbox_connection_id,
+                            clock,
+                        )
+                        quarantined_records.append(q_task)
+                    else:
+                        safe_envelopes.append(envelope)
+            else:
+                safe_envelopes = list(envelopes)
+
+            self._short_term.put(run.id, safe_envelopes)
             stored_envelopes = self._short_term.get(run.id)
             if stored_envelopes is None:  # defensive only: put() above guarantees presence
                 stored_envelopes = ()
@@ -328,7 +358,8 @@ class DigestWorker:
                 classified.gmail_message_id: classified.decision
                 for classified in classification.decisions
             }
-            candidates = correlate_candidates(decisions, messages)
+            safe_messages = {msg.gmail_message_id: msg for msg in stored_envelopes}
+            candidates = correlate_candidates(decisions, safe_messages)
             logger.info(
                 "⚡ [RUN %s] Correlated into %d Task Candidate(s) (Classifier took %d ms)",
                 run.id,
@@ -380,9 +411,9 @@ class DigestWorker:
             # it duplicates a fingerprint already produced in this run. The
             # legacy Action Item surface is derived from the persisted Tasks
             # by the compatibility mapper at read time (T4.2).
-            records: list[PersistedTask] = []
-            actionable: set[str] = set()
-            fingerprints: set[str] = set()
+            records: list[PersistedTask] = list(quarantined_records)
+            actionable: set[str] = {r.task.gmail_message_id for r in quarantined_records}
+            fingerprints: set[str] = {r.fingerprint for r in quarantined_records}
             for generated in outputs:
                 validation = validate_action_plan(
                     generated.output,
