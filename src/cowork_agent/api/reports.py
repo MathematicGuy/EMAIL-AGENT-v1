@@ -1,8 +1,8 @@
 """FastAPI transport for report artifacts.
 
 Every handler names a report through :class:`ReportFilename` and reaches the
-folder only through the store on ``app.state``. Neither the path nor the naming
-rule appears here.
+folder only through the report store on the composed runtime (ADR-013). Neither
+the path nor the naming rule appears here.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from cowork_agent.composition import runtime
 from cowork_agent.domain.report_artifacts import (
     InvalidReportFilename,
     ReportArtifact,
@@ -44,10 +45,7 @@ class SaveReportRequest(BaseModel):
 
 
 def _store(request: Request) -> ReportArtifactStore:
-    store = getattr(request.app.state, "report_store", None)
-    if store is None:
-        raise HTTPException(status_code=503, detail="Report storage is unavailable")
-    return cast(ReportArtifactStore, store)
+    return runtime(request).reports
 
 
 def _renderer(request: Request) -> ReportPdfRenderer | None:

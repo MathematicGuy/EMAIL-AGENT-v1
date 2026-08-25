@@ -1,8 +1,9 @@
 """Report artifact endpoints over the in-process ASGI transport.
 
-The store is injected onto ``app.state`` rather than letting the routes find the
-folder, which is the seam the whole candidate exists to create: these cases never
-touch the repository's tracked ``data/reports``.
+The runtime is injected onto ``app.state`` (the ASGI transport never runs
+``lifespan``) with a store pointing at a throwaway folder, which is the seam the
+whole candidate exists to create: these cases never touch the repository's
+tracked ``data/reports``.
 """
 
 from pathlib import Path
@@ -11,15 +12,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cowork_agent.app import create_app
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 
 
 @pytest.fixture
 def reports(tmp_path: Path):
-    """An app whose report store points at a throwaway folder."""
+    """An app whose composed runtime points at a throwaway report folder."""
     app = create_app()
     root = tmp_path / "reports"
-    app.state.report_store = FileSystemReportArtifactStore(root)
+    app.state.runtime = CoworkRuntime(reports=FileSystemReportArtifactStore(root))
+    app.state.report_store = app.state.runtime.reports
     return app, root
 
 

@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.config import (
     ChatMemorySettings,
     EmailRagQualitySettings,
@@ -322,7 +323,12 @@ def create_app() -> FastAPI:
             # this store, so the filename rule cannot diverge between them.
             # Composed before any credentialed settings are read: reports need
             # no provider, so a missing Gmail key must not take them offline.
-            app.state.report_store = FileSystemReportArtifactStore(REPORTS_DIR)
+            # The store is the first field of the typed runtime (ADR-013);
+            # ``report_store`` stays as a thin forward until later slices move
+            # the remaining consumers behind ``runtime(request)``.
+            report_store = FileSystemReportArtifactStore(REPORTS_DIR)
+            app.state.runtime = CoworkRuntime(reports=report_store)
+            app.state.report_store = app.state.runtime.reports
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
             outlook_settings: OutlookSettings | None = None

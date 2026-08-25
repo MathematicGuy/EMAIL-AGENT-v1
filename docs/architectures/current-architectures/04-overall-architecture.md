@@ -13,7 +13,7 @@
 
 | Category | Implemented Component | Runtime Responsibility | Authoritative Code Location |
 |---|---|---|---|
-| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, and API route mounts. | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) |
+| **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, OAuth 2.0 lifecycle, security principal resolution, and API route mounts. Composed dependencies are migrating from untyped `app.state` attributes to a typed `CoworkRuntime` value ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md), in progress). | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py) |
 | **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
 | **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes`), and Semantic memory scopes. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
 | **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
