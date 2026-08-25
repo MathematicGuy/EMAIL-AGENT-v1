@@ -25,7 +25,7 @@ import type {
   ChatGenerationStatus,
   ChatMessage,
 } from '../types';
-import { formatSecondsVi, spanMilliseconds } from './reasoningDuration';
+import { formatSecondsVi, formatShortSecondsVi, spanMilliseconds } from './reasoningDuration';
 
 export interface ExecutionTraceDrawerProps {
   trace?: ChatExecutionTrace;
@@ -114,8 +114,18 @@ export function ExecutionTraceDrawer({
       : ragEvidence.length > 0
         ? ragEvidence.length
         : filenames.length;
+  const understandingMs = spanMilliseconds(understandingActivity?.startedAt, understandingActivity?.completedAt);
+  const searchMs = spanMilliseconds(searchActivity?.startedAt, searchActivity?.completedAt);
+  const contextMs = spanMilliseconds(contextActivity?.startedAt, contextActivity?.completedAt);
+  const retrievalMs = searchMs ?? contextMs;
   const reasoningMs = spanMilliseconds(modelActivity?.startedAt, modelActivity?.completedAt);
   const isMemoryDegraded = contextActivity?.outcome === 'degraded';
+
+  const totalExecutionMs = useMemo(() => {
+    const first = activities?.find((a) => a.startedAt)?.startedAt;
+    const last = activities?.findLast((a) => a.completedAt)?.completedAt;
+    return spanMilliseconds(first, last);
+  }, [activities]);
 
   const handleCopyReasoning = () => {
     if (!trace?.reasoning) return;
@@ -210,6 +220,9 @@ export function ExecutionTraceDrawer({
               <span className={trace.mode === 'fast' ? 'text-amber-400/90' : 'text-emerald-400/90'}>
                 {trace.mode === 'fast' ? 'Nhanh' : 'Suy luận'}
               </span>
+              {totalExecutionMs !== null && (
+                <span className="text-zinc-500"> · Tổng {formatSecondsVi(totalExecutionMs)}s</span>
+              )}
             </p>
           ) : isGenerating ? (
             <p className="mt-1 text-xs text-[#e8a78f] animate-pulse">Đang thu thập thông tin xử lý...</p>
@@ -271,8 +284,15 @@ export function ExecutionTraceDrawer({
               <li className="relative flex gap-3">
                 <StatusNode status={stepStatus(understandingActivity, trace)} />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <p className="text-sm font-medium text-zinc-200">1. Hiểu yêu cầu</p>
-                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-zinc-200">1. Hiểu yêu cầu</p>
+                    {understandingMs !== null && (
+                      <span className="font-mono text-[11px] text-zinc-400 bg-[#181715] border border-[#38342e] px-1.5 py-0.5 rounded">
+                        {formatShortSecondsVi(understandingMs)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                     <span>Định tuyến:</span>
                     <span
                       className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
@@ -283,6 +303,9 @@ export function ExecutionTraceDrawer({
                     >
                       {isRagRoute ? 'RAG · Truy xuất tài liệu' : 'Direct · Hội thoại trực tiếp'}
                     </span>
+                    {understandingMs !== null && (
+                      <span className="text-zinc-500">· {formatSecondsVi(understandingMs)} giây</span>
+                    )}
                   </div>
                 </div>
               </li>
@@ -291,12 +314,22 @@ export function ExecutionTraceDrawer({
               <li className="relative flex gap-3">
                 <StatusNode status={stepStatus(searchActivity, trace)} />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <p className="text-sm font-medium text-zinc-200">2. Tìm thông tin liên quan</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-zinc-200">2. Tìm thông tin liên quan</p>
+                    {retrievalMs !== null && isRagRoute && (
+                      <span className="font-mono text-[11px] text-zinc-400 bg-[#181715] border border-[#38342e] px-1.5 py-0.5 rounded">
+                        {formatShortSecondsVi(retrievalMs)}
+                      </span>
+                    )}
+                  </div>
                   {isRagRoute ? (
                     <>
                       <p className="text-xs text-zinc-400">
                         Đã tìm thấy{' '}
                         <span className="font-medium text-zinc-200">{chunkCount}</span> đoạn nội dung liên quan
+                        {retrievalMs !== null && (
+                          <span> · Truy vấn trong {formatSecondsVi(retrievalMs)} giây</span>
+                        )}
                       </p>
                       {filenames.length > 0 && (
                         <ul className="flex flex-wrap gap-1.5">
@@ -322,7 +355,14 @@ export function ExecutionTraceDrawer({
               <li className="relative flex gap-3">
                 <StatusNode status={stepStatus(modelActivity, trace)} />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <p className="text-sm font-medium text-zinc-200">3. Tổng hợp câu trả lời</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-zinc-200">3. Tổng hợp câu trả lời</p>
+                    {reasoningMs !== null && (
+                      <span className="font-mono text-[11px] text-zinc-400 bg-[#181715] border border-[#38342e] px-1.5 py-0.5 rounded">
+                        {formatShortSecondsVi(reasoningMs)}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap items-center gap-2 text-[11px]">
                     {trace && (
                       <span className="rounded border border-[#6d3e2e] bg-[#38231a] px-2 py-0.5 font-medium text-[#e8a78f]">
@@ -330,7 +370,9 @@ export function ExecutionTraceDrawer({
                       </span>
                     )}
                     {reasoningMs !== null && (
-                      <span className="text-zinc-400">Suy luận trong {formatSecondsVi(reasoningMs)} giây</span>
+                      <span className="text-zinc-400">
+                        {trace?.mode === 'reasoning' ? 'Suy luận trong' : 'Tổng hợp trong'} {formatSecondsVi(reasoningMs)} giây
+                      </span>
                     )}
                   </div>
 

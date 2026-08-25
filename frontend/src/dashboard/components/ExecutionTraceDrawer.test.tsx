@@ -74,18 +74,25 @@ describe('ExecutionTraceDrawer', () => {
 
   it('shows the RAG route with chunk count, document pills and reasoning duration', () => {
     const activities: ChatActivity[] = [
-      { code: 'understanding_request', status: 'completed' },
+      {
+        code: 'understanding_request',
+        status: 'completed',
+        startedAt: '2026-08-24T10:00:00.000Z',
+        completedAt: '2026-08-24T10:00:02.000Z',
+      },
       {
         code: 'searching_relevant_information',
         status: 'completed',
         outcome: 'success',
         detail: { kind: 'documents_found', current: 4 },
+        startedAt: '2026-08-24T10:00:02.000Z',
+        completedAt: '2026-08-24T10:00:03.200Z',
       },
       {
         code: 'preparing_response',
         status: 'completed',
-        startedAt: '2026-08-24T10:00:00.000Z',
-        completedAt: '2026-08-24T10:00:16.800Z',
+        startedAt: '2026-08-24T10:00:03.200Z',
+        completedAt: '2026-08-24T10:00:08.100Z',
       },
     ];
 
@@ -108,7 +115,11 @@ describe('ExecutionTraceDrawer', () => {
     expect(screen.getByText(/đoạn nội dung liên quan/).textContent).toContain('4');
     expect(screen.getByText('guidelines.md')).toBeTruthy();
     expect(screen.getByText('mistral-medium-3-5')).toBeTruthy();
-    expect(screen.getByText('Suy luận trong 16,8 giây')).toBeTruthy();
+    expect(screen.getByText('2s')).toBeTruthy();
+    expect(screen.getByText('1,2s')).toBeTruthy();
+    expect(screen.getByText('4,9s')).toBeTruthy();
+    expect(screen.getByText(/Truy vấn trong 1,2 giây/)).toBeTruthy();
+    expect(screen.getByText('Suy luận trong 4,9 giây')).toBeTruthy();
     expect(screen.getByText(/Step 1: Analyze problem constraints/)).toBeTruthy();
   });
 
