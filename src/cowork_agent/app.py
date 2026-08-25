@@ -7,6 +7,7 @@ import re
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -27,9 +28,13 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
-from cowork_agent.composition import CoworkRuntime, build_control_plane, build_mailbox
+from cowork_agent.composition import (
+    CoworkRuntime,
+    build_chat,
+    build_control_plane,
+    build_mailbox,
+)
 from cowork_agent.config import (
-    ChatMemorySettings,
     EmailRagQualitySettings,
     EvaluationSettings,
     GmailSettings,
@@ -47,28 +52,15 @@ from cowork_agent.domain.target_contracts import (
     RetrievalLimits,
     SemanticRetrievalRequest,
 )
-from cowork_agent.features.ai_chat.controller import (
-    ChatController,
-    UnavailableChatReply,
-)
+from cowork_agent.features.ai_chat.controller import ChatController
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
-from cowork_agent.features.ai_chat.intent.service import (
-    CanonicalReadyDocumentCatalog,
-    ChatRoutingService,
-)
+from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
-from cowork_agent.features.ai_chat.memory_observability import (
-    LoggingMemoryOperationSink,
-    MemoryOperationMetrics,
-)
 from cowork_agent.features.ai_chat.ports import (
     ChatHistoryPort,
     ChatReplyPort,
     DeclarativeMemoryPort,
     EpisodicMemoryPort,
-)
-from cowork_agent.features.ai_chat.session_buffer import (
-    InMemoryChatSessionBuffer,
 )
 from cowork_agent.features.batch_evaluation.bootstrap import build_evaluation_runtime
 from cowork_agent.features.email_action_plan.observability import (
@@ -258,17 +250,6 @@ def _chat_controller_factory(
     return factory
 
 
-def create_chat_session_buffer(
-    settings: ChatMemorySettings, *, durable: bool
-) -> InMemoryChatSessionBuffer:
-    """Keep bounded working turns local; durability belongs to Postgres metadata."""
-    del durable
-    return InMemoryChatSessionBuffer(
-        max_turns=settings.max_turns,
-        ttl_seconds=settings.ttl_seconds,
-    )
-
-
 def create_app() -> FastAPI:
     load_runtime_environment()
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
@@ -403,29 +384,45 @@ def create_app() -> FastAPI:
             app.state.private_storage_client = mailbox_runtime.private_storage_client
             app.state.private_storage = mailbox_runtime.private_storage
             app.state.document_embeddings_configured = False
-            chat_memory_settings = ChatMemorySettings.from_env()
-            app.state.chat_memory_settings = chat_memory_settings
-            app.state.chat_sessions = chat_session_registry
-            app.state.chat_session_buffer = create_chat_session_buffer(
-                chat_memory_settings, durable=app.state.pg_pool is not None
+            # Chat group (ADR-013, slice 02-4): the memory settings, session
+            # buffer, observability sink, ready-document catalog, and identity
+            # callables now compose as one typed value in
+            # ``composition.build_chat``. The placeholder ``chat_reply`` /
+            # ``chat_routing_service`` forwards below keep the lazy-upgrade
+            # contract: ``_chat_controller_factory`` re-reads ``app.state`` on
+            # every controller creation, and the LLM provider block further
+            # down upgrades those keys after this point. ``chat_intent_settings``
+            # has no placeholder today, so it gains none. The
+            # ``app.state.<key>`` forwards are deliberate temporary duplication;
+            # later slices delete them one consumer at a time.
+            chat_runtime = await build_chat(
+                pg_pool=control_plane.pg_pool,
+                project_repository=control_plane.project_repository,
+                chat_session_registry=chat_session_registry,
+                user_documents_settings=user_documents_settings,
+                principal_resolver=_resolve_chat_principal,
+                guest_session_issuer=_issue_chat_guest_session,
             )
-            app.state.memory_metrics = MemoryOperationMetrics()
-            app.state.memory_operation_sink = LoggingMemoryOperationSink(
-                metrics=app.state.memory_metrics
+            app.state.runtime = CoworkRuntime(
+                reports=report_store,
+                control_plane=control_plane,
+                mailbox=mailbox_runtime,
+                chat=chat_runtime,
             )
-            app.state.chat_reply = UnavailableChatReply()
-            app.state.chat_routing_service = None
-            app.state.user_documents_settings = user_documents_settings
-            app.state.ready_document_catalog = (
-                CanonicalReadyDocumentCatalog(app.state.project_repository)
-                if app.state.project_repository is not None
-                else None
-            )
+            app.state.chat_memory_settings = chat_runtime.chat_memory_settings
+            app.state.chat_sessions = chat_runtime.chat_sessions
+            app.state.chat_session_buffer = chat_runtime.chat_session_buffer
+            app.state.memory_metrics = chat_runtime.memory_metrics
+            app.state.memory_operation_sink = chat_runtime.memory_operation_sink
+            app.state.chat_reply = chat_runtime.chat_reply
+            app.state.chat_routing_service = chat_runtime.chat_routing_service
+            app.state.user_documents_settings = chat_runtime.user_documents_settings
+            app.state.ready_document_catalog = chat_runtime.ready_document_catalog
             app.state.project_document_store = None
             app.state.project_document_vectors = None
             app.state.project_document_index = None
-            app.state.chat_principal_resolver = _resolve_chat_principal
-            app.state.chat_guest_session_issuer = _issue_chat_guest_session
+            app.state.chat_principal_resolver = chat_runtime.chat_principal_resolver
+            app.state.chat_guest_session_issuer = chat_runtime.chat_guest_session_issuer
 
             app.state.chat_controller_factory = _chat_controller_factory(app)
             # Control-plane forwards (ADR-013, slice 02-2): same temporary
@@ -572,6 +569,30 @@ def create_app() -> FastAPI:
                 app.state.knowledge_documents = ()
                 app.state.llm_configuration_error = str(exc)
                 app.state.llm_provider_label = provider_label
+            # Chat group upgrade (ADR-013, slice 02-4): the LLM provider block
+            # above is deliberately left intact this slice — it mixes chat and
+            # email wiring, and its ``except ValueError`` degrade path must
+            # keep both halves behaving exactly as before (the email half moves
+            # in slice 02-5). Whatever the block published is final: on success
+            # the real ``chat_reply`` / ``chat_intent_settings`` /
+            # ``chat_routing_service``, on degrade the placeholders the chat
+            # group booted with (``chat_intent_settings`` was never set). Read
+            # those results back and republish the typed chat group so
+            # ``runtime(request)`` carries the same final values the legacy
+            # ``app.state`` keys already hold; the legacy forwards happened
+            # inside the block, so nothing else moves.
+            chat_runtime = replace(
+                chat_runtime,
+                chat_reply=app.state.chat_reply,
+                chat_intent_settings=getattr(app.state, "chat_intent_settings", None),
+                chat_routing_service=app.state.chat_routing_service,
+            )
+            app.state.runtime = CoworkRuntime(
+                reports=report_store,
+                control_plane=control_plane,
+                mailbox=mailbox_runtime,
+                chat=chat_runtime,
+            )
             evaluation_settings = getattr(app.state, "evaluation_settings", None)
             if evaluation_settings is not None:
                 # Internal evaluation control plane: durable storage first,

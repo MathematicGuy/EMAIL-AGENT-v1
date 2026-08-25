@@ -23,21 +23,32 @@ disappears only when its last reader moves behind ``runtime(request)``).
 Slice 02-3 adds ``MailboxRuntime``, the group that owns the provider mailbox
 construction: the shared cipher, the Gmail and Outlook connection/mailbox
 adapters with the Outlook sqlite-only gate, the routing adapter, and the
-private document storage. Later slices grow the remaining groups — ``chat``,
-``email_rag``, ``evaluation`` — without changing this interface.
+private document storage. Slice 02-4 adds ``ChatRuntime``, the group that owns
+the chat construction: the memory settings, session registry and buffer, the
+memory-observability sink, the ready-document catalog, the identity callables,
+and the reply/intent/routing adapter slots that the LLM provider block
+upgrades after boot. The legacy ``chat_controller_factory`` keeps its lazy
+``app.state`` reads through that upgrade (the deletion test on those forwards
+only passes once the factory moves behind ``runtime(request)`` in the cutover
+slice). Later slices grow the remaining groups — ``email_rag``,
+``evaluation`` — without changing this interface.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import httpx
 from starlette.requests import Request
+from starlette.responses import Response
 
 from cowork_agent.config import (
+    ChatIntentSettings,
+    ChatMemorySettings,
     GmailSettings,
     OutlookSettings,
     SessionSettings,
@@ -45,7 +56,20 @@ from cowork_agent.config import (
     UserDocumentsSettings,
 )
 from cowork_agent.domain.report_artifacts import ReportArtifactStore
-from cowork_agent.features.ai_chat.controller import ChatSessionRegistryPort
+from cowork_agent.features.ai_chat.controller import (
+    ChatSessionRegistryPort,
+    UnavailableChatReply,
+)
+from cowork_agent.features.ai_chat.intent.service import (
+    CanonicalReadyDocumentCatalog,
+    ChatRoutingService,
+)
+from cowork_agent.features.ai_chat.memory_observability import (
+    LoggingMemoryOperationSink,
+    MemoryOperationMetrics,
+)
+from cowork_agent.features.ai_chat.ports import ChatReplyPort
+from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 from cowork_agent.features.email_action_plan.ports import (
     MailboxConnectionRepository,
     MailboxPort,
@@ -56,7 +80,7 @@ from cowork_agent.features.email_action_plan.workflow import (
     CreateDigestRun,
     GetDigestResult,
 )
-from cowork_agent.identity import PrincipalRepository
+from cowork_agent.identity import PrincipalRepository, VerifiedPrincipal
 from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
 from cowork_agent.integrations.gmail.provider import (
     GmailConnectionService,
@@ -180,23 +204,68 @@ class MailboxRuntime:
     private_storage: SupabasePrivateStorage | LocalPrivateStorage | None
 
 
+def create_chat_session_buffer(
+    settings: ChatMemorySettings, *, durable: bool
+) -> InMemoryChatSessionBuffer:
+    """Keep bounded working turns local; durability belongs to Postgres metadata."""
+    del durable
+    return InMemoryChatSessionBuffer(
+        max_turns=settings.max_turns,
+        ttl_seconds=settings.ttl_seconds,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChatRuntime:
+    """The chat group: memory settings, session buffer, catalog, provider slots.
+
+    Every field is what ``lifespan`` used to construct inline and publish as an
+    untyped ``app.state`` key. ``chat_reply`` boots as the
+    ``UnavailableChatReply`` placeholder and ``chat_intent_settings`` /
+    ``chat_routing_service`` boot as ``None``: the LLM provider block upgrades
+    those three after this group is composed, and ``lifespan`` republishes the
+    group with the upgraded values. The controller factory still reads the
+    forwarded ``app.state`` keys lazily at controller-creation time, so it
+    always sees whichever value the upgrade sequence last published — the
+    frozen group never observes a mid-flight swap. ``ready_document_catalog``
+    is ``None`` only when there is no project repository; the principal
+    resolver and guest session issuer arrive as callables because they are
+    bound to the HTTP adapter surface in ``app.py`` and crossing that seam the
+    other way would invert the dependency direction.
+    """
+
+    chat_memory_settings: ChatMemorySettings
+    chat_sessions: ChatSessionRegistryPort
+    chat_session_buffer: InMemoryChatSessionBuffer
+    memory_metrics: MemoryOperationMetrics
+    memory_operation_sink: LoggingMemoryOperationSink
+    user_documents_settings: UserDocumentsSettings
+    ready_document_catalog: CanonicalReadyDocumentCatalog | None
+    chat_principal_resolver: Callable[[Request], Awaitable[VerifiedPrincipal]]
+    chat_guest_session_issuer: Callable[[Request, Response], Awaitable[None]]
+    chat_reply: ChatReplyPort
+    chat_intent_settings: ChatIntentSettings | None
+    chat_routing_service: ChatRoutingService | None
+
+
 @dataclass(frozen=True, slots=True)
 class CoworkRuntime:
     """The composed value of the application: dependencies that outlive requests.
 
     Frozen so no code path can swap a field mid-flight, and typed so a missing
     dependency is a mypy error at the composition root instead of a ``None``
-    found at request time. ``control_plane`` and ``mailbox`` are optional only
-    for injected test runtimes that exercise a single group (the ASGI
-    transport never runs ``lifespan``); a boot through ``lifespan`` always
-    composes both. Later slices add the remaining groups (``chat``,
-    ``email_rag``, ``evaluation``); each migration moves *where* a consumer
+    found at request time. ``control_plane``, ``mailbox``, and ``chat`` are
+    optional only for injected test runtimes that exercise a single group (the
+    ASGI transport never runs ``lifespan``); a boot through ``lifespan``
+    always composes all three. Later slices add the remaining groups
+    (``email_rag``, ``evaluation``); each migration moves *where* a consumer
     reads from, never *what* is composed.
     """
 
     reports: ReportArtifactStore
     control_plane: ControlPlane | None = None
     mailbox: MailboxRuntime | None = None
+    chat: ChatRuntime | None = None
 
 
 def runtime(request: Request) -> CoworkRuntime:
@@ -478,11 +547,63 @@ async def build_mailbox(
     )
 
 
+async def build_chat(
+    *,
+    pg_pool: AsyncConnectionPool | None,
+    project_repository: PostgresProjectRepository | SQLiteProjectRepository | None,
+    chat_session_registry: ChatSessionRegistryPort,
+    user_documents_settings: UserDocumentsSettings,
+    principal_resolver: Callable[[Request], Awaitable[VerifiedPrincipal]],
+    guest_session_issuer: Callable[[Request, Response], Awaitable[None]],
+) -> ChatRuntime:
+    """Compose the chat group (ADR-013, slice 02-4).
+
+    The body is the construction that used to live inline in ``lifespan``,
+    moved verbatim: the memory settings, the session buffer whose ``durable``
+    flag derives from the control-plane pool, the memory-observability
+    metrics/sink pair, the ready-document catalog built from the project
+    repository, and the identity callables. Only *where* it happens changed.
+    The reply/intent/routing slots are published here as the placeholder
+    ``UnavailableChatReply`` and ``None`` because the real adapters arrive
+    only after the LLM provider block resolves; ``lifespan`` republishes the
+    group with those upgrades, preserving the placeholder-then-upgrade
+    sequence the lazily-reading controller factory depends on. The provider
+    dependencies arrive as explicit inputs because the chat group leans on
+    the control plane (pool, repositories) and the mailbox group
+    (``user_documents_settings``) without owning either.
+    """
+    chat_memory_settings = ChatMemorySettings.from_env()
+    memory_metrics = MemoryOperationMetrics()
+    return ChatRuntime(
+        chat_memory_settings=chat_memory_settings,
+        chat_sessions=chat_session_registry,
+        chat_session_buffer=create_chat_session_buffer(
+            chat_memory_settings, durable=pg_pool is not None
+        ),
+        memory_metrics=memory_metrics,
+        memory_operation_sink=LoggingMemoryOperationSink(metrics=memory_metrics),
+        user_documents_settings=user_documents_settings,
+        ready_document_catalog=(
+            CanonicalReadyDocumentCatalog(project_repository)
+            if project_repository is not None
+            else None
+        ),
+        chat_principal_resolver=principal_resolver,
+        chat_guest_session_issuer=guest_session_issuer,
+        chat_reply=UnavailableChatReply(),
+        chat_intent_settings=None,
+        chat_routing_service=None,
+    )
+
+
 __all__ = [
+    "ChatRuntime",
     "ControlPlane",
     "CoworkRuntime",
     "MailboxRuntime",
+    "build_chat",
     "build_control_plane",
     "build_mailbox",
+    "create_chat_session_buffer",
     "runtime",
 ]
