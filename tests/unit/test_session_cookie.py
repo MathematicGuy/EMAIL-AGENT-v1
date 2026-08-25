@@ -6,11 +6,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
 from starlette.requests import Request
 
-from cowork_agent.app import (
-    _authenticated_principal,
-    _connection_principal,
-    _issue_chat_guest_session,
-    _set_session_cookie,
+from cowork_agent.api.dependencies import (
+    authenticated_principal,
+    connection_principal,
+    issue_chat_guest_session,
+    set_session_cookie,
 )
 from cowork_agent.composition import CoworkRuntime
 from cowork_agent.config import SessionSettings
@@ -22,7 +22,7 @@ def test_session_cookie_is_httponly_secure_lax_and_never_added_to_redirect_url()
     response = RedirectResponse("https://app.example.test/dashboard")
     settings = SessionSettings(3600, "cowork_session", True)
 
-    _set_session_cookie(response, settings, "opaque-token")
+    set_session_cookie(response, settings, "opaque-token")
 
     cookie = response.headers["set-cookie"]
     assert "cowork_session=opaque-token" in cookie
@@ -50,7 +50,7 @@ def test_postgres_runtime_rejects_a_request_without_an_opaque_session_cookie() -
     request = Request({"type": "http", "app": app, "headers": [], "path": "/"})
 
     try:
-        asyncio.run(_authenticated_principal(request))
+        asyncio.run(authenticated_principal(request))
     except HTTPException as exc:
         assert exc.status_code == 401
     else:
@@ -86,7 +86,7 @@ def test_postgres_runtime_never_falls_back_to_mailbox_identity_without_a_cookie(
     )
 
     try:
-        asyncio.run(_connection_principal(request, connection))
+        asyncio.run(connection_principal(request, connection))
     except HTTPException as exc:
         assert exc.status_code == 401
     else:
@@ -125,6 +125,6 @@ def test_guest_bootstrap_preserves_an_existing_opaque_session() -> None:
     })
     response = Response(status_code=204)
 
-    asyncio.run(_issue_chat_guest_session(request, response))
+    asyncio.run(issue_chat_guest_session(request, response))
 
     assert "set-cookie" not in response.headers

@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.composition import (
-    ControlPlane,
     CoworkRuntime,
     build_chat,
     build_control_plane,
@@ -41,12 +40,11 @@ from cowork_agent.config import (
     EvaluationSettings,
     GmailSettings,
     OutlookSettings,
-    SessionSettings,
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
 )
-from cowork_agent.domain import DigestRun, MailboxConnection
+from cowork_agent.domain import DigestRun
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
 from cowork_agent.features.ai_chat.controller import ChatController
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
@@ -57,12 +55,8 @@ from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.features.email_action_plan.workflow import DigestWorker
 from cowork_agent.identity import (
-    ConnectionNotOwnedError,
     VerifiedPrincipal,
-    create_guest_session,
-    ensure_principal_owns_connection,
     principal_for_connection,
-    principal_from_opaque_session,
 )
 from cowork_agent.integrations.gmail.provider import GmailConnectionService
 from cowork_agent.integrations.llm.provider_factory import (
@@ -89,6 +83,17 @@ from cowork_agent.runtime import (
 )
 
 from .api.chat import create_chat_router
+from .api.dependencies import (
+    authenticated_chat_principal,
+    authenticated_principal,
+    connection_principal,
+    control_plane_required,
+    issue_chat_guest_session,
+    owned_connection,
+    require_owned_connection,
+    session_settings,
+    set_session_cookie,
+)
 from .api.evaluation_jobs import create_evaluation_router
 from .api.handlers import _jsonable
 from .api.knowledge import create_knowledge_router
@@ -113,7 +118,7 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
     if control_plane is None:
         raise RuntimeError("the control-plane group is not composed")
     if control_plane.chat_opaque_session_repository is not None:
-        principal = await _authenticated_chat_principal(request)
+        principal = await authenticated_chat_principal(request)
         assert principal is not None
         return principal
 
@@ -316,7 +321,7 @@ def create_app() -> FastAPI:
                 chat_session_registry=chat_session_registry,
                 user_documents_settings=user_documents_settings,
                 principal_resolver=_resolve_chat_principal,
-                guest_session_issuer=_issue_chat_guest_session,
+                guest_session_issuer=issue_chat_guest_session,
             )
 
             # Email-RAG group (ADR-013, slice 02-5): the project-document
@@ -540,9 +545,9 @@ def create_app() -> FastAPI:
             token, _ = await session_repository.create(
                 principal,
                 now=datetime.now(UTC),
-                ttl_seconds=_session_settings(request).session_ttl_seconds,
+                ttl_seconds=session_settings(request).session_ttl_seconds,
             )
-            _set_session_cookie(response, _session_settings(request), token)
+            set_session_cookie(response, session_settings(request), token)
         return response
 
     @app.get("/v1/mail-todo/oauth/outlook/connect")
@@ -565,7 +570,7 @@ def create_app() -> FastAPI:
                 status_code=503,
                 detail=f"Outlook connection is unavailable: {reason}",
             )
-        owner = await _owned_connection(
+        owner = await owned_connection(
             request, owner_connection_id, "Gmail owner connection not found"
         )
         if owner.provider != "gmail" or owner.status != "active":
@@ -620,9 +625,9 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/connections")
     async def list_connections(request: Request) -> dict[str, Any]:
-        control_plane = _control_plane_required(request)
+        control_plane = control_plane_required(request)
         repository = control_plane.connection_repository
-        principal = await _authenticated_principal(
+        principal = await authenticated_principal(
             request, required=control_plane.session_repository is not None
         )
         connections = (
@@ -640,9 +645,9 @@ def create_app() -> FastAPI:
 
     @app.delete("/v1/mail-todo/connections/{connection_id}")
     async def disconnect_mailbox(connection_id: str, request: Request) -> dict[str, bool]:
-        connection = await _owned_connection(request, connection_id, "Mailbox connection not found")
-        principal = await _connection_principal(request, connection)
-        repository = _control_plane_required(request).connection_repository
+        connection = await owned_connection(request, connection_id, "Mailbox connection not found")
+        principal = await connection_principal(request, connection)
+        repository = control_plane_required(request).connection_repository
         deleted = await repository.delete(connection_id, principal.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Mailbox connection not found")
@@ -654,7 +659,7 @@ def create_app() -> FastAPI:
         request: Request,
         limit: int = Query(default=10, ge=1, le=20),
     ) -> dict[str, Any]:
-        connection = await _owned_connection(request, connection_id, "Mailbox connection not found")
+        connection = await owned_connection(request, connection_id, "Mailbox connection not found")
         try:
             mailbox = _mailbox(request)
             page = await mailbox.search_unread(connection_id, DEFAULT_QUERY, limit)
@@ -709,11 +714,11 @@ def create_app() -> FastAPI:
         mailbox_connection_id: str = Query(alias="mailboxConnectionId", min_length=1),
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
-        connection = await _owned_connection(
+        connection = await owned_connection(
             request, mailbox_connection_id, "Mailbox connection not found"
         )
-        principal = await _connection_principal(request, connection)
-        repository = _control_plane_required(request).run_repository
+        principal = await connection_principal(request, connection)
+        repository = control_plane_required(request).run_repository
         runs = await repository.list_recent(
             user_id=principal.user_id,
             mailbox_connection_id=mailbox_connection_id,
@@ -728,10 +733,10 @@ def create_app() -> FastAPI:
         background_tasks: BackgroundTasks,
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
     ) -> dict[str, str]:
-        connection = await _owned_connection(
+        connection = await owned_connection(
             request, payload.mailbox_connection_id, "Mailbox connection not found"
         )
-        principal = await _connection_principal(request, connection)
+        principal = await connection_principal(request, connection)
         worker = _digest_worker(request)
         if worker is None:
             email_rag = runtime(request).email_rag
@@ -745,7 +750,7 @@ def create_app() -> FastAPI:
                 status_code=503,
                 detail=f"{label} is not configured: {error}",
             )
-        creator = _control_plane_required(request).create_run
+        creator = control_plane_required(request).create_run
         run = await creator.execute(
             user_id=principal.user_id,
             mailbox_connection_id=payload.mailbox_connection_id,
@@ -767,7 +772,7 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}")
     async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
-        repository = _control_plane_required(request).run_repository
+        repository = control_plane_required(request).run_repository
         run = await repository.get(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Digest run not found")
@@ -789,7 +794,7 @@ def create_app() -> FastAPI:
             ),
         }
         if _is_development():
-            results = _control_plane_required(request).result_repository
+            results = control_plane_required(request).result_repository
             processed = await results.list_processed_emails(run_id)
             response["processedEmails"] = [
                 {
@@ -805,7 +810,7 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/mail-todo/runs/{run_id}/result")
     async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
-        control_plane = _control_plane_required(request)
+        control_plane = control_plane_required(request)
         repository = control_plane.run_repository
         run = await repository.get(run_id)
         if run is None:
@@ -823,7 +828,7 @@ def create_app() -> FastAPI:
     async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
         """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
         information, and confidences that the legacy result shape drops."""
-        control_plane = _control_plane_required(request)
+        control_plane = control_plane_required(request)
         repository = control_plane.run_repository
         run = await repository.get(run_id)
         if run is None:
@@ -840,14 +845,6 @@ def create_app() -> FastAPI:
     return app
 
 
-def _control_plane_required(request: Request) -> ControlPlane:
-    """The control-plane group, or the loud failure its old direct reads had."""
-    control_plane = runtime(request).control_plane
-    if control_plane is None:
-        raise RuntimeError("the control-plane group is not composed")
-    return control_plane
-
-
 def _connection_service(request: Request) -> GmailConnectionService:
     mailbox_group = runtime(request).mailbox
     if mailbox_group is None:
@@ -860,127 +857,13 @@ def _outlook_connection_service(request: Request) -> OutlookConnectionService | 
     return mailbox_group.outlook_connections if mailbox_group is not None else None
 
 
-async def _authenticated_principal(
-    request: Request, *, required: bool = True
-) -> VerifiedPrincipal | None:
-    """Resolve the opaque session only in the PostgreSQL multi-user runtime."""
-    control_plane = runtime(request).control_plane
-    sessions = control_plane.session_repository if control_plane is not None else None
-    if sessions is None:
-        return None
-    principal = await principal_from_opaque_session(
-        request.cookies.get(_session_settings(request).cookie_name), sessions
-    )
-    if principal is None and required:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return principal
-
-
-async def _authenticated_chat_principal(
-    request: Request, *, required: bool = True
-) -> VerifiedPrincipal | None:
-    """Resolve a browser's opaque chat session in either persistence mode."""
-    control_plane = runtime(request).control_plane
-    sessions = (
-        (control_plane.chat_opaque_session_repository or control_plane.session_repository)
-        if control_plane is not None
-        else None
-    )
-    if sessions is None:
-        return None
-    principal = await principal_from_opaque_session(
-        request.cookies.get(_session_settings(request).cookie_name), sessions
-    )
-    if principal is None and required:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return principal
-
-
-async def _issue_chat_guest_session(request: Request, response: Response) -> None:
-    """Bootstrap an isolated guest workspace without replacing an existing session."""
-    existing = await _authenticated_chat_principal(request, required=False)
-    if existing is not None:
-        return
-
-    control_plane = runtime(request).control_plane
-    identities = (
-        (control_plane.chat_identity_repository or control_plane.identity_repository)
-        if control_plane is not None
-        else None
-    )
-    sessions = (
-        (control_plane.chat_opaque_session_repository or control_plane.session_repository)
-        if control_plane is not None
-        else None
-    )
-    if identities is None or sessions is None:
-        raise HTTPException(status_code=503, detail="Guest chat is unavailable")
-
-    settings = _session_settings(request)
-    _, token = await create_guest_session(
-        identities,
-        sessions,
-        ttl_seconds=settings.session_ttl_seconds,
-    )
-    _set_session_cookie(response, settings, token)
-
-
-async def _connection_principal(
-    request: Request, connection: MailboxConnection
-) -> VerifiedPrincipal:
-    """Use the opaque session in Postgres mode and legacy identity locally."""
-    control_plane = runtime(request).control_plane
-    if control_plane is not None and control_plane.session_repository is not None:
-        principal = await _authenticated_principal(request)
-        assert principal is not None
-        return principal
-    if connection.provider == "outlook":
-        # Outlook is an auxiliary mailbox whose verified address may differ from
-        # the Gmail identity that owns it. The persisted user_id is that binding.
-        return VerifiedPrincipal(user_id=connection.user_id)
-    return principal_for_connection(connection)
-
-
-async def _owned_connection(request: Request, connection_id: str, detail: str) -> MailboxConnection:
-    repository = _control_plane_required(request).connection_repository
-    connection = await repository.get(connection_id)
-    if connection is None:
-        raise HTTPException(status_code=404, detail=detail)
-    principal = await _connection_principal(request, connection)
-    _require_owned_connection(principal, connection, detail=detail)
-    return connection
-
-
-def _set_session_cookie(response: Response, settings: SessionSettings, token: str) -> None:
-    """Set the one HttpOnly cookie that carries the opaque session token."""
-    response.set_cookie(
-        key=settings.cookie_name,
-        value=token,
-        max_age=settings.session_ttl_seconds,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="lax",
-        path="/",
-    )
-
-
-def _require_owned_connection(
-    principal: VerifiedPrincipal, connection: MailboxConnection, *, detail: str
-) -> None:
-    """Translate the centralized ownership guard into the HTTP 404 contract."""
-    try:
-        ensure_principal_owns_connection(principal, connection)
-    except ConnectionNotOwnedError as exc:
-        raise HTTPException(status_code=404, detail=detail) from exc
-
-
 async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
     """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
-    connection = await _owned_connection(request, run.mailbox_connection_id, detail)
-    principal = await _connection_principal(request, connection)
+    connection = await owned_connection(request, run.mailbox_connection_id, detail)
+    principal = await connection_principal(request, connection)
     if principal.user_id != run.user_id:
         raise HTTPException(status_code=404, detail=detail)
-    _require_owned_connection(principal, connection, detail=detail)
+    require_owned_connection(principal, connection, detail=detail)
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
@@ -996,10 +879,6 @@ def _gmail_settings(request: Request) -> GmailSettings:
 def _outlook_settings(request: Request) -> OutlookSettings | None:
     mailbox_group = runtime(request).mailbox
     return mailbox_group.outlook_settings if mailbox_group is not None else None
-
-
-def _session_settings(request: Request) -> SessionSettings:
-    return _control_plane_required(request).session_settings
 
 
 def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
