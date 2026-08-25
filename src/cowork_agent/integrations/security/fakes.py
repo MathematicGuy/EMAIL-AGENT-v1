@@ -1,7 +1,9 @@
 """Deterministic test fakes for security ports."""
 
+import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 
 from cowork_agent.domain.target_contracts import (
     AttachmentSafetyReport,
@@ -137,3 +139,86 @@ class FakeEmailSecurityScanner:
         self, envelopes: Sequence[EphemeralEmailEnvelope]
     ) -> Sequence[SecurityScanResult]:
         return [await self.scan_envelope(envelope) for envelope in envelopes]
+
+
+class FakeClamAVScanner:
+    """Deterministic test fake for ClamAVScanner."""
+
+    def __init__(
+        self,
+        *,
+        is_online: bool = True,
+        version: str = "ClamAV 1.4.0/FakeTestSignatures",
+        signatures: dict[bytes, str] | None = None,
+    ) -> None:
+        self.is_online = is_online
+        self.version = version
+        self.signatures = signatures or {
+            b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*": (
+                "Win.Test.EICAR_HDB-1"
+            ),
+        }
+        self.scanned_contents: list[bytes] = []
+
+    async def ping(self) -> bool:
+        return self.is_online
+
+    async def get_version(self) -> str | None:
+        return self.version if self.is_online else None
+
+    async def scan_bytes(
+        self, content: bytes, filename: str = ""
+    ) -> AttachmentSafetyReport:
+        self.scanned_contents.append(content)
+        sha256_hash = hashlib.sha256(content).hexdigest()
+
+        if not self.is_online:
+            return AttachmentSafetyReport(
+                filename=filename,
+                sha256=sha256_hash,
+                detected_mime_type="application/octet-stream",
+                threat_level=ThreatLevel.CLEAN,
+                threat_category=ThreatCategory.NONE,
+                is_safe_to_extract=True,
+                reason="ClamAV daemon offline (fake)",
+            )
+
+        for pattern, virus_name in self.signatures.items():
+            if pattern in content:
+                return AttachmentSafetyReport(
+                    filename=filename,
+                    sha256=sha256_hash,
+                    detected_mime_type="application/octet-stream",
+                    threat_level=ThreatLevel.MALICIOUS,
+                    threat_category=ThreatCategory.MALWARE,
+                    is_safe_to_extract=False,
+                    reason=f"ClamAV detected malware signature: {virus_name}",
+                )
+
+        return AttachmentSafetyReport(
+            filename=filename,
+            sha256=sha256_hash,
+            detected_mime_type="application/octet-stream",
+            threat_level=ThreatLevel.CLEAN,
+            threat_category=ThreatCategory.NONE,
+            is_safe_to_extract=True,
+            reason="ClamAV: OK (no virus signatures found)",
+        )
+
+    async def scan_file(
+        self, file_path: Path | str, original_filename: str | None = None
+    ) -> AttachmentSafetyReport:
+        path = Path(file_path)
+        if not path.exists():
+            return AttachmentSafetyReport(
+                filename=original_filename or path.name,
+                sha256="",
+                detected_mime_type="application/octet-stream",
+                threat_level=ThreatLevel.BLOCKED,
+                threat_category=ThreatCategory.NONE,
+                is_safe_to_extract=False,
+                reason=f"File not found on disk: {path}",
+            )
+        content = path.read_bytes()
+        return await self.scan_bytes(content, filename=original_filename or path.name)
+
