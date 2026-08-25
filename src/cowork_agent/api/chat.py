@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from langfuse import observe
 from pydantic import BaseModel, ConfigDict, Field
 
+from cowork_agent.composition import ChatRuntime, ControlPlane, runtime
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_ACTIVITIES,
     ChatActivity,
@@ -51,8 +52,6 @@ from cowork_agent.features.ai_chat.profile_policy import (
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
 
-PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
-GuestSessionIssuer = Callable[[Request, Response], Awaitable[None]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
 
 
@@ -210,16 +209,17 @@ class _ChatProfilePayload(BaseModel):
 
 
 def create_chat_router() -> APIRouter:
-    """Create the transport-only router; runtime dependencies live on app.state."""
+    """Create the transport-only router; runtime dependencies live on the composed runtime."""
 
     router = APIRouter(prefix="/v1/cowork/chat", tags=["chat"])
 
     @router.post("/guest-session", status_code=204, response_model=None)
     async def create_guest_session(request: Request, response: Response) -> None:
-        issuer = getattr(request.app.state, "chat_guest_session_issuer", None)
+        chat = runtime(request).chat
+        issuer = chat.chat_guest_session_issuer if chat is not None else None
         if issuer is None:
             raise HTTPException(status_code=503, detail="Guest chat is unavailable")
-        await cast(GuestSessionIssuer, issuer)(request, response)
+        await issuer(request, response)
 
     @router.post("/sessions", status_code=201)
     async def create_session(
@@ -227,7 +227,8 @@ def create_chat_router() -> APIRouter:
     ) -> dict[str, str]:
         principal = await _verified_principal(request)
         requested_project_id = payload.project_id if payload else None
-        project_repository = getattr(request.app.state, "project_repository", None)
+        control_plane = runtime(request).control_plane
+        project_repository = control_plane.project_repository if control_plane is not None else None
         if project_repository is None and requested_project_id is None:
             project_id = "default-project"
         elif project_repository is None:
@@ -288,20 +289,29 @@ def create_chat_router() -> APIRouter:
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
         if message.document_ids:
-            settings = getattr(request.app.state, "user_documents_settings", None)
+            # The document gate spans three groups: the settings and routing
+            # provider (chat) plus the vector plane (email-rag). An uncomposed
+            # group degrades to the same 503 the old missing keys produced.
+            chat = runtime(request).chat
+            settings = chat.user_documents_settings if chat is not None else None
             if settings is None or not bool(getattr(settings, "enabled", False)):
                 raise HTTPException(status_code=503, detail="User documents are disabled")
-            if getattr(request.app.state, "project_document_vectors", None) is None:
+            email_rag = runtime(request).email_rag
+            if (
+                email_rag is None
+                or email_rag.project_document_vectors is None
+            ):
                 raise HTTPException(
                     status_code=503,
                     detail="Project document retrieval unavailable",
                 )
-            if getattr(request.app.state, "chat_routing_service", None) is None:
+            if chat is None or chat.chat_routing_service is None:
                 raise HTTPException(
                     status_code=503,
                     detail="Project document routing unavailable",
                 )
-            repository = getattr(request.app.state, "project_repository", None)
+            control_plane = runtime(request).control_plane
+            repository = control_plane.project_repository if control_plane is not None else None
             if repository is None:
                 raise HTTPException(status_code=404, detail="Document not found")
             for document_id in message.document_ids:
@@ -810,10 +820,8 @@ def _upsert_buffer_mail_turn(
 
 
 async def _verified_principal(request: Request) -> VerifiedPrincipal:
-    resolver = cast(
-        PrincipalResolver | None,
-        getattr(request.app.state, "chat_principal_resolver", None),
-    )
+    chat = runtime(request).chat
+    resolver = chat.chat_principal_resolver if chat is not None else None
     if resolver is None:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
     principal = await resolver(request)
@@ -911,22 +919,39 @@ def _user_namespace(principal: VerifiedPrincipal, memory_type: MemoryType) -> Me
     )
 
 
+def _chat_group(request: Request) -> ChatRuntime:
+    # Typed read through the runtime seam (ADR-013). The old direct attribute
+    # reads crashed on a missing key; an uncomposed group fails just as loudly.
+    chat = runtime(request).chat
+    if chat is None:
+        raise RuntimeError("the chat group is not composed")
+    return chat
+
+
+def _control_plane(request: Request) -> ControlPlane | None:
+    return runtime(request).control_plane
+
+
 def _buffer(request: Request) -> ChatSessionBufferPort:
-    return cast(ChatSessionBufferPort, request.app.state.chat_session_buffer)
+    return _chat_group(request).chat_session_buffer
 
 
 def _profile_repository(request: Request) -> DeclarativeMemoryPort:
-    repository = getattr(request.app.state, "chat_profile_repository", None)
+    control_plane = _control_plane(request)
+    repository = control_plane.chat_profile_repository if control_plane is not None else None
     if repository is None:
         raise HTTPException(status_code=503, detail="Chat memory store unavailable")
-    return cast(DeclarativeMemoryPort, repository)
+    return repository
 
 
 def _episodic_repository(request: Request) -> EpisodicMemoryPort:
-    repository = getattr(request.app.state, "chat_task_episode_repository", None)
+    control_plane = _control_plane(request)
+    repository = (
+        control_plane.chat_task_episode_repository if control_plane is not None else None
+    )
     if repository is None:
         raise HTTPException(status_code=503, detail="Chat memory store unavailable")
-    return cast(EpisodicMemoryPort, repository)
+    return repository  # type: ignore[return-value]
 
 
 async def _require_session(
@@ -938,6 +963,9 @@ async def _require_session(
 
 
 def _controllers(request: Request) -> dict[str, ChatController]:
+    # Request-time memoization cache. Deliberately NOT on the frozen runtime:
+    # a frozen dataclass cannot hold a mutable per-request cache (ADR-013),
+    # so this one write stays on ``app.state`` until a proper seam exists.
     controllers = getattr(request.app.state, "chat_controllers", None)
     if controllers is None:
         controllers = {}
@@ -946,10 +974,12 @@ def _controllers(request: Request) -> dict[str, ChatController]:
 
 
 def _sessions(request: Request) -> ChatSessionRegistryPort:
-    return cast(ChatSessionRegistryPort, request.app.state.chat_sessions)
+    return _chat_group(request).chat_sessions
 
 
 def _controller_factory(request: Request) -> ControllerFactory:
+    # Not a runtime-group field: the factory is the chat seam rewired in the
+    # next slice, so it still reads its forwarded ``app.state`` key.
     return cast(ControllerFactory, request.app.state.chat_controller_factory)
 
 
@@ -975,7 +1005,8 @@ def _session_response(
 
 
 def _history_repository(request: Request) -> ChatHistoryPort | None:
-    repository = getattr(request.app.state, "chat_history_repository", None)
+    control_plane = _control_plane(request)
+    repository = control_plane.chat_history_repository if control_plane is not None else None
     return cast(ChatHistoryPort | None, repository)
 
 

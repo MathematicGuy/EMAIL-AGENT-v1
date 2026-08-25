@@ -3,11 +3,13 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import httpx
 from fastapi import FastAPI, Request, Response
 
 from cowork_agent.api.chat import create_chat_router
+from cowork_agent.composition import ChatRuntime, CoworkRuntime
 from cowork_agent.domain.chat_contracts import (
     ChatMemoryScope,
     ChatMessageRequest,
@@ -232,14 +234,8 @@ def _app(
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(create_chat_router())
-    app.state.chat_sessions = InMemoryChatSessionRegistry(new_id=lambda: "session-1")
-    app.state.chat_controllers = {}
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
-    app.state.chat_session_buffer = buffer
-    app.state.chat_task_episode_repository = episodes
-    app.state.chat_profile_repository = profiles
     reply = FakeReply()
-    app.state.chat_test_reply = reply
 
     def controller_factory(scope: ChatMemoryScope) -> ChatController:
         return ChatController(
@@ -248,14 +244,45 @@ def _app(
             reply=reply,
         )
 
-    app.state.chat_controller_factory = controller_factory
+    resolver = None
     if principal is not None:
 
         async def resolve_principal(request: Request) -> VerifiedPrincipal:
             del request
             return principal
 
-        app.state.chat_principal_resolver = resolve_principal
+        resolver = resolve_principal
+
+    # The router reads through the typed runtime seam (ADR-013). The memo
+    # cache, the controller factory, and the test-only reply probe stay on
+    # ``app.state``: the cache is a request-time write the frozen runtime
+    # cannot hold, and the factory seam is rewired in a later slice.
+    app.state.chat_controllers = {}
+    app.state.chat_test_reply = reply
+    app.state.chat_controller_factory = controller_factory
+    app.state.runtime = CoworkRuntime(
+        reports=None,
+        control_plane=SimpleNamespace(
+            chat_task_episode_repository=episodes,
+            chat_profile_repository=profiles,
+            chat_history_repository=None,
+            project_repository=None,
+        ),
+        chat=ChatRuntime(
+            chat_memory_settings=None,
+            chat_sessions=InMemoryChatSessionRegistry(new_id=lambda: "session-1"),
+            chat_session_buffer=buffer,
+            memory_metrics=None,
+            memory_operation_sink=None,
+            user_documents_settings=None,
+            ready_document_catalog=None,
+            chat_principal_resolver=resolver,
+            chat_guest_session_issuer=None,
+            chat_reply=reply,
+            chat_intent_settings=None,
+            chat_routing_service=None,
+        ),
+    )
     return app
 
 
@@ -321,7 +348,12 @@ def test_guest_session_endpoint_sets_an_opaque_http_only_cookie() -> None:
                 samesite="lax",
             )
 
-        app.state.chat_guest_session_issuer = issue_guest_session
+        app.state.runtime = replace(
+            app.state.runtime,
+            chat=replace(
+                app.state.runtime.chat, chat_guest_session_issuer=issue_guest_session
+            ),
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="https://chat.test"
         ) as client:
@@ -349,7 +381,9 @@ def test_message_endpoint_rebuilds_a_controller_from_an_async_owned_session_scop
             factory_scopes.append(scope)
             return original_factory(scope)
 
-        app.state.chat_sessions = registry
+        app.state.runtime = replace(
+            app.state.runtime, chat=replace(app.state.runtime.chat, chat_sessions=registry)
+        )
         app.state.chat_controller_factory = factory
         del app.state.chat_controllers
         async with httpx.AsyncClient(
@@ -472,7 +506,12 @@ def test_message_endpoint_hides_a_session_owned_by_another_principal() -> None:
                 del request
                 return VerifiedPrincipal(tenant_id="tenant-1", user_id="other@example.com")
 
-            app.state.chat_principal_resolver = foreign_principal
+            app.state.runtime = replace(
+                app.state.runtime,
+                chat=replace(
+                    app.state.runtime.chat, chat_principal_resolver=foreign_principal
+                ),
+            )
             response = await client.post(
                 "/v1/cowork/chat/sessions/session-1/messages",
                 json={
@@ -638,7 +677,7 @@ def test_list_messages_omits_rag_evidence_content_unless_requested() -> None:
             preview="Short preview of the chunk.",
             content="FULL CHUNK BODY THAT MUST NOT SHIP ON THE LIST PATH.",
         )
-        app.state.chat_session_buffer.append(
+        app.state.runtime.chat.chat_session_buffer.append(
             MemoryNamespace(
                 scope=scope,
                 memory_type=MemoryType.SHORT_TERM,
@@ -949,7 +988,7 @@ def test_delete_session_removes_its_history_and_rejects_future_reads() -> None:
 def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> None:
     async def scenario() -> None:
         app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="user@example.com"))
-        app.state.chat_history_repository = HistoryStore()
+        app.state.runtime.control_plane.chat_history_repository = HistoryStore()
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
         ) as client:
@@ -968,7 +1007,7 @@ def test_history_endpoint_reads_durable_turns_and_exposes_the_saved_title() -> N
 def test_history_endpoint_hides_durable_turns_from_a_non_owner() -> None:
     async def scenario() -> None:
         app = _app(VerifiedPrincipal(tenant_id="tenant-1", user_id="other@example.com"))
-        app.state.chat_history_repository = HistoryStore()
+        app.state.runtime.control_plane.chat_history_repository = HistoryStore()
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://chat.test"
         ) as client:
