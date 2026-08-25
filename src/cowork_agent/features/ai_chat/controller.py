@@ -728,7 +728,10 @@ class ChatController:
                 if project_documents.degraded:
                     response_mode = ChatResponseMode.EVIDENCE_UNAVAILABLE
                 elif not project_documents.evidence:
-                    response_mode = ChatResponseMode.INSUFFICIENT_EVIDENCE
+                    if request.document_ids:
+                        response_mode = ChatResponseMode.INSUFFICIENT_EVIDENCE
+                    else:
+                        response_mode = ChatResponseMode.CLARIFY
             context = await self._memory.read_context(context_request)
             if searches_information:
                 rag_evidence, retrieval_status = _rag_evidence(

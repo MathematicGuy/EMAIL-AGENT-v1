@@ -740,3 +740,51 @@ def test_a_provider_that_raises_is_still_a_provider_outage() -> None:
     with pytest.raises(ChatReplyUnavailable) as caught:
         asyncio.run(_collect(reply, request, context))
     assert not isinstance(caught.value, ChatResponseInvalid)
+
+
+def test_project_evidence_allows_empty_citation_ids_when_evidence_is_not_used() -> None:
+    from cowork_agent.domain.project_documents import (
+        ProjectDocumentEvidence,
+        ProjectDocumentResponse,
+    )
+
+    request = ChatMessageRequest("session-1", "How to optimize team workflows?", "idem-empty-cite")
+    evidence = ProjectDocumentEvidence(
+        citation_id="cite-1",
+        chunk_id="chunk-1",
+        document_id="doc-1",
+        project_id="proj-1",
+        title="Leave Policy",
+        text="Annual leave guidelines.",
+        page_start=1,
+        page_end=1,
+        section="Section 1",
+        score=0.3,
+    )
+    project_documents = ProjectDocumentResponse((evidence,), degraded=False)
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+        project_documents=project_documents,
+    )
+
+    async def complete_no_citations(payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        return {
+            "assistant_text": "The documents do not contain team workflow optimization guidelines.",
+            "conversation_title": "Workflow Optimization",
+            "citation_ids": [],
+            "task_proposal": None,
+        }
+
+    reply = MistralChatReply(model="mistral-small-2603", complete=complete_no_citations)
+    chunks = asyncio.run(_collect(reply, request, context))
+    assert chunks[0].text == "The documents do not contain team workflow optimization guidelines."
+    assert chunks[0].citation_ids == ()
