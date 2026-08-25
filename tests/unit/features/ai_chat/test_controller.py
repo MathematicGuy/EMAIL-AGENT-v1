@@ -230,6 +230,28 @@ class CompletedHistory(HistoryWriter):
         )
 
 
+class FailingCompletionHistory(HistoryWriter):
+    """Fails only the terminal write - the one that stamps ``completed_at``.
+
+    A task turn writes twice: once to store the assistant message while the
+    episode is still being settled, then once to close the turn. Only the
+    second carries ``completed_at``, so this isolates the completion failure
+    that the task path reaches after its proposal card is already out.
+    """
+
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        if turn.completed_at is not None:
+            raise RuntimeError("database unavailable")
+        return turn
+
+
 class FailingUpdateHistory(HistoryWriter):
     async def update_turn(
         self,
@@ -1172,6 +1194,53 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
     assert approved_episode.validation_status is ValidationStatus.USER_APPROVED
     assert approved_episode.retrieval_eligible is True
 
+
+
+def test_a_task_turn_reports_the_same_failure_as_a_normal_turn_when_completion_fails() -> None:
+    """Both completion paths share one durable write, so they must abort alike."""
+
+    task_proposal = ChatTaskProposal(
+        task_title="Nộp hồ sơ cấp lại CCCD",
+        minimal_request_paraphrase="Các bước nộp hồ sơ xin cấp lại CCCD",
+        action_plan=("Bước 1: Đăng nhập VNeID",),
+        rag_citations=(),
+        missing_information=(),
+        model_id="gemini-3.5-flash-lite",
+        prompt_version="chat-v2",
+        confidence=0.95,
+    )
+    controller, buffer = _controller(
+        reply=FakeReply((ChatReplyChunk("Kế hoạch.", task_proposal=task_proposal),)),
+        profile=ProfileReader(_profile()),
+        episodes=EpisodeWriter(),
+        history=FailingCompletionHistory(),
+    )
+
+    events = asyncio.run(
+        _collect(
+            controller,
+            _request(user_message="Tạo task các bước nộp hồ sơ xin cấp lại CCCD"),
+        )
+    )
+
+    # The proposal card still reaches the client - the episode write succeeded -
+    # and only then does the failed turn write end the stream.
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
+        ChatEventType.ERROR,
+    ]
+    assert events[-1].code == "chat_history_unavailable"
+    assert buffer.read(
+        MemoryNamespace(
+            scope=_scope(),
+            memory_type=MemoryType.SHORT_TERM,
+            record_id="session-1",
+            source_id=None,
+        )
+    ) == ()
 
 
 def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
