@@ -42,6 +42,11 @@ _KNOWN_MALICIOUS_HASHES: Final[dict[str, tuple[str, str]]] = {
         "Trojan:Win32/Emotet",
         "Emotet banking trojan payload",
     ),
+    # Ransomware Simulation Test Payload
+    "ed418e7be7d5b9595cb85f1dbdf5caf965f01fd1d7f2aa891c90c1051ab6ff85": (
+        "Trojan:Win32/RansomTest",
+        "Simulated ransomware payload signature",
+    ),
 }
 
 VIRUSTOTAL_FILES_URL: Final[str] = "https://www.virustotal.com/api/v3/files/{sha256}"

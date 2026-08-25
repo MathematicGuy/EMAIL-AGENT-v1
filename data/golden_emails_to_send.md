@@ -820,3 +820,156 @@ Ban Quản trị Nhân sự
 * **Mức độ đe dọa:** `BLOCKED` / `PARSER_EXPLOIT`
 * **Xử lý cách ly:** `quarantined = True`
 * **Tiêu chí đạt:** Chặn scheme không an toàn `javascript:`, cô lập email và ngăn chặn XSS.
+---
+
+### 🛡️ EMAIL 26: [Bảo Mật] Tấn công Zip Bomb / Decompression Bomb
+
+#### 📌 Subject (Giữ nguyên để gửi):
+```text
+Tài liệu lưu trữ tổng kết dự án năm 2026 (Nén dữ liệu)
+```
+
+#### 📄 Nội dung Email (Giữ nguyên để gửi):
+```text
+Kính gửi Ban Giám đốc và Quản lý dự án,
+
+Hệ thống lưu trữ dữ liệu đã nén toàn bộ tài liệu dự án năm 2026 và đính kèm trong tệp zip bên dưới.
+
+Nhờ anh/chị tải xuống và kiểm tra giải nén để nghiệm thu dữ liệu.
+
+Trân trọng,
+Backup & Archive Team
+```
+
+#### 📎 Tệp đính kèm thử nghiệm:
+* Đường dẫn: [`data/security_test_attachments/tailieu_luutru_2026.zip`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/tailieu_luutru_2026.zip)
+
+#### 🎯 TARGET ĐẦU RA HỢP LÝ CỦA HỆ THỐNG:
+* **Mức độ đe dọa:** `BLOCKED` / `ZIP_BOMB`
+* **Xử lý cách ly:** `quarantined = True`
+* **Tiêu chí đạt:** Magic Bytes Inspector và Zip Bomb Guard phát hiện tỷ lệ nén bất thường (> 100:1) vượt ngưỡng an toàn, từ chối giải nén và cách ly tệp để bảo vệ bộ nhớ máy chủ.
+
+---
+
+### 🛡️ EMAIL 27: [Bảo Mật] Tệp thực thi PE giả mạo đuôi PDF (Masquerading Binary)
+
+#### 📌 Subject (Giữ nguyên để gửi):
+```text
+Báo cáo tài chính soát xét Quý 2/2026 - Kiểm toán độc lập
+```
+
+#### 📄 Nội dung Email (Giữ nguyên để gửi):
+```text
+Kính gửi Ban Kiểm soát và Kế toán trưởng,
+
+Đoàn kiểm toán xin gửi bản báo cáo tài chính soát xét bán niên Quý 2/2026 định dạng PDF trong tệp đính kèm bên dưới.
+
+Đề nghị Quý công ty mở file kiểm tra và ký xác nhận biên bản.
+
+Trân trọng,
+Trưởng nhóm Kiểm toán
+```
+
+#### 📎 Tệp đính kèm thử nghiệm:
+* Đường dẫn: [`data/security_test_attachments/Bao_cao_tai_chinh_Q2.pdf`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/Bao_cao_tai_chinh_Q2.pdf)
+
+#### 🎯 TARGET ĐẦU RA HỢP LÝ CỦA HỆ THỐNG:
+* **Mức độ đe dọa:** `MALICIOUS` / `MALWARE`
+* **Xử lý cách ly:** `quarantined = True`
+* **Tiêu chí đạt:** Magic Inspector đọc 512 bytes đầu tiên phát hiện chữ ký Windows PE `MZ`, xác định tệp thực thi giả mạo đuôi `.pdf`, tự động chặn và phát cảnh báo mã độc.
+
+---
+
+### 🛡️ EMAIL 28: [Bảo Mật] Khớp chữ ký mã độc SHA-256 Ransomware Cloud
+
+#### 📌 Subject (Giữ nguyên để gửi):
+```text
+Khẩn cấp: Bản vá bảo mật hệ điều hành Windows KB5034123
+```
+
+#### 📄 Nội dung Email (Giữ nguyên để gửi):
+```text
+Kính gửi toàn thể nhân viên,
+
+Trung tâm an toàn thông tin phát hiện lỗ hổng nghiêm trọng trên hệ điều hành Windows. Đề nghị mọi người tải bản vá đính kèm và cập nhật ngay lập tức.
+
+Nếu không cập nhật, máy tính có nguy cơ bị khóa dữ liệu tống tiền.
+
+IT Support Team
+```
+
+#### 📎 Tệp đính kèm thử nghiệm:
+* Đường dẫn: [`data/security_test_attachments/security_patch_kb5034123.bin`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/security_patch_kb5034123.bin)
+
+#### 🎯 TARGET ĐẦU RA HỢP LÝ CỦA HỆ THỐNG:
+* **Mức độ đe dọa:** `MALICIOUS` / `MALWARE`
+* **Xử lý cách ly:** `quarantined = True`
+* **Tiêu chí đạt:** Privacy Hash Lookup tính SHA-256 đối chiếu với cơ sở dữ liệu mẫu độc hại/Ransomware, bắt chính xác mã băm và kích hoạt cách ly.
+
+---
+
+### 🟢 EMAIL 29: [Tác vụ nội bộ] Báo cáo hiệu năng Model AI (Nhiều tệp đính kèm sạch)
+
+#### 📌 Subject (Giữ nguyên để gửi):
+```text
+Báo cáo đo kiểm hiệu năng Model AI và số liệu Latency Q3/2026
+```
+
+#### 📄 Nội dung Email (Giữ nguyên để gửi):
+```text
+Chào Team Lead,
+
+Em đã hoàn thành đợt đo kiểm benchmark hiệu năng thực tế giữa các model (Llama-3.3-70B, Gemini 2.5 Flash, Mimo-v2) trên môi trường staging.
+
+Em xin gửi kèm 2 tài liệu:
+1. Tệp PDF tổng quan kiến trúc và phương pháp đo (khao_sat_hieu_nang_model.pdf)
+2. Tệp CSV số liệu chi tiết P50/P99 latency và Throughput QPS (thong_ke_latency.csv)
+
+Nhờ anh review số liệu và lên kế hoạch chọn model tối ưu chi phí cho đợt release tới nhé.
+
+Em cảm ơn anh,
+Nam - AI Engineer
+```
+
+#### 📎 Tệp đính kèm thử nghiệm:
+* [`data/security_test_attachments/khao_sat_hieu_nang_model.pdf`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/khao_sat_hieu_nang_model.pdf)
+* [`data/security_test_attachments/thong_ke_latency.csv`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/thong_ke_latency.csv)
+
+#### 🎯 TARGET ĐẦU RA HỢP LÝ CỦA HỆ THỐNG:
+* **Route phân loại:** `DIRECT_PLAN`
+* **Mức độ an toàn:** `CLEAN` / `quarantined = False`
+* **Tiêu đề Task:** Đánh giá báo cáo hiệu năng Model AI và lập kế hoạch tối ưu chi phí Q3/2026.
+* **Kế hoạch hành động:**
+  1. Đọc và phân tích báo cáo benchmark hiệu năng trong tệp PDF đính kèm.
+  2. Rà soát bảng số liệu CSV chi tiết về P50/P99 latency và Throughput QPS.
+  3. Lên phương án chốt cấu hình model AI cho đợt release sản phẩm.
+
+---
+
+### 🛡️ EMAIL 30: [Bảo Mật] Email đa tệp đính kèm chứa mã độc ẩn (.js)
+
+#### 📌 Subject (Giữ nguyên để gửi):
+```text
+Hướng dẫn cài đặt VPN nội bộ và script tự động cấu hình
+```
+
+#### 📄 Nội dung Email (Giữ nguyên để gửi):
+```text
+Chào anh/chị,
+
+Để truy cập hệ thống máy chủ chi nhánh mới, đề nghị anh/chị đọc hướng dẫn cài đặt (huong_dan_cai_dat.pdf) và chạy script tự động (installer_helper.js) đính kèm.
+
+Script sẽ tự động add cấu hình VPN vào máy tính.
+
+Trân trọng,
+Đội hỗ trợ kỹ thuật
+```
+
+#### 📎 Tệp đính kèm thử nghiệm:
+* [`data/security_test_attachments/huong_dan_cai_dat.pdf`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/huong_dan_cai_dat.pdf) (Tệp PDF sạch)
+* [`data/security_test_attachments/installer_helper.js`](file:///home/dammanhdungvn/Downloads/Workspace/Test/EMAIL-AGENT-v1/data/security_test_attachments/installer_helper.js) (Tệp script độc hại)
+
+#### 🎯 TARGET ĐẦU RA HỢP LÝ CỦA HỆ THỐNG:
+* **Mức độ đe dọa:** `MALICIOUS` / `MACRO_SCRIPT`
+* **Xử lý cách ly:** `quarantined = True`
+* **Tiêu chí đạt:** Hệ thống quét toàn bộ danh sách tệp đính kèm, phát hiện tệp script bị cấm `.js` nằm xen kẽ tệp `.pdf`, nâng mức độ đe dọa chung lên `MALICIOUS` và cách ly toàn bộ email.

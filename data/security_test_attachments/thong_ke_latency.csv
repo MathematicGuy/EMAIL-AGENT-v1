@@ -1,0 +1,4 @@
+model,p50_latency_ms,p99_latency_ms,throughput_qps
+llama-3.3-70b,120,450,85
+gemini-2.5-flash,45,180,320
+mimo-v2-chat,38,150,410

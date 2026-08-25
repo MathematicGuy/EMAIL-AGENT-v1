@@ -665,5 +665,186 @@
         "Cách ly bảo vệ người dùng"
       ]
     }
+  },
+  {
+    "id": "email_26",
+    "category": "security_zip_bomb",
+    "intent": "QUARANTINE",
+    "subject": "Tài liệu lưu trữ tổng kết dự án năm 2026 (Nén dữ liệu)",
+    "sender": "Archive Service <no-reply@backup-archive-system.org>",
+    "body": "Kính gửi Ban Giám đốc và Quản lý dự án,\n\nHệ thống lưu trữ dữ liệu đã nén toàn bộ tài liệu dự án năm 2026 và đính kèm trong tệp zip bên dưới.\n\nNhờ anh/chị tải xuống và kiểm tra giải nén để nghiệm thu dữ liệu.\n\nTrân trọng,\nBackup & Archive Team",
+    "target_documents": [],
+    "threat_level": "BLOCKED",
+    "threat_category": "ZIP_BOMB",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "tailieu_luutru_2026.zip",
+        "file_path": "data/security_test_attachments/tailieu_luutru_2026.zip",
+        "declared_mime_type": "application/zip",
+        "threat_level": "BLOCKED",
+        "threat_category": "ZIP_BOMB",
+        "reason": "Zip bomb detected: decompression ratio exceeds threshold"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp nén độc hại (Zip Bomb)",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Zip bomb",
+        "Tỷ lệ giải nén bất thường",
+        "Từ chối giải nén"
+      ]
+    }
+  },
+  {
+    "id": "email_27",
+    "category": "security_masquerading_pe",
+    "intent": "QUARANTINE",
+    "subject": "Báo cáo tài chính soát xét Quý 2/2026 - Kiểm toán độc lập",
+    "sender": "Kiem Toan Ernst & Young <audit-report@ey-vietnam-secure.com>",
+    "body": "Kính gửi Ban Kiểm soát và Kế toán trưởng,\n\nĐoàn kiểm toán xin gửi bản báo cáo tài chính soát xét bán niên Quý 2/2026 định dạng PDF trong tệp đính kèm bên dưới.\n\nĐề nghị Quý công ty mở file kiểm tra và ký xác nhận biên bản.\n\nTrân trọng,\nTrưởng nhóm Kiểm toán",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "Bao_cao_tai_chinh_Q2.pdf",
+        "file_path": "data/security_test_attachments/Bao_cao_tai_chinh_Q2.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "Executable binary disguised as .pdf (PE MZ signature)"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp thực thi giả mạo PDF",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Giả mạo PDF",
+        "Mã độc Windows PE",
+        "Cách ly tệp"
+      ]
+    }
+  },
+  {
+    "id": "email_28",
+    "category": "security_cloud_malware_hash",
+    "intent": "QUARANTINE",
+    "subject": "Khẩn cấp: Bản vá bảo mật hệ điều hành Windows KB5034123",
+    "sender": "IT Helpdesk Security <helpdesk@global-it-support.net>",
+    "body": "Kính gửi toàn thể nhân viên,\n\nTrung tâm an toàn thông tin phát hiện lỗ hổng nghiêm trọng trên hệ điều hành Windows. Đề nghị mọi người tải bản vá đính kèm và cập nhật ngay lập tức.\n\nNếu không cập nhật, máy tính có nguy cơ bị khóa dữ liệu tống tiền.\n\nIT Support Team",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "security_patch_kb5034123.bin",
+        "file_path": "data/security_test_attachments/security_patch_kb5034123.bin",
+        "declared_mime_type": "application/octet-stream",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "SHA-256 hash matched known ransomware/malware signature"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp chứa mã độc Ransomware",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Mã độc tống tiền",
+        "Trùng khớp chữ ký SHA-256",
+        "Cách ly lập tức"
+      ]
+    }
+  },
+  {
+    "id": "email_29",
+    "category": "clean_multi_attachment",
+    "intent": "DIRECT_PLAN",
+    "subject": "Báo cáo đo kiểm hiệu năng Model AI và số liệu Latency Q3/2026",
+    "sender": "Le Hoang Nam <namlh.ai@company.com>",
+    "body": "Chào Team Lead,\n\nEm đã hoàn thành đợt đo kiểm benchmark hiệu năng thực tế giữa các model (Llama-3.3-70B, Gemini 2.5 Flash, Mimo-v2) trên môi trường staging.\n\nEm xin gửi kèm 2 tài liệu:\n1. Tệp PDF tổng quan kiến trúc và phương pháp đo (khao_sat_hieu_nang_model.pdf)\n2. Tệp CSV số liệu chi tiết P50/P99 latency và Throughput QPS (thong_ke_latency.csv)\n\nNhờ anh review số liệu và lên kế hoạch chọn model tối ưu chi phí cho đợt release tới nhé.\n\nEm cảm ơn anh,\nNam - AI Engineer",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [
+      {
+        "filename": "khao_sat_hieu_nang_model.pdf",
+        "file_path": "data/security_test_attachments/khao_sat_hieu_nang_model.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      },
+      {
+        "filename": "thong_ke_latency.csv",
+        "file_path": "data/security_test_attachments/thong_ke_latency.csv",
+        "declared_mime_type": "text/csv",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      }
+    ],
+    "expected_output": {
+      "route": "DIRECT_PLAN",
+      "priority": "HIGH",
+      "expected_title": "Đánh giá báo cáo hiệu năng Model AI và lập kế hoạch tối ưu chi phí Q3/2026",
+      "expected_steps_count": 3,
+      "key_points": [
+        "Review benchmark Llama/Gemini/Mimo",
+        "Phân tích P50/P99 latency và Throughput CSV",
+        "Quyết định model cho đợt release"
+      ]
+    }
+  },
+  {
+    "id": "email_30",
+    "category": "security_mixed_attachment",
+    "intent": "QUARANTINE",
+    "subject": "Hướng dẫn cài đặt VPN nội bộ và script tự động cấu hình",
+    "sender": "External Contractor <contractor.vpn@external-support.io>",
+    "body": "Chào anh/chị,\n\nĐể truy cập hệ thống máy chủ chi nhánh mới, đề nghị anh/chị đọc hướng dẫn cài đặt (huong_dan_cai_dat.pdf) và chạy script tự động (installer_helper.js) đính kèm.\n\nScript sẽ tự động add cấu hình VPN vào máy tính.\n\nTrân trọng,\nĐội hỗ trợ kỹ thuật",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "huong_dan_cai_dat.pdf",
+        "file_path": "data/security_test_attachments/huong_dan_cai_dat.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      },
+      {
+        "filename": "installer_helper.js",
+        "file_path": "data/security_test_attachments/installer_helper.js",
+        "declared_mime_type": "application/javascript",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "Prohibited executable/script file extension (.js) detected in multi-attachment email"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Script thực thi nguy hiểm (.js) trong Email",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Cảnh báo script .js độc hại",
+        "Không chạy installer_helper.js",
+        "Cách ly toàn bộ email"
+      ]
+    }
   }
 ]
