@@ -14,8 +14,10 @@ export class DashboardPage {
     this.recents = page.getByTestId('recent-chat');
     this.loading = page.getByTestId('chat-history-loading');
     this.stream = page.getByTestId('chat-stream');
-    this.composer = page.getByPlaceholder('How can I help you today?');
-    this.fileInput = page.getByLabel('Chọn tài liệu từ máy');
+    this.composer = page.getByPlaceholder('Tôi có thể giúp gì cho bạn hôm nay?')
+      .or(page.getByPlaceholder('How can I help you today?'))
+      .or(page.locator('textarea'));
+    this.fileInput = page.getByLabel('Chọn tài liệu từ máy').or(page.locator('input[type="file"]'));
     this.sendButton = page.getByTestId('chat-send');
   }
 
@@ -32,15 +34,28 @@ export class DashboardPage {
   }
 
   async closeProjectDocuments(): Promise<void> {
-    const close = this.page.getByRole('button', { name: 'Close project documents' });
+    const close = this.page.getByRole('button', { name: /Close project documents|Đóng/i });
     if (await close.isVisible().catch(() => false)) await close.click();
   }
 
   async expandSidebar(): Promise<void> {
-    const toggle = this.page.getByRole('button', { name: /Show sidebar/i });
-    await expect(toggle.or(this.recents.first())).toBeVisible({ timeout: 20_000 });
-    if (await toggle.isVisible().catch(() => false)) {
+    // Wait for dashboard to be ready
+    await this.page.locator('textarea').waitFor({ state: 'visible', timeout: 20_000 });
+
+    // Expand sidebar if collapsed
+    const toggle = this.page.getByRole('button', { name: 'Show sidebar' });
+    if (await toggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await toggle.click();
+      await expect(this.page.getByText('DỰ ÁN', { exact: true })).toBeVisible({ timeout: 10_000 });
+    }
+
+    // Expand project accordion – wait up to 10s since projects load async
+    const expandBtn = this.page.getByRole('button', { name: /Expand Latency Project/i });
+    try {
+      await expandBtn.waitFor({ state: 'visible', timeout: 10_000 });
+      await expandBtn.click();
+    } catch {
+      // Already expanded – fall through
     }
   }
 

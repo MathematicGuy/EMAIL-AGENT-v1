@@ -1288,6 +1288,29 @@ def create_app() -> FastAPI:
             target_path.unlink()
         return {"status": "success", "message": f"Deleted {safe_name}"}
 
+    @app.get("/api/v1/reports/{filename}/download")
+    async def download_report_file(filename: str) -> FileResponse:
+        safe_name = Path(filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        target_path = REPORTS_DIR / safe_name
+        if not target_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        ext = target_path.suffix.lower()
+        media_types = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc": "application/msword",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+        }
+        return FileResponse(
+            path=target_path,
+            media_type=media_types.get(ext, "application/octet-stream"),
+            filename=safe_name,
+            content_disposition_type="attachment",
+        )
+
     # ── Raw process documents (data/raw) endpoints for procedure viewer ──
     # RAW_DOCS_DIR / EXTRACTED_DIR are module-level so tests and handlers agree on
     # one location; do not shadow them with a local copy here.

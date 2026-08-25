@@ -225,6 +225,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         onNavigateHome={onNavigateHome}
         activeView={activeView}
         onChangeView={setActiveView}
+        initialExpandedProjectIds={projects.map((p) => p.id)}
         isGenerating={isGenerating}
       />
 

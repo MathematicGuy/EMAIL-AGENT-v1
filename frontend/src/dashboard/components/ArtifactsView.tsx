@@ -236,43 +236,15 @@ export const ArtifactsView: React.FC = () => {
 
 
 
-  const handleDownloadPDF = async () => {
+  const handleDownloadFile = () => {
     if (!selectedFile) return;
-    const isDocx = selectedFile.filename.endsWith('.docx');
-
-    if (isDocx) {
-      // Tải trực tiếp bằng link của backend để trình duyệt tự xử lý stream nhị phân chuẩn xác
-      const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/download`;
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = selectedFile.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      return;
-    }
-
-    try {
-      const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/pdf`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Lỗi từ server khi tạo PDF');
-
-      const blob = await res.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = selectedFile.filename.replace(/\.md$/, '.pdf');
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(downloadUrl);
-    } catch (err: unknown) {
-      console.error('Lỗi khi xuất file PDF:', err);
-      alert(
-        'Không thể tải file PDF từ server: ' +
-        (err instanceof Error ? err.message : String(err))
-      );
-    }
+    const url = `${API_BASE_URL}/api/v1/reports/${encodeURIComponent(selectedFile.filename)}/download`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = selectedFile.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -408,11 +380,11 @@ export const ArtifactsView: React.FC = () => {
               <div className="flex items-center gap-2 shrink-0 ml-4">
                 {selectedFile && !isEditing && !isCreatingNew && (
                   <button
-                    onClick={handleDownloadPDF}
+                    onClick={handleDownloadFile}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>{selectedFile.filename.endsWith('.docx') ? 'Tải DOCX' : 'Tải PDF'}</span>
+                    <span>{selectedFile.filename.endsWith('.docx') ? 'Tải DOCX' : 'Tải file'}</span>
                   </button>
                 )}
 
