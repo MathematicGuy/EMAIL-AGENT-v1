@@ -503,6 +503,7 @@ def test_threat_category_enum_values():
         "parser_exploit",
         "prompt_injection",
         "homograph_spoof",
+        "zip_bomb",
     ]
 
 

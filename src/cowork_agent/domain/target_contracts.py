@@ -139,6 +139,7 @@ class ThreatCategory(StrEnum):
     PARSER_EXPLOIT = "parser_exploit"
     PROMPT_INJECTION = "prompt_injection"
     HOMOGRAPH_SPOOF = "homograph_spoof"
+    ZIP_BOMB = "zip_bomb"
 
 
 _T = TypeVar("_T")
