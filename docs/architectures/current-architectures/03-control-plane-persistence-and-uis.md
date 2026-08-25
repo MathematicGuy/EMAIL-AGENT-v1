@@ -2,7 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-26
 **Primary Owner:** `src/cowork_agent/persistence` & `src/cowork_agent/api`  
 **Target Alignment:** Core control plane is aligned with [TARGET-ARCHITECTURE.md §1 & §2](../TARGET-ARCHITECTURE.md); linked Outlook is an additive SQLite-only provider variance.
 
@@ -28,6 +28,8 @@ flowchart TB
         WORKER["mail-todo-worker<br/>(digest, document & cleanup pollers)"]
     end
 
+    MAIL_POLICY["AI Chat Mail-Scan Reconciliation<br/>(features/ai_chat)"]
+
     subgraph PERSISTENCE["Dual Persistence Layer"]
         LOCAL[("Local Mode<br/>SQLite .data/*.db<br/>+ In-Memory Stores")]
         PG[("Postgres / Supabase Mode<br/>migrations 001 through 016")]
@@ -36,6 +38,7 @@ flowchart TB
     REACT --> APP
     APP --> AUTH
     APP --> ROUTES
+    ROUTES --> MAIL_POLICY
     APP --> WORKER
 
     APP -->|DATABASE_URL absent| LOCAL
@@ -51,7 +54,8 @@ flowchart TB
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
 | **FastAPI App** | [`app.py`](../../../src/cowork_agent/app.py) (`mail-todo-api`) | Composition root and Langfuse bootstrap only: `lifespan` assembles one runtime value, teardown reads its handles back from it, and `create_app` mounts the routers. It serves exactly one route of its own, `/health` — every other route lives in a `create_*_router()` module under [`api/`](../../../src/cowork_agent/api) ([ADR-015](../../../tasks/adr/ADR-015-routers-own-their-transport.md)). |
-| **API Routers** | [`api/`](../../../src/cowork_agent/api) | One module per subject: `chat.py`, `projects.py`, `reports.py`, `evaluation_jobs.py`, `knowledge.py` (document health, corpus reads, raw documents), `digest_runs.py`, `mailboxes.py`. `dependencies.py` holds the request-scoped seams more than one of them needs — the runtime group accessors and the identity/ownership chain — and admits a helper only once a second router needs it. |
+| **API Routers** | [`api/`](../../../src/cowork_agent/api) | One module per subject: `chat.py`, `projects.py`, `reports.py`, `evaluation_jobs.py`, `knowledge.py` (document health, corpus reads, raw documents), `digest_runs.py`, `mailboxes.py`. The mail-scan endpoint remains in `chat.py` with its chat principal, session, history, and buffer seams; it maps private Pydantic activity payloads once before calling feature policy. `dependencies.py` holds the request-scoped seams more than one router needs and admits a helper only once a second router needs it. |
+| **Mail-Scan Reconciliation Policy** | [`features/ai_chat/mail_scan_reconciliation.py`](../../../src/cowork_agent/features/ai_chat/mail_scan_reconciliation.py) | Validates aggregate scan state and reconciles desired activity snapshots into durable or buffered `ChatTurn` values without importing from `api`. The route surface and route count are unchanged. |
 | **Typed Composition Module** | [`composition.py`](../../../src/cowork_agent/composition.py) | Builds `CoworkRuntime` — one frozen, slotted value holding the `reports` store and the `control_plane`, `mailbox`, `chat`, `email_rag`, and `evaluation` groups — once at startup via the group builders. Handlers read it through the plain `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). |
 | **Identity & Security** | [`identity.py`](../../../src/cowork_agent/identity.py) & [`config.py`](../../../src/cowork_agent/config.py) | Resolves `VerifiedPrincipal`; opaque session cookies, guest principals, and central ownership guards enforce authorization. |
 | **Mailbox OAuth & Availability** | [`api/mailboxes.py`](../../../src/cowork_agent/api/mailboxes.py), [`outlook/provider.py`](../../../src/cowork_agent/integrations/outlook/provider.py) | Gmail OAuth plus optional Microsoft OAuth with PKCE, signed one-time owner state, encrypted rotating refresh tokens, and `Mail.Read` only. `/connections` exposes stable availability; Outlook is `not_configured` or `sqlite_only` when unavailable and never creates a user/session or changes the login cookie. |
@@ -108,7 +112,7 @@ The application dynamically selects storage backends based on `POSTGRES_MODE` an
 ## 4. Alignment & Diff vs Target Architecture
 
 - **Clean API & Product Surfaces:** Presentation layers consume REST and SSE endpoints exclusively. Standalone Email digest workflow operates on `/v1/mail-todo`; AI Chat and Project Document features operate on `/v1/cowork/*` ([TARGET §1 & §2](../TARGET-ARCHITECTURE.md)); report artifacts and raw document editing operate on `/api/v1/*`.
-- **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. The React client projects polled mail progress into that shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn.
+- **Email & Chat Capabilities:** Email RAG remains a standalone pipeline while AI Chat streams and persists bounded semantic turn activity. The React client projects polled mail progress into that shared user-facing timeline and stores only aggregate `mail_scan` metadata with the turn. Transport owns authentication and payload parsing; `features/ai_chat/mail_scan_reconciliation.py` owns the scan/turn consistency and transition rules shared by durable history and the in-process buffer.
 - **Security & Identity Isolation:** OAuth tokens are stored encrypted using Fernet (`TokenCipher`). Session cookies are opaque, HttpOnly, and hashed at rest. Caller-supplied tenant/user identifiers are never trusted for authorization; all operations derive tenancy from `VerifiedPrincipal`.
 - **Memory & Durability Alignment:** Bounded short-term chat context resides in-process (`InMemoryChatSessionBuffer`), while durable long-term declarative profiles, episodic TaskEpisodes (with `supersedes`), chat turns, and document chunks are persisted in PostgreSQL (or isolated local SQLite files).
 - **Presentation Layer:** Production React 19 + Vite + Tailwind 4 web application is the authoritative user interface, including Execution Trace Drawer, Live Reasoning stream, Report Artifact Viewer, and Document Viewer/Editor. Legacy Streamlit developer GUI has been retired.

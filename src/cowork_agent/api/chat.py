@@ -3,7 +3,6 @@
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
 
@@ -15,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from cowork_agent.composition import ChatRuntime, ControlPlane, runtime
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_ACTIVITIES,
-    ChatActivity,
     ChatActivityCode,
     ChatActivityDetail,
     ChatActivityOutcome,
@@ -37,6 +35,13 @@ from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionAccessDenied,
     ChatSessionRegistryPort,
+)
+from cowork_agent.features.ai_chat.mail_scan_reconciliation import (
+    DesiredMailActivity,
+    reconcile_mail_activities,
+    reconcile_mail_turn,
+    upsert_buffer_mail_turn,
+    validate_mail_turn_scan_status,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.ai_chat.ports import (
@@ -182,6 +187,24 @@ class _PersistMailScanPayload(BaseModel):
     mail_scan: _MailScanPayload
     activities: list[_ActivitySnapshotPayload] = Field(
         default_factory=list, max_length=MAX_CHAT_ACTIVITIES
+    )
+
+
+def _desired_mail_activity(payload: _ActivitySnapshotPayload) -> DesiredMailActivity:
+    detail = payload.detail
+    return DesiredMailActivity(
+        code=payload.code,
+        status=payload.status,
+        outcome=payload.outcome,
+        detail=(
+            ChatActivityDetail(
+                kind=detail.kind,
+                current=detail.current,
+                total=detail.total,
+            )
+            if detail is not None
+            else None
+        ),
     )
 
 
@@ -352,10 +375,13 @@ def create_chat_router() -> APIRouter:
         turn_status = ChatTurnStatus(payload.turn_status)
         try:
             mail_scan = MailScanSummary.from_dict(payload.mail_scan.model_dump())
-            _validate_mail_turn_scan_status(turn_status, mail_scan)
-            desired_activities = tuple(payload.activities)
-            activities = _merge_mail_activity_snapshot((), desired_activities, at=now)
-            activities = _terminalize_mail_activities(activities, turn_status, at=now)
+            validate_mail_turn_scan_status(turn_status, mail_scan)
+            desired_activities = tuple(
+                _desired_mail_activity(activity) for activity in payload.activities
+            )
+            activities = reconcile_mail_activities(
+                (), desired_activities, turn_status, at=now
+            )
             turn = ChatTurn(
                 turn_id=payload.turn_id,
                 session_id=session_id,
@@ -379,7 +405,7 @@ def create_chat_router() -> APIRouter:
                     idempotency_key=idempotency_key,
                     title="@mail",
                 )
-                turn = _merge_mail_turn(existing, turn, desired_activities, at=now)
+                turn = reconcile_mail_turn(existing, turn, desired_activities, at=now)
                 turn = await history.update_turn(scope, turn, title="@mail")
             except ValueError as exc:
                 raise HTTPException(
@@ -387,7 +413,7 @@ def create_chat_router() -> APIRouter:
                 ) from exc
         else:
             try:
-                turn = _upsert_buffer_mail_turn(
+                turn = upsert_buffer_mail_turn(
                     _buffer(request), scope, turn, desired_activities, at=now
                 )
             except ValueError as exc:
@@ -589,234 +615,6 @@ def _serialize_sse(event: ChatMessageStreamEvent) -> str:
         separators=(",", ":"),
     )
     return f"id: {event.event_id}\nevent: {event.event_type.value}\ndata: {data}\n\n"
-
-
-_MAIL_ACTIVITY_CODES = frozenset(
-    {
-        ChatActivityCode.CHECKING_MAIL,
-        ChatActivityCode.PROCESSING_EMAIL,
-        ChatActivityCode.PREPARING_MAIL_RESULTS,
-    }
-)
-
-
-def _validate_mail_turn_scan_status(
-    turn_status: ChatTurnStatus, mail_scan: MailScanSummary
-) -> None:
-    allowed = {
-        ChatTurnStatus.GENERATING: {"connecting", "queued", "running"},
-        ChatTurnStatus.COMPLETED: {"succeeded", "partial"},
-        ChatTurnStatus.FAILED: {"failed"},
-        ChatTurnStatus.CANCELLED: {
-            "connecting",
-            "queued",
-            "running",
-            "succeeded",
-            "partial",
-            "failed",
-        },
-    }
-    if mail_scan.status not in allowed[turn_status]:
-        raise ValueError("mail scan status does not match turn status")
-
-
-def _terminalize_mail_activities(
-    activities: tuple[ChatActivity, ...],
-    turn_status: ChatTurnStatus,
-    *,
-    at: datetime,
-) -> tuple[ChatActivity, ...]:
-    if turn_status is ChatTurnStatus.GENERATING:
-        return activities
-    if turn_status is ChatTurnStatus.COMPLETED:
-        if any(
-            item.status not in {ChatActivityStatus.COMPLETED, ChatActivityStatus.SKIPPED}
-            for item in activities
-        ):
-            raise ValueError("completed mail turn has unfinished activity")
-        return activities
-    terminal_activity_status = (
-        ChatActivityStatus.FAILED
-        if turn_status is ChatTurnStatus.FAILED
-        else ChatActivityStatus.CANCELLED
-    )
-    result = activities
-    for item in tuple(result):
-        if item.status is ChatActivityStatus.RUNNING:
-            result = tuple(
-                current.transition(terminal_activity_status, at=at)
-                if current.code is item.code
-                else current
-                for current in result
-            )
-        elif item.status is ChatActivityStatus.PENDING:
-            result = tuple(
-                current.transition(ChatActivityStatus.SKIPPED, at=at)
-                if current.code is item.code
-                else current
-                for current in result
-            )
-    return result
-
-
-def _activity_detail(payload: _ActivityDetailPayload | None) -> ChatActivityDetail | None:
-    if payload is None:
-        return None
-    return ChatActivityDetail(
-        kind=payload.kind,
-        current=payload.current,
-        total=payload.total,
-    )
-
-
-def _transition_to_desired_activity(
-    activity: ChatActivity,
-    desired: _ActivitySnapshotPayload,
-    *,
-    at: datetime,
-) -> ChatActivity:
-    detail = _activity_detail(desired.detail)
-    if (
-        desired.outcome is not None
-        and desired.status is not ChatActivityStatus.COMPLETED
-    ):
-        raise ValueError("activity outcome requires completed status")
-    if activity.status is desired.status:
-        if activity.status is ChatActivityStatus.PENDING:
-            if desired.outcome is not None or detail is not None:
-                raise ValueError("pending mail activity cannot carry results")
-            return activity
-        return replace(
-            activity,
-            detail=detail if detail is not None else activity.detail,
-            outcome=(
-                desired.outcome
-                if activity.status is ChatActivityStatus.COMPLETED
-                else None
-            ),
-        )
-    if activity.status not in {ChatActivityStatus.PENDING, ChatActivityStatus.RUNNING}:
-        raise ValueError("terminal mail activity cannot regress")
-    if (
-        activity.status is ChatActivityStatus.PENDING
-        and desired.status in {ChatActivityStatus.COMPLETED, ChatActivityStatus.FAILED}
-    ):
-        activity = activity.transition(ChatActivityStatus.RUNNING, at=at)
-    return activity.transition(
-        desired.status,
-        at=at,
-        outcome=desired.outcome,
-        detail=detail,
-    )
-
-
-def _merge_mail_activity_snapshot(
-    existing: tuple[ChatActivity, ...],
-    desired: tuple[_ActivitySnapshotPayload, ...],
-    *,
-    at: datetime,
-) -> tuple[ChatActivity, ...]:
-    if not desired:
-        return existing
-    desired_codes = tuple(item.code for item in desired)
-    if len(set(desired_codes)) != len(desired_codes):
-        raise ValueError("mail activity codes must be unique")
-    if any(code not in _MAIL_ACTIVITY_CODES for code in desired_codes):
-        raise ValueError("mail lifecycle accepts only mail activity codes")
-    existing_codes = tuple(item.code for item in existing)
-    if desired_codes[: len(existing_codes)] != existing_codes:
-        raise ValueError("mail activity plan is append-only")
-
-    merged: list[ChatActivity] = []
-    for index, item in enumerate(desired):
-        activity = (
-            existing[index]
-            if index < len(existing)
-            else ChatActivity.pending(item.code)
-        )
-        merged.append(_transition_to_desired_activity(activity, item, at=at))
-    return tuple(merged)
-
-
-def _merge_mail_turn(
-    existing: ChatTurn,
-    incoming: ChatTurn,
-    desired_activities: tuple[_ActivitySnapshotPayload, ...],
-    *,
-    at: datetime,
-) -> ChatTurn:
-    if existing.user_message != incoming.user_message:
-        raise ValueError("idempotency key was already used for another mail request")
-    if existing.idempotency_key not in {None, incoming.idempotency_key}:
-        raise ValueError("mail turn idempotency key cannot change")
-    if existing.status is not ChatTurnStatus.GENERATING and incoming.status is not existing.status:
-        raise ValueError("terminal mail turn cannot regress")
-    if existing.status is not ChatTurnStatus.GENERATING:
-        return existing
-    if (
-        existing.status is ChatTurnStatus.GENERATING
-        and incoming.status
-        not in {
-            ChatTurnStatus.GENERATING,
-            ChatTurnStatus.COMPLETED,
-            ChatTurnStatus.FAILED,
-            ChatTurnStatus.CANCELLED,
-        }
-    ):
-        raise ValueError("unsupported mail turn transition")
-    terminal = incoming.status is not ChatTurnStatus.GENERATING
-    activities = _merge_mail_activity_snapshot(
-        existing.activities, desired_activities, at=at
-    )
-    activities = _terminalize_mail_activities(activities, incoming.status, at=at)
-    return replace(
-        existing,
-        assistant_message=(
-            incoming.assistant_message
-            if incoming.assistant_message is not None
-            else existing.assistant_message
-        ),
-        mail_scan=incoming.mail_scan,
-        status=incoming.status,
-        activities=activities,
-        completed_at=(existing.completed_at or at) if terminal else None,
-    )
-
-
-def _upsert_buffer_mail_turn(
-    buffer: ChatSessionBufferPort,
-    scope: ChatMemoryScope,
-    incoming: ChatTurn,
-    desired_activities: tuple[_ActivitySnapshotPayload, ...],
-    *,
-    at: datetime,
-) -> ChatTurn:
-    namespace = MemoryNamespace(
-        scope=scope,
-        memory_type=MemoryType.SHORT_TERM,
-        record_id=scope.session_id,
-        source_id=None,
-    )
-    turns = list(buffer.read(namespace))
-    index = next(
-        (
-            position
-            for position, turn in enumerate(turns)
-            if turn.turn_id == incoming.turn_id
-            or turn.idempotency_key == incoming.idempotency_key
-        ),
-        None,
-    )
-    if index is None:
-        stored = incoming
-        turns.append(stored)
-    else:
-        stored = _merge_mail_turn(turns[index], incoming, desired_activities, at=at)
-        turns[index] = stored
-    buffer.clear(namespace)
-    for turn in turns:
-        buffer.append(namespace, turn)
-    return stored
 
 
 async def _verified_principal(request: Request) -> VerifiedPrincipal:

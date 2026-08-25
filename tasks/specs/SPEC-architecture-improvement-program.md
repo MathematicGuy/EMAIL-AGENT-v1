@@ -64,7 +64,7 @@ flowchart TB
 
     subgraph TRANSPORT["Transport · app.py + api/ routers"]
         APP["app.py · 507 lines<br/>composition root, /health, router mounts<br/><b>C03 · done (was 1581)</b>"]
-        CHAT["api/chat.py · 1015 lines<br/>four subjects in one module<br/><b>C07 · open</b>"]
+        CHAT["api/chat.py · 813 lines<br/>chat transport + mail-scan route<br/><b>C07 · done</b>"]
         SIB["api/knowledge · projects · mailboxes<br/>digest_runs · evaluation_jobs · reports<br/><b>C03 · done</b>"]
         DEPS["api/dependencies.py · 196 lines<br/>admission rule: a <i>second</i> router must need it"]
     end
@@ -75,7 +75,7 @@ flowchart TB
     end
 
     subgraph FEATURES["Features · features/"]
-        CTRL["ai_chat/controller.py · stream_message<br/>+ TurnJournal + CancellationGuard<br/>+ TaskEpisodeSettler<br/><b>C04 · done, narrowed</b>"]
+        CTRL["ai_chat/controller.py · stream_message<br/>+ TurnJournal + CancellationGuard<br/>+ TaskEpisodeSettler<br/>+ mail_scan_reconciliation.py · 257 lines<br/><b>C04 · done, narrowed · C07 · done</b>"]
     end
 
     subgraph DOMAIN["Domain · ports and value objects"]
@@ -107,9 +107,8 @@ flowchart TB
     classDef open fill:#fef3c7,stroke:#b45309,color:#78350f;
     classDef outlier fill:#ffe4e6,stroke:#be123c,color:#881337,stroke-width:2px;
     classDef plain fill:#f5f5f4,stroke:#a8a29e,color:#44403c;
-    class APP,SIB,RT,CTRL,RA,CORPUS,RAWDIR done;
+    class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR done;
     class HOOK,CFG,SURV open;
-    class CHAT outlier;
     class DEPS plain;
 ```
 
@@ -128,7 +127,7 @@ got enforced at the composition edge; everything above reads its dependencies th
 | **C02** | Composition is a 440-line closure and ~60 untyped `app.state` keys | Strong | **Done** — slices 02-1…02-8 | [ADR-013](../adr/ADR-013-composition-as-typed-value.md) |
 | **C04** | One chat turn is one 617-line generator | Strong | **Done, narrowed** — slices 04-1…04-3 | [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md) |
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
-| **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Open — shape decided (move down to `features/ai_chat/`); payload-boundary question still open** | §4.5 |
+| **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Done — C07 slice** | §4.5 |
 | **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Open — unscheduled** | §4.6 |
 | **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Open — SCHEDULED 2026-08-25**, own agent, frontend-only | §4.7 |
 | **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
@@ -241,7 +240,50 @@ already a module, which is what makes it the outlier now.
 
 ---
 
-### 4.5 C07 — `api/chat.py` is the new outlier · **OPEN — needs a go/no-go**
+### 4.5 C07 — Mail-scan turn reconciliation moved below transport · **Done**
+
+#### Implemented shape — 2026-08-26
+
+The route remains a chat-session operation in [`api/chat.py`](../../src/cowork_agent/api/chat.py),
+with all six request-scoped seams (`_verified_principal`, `_require_session`, `_sessions`,
+`_chat_group`, `_buffer`, and `_history_repository`) left in place. The reconciliation policy
+now lives in
+[`features/ai_chat/mail_scan_reconciliation.py`](../../src/cowork_agent/features/ai_chat/mail_scan_reconciliation.py):
+
+- `DesiredMailActivity` is the transport-free desired-state value.
+- `validate_mail_turn_scan_status` enforces aggregate scan/turn status compatibility.
+- `reconcile_mail_activities` owns append-only activity plans, transitions, and terminalization.
+- `reconcile_mail_turn` owns idempotent durable-turn reconciliation.
+- `upsert_buffer_mail_turn` applies the same reconciliation path to the short-term buffer.
+
+The Pydantic request types stay private to transport. `_desired_mail_activity` maps each payload
+once into `ChatActivityDetail` and `DesiredMailActivity`; the feature module has no import from
+`cowork_agent.api`. This preserves ADR-001's dependency direction while keeping the route with
+the chat identity, session, history, and buffer seams it actually needs.
+
+```mermaid
+flowchart LR
+    PAYLOAD["Pydantic mail-scan payloads<br/>api/chat.py"]
+    MAP["_desired_mail_activity<br/>one boundary mapping"]
+    ROUTE["persist_mail_scan<br/>route + six chat seams"]
+    POLICY["features/ai_chat/mail_scan_reconciliation.py<br/>DesiredMailActivity + four operations"]
+    STORES["Chat history or<br/>short-term session buffer"]
+
+    PAYLOAD --> MAP --> ROUTE
+    ROUTE --> POLICY --> STORES
+    classDef transport fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    classDef feature fill:#d1fae5,stroke:#047857,color:#064e3b;
+    class PAYLOAD,MAP,ROUTE transport;
+    class POLICY feature;
+```
+
+Current measured shape: `api/chat.py` is 813 lines and
+`features/ai_chat/mail_scan_reconciliation.py` is 257 lines. The focused feature + chat API
+gate passed **927 tests**. The route-table oracle matched before and after: **63 routes**, both
+with SHA-256
+`510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`.
+
+#### Pre-implementation decision record (historical)
 
 > The deep-dive handoff for this item is `%TEMP%\handoff-runtime-deepening-roadmap.md`.
 > Everything load-bearing is reproduced here.
@@ -487,7 +529,9 @@ That makes the slice bigger than a code move: a new domain type (a desired-activ
 with its optional detail) has to be named and placed. Name it from the domain, not from the
 transport payload it replaces.
 
-**Nothing has been written. This is the agreed shape, not work in progress.**
+**Implemented 2026-08-26.** The historical exploration above is retained to preserve why the
+router split was rejected; the implemented shape and verification evidence are at the top of
+this section.
 
 ---
 
@@ -666,7 +710,7 @@ Recording these is the point of the file. Each was examined and rejected on evid
 | **`domain/_chat_contracts_memory.py` (1,480 lines)** | A contracts file, not depth debt. Leave it. |
 | **`features/batch_evaluation/`** | Large and hot, but its commits read as *hardening* — lease ownership, cancellation cleanup, replay bounds, watchdog progress. A module converging, not fighting its shape. Re-review when it stops changing weekly. |
 | **A separate `api/mail_scans.py` router (C07 option B)** | Rejected 2026-08-25. `persist_mail_scan` reaches six seams private to `chat.py` (§4.5), so a second router would force the identity and session seams into `api/dependencies.py` — a real change to the shared seam layer bought for a cosmetic file split. The route is a chat-session operation by subject: it authenticates a chat principal, requires a chat session scope, and writes a `ChatTurn`. |
-| **Promoting the eight mail-scan helpers into `api/dependencies.py`** | Violates that module's stated admission rule: a helper moves there when a *second* router needs it. None of these do. (This does *not* apply to the six seam helpers, which the rule would legitimately admit — moot now that option B is rejected.) |
+| **Promoting mail-scan reconciliation into `api/dependencies.py`** | Rejected and now superseded by C07's implemented feature boundary. Shared transport dependencies admit a helper only when a second router needs it; reconciliation is feature policy, so it belongs in `features/ai_chat/mail_scan_reconciliation.py`. The six chat seams remain private to `chat.py` because the route did not move. |
 | **ADR-001's dependency direction** | `domain ← features ← integrations/orchestration/persistence ← app`. Not up for renegotiation; C02 is where it finally got enforced at the composition edge. |
 
 ---
@@ -690,7 +734,8 @@ Recording these is the point of the file. Each was examined and rejected on evid
 **invariant-ownership registry**. Check §3 there before writing a test: add cases to the file
 that owns the invariant rather than creating a parallel layer test. Relevant routes:
 **R11** `tests/integration/api` for anything touching routes, **R2** `tests/unit/features` for
-the chat controller, **R1** for domain.
+the chat controller and mail-scan reconciliation policy, **R1** for domain. C07 therefore uses
+R2 for the feature rules and R11 for the one-time payload mapping and unchanged route behavior.
 
 **Documentation duty** — every workstream updates `docs/architectures/current-architectures/`
 in the same change: `README.md` (Live Module Status Matrix),
@@ -814,6 +859,7 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
 | 2026-08-25 | **C09 closed.** Moved rather than deleted: `books/` was already gone (`e91486e`), so `data/raw/` held the only copy, and deleting reclaims nothing because the blob is permanent in history. The PDF now sits in `data/OCR/` beside its extraction and golden dataset. `data/raw/` back to 17 files; gate green (2137 passed). |
 | 2026-08-25 | **C07 payload boundary decided** — convert to a domain value at the route boundary; `features/` must not import `api/` payload models. Slice now includes naming a new domain type. |
 | 2026-08-25 | **Decisions.** C07 shape settled — option A, move the seven pure helpers down into `features/ai_chat/`; option B (a new router) rejected and recorded in §5. C06 scheduled as the next agent's sole mandate. C05 re-confirmed parked. C08 still blocked on the user. |

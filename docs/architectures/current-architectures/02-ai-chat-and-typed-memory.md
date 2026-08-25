@@ -2,6 +2,7 @@
 
 **Architecture level:** Level 1 — High-Level Component & Data Flow  
 **Status:** Live / Implemented  
+**Last Updated:** 2026-08-26
 **Primary Owner:** `src/cowork_agent/features/ai_chat`  
 **Target Alignment:** Mostly Aligned with [TARGET-ARCHITECTURE.md §2 & §3](../TARGET-ARCHITECTURE.md) ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md), [ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md))
 
@@ -11,13 +12,16 @@
 
 The AI Chat Subsystem is a multi-turn assistant: it streams replies, reads four typed memory scopes through the Memory Gateway, and persists a chat-native `TaskEpisode` only after an explicit user task request ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)). User documents represent a secondary semantic **plane** (project-scoped), never merged with company RAG ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
 
-For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Turns support `reasoning_mode` (`fast` | `reasoning`), streaming live thinking traces alongside text deltas. The controller records a bounded execution trace (`ChatExecutionTrace`), auto-generates report artifacts (`GeneratedReportArtifact` scoped to the `reports/` folder), and emits a bounded, server-stamped user-facing activity snapshot that is streamed over SSE and stored with chat history. End-to-end LLM calls and memory operations are instrumented with Langfuse (`@observe`). Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` plus the same safe activity metadata, without storing raw email content.
+For standard chat turns, request validation strictly checks fields (`extra="forbid"` on `_ChatMessagePayload` and `ChatMessageRequest.from_dict`). Turns support `reasoning_mode` (`fast` | `reasoning`), streaming live thinking traces alongside text deltas. The controller records a bounded execution trace (`ChatExecutionTrace`), auto-generates report artifacts (`GeneratedReportArtifact` scoped to the `reports/` folder), and emits a bounded, server-stamped user-facing activity snapshot that is streamed over SSE and stored with chat history. End-to-end LLM calls and memory operations are instrumented with Langfuse (`@observe`). Dedicated mail scan results are captured through the `/sessions/{session_id}/mail-scans` endpoint as aggregate `MailScanSummary` plus the same safe activity metadata, without storing raw email content. The route maps its private Pydantic activity payload once into `DesiredMailActivity`; transport-free reconciliation then applies the same validation and transition rules to durable history and the short-term buffer.
 
 ```mermaid
 flowchart TB
     CLIENT["Chat UI / API Client<br/>(Execution Trace Drawer)"] --> SSE["Chat API & SSE Stream<br/>(/v1/cowork/chat)"]
     SSE --> CHAT["Chat Controller"]
     CHAT --> HISTORY[("Durable Turn History<br/>turns + trace + artifacts + activity")]
+    SSE --> MAIL_ROUTE["Mail-Scan Route<br/>Pydantic boundary mapping"]
+    MAIL_ROUTE --> MAIL_POLICY["Mail-Scan Reconciliation<br/>DesiredMailActivity + turn policy"]
+    MAIL_POLICY --> HISTORY
     CHAT --> CLS["Intent Classifier<br/>(ChatRoutingService)"]
     CLS --> CHAT
     CHAT <--> GATEWAY["Memory Gateway Facade<br/>(Policy & Namespace Enforcement)"]
@@ -30,6 +34,7 @@ flowchart TB
     end
 
     GATEWAY <--> SHORT
+    MAIL_POLICY --> SHORT
     GATEWAY <--> DECL
     GATEWAY <--> EPISODE
     GATEWAY <--> SEMANTIC
@@ -45,6 +50,7 @@ flowchart TB
 | Component | Path / Implementation | Level 1 Responsibility |
 |---|---|---|
 | **Chat API Router** | [`chat.py`](../../../src/cowork_agent/api/chat.py) | Exposes `/v1/cowork/chat/sessions`, `/messages` SSE, profile CRUD, aggregate mail-scan lifecycle recording, and TaskEpisode lifecycle (approve/complete/reject). |
+| **Mail-Scan Turn Reconciliation** | [`mail_scan_reconciliation.py`](../../../src/cowork_agent/features/ai_chat/mail_scan_reconciliation.py) | Owns `DesiredMailActivity`, scan/turn status validation, append-only activity reconciliation, idempotent durable-turn merge, and short-term buffer upsert. It imports domain contracts and the buffer port, never transport payloads; `chat.py` converts Pydantic detail/activity values once through `_desired_mail_activity`. |
 | **Chat Runtime Group** | [`composition.py`](../../../src/cowork_agent/composition.py) (`build_chat`) | Composes the chat group once into the typed `CoworkRuntime` ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)): reply provider, intent settings, routing classifier, session registry, and the ready-document catalog. Handlers read it through `runtime(request).chat`; per-session controllers stay request-time growth, created by a factory that reads the assembled runtime. |
 | **Chat Controller** | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) | Orchestrates one turn in-process: classify → optional user-doc retrieve → assemble → stream (with reasoning trace & text delta) → auto report artifact generation → execution trace capture → persist turn with activities. Emits bounded semantic activity snapshots at real workflow boundaries and writes a `TaskEpisode` only when `is_explicit_task_request` is true. `stream_message` stays one linear function by decision, not by neglect — [ADR-014](../../../tasks/adr/ADR-014-turn-pipeline-stays-one-function.md) records the evidence that rejected splitting it into stages. |
 | **Turn Journal & Cancellation Guard** | [`turn_journal.py`](../../../src/cowork_agent/features/ai_chat/turn_journal.py) | `TurnJournal` owns the evolving `ChatTurn` for the length of one turn: `record()` transitions the activity snapshot, persists it, refreshes the live-turn registry and returns the event to yield, so no phase threads the turn forward by hand. `CancellationGuard` answers "must this turn stop?" once — an explicit `cancel_turn` on this turn id short-circuits before the client-disconnect check ([ADR-014](../../../tasks/adr/ADR-014-turn-pipeline-stays-one-function.md)). |
@@ -81,7 +87,7 @@ flowchart TB
 - **Generated report artifacts:** A turn that produces a report writes it through the injected `ReportArtifactStore` port ([`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py)) composed once at startup as a field of the typed `CoworkRuntime` ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)); the controller no longer resolves `data/reports` for itself. The provider-supplied filename is not trusted: it passes through `ReportFilename.sanitize`, which never raises and degrades an unusable name to a safe slug (default stem `bao-cao-tong-hop`), so the name reaching the store cannot address anything outside the report folder. A failed write is caught as `(OSError, ValueError)`, logged, and the turn continues. `_fallback_report_filename` delegates its slug rule to the same `ReportFilename.sanitize`. The saved report is surfaced to the client as a generated artifact reference; it is not a memory write.
 - **Observability:** Full Langfuse tracing instrumentation across chat turns, LLM provider calls, and memory gateway queries.
 - **User-facing progress:** Durable activity uses stable semantic codes and aggregate counts only. Vietnamese labels are owned by the React presentation layer; provider/component names and model reasoning never enter the public activity contract.
-- **Email Capability Integration:** Standalone Email Agent runs independently for email action planning. The React client maps its existing poll results into the shared activity view and AI Chat history persists aggregate mail scan results (`MailScanSummary` via `/sessions/{session_id}/mail-scans`), keeping raw email bodies and attachment contents out of chat history and memory.
+- **Email Capability Integration:** Standalone Email Agent runs independently for email action planning. The React client maps its existing poll results into the shared activity view and AI Chat history persists aggregate mail scan results (`MailScanSummary` via `/sessions/{session_id}/mail-scans`), keeping raw email bodies and attachment contents out of chat history and memory. The endpoint remains in `api/chat.py` because it authenticates a chat principal, requires a chat session, and chooses chat history or buffer storage; only reconciliation policy moved into `features/ai_chat`.
 - **OCR on the user-document plane:** Aligned with TARGET §3.4. Pages needing OCR fail closed as `ocr_unavailable`; mixed-PDF native pages are not indexed alone. `document-health` reports `ocr: optional_unavailable`.
 - **Local fallback:** With `POSTGRES_MODE=off`, chat sessions, history, profile memory, task episodic memory, projects, document jobs, and document chunks persist in SQLite. The bounded working-memory buffer stays in-process.
 

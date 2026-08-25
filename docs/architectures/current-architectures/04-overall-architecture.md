@@ -2,6 +2,7 @@
 
 **Architecture level:** Level 1 — Comprehensive High-Level System Overview  
 **Status:** Live / Implemented  
+**Last Updated:** 2026-08-26
 **Primary Owner:** [`src/cowork_agent/`](../../../src/cowork_agent)  
 **Target Alignment:** Fully Aligned with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
@@ -15,7 +16,7 @@
 |---|---|---|---|
 | **Control Plane API** | FastAPI Application (`app.py`) | Service composition root, Langfuse bootstrap, and router mounts. Composed dependencies live in one typed `CoworkRuntime` value built by [`composition.py`](../../../src/cowork_agent/composition.py) and read through the `runtime(request)` accessor; the untyped `app.state` sprawl is retired ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)). Transport lives in the routers, not here: `app.py` serves only `/health`, and OAuth, connections, digest runs and the document surfaces are `create_*_router()` modules under `api/` ([ADR-015](../../../tasks/adr/ADR-015-routers-own-their-transport.md)). | [`src/cowork_agent/app.py`](../../../src/cowork_agent/app.py), [`src/cowork_agent/api/`](../../../src/cowork_agent/api) |
 | **Email Action Plan & RAG** | Single-turn Digest Workflow | Connects to Gmail, extracts bounded text attachments, classifies intent (`NO_ACTION`, `DIRECT_PLAN`, `RETRIEVE_RAG`), and generates structured Action Plans. | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
-| **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes` with `supersedes`), and Semantic memory scopes, with live reasoning and report artifact generation. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
+| **AI Chat & 4-Type Memory** | Multi-turn Chat Controller | Streaming SSE chat assistant backed by Short-term, Declarative, Episodic (`TaskEpisodes` with `supersedes`), and Semantic memory scopes, with live reasoning, report artifact generation, and transport-free mail-scan turn reconciliation. | [`features/ai_chat`](../../../src/cowork_agent/features/ai_chat) |
 | **User Documents Subsystem** | Project-Scoped Document RAG | Uploads, extracts, indexes, and retrieves user project documents behind classifier gating ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). | [`integrations/rag/project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
 | **Report Artifact Store** | Report Folder Owner (`data/reports/`) | Single naming rule (`ReportFilename`) and single store port behind `/api/v1/reports`, shared by the artifacts view and the AI Chat turn that generates a report. | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py), [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) & [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
 | **Document Ingestion Pipeline** | Offline Knowledge CLI & Ingestion Service | Converts DOCX/PDF source files into standardized Markdown (`data/extracted/*.md`) with SHA-256 hash manifest tracking and atomic persistence. | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) & [`ingestion_cli.py`](../../../src/cowork_agent/ingestion_cli.py) |
@@ -47,7 +48,7 @@
 | `GET /v1/mail-todo/runs/{run_id}/result` | Retrieves finalized Action Items and next action plans | Email Subsystem |
 | `POST /v1/cowork/chat/sessions` | Creates or retrieves multi-turn chat session | AI Chat Subsystem |
 | `POST /v1/cowork/chat/sessions/{id}/messages` | SSE streaming chat completions with live reasoning & 4-type memory context | AI Chat Subsystem |
-| `POST /v1/cowork/chat/sessions/{id}/mail-scans` | Persists aggregate email scan summaries into chat history | AI Chat Subsystem |
+| `POST /v1/cowork/chat/sessions/{id}/mail-scans` | Maps aggregate scan/activity payloads into domain values and reconciles the chat turn into durable history or the short-term buffer | AI Chat Subsystem |
 | `GET /v1/cowork/chat/document-health` | Diagnostic health endpoint for User Document RAG stack | User Documents Subsystem |
 | `POST /v1/cowork/chat/projects` & `POST /v1/cowork/chat/projects/{id}/documents` | Project workspace management & document ingestion | User Documents Subsystem |
 | `GET/POST /api/v1/raw-documents/*` | Raw DOCX/PDF viewing, editing, and save history | Raw Documents Subsystem |
@@ -84,7 +85,7 @@ flowchart TB
 
     subgraph SUBSYSTEMS["Core Application Subsystems"]
         SUB_EMAIL["1. Email Action Plan Subsystem<br/>Mailbox Adapter + Classifier + RAG + Generator"]
-        SUB_CHAT["2. AI Chat Subsystem<br/>Chat Controller + Intent Service + 4-Type Memory Gateway"]
+        SUB_CHAT["2. AI Chat Subsystem<br/>Chat Controller + Intent Service + 4-Type Memory Gateway<br/>+ Mail-Scan Reconciliation"]
         SUB_DOCS["3. User Documents Subsystem<br/>Project Ingestion + Vector Indexing + OCR"]
         SUB_RAW["4. Raw Documents Subsystem<br/>DOCX Viewer + Report Artifact Storage"]
     end
@@ -139,12 +140,13 @@ flowchart TB
 3. **Intent Routing & User Documents:** If enabled, `ChatRoutingService` evaluates prompt intent to query project-scoped user documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)).
 4. **Streaming Reply & Artifact Generation:** `ChatReplyPort` streams response chunks and live reasoning over SSE. The controller auto-generates report artifacts saved into `reports/` and records `ChatExecutionTrace` for drawer inspection.
 5. **Turn Persistence:** Complete turn, execution trace, report artifact refs, activity timeline, and deduped citations are stored atomically.
+6. **Aggregate Mail Cards:** `POST /sessions/{id}/mail-scans` maps its Pydantic activity payloads once into `DesiredMailActivity`. Feature policy validates scan/turn status and reconciles append-only activities before the route writes the turn to durable history or the in-process buffer.
 
 ---
 
 ## 4. Architectural Boundaries & Decoupling Compliance
 
-1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. In-chat email integration is implemented via high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory.
+1. **Email & Chat Decoupling ([ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)):** AI Chat operates independently from the standalone Email digest workflow. In-chat email integration is implemented via high-level `MailScanSummary` cards (`POST /sessions/{id}/mail-scans`) without injecting raw email bodies into conversational memory. The chat router keeps transport and its six request-scoped seams; `features/ai_chat/mail_scan_reconciliation.py` owns the transport-free activity and turn rules.
 2. **TaskEpisode Security:** System-proposed tasks created during chat interactions are marked `retrieval_eligible=false` to prevent unverified tasks from contaminating semantic memory context.
 3. **Transient Data Isolation:** Gmail contents and user attachments are processed ephemerally in-memory and are never stored in company vector indices or long-term databases.
 4. **Dual Persistence Strategy:** Zero-friction local development using SQLite plus an in-process bounded working-memory buffer; seamless production scaling using Supabase PostgreSQL when `DATABASE_URL` is supplied.
