@@ -14,7 +14,6 @@ from cowork_agent.integrations.llm.providers.mimo import (
 def test_mimo_settings_from_env_defaults() -> None:
     settings = MimoSettings.from_env(
         {"MIMO_API_KEY": "test-key-1"},
-        load_env_file=False,
     )
     assert settings.rotator.keys == ("test-key-1",)
     assert settings.model == "mimo-v2.5-pro"
@@ -33,7 +32,6 @@ def test_mimo_settings_from_env_multiple_keys() -> None:
             "MIMO_API_KEY_2": "key-two",
             "MIMO_API_KEY_3": "key-three",
         },
-        load_env_file=False,
     )
     assert settings.rotator.keys == ("key-one", "key-two", "key-three")
     assert settings.max_attempts == 3
@@ -43,7 +41,6 @@ def test_mimo_settings_from_env_validates_model() -> None:
     with pytest.raises(ValueError, match="MIMO_MODEL must be a real Mimo model name"):
         MimoSettings.from_env(
             {"MIMO_API_KEY": "test-key", "MIMO_MODEL": "replace-with-real-model"},
-            load_env_file=False,
         )
 
 
@@ -56,7 +53,6 @@ async def test_mimo_execute_chat_completion_rotates_on_rate_limit(
             "MIMO_API_KEY_1": "key-1",
             "MIMO_API_KEY_2": "key-2",
         },
-        load_env_file=False,
     )
 
     attempted_keys: list[str] = []
@@ -92,7 +88,7 @@ async def test_mimo_execute_chat_completion_rotates_on_rate_limit(
 async def test_mimo_fast_mode_disables_thinking_and_captures_reasoning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = MimoSettings.from_env({"MIMO_API_KEY": "key-1"}, load_env_file=False)
+    settings = MimoSettings.from_env({"MIMO_API_KEY": "key-1"})
     received: dict[str, object] = {}
 
     def mock_post_json(
@@ -131,7 +127,6 @@ async def test_mimo_execute_chat_completion_rotates_on_502_gateway_error(
             "MIMO_API_KEY_1": "key-1",
             "MIMO_API_KEY_2": "key-2",
         },
-        load_env_file=False,
     )
 
     attempted_keys: list[str] = []
@@ -172,7 +167,6 @@ async def test_mimo_execute_chat_completion_all_keys_fail_raises(
             "MIMO_API_KEY_1": "key-1",
             "MIMO_API_KEY_2": "key-2",
         },
-        load_env_file=False,
     )
 
     def mock_post_json(

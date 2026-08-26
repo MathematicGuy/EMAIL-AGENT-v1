@@ -741,6 +741,9 @@ def _gmail_env(tmp_path: Path) -> dict[str, str]:
         "GMAIL_CONNECTION_DB_PATH": str(tmp_path / "connections.db"),
         "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "OAUTH_STATE_SECRET": "state-secret-that-is-at-least-32-characters",
+        "LLM_PROVIDER": "mistral",
+        "MISTRAL_API_KEY": "test-mistral-key",
+        "MISTRAL_MODEL": "mistral-small-2603",
         "MICROSOFT_CLIENT_ID": "",
         "MICROSOFT_CLIENT_SECRET": "",
     }

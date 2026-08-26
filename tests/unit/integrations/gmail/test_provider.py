@@ -45,7 +45,7 @@ def gmail_environment(tmp_path: Path) -> dict[str, str]:
 
 
 def test_gmail_settings_allow_readonly_scope_and_redact_secrets(tmp_path: Path) -> None:
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     assert settings.scopes == (GMAIL_READONLY_SCOPE,)
     assert settings.fetch_concurrency == 6
     assert "client-secret" not in repr(settings)
@@ -61,13 +61,13 @@ def test_gmail_settings_reject_out_of_range_fetch_concurrency(
     values["GMAIL_FETCH_CONCURRENCY"] = value
 
     with pytest.raises(ValueError, match="GMAIL_FETCH_CONCURRENCY"):
-        GmailSettings.from_env(values, load_env_file=False)
+        GmailSettings.from_env(values)
 
 
 def test_gmail_settings_accept_safe_frontend_url(tmp_path: Path) -> None:
     values = gmail_environment(tmp_path)
     values["FRONTEND_URL"] = "http://localhost:5173/"
-    settings = GmailSettings.from_env(values, load_env_file=False)
+    settings = GmailSettings.from_env(values)
     assert settings.frontend_url == "http://localhost:5173"
 
 
@@ -75,18 +75,18 @@ def test_gmail_settings_reject_insecure_remote_frontend_url(tmp_path: Path) -> N
     values = gmail_environment(tmp_path)
     values["FRONTEND_URL"] = "http://example.com"
     with pytest.raises(ValueError, match="FRONTEND_URL"):
-        GmailSettings.from_env(values, load_env_file=False)
+        GmailSettings.from_env(values)
 
 
 def test_gmail_settings_reject_write_scope(tmp_path: Path) -> None:
     values = gmail_environment(tmp_path)
     values["GMAIL_SCOPES"] = "https://www.googleapis.com/auth/gmail.modify"
     with pytest.raises(ValueError, match="gmail.readonly"):
-        GmailSettings.from_env(values, load_env_file=False)
+        GmailSettings.from_env(values)
 
 
 def test_google_oauth_reuses_same_pkce_verifier_for_callback(tmp_path: Path) -> None:
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     driver = GoogleOAuthDriver(settings)
     verifier = "v" * 64
     authorization_url = driver.authorization_url("signed-state", verifier)
@@ -138,7 +138,7 @@ class FakeOAuthDriver:
 
 def test_oauth_completion_encrypts_and_persists_refresh_token(tmp_path: Path) -> None:
     async def scenario() -> None:
-        settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+        settings = GmailSettings.from_env(gmail_environment(tmp_path))
         repository = SQLiteMailboxConnectionRepository(settings.connection_db_path)
         await repository.initialize()
         cipher = TokenCipher(settings.token_encryption_key)
@@ -180,7 +180,7 @@ def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Pat
         return VerifiedPrincipal(user_id="internal-user-1")
 
     async def scenario() -> None:
-        settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+        settings = GmailSettings.from_env(gmail_environment(tmp_path))
         repository = RecordingRepository()
         driver = FakeOAuthDriver()
         service = GmailConnectionService(
@@ -691,7 +691,7 @@ def test_service_translates_only_stored_token_decryption_errors(tmp_path: Path) 
             assert encrypted_token == "encrypted-token"
             raise ValueError("Stored Gmail token cannot be decrypted")
 
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     adapter = GmailMailboxAdapter(settings, Repository(), FailingCipher())  # type: ignore[arg-type]
 
     with pytest.raises(MailboxReauthRequiredError) as raised:
@@ -720,7 +720,7 @@ def test_service_does_not_translate_unrelated_build_value_errors(
         raise ValueError("Gmail discovery document is invalid")
 
     monkeypatch.setattr(gmail_provider, "build", invalid_build)
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="discovery document"):
@@ -769,7 +769,7 @@ def test_service_cache_builds_once_and_requests_receive_distinct_transports(
     monkeypatch.setattr(gmail_provider.httplib2, "Http", fake_http)
     monkeypatch.setattr(gmail_provider, "AuthorizedHttp", fake_authorized_http)
     monkeypatch.setattr(gmail_provider, "HttpRequest", fake_request)
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
 
     async def scenario() -> None:

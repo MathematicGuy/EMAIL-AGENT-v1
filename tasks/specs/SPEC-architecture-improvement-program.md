@@ -4,7 +4,7 @@
 **Date opened:** 2026-08-25
 **Baseline verified at:** `dev` @ `216399e` (backend gate green: ruff clean, mypy clean on 201 files, pytest 2135 passed / 9 skipped)
 **Vocabulary:** `codebase-design` — module, interface, depth, seam, adapter, leverage, locality, and the **deletion test**
-**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md)
+**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md), [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md), [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md)
 
 ---
 
@@ -46,7 +46,7 @@ Source documents, all outside the repo and all volatile:
 | Roadmap 02 → 04 → 03 | `%APPDATA%\Qoder\SharedClientCache\cache\plans\Runtime_Deepening_Roadmap_464a1314.md` | complete; superseded by §4 |
 | Post-merge decisions | `%TEMP%\decisions-runtime-deepening.html` | five decisions; four now resolved, see §3 |
 | Handoff — roadmap | `%TEMP%\handoff-architecture-roadmap-20260825.md` | historical; content absorbed here |
-| Handoff — C07 deep dive | `%TEMP%\handoff-runtime-deepening-roadmap.md` | **current**; the only live handoff |
+| Handoff — C07 deep dive | `%TEMP%\handoff-runtime-deepening-roadmap.md` | historical; C07 is complete and its durable record is §4.5 |
 | C07 before/after, illustrated | `%TEMP%\c07-chat-module-before-after.html` | a reading copy of §4.5 for humans; the diagrams here are the same ones |
 
 If any of those are gone, this file is sufficient to continue.
@@ -72,7 +72,7 @@ flowchart TB
 
     subgraph COMPOSITION["Composition · composition.py"]
         RT["CoworkRuntime (frozen, typed)<br/>ControlPlane · MailboxRuntime · ChatRuntime<br/>EmailRagRuntime · EvaluationBundle<br/><b>C02 · done</b>"]
-        SURV["app.state survivors · 3 sites<br/>chat_controllers · chat_controller_factory<br/>report_pdf_renderer<br/><b>C10 · accepted debt</b>"]
+        SURV["app.state survivors · 2 keys<br/>chat_controllers · chat_controller_factory<br/><b>C10 · accepted debt</b>"]
     end
 
     subgraph FEATURES["Features · features/"]
@@ -80,10 +80,10 @@ flowchart TB
     end
 
     subgraph DOMAIN["Domain · ports and value objects"]
-        RA["report_artifacts.py<br/>ReportFilename · ReportArtifactStore<br/>ReportPdfRenderer (no implementation)<br/><b>C01 · done · C08 · blocked</b>"]
+        RA["report_artifacts.py + integrations/report_pdf<br/>ReportFilename · ReportArtifactStore<br/>fpdf2 + bundled Noto Sans renderer<br/><b>C01 · done · C08 · done</b>"]
     end
 
-    CFG["config.py · Settings.from_env<br/>re-reads .env on every call · 38 sites in src/<br/><b>C05 · open</b>"]
+    CFG["config.py · pure Settings.from_env<br/>dotenv loaded by executable boundaries<br/><b>C05 · done</b>"]
     CORPUS[("data/extracted/ · 17 documents<br/>the retrieval corpus · RAG_CORPUS_PATH")]
     RAWDIR[("data/raw/ · 17 files<br/>user-facing store + ingestion input<br/><b>C09 · done</b>")]
 
@@ -108,10 +108,12 @@ flowchart TB
 
     classDef done fill:#d1fae5,stroke:#047857,color:#064e3b;
     classDef open fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef debt fill:#e0e7ff,stroke:#4338ca,color:#312e81;
     classDef outlier fill:#ffe4e6,stroke:#be123c,color:#881337,stroke-width:2px;
     classDef plain fill:#f5f5f4,stroke:#a8a29e,color:#44403c;
-    class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR done;
-    class HOOK,CFG,SURV open;
+    class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR,HOOK,MAILP done;
+    class CFG done;
+    class SURV debt;
     class DEPS plain;
 ```
 
@@ -126,21 +128,22 @@ got enforced at the composition edge; everything above reads its dependencies th
 
 | ID | Workstream | Strength | Status | Record |
 |---|---|---|---|---|
-| **C01** | Report artifacts have no module — 3 hard-coded paths to `data/reports` | Strong | **Done** — `9c4e5fc` | §4.1 (no ADR; see note) |
+| **C01** | Report artifacts have no module — 3 hard-coded paths to `data/reports` | Strong | **Done** — `9c4e5fc` | [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md) |
 | **C02** | Composition is a 440-line closure and ~60 untyped `app.state` keys | Strong | **Done** — slices 02-1…02-8 | [ADR-013](../adr/ADR-013-composition-as-typed-value.md) |
 | **C04** | One chat turn is one 617-line generator | Strong | **Done, narrowed** — slices 04-1…04-3 | [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md) |
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
 | **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Done — C07 slice** | §4.5 |
-| **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Open — unscheduled** | §4.6 |
+| **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Done** — `67822e9` | [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md) |
 | **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Done — frontend protocol extraction** | §4.7 |
-| **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
+| **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Done** — fpdf2 + bundled Noto Sans | [ADR-018](../adr/ADR-018-report-pdfs-use-fpdf2-and-bundled-noto-sans.md) |
 | **C09** | A stray corpus input in `data/raw/` — latent re-ingest risk | Minor | **Done** — moved to `data/OCR/` | §4.9 |
-| **C10** | Three `app.state` survivors, one of them undocumented | — | **Accepted debt**, with revisit criteria | §4.10 |
+| **C10** | Two request-time `app.state` survivors remain | — | **Accepted debt**; PDF survivor closed by C08 | §4.10 |
 
 Operational items from the post-merge decisions doc, for completeness — **not architecture
 workstreams**, no ID, no tracking:
 
-- *Unpushed commits* — resolved. `dev` is ahead of `origin/dev` by 1 as of `216399e`.
+- *Unpushed commits* — resolved at the original baseline. This living register does not track
+  later branch divergence; inspect Git directly.
 - *E2E verification* — addressed at `216399e` (`test(e2e): fix locators and mocks…`). Playwright
   still needs a live server and credentials to run, so treat it as green-by-construction, not
   green-by-observation.
@@ -159,9 +162,10 @@ Closed by giving the artifact a module: `domain/report_artifacts.py` (the `Repor
 value object — `parse` raises, `sanitize` degrades — plus the `ReportArtifactStore` and
 `ReportPdfRenderer` **ports**), `persistence/report_artifacts.py`, and `api/reports.py`.
 
-**No ADR was written.** That is a gap, not a decision: C01 predates the ADR habit this program
-picked up at C02, and its two lasting contracts (the filename rule, and the store as an
-injected port) are recorded only in the commit. Cheap to fix if anyone touches reports again.
+The implementation predates this program's ADR habit. [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md)
+now records its two lasting contracts: filenames are validated domain values, and all report
+persistence crosses one injected store interface. C08 later supplied the separate renderer
+adapter without changing either contract.
 
 ```bash
 git show 9c4e5fc --stat
@@ -538,7 +542,7 @@ this section.
 
 ---
 
-### 4.6 C05 — `from_env` reads disk behind the caller · **Open, unscheduled**
+### 4.6 C05 — Settings parsing is pure · **Done** (`67822e9`) · ADR-017
 
 `Settings.from_env(load_env_file=True)` re-reads `.env` from disk on every call, so a caller
 that believes it controls the environment does not.
@@ -561,9 +565,27 @@ grep -rn "load_env_file" src/ --include=*.py | wc -l
   `test_create_app_wires_runtime_recovery_and_auth_when_enabled` at baseline: candidate 05's
   friction showing up as a test failure.
 
-**Why unscheduled:** widest blast radius of any open item, and no forcing function yet. If it
-starts costing time during another workstream, schedule it then. Re-confirmed parked
-2026-08-25.
+Closed by removing dotenv I/O and the `load_env_file` switch from all settings parsers. A parser
+now reads only its supplied mapping or the current `os.environ`; the FastAPI app, worker,
+ingestion CLI, live evaluation commands, and Gmail-candidate command call the one
+`load_runtime_environment()` seam before parsing settings. The optional Gemini last-resort
+parser follows the same rule.
+
+The regression test creates a local `.env` containing a provider key, deletes that key from the
+process environment, and proves `OpenRouterSettings.from_env()` still rejects the missing key.
+The ingestion CLI test proves an executable boundary still loads `.env` before composing its
+settings. [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md) records the lifecycle rule.
+
+Evidence:
+
+```bash
+uv run pytest tests/unit/test_config.py tests/unit/test_ingestion_cli.py -q
+uv run pytest tests/unit --ignore=tests/unit/scripts -q
+uv run pytest tests/unit/scripts -q
+uv run pytest tests/integration/test_knowledge_ingestion_to_rag.py -q
+uv run ruff check .
+uv run mypy src
+```
 
 ---
 
@@ -602,25 +624,67 @@ pnpm build
 
 ---
 
-### 4.8 C08 — PDF renderer unshipped · **Blocked on a human decision**
+### 4.8 C08 — PDF renderer · **Done** · ADR-018
 
-`POST /reports/{f}/pdf` returns `501 pdf_export_unavailable`. Faithful Vietnamese Markdown
-rendering needs an embedded Unicode TTF, and that dependency choice was **deliberately not made
-unilaterally**. The `ReportPdfRenderer` port is defined so an implementation can be registered
-without a transport change. The UI falls back to source download.
+The user selected `fpdf2`. Production now composes `Fpdf2ReportPdfRenderer` through the typed
+`CoworkRuntime.report_pdf_renderer` field, and `GET /api/v1/reports/{filename}/pdf` returns an
+`application/pdf` attachment. The former `app.state.report_pdf_renderer` test-only write and the
+route's `getattr`/`cast` are deleted. A `None` renderer remains valid only in narrow injected test
+runtimes, preserving the explicit `501 pdf_export_unavailable` capability response.
 
-**Do not "fix" this by silently adding a PDF library. Ask first.** Also documented as a
-`[!NOTE]` in `docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md`.
+The concrete decision and its rejected alternatives are recorded in
+[ADR-018](../adr/ADR-018-report-pdfs-use-fpdf2-and-bundled-noto-sans.md).
 
-Verified at `216399e`: **nothing in `src/` ever writes `app.state.report_pdf_renderer`.** The
-only writer in the tree is `tests/integration/api/test_reports_api.py:151`. So in production
-`_renderer()` reads `None` unconditionally — the 501 is structural, not conditional. See C10:
-whoever ships the renderer should give it a typed `CoworkRuntime` field and delete the last
-`getattr`, rather than adding a second untyped write.
+#### Dependency decision
+
+The implementation choice is intentionally narrow. Every option must bundle an open Unicode
+font in the repository; relying on an operating-system font would make Vietnamese output vary by
+machine and break offline builds.
+
+| Option | Strength | Cost / constraint | Decision signal |
+|---|---|---|---|
+| **fpdf2 + bundled Noto Sans** | Pure-Python-friendly installation on Windows; embeds and subsets TrueType/OpenType fonts; enough layout primitives for the report Markdown subset | The adapter must map headings, paragraphs, lists, emphasis, links, and fenced code explicitly | **Recommended** for the current report surface |
+| **WeasyPrint + bundled Noto Sans** | Best HTML/CSS fidelity after Markdown-to-HTML conversion | Python-library use on Windows requires the native Pango/MSYS2 runtime, expanding installation and CI support | Choose only if CSS fidelity is worth the native runtime |
+| **ReportLab + bundled Noto Sans** | Mature PDF engine with TrueType font support and no browser renderer | Platypus mapping is more manual than fpdf2 for the same Markdown subset | Choose when ReportLab is already an organizational standard |
+
+**Selected:** `fpdf2 + bundled Noto Sans`. The four committed static styles are derived from the
+official `google/fonts` variable sources at a recorded commit under the SIL Open Font License.
+Static instances keep variable-font interpolation out of the request path; the adapter performs
+no network or host-font discovery.
+
+#### Completed implementation contract
+
+All acceptance conditions are implemented:
+
+1. A concrete adapter implements `ReportPdfRenderer` outside `domain/`; the domain port remains
+   unaware of the selected library.
+2. `CoworkRuntime` owns `report_pdf_renderer: ReportPdfRenderer | None`. Production composition
+   registers the adapter, the report route reads the typed field, and
+   `app.state.report_pdf_renderer` plus its `getattr`/`cast` are deleted.
+3. The adapter bundles and embeds an open Unicode font deterministically. It performs no network
+   access and does not discover fonts from the host operating system.
+4. The supported report Markdown subset is explicit and tested: Vietnamese headings and body
+   text, paragraphs, ordered/unordered lists, emphasis, links as visible text plus URL, and fenced
+   code. Unsupported constructs degrade to readable text rather than disappearing.
+5. The existing route contract stays stable: unknown report is 404; a rendered report is
+   `application/pdf` with an attachment filename derived from `ReportFilename`; no report content
+   or local path appears in errors or logs.
+6. Tests prove the emitted bytes are a valid PDF and extract back the representative Vietnamese
+   text. A `%PDF` prefix alone is not sufficient evidence of correct Unicode rendering.
+7. A new ADR records the renderer/library/font choice, C10 closes its final untyped survivor, the
+   four Level 1 architecture documents are synchronized, and this register plus `tasks/todo.md`
+   mark C08 done.
+8. Verification runs the narrow renderer and report-route tests first, followed by `ruff`, `mypy`,
+   and the full backend suite. Because the dependency changes `pyproject.toml` and `uv.lock`, a
+   clean `uv sync --extra dev --extra postgres` must also succeed.
+
+Extraction tests reopen the emitted bytes with `pypdf` and recover Vietnamese headings, body text,
+lists, emphasis, visible link labels and URLs, fenced code, and literal unsupported constructs.
+The built wheel contains all four font files plus their license and source/checksum record.
 
 ---
 
-### 4.9 C09 — A stray corpus input, already defused · **Open (minor), latent risk only**
+### 4.9 C09 — A stray corpus input, already defused · **Done**
 
 > **This entry was wrong when first written and is corrected here.** Two claims did not
 > survive checking: that the textbook is in the production retrieval corpus, and that no test
@@ -691,29 +755,28 @@ agent's file and they are mid-flight; flag it to them rather than editing it.
 
 ---
 
-### 4.10 C10 — `app.state` survivors · **Accepted debt**
+### 4.10 C10 — `app.state` survivors · **Accepted debt, narrowed by C08**
 
-Three live sites remain in `src/`:
+Two keys remain in `src/`:
 
 | Site | Key | Why it survives |
 |---|---|---|
-| `api/chat.py:969, 972` | `chat_controllers` | Request-time per-session controller cache. Created lazily on first request; a frozen value cannot hold it. Sanctioned by ADR-013 point 3. |
-| `api/chat.py:985` | `chat_controller_factory` | Published once after the single runtime assembly. Sanctioned by ADR-013. |
-| `api/reports.py:54` | `report_pdf_renderer` | **Undocumented.** A `getattr` read with no production writer — it exists so a test can inject a stub (C08). |
+| `api/chat.py:767, 770` | `chat_controllers` | Request-time per-session controller cache. Created lazily on first request; a frozen value cannot hold it. Sanctioned by ADR-013 point 3. |
+| `app.py:498`; `api/chat.py:783` | `chat_controller_factory` | Published once after the single runtime assembly and read by the request-time cache. Sanctioned by ADR-013. |
 
 ```bash
 grep -rn "app\.state" src/ --include=*.py
 ```
 
-**Two corrections ADR-013 needs**, both one-liners, best made by whoever next opens that ADR:
+**ADR-013 corrected 2026-08-26:**
 
-1. Its "Final shape" survivor list names `raw_document_repository`. That survivor is **gone** —
-   candidate 03 replaced it with a typed read at `api/knowledge.py:133`.
-2. It does not mention `report_pdf_renderer`, which is now the last untyped `app.state` read in
-   the codebase.
+1. The obsolete `raw_document_repository` survivor was removed; candidate 03 replaced it with a
+   typed control-plane read.
+2. `report_pdf_renderer`, the last untyped optional read, was recorded with its C08 revisit rule;
+   ADR-018 has now completed that revisit and removed it.
 
-**Revisit criterion:** when C08 is decided, the renderer becomes a typed runtime field and this
-row shrinks to the two request-time caches, which are correct as they are.
+**C08 revisit completed:** the renderer is a typed `CoworkRuntime` field and the untyped row is
+gone. The two request-time chat cache/factory exceptions remain correct as documented.
 
 ---
 
@@ -740,7 +803,6 @@ Recording these is the point of the file. Each was examined and rejected on evid
 - SQL migrations. Moving *where* a migration is invoked from is fine; changing *what* it does
   is not. Flag it if the distinction blurs.
 - RAG bootstrap fallbacks.
-- The PDF renderer dependency (C08).
 
 **Security** (from `AGENTS.md`, binding):
 
@@ -877,6 +939,10 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C08 completed.** The user selected fpdf2. Added the concrete renderer behind the existing domain port, bundled four static Noto Sans styles with license/provenance, moved renderer ownership into typed `CoworkRuntime`, preserved the report route contract, and proved Vietnamese text by reopening generated PDFs with pypdf. ADR-018 records the decision; C10 now has only its two request-time chat survivors. |
+| 2026-08-26 | **C08 decision surface made executable.** Added the three dependency options, a recommendation, and library-neutral acceptance criteria covering the typed runtime cutover, bundled Unicode font, Markdown subset, PDF extraction proof, ADR/docs, and clean dependency sync. C08 remains blocked until the human selects a library. |
+| 2026-08-26 | **C05 completed.** Settings parsers are pure, executable entry points own the single dotenv-loading seam, regression coverage prevents `.env` from replenishing a deleted provider key, and ADR-017 records the boundary. |
+| 2026-08-26 | **C01/C10 records completed and register drift repaired.** Added ADR-016 for the report filename/store contracts, corrected ADR-013's survivor list, and synchronized the C06/C07/C09/C10 checklist and section statuses with the register. No runtime behavior changed. |
 | 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
 | 2026-08-26 | **C06 closed.** Extracted the concurrent Gmail/Outlook mail-poll protocol from `useStreamingChat` into the deep `runMailScanProtocol` operation. The hook remains the React/persistence adapter; routes, mail client, cancellation semantics, provider ordering, and public hook interface are unchanged. Added protocol characterization and refreshed all four required Level 1 architecture documents. |
 | 2026-08-25 | **C09 closed.** Moved rather than deleted: `books/` was already gone (`e91486e`), so `data/raw/` held the only copy, and deleting reclaims nothing because the blob is permanent in history. The PDF now sits in `data/OCR/` beside its extraction and golden dataset. `data/raw/` back to 17 files; gate green (2137 passed). |

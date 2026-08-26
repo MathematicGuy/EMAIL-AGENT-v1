@@ -6,7 +6,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from cowork_agent.config import KnowledgeIngestionSettings
+from cowork_agent.config import KnowledgeIngestionSettings, load_runtime_environment
 from cowork_agent.integrations.knowledge_ingestion.service import KnowledgeIngestionService
 
 
@@ -17,6 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else 2
     try:
+        load_runtime_environment()
         settings = KnowledgeIngestionSettings.from_env()
         outcomes = KnowledgeIngestionService(settings).ingest(
             arguments.source, arguments.output, arguments.force, dry_run=arguments.dry_run

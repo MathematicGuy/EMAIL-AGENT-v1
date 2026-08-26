@@ -182,11 +182,12 @@ def write_candidates(
 
 
 async def _load_connection(connection_id: str | None) -> tuple[Any, Any, Any]:
-    from cowork_agent.config import GmailSettings
+    from cowork_agent.config import GmailSettings, load_runtime_environment
     from cowork_agent.persistence.repositories.mailbox_connections import (
         SQLiteMailboxConnectionRepository,
     )
 
+    load_runtime_environment()
     settings = GmailSettings.from_env()
     repository = SQLiteMailboxConnectionRepository(settings.connection_db_path)
     connections = tuple(

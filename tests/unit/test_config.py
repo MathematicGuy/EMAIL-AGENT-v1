@@ -31,7 +31,20 @@ def test_load_runtime_environment_reads_feature_flags_from_config(
 
     assert database_url() == "postgresql://example/db"
     assert postgres_mode() == ""
-    assert UserDocumentsSettings.from_env(load_env_file=False).enabled is False
+    assert UserDocumentsSettings.from_env().enabled is False
+
+
+def test_settings_parser_does_not_read_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Implicit dotenv I/O can turn an offline settings read into a billed call."""
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=fake-provider-key\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        OpenRouterSettings.from_env()
 
 
 def test_database_url_follows_postgres_mode_local_and_ignores_legacy_url() -> None:
@@ -100,13 +113,13 @@ def test_postgres_mode_rejects_unknown_value() -> None:
 
 
 def test_session_cookie_defaults_insecure_on_local_postgres_mode() -> None:
-    settings = SessionSettings.from_env({"POSTGRES_MODE": "local"}, load_env_file=False)
+    settings = SessionSettings.from_env({"POSTGRES_MODE": "local"})
 
     assert settings.cookie_secure is False
 
 
 def test_session_cookie_defaults_insecure_on_sqlite_fallback() -> None:
-    settings = SessionSettings.from_env({"POSTGRES_MODE": "off"}, load_env_file=False)
+    settings = SessionSettings.from_env({"POSTGRES_MODE": "off"})
 
     assert settings.cookie_secure is False
 
@@ -114,7 +127,6 @@ def test_session_cookie_defaults_insecure_on_sqlite_fallback() -> None:
 def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
     settings = SessionSettings.from_env(
         {"POSTGRES_MODE": "local", "APP_SESSION_COOKIE_SECURE": "true"},
-        load_env_file=False,
     )
 
     assert settings.cookie_secure is True
@@ -122,7 +134,7 @@ def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
 
 def test_project_gemini_embedding_settings_default_to_1024() -> None:
     settings = GeminiEmbeddingSettings.from_env(
-        {"GEMINI_API_KEY_1": "key-1"}, load_env_file=False
+        {"GEMINI_API_KEY_1": "key-1"}
     )
 
     assert settings.model == "gemini-embedding-2"
@@ -136,17 +148,17 @@ def test_project_documents_read_the_turbovec_index_root() -> None:
     environ = {"USER_DOCUMENTS_INDEX_ROOT": "var/private-project-indexes"}
 
     assert (
-        UserDocumentsSettings.from_env(environ, load_env_file=False).index_root
+        UserDocumentsSettings.from_env(environ).index_root
         == "var/private-project-indexes"
     )
     assert (
-        UserDocumentsSettings.from_env({}, load_env_file=False).index_root
+        UserDocumentsSettings.from_env({}).index_root
         == "var/project-indexes"
     )
 
 
 def test_project_documents_are_enabled_by_default() -> None:
-    settings = UserDocumentsSettings.from_env({}, load_env_file=False)
+    settings = UserDocumentsSettings.from_env({})
 
     assert settings.enabled is True
     assert settings.retrieval_timeout_ms == 10_000
@@ -159,7 +171,6 @@ def test_session_settings_load_cookie_contract() -> None:
             "APP_SESSION_COOKIE_NAME": "cowork_session",
             "APP_SESSION_COOKIE_SECURE": "true",
         },
-        load_env_file=False,
     )
 
     assert settings.session_ttl_seconds == 3600
@@ -171,7 +182,7 @@ def test_session_settings_load_cookie_contract() -> None:
 def test_session_settings_reject_non_positive_ttl(ttl: str) -> None:
     with pytest.raises(ValueError, match="must be positive"):
         SessionSettings.from_env(
-            {"APP_SESSION_TTL_SECONDS": ttl}, load_env_file=False
+            {"APP_SESSION_TTL_SECONDS": ttl}
         )
 
 
@@ -181,7 +192,6 @@ def test_supabase_storage_settings_keep_the_secret_out_of_repr() -> None:
             "SUPABASE_URL": "https://project.supabase.co/",
             "SUPABASE_SECRET_KEY": "server-secret",
         },
-        load_env_file=False,
     )
 
     assert settings.url == "https://project.supabase.co"
@@ -195,7 +205,6 @@ def test_reranker_settings_cohere_model_from_env() -> None:
             "RERANKER_MODEL": "rerank-v4.0-fast",
             "COHERE_API_KEY": "cohere-key-1",
         },
-        load_env_file=False,
     )
 
     assert settings.model == "rerank-v4.0-fast"
@@ -211,7 +220,6 @@ def test_reranker_settings_jina_model_from_env() -> None:
             "RERANKER_MODEL": "jina-reranker-v2",
             "JINA_API_KEY": "jina-key-1",
         },
-        load_env_file=False,
     )
 
     assert settings.model == "jina-reranker-v2"
@@ -234,7 +242,7 @@ _OPENROUTER_BASE = {
     ],
 )
 def test_openrouter_allowed_models_missing_is_empty(environ: dict[str, str]) -> None:
-    settings = OpenRouterSettings.from_env(environ, load_env_file=False)
+    settings = OpenRouterSettings.from_env(environ)
 
     assert settings.allowed_models == ()
     assert settings.fallback_models() == ()
@@ -246,7 +254,6 @@ def test_openrouter_allowed_models_parses_json_list_in_order() -> None:
             **_OPENROUTER_BASE,
             "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", "deepseek/x"]',
         },
-        load_env_file=False,
     )
 
     assert settings.allowed_models == ("openai/gpt", "deepseek/x")
@@ -256,7 +263,6 @@ def test_openrouter_allowed_models_reject_invalid_json() -> None:
     with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
         OpenRouterSettings.from_env(
             {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": "not-json"},
-            load_env_file=False,
         )
 
 
@@ -264,7 +270,6 @@ def test_openrouter_allowed_models_reject_non_list() -> None:
     with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
         OpenRouterSettings.from_env(
             {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '{"openai/gpt": true}'},
-            load_env_file=False,
         )
 
 
@@ -272,7 +277,6 @@ def test_openrouter_allowed_models_reject_empty_entry() -> None:
     with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
         OpenRouterSettings.from_env(
             {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", ""]'},
-            load_env_file=False,
         )
 
 
@@ -280,7 +284,6 @@ def test_openrouter_allowed_models_reject_non_string() -> None:
     with pytest.raises(ValueError, match="OPENROUTER_ALLOWED_MODELS"):
         OpenRouterSettings.from_env(
             {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", 1]'},
-            load_env_file=False,
         )
 
 
@@ -291,15 +294,14 @@ def test_openrouter_fallback_models_omits_primary_preserving_order() -> None:
             "OPENROUTER_MODEL": "deepseek/x",
             "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", "deepseek/x"]',
         },
-        load_env_file=False,
     )
 
     assert settings.fallback_models() == ("openai/gpt",)
 
 def test_email_rag_quality_settings_default_and_bounds() -> None:
-    settings = EmailRagQualitySettings.from_env({}, load_env_file=False)
+    settings = EmailRagQualitySettings.from_env({})
     assert (settings.min_rerank_score, settings.relative_cutoff_ratio) == (0.30, 0.85)
     with pytest.raises(ValueError, match="EMAIL_RAG_MIN_RERANK_SCORE"):
         EmailRagQualitySettings.from_env(
-            {"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"}, load_env_file=False
+            {"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"}
         )

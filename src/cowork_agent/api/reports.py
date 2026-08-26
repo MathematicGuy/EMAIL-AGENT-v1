@@ -8,7 +8,7 @@ the path nor the naming rule appears here.
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -50,9 +50,7 @@ def _store(request: Request) -> ReportArtifactStore:
 
 
 def _renderer(request: Request) -> ReportPdfRenderer | None:
-    return cast(
-        ReportPdfRenderer | None, getattr(request.app.state, "report_pdf_renderer", None)
-    )
+    return runtime(request).report_pdf_renderer
 
 
 def _filename(raw: str) -> ReportFilename:

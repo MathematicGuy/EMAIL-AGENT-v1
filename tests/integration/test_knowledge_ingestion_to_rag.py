@@ -25,7 +25,7 @@ def test_ingested_docx_markdown_is_loadable_by_rag(tmp_path: Path) -> None:
     document.add_paragraph("Submit receipts within five days.")
     document.save(source / "expense-policy.docx")
     settings = KnowledgeIngestionSettings.from_env(
-        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}, load_env_file=False
+        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}
     )
     service = KnowledgeIngestionService(settings, DocxExtractor(), NativePdfInspector())
 

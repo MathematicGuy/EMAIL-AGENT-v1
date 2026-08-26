@@ -37,11 +37,11 @@ accessor, `runtime(request) -> CoworkRuntime`.
    invariants (e.g. the report store composed before any credentialed
    settings read) survive untouched.
 3. **Request-time writes stay outside the frozen runtime.** The
-   `chat_controllers` per-session controller cache and the raw-document
-   SQLite fallback repository memo are created lazily on first request and
-   written back to `app.state`; they are request-time growth, not boot-time
-   composition, and a frozen value cannot hold them. They keep their
-   `app.state` homes as documented survivors.
+   `chat_controllers` per-session controller cache is created lazily on first
+   request and written back to `app.state`; it is request-time growth, not
+   boot-time composition, and a frozen value cannot hold it. The
+   raw-document SQLite fallback originally shared this exception, but ADR-015
+   removed that memo when its router moved to the typed control-plane read.
 4. **Slice 02-1 ships the skeleton only**: `CoworkRuntime(reports=...)` and
    the accessor, with `app.state.report_store` kept as a thin forward. Later
    slices add the group fields `control_plane`, `mailbox`, `chat`,
@@ -68,12 +68,15 @@ Slice 02-8 grep-proved every legacy forward dead and deleted it. The only
 
 - `runtime` — the one assignment; the whole contract of this ADR.
 - `chat_controllers` — the request-time controller cache (point 3).
-- `raw_document_repository` — the self-heal memo fallback for the
-  no-lifespan path (point 3); request-time readers go through the
-  control-plane group first.
 - `chat_controller_factory` — published once after the single assembly;
   the chat router's request-time cache reads it there, and the factory
   itself reads the assembled runtime at controller-creation time.
+
+ADR-015 removed the former `raw_document_repository` self-heal memo: the
+knowledge router now reads the typed control-plane repository like every other
+consumer. The two request-time chat survivors above are therefore the complete current exception
+list. ADR-018 completed C08 by moving `report_pdf_renderer` into `CoworkRuntime` and deleting its
+test-only untyped write.
 
 Two last strays also died here: `gmail_settings` gained a home on the
 mailbox group so its forward could be deleted, and the always-`None`

@@ -6,6 +6,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -72,6 +73,7 @@ from cowork_agent.integrations.llm.provider_factory import (
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.report_pdf import Fpdf2ReportPdfRenderer
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
@@ -161,6 +163,35 @@ def _not_connected_tool() -> Tool:
         description=CALENDAR_TOOL_DESCRIPTION,
         parameters=CALENDAR_TOOL_SCHEMA,
         handler=handler,
+    )
+
+
+def _calendar_classifier_tools(
+    settings: GoogleCalendarSettings | None,
+) -> tuple[Tool, ...]:
+    """Tool descriptions the intent classifier may select at this boot.
+
+    The handler is never dispatched from this tuple; `ChatToolRunner` binds a
+    fresh tool to the real turn. Keeping the same `Tool` value for both paths
+    makes the classifier name, description, and schema impossible to drift
+    from the executable definition.
+
+    The `GoogleCalendar` built here from environment settings is inert: only
+    the name, description, and schema are read off the value, and the handler
+    is dropped. ADR-019's per-user rule governs dispatch, which happens in
+    `_chat_tool_runner`, and is not weakened by a description built once.
+    """
+
+    if settings is None or not settings.enabled:
+        return ()
+    timezone = ZoneInfo(settings.timezone)
+    return (
+        build_calendar_tool(
+            GoogleCalendar(settings),
+            idempotency_key="classifier-tool-spec",
+            timezone=settings.timezone,
+            now=datetime.now(timezone),
+        ),
     )
 
 
@@ -329,6 +360,7 @@ def create_app() -> FastAPI:
             # The store is the first field of the typed runtime (ADR-013); its
             # consumers read it through ``runtime(request).reports``.
             report_store = FileSystemReportArtifactStore(REPORTS_DIR)
+            report_pdf_renderer = Fpdf2ReportPdfRenderer()
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
             outlook_settings: OutlookSettings | None = None
@@ -432,7 +464,9 @@ def create_app() -> FastAPI:
                     "mimo": "Mimo",
                 }.get(provider, "LLM provider")
                 email_providers = await resolve_email_providers(provider)
-                chat_providers = resolve_chat_providers(provider)
+                chat_providers = resolve_chat_providers(
+                    provider, tools=_calendar_classifier_tools(calendar_settings)
+                )
                 intent_classifier = chat_providers.intent_classifier
                 intent_settings = chat_providers.intent_settings
                 chat_reply = chat_providers.chat_reply
@@ -519,6 +553,7 @@ def create_app() -> FastAPI:
             # exceptions in ADR-013.
             app.state.runtime = CoworkRuntime(
                 reports=report_store,
+                report_pdf_renderer=report_pdf_renderer,
                 control_plane=control_plane,
                 mailbox=mailbox_runtime,
                 chat=chat_runtime,

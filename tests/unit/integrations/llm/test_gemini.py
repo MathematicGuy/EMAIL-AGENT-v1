@@ -45,7 +45,7 @@ def environment(**overrides: str) -> dict[str, str]:
 
 
 def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None:
-    settings = GeminiSettings.from_env(environment(), load_env_file=False)
+    settings = GeminiSettings.from_env(environment())
     assert settings.api_keys == ("key-one", "key-two", "key-three")
     assert settings.action_plan_concurrency == 3
     assert "key-one" not in repr(settings)
@@ -55,7 +55,7 @@ def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None
 def test_settings_reject_out_of_range_action_plan_concurrency(value: str) -> None:
     with pytest.raises(ValueError, match="GEMINI_ACTION_PLAN_CONCURRENCY"):
         GeminiSettings.from_env(
-            environment(GEMINI_ACTION_PLAN_CONCURRENCY=value), load_env_file=False
+            environment(GEMINI_ACTION_PLAN_CONCURRENCY=value)
         )
 
 
@@ -67,7 +67,6 @@ def test_settings_load_all_numbered_gemini_keys() -> None:
             GEMINI_API_KEY_6="key-six",
             GEMINI_MAX_ATTEMPTS_PER_REQUEST="6",
         ),
-        load_env_file=False,
     )
 
     assert settings.api_keys == (
@@ -89,21 +88,20 @@ def test_placeholder_keys_are_not_accepted_as_credentials() -> None:
                 "GEMINI_API_KEY_2": "",
                 "GEMINI_API_KEY_3": "",
             },
-            load_env_file=False,
         )
 
 
 def test_default_model_is_gemini_3_5_flash_lite() -> None:
     values = environment()
     del values["GEMINI_MODEL"]
-    settings = GeminiSettings.from_env(values, load_env_file=False)
+    settings = GeminiSettings.from_env(values)
     assert settings.model == "gemini-3.5-flash-lite"
 
 
 def test_placeholder_model_is_rejected_during_startup() -> None:
     values = environment(GEMINI_MODEL="replace-with-gemini-structured-output-model")
     with pytest.raises(ValueError, match="real Gemini model"):
-        GeminiSettings.from_env(values, load_env_file=False)
+        GeminiSettings.from_env(values)
 
 
 def test_round_robin_starts_each_request_with_the_next_key() -> None:
@@ -208,7 +206,7 @@ def test_query_rewriter_rotates_keys_and_wraps_untrusted_email_data() -> None:
     async def scenario() -> None:
         transport = QueryTransport({"key-one"})
         rewriter = GeminiRetrievalQueryRewriter(
-            GeminiSettings.from_env(environment(), load_env_file=False), transport
+            GeminiSettings.from_env(environment()), transport
         )
         query = await rewriter.rewrite(
             QueryRewriteInput(
@@ -226,7 +224,7 @@ def test_query_rewriter_rotates_keys_and_wraps_untrusted_email_data() -> None:
 
 def test_generator_rotates_to_next_key_after_rate_limit() -> None:
     async def scenario() -> None:
-        settings = GeminiSettings.from_env(environment(), load_env_file=False)
+        settings = GeminiSettings.from_env(environment())
         transport = RecordingTransport({"key-one"})
         generator = GeminiActionPlanGenerator(settings, transport)
         output = await generator.generate(

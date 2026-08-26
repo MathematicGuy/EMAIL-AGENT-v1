@@ -36,7 +36,7 @@ class StubPdfInspector:
 
 def _settings() -> KnowledgeIngestionSettings:
     return KnowledgeIngestionSettings.from_env(
-        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}, load_env_file=False
+        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}
     )
 
 
@@ -144,7 +144,6 @@ def test_pdf_over_page_limit_is_rejected_before_markdown_is_written(tmp_path: Pa
     (raw / "long.pdf").write_bytes(b"pdf")
     settings = KnowledgeIngestionSettings.from_env(
         {"KNOWLEDGE_INGEST_OCR_ENABLED": "false", "KNOWLEDGE_INGEST_MAX_PDF_PAGES": "1"},
-        load_env_file=False,
     )
     service = KnowledgeIngestionService(
         settings,
@@ -178,7 +177,6 @@ def test_service_extracts_via_ocr_when_enabled(tmp_path: Path) -> None:
     (raw / "scanned_doc.pdf").write_bytes(b"scanned-pdf-bytes")
     settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"},
-        load_env_file=False,
     )
     stub_ocr = _StubOcrExtractor("# Scanned Content")
     service = KnowledgeIngestionService(
@@ -205,7 +203,6 @@ def test_service_handles_ocr_failure_cleanly(tmp_path: Path) -> None:
     (raw / "broken.pdf").write_bytes(b"bytes")
     settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"},
-        load_env_file=False,
     )
 
     class _FailingOcr:
@@ -232,7 +229,6 @@ def test_service_adaptive_mode_escalates_scanned_pdf_to_ocr(tmp_path: Path) -> N
     inspection = PdfInspection(PdfKind.MIXED, 2, (2,), {1: "page 1"})
     settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "adaptive", "MISTRAL_API_KEY": "secret"},
-        load_env_file=False,
     )
     stub_ocr = _StubOcrExtractor("# Escalated OCR Content")
     service = KnowledgeIngestionService(
@@ -260,7 +256,6 @@ def test_service_adaptive_mode_uses_native_for_clean_pdf(tmp_path: Path) -> None
     inspection = PdfInspection(PdfKind.TEXT_BASED, 1, (), {1: "clean digital text"})
     settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "adaptive", "MISTRAL_API_KEY": "secret"},
-        load_env_file=False,
     )
     stub_ocr = _StubOcrExtractor("# Should Not Be Called")
     service = KnowledgeIngestionService(
@@ -415,7 +410,6 @@ def test_advance_mode_does_not_ocr_txt(tmp_path: Path) -> None:
     (raw / "note.txt").write_text("plain text body\n", encoding="utf-8")
     settings = KnowledgeIngestionSettings.from_env(
         {"EXTRACTION_MODE": "advance", "MISTRAL_API_KEY": "secret"},
-        load_env_file=False,
     )
     stub_ocr = _StubOcrExtractor("# Should Not Be Called")
     service = KnowledgeIngestionService(

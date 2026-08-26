@@ -133,7 +133,7 @@ def test_authorization_url_is_pkce_and_read_only() -> None:
 
 def test_config_defaults_to_common_and_the_exact_read_only_scope_set() -> None:
     settings = ConfigOutlookSettings.from_env(
-        outlook_environment(), load_env_file=False
+        outlook_environment()
     )
     assert settings.tenant == "common"
     assert settings.scopes == MICROSOFT_DEFAULT_SCOPES
@@ -143,7 +143,7 @@ def test_config_rejects_mail_write_scope() -> None:
     values = outlook_environment()
     values["MICROSOFT_SCOPES"] = " ".join((*MICROSOFT_DEFAULT_SCOPES, "Mail.ReadWrite"))
     with pytest.raises(ValueError, match="only Mail.Read"):
-        ConfigOutlookSettings.from_env(values, load_env_file=False)
+        ConfigOutlookSettings.from_env(values)
 
 
 def test_driver_rejects_any_scope_change() -> None:

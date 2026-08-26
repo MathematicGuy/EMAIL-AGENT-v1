@@ -110,6 +110,7 @@ Before writing a test, check if its invariant is already owned.
 | Per-user calendar grant: whose token a turn resolves, and the refusal when there is none (J1, J2) | `unit/features/ai_chat/test_calendar_binder.py` | controller and tool tests |
 | A chained calendar consent never costs the mail connection or mints a session (J4, J5) | `unit/api/test_calendar_router.py` | mailbox API tests |
 | Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
+| Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.
