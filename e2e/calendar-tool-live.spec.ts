@@ -121,7 +121,6 @@ test.describe('Calendar tool, live backend', () => {
   // deleted so the suite turns red the day it starts passing, which is the
   // only signal that the fix landed. See docs/evaluations/CHAT/PROGRESS.md F6.
   test('the created event carries the calendar zone, not UTC', async ({ page }) => {
-    test.fail();
     await seedGrant(page);
     await clearEvents(page);
 

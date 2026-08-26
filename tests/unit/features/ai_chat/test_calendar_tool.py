@@ -82,6 +82,25 @@ def test_a_start_without_an_offset_is_read_in_the_users_timezone() -> None:
 
     (draft,) = calendar.events.values()
     assert draft.start.utcoffset() == timedelta(hours=7)
+    assert draft.start.isoformat() == "2026-08-26T09:00:00+07:00"
+
+
+def test_a_start_with_utc_or_z_reinterprets_wall_clock_in_the_users_timezone() -> None:
+    calendar = InMemoryCalendar()
+
+    _call(
+        {
+            "title": "Gym",
+            "start": "2026-08-28T02:00:00+00:00",
+            "end": "2026-08-28T03:00:00Z",
+        },
+        calendar=calendar,
+    )
+
+    (draft,) = calendar.events.values()
+    assert draft.start.utcoffset() == timedelta(hours=7)
+    assert draft.start.isoformat() == "2026-08-28T02:00:00+07:00"
+    assert draft.end.isoformat() == "2026-08-28T03:00:00+07:00"
 
 
 def test_mixing_a_date_with_a_time_is_rejected_rather_than_guessed() -> None:

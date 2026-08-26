@@ -167,10 +167,12 @@ def _parse_moment(raw: str, tz: ZoneInfo) -> datetime | date | None:
         moment = datetime.fromisoformat(text)
     except ValueError:
         return None
-    # An offset-less dateTime is accepted by Google and read in the calendar's
-    # zone, so a missing offset is not an error signal there. Resolve it here
-    # instead, where the user's zone is known.
-    return moment if moment.tzinfo is not None else moment.replace(tzinfo=tz)
+    # Option A (Wall-clock wins): Re-interpret the wall-clock digits in the
+    # calendar's zone (e.g. 02:00 UTC emitted by an LLM becomes 02:00 in Asia/Ho_Chi_Minh).
+    # Google accepts an explicit offset and honors it over timeZone, so attaching
+    # the target calendar's tzinfo directly ensures the event lands on the exact
+    # wall-clock hour the user requested.
+    return moment.replace(tzinfo=tz)
 
 
 def _validate_range(start: datetime | date, end: datetime | date, *, now: datetime) -> str | None:
