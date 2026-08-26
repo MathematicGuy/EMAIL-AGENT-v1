@@ -6,6 +6,7 @@ import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -44,7 +45,11 @@ from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRout
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
-from cowork_agent.features.ai_chat.tools import CALENDAR_TOOL_NAME, build_calendar_tool
+from cowork_agent.features.ai_chat.tools import (
+    CALENDAR_TOOL_NAME,
+    Tool,
+    build_calendar_tool,
+)
 from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import (
@@ -118,6 +123,30 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 #: Default report folder. The store is constructed from this once in ``lifespan``
 #: and injected from there; nothing downstream resolves the location again.
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
+
+
+def _calendar_classifier_tools(
+    settings: GoogleCalendarSettings | None,
+) -> tuple[Tool, ...]:
+    """Tool descriptions the intent classifier may select at this boot.
+
+    The handler is never dispatched from this tuple; `ChatToolRunner` binds a
+    fresh tool to the real turn. Keeping the same `Tool` value for both paths
+    makes the classifier name, description, and schema impossible to drift
+    from the executable definition.
+    """
+
+    if settings is None or not settings.enabled:
+        return ()
+    timezone = ZoneInfo(settings.timezone)
+    return (
+        build_calendar_tool(
+            GoogleCalendar(settings),
+            idempotency_key="classifier-tool-spec",
+            timezone=settings.timezone,
+            now=datetime.now(timezone),
+        ),
+    )
 
 
 def _chat_tool_runner(
@@ -365,7 +394,9 @@ def create_app() -> FastAPI:
                     "mimo": "Mimo",
                 }.get(provider, "LLM provider")
                 email_providers = await resolve_email_providers(provider)
-                chat_providers = resolve_chat_providers(provider)
+                chat_providers = resolve_chat_providers(
+                    provider, tools=_calendar_classifier_tools(calendar_settings)
+                )
                 intent_classifier = chat_providers.intent_classifier
                 intent_settings = chat_providers.intent_settings
                 chat_reply = chat_providers.chat_reply

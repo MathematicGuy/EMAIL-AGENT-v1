@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from cowork_agent.config import (
@@ -15,6 +16,7 @@ from cowork_agent.config import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort, IntentClassifierPort
 from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion
+from cowork_agent.features.ai_chat.tools.registry import Tool
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
@@ -140,14 +142,16 @@ async def resolve_email_providers(provider: str) -> EmailProviderBundle:
     )
 
 
-def resolve_chat_providers(provider: str) -> ChatProviderBundle:
+def resolve_chat_providers(
+    provider: str, *, tools: Sequence[Tool] = ()
+) -> ChatProviderBundle:
     name = normalize_llm_provider(provider)
     if name == "gemini":
         gemini_settings = GeminiSettings.from_env()
         intent_settings = ChatIntentSettings.from_env(default_model=gemini_settings.model)
         return ChatProviderBundle(
             intent_classifier=GeminiIntentClassifier.from_settings(
-                gemini_settings, intent_settings
+                gemini_settings, intent_settings, tools=tools
             ),
             chat_reply=GeminiChatReply.from_settings(gemini_settings),
             intent_settings=intent_settings,
@@ -157,7 +161,9 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
         mimo_settings = MimoSettings.from_env()
         intent_settings = ChatIntentSettings.from_env(default_model=mimo_settings.model)
         return ChatProviderBundle(
-            intent_classifier=MimoIntentClassifier.from_settings(mimo_settings, intent_settings),
+            intent_classifier=MimoIntentClassifier.from_settings(
+                mimo_settings, intent_settings, tools=tools
+            ),
             chat_reply=MimoChatReply.from_settings(mimo_settings),
             intent_settings=intent_settings,
             tool_arguments=mimo_tool_arguments(mimo_settings, intent_settings),
@@ -167,7 +173,7 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
         intent_settings = ChatIntentSettings.from_env(default_model=mistral_settings.model)
         return ChatProviderBundle(
             intent_classifier=MistralIntentClassifier.from_settings(
-                mistral_settings, intent_settings
+                mistral_settings, intent_settings, tools=tools
             ),
             chat_reply=MistralChatReply.from_settings(mistral_settings),
             intent_settings=intent_settings,
@@ -178,7 +184,10 @@ def resolve_chat_providers(provider: str) -> ChatProviderBundle:
     intent_settings = ChatIntentSettings.from_env(default_model=openrouter_settings.model)
     return ChatProviderBundle(
         intent_classifier=OpenRouterIntentClassifier.from_settings(
-            openrouter_settings, intent_settings, last_resort=last_resort
+            openrouter_settings,
+            intent_settings,
+            last_resort=last_resort,
+            tools=tools,
         ),
         chat_reply=OpenRouterChatReply.from_settings(openrouter_settings, last_resort=last_resort),
         intent_settings=intent_settings,
