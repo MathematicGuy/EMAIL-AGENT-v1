@@ -4,7 +4,8 @@ Register: [SPEC-architecture-improvement-program.md](specs/SPEC-architecture-imp
 — the source of truth for status. ADRs: [013](adr/ADR-013-composition-as-typed-value.md),
 [014](adr/ADR-014-turn-pipeline-stays-one-function.md),
 [015](adr/ADR-015-routers-own-their-transport.md),
-[016](adr/ADR-016-report-artifacts-are-validated-domain-values.md).
+[016](adr/ADR-016-report-artifacts-are-validated-domain-values.md),
+[017](adr/ADR-017-settings-parsing-is-pure.md).
 
 - [x] C01 Report artifacts get a module (`9c4e5fc`, ADR-016)
 - [x] C02 Composition is a typed value — `CoworkRuntime` (ADR-013)
@@ -12,7 +13,7 @@ Register: [SPEC-architecture-improvement-program.md](specs/SPEC-architecture-imp
 - [x] C03 Routers own their transport; `app.py` 1581 → 507 (ADR-015)
 - [x] C07 Mail-scan reconciliation moved below transport (`48ac90e`)
 - [x] C06 Mail-poll protocol extracted from `useStreamingChat` (`ace5c26`)
-- [ ] C05 `Settings.from_env` reads disk behind the caller — scheduled next
+- [x] C05 Settings parsing is pure; executable boundaries load dotenv (ADR-017)
 - [ ] C08 PDF renderer — blocked on a dependency decision (ask first)
 - [x] C09 Stray textbook moved out of `data/raw/` into `data/OCR/`
 - [x] C10 Three `app.state` survivors accepted and documented; revisit with C08
