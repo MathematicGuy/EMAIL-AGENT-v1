@@ -111,6 +111,29 @@ def test_an_expected_decline_that_fills_arguments_instead_fails_its_gate() -> No
     assert metrics["declined_when_underdetermined"]["met"] is False
 
 
+def test_the_decline_gate_counts_a_refusal_from_the_tool_as_well_as_the_filler() -> None:
+    """Since the ambiguous-hour guard landed, an underdetermined request can be
+    stopped in two places. The gate is about nothing reaching the calendar, so
+    both count -- and `refused_by` is what says which one did the work."""
+
+    module = _module()
+    results = (
+        _result(
+            module,
+            "a",
+            expected_start=None,
+            start_exact=None,
+            decline_expected=True,
+            declined=True,
+            refused_by="tool",
+        ),
+    )
+
+    metrics = module.build_report(results, "fake")["metrics"]
+
+    assert metrics["declined_when_underdetermined"]["met"] is True
+
+
 def _result(
     module,
     case_id: str,
@@ -119,12 +142,15 @@ def _result(
     start_exact: bool | None,
     decline_expected: bool = False,
     resolves_backwards: bool = False,
+    declined: bool = False,
+    refused_by: str | None = None,
 ):
     return module.ToolIntentEvalResult(
         case_id=case_id,
         tier="happy_path",
         decline_expected=decline_expected,
-        declined=False,
+        declined=declined,
+        refused_by=refused_by,
         decline_reason=None,
         ok=True,
         result_text="created",

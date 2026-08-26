@@ -25,6 +25,10 @@ class ToolTurnContext:
 
     idempotency_key: str
     now: datetime
+    # What the user actually wrote. A tool that has to tell an underdetermined
+    # request apart from a determined one cannot do it from filled arguments
+    # (PROGRESS.md F5/F7), and the runner is the only layer holding both.
+    user_message: str
     user_id: str | None = None
 
 
@@ -79,7 +83,12 @@ class ChatToolRunner:
             # here means the two disagree -- report it rather than guessing.
             return ToolResult(ok=False, text=f"No tool named {tool_name!r} is available.")
         tool = await binder(
-            ToolTurnContext(idempotency_key=idempotency_key, now=now, user_id=user_id)
+            ToolTurnContext(
+                idempotency_key=idempotency_key,
+                now=now,
+                user_message=user_message,
+                user_id=user_id,
+            )
         )
         arguments = await fill_arguments(
             self._complete,

@@ -88,6 +88,14 @@ capability under a per-user grant; it does not claim the argument filler is
 trustworthy. The ambiguous-hour guard is still owed, and the flags are what hold
 the line until it lands.
 
+**Amended 2026-08-27.** The guard landed:
+[`tools/ambiguous_hour.py`](../../src/cowork_agent/features/ai_chat/tools/ambiguous_hour.py),
+reached from the handler because `ToolTurnContext` now carries the turn's
+message. The classifier is no longer the only thing between an undetermined hour
+and a real event. This does not change the decision — the flags and the per-user
+grant stay exactly as decided — it removes the caveat the decision was made
+under. The live re-measurement is still owed; see PROGRESS.md §5 "F5/F7 fixed".
+
 ## Alternatives considered
 
 **Keep the shared service token and scope it to a dedicated calendar.** Simplest,

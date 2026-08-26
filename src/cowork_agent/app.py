@@ -191,6 +191,9 @@ def _calendar_classifier_tools(
             idempotency_key="classifier-tool-spec",
             timezone=settings.timezone,
             now=datetime.now(timezone),
+            # No turn, so no message and nothing for the ambiguous-hour guard
+            # to read. Harmless here: this value's handler is never called.
+            user_message="",
         ),
     )
 
@@ -237,6 +240,7 @@ def _chat_tool_runner(
             idempotency_key=context.idempotency_key,
             timezone=resolved.timezone,
             now=context.now.astimezone(ZoneInfo(resolved.timezone)),
+            user_message=context.user_message,
         )
 
     return ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=chat_providers.tool_arguments)

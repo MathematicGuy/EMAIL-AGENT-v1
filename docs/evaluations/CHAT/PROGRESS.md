@@ -323,15 +323,64 @@ longer falls back to a 09:00 working hour, it resolves to **14:00** and writes.
 labels, so production is covered by routing — but the tool layer's missing guard
 (F5) is now a wrong write rather than a wrong default, which is worse.
 
+### F5/F7 fixed — the ambiguous-hour guard, in code
+
+Closed 2026-08-27 by
+[`tools/ambiguous_hour.py`](../../../src/cowork_agent/features/ai_chat/tools/ambiguous_hour.py),
+the design change F5 said it needed rather than the third prompt attempt it said
+would not work.
+
+**What changed.** `ToolTurnContext` now carries the user's message, so
+`build_calendar_tool` can read it. Before a timed event is created, the handler
+asks whether the message names an hour it does not determine; if it does, the
+turn returns *"The hour is undetermined: 02:00 or 14:00. Confirm which one was
+meant."* and nothing reaches the calendar. It sits beside `_validate_range` —
+the same shape as every other guard here.
+
+**Why the message and not the arguments.** The filler always resolves to *some*
+hour. `start: 2026-08-28T14:00:00+07:00` is indistinguishable whether the user
+said `2 giờ chiều` or `2 giờ`; only the message separates them.
+
+**Where the line is drawn.** An hour of 1–12 with no `sáng`/`chiều`/`tối`/`am`/
+`pm` near it is undetermined. A 24-hour reading (`14:00`, `20h`) and a
+zero-padded one (`09:00`) are not — nobody pads an hour they mean on a 12-hour
+clock. All-day events are untouched: they have no hour to get wrong.
+
+**It fails closed, deliberately.** `giờ` is recognised with or without its
+diacritics; the qualifiers are recognised only with them. So `2 gio sang` reads
+as undetermined and costs a question. Accepting the bare `sang` would be worse
+than the miss: it is the preposition in *"dời sang 2 giờ"*, exactly the
+reschedule phrasing the guard exists to catch.
+
+**Verified.** 30 new tests. `tq-005` driven with the `14:00` arguments the Tier B
+run actually recorded writes nothing; `tq-001`, which differs by one word,
+still writes. Every happy-path, false-positive and unsupported-verb message in
+the fixture is left alone —
+[`test_ambiguous_hour.py`](../../../tests/unit/features/ai_chat/test_ambiguous_hour.py)
+carries them as a parametrized list so a future widening of the pattern has to
+break something first.
+
+`scripts/evaluate_tool_intent.py` was taught that a refusal can now come from
+the tool as well as the filler: `declined` means "nothing reached the calendar"
+and a new `refused_by` field says which layer did it. Without that the gate would
+have stayed red while the guard worked.
+
+**Still owed:** the live re-run. `declined_when_underdetermined` is red on the
+recorded evidence and only a live run can turn it green:
+
+```bash
+uv run python scripts/evaluate_tool_intent.py
+```
+
 ## 6. Still open
 
 0. **F6 — the UTC-offset write.** The highest-severity item here and the only one
    that silently puts a real event at the wrong hour. Needs the product decision
    in §5 F6 before a guard can be written.
 
-1. **F5 — the ambiguous-hour guard.** The only unmet gate. Needs the tool layer
-   to see the user's message so a stated-but-undetermined hour can be refused in
-   code rather than by prompt. Design change; see §5 F5. Re-run after:
+1. **F5 — the ambiguous-hour guard: written, not yet re-measured.** The guard
+   landed 2026-08-27 (§5 F5/F7 fixed) and is proven offline. The gate stays red
+   until a live run confirms it, because the recorded evidence predates it:
 
    ```bash
    uv run python scripts/evaluate_tool_intent.py

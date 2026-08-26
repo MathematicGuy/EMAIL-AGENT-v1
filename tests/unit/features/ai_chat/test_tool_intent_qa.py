@@ -182,7 +182,11 @@ def _runner(calendar: InMemoryCalendar, arguments: Mapping[str, object] | None) 
 
     async def bind(context: ToolTurnContext) -> Tool:
         return build_calendar_tool(
-            calendar, idempotency_key=context.idempotency_key, timezone=TIMEZONE, now=context.now
+            calendar,
+            idempotency_key=context.idempotency_key,
+            timezone=TIMEZONE,
+            now=context.now,
+            user_message=context.user_message,
         )
 
     return ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
@@ -341,6 +345,7 @@ def test_a_closing_delimiter_in_the_message_cannot_end_the_quoted_block() -> Non
             idempotency_key=context.idempotency_key,
             timezone=TIMEZONE,
             now=context.now,
+            user_message=context.user_message,
         )
 
     runner = ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
@@ -371,7 +376,9 @@ def test_a_closing_delimiter_in_the_message_cannot_end_the_quoted_block() -> Non
 
 def _handler_result(start: str, end: str, *, now: datetime) -> ToolResult:
     calendar = InMemoryCalendar()
-    tool = build_calendar_tool(calendar, idempotency_key="guard", timezone=TIMEZONE, now=now)
+    tool = build_calendar_tool(
+        calendar, idempotency_key="guard", timezone=TIMEZONE, now=now, user_message=""
+    )
     result = asyncio.run(tool.handler({"title": "Gym", "start": start, "end": end}))
     # A rejection that still wrote is the failure this whole tier exists to
     # prevent, so it is checked on every guard rather than once.
@@ -438,7 +445,9 @@ def test_an_offsetless_time_is_read_in_the_user_timezone() -> None:
     where the user's zone is actually known."""
 
     calendar = InMemoryCalendar()
-    tool = build_calendar_tool(calendar, idempotency_key="tz", timezone=TIMEZONE, now=FIXTURE.now)
+    tool = build_calendar_tool(
+        calendar, idempotency_key="tz", timezone=TIMEZONE, now=FIXTURE.now, user_message=""
+    )
 
     result = asyncio.run(
         tool.handler({"title": "Gym", "start": "2026-08-28T02:00:00", "end": "2026-08-28T03:00:00"})
@@ -455,6 +464,83 @@ def test_an_unreadable_date_is_reported_rather_than_repaired() -> None:
 
     assert not result.ok
     assert "Could not read" in result.text
+
+
+def test_a_bare_hour_is_refused_even_when_the_model_resolved_it() -> None:
+    """F7: the filler resolves `2 giờ thứ Sáu` to 14:00 and dispatches. The
+    router sends this story to `clarify`, so on the shipped path the filler
+    never runs -- this is the second line of defence, driven with the exact
+    arguments the live run recorded."""
+
+    case = BY_ID["tq-005"]
+    calendar = InMemoryCalendar()
+    tool = build_calendar_tool(
+        calendar,
+        idempotency_key="ambiguous",
+        timezone=TIMEZONE,
+        now=FIXTURE.now,
+        user_message=case.current_message,
+    )
+
+    result = asyncio.run(
+        tool.handler(
+            {
+                "title": "Gym",
+                "start": "2026-08-28T14:00:00+07:00",
+                "end": "2026-08-28T15:00:00+07:00",
+            }
+        )
+    )
+
+    assert not result.ok
+    assert calendar.events == {}
+    assert "02:00" in result.text and "14:00" in result.text
+
+
+def test_the_same_hour_with_a_qualifier_still_writes() -> None:
+    """The guard is only worth having if it lets `tq-001` through: the two
+    messages differ by one word."""
+
+    calendar = InMemoryCalendar()
+    tool = build_calendar_tool(
+        calendar,
+        idempotency_key="qualified",
+        timezone=TIMEZONE,
+        now=FIXTURE.now,
+        user_message=BY_ID["tq-001"].current_message,
+    )
+
+    result = asyncio.run(
+        tool.handler(
+            {
+                "title": "Gym",
+                "start": "2026-08-28T02:00:00+07:00",
+                "end": "2026-08-28T03:00:00+07:00",
+            }
+        )
+    )
+
+    assert result.ok
+    assert len(calendar.events) == 1
+
+
+def test_an_all_day_request_is_not_touched_by_the_hour_guard() -> None:
+    """An all-day event has no hour to get wrong, so a bare hour elsewhere in
+    the message is not a reason to refuse it."""
+
+    calendar = InMemoryCalendar()
+    tool = build_calendar_tool(
+        calendar,
+        idempotency_key="all-day",
+        timezone=TIMEZONE,
+        now=FIXTURE.now,
+        user_message=BY_ID["tq-005"].current_message,
+    )
+
+    result = asyncio.run(tool.handler({"title": "Gym", "start": "2026-08-28", "end": "2026-08-29"}))
+
+    assert result.ok
+    assert len(calendar.events) == 1
 
 
 def test_every_guard_message_names_the_problem() -> None:

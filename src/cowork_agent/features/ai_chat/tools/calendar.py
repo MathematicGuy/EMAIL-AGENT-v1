@@ -9,6 +9,7 @@ from datetime import date, datetime
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from .ambiguous_hour import ambiguous_hour_question
 from .registry import Tool, ToolResult
 
 CALENDAR_TOOL_NAME = "create_calendar_event"
@@ -93,12 +94,20 @@ def build_calendar_tool(
     idempotency_key: str,
     timezone: str,
     now: datetime,
+    user_message: str,
 ) -> Tool:
     """Bind the calendar tool to one chat turn.
 
-    `idempotency_key` and `now` belong to the turn, not the process, so this is
-    built per turn. `name` and `description` are constant, which is what lets
-    the same factory feed the classifier prompt.
+    `idempotency_key`, `now` and `user_message` belong to the turn, not the
+    process, so this is built per turn. `name` and `description` are constant,
+    which is what lets the same factory feed the classifier prompt.
+
+    `user_message` is what the guard in `ambiguous_hour` reads: an hour the
+    user named but did not determine cannot be seen in the filled arguments,
+    only in the message they were filled from (PROGRESS.md F5/F7). It is
+    required rather than defaulted so that a new call site has to decide;
+    passing `""` -- as the classifier's inert tool spec does -- turns the guard
+    off, which is only correct where no turn exists to guard.
     """
 
     tz = ZoneInfo(timezone)
@@ -116,6 +125,15 @@ def build_calendar_tool(
         problem = _validate_range(start, end, now=now)
         if problem is not None:
             return ToolResult(ok=False, text=problem)
+
+        # Only for a timed event: an all-day event has no hour to get wrong.
+        # This reads the message rather than `start` on purpose -- the filler
+        # always resolves to *some* hour, and the arguments cannot say whether
+        # the user chose it or the model did.
+        if isinstance(start, datetime):
+            question = ambiguous_hour_question(user_message)
+            if question is not None:
+                return ToolResult(ok=False, text=question)
 
         description = arguments.get("description")
         draft = CalendarEventDraft(

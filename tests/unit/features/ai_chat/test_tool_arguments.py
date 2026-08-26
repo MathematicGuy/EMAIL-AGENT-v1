@@ -17,10 +17,14 @@ from cowork_agent.features.ai_chat.tools.arguments import (
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 NOW = datetime(2026, 8, 25, 10, 0, tzinfo=TZ)
-TOOL = build_calendar_tool(
-    InMemoryCalendar(), idempotency_key="turn-1", timezone="Asia/Ho_Chi_Minh", now=NOW
-)
 MESSAGE = "Tạo todo họp team ngày mai 3 giờ chiều"
+TOOL = build_calendar_tool(
+    InMemoryCalendar(),
+    idempotency_key="turn-1",
+    timezone="Asia/Ho_Chi_Minh",
+    now=NOW,
+    user_message=MESSAGE,
+)
 
 
 def _turn(user: str, assistant: str) -> ChatTurn:

@@ -1,5 +1,6 @@
 """Executable in-chat tools: one registry, one dispatch, failures as data."""
 
+from .ambiguous_hour import ambiguous_hour_question
 from .calendar import (
     CALENDAR_TOOL_DESCRIPTION,
     CALENDAR_TOOL_NAME,
@@ -31,6 +32,7 @@ __all__ = [
     "Tool",
     "ToolRegistry",
     "ToolResult",
+    "ambiguous_hour_question",
     "build_calendar_tool",
     "google_event_id",
     "validate_arguments",

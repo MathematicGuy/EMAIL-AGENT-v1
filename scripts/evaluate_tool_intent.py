@@ -75,7 +75,11 @@ class ToolIntentEvalResult:
     tier: str
     # True when the story's own expectation is a refusal rather than arguments.
     decline_expected: bool
+    # True when nothing reached the calendar. That is the property the gate is
+    # named for, and since the ambiguous-hour guard landed it can be satisfied
+    # in two places -- `refused_by` says which.
     declined: bool
+    refused_by: str | None
     decline_reason: str | None
     ok: bool
     result_text: str
@@ -116,7 +120,14 @@ async def evaluate_case(
     now: datetime = case.context.now
     calendar = InMemoryCalendar()
     tool = build_calendar_tool(
-        calendar, idempotency_key=f"eval-{case.id}", timezone=TIMEZONE, now=now
+        calendar,
+        idempotency_key=f"eval-{case.id}",
+        timezone=TIMEZONE,
+        now=now,
+        # The story's own message, so the ambiguous-hour guard sees what the
+        # argument filler saw. Without it `tq-005` is scored against a tool
+        # that has had its second line of defence removed.
+        user_message=case.current_message,
     )
     arguments = await fill_arguments(
         complete,
@@ -135,6 +146,7 @@ async def evaluate_case(
             tier=str(case.tier),
             decline_expected=decline_expected,
             declined=True,
+            refused_by="filler",
             decline_reason=arguments,
             ok=False,
             result_text=arguments,
@@ -149,12 +161,20 @@ async def evaluate_case(
     event = next(iter(calendar.events.values()), None)
     start = getattr(event, "start", None)
     end = getattr(event, "end", None)
+    # The filler answered, so anything that stopped the write happened inside
+    # the tool -- the ambiguous-hour guard, a range check, or schema
+    # validation. All three are refusals as far as this gate is concerned; the
+    # text is carried through so a reader can tell them apart, and
+    # `schema_accepted` is what keeps a validation failure from passing as a
+    # deliberate one.
+    refused_by_tool = event is None and not result.ok
     return ToolIntentEvalResult(
         case_id=case.id,
         tier=str(case.tier),
         decline_expected=decline_expected,
-        declined=False,
-        decline_reason=None,
+        declined=refused_by_tool,
+        refused_by="tool" if refused_by_tool else None,
+        decline_reason=result.text if refused_by_tool else None,
         ok=result.ok,
         result_text=result.text,
         resolved_start=start.isoformat() if start is not None else None,

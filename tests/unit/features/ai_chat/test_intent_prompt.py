@@ -21,6 +21,7 @@ _TOOL = build_calendar_tool(
     idempotency_key="turn-1",
     timezone="Asia/Ho_Chi_Minh",
     now=datetime(2026, 8, 25, 10, 0, tzinfo=UTC),
+    user_message=_INPUT.current_message,
 )
 
 

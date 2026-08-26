@@ -26,12 +26,14 @@ def _call(
     calendar: InMemoryCalendar | None = None,
     idempotency_key: str = "turn-1",
     now: datetime = NOW,
+    user_message: str = "",
 ) -> ToolResult:
     tool = build_calendar_tool(
         calendar or InMemoryCalendar(),
         idempotency_key=idempotency_key,
         timezone=TIMEZONE,
         now=now,
+        user_message=user_message,
     )
     return asyncio.run(ToolRegistry([tool]).run(CALENDAR_TOOL_NAME, arguments))
 
@@ -254,7 +256,11 @@ def test_derived_event_ids_stay_inside_googles_alphabet(seed: str) -> None:
 
 def test_the_tool_is_named_and_described_for_the_classifier() -> None:
     tool = build_calendar_tool(
-        InMemoryCalendar(), idempotency_key="turn-1", timezone=TIMEZONE, now=NOW
+        InMemoryCalendar(),
+        idempotency_key="turn-1",
+        timezone=TIMEZONE,
+        now=NOW,
+        user_message="",
     )
 
     assert tool.name == CALENDAR_TOOL_NAME

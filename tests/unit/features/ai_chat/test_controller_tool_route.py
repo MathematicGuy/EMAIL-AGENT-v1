@@ -93,7 +93,11 @@ def _runner(
 
     async def bind(context: ToolTurnContext) -> Tool:
         return build_calendar_tool(
-            calendar, idempotency_key=context.idempotency_key, timezone="UTC", now=context.now
+            calendar,
+            idempotency_key=context.idempotency_key,
+            timezone="UTC",
+            now=context.now,
+            user_message=context.user_message,
         )
 
     runner = ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
