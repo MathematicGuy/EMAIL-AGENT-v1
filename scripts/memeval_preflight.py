@@ -192,7 +192,7 @@ def check_embeddings(environ: Mapping[str, str], *, live: bool) -> Check:
     from cowork_agent.config import document_embedding_provider
     from cowork_agent.features.ai_chat.memory_eval.live_env import probe_environment
 
-    provider = document_embedding_provider(environ, load_env_file=False)
+    provider = document_embedding_provider(environ)
     env = probe_environment(dict(environ))
     if not env.embeddings_ready:
         return Check("embeddings", FAIL, f"provider {provider}: no {env.embedding_key_name}")

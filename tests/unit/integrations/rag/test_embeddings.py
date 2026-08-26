@@ -223,7 +223,7 @@ def test_project_embedding_uses_gemini_2_dimensions_and_document_task() -> None:
 
 def test_jina_embedding_settings_default_to_v5_omni_small() -> None:
     settings = JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "test-key"}, load_env_file=False
+        {"JINA_API_KEY": "test-key"}
     )
 
     assert settings.model == "jina-embeddings-v5-omni-small"
@@ -284,7 +284,7 @@ class _RotatingJinaTransport:
 
 def _jina_settings() -> JinaEmbeddingSettings:
     return JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "test-key"}, load_env_file=False
+        {"JINA_API_KEY": "test-key"}
     )
 
 
@@ -311,7 +311,7 @@ def test_jina_adapter_posts_v5_model_and_passage_task(slept: list[float]) -> Non
 
 def test_jina_adapter_rotates_to_the_next_key_after_a_rate_limit(slept: list[float]) -> None:
     settings = JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}
     )
     transport = _RotatingJinaTransport()
 
@@ -353,7 +353,7 @@ class _InsufficientBalanceThenOkTransport:
 
 def test_jina_adapter_rotates_past_a_key_with_insufficient_balance(slept: list[float]) -> None:
     settings = JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}
     )
     transport = _InsufficientBalanceThenOkTransport()
     adapter = JinaEmbeddingAdapter(settings, transport=transport)
@@ -400,7 +400,7 @@ class _GenericForbiddenTransport:
 
 def test_jina_adapter_does_not_rotate_on_generic_forbidden() -> None:
     settings = JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}, load_env_file=False
+        {"JINA_API_KEY": "key-1", "JINA_API_KEY2": "key-2"}
     )
     transport = _GenericForbiddenTransport()
 
@@ -422,7 +422,7 @@ def test_jina_adapter_rejects_response_with_wrong_vector_dimension() -> None:
 
 def test_jina_adapter_raises_when_all_keys_are_exhausted() -> None:
     settings = JinaEmbeddingSettings.from_env(
-        {"JINA_API_KEY": "key-1"}, load_env_file=False
+        {"JINA_API_KEY": "key-1"}
     )
     settings.rotator.mark_exhausted_sync("key-1")
     adapter = JinaEmbeddingAdapter(settings)

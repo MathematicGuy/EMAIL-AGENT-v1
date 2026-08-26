@@ -289,6 +289,9 @@ def resolve_evaluator_models(
     embedding_override: str | None = None,
 ) -> tuple[str, str]:
     """Resolve evaluator LLM and embedding model IDs according to project config."""
+    from cowork_agent.config import load_runtime_environment
+
+    load_runtime_environment()
     if provider == "mistral":
         try:
             from cowork_agent.config import MistralSettings

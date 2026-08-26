@@ -95,7 +95,7 @@ def default_postgres_probe(url: str) -> bool:
 def _embedding_key_name(environ: Mapping[str, str]) -> str:
     """Which API key the corpus needs, given the configured embedding provider."""
 
-    provider = document_embedding_provider(environ, load_env_file=False)
+    provider = document_embedding_provider(environ)
     return "JINA_API_KEY" if provider == "jina" else "GEMINI_API_KEY"
 
 

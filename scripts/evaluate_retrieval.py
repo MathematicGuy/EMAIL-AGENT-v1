@@ -641,9 +641,10 @@ def build_embedder(name: str) -> EmbeddingPort | None:
         from cowork_agent.integrations.rag.fakes import HashingEmbedder
 
         return HashingEmbedder()
-    from cowork_agent.config import GeminiSettings
+    from cowork_agent.config import GeminiSettings, load_runtime_environment
     from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 
+    load_runtime_environment()
     try:
         return GeminiEmbeddingAdapter(GeminiSettings.from_env())
     except ValueError as exc:

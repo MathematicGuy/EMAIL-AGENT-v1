@@ -19,6 +19,7 @@ from cowork_agent.config import (
     GeminiSettings,
     MimoSettings,
     MistralSettings,
+    load_runtime_environment,
 )
 from cowork_agent.domain.chat_contracts import (
     ChatIntent,
@@ -142,6 +143,7 @@ async def evaluate(
 
 
 def build_live_classifier():
+    load_runtime_environment()
     provider_name = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     if provider_name == "gemini":
         provider = GeminiSettings.from_env()

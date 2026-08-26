@@ -107,8 +107,9 @@ def build_envelopes(cases):
 def build_live_classifier():
     """Return the configured Route Classifier, or None when keys are missing."""
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    from cowork_agent.config import GeminiSettings, MimoSettings
+    from cowork_agent.config import GeminiSettings, MimoSettings, load_runtime_environment
 
+    load_runtime_environment()
     try:
         if provider == "mimo":
             from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
