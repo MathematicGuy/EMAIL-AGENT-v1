@@ -12,7 +12,7 @@ Spec: [`SPEC-calendar-tool-qa.md`](SPEC-calendar-tool-qa.md) · Plan: [`PLAN-cal
 | T1 | [`tests/fixtures/tool_intent/loader.py`](../../../tests/fixtures/tool_intent/loader.py) + [`test_tool_intent_loader.py`](../../../tests/unit/fixtures/test_tool_intent_loader.py) | Done — 11 tests |
 | T2–T4 | [`tests/unit/features/ai_chat/test_tool_intent_qa.py`](../../../tests/unit/features/ai_chat/test_tool_intent_qa.py) | Done — 102 tests (97 run, 5 skip) |
 | T5 | Mutation pass, §4 below | Done — 4/4 mutations red |
-| T6 | [`scripts/evaluate_tool_intent.py`](../../../scripts/evaluate_tool_intent.py) + [`test_evaluate_tool_intent.py`](../../../tests/unit/scripts/test_evaluate_tool_intent.py) | Built and dry-run green; **live run not executed** |
+| T6 | [`scripts/evaluate_tool_intent.py`](../../../scripts/evaluate_tool_intent.py) + [`test_evaluate_tool_intent.py`](../../../tests/unit/scripts/test_evaluate_tool_intent.py) | Built, dry-run green, **live run executed — 2 of 4 gates missed**, §5 F4 |
 | T7 | This document | Done |
 
 **121 new tests**, all offline, all in the default suite. No new marker, no
@@ -43,7 +43,7 @@ away.
 | AC3 | Each invariant has a test that goes red when broken | §4 |
 | AC4 | `ruff` and `mypy` clean, `src/` untouched | §2, `git status` |
 | AC5 | Route table unchanged | 63 routes, byte-identical |
-| AC6 | Layer B built, unit-tested, reports the §6 metrics | 8 tests; dry-run scores 14/14 and exits 0. **Live run pending authorization.** |
+| AC6 | Layer B built, unit-tested, reports the §6 metrics | 8 tests; dry-run scores 14/14 and exits 0. Live run executed 2026-08-26 against `gemini-3.5-flash-lite`: 2 gates met, 2 missed — see §5 F4 |
 
 ## 4. Mutation verification
 
@@ -107,18 +107,70 @@ matched answers by locating the message inside the prompt and so collapsed three
 stories into one. Any consumer that keys on message text will do the same. The
 scorer now serves answers in call order and says why in a comment.
 
+### F4 — The live run: the model under-writes rather than mis-writes
+
+Run 2026-08-26, `gemini-3.5-flash-lite`, 14 cases, one call each. Report:
+[`evaluations/CHAT/qa-test/tool-intent/tool-intent-eval-2026-08-26.json`](../../../evaluations/CHAT/qa-test/tool-intent/tool-intent-eval-2026-08-26.json).
+
+| Gate | Result | |
+|---|---|---|
+| `no_backwards_resolution` | **14/14** | met |
+| `declined_when_underdetermined` | **2/2** | met |
+| `start_exact` | **4/7** | missed |
+| `schema_accepted` | **5/12** | missed |
+
+**Read the failures before the numbers.** Not one of the 14 calls produced an
+event at the wrong time. Every miss is a refusal to act, never a wrong write —
+which is the cheap direction of the asymmetry SPEC §1 is built on. The three
+`start_exact` misses (`tq-007`, `tq-008`, `tq-024`) are declines, not wrong
+instants; the guards were never the thing that saved them.
+
+**F4a — the same sentence gets different answers.** `tq-001`, `tq-019`, and
+`tq-020` are byte-identical messages against the same clock. Three calls, three
+outcomes: a correct 02:00 event, a malformed object, and a correct 02:00 event.
+`tq-019` returned arguments *missing both `start` and `title`* and did not use
+the refusal field, so it was neither a fill nor a decline — the registry rejected
+it with `Invalid arguments for create_calendar_event: missing required start,
+title`. One in three identical calls landing outside both valid shapes is the
+single most consequential number in this run, and `MAX_ARGUMENT_TURNS = 4` did
+not recover it.
+
+**F4b — "thứ Sáu" resolves, except when it doesn't.** The model resolved Friday
+correctly in `tq-001` and `tq-002`, then declined `tq-008` — the *same* Friday,
+same hour, with a duration added — saying "the specific date for Friday is
+missing". Adding *tập khoảng 90 phút* to a sentence it had already resolved
+turned a fill into a refusal. `tq-024` behaved the same way ("Which Friday?").
+This is an over-refusal, and it is the reason `schema_accepted` sits at 5/12.
+
+**F4c — the decline text is not a question.** The refusal string is shown to the
+user. `tq-007` returned the single word `date`; `tq-013` returned `tài liệu`;
+`tq-014` returned unaccented `tai lieu va thoi gian cu the`. A refusal that
+cannot be read as a question defeats the purpose of having a refusal path at
+all. This is a prompt defect in `fill_arguments`, not a model capability limit —
+`tq-005` ("the specific date for Friday is missing") and `tq-006` ("when should
+the gym session happen") show the same model producing usable text.
+
+**F4d — `tq-016` may have the better answer, and the fixture the worse one.**
+The fixture expects the recurring request to create one event. The model instead
+declined with "recurring events are not supported in a single
+create_calendar_event call, and a specific date was not provided" — which is
+exactly what I7 wants a user to be told. The expectation is worth revisiting
+before the refusal is treated as a failure.
+
+**Not fixed here**, for the same reason as F1: `src/` is not modified by this QA.
+F4a and F4c are both defects with an owner (`tools/arguments.py`), and both are
+now measured rather than suspected.
+
 ## 6. Still open
 
-1. **The live run.** `scripts/evaluate_tool_intent.py` is ready. ~14 structured
-   completions on the configured provider — small, but it hits a real API, so it
-   runs on an explicit instruction, not by default:
+1. **F4a and F4c are unfixed.** The malformed-arguments path and the one-word
+   refusal both live in
+   [`tools/arguments.py`](../../../src/cowork_agent/features/ai_chat/tools/arguments.py)
+   and both need a source change plus a re-run to confirm. Re-run:
 
    ```bash
    uv run python scripts/evaluate_tool_intent.py
    ```
-
-   Until it runs, nothing here says whether a model resolves *"2 giờ sáng thứ
-   Sáu"* to the right instant. Layer A scripts that answer.
 
 2. **The §11 classifier fixtures.** Four cases prepared in
    [`chat_routing_labels_tool_block.json`](../../../tests/fixtures/tool_intent/chat_routing_labels_tool_block.json),

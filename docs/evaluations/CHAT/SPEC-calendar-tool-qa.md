@@ -1,6 +1,6 @@
 # SPEC — Google Calendar tool-use QA
 
-> **Status:** Layer A implemented and green. Layer B implemented, not run (needs spend authorization).
+> **Status:** Layer A implemented and green. Layer B implemented and run — 2 of 4 gates missed, see [`PROGRESS.md`](PROGRESS.md) §5 F4.
 > **Feature under test:** the chat tool plane from `tasks/specs/SPEC-chat-tools-registry.md` (M0–M4, flag-off).
 > **Data:** [`tests/fixtures/tool_intent/`](../../../tests/fixtures/tool_intent/README.md)
 
@@ -162,7 +162,7 @@ instruction, never as a default.
 - [x] **AC3** — Each of I1–I8 is asserted by at least one named test, and breaking the corresponding source line turns that test red (verified by mutation, §8).
 - [x] **AC4** — `ruff check .` and `mypy src` stay clean; no change to `src/` behaviour.
 - [x] **AC5** — Route table unchanged: 63 byte-identical routes (ADR-015 invariant).
-- [ ] **AC6** — Layer B script exists, is unit-tested against a fake completion under R9, and reports the §6 metrics. *(script + tests done; live run not executed)*
+- [x] **AC6** — Layer B script exists, is unit-tested against a fake completion under R9, and reports the §6 metrics. *(run 2026-08-26; the run itself is red — that is a finding about the model, not an unmet criterion)*
 
 ---
 
