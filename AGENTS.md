@@ -107,6 +107,7 @@ keeps spec, scope, and the Definition of Done.
 - RAGAS & Grounding: `docs/evaluations/RAGAS.md`, `tasks/specs/SPEC-chat-ragas-evaluation.md`
 - ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
 - Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
+- Chat tools registry (guide): `docs/guides/tool-registry-from-first-principles.md`
 - Email RAG runtime: `evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
 
