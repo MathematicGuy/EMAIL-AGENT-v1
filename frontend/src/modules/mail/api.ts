@@ -25,6 +25,17 @@ export interface MailboxConnection {
   createdAt: string;
 }
 
+/** The per-user Google Calendar grant. Never carries the token itself. */
+export interface CalendarConnection {
+  id: string;
+  provider: string;
+  account: string;
+  calendarId: string;
+  timezone: string;
+  status: string;
+  connectedAt: string;
+}
+
 export interface UnreadPreviewMessage {
   messageId: string;
   threadId: string;
@@ -182,6 +193,10 @@ export function getOutlookConnectUrl(ownerConnectionId: string): string {
   return `${API_BASE_URL}/v1/mail-todo/oauth/outlook/connect?${params}`;
 }
 
+export function getCalendarConnectUrl(): string {
+  return `${API_BASE_URL}/v1/calendar/oauth/google/connect`;
+}
+
 export const MAILBOX_SELECTION_KEYS: Record<MailProvider, string> = {
   gmail: 'cowork.mail.selected.gmail',
   outlook: 'cowork.mail.selected.outlook',
@@ -216,6 +231,51 @@ export async function listConnections(signal?: AbortSignal): Promise<MailboxConn
       outlook: body.providerAvailability?.outlook ?? { enabled: false, reason: 'not_configured' },
     },
   };
+}
+
+/** The calendar half of the connect status. `null` means not connected.
+ *
+ * A 503 -- the deployment has no calendar handshake configured -- reads the
+ * same as "not connected" on purpose: the user's answer to "is my calendar
+ * working" is no either way, and a red error for a feature the server never
+ * offered is noise.
+ */
+export async function readCalendarConnection(
+  signal?: AbortSignal
+): Promise<CalendarConnection | null> {
+  try {
+    const body = await request<{
+      connected: boolean;
+      connection: {
+        id: string;
+        provider: string;
+        account: string;
+        calendar_id: string;
+        timezone: string;
+        status: string;
+        connected_at: string;
+      } | null;
+    }>('/v1/calendar/connection', { signal });
+    if (!body.connected || body.connection === null) return null;
+    return {
+      id: body.connection.id,
+      provider: body.connection.provider,
+      account: body.connection.account,
+      calendarId: body.connection.calendar_id,
+      timezone: body.connection.timezone,
+      status: body.connection.status,
+      connectedAt: body.connection.connected_at,
+    };
+  } catch (error) {
+    if (error instanceof MailApiError && (error.status === 401 || error.status === 503)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function disconnectCalendar(): Promise<void> {
+  await request<{ disconnected: boolean }>('/v1/calendar/connection', { method: 'DELETE' });
 }
 
 export async function disconnectConnection(connectionId: string): Promise<void> {
