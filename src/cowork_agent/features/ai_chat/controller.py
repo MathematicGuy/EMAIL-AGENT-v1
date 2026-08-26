@@ -68,6 +68,7 @@ from .task_episode_settlement import (
     TaskEpisodeSettler,
     TurnAborted,
 )
+from .tools.runner import ChatToolRunner
 from .turn_journal import (
     CancellationCheck,
     CancellationGuard,
@@ -385,6 +386,7 @@ class ChatController:
         company_rag_enabled: bool = True,
         history: ChatHistoryPort | None = None,
         reports: ReportArtifactStore | None = None,
+        tools: ChatToolRunner | None = None,
     ) -> None:
         self._scope = scope
         self._memory = memory
@@ -396,6 +398,7 @@ class ChatController:
         self._routing = routing
         self._company_rag_enabled = company_rag_enabled
         self._history = history
+        self._tools = tools
         self._completed: dict[
             str, tuple[ChatMessageRequest, tuple[ChatMessageStreamEvent, ...]]
         ] = {}
@@ -732,6 +735,23 @@ class ChatController:
                         response_mode = ChatResponseMode.INSUFFICIENT_EVIDENCE
                     else:
                         response_mode = ChatResponseMode.CLARIFY
+            tool_result: str | None = None
+            if (
+                routing_outcome is not None
+                and routing_outcome.route is ChatRoute.TOOL
+                and self._tools is not None
+            ):
+                # One tool, once. A failure degrades the turn into an
+                # ordinary reply that says what did not happen; it never
+                # fails the turn.
+                outcome = await self._tools.run_for_turn(
+                    routing_outcome.decision.tool_name or "",
+                    user_message=request.user_message,
+                    recent_turns=self._memory.read_active_turns(),
+                    idempotency_key=request.idempotency_key,
+                    now=self._clock(),
+                )
+                tool_result = outcome.text
             context = await self._memory.read_context(context_request)
             if searches_information:
                 rag_evidence, retrieval_status = _rag_evidence(
@@ -803,6 +823,7 @@ class ChatController:
                 context,
                 response_mode=response_mode,
                 project_documents=project_documents,
+                tool_result=tool_result,
             )
             activity_event = await journal.record(
                 final_activity,

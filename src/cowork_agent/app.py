@@ -6,8 +6,10 @@ import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import (
@@ -43,12 +45,20 @@ from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRout
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
+from cowork_agent.features.ai_chat.tools import (
+    CALENDAR_TOOL_NAME,
+    Tool,
+    build_calendar_tool,
+)
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import (
     VerifiedPrincipal,
     principal_for_connection,
 )
+from cowork_agent.integrations.google_calendar import GoogleCalendar, GoogleCalendarSettings
 from cowork_agent.integrations.llm.provider_factory import (
+    ChatProviderBundle,
     resolve_chat_providers,
     resolve_email_providers,
 )
@@ -115,6 +125,59 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 
+def _calendar_classifier_tools(
+    settings: GoogleCalendarSettings | None,
+) -> tuple[Tool, ...]:
+    """Tool descriptions the intent classifier may select at this boot.
+
+    The handler is never dispatched from this tuple; `ChatToolRunner` binds a
+    fresh tool to the real turn. Keeping the same `Tool` value for both paths
+    makes the classifier name, description, and schema impossible to drift
+    from the executable definition.
+    """
+
+    if settings is None or not settings.enabled:
+        return ()
+    timezone = ZoneInfo(settings.timezone)
+    return (
+        build_calendar_tool(
+            GoogleCalendar(settings),
+            idempotency_key="classifier-tool-spec",
+            timezone=settings.timezone,
+            now=datetime.now(timezone),
+        ),
+    )
+
+
+def _chat_tool_runner(
+    chat_providers: ChatProviderBundle,
+    settings: GoogleCalendarSettings | None,
+) -> ChatToolRunner | None:
+    """Compose the calendar tool, or ``None`` when unconfigured or not enabled.
+
+    Both gates matter: absent credentials is the usual case, and
+    ``GOOGLE_CALENDAR_ENABLED`` is what keeps a developer's working
+    credentials from turning the tool on everywhere else. The settings arrive
+    as an explicit capture resolved once in ``create_app`` (ADR-013) rather
+    than a per-turn ``from_env()`` re-read of the process environment.
+    """
+
+    if settings is None or not settings.enabled:
+        return None
+    calendar = GoogleCalendar(settings)
+    return ChatToolRunner(
+        {
+            CALENDAR_TOOL_NAME: lambda key, now: build_calendar_tool(
+                calendar,
+                idempotency_key=key,
+                timezone=settings.timezone,
+                now=now.astimezone(ZoneInfo(settings.timezone)),
+            )
+        },
+        complete=chat_providers.tool_arguments,
+    )
+
+
 def _chat_controller_factory(
     app: FastAPI,
 ) -> Callable[[ChatMemoryScope], ChatController]:
@@ -171,6 +234,7 @@ def _chat_controller_factory(
                 intent_settings.company_rag_enabled if intent_settings is not None else True
             ),
             episode_retention_seconds=chat.chat_memory_settings.episode_retention_seconds,
+            tools=chat.chat_tool_runner,
         )
 
     return factory
@@ -198,6 +262,10 @@ def create_app() -> FastAPI:
     # them onto ``app.state`` after this closure was defined and read them
     # back inside it, a cross-phase round-trip the typed assembly deletes.
     evaluation_settings = EvaluationSettings.from_env()
+    # Same explicit-capture rule for the calendar tool: one ``.env`` read at
+    # startup, carried into ``lifespan`` as a closure capture instead of a
+    # per-turn re-read of the process environment.
+    calendar_settings = GoogleCalendarSettings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -316,6 +384,7 @@ def create_app() -> FastAPI:
             chat_reply = chat_runtime.chat_reply
             chat_intent_settings: ChatIntentSettings | None = None
             chat_routing_service = chat_runtime.chat_routing_service
+            chat_tool_runner = chat_runtime.chat_tool_runner
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
@@ -325,12 +394,15 @@ def create_app() -> FastAPI:
                     "mimo": "Mimo",
                 }.get(provider, "LLM provider")
                 email_providers = await resolve_email_providers(provider)
-                chat_providers = resolve_chat_providers(provider)
+                chat_providers = resolve_chat_providers(
+                    provider, tools=_calendar_classifier_tools(calendar_settings)
+                )
                 intent_classifier = chat_providers.intent_classifier
                 intent_settings = chat_providers.intent_settings
                 chat_reply = chat_providers.chat_reply
                 chat_intent_settings = intent_settings
                 ready_document_catalog = chat_runtime.ready_document_catalog
+                chat_tool_runner = _chat_tool_runner(chat_providers, calendar_settings)
                 chat_routing_service = (
                     ChatRoutingService(
                         classifier=intent_classifier,
@@ -339,6 +411,9 @@ def create_app() -> FastAPI:
                         timeout_ms=intent_settings.timeout_ms,
                         max_attempts=intent_settings.max_attempts,
                         tool_axis_enabled=intent_settings.tool_axis_enabled,
+                        available_tools=(
+                            chat_tool_runner.names if chat_tool_runner is not None else ()
+                        ),
                         sink=LoggingIntentRoutingSink(),
                     )
                     if (
@@ -389,6 +464,7 @@ def create_app() -> FastAPI:
                 chat_reply=chat_reply,
                 chat_intent_settings=chat_intent_settings,
                 chat_routing_service=chat_routing_service,
+                chat_tool_runner=chat_tool_runner,
             )
             # Evaluation group (ADR-013, slice 02-6): the internal evaluation
             # control plane composes in ``composition.build_evaluation``,
