@@ -23,6 +23,7 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryQuery,
     TaskEpisode,
 )
+from cowork_agent.domain.models import CalendarConnection
 
 if TYPE_CHECKING:
     from .generation_context import GenerationContext
@@ -120,9 +121,7 @@ class ChatHistoryPort(Protocol):
         title: str | None = None,
     ) -> ChatTurn: ...
 
-    async def write_turn(
-        self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
-    ) -> None: ...
+    async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None: ...
 
     async def list_turns(
         self, scope: ChatMemoryScope, *, connection: object | None = None
@@ -132,9 +131,7 @@ class ChatHistoryPort(Protocol):
         self, *, session_id: str, tenant_id: str, user_id: str
     ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None: ...
 
-    async def titles_for(
-        self, scopes: Sequence[ChatMemoryScope]
-    ) -> Mapping[str, str]: ...
+    async def titles_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, str]: ...
 
     async def latest_turns_for(
         self, scopes: Sequence[ChatMemoryScope]
@@ -191,3 +188,17 @@ class SemanticChatMemoryPort(Protocol):
     async def read_semantic_context(
         self, namespace: MemoryNamespace, query: SemanticMemoryQuery
     ) -> Mapping[str, object] | None: ...
+
+
+class CalendarConnectionRepository(Protocol):
+    """Per-user Google Calendar grants.
+
+    `get_for_user` rather than `list_for_user`: one active grant per user, so a
+    second connect replaces the first. The mailbox repository lists because a
+    person legitimately has several mailboxes; nobody needs two grants against
+    the same calendar account.
+    """
+
+    async def upsert(self, connection: CalendarConnection) -> CalendarConnection: ...
+    async def get_for_user(self, user_id: str) -> CalendarConnection | None: ...
+    async def delete_for_user(self, user_id: str) -> bool: ...

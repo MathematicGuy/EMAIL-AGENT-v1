@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -19,7 +19,9 @@ from fastapi import (
 
 import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
 from cowork_agent.composition import (
+    CalendarRuntime,
     CoworkRuntime,
+    build_calendar,
     build_chat,
     build_control_plane,
     build_email_rag,
@@ -44,14 +46,25 @@ from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRout
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
-from cowork_agent.features.ai_chat.tools import CALENDAR_TOOL_NAME, build_calendar_tool
-from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
+from cowork_agent.features.ai_chat.tools import (
+    CALENDAR_TOOL_DESCRIPTION,
+    CALENDAR_TOOL_NAME,
+    CALENDAR_TOOL_SCHEMA,
+    Tool,
+    ToolResult,
+    build_calendar_tool,
+)
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner, ToolTurnContext
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import (
     VerifiedPrincipal,
     principal_for_connection,
 )
-from cowork_agent.integrations.google_calendar import GoogleCalendar, GoogleCalendarSettings
+from cowork_agent.integrations.google_calendar import (
+    GoogleCalendar,
+    GoogleCalendarSettings,
+    calendar_settings_for,
+)
 from cowork_agent.integrations.llm.provider_factory import (
     ChatProviderBundle,
     resolve_chat_providers,
@@ -68,6 +81,7 @@ from cowork_agent.runtime import (
     configure_windows_reload,
 )
 
+from .api.calendars import create_calendar_router
 from .api.chat import create_chat_router
 from .api.dependencies import (
     authenticated_chat_principal,
@@ -120,9 +134,40 @@ async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 
+#: Shown when the turn belongs to a user with no calendar grant. A refusal the
+#: user can act on beats a successful write to somebody else's calendar, which
+#: is what any fallback credential would produce (ADR-016 §2).
+CALENDAR_NOT_CONNECTED = (
+    "Your Google Calendar is not connected yet, so I could not create the event. "
+    "Connect it from the dashboard and ask me again."
+)
+
+
+def _not_connected_tool() -> Tool:
+    """A calendar tool that refuses instead of writing.
+
+    Returned rather than binding no tool at all, so the turn degrades into a
+    reply that says what did not happen -- the same shape every other tool
+    failure takes -- instead of the router and the runner disagreeing about
+    whether the tool exists.
+    """
+
+    async def handler(arguments: Mapping[str, object]) -> ToolResult:
+        del arguments
+        return ToolResult(ok=False, text=CALENDAR_NOT_CONNECTED)
+
+    return Tool(
+        name=CALENDAR_TOOL_NAME,
+        description=CALENDAR_TOOL_DESCRIPTION,
+        parameters=CALENDAR_TOOL_SCHEMA,
+        handler=handler,
+    )
+
+
 def _chat_tool_runner(
     chat_providers: ChatProviderBundle,
     settings: GoogleCalendarSettings | None,
+    calendar_plane: CalendarRuntime | None = None,
 ) -> ChatToolRunner | None:
     """Compose the calendar tool, or ``None`` when unconfigured or not enabled.
 
@@ -131,22 +176,39 @@ def _chat_tool_runner(
     credentials from turning the tool on everywhere else. The settings arrive
     as an explicit capture resolved once in ``create_app`` (ADR-013) rather
     than a per-turn ``from_env()`` re-read of the process environment.
+
+    The credential does *not* arrive that way, and cannot: ADR-016 requires the
+    grant to belong to the turn's own user, so the binder resolves it per turn
+    from ``calendar_plane``. ``settings`` keeps only what is genuinely
+    process-wide -- the flag, and the local-development fallback token used when
+    there is no principal at all.
     """
 
     if settings is None or not settings.enabled:
         return None
-    calendar = GoogleCalendar(settings)
-    return ChatToolRunner(
-        {
-            CALENDAR_TOOL_NAME: lambda key, now: build_calendar_tool(
-                calendar,
-                idempotency_key=key,
-                timezone=settings.timezone,
-                now=now.astimezone(ZoneInfo(settings.timezone)),
+
+    async def bind(context: ToolTurnContext) -> Tool:
+        resolved = settings
+        if context.user_id and calendar_plane is not None:
+            connection = await calendar_plane.repository.get_for_user(context.user_id)
+            if connection is None:
+                # No silent fallback to `settings`. A signed-in user without a
+                # grant is told so; substituting the environment token here is
+                # how one person's event lands on another person's calendar.
+                return _not_connected_tool()
+            resolved = calendar_settings_for(
+                connection, calendar_plane.oauth_settings, calendar_plane.cipher
             )
-        },
-        complete=chat_providers.tool_arguments,
-    )
+        elif context.user_id and calendar_plane is None:
+            return _not_connected_tool()
+        return build_calendar_tool(
+            GoogleCalendar(resolved),
+            idempotency_key=context.idempotency_key,
+            timezone=resolved.timezone,
+            now=context.now.astimezone(ZoneInfo(resolved.timezone)),
+        )
+
+    return ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=chat_providers.tool_arguments)
 
 
 def _chat_controller_factory(
@@ -316,6 +378,11 @@ def create_app() -> FastAPI:
                 UserDocumentsSettings.from_env(),
             )
             user_documents_settings = mailbox_runtime.user_documents_settings
+            # Calendar group (SPEC-per-user-google-calendar-oauth P4/P5): the
+            # per-user grant plane. Composed right after the mailbox because it
+            # shares that group's cipher and OAuth state secret, and because the
+            # Gmail callback chains into its connect route.
+            calendar_runtime = await build_calendar(settings, control_plane.pg_pool)
             # Chat group (ADR-013, slice 02-4): the memory settings, session
             # buffer, observability sink, ready-document catalog, and identity
             # callables compose as one typed value in
@@ -371,7 +438,9 @@ def create_app() -> FastAPI:
                 chat_reply = chat_providers.chat_reply
                 chat_intent_settings = intent_settings
                 ready_document_catalog = chat_runtime.ready_document_catalog
-                chat_tool_runner = _chat_tool_runner(chat_providers, calendar_settings)
+                chat_tool_runner = _chat_tool_runner(
+                    chat_providers, calendar_settings, calendar_runtime
+                )
                 chat_routing_service = (
                     ChatRoutingService(
                         classifier=intent_classifier,
@@ -455,6 +524,7 @@ def create_app() -> FastAPI:
                 chat=chat_runtime,
                 email_rag=email_rag_runtime,
                 evaluation=evaluation_bundle,
+                calendar=calendar_runtime,
             )
             # The controller factory reads the composed runtime at controller
             # creation time (ADR-013, slice 02-7): publish it after the single
@@ -495,6 +565,7 @@ def create_app() -> FastAPI:
     app.include_router(create_knowledge_router())
     app.include_router(create_digest_router())
     app.include_router(create_mailbox_router())
+    app.include_router(create_calendar_router())
     # The evaluation API is internal-only and disabled by default; its routes
     # are mounted exclusively when explicitly enabled with a bearer token.
     if evaluation_settings.enabled:

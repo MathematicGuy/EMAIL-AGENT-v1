@@ -39,10 +39,11 @@ from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuff
 from cowork_agent.features.ai_chat.tools import (
     CALENDAR_TOOL_NAME,
     InMemoryCalendar,
+    Tool,
     build_calendar_tool,
 )
 from cowork_agent.features.ai_chat.tools.registry import ToolResult
-from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner, ToolTurnContext
 from tests.fixtures.tool_intent.loader import (
     SERVER_OWNED_REASON_CODES,
     ToolIntentCase,
@@ -179,14 +180,12 @@ def _runner(calendar: InMemoryCalendar, arguments: Mapping[str, object] | None) 
         # `None` stands for the model declining rather than guessing.
         return arguments if arguments is not None else {"error": "no date was given"}
 
-    return ChatToolRunner(
-        {
-            CALENDAR_TOOL_NAME: lambda key, now: build_calendar_tool(
-                calendar, idempotency_key=key, timezone=TIMEZONE, now=now
-            )
-        },
-        complete=complete,
-    )
+    async def bind(context: ToolTurnContext) -> Tool:
+        return build_calendar_tool(
+            calendar, idempotency_key=context.idempotency_key, timezone=TIMEZONE, now=context.now
+        )
+
+    return ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
 
 
 def _run_turn(
@@ -336,14 +335,15 @@ def test_a_closing_delimiter_in_the_message_cannot_end_the_quoted_block() -> Non
         prompts.append(prompt)
         return _scripted_arguments(case)
 
-    runner = ChatToolRunner(
-        {
-            CALENDAR_TOOL_NAME: lambda key, now: build_calendar_tool(
-                InMemoryCalendar(), idempotency_key=key, timezone=TIMEZONE, now=now
-            )
-        },
-        complete=complete,
-    )
+    async def bind(context: ToolTurnContext) -> Tool:
+        return build_calendar_tool(
+            InMemoryCalendar(),
+            idempotency_key=context.idempotency_key,
+            timezone=TIMEZONE,
+            now=context.now,
+        )
+
+    runner = ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
 
     asyncio.run(
         runner.run_for_turn(

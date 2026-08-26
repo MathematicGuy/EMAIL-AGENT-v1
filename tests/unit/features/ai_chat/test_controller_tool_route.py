@@ -20,9 +20,10 @@ from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuff
 from cowork_agent.features.ai_chat.tools import (
     CALENDAR_TOOL_NAME,
     InMemoryCalendar,
+    Tool,
     build_calendar_tool,
 )
-from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner, ToolTurnContext
 
 NOW = datetime(2026, 8, 25, 10, 0, tzinfo=UTC)
 ARGUMENTS: Mapping[str, object] = {
@@ -90,14 +91,12 @@ def _runner(
             raise payload
         return payload  # type: ignore[return-value]
 
-    runner = ChatToolRunner(
-        {
-            CALENDAR_TOOL_NAME: lambda key, now: build_calendar_tool(
-                calendar, idempotency_key=key, timezone="UTC", now=now
-            )
-        },
-        complete=complete,
-    )
+    async def bind(context: ToolTurnContext) -> Tool:
+        return build_calendar_tool(
+            calendar, idempotency_key=context.idempotency_key, timezone="UTC", now=context.now
+        )
+
+    runner = ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=complete)
     return runner, prompts
 
 

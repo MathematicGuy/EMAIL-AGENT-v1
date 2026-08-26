@@ -51,9 +51,9 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from starlette.requests import Request
@@ -83,7 +83,7 @@ from cowork_agent.features.ai_chat.memory_observability import (
     LoggingMemoryOperationSink,
     MemoryOperationMetrics,
 )
-from cowork_agent.features.ai_chat.ports import ChatReplyPort
+from cowork_agent.features.ai_chat.ports import CalendarConnectionRepository, ChatReplyPort
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
 from cowork_agent.features.batch_evaluation.bootstrap import (
@@ -117,6 +117,10 @@ from cowork_agent.integrations.gmail.provider import (
     GmailMailboxAdapter,
     GmailPrincipalResolver,
 )
+from cowork_agent.integrations.google_calendar import (
+    GoogleCalendarConnectionService,
+    GoogleCalendarOAuthSettings,
+)
 from cowork_agent.integrations.llm.provider_factory import EmailProviderBundle
 from cowork_agent.integrations.mailbox.router import ProviderRoutingMailboxAdapter
 from cowork_agent.integrations.outlook import (
@@ -136,6 +140,10 @@ from cowork_agent.integrations.rag.project_index import (
 )
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
+from cowork_agent.persistence.repositories.calendar_connections import (
+    PostgresCalendarConnectionRepository,
+    SQLiteCalendarConnectionRepository,
+)
 from cowork_agent.persistence.repositories.local import InMemoryResultRepository
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
@@ -201,12 +209,8 @@ class ControlPlane:
     pg_pool: AsyncConnectionPool | None
     identity_repository: PostgresIdentityRepository | None
     session_repository: PostgresSessionRepository | None
-    chat_identity_repository: (
-        PostgresIdentityRepository | SQLiteChatIdentityRepository | None
-    )
-    chat_opaque_session_repository: (
-        PostgresSessionRepository | SQLiteChatIdentityRepository | None
-    )
+    chat_identity_repository: PostgresIdentityRepository | SQLiteChatIdentityRepository | None
+    chat_opaque_session_repository: PostgresSessionRepository | SQLiteChatIdentityRepository | None
     outbox_repository: PostgresOutboxRepository | InMemoryOutbox
     chat_profile_repository: PostgresChatProfileRepository | SQLiteChatRepository
     chat_task_episode_repository: PostgresTaskEpisodeRepository | SQLiteChatRepository
@@ -360,6 +364,21 @@ class EvaluationBundle:
 
 
 @dataclass(frozen=True, slots=True)
+class CalendarRuntime:
+    """The per-user Google Calendar plane (ADR-016, ADR-017).
+
+    Present only when the handshake is configured. Holds application identity
+    and the seams the callback and the tool binder both need -- never a refresh
+    token, which is per-user and lives in the repository.
+    """
+
+    oauth_settings: GoogleCalendarOAuthSettings
+    connections: GoogleCalendarConnectionService
+    repository: CalendarConnectionRepository
+    cipher: TokenCipher
+
+
+@dataclass(frozen=True, slots=True)
 class CoworkRuntime:
     """The composed value of the application: dependencies that outlive requests.
 
@@ -381,6 +400,7 @@ class CoworkRuntime:
     chat: ChatRuntime | None = None
     email_rag: EmailRagRuntime | None = None
     evaluation: EvaluationBundle | None = None
+    calendar: CalendarRuntime | None = None
 
 
 def runtime(request: Request) -> CoworkRuntime:
@@ -406,9 +426,9 @@ async def build_control_plane(settings: GmailSettings, control_plane_url: str) -
     await local_repository.initialize()
     identity_repository: PostgresIdentityRepository | None = None
     session_repository: PostgresSessionRepository | None = None
-    chat_identity_repository: (
-        PostgresIdentityRepository | SQLiteChatIdentityRepository | None
-    ) = None
+    chat_identity_repository: PostgresIdentityRepository | SQLiteChatIdentityRepository | None = (
+        None
+    )
     chat_opaque_session_repository: (
         PostgresSessionRepository | SQLiteChatIdentityRepository | None
     ) = None
@@ -454,15 +474,15 @@ async def build_control_plane(settings: GmailSettings, control_plane_url: str) -
         await apply_migrations(pool)
         run_repository = PostgresRunRepository(pool)
         task_repository = PostgresTaskRepository(pool)
-        outbox_repository: PostgresOutboxRepository | InMemoryOutbox = (
-            PostgresOutboxRepository(pool)
+        outbox_repository: PostgresOutboxRepository | InMemoryOutbox = PostgresOutboxRepository(
+            pool
         )
         chat_profile_repository: PostgresChatProfileRepository | SQLiteChatRepository = (
             PostgresChatProfileRepository(pool)
         )
-        chat_task_episode_repository: (
-            PostgresTaskEpisodeRepository | SQLiteChatRepository
-        ) = PostgresTaskEpisodeRepository(pool)
+        chat_task_episode_repository: PostgresTaskEpisodeRepository | SQLiteChatRepository = (
+            PostgresTaskEpisodeRepository(pool)
+        )
         project_repository: PostgresProjectRepository | SQLiteProjectRepository = (
             PostgresProjectRepository(pool)
         )
@@ -478,13 +498,9 @@ async def build_control_plane(settings: GmailSettings, control_plane_url: str) -
         chat_opaque_session_repository = session_repository
         repository = PostgresMailboxConnectionRepository(pool)
     else:
-        task_repository = SQLiteTaskRepository(
-            settings.connection_db_path.parent / "tasks.db"
-        )
+        task_repository = SQLiteTaskRepository(settings.connection_db_path.parent / "tasks.db")
         await task_repository.initialize()
-        sqlite_run_repository = SQLiteRunRepository(
-            settings.connection_db_path.parent / "runs.db"
-        )
+        sqlite_run_repository = SQLiteRunRepository(settings.connection_db_path.parent / "runs.db")
         await sqlite_run_repository.initialize()
         run_repository = sqlite_run_repository
         outbox_repository = InMemoryOutbox()
@@ -777,11 +793,9 @@ async def build_email_rag(
                     sqlite_project_document_chunks,
                 )
 
-                local_chunks = (
-                    sqlite_project_document_chunks.SQLiteProjectDocumentChunkRepository(
-                        settings.connection_db_path.parent / "project_chunks.db",
-                        settings.connection_db_path.parent / "projects.db",
-                    )
+                local_chunks = sqlite_project_document_chunks.SQLiteProjectDocumentChunkRepository(
+                    settings.connection_db_path.parent / "project_chunks.db",
+                    settings.connection_db_path.parent / "projects.db",
                 )
                 await local_chunks.initialize()
                 local_index = TurbovecProjectIndexStore(
@@ -803,9 +817,7 @@ async def build_email_rag(
                     timeout_ms=user_documents_settings.retrieval_timeout_ms,
                 )
         except Exception:
-            logger.exception(
-                "Project document vector store is unavailable; API remains online"
-            )
+            logger.exception("Project document vector store is unavailable; API remains online")
     return EmailRagRuntime(
         semantic_memory=NullSemanticMemory(),
         knowledge_documents=(),
@@ -934,12 +946,14 @@ async def build_evaluation(
 
 
 __all__ = [
+    "CalendarRuntime",
     "ChatRuntime",
     "ControlPlane",
     "CoworkRuntime",
     "EmailRagRuntime",
     "EvaluationBundle",
     "MailboxRuntime",
+    "build_calendar",
     "build_chat",
     "build_control_plane",
     "build_email_rag",
@@ -950,3 +964,44 @@ __all__ = [
     "runtime",
     "upgrade_email_rag_providers",
 ]
+
+
+async def build_calendar(
+    settings: GmailSettings,
+    pool: object | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> CalendarRuntime | None:
+    """Compose the calendar plane, or None when the handshake is unconfigured.
+
+    Shares `TOKEN_ENCRYPTION_KEY` and the OAuth state secret with the mailbox
+    path on purpose: they are properties of this deployment, not of a provider,
+    and a second pair would be two things to rotate instead of one. What is *not*
+    shared is the grant -- separate consent, separate token, separate table
+    (ADR-017).
+    """
+
+    oauth_settings = GoogleCalendarOAuthSettings.from_env(environ)
+    if oauth_settings is None:
+        return None
+    repository: CalendarConnectionRepository
+    if pool is not None:
+        repository = PostgresCalendarConnectionRepository(cast(Any, pool))
+    else:
+        sqlite_repository = SQLiteCalendarConnectionRepository(
+            settings.connection_db_path.parent / "calendar_connections.db"
+        )
+        await sqlite_repository.initialize()
+        repository = sqlite_repository
+    cipher = TokenCipher(settings.token_encryption_key)
+    return CalendarRuntime(
+        oauth_settings=oauth_settings,
+        connections=GoogleCalendarConnectionService(
+            oauth_settings,
+            repository,
+            cipher,
+            OAuthStateManager(settings.oauth_state_secret, settings.oauth_state_ttl_seconds),
+        ),
+        repository=repository,
+        cipher=cipher,
+    )

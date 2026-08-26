@@ -750,6 +750,7 @@ class ChatController:
                     recent_turns=self._memory.read_active_turns(),
                     idempotency_key=request.idempotency_key,
                     now=self._clock(),
+                    user_id=self._scope.user_id,
                 )
                 tool_result = outcome.text
             context = await self._memory.read_context(context_request)

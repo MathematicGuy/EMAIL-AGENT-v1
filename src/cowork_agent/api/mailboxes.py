@@ -30,6 +30,7 @@ from cowork_agent.integrations.mailbox import (
 )
 from cowork_agent.integrations.outlook import OutlookConnectionService
 
+from .calendars import CONNECT_PATH
 from .dependencies import (
     authenticated_principal,
     connection_principal,
@@ -47,11 +48,9 @@ def _connection_service(request: Request) -> GmailConnectionService:
     return mailbox_group.gmail_connections
 
 
-
 def _outlook_connection_service(request: Request) -> OutlookConnectionService | None:
     mailbox_group = runtime(request).mailbox
     return mailbox_group.outlook_connections if mailbox_group is not None else None
-
 
 
 def _gmail_settings(request: Request) -> GmailSettings:
@@ -64,11 +63,9 @@ def _gmail_settings(request: Request) -> GmailSettings:
     return mailbox_group.gmail_settings
 
 
-
 def _outlook_settings(request: Request) -> OutlookSettings | None:
     mailbox_group = runtime(request).mailbox
     return mailbox_group.outlook_settings if mailbox_group is not None else None
-
 
 
 def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
@@ -76,7 +73,6 @@ def _mailbox(request: Request) -> ProviderRoutingMailboxAdapter:
     if mailbox_group is None:
         raise RuntimeError("the mailbox group is not composed")
     return mailbox_group.mailbox
-
 
 
 def _public_connection(connection: Any) -> dict[str, Any]:
@@ -90,7 +86,6 @@ def _public_connection(connection: Any) -> dict[str, Any]:
     }
 
 
-
 def _frontend_mail_redirect(
     frontend_url: str, outcome: str, *, provider: str = "gmail"
 ) -> RedirectResponse:
@@ -101,7 +96,6 @@ def _frontend_mail_redirect(
         (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), "dashboard")
     )
     return RedirectResponse(location, status_code=302)
-
 
 
 def create_mailbox_router() -> APIRouter:
@@ -137,8 +131,38 @@ def create_mailbox_router() -> APIRouter:
             if settings.frontend_url:
                 return _frontend_mail_redirect(settings.frontend_url, "error")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if settings.frontend_url:
-            response: Response = _frontend_mail_redirect(settings.frontend_url, "connected")
+        control_plane = runtime(request).control_plane
+        identity_repository = (
+            control_plane.identity_repository if control_plane is not None else None
+        )
+        session_repository = control_plane.session_repository if control_plane is not None else None
+        session_token: str | None = None
+        if identity_repository is not None and session_repository is not None:
+            principal = await identity_repository.resolve_or_create_principal(
+                connection.email_address
+            )
+            session_token, _ = await session_repository.create(
+                principal,
+                now=datetime.now(UTC),
+                ttl_seconds=session_settings(request).session_ttl_seconds,
+            )
+        # The chained calendar consent (ADR-017). The mail connection and the
+        # session are already earned at this point; the second leg can only add
+        # to them, never take them back, which is why every failure over in
+        # `api/calendars.py` still redirects with `gmail=connected`.
+        #
+        # Chained only when a session was actually minted: without the cookie
+        # the calendar connect has no principal to attach a grant to and would
+        # bounce straight back, costing the user a redirect to be told nothing.
+        chain_calendar = (
+            bool(settings.frontend_url)
+            and session_token is not None
+            and runtime(request).calendar is not None
+        )
+        if chain_calendar:
+            response: Response = RedirectResponse(CONNECT_PATH, status_code=302)
+        elif settings.frontend_url:
+            response = _frontend_mail_redirect(settings.frontend_url, "connected")
         else:
             response = JSONResponse(
                 {
@@ -147,23 +171,8 @@ def create_mailbox_router() -> APIRouter:
                     "next": "Create a digest run with this mailbox connection ID.",
                 }
             )
-        control_plane = runtime(request).control_plane
-        identity_repository = (
-            control_plane.identity_repository if control_plane is not None else None
-        )
-        session_repository = (
-            control_plane.session_repository if control_plane is not None else None
-        )
-        if identity_repository is not None and session_repository is not None:
-            principal = await identity_repository.resolve_or_create_principal(
-                connection.email_address
-            )
-            token, _ = await session_repository.create(
-                principal,
-                now=datetime.now(UTC),
-                ttl_seconds=session_settings(request).session_ttl_seconds,
-            )
-            set_session_cookie(response, session_settings(request), token)
+        if session_token is not None:
+            set_session_cookie(response, session_settings(request), session_token)
         return response
 
     @router.get("/v1/mail-todo/oauth/outlook/connect")

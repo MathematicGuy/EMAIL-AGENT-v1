@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 from cowork_agent.domain.chat_contracts import ChatTurn
@@ -10,19 +11,38 @@ from cowork_agent.domain.chat_contracts import ChatTurn
 from .arguments import ToolArgumentCompletion, fill_arguments
 from .registry import Tool, ToolRegistry, ToolResult
 
-# A tool bound to one turn. `idempotency_key` becomes the created resource's id,
-# which is what makes a retried turn idempotent; `now` is what resolves "ngày
-# mai" into a date.
-ToolBinder = Callable[[str, datetime], Tool]
+
+@dataclass(frozen=True, slots=True)
+class ToolTurnContext:
+    """Everything a tool needs to know about the turn it is being bound to.
+
+    One parameter object rather than three arguments: the next writing tool
+    will want the same three, and a binder signature that grows once will grow
+    again. `user_id` is explicitly nullable — `None` is local development with no
+    principal, and the binder decides what that means rather than the runner
+    guessing on its behalf.
+    """
+
+    idempotency_key: str
+    now: datetime
+    user_id: str | None = None
+
+
+# A tool bound to one turn. Async because a per-user grant is a repository read
+# (ADR-016): the credential belongs to whoever is speaking, so it cannot be
+# resolved once at composition time.
+ToolBinder = Callable[[ToolTurnContext], Awaitable[Tool]]
 
 
 class ChatToolRunner:
     """The controller's whole view of tools: one call in, one result out.
 
     Tools are bound per turn rather than per process because the calendar tool
-    needs the turn's idempotency key and the current time. `names` is stable
-    across turns, which is what lets the router narrow on it before any binding
-    happens.
+    needs the turn's idempotency key, the current time, and — since ADR-016 —
+    the grant belonging to the user whose turn it is. `names` is stable across
+    turns and across users, which is what lets the router narrow on it before
+    any binding happens: whether a tool *runs* is per-user, whether it *exists*
+    is not.
     """
 
     def __init__(
@@ -48,6 +68,7 @@ class ChatToolRunner:
         recent_turns: Sequence[ChatTurn] = (),
         idempotency_key: str,
         now: datetime,
+        user_id: str | None = None,
     ) -> ToolResult:
         """Run the named tool for this turn. Never raises, for the same reason
         `ToolRegistry.run` does not: the controller is mid-stream."""
@@ -57,7 +78,9 @@ class ChatToolRunner:
             # The router narrows unknown names before this point, so reaching
             # here means the two disagree -- report it rather than guessing.
             return ToolResult(ok=False, text=f"No tool named {tool_name!r} is available.")
-        tool = binder(idempotency_key, now)
+        tool = await binder(
+            ToolTurnContext(idempotency_key=idempotency_key, now=now, user_id=user_id)
+        )
         arguments = await fill_arguments(
             self._complete,
             tool,
