@@ -71,13 +71,12 @@ Slice 02-8 grep-proved every legacy forward dead and deleted it. The only
 - `chat_controller_factory` — published once after the single assembly;
   the chat router's request-time cache reads it there, and the factory
   itself reads the assembled runtime at controller-creation time.
-- `report_pdf_renderer` — an optional test-injection read with no production
-  writer. C08 owns the dependency decision; when it ships, the renderer moves
-  into the typed runtime and this survivor disappears.
 
 ADR-015 removed the former `raw_document_repository` self-heal memo: the
 knowledge router now reads the typed control-plane repository like every other
-consumer. The three survivors above are therefore the complete current list.
+consumer. The two request-time chat survivors above are therefore the complete current exception
+list. ADR-018 completed C08 by moving `report_pdf_renderer` into `CoworkRuntime` and deleting its
+test-only untyped write.
 
 Two last strays also died here: `gmail_settings` gained a home on the
 mailbox group so its forward could be deleted, and the always-`None`

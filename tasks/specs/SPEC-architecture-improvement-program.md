@@ -72,7 +72,7 @@ flowchart TB
 
     subgraph COMPOSITION["Composition · composition.py"]
         RT["CoworkRuntime (frozen, typed)<br/>ControlPlane · MailboxRuntime · ChatRuntime<br/>EmailRagRuntime · EvaluationBundle<br/><b>C02 · done</b>"]
-        SURV["app.state survivors · 3 sites<br/>chat_controllers · chat_controller_factory<br/>report_pdf_renderer<br/><b>C10 · accepted debt</b>"]
+        SURV["app.state survivors · 2 keys<br/>chat_controllers · chat_controller_factory<br/><b>C10 · accepted debt</b>"]
     end
 
     subgraph FEATURES["Features · features/"]
@@ -80,7 +80,7 @@ flowchart TB
     end
 
     subgraph DOMAIN["Domain · ports and value objects"]
-        RA["report_artifacts.py<br/>ReportFilename · ReportArtifactStore<br/>ReportPdfRenderer (no implementation)<br/><b>C01 · done · C08 · blocked</b>"]
+        RA["report_artifacts.py + integrations/report_pdf<br/>ReportFilename · ReportArtifactStore<br/>fpdf2 + bundled Noto Sans renderer<br/><b>C01 · done · C08 · done</b>"]
     end
 
     CFG["config.py · pure Settings.from_env<br/>dotenv loaded by executable boundaries<br/><b>C05 · done</b>"]
@@ -135,9 +135,9 @@ got enforced at the composition edge; everything above reads its dependencies th
 | **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Done — C07 slice** | §4.5 |
 | **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Done** — `67822e9` | [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md) |
 | **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Done — frontend protocol extraction** | §4.7 |
-| **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
+| **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Done** — fpdf2 + bundled Noto Sans | [ADR-018](../adr/ADR-018-report-pdfs-use-fpdf2-and-bundled-noto-sans.md) |
 | **C09** | A stray corpus input in `data/raw/` — latent re-ingest risk | Minor | **Done** — moved to `data/OCR/` | §4.9 |
-| **C10** | Three `app.state` survivors, one of them undocumented | — | **Accepted debt**, with revisit criteria | §4.10 |
+| **C10** | Two request-time `app.state` survivors remain | — | **Accepted debt**; PDF survivor closed by C08 | §4.10 |
 
 Operational items from the post-merge decisions doc, for completeness — **not architecture
 workstreams**, no ID, no tracking:
@@ -164,7 +164,8 @@ value object — `parse` raises, `sanitize` degrades — plus the `ReportArtifac
 
 The implementation predates this program's ADR habit. [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md)
 now records its two lasting contracts: filenames are validated domain values, and all report
-persistence crosses one injected store interface. C08 remains a separate renderer decision.
+persistence crosses one injected store interface. C08 later supplied the separate renderer
+adapter without changing either contract.
 
 ```bash
 git show 9c4e5fc --stat
@@ -623,15 +624,16 @@ pnpm build
 
 ---
 
-### 4.8 C08 — PDF renderer unshipped · **Blocked on a human decision**
+### 4.8 C08 — PDF renderer · **Done** · ADR-018
 
-`POST /reports/{f}/pdf` returns `501 pdf_export_unavailable`. Faithful Vietnamese Markdown
-rendering needs an embedded Unicode TTF, and that dependency choice was **deliberately not made
-unilaterally**. The `ReportPdfRenderer` port is defined so an implementation can be registered
-without a transport change. The UI falls back to source download.
+The user selected `fpdf2`. Production now composes `Fpdf2ReportPdfRenderer` through the typed
+`CoworkRuntime.report_pdf_renderer` field, and `GET /api/v1/reports/{filename}/pdf` returns an
+`application/pdf` attachment. The former `app.state.report_pdf_renderer` test-only write and the
+route's `getattr`/`cast` are deleted. A `None` renderer remains valid only in narrow injected test
+runtimes, preserving the explicit `501 pdf_export_unavailable` capability response.
 
-**Do not "fix" this by silently adding a PDF library. Ask first.** Also documented as a
-`[!NOTE]` in `docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md`.
+The concrete decision and its rejected alternatives are recorded in
+[ADR-018](../adr/ADR-018-report-pdfs-use-fpdf2-and-bundled-noto-sans.md).
 
 #### Dependency decision
 
@@ -645,13 +647,14 @@ machine and break offline builds.
 | **WeasyPrint + bundled Noto Sans** | Best HTML/CSS fidelity after Markdown-to-HTML conversion | Python-library use on Windows requires the native Pango/MSYS2 runtime, expanding installation and CI support | Choose only if CSS fidelity is worth the native runtime |
 | **ReportLab + bundled Noto Sans** | Mature PDF engine with TrueType font support and no browser renderer | Platypus mapping is more manual than fpdf2 for the same Markdown subset | Choose when ReportLab is already an organizational standard |
 
-The required human answer is one of `fpdf2`, `WeasyPrint`, or `ReportLab`. Command execution
-permission is not the decision: selecting a dependency changes the product's install/runtime
-contract and is why this workstream remains blocked.
+**Selected:** `fpdf2 + bundled Noto Sans`. The four committed static styles are derived from the
+official `google/fonts` variable sources at a recorded commit under the SIL Open Font License.
+Static instances keep variable-font interpolation out of the request path; the adapter performs
+no network or host-font discovery.
 
-#### Library-neutral implementation contract
+#### Completed implementation contract
 
-After the dependency is selected, C08 is complete only when all of the following are true:
+All acceptance conditions are implemented:
 
 1. A concrete adapter implements `ReportPdfRenderer` outside `domain/`; the domain port remains
    unaware of the selected library.
@@ -675,11 +678,9 @@ After the dependency is selected, C08 is complete only when all of the following
    and the full backend suite. Because the dependency changes `pyproject.toml` and `uv.lock`, a
    clean `uv sync --extra dev --extra postgres` must also succeed.
 
-Verified at `216399e`: **nothing in `src/` ever writes `app.state.report_pdf_renderer`.** The
-only writer in the tree is `tests/integration/api/test_reports_api.py:151`. So in production
-`_renderer()` reads `None` unconditionally — the 501 is structural, not conditional. See C10:
-whoever ships the renderer should give it a typed `CoworkRuntime` field and delete the last
-`getattr`, rather than adding a second untyped write.
+Extraction tests reopen the emitted bytes with `pypdf` and recover Vietnamese headings, body text,
+lists, emphasis, visible link labels and URLs, fenced code, and literal unsupported constructs.
+The built wheel contains all four font files plus their license and source/checksum record.
 
 ---
 
@@ -754,15 +755,14 @@ agent's file and they are mid-flight; flag it to them rather than editing it.
 
 ---
 
-### 4.10 C10 — `app.state` survivors · **Accepted debt**
+### 4.10 C10 — `app.state` survivors · **Accepted debt, narrowed by C08**
 
-Three live sites remain in `src/`:
+Two keys remain in `src/`:
 
 | Site | Key | Why it survives |
 |---|---|---|
 | `api/chat.py:767, 770` | `chat_controllers` | Request-time per-session controller cache. Created lazily on first request; a frozen value cannot hold it. Sanctioned by ADR-013 point 3. |
-| `app.py:419`; `api/chat.py:783` | `chat_controller_factory` | Published once after the single runtime assembly and read by the request-time cache. Sanctioned by ADR-013. |
-| `api/reports.py:54` | `report_pdf_renderer` | Optional `getattr` read with no production writer — it exists so a test can inject a stub (C08), now documented in ADR-013. |
+| `app.py:498`; `api/chat.py:783` | `chat_controller_factory` | Published once after the single runtime assembly and read by the request-time cache. Sanctioned by ADR-013. |
 
 ```bash
 grep -rn "app\.state" src/ --include=*.py
@@ -772,10 +772,11 @@ grep -rn "app\.state" src/ --include=*.py
 
 1. The obsolete `raw_document_repository` survivor was removed; candidate 03 replaced it with a
    typed control-plane read.
-2. `report_pdf_renderer`, the last untyped optional read, is recorded with its C08 revisit rule.
+2. `report_pdf_renderer`, the last untyped optional read, was recorded with its C08 revisit rule;
+   ADR-018 has now completed that revisit and removed it.
 
-**Revisit criterion:** when C08 is decided, the renderer becomes a typed runtime field and this
-row shrinks to the two request-time caches, which are correct as they are.
+**C08 revisit completed:** the renderer is a typed `CoworkRuntime` field and the untyped row is
+gone. The two request-time chat cache/factory exceptions remain correct as documented.
 
 ---
 
@@ -802,7 +803,6 @@ Recording these is the point of the file. Each was examined and rejected on evid
 - SQL migrations. Moving *where* a migration is invoked from is fine; changing *what* it does
   is not. Flag it if the distinction blurs.
 - RAG bootstrap fallbacks.
-- The PDF renderer dependency (C08).
 
 **Security** (from `AGENTS.md`, binding):
 
@@ -939,6 +939,7 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C08 completed.** The user selected fpdf2. Added the concrete renderer behind the existing domain port, bundled four static Noto Sans styles with license/provenance, moved renderer ownership into typed `CoworkRuntime`, preserved the report route contract, and proved Vietnamese text by reopening generated PDFs with pypdf. ADR-018 records the decision; C10 now has only its two request-time chat survivors. |
 | 2026-08-26 | **C08 decision surface made executable.** Added the three dependency options, a recommendation, and library-neutral acceptance criteria covering the typed runtime cutover, bundled Unicode font, Markdown subset, PDF extraction proof, ADR/docs, and clean dependency sync. C08 remains blocked until the human selects a library. |
 | 2026-08-26 | **C05 completed.** Settings parsers are pure, executable entry points own the single dotenv-loading seam, regression coverage prevents `.env` from replenishing a deleted provider key, and ADR-017 records the boundary. |
 | 2026-08-26 | **C01/C10 records completed and register drift repaired.** Added ADR-016 for the report filename/store contracts, corrected ADR-013's survivor list, and synchronized the C06/C07/C09/C10 checklist and section statuses with the register. No runtime behavior changed. |
