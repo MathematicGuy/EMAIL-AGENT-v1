@@ -37,6 +37,7 @@ dependencies = [
 dev = [
   "coverage>=7",
   "mypy>=1.14",
+  "pypdf>=6,<7",
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6",
@@ -108,8 +109,3 @@ files = ["src"]
 # src/ (e.g. `mypy scripts/evaluate_retrieval.py`) sees real types instead
 # of the un-marked installed distribution.
 mypy_path = "src"
-
-[dependency-groups]
-dev = [
-    "pypdf>=6,<7",
-]

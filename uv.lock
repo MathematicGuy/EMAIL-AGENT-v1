@@ -1658,6 +1658,7 @@ dependencies = [
 dev = [
     { name = "coverage" },
     { name = "mypy" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1669,11 +1670,6 @@ postgres = [
 ]
 redis = [
     { name = "redis" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pypdf" },
 ]
 
 [package.metadata]
@@ -1695,6 +1691,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14" },
     { name = "pdf-inspector", specifier = ">=1.14,<2" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3.2,<4" },
+    { name = "pypdf", marker = "extra == 'dev'", specifier = ">=6,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6" },
@@ -1709,9 +1706,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 provides-extras = ["dev", "postgres", "redis"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pypdf", specifier = ">=6,<7" }]
 
 [[package]]
 name = "multidict"
