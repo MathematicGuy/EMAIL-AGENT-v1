@@ -136,7 +136,7 @@ REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 #: Shown when the turn belongs to a user with no calendar grant. A refusal the
 #: user can act on beats a successful write to somebody else's calendar, which
-#: is what any fallback credential would produce (ADR-016 §2).
+#: is what any fallback credential would produce (ADR-019 §2).
 CALENDAR_NOT_CONNECTED = (
     "Your Google Calendar is not connected yet, so I could not create the event. "
     "Connect it from the dashboard and ask me again."
@@ -177,7 +177,7 @@ def _chat_tool_runner(
     as an explicit capture resolved once in ``create_app`` (ADR-013) rather
     than a per-turn ``from_env()`` re-read of the process environment.
 
-    The credential does *not* arrive that way, and cannot: ADR-016 requires the
+    The credential does *not* arrive that way, and cannot: ADR-019 requires the
     grant to belong to the turn's own user, so the binder resolves it per turn
     from ``calendar_plane``. ``settings`` keeps only what is genuinely
     process-wide -- the flag, and the local-development fallback token used when

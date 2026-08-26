@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | M0-M4 implemented on current `dev`; flag-off. Outstanding: §11 fixtures. The executable-chat-tool ADR §9 required is now [ADR-016](../adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md). |
+| Status | M0-M4 implemented on current `dev`; flag-off. Outstanding: §11 fixtures. The executable-chat-tool ADR §9 required is now [ADR-019](../adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md). |
 | Date | 2026-08-26 (synchronized with `dev` at `bf2fdee`) |
 | Scope | **Dev-grade slice.** One use case, one tool, flag-off by default. |
 | Use case | "Create a todo on my Google Calendar" — the agent picks the tool from its own turn context and creates the event. |
@@ -349,12 +349,12 @@ architecture.** ADR-013 remains the composition decision and should not be overl
 new product-capability decision. The new ADR must explicitly amend the no-executable-tool target
 without weakening ADR-004's Email/Gmail prohibition.
 
-That ADR is now written: [ADR-016](../adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)
+That ADR is now written: [ADR-019](../adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)
 permits a writing tool only under a grant belonging to the turn's own user, and leaves ADR-004's
 prohibition intact. It carries a precondition of its own — the shared refresh token §10 records
 must be replaced first, specified in
 [SPEC-per-user-google-calendar-oauth](SPEC-per-user-google-calendar-oauth.md) and decided by
-[ADR-017](../adr/ADR-017-google-grants-stay-separate.md).
+[ADR-020](../adr/ADR-020-google-grants-stay-separate.md).
 
 ADR-004's actual constraint — no `@Email`, no Gmail from chat, no `tool_choices`
 request field — is untouched. Tool selection stays a server-side routing decision,
@@ -542,6 +542,6 @@ Verified on the ported tree:
   `stream_message`, `mail_scan_reconciliation.py` untouched.
 
 Still outstanding, unchanged by the port: §11's two fixture cases and their live label re-run.
-The executable-chat-tool ADR that §9 required is written — [ADR-016](../adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)
+The executable-chat-tool ADR that §9 required is written — [ADR-019](../adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)
 — and it makes replacing §10's shared refresh token a precondition rather than a wish; see
 [SPEC-per-user-google-calendar-oauth](SPEC-per-user-google-calendar-oauth.md).

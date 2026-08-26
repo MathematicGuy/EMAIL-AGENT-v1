@@ -288,13 +288,13 @@ exits non-zero. That is the correct reading: one gate is genuinely unmet.
    and on authorizing a 64-call live re-run.
 
 3. **The executable-chat-tool ADR — written.**
-   [ADR-016](../../../tasks/adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)
+   [ADR-019](../../../tasks/adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)
    permits a writing tool only under a per-user grant, and cites F5 as the reason
    the flags stay the last line of defence until the ambiguous-hour guard lands.
 
 4. **Per-user Calendar OAuth — specified, not built.** The shared refresh token
    is still the one thing that cannot ship to real users.
-   [ADR-017](../../../tasks/adr/ADR-017-google-grants-stay-separate.md) decides
+   [ADR-020](../../../tasks/adr/ADR-020-google-grants-stay-separate.md) decides
    two grants with chained consent rather than one merged token, and
    [SPEC-per-user-google-calendar-oauth](../../../tasks/specs/SPEC-per-user-google-calendar-oauth.md)
    breaks it into P1–P8.

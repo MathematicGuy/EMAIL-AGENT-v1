@@ -3,7 +3,7 @@
 Mirrors `integrations/gmail/provider.py`'s OAuth path deliberately: same PKCE
 verifier, same single-use state, same granted-scope check on the way back. The
 two grants stay separate records against separate consent screens
-([ADR-017](../../../../tasks/adr/ADR-017-google-grants-stay-separate.md)); what
+([ADR-020](../../../../tasks/adr/ADR-020-google-grants-stay-separate.md)); what
 they share is the mechanism, not the token.
 """
 
@@ -43,7 +43,7 @@ class GoogleCalendarOAuthSettings:
 
     Deliberately holds no refresh token. Application identity is resolved once
     at boot; the credential is per-user and comes from the repository
-    (ADR-016). That split is what stops a turn reading `.env`.
+    (ADR-019). That split is what stops a turn reading `.env`.
     """
 
     client_id: str
@@ -68,7 +68,7 @@ class GoogleCalendarOAuthSettings:
         if scopes != (CALENDAR_SCOPE,):
             # The mirror of the Gmail guard. Its job here is the reverse: keep
             # anything mail-shaped off the calendar consent, so neither grant
-            # can quietly grow into the other (ADR-017 J3).
+            # can quietly grow into the other (ADR-020 J3).
             raise ValueError("The calendar grant must use only the calendar scope")
         frontend_url = source.get("FRONTEND_URL", "").strip()
         if frontend_url:

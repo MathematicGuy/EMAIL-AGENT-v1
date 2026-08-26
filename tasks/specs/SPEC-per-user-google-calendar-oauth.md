@@ -5,7 +5,7 @@
 | Status | **Implemented.** P1–P8 landed on `claude/cowork-agent-tools-registry-b7ee98`. |
 | Date | 2026-08-26 |
 | Scope | Replace the shared `GOOGLE_CALENDAR_REFRESH_TOKEN` with a per-user grant, obtained in the same journey as the mail connection. |
-| Decisions | [ADR-016](../adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md) (per-user grant required), [ADR-017](../adr/ADR-017-google-grants-stay-separate.md) (two grants, chained consent) |
+| Decisions | [ADR-019](../adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md) (per-user grant required), [ADR-020](../adr/ADR-020-google-grants-stay-separate.md) (two grants, chained consent) |
 | Builds on | [`SPEC-chat-tools-registry.md`](SPEC-chat-tools-registry.md) §10 — this closes the debt that section records |
 | Evidence | [`docs/evaluations/CHAT/PROGRESS.md`](../../docs/evaluations/CHAT/PROGRESS.md) — the QA that measured the write path, and §2 there for the gate this work re-measured |
 
@@ -16,7 +16,7 @@
 Today every chat user shares one Google Calendar grant, read from
 `GOOGLE_CALENDAR_REFRESH_TOKEN` in the environment. Whoever asks, the event
 lands on whichever calendar that token belongs to. `SPEC-chat-tools-registry.md`
-§10 names this as the largest piece of debt in the tool plane, and ADR-016 now
+§10 names this as the largest piece of debt in the tool plane, and ADR-019 now
 makes a per-user grant a precondition for enabling a writing tool at all.
 
 The product requirement layered on top: a user who connects their email should
@@ -40,7 +40,7 @@ email address inside a token.
 
 ### Out
 
-- **Merging the two grants.** ADR-017 decided against it. The guards at `config.py:379` and `gmail/provider.py:180` are not touched by this spec, and a change that touches them is not this spec.
+- **Merging the two grants.** ADR-020 decided against it. The guards at `config.py:379` and `gmail/provider.py:180` are not touched by this spec, and a change that touches them is not this spec.
 - **Outlook or Microsoft calendars.** One provider, following the Gmail/Outlook precedent of adding providers one at a time.
 - **Turning the flags on.** `CHAT_TOOL_AXIS_ENABLED` and `GOOGLE_CALENDAR_ENABLED` stay off by default. This spec makes enabling them defensible; it does not enable them.
 - **F5, the ambiguous-hour guard.** Recorded in PROGRESS.md §5, owed separately. Named here so it is not assumed closed by this work.
@@ -54,7 +54,7 @@ process-wide credential, no other user's, no environment fallback when a
 principal is present.
 
 **J2 — A missing grant degrades the turn.** The user is told the calendar is not
-connected. Nothing is written and no other calendar is substituted (ADR-016 §2).
+connected. Nothing is written and no other calendar is substituted (ADR-019 §2).
 
 **J3 — Both Gmail scope guards hold unchanged.** `config.py:379` and
 `gmail/provider.py:180` behave exactly as today. A Gmail grant returning
@@ -155,7 +155,7 @@ The route table grows by three (`connect`, `callback`, and the status read),
 which is expected: the 63-route baseline is an invariant of the *tool registry*
 port, not of the application forever. The new count is recorded when this lands.
 
-`GoogleCalendarSettings` splits along the line ADR-016 draws:
+`GoogleCalendarSettings` splits along the line ADR-019 draws:
 
 | Value | Resolved | Why |
 |---|---|---|
@@ -260,5 +260,5 @@ leaves a stale `active` record. The refresh failure has to mark it `revoked` and
 degrade the turn per J2, not retry.
 
 **Scope creep back toward merging.** The cheapest answer to any friction here is
-"just put both scopes on one consent". ADR-017 rejected that with reasons; if it
+"just put both scopes on one consent". ADR-020 rejected that with reasons; if it
 is revisited, it is a superseding ADR, not an edit to a guard.

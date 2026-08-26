@@ -1,13 +1,13 @@
-# ADR-017 — Google grants stay separate; consent is chained, not merged
+# ADR-020 — Google grants stay separate; consent is chained, not merged
 
 - Status: Accepted — implemented 2026-08-26 by [`SPEC-per-user-google-calendar-oauth.md`](../specs/SPEC-per-user-google-calendar-oauth.md)
 - Date: 2026-08-26
 - Decision makers: Product/Engineering team
-- Relates to: `src/cowork_agent/config.py`, `src/cowork_agent/integrations/gmail/`, `src/cowork_agent/api/mailboxes.py`; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-006](ADR-006-supabase-managed-data-with-gmail-sessions.md), [ADR-016](ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)
+- Relates to: `src/cowork_agent/config.py`, `src/cowork_agent/integrations/gmail/`, `src/cowork_agent/api/mailboxes.py`; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-006](ADR-006-supabase-managed-data-with-gmail-sessions.md), [ADR-019](ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)
 
 ## Context
 
-[ADR-016](ADR-016-executable-chat-tools-run-under-a-per-user-grant.md) requires a
+[ADR-019](ADR-019-executable-chat-tools-run-under-a-per-user-grant.md) requires a
 per-user Google Calendar grant. The product requirement on top of it is that
 connecting email should leave the user with calendar working too — one journey,
 not a second button to discover.
@@ -106,4 +106,4 @@ both scopes, arrived at more subtly.
 **Leave the flows independent, unify only the frontend.** Cheapest, and no OAuth
 work at all. Rejected because it does not deliver the requirement: the user still
 performs two distinct connect actions, and the shared environment token stays,
-which ADR-016 forbids for a writing tool.
+which ADR-019 forbids for a writing tool.

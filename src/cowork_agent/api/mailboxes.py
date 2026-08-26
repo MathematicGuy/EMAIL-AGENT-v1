@@ -146,7 +146,7 @@ def create_mailbox_router() -> APIRouter:
                 now=datetime.now(UTC),
                 ttl_seconds=session_settings(request).session_ttl_seconds,
             )
-        # The chained calendar consent (ADR-017). The mail connection and the
+        # The chained calendar consent (ADR-020). The mail connection and the
         # session are already earned at this point; the second leg can only add
         # to them, never take them back, which is why every failure over in
         # `api/calendars.py` still redirects with `gmail=connected`.

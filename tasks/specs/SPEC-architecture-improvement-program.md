@@ -445,7 +445,7 @@ this section is measured.
    is its own subject; the four payload models; the eight helpers; `create_mail_scan_router()`.
 2. `app.py` gains one `include_router(create_mail_scan_router())`.
 3. `chat.py` loses the cluster; `ruff check --fix` clears the F401 cascade.
-4. Amend ADR-015 with the module and the admission-rule reasoning, or write ADR-016 if the
+4. Amend ADR-015 with the module and the admission-rule reasoning, or write ADR-019 if the
    decision turns out broader than one module.
 
 **Do not** promote any of the *eight mail-scan helpers* into `api/dependencies.py` — see the

@@ -328,12 +328,12 @@ and gated a second time by `GOOGLE_CALENDAR_ENABLED`. Two conditions govern it,
 and neither is a runtime check that can be forgotten:
 
 - It writes **only under the turn's own user's Google Calendar grant**
-  ([ADR-016](../../tasks/adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)).
+  ([ADR-019](../../tasks/adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)).
   A signed-in user with no grant is told the calendar is not connected; no
   process-wide credential is ever substituted.
 - That grant is **separate from the Gmail grant**, obtained through its own
   consent and stored in its own table
-  ([ADR-017](../../tasks/adr/ADR-017-google-grants-stay-separate.md)). The
+  ([ADR-020](../../tasks/adr/ADR-020-google-grants-stay-separate.md)). The
   `gmail.readonly` scope guard is untouched.
 
 **ADR-004's prohibition is unchanged: there is no executable Email or Gmail tool

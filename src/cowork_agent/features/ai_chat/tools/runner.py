@@ -29,7 +29,7 @@ class ToolTurnContext:
 
 
 # A tool bound to one turn. Async because a per-user grant is a repository read
-# (ADR-016): the credential belongs to whoever is speaking, so it cannot be
+# (ADR-019): the credential belongs to whoever is speaking, so it cannot be
 # resolved once at composition time.
 ToolBinder = Callable[[ToolTurnContext], Awaitable[Tool]]
 
@@ -38,7 +38,7 @@ class ChatToolRunner:
     """The controller's whole view of tools: one call in, one result out.
 
     Tools are bound per turn rather than per process because the calendar tool
-    needs the turn's idempotency key, the current time, and — since ADR-016 —
+    needs the turn's idempotency key, the current time, and — since ADR-019 —
     the grant belonging to the user whose turn it is. `names` is stable across
     turns and across users, which is what lets the router narrow on it before
     any binding happens: whether a tool *runs* is per-user, whether it *exists*

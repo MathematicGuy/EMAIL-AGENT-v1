@@ -365,7 +365,7 @@ class EvaluationBundle:
 
 @dataclass(frozen=True, slots=True)
 class CalendarRuntime:
-    """The per-user Google Calendar plane (ADR-016, ADR-017).
+    """The per-user Google Calendar plane (ADR-019, ADR-020).
 
     Present only when the handshake is configured. Holds application identity
     and the seams the callback and the tool binder both need -- never a refresh
@@ -978,7 +978,7 @@ async def build_calendar(
     path on purpose: they are properties of this deployment, not of a provider,
     and a second pair would be two things to rotate instead of one. What is *not*
     shared is the grant -- separate consent, separate token, separate table
-    (ADR-017).
+    (ADR-020).
     """
 
     oauth_settings = GoogleCalendarOAuthSettings.from_env(environ)

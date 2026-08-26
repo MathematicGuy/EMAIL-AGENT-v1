@@ -1,9 +1,9 @@
-# ADR-016 — Executable chat tools run under a per-user grant
+# ADR-019 — Executable chat tools run under a per-user grant
 
 - Status: Accepted — implemented 2026-08-26 by [`SPEC-per-user-google-calendar-oauth.md`](../specs/SPEC-per-user-google-calendar-oauth.md)
 - Date: 2026-08-26
 - Decision makers: Product/Engineering team
-- Relates to: `src/cowork_agent/features/ai_chat/tools/`, `src/cowork_agent/integrations/google_calendar/`; required by [`SPEC-chat-tools-registry.md`](../specs/SPEC-chat-tools-registry.md) §9; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-013](ADR-013-composition-as-typed-value.md), [ADR-017](ADR-017-google-grants-stay-separate.md)
+- Relates to: `src/cowork_agent/features/ai_chat/tools/`, `src/cowork_agent/integrations/google_calendar/`; required by [`SPEC-chat-tools-registry.md`](../specs/SPEC-chat-tools-registry.md) §9; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-013](ADR-013-composition-as-typed-value.md), [ADR-020](ADR-020-google-grants-stay-separate.md)
 
 ## Context
 
@@ -45,7 +45,7 @@ deployment:
 1. **Per-user grant.** The credential comes from a connection record owned by
    the authenticated principal. `GOOGLE_CALENDAR_REFRESH_TOKEN` is demoted to a
    local-development convenience and is ignored whenever a principal is present.
-   [ADR-017](ADR-017-google-grants-stay-separate.md) decides how that grant is
+   [ADR-020](ADR-020-google-grants-stay-separate.md) decides how that grant is
    obtained; this ADR only requires that it exists.
 2. **Absent grant degrades the turn, never substitutes.** A user with no
    calendar connection gets a reply saying the calendar is not connected. It is
