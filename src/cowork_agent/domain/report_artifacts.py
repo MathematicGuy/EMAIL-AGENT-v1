@@ -161,10 +161,9 @@ class ReportArtifactStore(Protocol):
 class ReportPdfRenderer(Protocol):
     """Renders a stored report to PDF bytes.
 
-    No implementation ships today: a faithful render of a Vietnamese Markdown
-    report needs an embedded Unicode font, which is a dependency decision rather
-    than a refactor. The port exists so ``GET /api/v1/reports/{name}/pdf`` has a
-    seam to grow one behind, and so the route can report its own absence.
+    The domain owns only this behavior-shaped port. A concrete implementation
+    and its font assets belong to the integrations layer and are selected at
+    the application composition root.
     """
 
     def render(self, report: StoredReport, *, title: str | None = None) -> bytes: ...

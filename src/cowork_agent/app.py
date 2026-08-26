@@ -64,6 +64,7 @@ from cowork_agent.integrations.llm.provider_factory import (
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.report_pdf import Fpdf2ReportPdfRenderer
 from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
@@ -296,6 +297,7 @@ def create_app() -> FastAPI:
             # The store is the first field of the typed runtime (ADR-013); its
             # consumers read it through ``runtime(request).reports``.
             report_store = FileSystemReportArtifactStore(REPORTS_DIR)
+            report_pdf_renderer = Fpdf2ReportPdfRenderer()
             settings = GmailSettings.from_env()
             control_plane_url = database_url()
             outlook_settings: OutlookSettings | None = None
@@ -481,6 +483,7 @@ def create_app() -> FastAPI:
             # exceptions in ADR-013.
             app.state.runtime = CoworkRuntime(
                 reports=report_store,
+                report_pdf_renderer=report_pdf_renderer,
                 control_plane=control_plane,
                 mailbox=mailbox_runtime,
                 chat=chat_runtime,

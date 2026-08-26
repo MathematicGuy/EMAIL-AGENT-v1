@@ -70,7 +70,7 @@ from cowork_agent.config import (
     SupabaseStorageSettings,
     UserDocumentsSettings,
 )
-from cowork_agent.domain.report_artifacts import ReportArtifactStore
+from cowork_agent.domain.report_artifacts import ReportArtifactStore, ReportPdfRenderer
 from cowork_agent.features.ai_chat.controller import (
     ChatSessionRegistryPort,
     UnavailableChatReply,
@@ -376,6 +376,7 @@ class CoworkRuntime:
     """
 
     reports: ReportArtifactStore
+    report_pdf_renderer: ReportPdfRenderer | None = None
     control_plane: ControlPlane | None = None
     mailbox: MailboxRuntime | None = None
     chat: ChatRuntime | None = None

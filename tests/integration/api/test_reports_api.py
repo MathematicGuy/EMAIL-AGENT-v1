@@ -6,6 +6,7 @@ whole candidate exists to create: these cases never touch the repository's
 tracked ``data/reports``.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -148,7 +149,10 @@ async def test_pdf_uses_a_registered_renderer(reports) -> None:
         def render(self, report, *, title=None) -> bytes:
             return b"%PDF-1.4 " + report.content.encode("utf-8")
 
-    app.state.report_pdf_renderer = StubRenderer()
+    app.state.runtime = replace(
+        app.state.runtime,
+        report_pdf_renderer=StubRenderer(),
+    )
     async with _client(app) as client:
         await client.post(
             "/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"}

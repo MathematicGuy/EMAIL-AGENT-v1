@@ -11,6 +11,7 @@ from cowork_agent.app import create_app
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMessageRequest, ChatTurnStatus
+from cowork_agent.integrations.report_pdf import Fpdf2ReportPdfRenderer
 from cowork_agent.persistence.repositories.sqlite_chat import SQLiteChatRepository
 
 
@@ -44,6 +45,10 @@ def test_server_starts_and_redirects_to_google_oauth(tmp_path: Path, monkeypatch
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
+            assert isinstance(
+                app.state.runtime.report_pdf_renderer,
+                Fpdf2ReportPdfRenderer,
+            )
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 assert (await client.get("/health")).json() == {"status": "ok"}
