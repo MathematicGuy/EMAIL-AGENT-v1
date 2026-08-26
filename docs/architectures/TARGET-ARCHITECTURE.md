@@ -318,8 +318,28 @@ Per-turn classification uses a lightweight LLM call (`ChatRoutingService`) to de
 | otherwise | `CHAT` |
 
 This baseline executes `CHAT`, `RAG`, and `CLARIFY`. The action axis exists in
-the contract but is disabled at runtime: `needs_tool` is forced to `false`, and
-`TOOL` and `RAG_TOOL` are unreachable. There is still no executable in-chat tool.
+the contract and is **disabled by default at runtime**: with
+`CHAT_TOOL_AXIS_ENABLED` off, `needs_tool` is forced to `false` and `TOOL` and
+`RAG_TOOL` are unreachable.
+
+One executable tool now exists behind that flag — `create_calendar_event`,
+specified in [`SPEC-chat-tools-registry.md`](../../tasks/specs/SPEC-chat-tools-registry.md)
+and gated a second time by `GOOGLE_CALENDAR_ENABLED`. Two conditions govern it,
+and neither is a runtime check that can be forgotten:
+
+- It writes **only under the turn's own user's Google Calendar grant**
+  ([ADR-016](../../tasks/adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)).
+  A signed-in user with no grant is told the calendar is not connected; no
+  process-wide credential is ever substituted.
+- That grant is **separate from the Gmail grant**, obtained through its own
+  consent and stored in its own table
+  ([ADR-017](../../tasks/adr/ADR-017-google-grants-stay-separate.md)). The
+  `gmail.readonly` scope guard is untouched.
+
+**ADR-004's prohibition is unchanged: there is no executable Email or Gmail tool
+in chat, and the calendar tool does not create one.** Enabling either flag
+outside local development remains a decision this document must record, not a
+configuration change.
 
 ### Layered prompt
 

@@ -38,6 +38,42 @@ answering evidence rather than defining it. The one file that changed is
 `tools/arguments.py`; the router, the resolver, and the calendar tool are as they
 were.
 
+### Re-measured after the per-user calendar grant
+
+[`SPEC-per-user-google-calendar-oauth`](../../../tasks/specs/SPEC-per-user-google-calendar-oauth.md)
+landed after the numbers above. It changes *whose* calendar a turn writes to,
+not how a turn decides what to write, so every gate in §5 is unmoved — the same
+`fill_arguments` prompt against the same fixtures.
+
+```
+uv run pytest -q      2382 passed, 14 skipped, 0 failed   (24.1 s)
+uv run ruff check .   All checks passed
+uv run mypy src       Success: no issues found in 213 source files
+route table           67 routes  (63 + 4, nothing removed)
+```
+
+| Added | |
+|---|---|
+| `GET /v1/calendar/oauth/google/connect` | starts the consent for a signed-in user |
+| `GET /v1/calendar/oauth/google/callback` | stores the grant against the session's principal |
+| `GET /v1/calendar/connection` | the status the frontend renders |
+| `DELETE /v1/calendar/connection` | revokes the calendar grant, and only that (J6) |
+
+The route table is the one number that moved, and it moved because a new
+router mounted. Measured with the §7.3 oracle from
+[`SPEC-architecture-improvement-program.md`](../../../tasks/specs/SPEC-architecture-improvement-program.md),
+before and after, on the same checkout. The 63-route figure was an invariant of
+the *tool registry* port, never of the application forever; `test_no_route_accepts_caller_provided_identity`
+is the invariant that actually guards it, and it still passes over all 67.
+
+The 30 new tests are the J1–J7 invariants: [`test_calendar_oauth.py`](../../../tests/unit/integrations/google_calendar/test_calendar_oauth.py)
+(storage and consent), [`test_calendar_router.py`](../../../tests/unit/api/test_calendar_router.py)
+(every path out of the callback), [`test_calendar_binder.py`](../../../tests/unit/features/ai_chat/test_calendar_binder.py)
+(which grant a turn resolves). Six mutations, six reds — J2's silent
+environment fallback and J4's lost mail connection were mutated hardest,
+because both are invisible in a green suite.
+
+
 ## 3. Acceptance criteria
 
 | | Criterion | Evidence |

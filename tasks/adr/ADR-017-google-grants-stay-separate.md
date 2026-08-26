@@ -1,6 +1,6 @@
 # ADR-017 — Google grants stay separate; consent is chained, not merged
 
-- Status: Proposed
+- Status: Accepted — implemented 2026-08-26 by [`SPEC-per-user-google-calendar-oauth.md`](../specs/SPEC-per-user-google-calendar-oauth.md)
 - Date: 2026-08-26
 - Decision makers: Product/Engineering team
 - Relates to: `src/cowork_agent/config.py`, `src/cowork_agent/integrations/gmail/`, `src/cowork_agent/api/mailboxes.py`; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-006](ADR-006-supabase-managed-data-with-gmail-sessions.md), [ADR-016](ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)

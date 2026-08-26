@@ -379,8 +379,10 @@ Nothing here blocks the loop:
 
 Fix in this order when the slice proves out:
 
-1. **Per-user OAuth** (§3). The shared refresh token is the one thing that cannot
-   ship to real users.
+1. ~~**Per-user OAuth** (§3). The shared refresh token is the one thing that cannot
+   ship to real users.~~ **Done** — [`SPEC-per-user-google-calendar-oauth.md`](SPEC-per-user-google-calendar-oauth.md),
+   2026-08-26. The grant is per user, chained to the mail consent, and a turn
+   with no grant refuses rather than borrowing one.
 2. **A second tool.** One adapter is a hypothetical seam. The second is what
    reveals whether `Tool` and `ToolResult` are actually the right shapes — expect
    to change them, and prefer changing them then over guessing now.

@@ -2,12 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed. No implementation yet. |
+| Status | **Implemented.** P1–P8 landed on `claude/cowork-agent-tools-registry-b7ee98`. |
 | Date | 2026-08-26 |
 | Scope | Replace the shared `GOOGLE_CALENDAR_REFRESH_TOKEN` with a per-user grant, obtained in the same journey as the mail connection. |
 | Decisions | [ADR-016](../adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md) (per-user grant required), [ADR-017](../adr/ADR-017-google-grants-stay-separate.md) (two grants, chained consent) |
 | Builds on | [`SPEC-chat-tools-registry.md`](SPEC-chat-tools-registry.md) §10 — this closes the debt that section records |
-| Evidence | [`docs/evaluations/CHAT/PROGRESS.md`](../../docs/evaluations/CHAT/PROGRESS.md) — the QA that measured the write path |
+| Evidence | [`docs/evaluations/CHAT/PROGRESS.md`](../../docs/evaluations/CHAT/PROGRESS.md) — the QA that measured the write path, and §2 there for the gate this work re-measured |
 
 ---
 
@@ -173,14 +173,17 @@ idempotency key and clock. A per-user credential does not fit through it, so the
 seam widens to carry who the turn belongs to:
 
 ```python
-ToolBinder = Callable[[ToolTurnContext], Tool]
+ToolBinder = Callable[[ToolTurnContext], Awaitable[Tool]]
 
 @dataclass(frozen=True, slots=True)
 class ToolTurnContext:
     idempotency_key: str
     now: datetime
-    user_id: str | None
+    user_id: str | None = None
 ```
+
+The binder is **async**, which this spec did not originally say: resolving the
+grant is a repository read, so it cannot happen synchronously at bind time.
 
 `ChatToolRunner.run_for_turn` gains `user_id` and passes it through. The binder
 resolves the grant and returns either a bound calendar tool or one whose handler
@@ -198,16 +201,16 @@ per-user; whether it *exists* is not.
 
 ## 8. Task breakdown
 
-| | Task | Done when |
-|---|---|---|
-| P1 | `CalendarConnection`, repository protocol, SQLite implementation | Round-trips through `upsert`/`get_for_user`/`delete`; token encrypted at rest |
-| P2 | Postgres implementation | Same tests, both backends |
-| P3 | `GoogleCalendarConnectionService` — `begin()`, `complete(state, response, user_id)` | PKCE and single-use state reused from `OAuthStateManager`; granted scope checked, as Gmail does |
-| P4 | `api/calendars.py` — connect, callback, status | J4 and J5 asserted per error path |
-| P5 | Chain the Gmail callback's final redirect | Gmail path otherwise byte-identical; J3 unchanged and still asserted |
-| P6 | Widen the binder to `ToolTurnContext`; resolve the grant per turn | J1, J2; `names` proven user-independent |
-| P7 | Frontend combined status | Three states rendered: connected, mail-only, neither |
-| P8 | Re-run the tool-intent QA; record the new route count | PROGRESS.md updated; suite, ruff, mypy green |
+| | Task | Done when | State |
+|---|---|---|---|
+| P1 | `CalendarConnection`, repository protocol, SQLite implementation | Round-trips through `upsert`/`get_for_user`/`delete`; token encrypted at rest | Done |
+| P2 | Postgres implementation | Same tests, both backends | Done — migration `017_calendar_connections.sql` |
+| P3 | `GoogleCalendarConnectionService` — `begin()`, `complete(state, response, user_id)` | PKCE and single-use state reused from `OAuthStateManager`; granted scope checked, as Gmail does | Done |
+| P4 | `api/calendars.py` — connect, callback, status | J4 and J5 asserted per error path | Done — 15 tests |
+| P5 | Chain the Gmail callback's final redirect | Gmail path otherwise byte-identical; J3 unchanged and still asserted | Done |
+| P6 | Widen the binder to `ToolTurnContext`; resolve the grant per turn | J1, J2; `names` proven user-independent | Done — 6 tests |
+| P7 | Frontend combined status | Three states rendered: connected, mail-only, neither | Done — 157 frontend tests pass |
+| P8 | Re-run the tool-intent QA; record the new route count | PROGRESS.md updated; suite, ruff, mypy green | Done — 63 → 67 routes |
 
 P1–P4 are independent of the chat plane and can land before P5. P6 is the only
 task that touches `features/ai_chat/`.
@@ -231,6 +234,14 @@ Mutation pass before this is called done, matching the QA's §8: break each guar
 in `src/`, confirm the named test goes red, revert. J2 and J4 are the two worth
 mutating hardest — a silent environment fallback and a lost mail connection are
 both invisible in a green suite.
+
+**Result — nine mutations, nine reds.** Six in `src/`: J2's silent environment
+fallback, J1 ignoring the user's grant, J4 dropping the mail outcome, J5
+identifying from the token, J3 accepting a widened grant, and narrowing the
+callback's `except Exception` to `except ValueError` (which is how a
+`CalendarReauthRequiredError` becomes a 500 instead of a redirect). Three in the
+frontend: always showing the connect offer, reporting only the calendar half of
+the journey, and letting a calendar read failure surface as a mail error.
 
 ## 10. Risks
 

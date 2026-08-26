@@ -47,10 +47,11 @@ what one route costs alone; the whole-suite row is parallel.
 | `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
+| `integrations/google_calendar/` | `tests/unit/integrations/google_calendar` + `tests/unit/api` + `tests/unit/features/ai_chat/test_calendar_binder.py` |
 | `integrations/mailbox/`, `integrations/outlook/` | R5 + R11 + R13 |
 | `persistence/` | R7 + R12 |
 | `orchestration/` | R8 |
-| `app.py`, API routes | R11 |
+| `app.py`, API routes | R11 (+ `tests/unit/api` for router-level invariants) |
 | `identity.py`, session/cookie | R11 + `tests/unit/test_identity.py` |
 | `scripts/*.py` | R9 |
 | `data/extracted/*.md` (corpus) | R10 + R3 |
@@ -106,6 +107,9 @@ Before writing a test, check if its invariant is already owned.
 | Report filename rule (traversal, reserved names, slug fallback) | `unit/domain/test_report_artifacts.py` | store, route and chat-controller tests |
 | Report store stays inside its injected root | `unit/persistence/test_report_artifact_store.py` | API tests |
 | `runtime(request)` returns the composed `CoworkRuntime` value | `unit/test_composition.py` | API tests |
+| Per-user calendar grant: whose token a turn resolves, and the refusal when there is none (J1, J2) | `unit/features/ai_chat/test_calendar_binder.py` | controller and tool tests |
+| A chained calendar consent never costs the mail connection or mints a session (J4, J5) | `unit/api/test_calendar_router.py` | mailbox API tests |
+| Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.

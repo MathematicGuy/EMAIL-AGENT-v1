@@ -1,6 +1,6 @@
 # ADR-016 — Executable chat tools run under a per-user grant
 
-- Status: Proposed
+- Status: Accepted — implemented 2026-08-26 by [`SPEC-per-user-google-calendar-oauth.md`](../specs/SPEC-per-user-google-calendar-oauth.md)
 - Date: 2026-08-26
 - Decision makers: Product/Engineering team
 - Relates to: `src/cowork_agent/features/ai_chat/tools/`, `src/cowork_agent/integrations/google_calendar/`; required by [`SPEC-chat-tools-registry.md`](../specs/SPEC-chat-tools-registry.md) §9; partners [ADR-004](ADR-004-chat-native-task-episodes.md), [ADR-013](ADR-013-composition-as-typed-value.md), [ADR-017](ADR-017-google-grants-stay-separate.md)
