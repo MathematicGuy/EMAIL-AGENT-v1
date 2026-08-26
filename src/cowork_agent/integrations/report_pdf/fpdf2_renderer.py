@@ -6,7 +6,7 @@ import html
 import re
 from pathlib import Path
 
-from fpdf import FPDF
+from fpdf import FPDF, TextStyle
 
 from cowork_agent.domain.report_artifacts import StoredReport
 
@@ -16,6 +16,54 @@ _FONT_STYLES = {
     "B": "NotoSans-Bold.ttf",
     "I": "NotoSans-Italic.ttf",
     "BI": "NotoSans-BoldItalic.ttf",
+}
+_HTML_TAG_STYLES = {
+    "h1": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=20.0,
+        color="#17324d",
+    ),
+    "h2": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=15.0,
+        color="#234e70",
+    ),
+    "h3": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=13.0,
+        color="#234e70",
+    ),
+    "h4": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=12.0,
+        color="#234e70",
+    ),
+    "h5": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=11.5,
+        color="#234e70",
+    ),
+    "h6": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_style="B",
+        font_size_pt=11.0,
+        color="#234e70",
+    ),
+    "pre": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_size_pt=10.0,
+        color="#263238",
+    ),
+    "code": TextStyle(
+        font_family=_FONT_FAMILY,
+        font_size_pt=10.0,
+        color="#263238",
+    ),
 }
 
 _FENCE_RE = re.compile(r"^\s*```(?:[^`]*)$")
@@ -45,7 +93,11 @@ class Fpdf2ReportPdfRenderer:
         document = _markdown_to_html(report.content)
         if title:
             document = f"<h1>{_inline_markup(title)}</h1>{document}"
-        pdf.write_html(document)
+        pdf.write_html(
+            document,
+            font_family=_FONT_FAMILY,
+            tag_styles=_HTML_TAG_STYLES,
+        )
         return bytes(pdf.output())
 
     def _register_fonts(self, pdf: FPDF) -> None:
@@ -84,8 +136,14 @@ def _markdown_to_html(markdown: str) -> str:
     def flush_list() -> None:
         nonlocal list_kind
         if list_kind is not None:
-            items = "".join(f"<li>{_inline_markup(item)}</li>" for item in list_items)
-            blocks.append(f"<{list_kind}>{items}</{list_kind}>")
+            if list_kind == "ul":
+                items = [f"&#8226; {_inline_markup(item)}" for item in list_items]
+            else:
+                items = [
+                    f"{index}. {_inline_markup(item)}"
+                    for index, item in enumerate(list_items, start=1)
+                ]
+            blocks.append(f"<p>{'<br>'.join(items)}</p>")
             list_items.clear()
             list_kind = None
 

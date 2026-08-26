@@ -48,7 +48,7 @@ def test_render_preserves_the_supported_markdown_as_readable_text() -> None:
 [Tài liệu](https://example.com/huong-dan)
 
 ```python
-print("xin chào")
+print("đường dẫn dữ liệu")
 ```
 
 <widget>vẫn đọc được</widget>
@@ -67,7 +67,7 @@ print("xin chào")
         "Bước đầu",
         "Bước tiếp",
         "Tài liệu (https://example.com/huong-dan)",
-        'print("xin chào")',
+        'print("đường dẫn dữ liệu")',
         "<widget>vẫn đọc được</widget>",
     ):
         assert expected in extracted
