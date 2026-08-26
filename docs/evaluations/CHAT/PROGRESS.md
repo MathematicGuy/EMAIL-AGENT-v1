@@ -270,7 +270,64 @@ rather than an edit. Recorded, not attempted.
 `declined_when_underdetermined` therefore stays red at 1/2, and the run still
 exits non-zero. That is the correct reading: one gate is genuinely unmet.
 
+### F6 — every successful write carries the wrong UTC offset *(silent wrong write)*
+
+Found by the Tier B run on 2026-08-26 (`e2e/harness/tier_b_server.py`), which is
+the first harness to record the **Google request body** rather than only the
+tool's return value. Layer A and the three earlier live runs could not have seen
+this: they assert on the reply and on `ok`, and both are correct here.
+
+Four of four happy-path cases, plus `tq-024`, produced:
+
+| case | recorded `start.dateTime` | `start.timeZone` | QA expects |
+|---|---|---|---|
+| `tq-001` | `2026-08-28T02:00:00+00:00` | `Asia/Ho_Chi_Minh` | `2026-08-28T02:00:00+07:00` |
+| `tq-002` | `2026-08-28T02:00:00+00:00` | `Asia/Ho_Chi_Minh` | `2026-08-28T02:00:00+07:00` |
+| `tq-003` | `2026-08-27T15:00:00+00:00` | `Asia/Ho_Chi_Minh` | `2026-08-27T15:00:00+07:00` |
+| `tq-004` | `2026-09-03T09:00:00+00:00` | `Asia/Ho_Chi_Minh` | `2026-09-03T09:00:00+07:00` |
+| `tq-024` | `2026-08-28T02:00:00+00:00` | `Asia/Ho_Chi_Minh` | `2026-08-28T02:00:00+07:00` |
+
+The wall-clock digits are right and the reply tells the user the right hour. The
+offset is UTC. Google honours an explicit offset over `timeZone`, so a 2AM
+request is filed at **09:00 local** — seven hours off, with nothing anywhere
+saying so. That is the exact failure class the `silent_wrong_write` tier exists
+to catch, and it is 5 for 5.
+
+**Where it comes from.** Not the parser: `_parse_moment`
+(`features/ai_chat/tools/calendar.py:160`) attaches the calendar's zone only to
+a *naive* timestamp, and `ZoneInfo("Asia/Ho_Chi_Minh")` cannot produce `+00:00`.
+So `fill_arguments` is emitting an explicit `Z`/`+00:00`. Its prompt already
+says *"Use its timezone offset in any timestamp you write"*
+(`tools/arguments.py:26`); `mimo-v2.5-pro` does not. Nothing downstream compares
+the offset it wrote against the zone the event is filed in.
+
+**The decision this needs.** A guard in the tool layer that reconciles the two is
+cheap, but which one wins is a product call:
+
+* *Wall-clock wins* — reinterpret the digits in the calendar's zone. Correct for
+  every case here, wrong for a user who genuinely means another zone.
+* *Refuse on mismatch* — never writes the wrong hour, but rejects legitimate
+  cross-zone input.
+* *Send no offset* — `_bound` already notes Google reads an offset-less
+  `dateTime` in the named `timeZone`. Smallest diff; same trade-off as the first.
+
+Recorded, not fixed: changing which zone a write lands in is not a change to make
+unilaterally. `e2e/calendar-tool-live.spec.ts` carries a `test.fail()`-marked
+case asserting `+07:00`, so the suite turns red the day this starts passing.
+
+### F7 — `tq-005` now writes rather than defaults
+
+The same run re-measured F5. The behaviour has moved: the ambiguous bare hour no
+longer falls back to a 09:00 working hour, it resolves to **14:00** and writes.
+`expected=0 got=1`. The router still sends this case to `clarify` in the offline
+labels, so production is covered by routing — but the tool layer's missing guard
+(F5) is now a wrong write rather than a wrong default, which is worse.
+
 ## 6. Still open
+
+0. **F6 — the UTC-offset write.** The highest-severity item here and the only one
+   that silently puts a real event at the wrong hour. Needs the product decision
+   in §5 F6 before a guard can be written.
 
 1. **F5 — the ambiguous-hour guard.** The only unmet gate. Needs the tool layer
    to see the user's message so a stated-but-undetermined hour can be refused in
