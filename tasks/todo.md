@@ -14,9 +14,9 @@ Register: [SPEC-architecture-improvement-program.md](specs/SPEC-architecture-imp
 - [x] C07 Mail-scan reconciliation moved below transport (`48ac90e`)
 - [x] C06 Mail-poll protocol extracted from `useStreamingChat` (`ace5c26`)
 - [x] C05 Settings parsing is pure; executable boundaries load dotenv (ADR-017)
-- [ ] C08 PDF renderer — blocked on a dependency decision (ask first)
+- [x] C08 PDF renderer — fpdf2 + bundled Noto Sans (ADR-018)
 - [x] C09 Stray textbook moved out of `data/raw/` into `data/OCR/`
-- [x] C10 Three `app.state` survivors accepted and documented; revisit with C08
+- [x] C10 Two request-time `app.state` survivors accepted; PDF survivor closed by C08
 
 ---
 
