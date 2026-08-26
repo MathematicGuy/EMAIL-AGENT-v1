@@ -69,46 +69,56 @@ That is arguably the better answer. Worth knowing before the flag is turned on.
 
 ---
 
-## `chat_routing_labels_tool_block.json` — 4 cases, not yet merged
+## The §11 classifier cases — merged into the routing fixture
 
-The classifier-fixture work from `SPEC-chat-tools-registry` §11, prepared but **deliberately
-not appended** to `tests/fixtures/chat_routing/chat_routing_labels.json`.
+The classifier-fixture work from `SPEC-chat-tools-registry` §11 has landed:
+`chat_routing_labels_tool_block.json` was appended to
+[`tests/fixtures/chat_routing/chat_routing_labels.json`](../chat_routing/chat_routing_labels.json)
+and deleted. The routing fixture is now **64 cases, 16 per group**.
 
-Two prerequisites have to be met first, and neither is mine to decide.
-
-**1. Group balance forces four cases, not two.** The spec asked for two — a create-event case
-and a calendar-mention distractor. The loader rejects an unbalanced set outright
-(`chat routing fixture groups must be evenly balanced`) and `test_chat_routing_loader.py`
-asserts `set(counts.values()) == {len(cases) // 4}`. So additions come in multiples of four,
-one per group, and each group keeps its invariant: `ambiguous` cases must have
-`expected_needs_rag=true`, `distractor` cases must have it `false`. The block below satisfies
-both.
-
-**2. The evaluator would score two of these as failures even when the classifier is right.**
-`scripts/evaluate_chat_routing.py` builds its `ChatRoutingService` with the constructor
-defaults — `tool_axis_enabled=False`, `available_tools=()` — so every tool case is narrowed away
-before it is scored:
-
-| id | group | labelled | axis on + tool registered | evaluator today |
+| id | group | labelled route | needs_rag | needs_tool |
 |---|---|---|---|---|
-| `cr-061` | `obvious_chat` | `tool` | `tool` | **`chat`** |
-| `cr-062` | `distractor` | `chat` | `chat` | `chat` |
-| `cr-063` | `ambiguous` | `tool` | `tool` | **`rag`** |
-| `cr-064` | `obvious_rag` | `rag` | `rag` | `rag` |
+| `cr-061` | `obvious_chat` | `tool` | false | true |
+| `cr-062` | `distractor` | `chat` | false | false |
+| `cr-063` | `ambiguous` | `tool` | **true** | true |
+| `cr-064` | `obvious_rag` | `rag` | true | false |
 
-Merging the block without passing `tool_axis_enabled=True` and
-`available_tools={"create_calendar_event"}` into that service would bake in two guaranteed
-failures and make the eval report say the classifier is worse than it is.
+Four rather than the two the spec asked for: the loader rejects an unbalanced set outright
+(`chat routing fixture groups must be evenly balanced`) and `test_chat_routing_loader.py`
+asserts `set(counts.values()) == {len(cases) // 4}`, so additions come in multiples of four,
+one per group. Each group keeps its own invariant — `ambiguous` cases must have
+`expected_needs_rag=true`, `distractor` cases must have it `false`.
 
-**3. Merging costs a live re-run.** 60 cases become 64 live classifier calls. That spend is the
-user's to authorize, not a default to take.
+### What had to change in the evaluator first
 
-### To merge, once those are settled
+**The axis is now on in the scorer.** `scripts/evaluate_chat_routing.py` used to build its
+`ChatRoutingService` with the constructor defaults — `tool_axis_enabled=False`,
+`available_tools=()` — which narrowed every tool case away before it was scored, so `cr-061`
+scored `chat` and `cr-063` scored `rag` for a *correct* classifier. It now passes
+`tool_axis_enabled=True` and the registry's own names, and renders the TIER 4.5 tool block
+into the live prompt through `build_calendar_tool`, so the name, description and schema the
+model is shown cannot drift from the executable definition.
 
-1. Pass the tool axis and the registry names into `ChatRoutingService` in
-   `scripts/evaluate_chat_routing.py`.
-2. Append the four cases to `chat_routing_labels.json`.
-3. Re-run the labelled set and record the new baseline.
+**The gate learned about tools.** `ChatRoutingMetrics` only measured retrieval, so turning the
+axis on would have added two cases the gate could not see. It now also reports `tool_recall`,
+`tool_precision`, `missed_tool_case_ids` and `false_tool_case_ids`, and gates on **precision
+only**: a false tool positive is a turn that never asked for an action being routed at one,
+which is the direction that writes to a real calendar, while a missed tool case costs a plain
+chat reply. Two labelled tool cases is too small a denominator to gate a recall ratio on —
+tighten it when the block grows.
+
+**`cr-063` is not a missed retrieval.** It is labelled `expected_needs_rag=true` because the
+request genuinely needs both, but `finalize_route` collapses `RAG_TOOL` to `TOOL` and drops
+the retrieval half (PROGRESS.md F1). Scoring that as a miss would park a permanent entry in
+`missed_case_ids` that no classifier change could ever clear, so it is excluded from the
+retrieval metrics and named in `rag_tool_downgraded_case_ids` instead. The gap stays counted;
+it just stops being attributed to the classifier.
+
+### Still owed
+
+The live re-run. 60 cases became **64 live classifier calls**, and that spend is the user's to
+authorize. Until it happens, the recorded baseline in `evaluations/CHAT/` describes 60 cases
+and a scorer that could not see the tool axis.
 
 ---
 

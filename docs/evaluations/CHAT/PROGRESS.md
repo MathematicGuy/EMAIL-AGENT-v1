@@ -386,12 +386,25 @@ uv run python scripts/evaluate_tool_intent.py
    uv run python scripts/evaluate_tool_intent.py
    ```
 
-2. **The §11 classifier fixtures.** Four cases prepared in
-   [`chat_routing_labels_tool_block.json`](../../../tests/fixtures/tool_intent/chat_routing_labels_tool_block.json),
-   still unmerged. Blocked on `scripts/evaluate_chat_routing.py` passing
-   `tool_axis_enabled=True` and `available_tools={"create_calendar_event"}` —
-   without that, two of the four score as failures for a *correct* classifier —
-   and on authorizing a 64-call live re-run.
+2. **The §11 classifier fixtures — merged, not yet re-measured.** `cr-061` to
+   `cr-064` now live in
+   [`chat_routing_labels.json`](../../../tests/fixtures/chat_routing/chat_routing_labels.json)
+   (64 cases, 16 per group). `scripts/evaluate_chat_routing.py` routes with
+   `tool_axis_enabled=True` and the registry's own names, and renders the
+   TIER 4.5 tool block into the live prompt, so a correct classifier is no
+   longer scored as two failures. `ChatRoutingMetrics` gained `tool_recall`,
+   `tool_precision`, `missed_tool_case_ids` and `false_tool_case_ids`, and gates
+   on precision — a false tool positive is the direction that writes to a real
+   calendar. `cr-063` is excluded from the retrieval metrics and named in
+   `rag_tool_downgraded_case_ids`: F1 drops its retrieval half by design, and
+   scoring that as a classifier miss would never clear.
+
+   What is still owed is the **64-call live re-run**. Until it happens the
+   recorded baseline describes 60 cases and a scorer blind to the tool axis.
+
+   ```bash
+   uv run python scripts/evaluate_chat_routing.py
+   ```
 
 3. **The executable-chat-tool ADR — written.**
    [ADR-019](../../../tasks/adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)

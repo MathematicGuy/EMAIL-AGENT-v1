@@ -111,6 +111,7 @@ Before writing a test, check if its invariant is already owned.
 | A chained calendar consent never costs the mail connection or mints a session (J4, J5) | `unit/api/test_calendar_router.py` | mailbox API tests |
 | Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
 | Which messages determine an hour and which do not (PROGRESS.md F5/F7) | `unit/features/ai_chat/test_ambiguous_hour.py` | calendar tool and QA tier tests, which assert only that the guard is *reached* |
+| What the routing launch gate measures, tool axis included | `unit/scripts/test_evaluate_chat_routing.py` | fixture and resolver tests, which own the labels and the narrowing |
 | Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
 ### Critical Invariants
