@@ -151,6 +151,7 @@ def _runtime_with(
             chat_reply=None,
             chat_intent_settings=None,
             chat_routing_service=chat_routing_service,
+            chat_tool_runner=None,
         ),
         email_rag=EmailRagRuntime(
             semantic_memory=None,

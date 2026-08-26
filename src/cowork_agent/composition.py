@@ -85,6 +85,7 @@ from cowork_agent.features.ai_chat.memory_observability import (
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner
 from cowork_agent.features.batch_evaluation.bootstrap import (
     EvaluationRuntime,
     build_evaluation_runtime,
@@ -281,7 +282,12 @@ class ChatRuntime:
     The controller factory reads the assembled runtime at controller-creation
     time (slice 02-7), so it always sees those final values without re-reading
     ``app.state`` — the frozen group never observes a mid-flight swap.
-    ``ready_document_catalog``
+    ``chat_tool_runner`` boots as ``None`` for the same reason and is
+    upgraded in the same ``replace``: the calendar tool needs the resolved
+    chat providers to fill its arguments, so it cannot exist before the
+    provider block runs. It stays ``None`` whenever the tool is unconfigured
+    or its flag is off, which is every deployment until the executable-chat-
+    tool ADR lands. ``ready_document_catalog``
     is ``None`` only when there is no project repository; the principal
     resolver and guest session issuer arrive as callables because they are
     bound to the HTTP adapter surface in ``app.py`` and crossing that seam the
@@ -300,6 +306,7 @@ class ChatRuntime:
     chat_reply: ChatReplyPort
     chat_intent_settings: ChatIntentSettings | None
     chat_routing_service: ChatRoutingService | None
+    chat_tool_runner: ChatToolRunner | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -702,6 +709,7 @@ async def build_chat(
         chat_reply=UnavailableChatReply(),
         chat_intent_settings=None,
         chat_routing_service=None,
+        chat_tool_runner=None,
     )
 
 

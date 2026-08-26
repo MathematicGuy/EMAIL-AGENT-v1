@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from math import ceil
 from typing import cast
@@ -27,6 +27,7 @@ from cowork_agent.features.ai_chat.intent.service import (
     IntentClassifierInvalidOutput,
     IntentClassifierUnavailable,
 )
+from cowork_agent.features.ai_chat.tools.registry import Tool
 
 Completion = Callable[[str], Awaitable[Mapping[str, object]]]
 
@@ -81,12 +82,13 @@ INTENT_RESPONSE_SCHEMA: dict[str, object] = {
 class ConfiguredIntentClassifier:
     """Provider-neutral parser boundary used by production adapters and tests."""
 
-    def __init__(self, complete: Completion) -> None:
+    def __init__(self, complete: Completion, tools: Sequence[Tool] = ()) -> None:
         self._complete = complete
+        self._tools = tuple(tools)
 
     async def classify(self, classifier_input: IntentClassifierInput) -> IntentDecision:
         try:
-            payload = await self._complete(build_intent_prompt(classifier_input))
+            payload = await self._complete(build_intent_prompt(classifier_input, self._tools))
             return classifier_decision_from_dict(payload)
         except IntentClassifierError:
             raise

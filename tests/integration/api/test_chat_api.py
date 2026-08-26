@@ -281,6 +281,7 @@ def _app(
             chat_reply=reply,
             chat_intent_settings=None,
             chat_routing_service=None,
+            chat_tool_runner=None,
         ),
     )
     return app

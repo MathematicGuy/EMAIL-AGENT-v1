@@ -1,0 +1,66 @@
+[
+  {
+    "id": "cr-061",
+    "group": "obvious_chat",
+    "current_message": "Tạo lịch tập gym lúc 2 giờ sáng thứ Sáu.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": true,
+      "expected_needs_clarification": false,
+      "expected_route": "tool"
+    }
+  },
+  {
+    "id": "cr-062",
+    "group": "distractor",
+    "current_message": "Lịch tuần này của tôi kín quá, có cách nào sắp xếp hiệu quả hơn không?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Operations Guide",
+      "Employment Agreement"
+    ],
+    "labels": {
+      "expected_needs_rag": false,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "chat"
+    }
+  },
+  {
+    "id": "cr-063",
+    "group": "ambiguous",
+    "current_message": "Dựa vào tài liệu này, giúp tôi tạo lịch học trong 4 tuần tới.",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Machine Learning Roadmap 2026",
+      "Operations Guide"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": true,
+      "expected_needs_clarification": false,
+      "expected_route": "tool"
+    }
+  },
+  {
+    "id": "cr-064",
+    "group": "obvious_rag",
+    "current_message": "Tài liệu roadmap của tôi đề xuất học những gì trong tháng đầu tiên?",
+    "recent_turns": [],
+    "ready_document_titles": [
+      "Machine Learning Roadmap 2026",
+      "Operations Guide"
+    ],
+    "labels": {
+      "expected_needs_rag": true,
+      "expected_needs_tool": false,
+      "expected_needs_clarification": false,
+      "expected_route": "rag"
+    }
+  }
+]
