@@ -12,6 +12,7 @@ dependencies = [
   "aiohttp>=3.12,<4",
   "cryptography>=44,<51",
   "fastapi>=0.115,<1",
+  "fpdf2>=2.8,<3",
   "google-api-python-client>=2.160,<3",
   "google-auth-httplib2>=0.2,<1",
   "google-auth-oauthlib>=1.2,<2",
@@ -57,6 +58,9 @@ mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"cowork_agent.integrations.report_pdf" = ["fonts/*.ttf", "fonts/OFL.txt", "fonts/SOURCE.md"]
 
 [tool.pytest.ini_options]
 # "." because test modules import shared helpers as `tests.fixtures.*`; without
@@ -104,3 +108,8 @@ files = ["src"]
 # src/ (e.g. `mypy scripts/evaluate_retrieval.py`) sees real types instead
 # of the un-marked installed distribution.
 mypy_path = "src"
+
+[dependency-groups]
+dev = [
+    "pypdf>=6,<7",
+]
