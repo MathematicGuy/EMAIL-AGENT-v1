@@ -185,7 +185,7 @@ def test_load_optional_gemini_settings_returns_none_without_usable_keys(
         raise AssertionError("from_env must not be called when no usable keys exist")
 
     monkeypatch.setattr(GeminiSettings, "from_env", classmethod(boom))
-    assert load_optional_gemini_settings(environ, load_env_file=False) is None
+    assert load_optional_gemini_settings(environ) is None
 
 
 def test_load_optional_gemini_settings_returns_settings_for_valid_keys() -> None:
@@ -195,7 +195,6 @@ def test_load_optional_gemini_settings_returns_settings_for_valid_keys() -> None
             "GEMINI_API_KEY_2": "key-two",
             "GEMINI_MODEL": "test-model",
         },
-        load_env_file=False,
     )
     assert settings is not None
     assert settings.api_keys == ("key-one", "key-two")
@@ -210,7 +209,6 @@ def test_load_optional_gemini_settings_raises_on_duplicate_keys() -> None:
                 "GEMINI_API_KEY_2": "same-key",
                 "GEMINI_MODEL": "test-model",
             },
-            load_env_file=False,
         )
 
 

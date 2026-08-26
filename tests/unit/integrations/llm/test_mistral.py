@@ -20,16 +20,14 @@ from cowork_agent.integrations.llm.providers.mistral import (
 
 def test_mistral_settings_require_configured_key_and_model_without_exposing_key() -> None:
     with pytest.raises(ValueError, match="MISTRAL_API_KEY"):
-        MistralSettings.from_env({"MISTRAL_MODEL": "test-model"}, load_env_file=False)
+        MistralSettings.from_env({"MISTRAL_MODEL": "test-model"})
     with pytest.raises(ValueError, match="MISTRAL_MODEL"):
         MistralSettings.from_env(
             {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "replace-with-mistral-model"},
-            load_env_file=False,
         )
 
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "mistral-small-2603"},
-        load_env_file=False,
     )
 
     assert settings.model == "mistral-small-2603"
@@ -39,9 +37,9 @@ def test_mistral_settings_require_configured_key_and_model_without_exposing_key(
 def test_mistral_settings_reject_values_above_resource_bounds() -> None:
     base = {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}
     with pytest.raises(ValueError, match="MISTRAL_MAX_OUTPUT_TOKENS must not exceed 4096"):
-        MistralSettings.from_env({**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"}, load_env_file=False)
+        MistralSettings.from_env({**base, "MISTRAL_MAX_OUTPUT_TOKENS": "4097"})
     with pytest.raises(ValueError, match="MISTRAL_TIMEOUT_SECONDS must not exceed 120"):
-        MistralSettings.from_env({**base, "MISTRAL_TIMEOUT_SECONDS": "121"}, load_env_file=False)
+        MistralSettings.from_env({**base, "MISTRAL_TIMEOUT_SECONDS": "121"})
 
 
 def test_mistral_reasoning_request_sets_high_effort_and_top_p() -> None:
@@ -158,7 +156,6 @@ def test_mistral_generator_rejects_missing_chat_completion_shape(
     )
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
-        load_env_file=False,
     )
 
     async def scenario() -> None:
@@ -189,7 +186,6 @@ def test_mistral_generator_requests_json_with_bounded_output_tokens(
             "MISTRAL_MAX_OUTPUT_TOKENS": "1024",
             "MISTRAL_TIMEOUT_SECONDS": "45",
         },
-        load_env_file=False,
     )
 
     async def scenario() -> None:

@@ -143,6 +143,27 @@ def test_dry_run_flow_reports_perfect_scores_and_no_content() -> None:
         assert case.body not in serialized
 
 
+def test_live_classifier_loads_environment_before_selecting_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_module()
+    import cowork_agent.config as config
+
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    def load_environment() -> None:
+        monkeypatch.setenv("LLM_PROVIDER", "mimo")
+        monkeypatch.setenv("MIMO_API_KEY", "test-mimo-key")
+        monkeypatch.setenv("MIMO_MODEL", "mimo-v2-flash")
+
+    monkeypatch.setattr(config, "load_runtime_environment", load_environment)
+
+    _classifier, provider, model = module.build_live_classifier()
+
+    assert provider == "mimo"
+    assert model == "mimo-v2-flash"
+
+
 def test_dry_run_writes_report_without_provider_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

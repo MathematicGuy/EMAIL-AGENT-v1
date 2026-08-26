@@ -181,7 +181,6 @@ def gemini_generator(transport: RecordingTransport) -> GeminiActionPlanGenerator
             "GEMINI_MODEL": "test-model",
             "GEMINI_MAX_ATTEMPTS_PER_REQUEST": "3",
         },
-        load_env_file=False,
     )
     return GeminiActionPlanGenerator(settings, transport)
 
@@ -334,7 +333,7 @@ def test_mimo_generator_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"})
         generator = MimoActionPlanGenerator(settings)
         output = await generator.generate(
             user_timezone="Asia/Ho_Chi_Minh",
@@ -364,7 +363,7 @@ def test_mimo_generator_raises_safe_error_after_failed_repair(
     monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"})
         with pytest.raises(MimoAPIError):
             await MimoActionPlanGenerator(settings).generate(
                 user_timezone="Asia/Ho_Chi_Minh",
@@ -399,7 +398,6 @@ def test_mistral_generator_parses_output_and_fails_safely(
     )
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
-        load_env_file=False,
     )
     generator = MistralActionPlanGenerator(settings)
 

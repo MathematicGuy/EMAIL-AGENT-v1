@@ -4,7 +4,7 @@
 **Date opened:** 2026-08-25
 **Baseline verified at:** `dev` @ `216399e` (backend gate green: ruff clean, mypy clean on 201 files, pytest 2135 passed / 9 skipped)
 **Vocabulary:** `codebase-design` — module, interface, depth, seam, adapter, leverage, locality, and the **deletion test**
-**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md), [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md)
+**Decision records:** [ADR-013](../adr/ADR-013-composition-as-typed-value.md), [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md), [ADR-015](../adr/ADR-015-routers-own-their-transport.md), [ADR-016](../adr/ADR-016-report-artifacts-are-validated-domain-values.md), [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md)
 
 ---
 
@@ -83,7 +83,7 @@ flowchart TB
         RA["report_artifacts.py<br/>ReportFilename · ReportArtifactStore<br/>ReportPdfRenderer (no implementation)<br/><b>C01 · done · C08 · blocked</b>"]
     end
 
-    CFG["config.py · Settings.from_env<br/>re-reads .env on every call · 38 sites in src/<br/><b>C05 · open</b>"]
+    CFG["config.py · pure Settings.from_env<br/>dotenv loaded by executable boundaries<br/><b>C05 · done</b>"]
     CORPUS[("data/extracted/ · 17 documents<br/>the retrieval corpus · RAG_CORPUS_PATH")]
     RAWDIR[("data/raw/ · 17 files<br/>user-facing store + ingestion input<br/><b>C09 · done</b>")]
 
@@ -112,7 +112,7 @@ flowchart TB
     classDef outlier fill:#ffe4e6,stroke:#be123c,color:#881337,stroke-width:2px;
     classDef plain fill:#f5f5f4,stroke:#a8a29e,color:#44403c;
     class APP,CHAT,SIB,RT,CTRL,RA,CORPUS,RAWDIR,HOOK,MAILP done;
-    class CFG open;
+    class CFG done;
     class SURV debt;
     class DEPS plain;
 ```
@@ -133,7 +133,7 @@ got enforced at the composition edge; everything above reads its dependencies th
 | **C04** | One chat turn is one 617-line generator | Strong | **Done, narrowed** — slices 04-1…04-3 | [ADR-014](../adr/ADR-014-turn-pipeline-stays-one-function.md) |
 | **C03** | ~30 route closures never moved to routers | Worth exploring | **Done** — slices 03-1…03-3c | [ADR-015](../adr/ADR-015-routers-own-their-transport.md) |
 | **C07** | Turn-reconciliation logic living in the transport layer (`api/chat.py`) | Strong | **Done — C07 slice** | §4.5 |
-| **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Open — unscheduled** | §4.6 |
+| **C05** | `Settings.from_env(load_env_file=True)` reads disk behind the caller | Worth exploring | **Done** — `67822e9` | [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md) |
 | **C06** | `useStreamingChat` runs both the SSE and the mail-poll protocol | Worth exploring | **Done — frontend protocol extraction** | §4.7 |
 | **C08** | PDF renderer deliberately unshipped (route returns 501) | — | **Blocked** on a human dependency decision | §4.8 |
 | **C09** | A stray corpus input in `data/raw/` — latent re-ingest risk | Minor | **Done** — moved to `data/OCR/` | §4.9 |
@@ -541,7 +541,7 @@ this section.
 
 ---
 
-### 4.6 C05 — `from_env` reads disk behind the caller · **Open, unscheduled**
+### 4.6 C05 — Settings parsing is pure · **Done** (`67822e9`) · ADR-017
 
 `Settings.from_env(load_env_file=True)` re-reads `.env` from disk on every call, so a caller
 that believes it controls the environment does not.
@@ -564,9 +564,27 @@ grep -rn "load_env_file" src/ --include=*.py | wc -l
   `test_create_app_wires_runtime_recovery_and_auth_when_enabled` at baseline: candidate 05's
   friction showing up as a test failure.
 
-**Why unscheduled:** widest blast radius of any open item, and no forcing function yet. If it
-starts costing time during another workstream, schedule it then. Re-confirmed parked
-2026-08-25.
+Closed by removing dotenv I/O and the `load_env_file` switch from all settings parsers. A parser
+now reads only its supplied mapping or the current `os.environ`; the FastAPI app, worker,
+ingestion CLI, live evaluation commands, and Gmail-candidate command call the one
+`load_runtime_environment()` seam before parsing settings. The optional Gemini last-resort
+parser follows the same rule.
+
+The regression test creates a local `.env` containing a provider key, deletes that key from the
+process environment, and proves `OpenRouterSettings.from_env()` still rejects the missing key.
+The ingestion CLI test proves an executable boundary still loads `.env` before composing its
+settings. [ADR-017](../adr/ADR-017-settings-parsing-is-pure.md) records the lifecycle rule.
+
+Evidence:
+
+```bash
+uv run pytest tests/unit/test_config.py tests/unit/test_ingestion_cli.py -q
+uv run pytest tests/unit --ignore=tests/unit/scripts -q
+uv run pytest tests/unit/scripts -q
+uv run pytest tests/integration/test_knowledge_ingestion_to_rag.py -q
+uv run ruff check .
+uv run mypy src
+```
 
 ---
 
@@ -879,6 +897,7 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C05 completed.** Settings parsers are pure, executable entry points own the single dotenv-loading seam, regression coverage prevents `.env` from replenishing a deleted provider key, and ADR-017 records the boundary. |
 | 2026-08-26 | **C01/C10 records completed and register drift repaired.** Added ADR-016 for the report filename/store contracts, corrected ADR-013's survivor list, and synchronized the C06/C07/C09/C10 checklist and section statuses with the register. No runtime behavior changed. |
 | 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
 | 2026-08-26 | **C06 closed.** Extracted the concurrent Gmail/Outlook mail-poll protocol from `useStreamingChat` into the deep `runMailScanProtocol` operation. The hook remains the React/persistence adapter; routes, mail client, cancellation semantics, provider ordering, and public hook interface are unchanged. Added protocol characterization and refreshed all four required Level 1 architecture documents. |

@@ -597,7 +597,6 @@ def test_openrouter_chat_reply_from_settings_without_last_resort() -> None:
 def _openrouter_settings() -> OpenRouterSettings:
     return OpenRouterSettings.from_env(
         {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "deepseek/x"},
-        load_env_file=False,
     )
 
 

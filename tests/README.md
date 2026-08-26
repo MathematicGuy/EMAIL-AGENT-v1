@@ -106,6 +106,7 @@ Before writing a test, check if its invariant is already owned.
 | Report filename rule (traversal, reserved names, slug fallback) | `unit/domain/test_report_artifacts.py` | store, route and chat-controller tests |
 | Report store stays inside its injected root | `unit/persistence/test_report_artifact_store.py` | API tests |
 | `runtime(request)` returns the composed `CoworkRuntime` value | `unit/test_composition.py` | API tests |
+| Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.
