@@ -12,7 +12,8 @@ Spec: [`SPEC-calendar-tool-qa.md`](SPEC-calendar-tool-qa.md) · Plan: [`PLAN-cal
 | T1 | [`tests/fixtures/tool_intent/loader.py`](../../../tests/fixtures/tool_intent/loader.py) + [`test_tool_intent_loader.py`](../../../tests/unit/fixtures/test_tool_intent_loader.py) | Done — 11 tests |
 | T2–T4 | [`tests/unit/features/ai_chat/test_tool_intent_qa.py`](../../../tests/unit/features/ai_chat/test_tool_intent_qa.py) | Done — 102 tests (97 run, 5 skip) |
 | T5 | Mutation pass, §4 below | Done — 4/4 mutations red |
-| T6 | [`scripts/evaluate_tool_intent.py`](../../../scripts/evaluate_tool_intent.py) + [`test_evaluate_tool_intent.py`](../../../tests/unit/scripts/test_evaluate_tool_intent.py) | Built, dry-run green, **live run executed — 2 of 4 gates missed**, §5 F4 |
+| T6 | [`scripts/evaluate_tool_intent.py`](../../../scripts/evaluate_tool_intent.py) + [`test_evaluate_tool_intent.py`](../../../tests/unit/scripts/test_evaluate_tool_intent.py) | Built, dry-run green, **run live three times**; 3 of 4 gates now met, §5 F4/F5 |
+| T8 | F4a–c fixed in [`tools/arguments.py`](../../../src/cowork_agent/features/ai_chat/tools/arguments.py) + 4 tests | Done — `start_exact` 4/7 → **7/7** |
 | T7 | This document | Done |
 
 **121 new tests**, all offline, all in the default suite. No new marker, no
@@ -21,18 +22,21 @@ credentials, no network.
 ## 2. Gate
 
 ```
-uv run pytest -q      2349 passed, 14 skipped, 0 failed   (23.6 s)
+uv run pytest -q      2352 passed, 14 skipped, 0 failed   (24.2 s)
 uv run ruff check .   All checks passed
 uv run mypy src       Success: no issues found in 210 source files
 route table           63 routes, byte-identical to the post-M0 baseline
 ```
 
-Before this change the suite was 2233 passed / 9 skipped. The delta is exactly
-the 121 tests added.
+Before this work the suite was 2233 passed / 9 skipped. 121 tests came from the
+QA itself; the remaining 3 came with the F4 fixes.
 
-`src/` was not modified. That is the point: this is QA over shipped behaviour,
-and a case that revealed a defect would be reported here, not silently patched
-away.
+**`src/` was untouched for the QA proper, and changed only afterwards.** That
+ordering is the point. Every finding below was measured against shipped
+behaviour first and recorded before anything was edited, so the fixes are
+answering evidence rather than defining it. The one file that changed is
+`tools/arguments.py`; the router, the resolver, and the calendar tool are as they
+were.
 
 ## 3. Acceptance criteria
 
@@ -41,9 +45,9 @@ away.
 | AC1 | Layer A runs in the default suite, offline | No marker, no network, no credentials. The three new files take 1.3 s run serially; under the parallel scheduler the whole-suite cost is below the run-to-run spread (22.2 s / 23.6 s across two runs) |
 | AC2 | All 25 cases pass Layer A | `test_the_route_matches_the_story[tq-001…tq-025]` and siblings |
 | AC3 | Each invariant has a test that goes red when broken | §4 |
-| AC4 | `ruff` and `mypy` clean, `src/` untouched | §2, `git status` |
+| AC4 | `ruff` and `mypy` clean; `src/` untouched for the QA, then one file changed by the F4 fixes | §2 |
 | AC5 | Route table unchanged | 63 routes, byte-identical |
-| AC6 | Layer B built, unit-tested, reports the §6 metrics | 8 tests; dry-run scores 14/14 and exits 0. Live run executed 2026-08-26 against `gemini-3.5-flash-lite`: 2 gates met, 2 missed — see §5 F4 |
+| AC6 | Layer B built, unit-tested, reports the §6 metrics | 8 tests; dry-run scores 14/14 and exits 0. Run live 2026-08-26 against `gemini-3.5-flash-lite`: 2 of 4 gates at baseline, **3 of 4 after the F4 fixes** — see §5 F4/F5 |
 
 ## 4. Mutation verification
 
@@ -128,12 +132,26 @@ instants; the guards were never the thing that saved them.
 **F4a — the same sentence gets different answers.** `tq-001`, `tq-019`, and
 `tq-020` are byte-identical messages against the same clock. Three calls, three
 outcomes: a correct 02:00 event, a malformed object, and a correct 02:00 event.
-`tq-019` returned arguments *missing both `start` and `title`* and did not use
-the refusal field, so it was neither a fill nor a decline — the registry rejected
-it with `Invalid arguments for create_calendar_event: missing required start,
-title`. One in three identical calls landing outside both valid shapes is the
-single most consequential number in this run, and `MAX_ARGUMENT_TURNS = 4` did
-not recover it.
+`tq-019` returned arguments *missing both `start` and `title`*, so the registry
+rejected it with `Invalid arguments for create_calendar_event: missing required
+start, title`. One in three identical calls landing outside both valid shapes is
+the single most consequential number in this run.
+
+The mechanism is exact, and it is in `fill_arguments`: a payload is treated as a
+fill whenever *any* non-`error` key survives the filter —
+
+```python
+arguments = {key: value for key, value in payload.items() if key != REFUSAL_FIELD}
+if arguments:
+    return arguments
+```
+
+A partial object is therefore never a refusal. It is forwarded to the registry,
+fails validation, and the user is shown a schema error instead of a question.
+`fill_arguments` is deliberately one attempt with no retry — correct for a
+calendar, where a wrong date beats a question — so nothing recovers this. The
+fix is to treat a payload missing any `required` field as a refusal, not to add
+a retry.
 
 **F4b — "thứ Sáu" resolves, except when it doesn't.** The model resolved Friday
 correctly in `tq-001` and `tq-002`, then declined `tq-008` — the *same* Friday,
@@ -157,16 +175,70 @@ create_calendar_event call, and a specific date was not provided" — which is
 exactly what I7 wants a user to be told. The expectation is worth revisiting
 before the refusal is treated as a failure.
 
-**Not fixed here**, for the same reason as F1: `src/` is not modified by this QA.
-F4a and F4c are both defects with an owner (`tools/arguments.py`), and both are
-now measured rather than suspected.
+### F4 fixed — second and third live runs
+
+All three defects were fixed in
+[`tools/arguments.py`](../../../src/cowork_agent/features/ai_chat/tools/arguments.py)
+and re-measured. Two further live runs, same model, same 14 cases:
+
+| Gate | Baseline | After F4a–c | After the tq-005 correction |
+|---|---|---|---|
+| `start_exact` | 4/7 | 6/7 | **7/7** ✅ |
+| `schema_accepted` | 5/12 | 8/12 | **9/12** |
+| `no_backwards_resolution` | 14/14 ✅ | 14/14 ✅ | **14/14** ✅ |
+| `declined_when_underdetermined` | 2/2 ✅ | 1/2 | **1/2** |
+
+What each fix did:
+
+- **F4a** — `fill_arguments` now treats a payload missing any `required` field as
+  a refusal instead of a fill, and names the missing fields as a question when
+  the model supplied none. `tq-019` has filled correctly in both runs since.
+- **F4b** — the prompt now states that a weekday name *is* a date it was given,
+  resolved forward, and that added detail such as a duration does not make it
+  less certain. `tq-007` and `tq-008` went from refusals to exact instants; this
+  is what carries `start_exact` to 7/7.
+- **F4c** — the refusal field's schema description asks for "the question to ask
+  the user" rather than "the missing information". Refusals are now answerable
+  sentences (*"Bạn muốn đi tập gym vào ngày nào và lúc mấy giờ?"*) instead of the
+  bare `date` and `tài liệu` of the baseline.
+- **F2 confirmed under a fill** — `tq-024` now creates exactly one event at
+  02:00 and ignores *tạo 100 sự kiện*. The baseline only showed the injection
+  being refused; this shows it contained while the tool actually runs.
+
+### F5 — an ambiguous bare hour is caught by the router, not by the tool
+
+The second run introduced a regression in the worst tier and the third did not
+clear it. `tq-005` — *"Tạo lịch gym 2 giờ thứ Sáu"*, where `2 giờ` is 02:00 or
+14:00 with nothing to separate them — was refused at baseline and is now
+**filled at 09:00**: not either reading of the stated hour, but the header's
+working-hour default.
+
+The cause is F4b's own wording. Pushing the model to stop treating relative days
+as underdetermined also pushed it to treat a bare hour as no hour at all. A
+follow-up instruction — *"an hour the user did name is never replaced by a
+default"* — did not recover it, so two prompt attempts have now failed and a
+third is not the answer.
+
+**Scope this precisely.** `tq-005`'s route is `clarify`, so on the shipped path
+the router asks the user and the argument filler never runs. The scorer includes
+`clarify` cases deliberately, to answer "would the model have guessed?" — and the
+answer is yes. That makes F5 a missing second line of defence, not an open hole:
+today the only thing standing between an ambiguous hour and a real event is the
+classifier being right.
+
+The fix is a guard, not a prompt, matching how every other safety property here
+works — range checks, scope checks, schema validation. It needs the tool layer to
+see the user's message, which it currently does not, so it is a design change
+rather than an edit. Recorded, not attempted.
+
+`declined_when_underdetermined` therefore stays red at 1/2, and the run still
+exits non-zero. That is the correct reading: one gate is genuinely unmet.
 
 ## 6. Still open
 
-1. **F4a and F4c are unfixed.** The malformed-arguments path and the one-word
-   refusal both live in
-   [`tools/arguments.py`](../../../src/cowork_agent/features/ai_chat/tools/arguments.py)
-   and both need a source change plus a re-run to confirm. Re-run:
+1. **F5 — the ambiguous-hour guard.** The only unmet gate. Needs the tool layer
+   to see the user's message so a stated-but-undetermined hour can be refused in
+   code rather than by prompt. Design change; see §5 F5. Re-run after:
 
    ```bash
    uv run python scripts/evaluate_tool_intent.py

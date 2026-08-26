@@ -9,6 +9,7 @@ import pytest
 from cowork_agent.domain.chat_contracts import ChatTurn
 from cowork_agent.features.ai_chat.tools import InMemoryCalendar, build_calendar_tool
 from cowork_agent.features.ai_chat.tools.arguments import (
+    REFUSAL_FIELD,
     build_arguments_prompt,
     fill_arguments,
     response_schema,
@@ -84,10 +85,42 @@ def test_a_well_formed_object_is_returned_unchanged() -> None:
     assert _fill(payload) == payload
 
 
-def test_arguments_are_not_validated_here() -> None:
-    """`ToolRegistry.run` owns schema conformance; duplicating it lets the two disagree."""
+def test_values_are_not_validated_here() -> None:
+    """`ToolRegistry.run` owns schema conformance; duplicating it lets the two
+    disagree. The presence of the required keys is the one exception, because
+    that is the fill-or-refuse decision rather than conformance."""
 
-    assert _fill({"nonsense": 1}) == {"nonsense": 1}
+    payload = {"title": 1, "start": "not a timestamp", "end": [], "nonsense": True}
+
+    assert _fill(payload) == payload
+
+
+def test_a_partial_answer_is_a_question_rather_than_a_dispatch() -> None:
+    """One live call in three returned arguments carrying neither `start` nor
+    `title`, and the user was shown `missing required start, title` by the
+    registry. A half-filled answer is the model failing to decide, which is what
+    the refusal path is for. PROGRESS.md F4a."""
+
+    result = _fill({"end": "2026-08-26T15:30:00+07:00"})
+
+    assert result == "What should the start and title be?"
+
+
+def test_a_partial_answer_still_prefers_the_models_own_question() -> None:
+    payload = {"end": "2026-08-26T15:30:00+07:00", "error": "Which Friday did you mean?"}
+
+    assert _fill(payload) == "Which Friday did you mean?"
+
+
+def test_the_refusal_field_asks_for_a_question_not_a_field_name() -> None:
+    """Asked to "name the missing information", a live model answered `date` and
+    `tài liệu`. That string is shown to the user. PROGRESS.md F4c."""
+
+    schema = response_schema(TOOL)
+    description = schema["properties"][REFUSAL_FIELD]["description"]  # type: ignore[index]
+
+    assert "question" in description
+    assert "name the missing information" not in description
 
 
 def test_a_reported_error_comes_back_as_the_reason() -> None:
