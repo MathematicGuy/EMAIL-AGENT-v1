@@ -633,6 +633,48 @@ without a transport change. The UI falls back to source download.
 **Do not "fix" this by silently adding a PDF library. Ask first.** Also documented as a
 `[!NOTE]` in `docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md`.
 
+#### Dependency decision
+
+The implementation choice is intentionally narrow. Every option must bundle an open Unicode
+font in the repository; relying on an operating-system font would make Vietnamese output vary by
+machine and break offline builds.
+
+| Option | Strength | Cost / constraint | Decision signal |
+|---|---|---|---|
+| **fpdf2 + bundled Noto Sans** | Pure-Python-friendly installation on Windows; embeds and subsets TrueType/OpenType fonts; enough layout primitives for the report Markdown subset | The adapter must map headings, paragraphs, lists, emphasis, links, and fenced code explicitly | **Recommended** for the current report surface |
+| **WeasyPrint + bundled Noto Sans** | Best HTML/CSS fidelity after Markdown-to-HTML conversion | Python-library use on Windows requires the native Pango/MSYS2 runtime, expanding installation and CI support | Choose only if CSS fidelity is worth the native runtime |
+| **ReportLab + bundled Noto Sans** | Mature PDF engine with TrueType font support and no browser renderer | Platypus mapping is more manual than fpdf2 for the same Markdown subset | Choose when ReportLab is already an organizational standard |
+
+The required human answer is one of `fpdf2`, `WeasyPrint`, or `ReportLab`. Command execution
+permission is not the decision: selecting a dependency changes the product's install/runtime
+contract and is why this workstream remains blocked.
+
+#### Library-neutral implementation contract
+
+After the dependency is selected, C08 is complete only when all of the following are true:
+
+1. A concrete adapter implements `ReportPdfRenderer` outside `domain/`; the domain port remains
+   unaware of the selected library.
+2. `CoworkRuntime` owns `report_pdf_renderer: ReportPdfRenderer | None`. Production composition
+   registers the adapter, the report route reads the typed field, and
+   `app.state.report_pdf_renderer` plus its `getattr`/`cast` are deleted.
+3. The adapter bundles and embeds an open Unicode font deterministically. It performs no network
+   access and does not discover fonts from the host operating system.
+4. The supported report Markdown subset is explicit and tested: Vietnamese headings and body
+   text, paragraphs, ordered/unordered lists, emphasis, links as visible text plus URL, and fenced
+   code. Unsupported constructs degrade to readable text rather than disappearing.
+5. The existing route contract stays stable: unknown report is 404; a rendered report is
+   `application/pdf` with an attachment filename derived from `ReportFilename`; no report content
+   or local path appears in errors or logs.
+6. Tests prove the emitted bytes are a valid PDF and extract back the representative Vietnamese
+   text. A `%PDF` prefix alone is not sufficient evidence of correct Unicode rendering.
+7. A new ADR records the renderer/library/font choice, C10 closes its final untyped survivor, the
+   four Level 1 architecture documents are synchronized, and this register plus `tasks/todo.md`
+   mark C08 done.
+8. Verification runs the narrow renderer and report-route tests first, followed by `ruff`, `mypy`,
+   and the full backend suite. Because the dependency changes `pyproject.toml` and `uv.lock`, a
+   clean `uv sync --extra dev --extra postgres` must also succeed.
+
 Verified at `216399e`: **nothing in `src/` ever writes `app.state.report_pdf_renderer`.** The
 only writer in the tree is `tests/integration/api/test_reports_api.py:151`. So in production
 `_renderer()` reads `None` unconditionally — the 501 is structural, not conditional. See C10:
@@ -897,6 +939,7 @@ web search.
 
 | Date | Change |
 |---|---|
+| 2026-08-26 | **C08 decision surface made executable.** Added the three dependency options, a recommendation, and library-neutral acceptance criteria covering the typed runtime cutover, bundled Unicode font, Markdown subset, PDF extraction proof, ADR/docs, and clean dependency sync. C08 remains blocked until the human selects a library. |
 | 2026-08-26 | **C05 completed.** Settings parsers are pure, executable entry points own the single dotenv-loading seam, regression coverage prevents `.env` from replenishing a deleted provider key, and ADR-017 records the boundary. |
 | 2026-08-26 | **C01/C10 records completed and register drift repaired.** Added ADR-016 for the report filename/store contracts, corrected ADR-013's survivor list, and synchronized the C06/C07/C09/C10 checklist and section statuses with the register. No runtime behavior changed. |
 | 2026-08-26 | **C07 closed.** Moved mail-scan status validation, activity/turn reconciliation, and buffer upsert policy from `api/chat.py` into `features/ai_chat/mail_scan_reconciliation.py`. Transport maps Pydantic activity payloads once into `DesiredMailActivity`; the route and its six chat seams remain in `chat.py`. Current sizes: 813 and 257 lines. Focused feature + chat API gate: 927 passed. Route oracle: 63 routes before and after, identical SHA-256 `510666a9554de543c654c7603c3ffbc201a4536349e7fd4d28d3ddbc00979aca`. |
