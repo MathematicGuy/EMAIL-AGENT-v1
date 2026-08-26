@@ -251,13 +251,17 @@ exits non-zero. That is the correct reading: one gate is genuinely unmet.
    without that, two of the four score as failures for a *correct* classifier —
    and on authorizing a 64-call live re-run.
 
-3. **The executable-chat-tool ADR.** Required by `SPEC-chat-tools-registry.md`
-   §9 before `GOOGLE_CALENDAR_ENABLED` or `CHAT_TOOL_AXIS_ENABLED` is turned on
-   outside local development. Must not overload ADR-013 or weaken ADR-004's
-   Gmail prohibition.
+3. **The executable-chat-tool ADR — written.**
+   [ADR-016](../../../tasks/adr/ADR-016-executable-chat-tools-run-under-a-per-user-grant.md)
+   permits a writing tool only under a per-user grant, and cites F5 as the reason
+   the flags stay the last line of defence until the ambiguous-hour guard lands.
 
-4. **Per-user Calendar OAuth.** The shared refresh token is the one thing that
-   cannot ship to real users. Out of this QA's scope; recorded so it is not lost.
+4. **Per-user Calendar OAuth — specified, not built.** The shared refresh token
+   is still the one thing that cannot ship to real users.
+   [ADR-017](../../../tasks/adr/ADR-017-google-grants-stay-separate.md) decides
+   two grants with chained consent rather than one merged token, and
+   [SPEC-per-user-google-calendar-oauth](../../../tasks/specs/SPEC-per-user-google-calendar-oauth.md)
+   breaks it into P1–P8.
 
 ## 7. How to re-run
 
