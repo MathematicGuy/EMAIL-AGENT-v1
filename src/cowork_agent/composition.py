@@ -365,10 +365,11 @@ class CoworkRuntime:
 
     Frozen so no code path can swap a field mid-flight, and typed so a missing
     dependency is a mypy error at the composition root instead of a ``None``
-    found at request time. ``control_plane``, ``mailbox``, ``chat``, and
-    ``email_rag`` are optional only for injected test runtimes that exercise a
-    single group (the ASGI transport never runs ``lifespan``); a boot through
-    ``lifespan`` always composes all of them. ``evaluation`` is the one group
+    found at request time. ``report_pdf_renderer``, ``control_plane``,
+    ``mailbox``, ``chat``, and ``email_rag`` are optional only for injected
+    test runtimes that exercise a single group (the ASGI transport never runs
+    ``lifespan``); a boot through ``lifespan`` always composes all of them.
+    ``evaluation`` is the one group
     a real boot may legitimately omit: it exists only when the evaluation
     settings are present and enabled. Every group now exists, so ``lifespan``
     assembles the full value at one point; the cutover slices move *where* a
