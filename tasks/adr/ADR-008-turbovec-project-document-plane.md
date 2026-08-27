@@ -118,7 +118,7 @@ query.
 - [ADR-007](ADR-007-project-scoped-classifier-gated-user-documents.md)
 - [PRD-v4](../prds/PRD-v4-pluggable-hybrid-rag-providers.md)
 - [Qdrant retirement follow-ups](../ISSUES-qdrant-retirement.md)
-- [Target Architecture](../../docs/architectures/TARGET-ARCHITECTURE.md)
+- [Architecture — retrieval components](../../docs/architectures/c3-api-retrieval.md)
 - [Turbovec snapshot storage](../../docs/references/understand/supabase-turbovec-snapshot-storage.md)
 - Supabase hybrid search recipe: `apps/docs/content/guides/ai/hybrid-search.mdx`
 - Turbovec API: https://github.com/ryancodrai/turbovec/blob/main/docs/api.md

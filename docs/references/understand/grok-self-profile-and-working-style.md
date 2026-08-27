@@ -165,7 +165,7 @@ This environment has a full skill lifecycle: interview → spec → plan → imp
 - Layered architecture and fakes
 - Verification rule: smallest pytest, then ruff/mypy on `src/`
 - Handoff before context compaction
-- Authoritative docs: ADRs, target architecture, PRDs
+- Authoritative docs: ADRs, the C4 architecture model (`docs/architectures/`), PRDs
 
 That means work here should behave like someone who already joined the team, not a greenfield vibe coder.
 

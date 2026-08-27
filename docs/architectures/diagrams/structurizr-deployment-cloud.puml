@@ -1,0 +1,60 @@
+@startuml
+title <size:24>Deployment View: Cowork Agent - Cloud</size>\n<size:24>Hosted deployment: Supabase Postgres and Storage.</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Deployment>
+
+Deployment_Node(Cloud.EndUserDevice, "End User Device", $type="OS", $descr="", $tags="", $link="") {
+  Deployment_Node(Cloud.EndUserDevice.Browser, "Browser", $type="Chromium / Firefox / Safari", $descr="", $tags="", $link="") {
+    Container(Cloud.EndUserDevice.Browser.WebApplication_1, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  }
+
+}
+
+Deployment_Node(Cloud.ApplicationHost, "Application Host", $type="Linux / CPython 3", $descr="Runs the API and worker processes", $tags="", $link="") {
+  Container(Cloud.ApplicationHost.ControlPlaneAPI_1, "Control Plane API", $techn="Python 3 / FastAPI (mail-todo-api)", $descr="Composition root and HTTP/SSE surface. Owns identity, routing, both product workflows, retrieval and persistence access.", $tags="", $link="")
+  Container(Cloud.ApplicationHost.BackgroundWorker_1, "Background Worker", $techn="Python 3 asyncio (mail-todo-worker)", $descr="Out-of-process poller that claims queued digest and document jobs, sweeps retention, and recovers interrupted runs.", $tags="", $link="")
+  Deployment_Node(Cloud.ApplicationHost.ApplicationFilesystem, "Application Filesystem", $type="Local disk", $descr="", $tags="", $link="") {
+    Container(Cloud.ApplicationHost.ApplicationFilesystem.CompanyKnowledgeCorpus_1, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+    Container(Cloud.ApplicationHost.ApplicationFilesystem.ReportArtifactStore_1, "Report Artifact Store", $techn="Local filesystem (data/reports/)", $descr="Generated report artifacts reached only through the ReportFilename rule.", $tags="", $link="")
+    ContainerDb(Cloud.ApplicationHost.ApplicationFilesystem.TurbovecVectorIndex_1, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+  }
+
+}
+
+Deployment_Node(Cloud.Supabase, "Supabase", $type="Supabase", $descr="Managed platform. POSTGRES_MODE=cloud", $tags="", $link="") {
+  Deployment_Node(Cloud.Supabase.SupabasePostgres, "Supabase Postgres", $type="PostgreSQL 16", $descr="", $tags="", $link="") {
+    ContainerDb(Cloud.Supabase.SupabasePostgres.ControlPlaneDatabase_1, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  }
+
+  Deployment_Node(Cloud.Supabase.SupabaseStorage, "Supabase Storage", $type="Object storage", $descr="", $tags="", $link="") {
+    Container(Cloud.Supabase.SupabaseStorage.PrivateDocumentStore_1, "Private Document Store", $techn="Supabase Storage or local filesystem", $descr="User-owned uploaded project documents. Encrypted at rest, access-checked on every read, retention-bounded.", $tags="", $link="")
+  }
+
+}
+
+Rel(Cloud.EndUserDevice.Browser.WebApplication_1, Cloud.ApplicationHost.ControlPlaneAPI_1, "Calls REST endpoints and consumes the chat stream", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(Cloud.ApplicationHost.ControlPlaneAPI_1, Cloud.ApplicationHost.ApplicationFilesystem.CompanyKnowledgeCorpus_1, "Chunks and indexes the committed corpus at bootstrap", $techn="File I/O", $tags="", $link="")
+Rel(Cloud.ApplicationHost.ControlPlaneAPI_1, Cloud.ApplicationHost.ApplicationFilesystem.ReportArtifactStore_1, "Writes and serves generated report artifacts", $techn="File I/O", $tags="", $link="")
+Rel(Cloud.ApplicationHost.ControlPlaneAPI_1, Cloud.ApplicationHost.ApplicationFilesystem.TurbovecVectorIndex_1, "Loads and queries the company and per-project indexes", $techn="In-process file I/O", $tags="", $link="")
+Rel(Cloud.ApplicationHost.BackgroundWorker_1, Cloud.ApplicationHost.ApplicationFilesystem.TurbovecVectorIndex_1, "Writes page-bounded project chunk vectors to", $techn="In-process file I/O", $tags="", $link="")
+Rel(Cloud.ApplicationHost.ControlPlaneAPI_1, Cloud.Supabase.SupabasePostgres.ControlPlaneDatabase_1, "Reads and writes identity, connections, runs, turns, episodes and chunk rows", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(Cloud.ApplicationHost.BackgroundWorker_1, Cloud.Supabase.SupabasePostgres.ControlPlaneDatabase_1, "Claims queued jobs from and writes results back to", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(Cloud.ApplicationHost.ControlPlaneAPI_1, Cloud.Supabase.SupabaseStorage.PrivateDocumentStore_1, "Registers, stores and serves uploaded project documents", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(Cloud.ApplicationHost.BackgroundWorker_1, Cloud.Supabase.SupabaseStorage.PrivateDocumentStore_1, "Reads uploaded documents for extraction from", $techn="Storage SDK / File I/O", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

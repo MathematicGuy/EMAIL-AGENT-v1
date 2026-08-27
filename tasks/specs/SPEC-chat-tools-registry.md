@@ -340,9 +340,10 @@ the composition root and controller factory.
 
 ## 9. Architecture debt, stated once
 
-TARGET-ARCHITECTURE §21.5 says "There is still no executable in-chat tool" and
-§21.15 lists "any executable in-chat tool" as out of scope. This spec makes that
-false.
+The target architecture document said "There is still no executable in-chat tool" and
+listed "any executable in-chat tool" as out of scope. This spec made that false; that
+document was removed on 2026-08-27 and the C4 model in `docs/architectures/` now records
+the tool axis as implemented.
 
 That is fine while `GOOGLE_CALENDAR_ENABLED=false` and
 `CHAT_TOOL_AXIS_ENABLED=false` in every deployed environment — the statement stays
@@ -363,11 +364,10 @@ ADR-004's actual constraint — no `@Email`, no Gmail from chat, no `tool_choice
 request field — is untouched. Tool selection stays a server-side routing decision,
 and Gmail's read-only guard is left exactly as it is (§3).
 
-The implementation change must also update the four live Level 1 documents named by the
-architecture improvement program: `current-architectures/README.md`,
-`02-ai-chat-and-typed-memory.md`, `03-control-plane-persistence-and-uis.md`, and
-`04-overall-architecture.md`. Those updates describe the new tool path and typed composition;
-they must not rewrite the C01-C10 statuses.
+The implementation change must also update the C4 model and the documents that narrate it:
+`docs/architectures/workspace.dsl` first, then `c3-api-ai-chat.md`, `c3-api-platform.md`
+and `c2-containers.md`, regenerating `diagrams/` in the same commit
+(see `docs/architectures/README.md`).
 
 ## 10. Path to ReAct, and what to fix first
 

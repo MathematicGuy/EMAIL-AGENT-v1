@@ -249,6 +249,6 @@ memory read.
 
 - [ADR-006 — Supabase managed data with Gmail sessions](./ADR-006-supabase-managed-data-with-gmail-sessions.md)
 - [ADR-008 — Turbovec + Postgres FTS project document plane](./ADR-008-turbovec-project-document-plane.md)
-- [Level 1 control plane](../../docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md)
-- [TARGET §2.4 four-type memory](../../docs/architectures/TARGET-ARCHITECTURE.md)
+- [Architecture — control plane and persistence](../../docs/architectures/c3-api-platform.md)
+- [Architecture — the four typed memory scopes](../../docs/architectures/c3-api-ai-chat.md)
 - [Chat history latency roadmap](../../evaluations/CHAT/latency/ROADMAP.md)

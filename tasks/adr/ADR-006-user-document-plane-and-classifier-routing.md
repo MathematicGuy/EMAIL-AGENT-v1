@@ -190,7 +190,7 @@ already bound the cost.
 
 - `../prds/PRD-v3-chat-with-user-documents.md`
 - `../specs/SPEC-chat-with-user-documents.md`
-- `../../docs/architectures/TARGET-ARCHITECTURE.md`
+- `../../docs/architectures/c3-api-retrieval.md`
 - `./ADR-003-defer-attachment-processing.md`
 - `./ADR-004-chat-native-task-episodes.md`
 - `../../docs/references/user_preference.md`

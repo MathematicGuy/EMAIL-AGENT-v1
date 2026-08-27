@@ -79,7 +79,7 @@ phrase. Word Heading styles and list styles still win first. Only `DocxExtractor
 **B. Normalization** — [`structure_normalizer.py`](../../../src/cowork_agent/integrations/rag/structure_normalizer.py)
 (new). Promotes standalone plain-text headings to ATX. Needed because stage A cannot cover the
 PDF/OCR path, and because uploaded project documents are never persisted as Markdown at all
-([TARGET-ARCHITECTURE.md](../../architectures/TARGET-ARCHITECTURE.md) forbids storing their
+([c1-system-context.md](../../architectures/c1-system-context.md) forbids storing their
 extracted text) — the text itself is the only surviving evidence of their structure. Idempotent,
 and called in-memory from both `load_corpus()` and `ProjectDocumentExtractor.extract()`.
 

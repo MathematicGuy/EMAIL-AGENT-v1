@@ -6,7 +6,7 @@
 > **Map:** [CAPABILITY-MAP-ingestion-pipeline.md](./CAPABILITY-MAP-ingestion-pipeline.md)
 > **Source:** Review of `docs/references/ingestion-pipeline-brainstorming.md` §5–§8
 >   against live `KnowledgeIngestionService`
-> **Architecture authority:** [06-knowledge-and-document-ingestion-pipeline.md](../../docs/architectures/current-architectures/06-knowledge-and-document-ingestion-pipeline.md),
+> **Architecture authority:** [c3-ingestion-cli.md](../../docs/architectures/c3-ingestion-cli.md),
 >   ADR-003 (emails never ingested), ADR-009 (Qdrant retired; Turbovec is the
 >   company store)
 > **Does not authorize:** `page-aware-corpus-load`, `format-txt-md`,

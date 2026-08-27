@@ -25,7 +25,7 @@
 | `src/cowork_agent/integrations/rag/hybrid.py` | BM25 + RRF wrapper; accept injected dense port |
 | `tests/unit/integrations/test_bootstrap.py` | Factory selection + degrade + retrieve contract |
 | `tests/unit/integrations/rag/test_hybrid.py` | Injected-dense Hybrid still fuses BM25 |
-| `docs/architectures/current-architectures/05-rag-architecture.md` | Document the switch after behavior exists |
+| `docs/architectures/c3-api-retrieval.md` | Document the switch after behavior exists |
 
 Out of scope this plan: Pinecone/Milvus/pgvector, live `.tvim` cloud sync, project-document provider switching.
 
@@ -458,7 +458,7 @@ git commit -m "feat(rag): wrap selected dense store with BM25 RRF hybrid"
 ### Task 5: Docs + quality gate
 
 **Files:**
-- Modify: `docs/architectures/current-architectures/05-rag-architecture.md` (provider ladder only)
+- Modify: `docs/architectures/c3-api-retrieval.md` (provider ladder only)
 - Modify: `AGENTS.md` only if the one-line semantic-store sentence is now wrong
 
 - [ ] **Step 1: Align the architecture ladder with the factory**
@@ -478,7 +478,7 @@ Expected: all pass.
 - [ ] **Step 3: Commit docs if they changed**
 
 ```bash
-git add docs/architectures/current-architectures/05-rag-architecture.md AGENTS.md
+git add docs/architectures/c3-api-retrieval.md AGENTS.md
 git commit -m "docs: describe pluggable RAG_STORE_PROVIDER factory"
 ```
 

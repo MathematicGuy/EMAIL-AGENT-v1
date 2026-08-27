@@ -3,7 +3,7 @@
 **Repository:** `EMAIL-AGENT-v1`  
 **Document Level:** Authoritative Engineering & Operational Reference  
 **Last Aligned:** 2026-08-25  
-**Primary Authorities:** [`AGENTS.md`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md), [`README.md`](file:///C:/WORK/EMAIL-AGENT-v1/README.md), [`tests/README.md`](file:///C:/WORK/EMAIL-AGENT-v1/tests/README.md), [`pyproject.toml`](file:///C:/WORK/EMAIL-AGENT-v1/pyproject.toml), [`.github/workflows/ci.yml`](file:///C:/WORK/EMAIL-AGENT-v1/.github/workflows/ci.yml), [`docs/architectures/TARGET-ARCHITECTURE.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md), [`docs/evaluations/`](file:///C:/WORK/EMAIL-AGENT-v1/docs/evaluations/), [`evaluations/HARNESS-GUIDE.md`](file:///C:/WORK/EMAIL-AGENT-v1/evaluations/HARNESS-GUIDE.md)
+**Primary Authorities:** [`AGENTS.md`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md), [`README.md`](file:///C:/WORK/EMAIL-AGENT-v1/README.md), [`tests/README.md`](file:///C:/WORK/EMAIL-AGENT-v1/tests/README.md), [`pyproject.toml`](file:///C:/WORK/EMAIL-AGENT-v1/pyproject.toml), [`.github/workflows/ci.yml`](file:///C:/WORK/EMAIL-AGENT-v1/.github/workflows/ci.yml), [`docs/architectures/README.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/README.md), [`docs/evaluations/`](file:///C:/WORK/EMAIL-AGENT-v1/docs/evaluations/), [`evaluations/HARNESS-GUIDE.md`](file:///C:/WORK/EMAIL-AGENT-v1/evaluations/HARNESS-GUIDE.md)
 
 ---
 
@@ -22,7 +22,7 @@
 
 ## 1. Executive Overview & System Architecture Context
 
-The `EMAIL-AGENT-v1` codebase represents an enterprise-grade AI coworker system (*Cowork Agent*) designed around **two strictly decoupled product flows** operating over a unified control plane and persistence engine ([`AGENTS.md:L15-25`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L15-L25), [`README.md:L9-52`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L9-L52), [`docs/architectures/current-architectures/04-overall-architecture.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/current-architectures/04-overall-architecture.md)).
+The `EMAIL-AGENT-v1` codebase represents an enterprise-grade AI coworker system (*Cowork Agent*) designed around **two strictly decoupled product flows** operating over a unified control plane and persistence engine ([`AGENTS.md:L15-25`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L15-L25), [`README.md:L9-52`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L9-L52), [`docs/architectures/c2-containers.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/c2-containers.md)).
 
 ```mermaid
 flowchart TB
@@ -84,13 +84,13 @@ flowchart TB
    - Classification routes execution into `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG`.
    - Company knowledge is retrieved from the committed Markdown corpus (`data/extracted/*.md`) via hybrid search (`RAG_STORE_PROVIDER=turbovec` combining Dense Embeddings + BM25 + Reciprocal Rank Fusion [RRF] + Reranker).
    - **Critical Privacy Invariant:** Raw email bodies and attachments are transient ephemeral data. They are purged immediately upon plan generation and are **never persisted** to long-term databases or indexed into vector stores ([`AGENTS.md:L66-67`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L66-L67), [`README.md:L49`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L49)).
-2. **AI Chat Assistant (Multi-Turn, Typed Memory)** ([`AGENTS.md:L21-24`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L21-L24), [`README.md:L13-33`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L13-L33), [`TARGET-ARCHITECTURE.md:L1-155`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L1-L155)):
+2. **AI Chat Assistant (Multi-Turn, Typed Memory)** ([`AGENTS.md:L21-24`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L21-L24), [`README.md:L13-33`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L13-L33), [`c3-api-ai-chat.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/c3-api-ai-chat.md)):
    - Governed by the `ChatController` and `MemoryGateway` with 4 explicit memory tiers:
      - **Short-Term Working Memory:** Active in-process session turn buffer (`InMemoryChatSessionBuffer`).
      - **Declarative Memory:** Explicit user persona, formatting, and tone preferences (`chat_profiles`).
-     - **Episodic Memory:** Validated chat summaries and chat-native `TaskEpisode` records. Tasks created in chat start with `retrieval_eligible=false` until explicitly approved by the user in the UI ([`TARGET-ARCHITECTURE.md:L78-83`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L78-L83), [`ADR-004`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md)).
+     - **Episodic Memory:** Validated chat summaries and chat-native `TaskEpisode` records. Tasks created in chat start with `retrieval_eligible=false` until explicitly approved by the user in the UI ([`c3-api-ai-chat.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/c3-api-ai-chat.md), [`ADR-004`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-004-chat-native-task-episodes.md)).
      - **Semantic Memory:** Grounded knowledge retrieval over user-uploaded project documents ([`ADR-007`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [`ADR-008`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-008-turbovec-project-document-plane.md)) and optional company knowledge (`CHAT_COMPANY_RAG_ENABLED`).
-   - **Decoupling Enforcement (ADR-004):** There is **no executable `@Email` tool inside AI Chat**. Chat and Email pipelines are strictly isolated; frontend `@email`/`@outlook`/`@mail` commands trigger standalone mail digestion without leaking email bodies into chat context ([`AGENTS.md:L23`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L23), [`README.md:L50`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L50), [`TARGET-ARCHITECTURE.md:L41`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L41)).
+   - **Decoupling Enforcement (ADR-004):** There is **no executable `@Email` tool inside AI Chat**. Chat and Email pipelines are strictly isolated; frontend `@email`/`@outlook`/`@mail` commands trigger standalone mail digestion without leaking email bodies into chat context ([`AGENTS.md:L23`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L23), [`README.md:L50`](file:///C:/WORK/EMAIL-AGENT-v1/README.md#L50), [`c1-system-context.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/c1-system-context.md)).
 
 ### 1.2 Strict Layered Architecture & Dependency Direction
 
@@ -130,7 +130,7 @@ flowchart LR
     PRD["Product Requirements<br/>(tasks/prds/PRD-v*.md)"] --> SPEC["Capability Specifications<br/>(tasks/specs/SPEC-*.md)"]
     SPEC --> ADR["Architecture Decision Records<br/>(tasks/adr/ADR-*.md)"]
     ADR --> DOMAIN["Domain Modeling & Glossary<br/>(docs/agents/domain.md)"]
-    DOMAIN --> ARCH_TARGET["Target Architecture Update<br/>(docs/architectures/TARGET-ARCHITECTURE.md)"]
+    DOMAIN --> ARCH_TARGET["Architecture Model Update<br/>(docs/architectures/workspace.dsl)"]
     ARCH_TARGET --> CODE["Implementation & Verification"]
 ```
 
@@ -231,7 +231,7 @@ flowchart TD
 ### 3.3 Workspace Privacy, Security & Isolation Rules
 
 1. **Git Isolation via `.git/info/exclude`:** Personal scripts, scratch artifacts, and local config overrides must be kept out of git tracking via `.git/info/exclude` to prevent leaking unapproved files to teammates upon `git push` (`<RULE[user_global]>`, [`agent-experience-registry.md:L98-103`](file:///C:/WORK/EMAIL-AGENT-v1/docs/references/agent-experience-registry.md#L98-L103)).
-2. **Zero-Secret Invariant:** Never commit `.env` files or secret keys (`TOKEN_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `GEMINI_API_KEY`, `JINA_API_KEY`). Never expose server secrets in frontend `VITE_*` environment variables ([`AGENTS.md:L65`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L65), [`TARGET-ARCHITECTURE.md:L228-229`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md#L228-L229)).
+2. **Zero-Secret Invariant:** Never commit `.env` files or secret keys (`TOKEN_ENCRYPTION_KEY`, `OAUTH_STATE_SECRET`, `GEMINI_API_KEY`, `JINA_API_KEY`). Never expose server secrets in frontend `VITE_*` environment variables ([`AGENTS.md:L65`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L65), [`deployment.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/deployment.md)).
 3. **Transient Email Rule:** Raw email bodies and attachments are transient ephemeral memory only; they must never be stored in persistent SQL tables or vector embeddings ([`AGENTS.md:L66-67`](file:///C:/WORK/EMAIL-AGENT-v1/AGENTS.md#L66-L67)).
 
 ---
@@ -449,7 +449,7 @@ Recorded in [`docs/references/agent-experience-registry.md`](file:///C:/WORK/EMA
 
 ## 7. Phase 6: Deployment, Persistence & Runtime Modes
 
-The control plane supports three runtime persistence modes selected via `POSTGRES_MODE` in `.env` ([`config.py:L41-80`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/config.py#L41-L80), [`ADR-010`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-010-local-postgres-control-plane-latency.md), [`current-architectures/03-control-plane-persistence-and-uis.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/current-architectures/03-control-plane-persistence-and-uis.md)).
+The control plane supports three runtime persistence modes selected via `POSTGRES_MODE` in `.env` ([`config.py:L41-80`](file:///C:/WORK/EMAIL-AGENT-v1/src/cowork_agent/config.py#L41-L80), [`ADR-010`](file:///C:/WORK/EMAIL-AGENT-v1/tasks/adr/ADR-010-local-postgres-control-plane-latency.md), [`c3-api-platform.md`](file:///C:/WORK/EMAIL-AGENT-v1/docs/architectures/c3-api-platform.md)).
 
 ```mermaid
 flowchart TD
@@ -507,7 +507,7 @@ Defined in [`pyproject.toml:L49-54`](file:///C:/WORK/EMAIL-AGENT-v1/pyproject.to
 
 | SDLC Phase | Core Artifacts & Tools | Primary Authority Files | Validation & Quality Gates |
 |---|---|---|---|
-| **Phase 1: Inception & Governance** | PRDs, Capability Specs, ADRs | `tasks/prds/`<br>`tasks/specs/`<br>`tasks/adr/`<br>`docs/agents/domain.md` | • Domain glossary alignment<br>• ADR conflict check<br>• Target architecture alignment |
+| **Phase 1: Inception & Governance** | PRDs, Capability Specs, ADRs | `tasks/prds/`<br>`tasks/specs/`<br>`tasks/adr/`<br>`docs/agents/domain.md` | • Domain glossary alignment<br>• ADR conflict check<br>• Architecture model alignment |
 | **Phase 2: Local Dev & Tooling** | `uv`, Python 3.13, `pnpm 9`, React 19, Vite, Tailwind 4 | `AGENTS.md`<br>`pyproject.toml`<br>`frontend/package.json` | • Strict typing (`mypy src`)<br>• Linting (`ruff check .`, `eslint .`)<br>• Type checking (`tsc -b --noEmit`) |
 | **Phase 3: Verification & Harness** | Pytest, `tests/xdist_plugin.py`, Routes R1–R16 | `tests/README.md`<br>`tests/conftest.py`<br>`docs/evaluations/` | • Route Index execution<br>• Single Invariant Owner rule (§3)<br>• Network socket isolation guard |
 | **Phase 4: Offline Evaluation** | 5 Evaluation Harnesses, Langfuse, Python Logging | `evaluations/HARNESS-GUIDE.md`<br>`evaluations/README.md`<br>`docs/observability/` | • Metadata-only commit rule<br>• RAGAS judge $\neq$ generator<br>• 3-arm memory attribution ($P,F,F$) |

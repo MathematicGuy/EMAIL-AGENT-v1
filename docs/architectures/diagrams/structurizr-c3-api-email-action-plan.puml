@@ -1,0 +1,75 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Control Plane API</size>\n<size:24>Level 3. The single-turn, memory-free email pipeline inside the Control Plane API.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+System(ThreatIntelligenceServices, "Threat Intelligence Services", $descr="ClamAV, VirusTotal, Google Web Risk and abuse.ch lookups used to screen attachments and links.", $tags="", $link="")
+System(GmailAPI, "Gmail API", $descr="Read-only mailbox source (gmail.readonly). Bodies are read transiently and never persisted.", $tags="", $link="")
+System(MicrosoftGraph, "Microsoft Graph", $descr="Read-only Outlook mailbox source (Mail.Read) for mailboxes linked to a Google-owned identity.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.ControlPlaneAPI_boundary", "Control Plane API", $tags="") {
+    AddBoundaryTag("Email Action Plan", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_1, "Email Action Plan", $tags="Email Action Plan") {
+      Component(CoworkAgent.ControlPlaneAPI.MailTodoAPI, "Mail-Todo API", $techn="FastAPI routers (api/digest_runs.py, api/mailboxes.py)", $descr="Digest run lifecycle, mailbox connections and OAuth callbacks on /v1/mail-todo.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, "Email Action Plan Workflow", $techn="features/email_action_plan/workflow.py", $descr="Single-turn, memory-free pipeline: classify, route, retrieve, generate, validate, persist.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.RouteResolverPolicyGuards, "Route Resolver & Policy Guards", $techn="features/email_action_plan/routing.py", $descr="Resolves NO_ACTION, DIRECT_PLAN or RETRIEVE_RAG from the classifier decision and forced policy guards.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ActionPlanValidator, "Action Plan Validator", $techn="features/email_action_plan/validation.py", $descr="Rejects plans that leak body text or fail the body-free output contract.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ProviderRoutingMailboxAdapter, "Provider-Routing Mailbox Adapter", $techn="integrations/mailbox/router.py", $descr="Resolves the stored connection provider and dispatches reads to one mailbox adapter.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.GmailAdapter, "Gmail Adapter", $techn="integrations/gmail/provider.py", $descr="Normalizes Gmail threads into EphemeralEmailEnvelope with five-message reply-chain aggregation.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.OutlookAdapter, "Outlook Adapter", $techn="integrations/outlook/provider.py", $descr="Normalizes Microsoft Graph messages into the same envelope. SQLite mode only.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.EmailSecurityScanner, "Email Security Scanner", $techn="integrations/security", $descr="Screens attachments and links: magic-byte inspection, hash lookup, redirect resolution, sandboxed extraction.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Platform", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_2, "Platform", $tags="Platform") {
+      Component(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Identity & Session Security", $techn="identity.py, api/dependencies.py, security", $descr="Google-owned identity, opaque sessions, encrypted OAuth token storage and PKCE state.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "LLM Provider Factory", $techn="integrations/llm", $descr="Selects and orders chat-completion providers, shares prompts and parsers, and degrades on provider failure.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persistence Repositories", $techn="persistence/repositories", $descr="Postgres and SQLite implementations behind one repository port set, plus migrations.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Retrieval", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_3, "Retrieval", $tags="Retrieval") {
+      Component(CoworkAgent.ControlPlaneAPI.HybridRetriever, "Hybrid Retriever", $techn="integrations/rag/hybrid.py, bm25.py, rrf.py", $descr="Dense cosine search fused with Okapi BM25 through Reciprocal Rank Fusion (k=60).", $tags="", $link="")
+    }
+
+  }
+
+  Container(CoworkAgent.WebApplication, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI.MailTodoAPI, "Creates digest runs and polls run results", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.MailTodoAPI, CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Resolves the caller and the owning connection through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.MailTodoAPI, CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, "Executes single-turn digest runs through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.ProviderRoutingMailboxAdapter, "Reads unread mail and threads through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProviderRoutingMailboxAdapter, CoworkAgent.ControlPlaneAPI.GmailAdapter, "Dispatches Gmail-backed connections to", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProviderRoutingMailboxAdapter, CoworkAgent.ControlPlaneAPI.OutlookAdapter, "Dispatches Outlook-backed connections to", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.GmailAdapter, GmailAPI, "Reads messages and threads from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.OutlookAdapter, MicrosoftGraph, "Reads messages and threads from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.RouteResolverPolicyGuards, "Resolves the per-email route with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.EmailSecurityScanner, "Screens attachment presence and links with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailSecurityScanner, ThreatIntelligenceServices, "Looks up hashes, URLs and signatures in", $techn="HTTPS / TCP", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.HybridRetriever, "Retrieves company evidence on the RETRIEVE_RAG route through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "Classifies and generates action plans through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.ActionPlanValidator, "Enforces the body-free output contract with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persists runs, tasks and plan outcomes through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Stores encrypted tokens and opaque sessions through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, CoworkAgent.ControlPlaneDatabase, "Reads from and writes to", $techn="asyncpg / sqlite3", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

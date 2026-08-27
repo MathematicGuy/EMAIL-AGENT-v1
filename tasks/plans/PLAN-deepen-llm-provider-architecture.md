@@ -65,7 +65,7 @@ Execute in dependency order. Each step should leave tests green.
 
 ### Step 5: Documentation & Cleanup
 
-10. Update `AGENTS.md`, `01-email-action-plan-and-rag.md`, `04-overall-architecture.md`, `LANGFUSE.md`.
+10. Update `AGENTS.md`, `c3-api-email-action-plan.md`, `c2-containers.md`, `LANGFUSE.md`.
 11. Update `providers/__init__.py` exports.
 12. Verify no `from .gemini import _*` remain in vyce/mistral/openrouter.
 13. Run evaluation scripts to verify provider wiring.
@@ -108,6 +108,6 @@ uv run pytest -q
 
 ### Documentation
 - `AGENTS.md` — Layout section
-- `docs/architectures/current-architectures/01-email-action-plan-and-rag.md`
-- `docs/architectures/current-architectures/04-overall-architecture.md`
+- `docs/architectures/c3-api-email-action-plan.md`
+- `docs/architectures/c2-containers.md`
 - `docs/observability/LANGFUSE.md`

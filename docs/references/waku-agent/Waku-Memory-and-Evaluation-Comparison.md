@@ -211,7 +211,7 @@ mode we should assume applies to us until measured.
 ## 2. Our memory system
 
 Source: `src/cowork_agent/features/ai_chat/`. Architecture record:
-[02-ai-chat-and-typed-memory.md](../architectures/current-architectures/02-ai-chat-and-typed-memory.md).
+[c3-api-ai-chat.md](../../architectures/c3-api-ai-chat.md).
 
 ### 2.1 Four typed scopes behind a fail-closed gateway
 

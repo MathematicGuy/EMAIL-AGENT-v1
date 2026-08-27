@@ -254,7 +254,7 @@ small job rather than a from-scratch one.
 
 #### D5 — Plan Faithfulness / Grounding Score
 
-No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The target architecture references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet for email action plans. The Chat-RAG area has an opt-in `--ragas` path (see [CHAT-RAG](../CHAT-RAG/README.md)) that has never been run.
+No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The reference design references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet for email action plans. The Chat-RAG area has an opt-in `--ragas` path (see [CHAT-RAG](../CHAT-RAG/README.md)) that has never been run.
 
 **Metrics to add:** RAGAS Faithfulness, RAGAS Answer Relevance, or a custom LLM-as-judge check.
 

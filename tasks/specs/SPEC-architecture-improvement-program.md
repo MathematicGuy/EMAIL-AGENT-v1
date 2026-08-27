@@ -817,10 +817,10 @@ that owns the invariant rather than creating a parallel layer test. Relevant rou
 the chat controller and mail-scan reconciliation policy, **R1** for domain. C07 therefore uses
 R2 for the feature rules and R11 for the one-time payload mapping and unchanged route behavior.
 
-**Documentation duty** — every workstream updates `docs/architectures/current-architectures/`
-in the same change: `README.md` (Live Module Status Matrix),
-`02-ai-chat-and-typed-memory.md`, `03-control-plane-persistence-and-uis.md`,
-`04-overall-architecture.md`, and bumps `Last Updated`.
+**Documentation duty** — every workstream updates `docs/architectures/` in the same change:
+`workspace.dsl` first, then the affected documents (`c3-api-ai-chat.md`,
+`c3-api-platform.md`, `c2-containers.md`), regenerating `diagrams/` and bumping
+`last_verified` in the frontmatter. See `docs/architectures/README.md`.
 
 **Commit discipline** — one commit per slice; every commit independently revertable and
 gate-green. A 60-key refactor lands as eight commits, not one.

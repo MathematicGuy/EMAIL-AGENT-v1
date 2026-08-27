@@ -1,14 +1,14 @@
 """Versioned target contracts for the Email Action Plan workflow.
 
-Pure-stdlib domain contracts implementing Step 6 of
-``docs/architectures/TARGET-ARCHITECTURE.md``:
+Pure-stdlib domain contracts for the email pipeline described in
+``docs/architectures/c3-api-email-action-plan.md``:
 
-- §6.1 ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
-- §6.2 ``EmailRouteDecision`` — the Classifier's Route Decision
-- §6.4/§6.5 ``SemanticRetrievalRequest``/``SemanticRetrievalResponse`` —
+- ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
+- ``EmailRouteDecision`` — the Classifier's Route Decision
+- ``SemanticRetrievalRequest``/``SemanticRetrievalResponse`` —
   the retrieval-only Semantic Memory boundary
-- §6.6 ``ActionPlanOutput``, ``Task``, ``PlanStep``, ``SupportingDocument``
-- §6.8 ``TraceEvent`` with ``TraceLatency``
+- ``ActionPlanOutput``, ``Task``, ``PlanStep``, ``SupportingDocument``
+- ``TraceEvent`` with ``TraceLatency``
 
 :data:`TARGET_CONTRACTS_VERSION` versions this contract set; the dataclasses
 carry no per-instance version fields. Contracts assigned to later milestones

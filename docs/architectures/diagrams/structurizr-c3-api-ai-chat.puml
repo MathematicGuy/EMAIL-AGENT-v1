@@ -1,0 +1,86 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Control Plane API</size>\n<size:24>Level 3. The multi-turn chat controller, typed memory, and the flag-off tool axis.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+System(GoogleCalendarAPI, "Google Calendar API", $descr="Creates calendar events for the single registered chat tool, under a per-user grant kept separate from the Gmail grant.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.ControlPlaneAPI_boundary", "Control Plane API", $tags="") {
+    AddBoundaryTag("AI Chat", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_1, "AI Chat", $tags="AI Chat") {
+      Component(CoworkAgent.ControlPlaneAPI.ChatAPISSEStream, "Chat API & SSE Stream", $techn="api/chat.py", $descr="Multi-turn chat endpoints, SSE token/reasoning/citation events and mail-scan submission on /v1/cowork/chat.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ChatController, "Chat Controller", $techn="features/ai_chat/controller.py", $descr="Owns the turn: classify, retrieve, assemble context, generate, persist, and emit the bounded execution trace.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.IntentClassifierRouteResolver, "Intent Classifier & Route Resolver", $techn="features/ai_chat/intent", $descr="Resolves CHAT, RAG, TOOL, RAG_TOOL or CLARIFY, with deterministic downgrades when a capability is disabled.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.MemoryGateway, "Memory Gateway", $techn="features/ai_chat/memory_gateway.py", $descr="Namespace-checked read/write across short-term, declarative, episodic and semantic memory.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.MailScanReconciliation, "Mail-Scan Reconciliation", $techn="features/ai_chat/mail_scan_reconciliation.py", $descr="Transport-free reconciliation of DesiredMailActivity into durable history and the session buffer.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.TaskEpisodeSettlement, "Task Episode Settlement", $techn="features/ai_chat/task_episode_settlement.py", $descr="Approve/reject/complete transitions and retrieval-eligibility for chat-native TaskEpisodes.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ChatToolRegistry, "Chat Tool Registry", $techn="features/ai_chat/tools", $descr="One specs()/run() boundary and a per-turn argument fill. run() never raises: unknown name, schema violation, handler error and timeout all return ToolResult(ok=False).", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.GoogleCalendarAdapter, "Google Calendar Adapter", $techn="integrations/google_calendar", $descr="The single registered tool, plus its per-user OAuth connection store. Event ids derive from the turn idempotency key, so a retried turn returns the existing event.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Documents & Reports", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_2, "Documents & Reports", $tags="Documents & Reports") {
+      Component(CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, "Report PDF Renderer", $techn="integrations/report_pdf (fpdf2)", $descr="Renders the explicit Markdown subset to PDF with bundled Noto Sans and extractable Vietnamese text.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Platform", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_3, "Platform", $tags="Platform") {
+      Component(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Identity & Session Security", $techn="identity.py, api/dependencies.py, security", $descr="Google-owned identity, opaque sessions, encrypted OAuth token storage and PKCE state.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "LLM Provider Factory", $techn="integrations/llm", $descr="Selects and orders chat-completion providers, shares prompts and parsers, and degrades on provider failure.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persistence Repositories", $techn="persistence/repositories", $descr="Postgres and SQLite implementations behind one repository port set, plus migrations.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Retrieval", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_4, "Retrieval", $tags="Retrieval") {
+      Component(CoworkAgent.ControlPlaneAPI.HybridRetriever, "Hybrid Retriever", $techn="integrations/rag/hybrid.py, bm25.py, rrf.py", $descr="Dense cosine search fused with Okapi BM25 through Reciprocal Rank Fusion (k=60).", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, "Project Document Retriever", $techn="integrations/rag/project_documents.py", $descr="Workspace/user/project-isolated retrieval over per-project indexes. Never falls back to the company index.", $tags="", $link="")
+    }
+
+  }
+
+  Container(CoworkAgent.WebApplication, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  Container(CoworkAgent.ReportArtifactStore, "Report Artifact Store", $techn="Local filesystem (data/reports/)", $descr="Generated report artifacts reached only through the ReportFilename rule.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI.ChatAPISSEStream, "Streams chat turns and submits aggregate mail-scan summaries", $techn="HTTPS / SSE", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatAPISSEStream, CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Resolves the caller and session ownership through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatAPISSEStream, CoworkAgent.ControlPlaneAPI.ChatController, "Delegates the turn to", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatAPISSEStream, CoworkAgent.ControlPlaneAPI.MailScanReconciliation, "Reconciles submitted mail-scan summaries through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.MailScanReconciliation, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Merges durable turn history through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.IntentClassifierRouteResolver, "Resolves the turn route with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.MemoryGateway, "Reads and writes the four typed memory scopes through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.HybridRetriever, "Retrieves company evidence through, when the flag is on", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, "Retrieves project document evidence through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.ChatToolRegistry, "Runs at most one server-chosen tool per turn through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "Streams reasoning and reply tokens through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.TaskEpisodeSettlement, "Settles chat-native TaskEpisode transitions through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, "Generates report artifacts through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatToolRegistry, CoworkAgent.ControlPlaneAPI.GoogleCalendarAdapter, "Executes the single registered tool through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.GoogleCalendarAdapter, GoogleCalendarAPI, "Creates events in", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.MemoryGateway, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Reads and writes declarative and episodic memory through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.TaskEpisodeSettlement, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persists episode state transitions through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Reads ACL-filtered chunk rows through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, CoworkAgent.ReportArtifactStore, "Writes rendered PDFs to", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Stores encrypted tokens and opaque sessions through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, LLMProviders, "Calls chat completions on, with configured fallback ordering", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, CoworkAgent.ControlPlaneDatabase, "Reads from and writes to", $techn="asyncpg / sqlite3", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

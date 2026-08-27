@@ -109,4 +109,4 @@ downloads Gmail attachments, has no upload API, and does not write the
 Turbovec snapshot; after a successful ingestion, restart the API/worker so
 `.data/turbovec_index.tvim` is rebuilt.
 - [RETRIEVAL-EVALUATION-STATUS.md](./RETRIEVAL-EVALUATION-STATUS.md) — evaluation & test coverage map
-- [TARGET-ARCHITECTURE.md](../../architectures/TARGET-ARCHITECTURE.md) — target design and milestone gap analysis
+- [Architecture harness](../../docs/architectures/README.md) — the C4 model of the system as implemented

@@ -188,7 +188,7 @@ pnpm lint
 
 ## 6. Authoritative References
 
-- **Target Architecture:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
+- **Architecture (C4 model + docs):** [`docs/architectures/README.md`](docs/architectures/README.md)
 - **Test Routing Index:** [`tests/README.md`](tests/README.md)
 - **Chat tools walkthrough:** [`docs/guides/tool-registry-from-first-principles.md`](docs/guides/tool-registry-from-first-principles.md)
 - **Experience Registry:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)

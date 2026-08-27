@@ -66,7 +66,19 @@ Frontend (`frontend/`): `pnpm install` · `pnpm dev` · `pnpm test` ·
 - Gmail is `gmail.readonly`. Raw email/attachments are transient; never
   persist them and never ingest them into company RAG or long-term memory.
 - Ask before changing SQL migrations or RAG bootstrap fallbacks.
-- System architecture: Level 1 system architecture is documented in `docs/architectures/current-architectures/`.
+
+## Architecture
+
+`docs/architectures/workspace.dsl` is the C4 model and the only place an element or a
+relationship is defined. `docs/architectures/diagrams/` is generated output: edit the
+DSL and regenerate — a hand-edited `.puml` or `.png` dies at the next regeneration.
+
+`docs/architectures/README.md` is the harness, not prose. Read it before writing or
+reviewing in that directory: **§3** is the frontmatter contract every document carries,
+**§4** the three Docker regeneration commands, **§6** the five changes that oblige an
+architecture edit in the same PR — a container, a Level 3 component, who-talks-to-whom,
+an external dependency, or a trust boundary. When a PR touches that directory, run and
+pass `uv run python docs/architectures/check_docs.py`.
 
 ## Verification & Pre-PR Gate
 
@@ -106,7 +118,7 @@ keeps spec, scope, and the Definition of Done.
 - Evaluation harness: `evaluations/README.md`, `evaluations/HARNESS-GUIDE.md`
 - RAGAS & Grounding: `docs/evaluations/RAGAS.md`, `tasks/specs/SPEC-chat-ragas-evaluation.md`
 - ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
-- Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
+- Architecture: `docs/architectures/README.md` (index + harness)
 - Chat tools registry (guide): `docs/guides/tool-registry-from-first-principles.md`
 - Email RAG runtime: `evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`

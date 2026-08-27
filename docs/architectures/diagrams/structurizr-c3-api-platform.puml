@@ -1,0 +1,72 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Control Plane API</size>\n<size:24>Level 3. Composition, configuration, identity, persistence and observability.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+System(Langfuse, "Langfuse", $descr="Receives span and generation traces. Raw email bodies, chunk text and prompts are prohibited fields.", $tags="", $link="")
+System(GoogleIdentityPlatform, "Google Identity Platform", $descr="Issues the OAuth 2.0 authorization codes and refresh tokens that own user identity.", $tags="", $link="")
+System(MicrosoftIdentityPlatform, "Microsoft Identity Platform", $descr="Issues OAuth 2.0 + PKCE tokens for linked Outlook mailboxes.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.ControlPlaneAPI_boundary", "Control Plane API", $tags="") {
+    AddBoundaryTag("Documents & Reports", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_1, "Documents & Reports", $tags="Documents & Reports") {
+      Component(CoworkAgent.ControlPlaneAPI.ProjectDocumentAPI, "Project & Document API", $techn="api/projects.py", $descr="Project CRUD, document register/upload/complete, status polling and document-health.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.KnowledgeRawDocumentAPI, "Knowledge & Raw Document API", $techn="api/knowledge.py", $descr="Company knowledge readiness and the editable raw-document surface on /api/v1/raw-documents.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ReportArtifactAPI, "Report Artifact API", $techn="api/reports.py", $descr="Lists, downloads and PDF-exports generated report artifacts on /api/v1/reports.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, "Report PDF Renderer", $techn="integrations/report_pdf (fpdf2)", $descr="Renders the explicit Markdown subset to PDF with bundled Noto Sans and extractable Vietnamese text.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Platform", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_2, "Platform", $tags="Platform") {
+      Component(CoworkAgent.ControlPlaneAPI.CompositionRoot, "Composition Root", $techn="composition.py", $descr="Builds one frozen CoworkRuntime value read through runtime(request).", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Identity & Session Security", $techn="identity.py, api/dependencies.py, security", $descr="Google-owned identity, opaque sessions, encrypted OAuth token storage and PKCE state.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.RuntimeSettings, "Runtime Settings", $techn="config.py", $descr="Pure parsers over a supplied mapping or os.environ; .env is loaded once at executable boundaries.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "LLM Provider Factory", $techn="integrations/llm", $descr="Selects and orders chat-completion providers, shares prompts and parsers, and degrades on provider failure.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persistence Repositories", $techn="persistence/repositories", $descr="Postgres and SQLite implementations behind one repository port set, plus migrations.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.Observability, "Observability", $techn="observability.py", $descr="@observe instrumentation of controller, provider and memory operations.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.EvaluationJobAPI, "Evaluation Job API", $techn="api/evaluation_jobs.py", $descr="Queues and reports batch evaluation jobs. Registered only when evaluation is enabled.", $tags="", $link="")
+    }
+
+  }
+
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  Container(CoworkAgent.CompanyKnowledgeCorpus, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+  Container(CoworkAgent.PrivateDocumentStore, "Private Document Store", $techn="Supabase Storage or local filesystem", $descr="User-owned uploaded project documents. Encrypted at rest, access-checked on every read, retention-bounded.", $tags="", $link="")
+  Container(CoworkAgent.ReportArtifactStore, "Report Artifact Store", $techn="Local filesystem (data/reports/)", $descr="Generated report artifacts reached only through the ReportFilename rule.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.ControlPlaneAPI.CompositionRoot, CoworkAgent.ControlPlaneAPI.RuntimeSettings, "Reads validated runtime configuration from", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentAPI, CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, "Resolves workspace, user and project scope through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentAPI, CoworkAgent.PrivateDocumentStore, "Registers and reads uploaded documents in", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentAPI, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Tracks document status and chunk rows through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.KnowledgeRawDocumentAPI, CoworkAgent.CompanyKnowledgeCorpus, "Reports readiness over", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ReportArtifactAPI, CoworkAgent.ReportArtifactStore, "Lists and serves artifacts from", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ReportArtifactAPI, CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, "Exports PDF through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ReportPDFRenderer, CoworkAgent.ReportArtifactStore, "Writes rendered PDFs to", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EvaluationJobAPI, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Queues and reports evaluation jobs through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, GoogleIdentityPlatform, "Exchanges authorization codes and refresh tokens with", $techn="HTTPS / OAuth 2.0", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, MicrosoftIdentityPlatform, "Exchanges authorization codes with, using PKCE", $techn="HTTPS / OAuth 2.0", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.IdentitySessionSecurity, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Stores encrypted tokens and opaque sessions through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, LLMProviders, "Calls chat completions on, with configured fallback ordering", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, CoworkAgent.ControlPlaneDatabase, "Reads from and writes to", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.Observability, Langfuse, "Emits spans and generations to", $techn="HTTPS", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.CompositionRoot, CoworkAgent.ControlPlaneAPI.Observability, "Installs tracing through", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

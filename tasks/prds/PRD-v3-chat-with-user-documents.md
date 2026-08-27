@@ -11,7 +11,7 @@
 | Phụ thuộc | PRD-v1 (Email + RAG) và PRD-v2 (Memory Extension) đã hoàn thành |
 | Nguồn yêu cầu | `docs/references/user_preference.md` |
 | Thiết kế kỹ thuật | [SPEC-chat-with-user-documents](../specs/SPEC-chat-with-user-documents.md) |
-| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [Architecture — retrieval](../../docs/architectures/c3-api-retrieval.md) |
 | Chủ sở hữu tính năng | AI Chat Controller (`feature: ai_chat`) |
 | Vector store | Qdrant collection riêng cho Project documents; Gemini 3.072 chiều |
 | OCR | Bật, dùng Mistral OCR |

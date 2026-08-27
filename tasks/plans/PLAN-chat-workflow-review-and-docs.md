@@ -49,7 +49,7 @@ pie title Phân bổ mức độ ưu tiên rà soát luồng Chat
   - [`src/cowork_agent/features/ai_chat/controller.py`](../../src/cowork_agent/features/ai_chat/controller.py)
   - [`src/cowork_agent/features/ai_chat/graph/runner.py`](../../src/cowork_agent/features/ai_chat/graph/runner.py)
 * **Trọng tâm rà soát:**
-  - **Architectural Drift:** Làm rõ sự khác biệt giữa thiết kế trong [TARGET-ARCHITECTURE.md](../../docs/architectures/TARGET-ARCHITECTURE.md) (Graph `classify -> retrieve -> assemble -> stream -> persist`) và mã nguồn live (`ChatController.stream_message` nguyên khối).
+  - **Architectural Drift:** Làm rõ sự khác biệt giữa thiết kế trong target architecture (tài liệu đã gỡ bỏ 2026-08-27) (Graph `classify -> retrieve -> assemble -> stream -> persist`) và mã nguồn live (`ChatController.stream_message` nguyên khối).
   - **SSE Streaming & Idempotency:** Chu trình phát các SSE events (`started`, `delta`, `memory_citation`, `task_proposal`, `completed`, `error`) và replay qua `idempotency_key`.
 
 #### 4. Quản lý Bộ nhớ Ngắn hạn & Khả năng Scale (Session Buffer)
@@ -91,7 +91,7 @@ pie title Phân bổ mức độ ưu tiên rà soát luồng Chat
 
 | Bước | Hành động | File đích / Cần tạo mới | Trạng thái |
 |---|---|---|---|
-| **B1** | Cập nhật Level 1 Architecture document cho AI Chat & Typed Memory | [MODIFY] [`docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md`](../../docs/architectures/current-architectures/02-ai-chat-and-typed-memory.md) | Sẵn sàng |
+| **B1** | Cập nhật Level 1 Architecture document cho AI Chat & Typed Memory | [MODIFY] [`docs/architectures/c3-api-ai-chat.md`](../../docs/architectures/c3-api-ai-chat.md) | Sẵn sàng |
 | **B2** | Viết tài liệu hướng dẫn kỹ thuật chi tiết luồng AI Chat (Deep-Dive & Runbook) | [NEW] [`docs/references/ai-chat-subsystem-guide.md`](../../docs/references/ai-chat-subsystem-guide.md) | Sẵn sàng |
 | **B3** | Cập nhật bảng chỉ số đánh giá và báo cáo latency intent classifier | [MODIFY] `evaluations/CHAT/README.md` | Sẵn sàng |
 | **B4** | Cập nhật Skill Tree tự động | [MODIFY] [`SKILL_TREE.md`](../../.agents/skills/corpus2skill/SKILL_TREE.md) | Sẵn sàng |

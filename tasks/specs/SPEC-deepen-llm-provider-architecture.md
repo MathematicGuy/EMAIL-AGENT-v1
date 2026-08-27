@@ -354,8 +354,8 @@ Same pattern, keeps `complete_with_gemini_last_resort` integration.
 | File | What Changes |
 |---|---|
 | `AGENTS.md` | Update Layout section: add new files to tree |
-| `docs/architectures/current-architectures/01-email-action-plan-and-rag.md` | Update Route Classifier & Action Plan Generation with new module structure |
-| `docs/architectures/current-architectures/04-overall-architecture.md` | Update External Providers table |
+| `docs/architectures/c3-api-email-action-plan.md` | Update Route Classifier & Action Plan Generation with new module structure |
+| `docs/architectures/c2-containers.md` | Update External Providers table |
 | `docs/observability/LANGFUSE.md` | Update provider file references (tracing.py, base.py) |
 | `CONTEXT.md` | Update if LLM provider module layout is mentioned |
 

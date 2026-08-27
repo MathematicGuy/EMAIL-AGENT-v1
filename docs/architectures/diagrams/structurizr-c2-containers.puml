@@ -1,0 +1,74 @@
+@startuml
+title <size:24>Container View: Cowork Agent</size>\n<size:24>Level 2. The deployable and storage units inside Cowork Agent.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+
+Person(KnowledgeWorker, "Knowledge Worker", $descr="Signs in with Google, scans unread mail into body-free action plans, chats with the assistant, and uploads project documents.", $tags="", $link="")
+Person(CorpusAdministrator, "Corpus Administrator", $descr="Curates the committed company knowledge corpus by running the offline ingestion CLI.", $tags="", $link="")
+System(GoogleIdentityPlatform, "Google Identity Platform", $descr="Issues the OAuth 2.0 authorization codes and refresh tokens that own user identity.", $tags="", $link="")
+System(MicrosoftIdentityPlatform, "Microsoft Identity Platform", $descr="Issues OAuth 2.0 + PKCE tokens for linked Outlook mailboxes.", $tags="", $link="")
+System(GmailAPI, "Gmail API", $descr="Read-only mailbox source (gmail.readonly). Bodies are read transiently and never persisted.", $tags="", $link="")
+System(MicrosoftGraph, "Microsoft Graph", $descr="Read-only Outlook mailbox source (Mail.Read) for mailboxes linked to a Google-owned identity.", $tags="", $link="")
+System(GoogleCalendarAPI, "Google Calendar API", $descr="Creates calendar events for the single registered chat tool, under a per-user grant kept separate from the Gmail grant.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+System(EmbeddingRerankingProviders, "Embedding & Reranking Providers", $descr="Jina AI embeddings and cross-encoder reranker, Gemini embeddings, and Cohere reranking.", $tags="", $link="")
+System(MistralOCRAPI, "Mistral OCR API", $descr="Extracts text from scanned PDF and OOXML pages that carry no native text layer.", $tags="", $link="")
+System(Langfuse, "Langfuse", $descr="Receives span and generation traces. Raw email bodies, chunk text and prompts are prohibited fields.", $tags="", $link="")
+System(ThreatIntelligenceServices, "Threat Intelligence Services", $descr="ClamAV, VirusTotal, Google Web Risk and abuse.ch lookups used to screen attachments and links.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container(CoworkAgent.WebApplication, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  Container(CoworkAgent.ControlPlaneAPI, "Control Plane API", $techn="Python 3 / FastAPI (mail-todo-api)", $descr="Composition root and HTTP/SSE surface. Owns identity, routing, both product workflows, retrieval and persistence access.", $tags="", $link="")
+  Container(CoworkAgent.BackgroundWorker, "Background Worker", $techn="Python 3 asyncio (mail-todo-worker)", $descr="Out-of-process poller that claims queued digest and document jobs, sweeps retention, and recovers interrupted runs.", $tags="", $link="")
+  Container(CoworkAgent.KnowledgeIngestionCLI, "Knowledge Ingestion CLI", $techn="Python 3 CLI (mail-todo-ingest-knowledge)", $descr="Offline batch tool that converts administrator-supplied documents into the committed Markdown corpus.", $tags="", $link="")
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  ContainerDb(CoworkAgent.TurbovecVectorIndex, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+  Container(CoworkAgent.CompanyKnowledgeCorpus, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+  Container(CoworkAgent.PrivateDocumentStore, "Private Document Store", $techn="Supabase Storage or local filesystem", $descr="User-owned uploaded project documents. Encrypted at rest, access-checked on every read, retention-bounded.", $tags="", $link="")
+  Container(CoworkAgent.ReportArtifactStore, "Report Artifact Store", $techn="Local filesystem (data/reports/)", $descr="Generated report artifacts reached only through the ReportFilename rule.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.BackgroundWorker, EmbeddingRerankingProviders, "Embeds project document chunks with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, MistralOCRAPI, "Extracts text from image-only pages with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, Langfuse, "Emits spans and generation traces to", $techn="HTTPS", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI, CoworkAgent.CompanyKnowledgeCorpus, "Writes sanitized Markdown and a SHA-256 manifest to", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI, MistralOCRAPI, "Extracts text from image-only pages with, in advanced mode", $techn="HTTPS / REST", $tags="", $link="")
+Rel(KnowledgeWorker, CoworkAgent.WebApplication, "Runs mail scans, chats, and manages project documents using", $techn="HTTPS", $tags="", $link="")
+Rel(CorpusAdministrator, CoworkAgent.KnowledgeIngestionCLI, "Ingests approved company documents using", $techn="CLI", $tags="", $link="")
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI, "Calls REST endpoints and consumes the chat stream", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ControlPlaneDatabase, "Reads and writes identity, connections, runs, turns, episodes and chunk rows", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.TurbovecVectorIndex, "Loads and queries the company and per-project indexes", $techn="In-process file I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.CompanyKnowledgeCorpus, "Chunks and indexes the committed corpus at bootstrap", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.PrivateDocumentStore, "Registers, stores and serves uploaded project documents", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ReportArtifactStore, "Writes and serves generated report artifacts", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, GmailAPI, "Reads unread mail and threads from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, MicrosoftGraph, "Reads unread mail and threads from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, GoogleIdentityPlatform, "Runs the authorization code flow and refreshes tokens against", $techn="HTTPS / OAuth 2.0", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, MicrosoftIdentityPlatform, "Runs the authorization code + PKCE flow against", $techn="HTTPS / OAuth 2.0", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, GoogleCalendarAPI, "Creates calendar events through the per-user-granted chat tool in", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, LLMProviders, "Classifies, plans and streams replies with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, EmbeddingRerankingProviders, "Embeds queries and reranks candidates with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, Langfuse, "Emits spans and generation traces to", $techn="HTTPS", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, ThreatIntelligenceServices, "Screens attachments and links against", $techn="HTTPS / TCP", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, CoworkAgent.ControlPlaneDatabase, "Claims queued jobs from and writes results back to", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, CoworkAgent.PrivateDocumentStore, "Reads uploaded documents for extraction from", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, CoworkAgent.TurbovecVectorIndex, "Writes page-bounded project chunk vectors to", $techn="In-process file I/O", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, GmailAPI, "Executes queued mailbox digests against", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, MicrosoftGraph, "Executes queued mailbox digests against", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, LLMProviders, "Classifies and generates action plans with", $techn="HTTPS / REST", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml
