@@ -36,8 +36,9 @@ Concepts are numbered **C1, C2, …** and collected in the glossary (Part 9).
 
 Strip everything away and a chat assistant is a loop:
 
-```text
-user text  ->  [ model ]  ->  assistant text
+```mermaid
+flowchart LR
+    User["User text"] --> Model["[ Model ]"] --> Assistant["Assistant text"]
 ```
 
 Useful, but sealed off from the world. Everything it produces is *words*. When it
@@ -83,6 +84,32 @@ Nearly every guard you are about to meet is C1 applied to a specific input.
 The evaluation suite even names the failure class — a **silent wrong write**:
 `ok=True`, a confident reply, and the wrong thing in the world. See
 [`PROGRESS.md`](../evaluations/CHAT/PROGRESS.md) §5.
+
+```mermaid
+flowchart TD
+    subgraph ReadOnly["Read-Only Failure (CHAT / RAG) — Low Cost"]
+        R_In["User: 'Explain quantum physics'"] --> R_LLM["Model hallucinates wrong fact"]
+        R_LLM --> R_Out["Chat reply: 'Quantum physics is...'"]
+        R_Out --> R_Impact["User reads wrong text, clarifies. Cost: Low"]
+    end
+
+    subgraph WrongWrite["Unguarded Write (Silent Wrong Write) — Catastrophic"]
+        W_In["User: 'Gym at 2 tomorrow'"] --> W_LLM["Model guesses 14:00 (PM)"]
+        W_LLM --> W_API["Direct API write to Google Calendar"]
+        W_API --> W_Out["Chat reply: 'Event created for 2:00 PM'"]
+        W_Out --> W_Impact["User wanted 2:00 AM gym session.<br/>Misses slot silently! Cost: High"]
+    end
+
+    subgraph FailClosed["Guarded Write (Fail-Closed C1/C7) — Safe"]
+        G_In["User: 'Gym at 2 tomorrow'"] --> G_Guard["Guard: ambiguous_hour_question()"]
+        G_Guard -->|"Refuses (ok=False)"| G_Out["Chat reply: 'Did you mean 2 AM or 2 PM?'"]
+        G_Out --> G_Impact["User clarifies with 1 word. Cost: Negligible"]
+    end
+
+    style ReadOnly fill:#e8f4f8,stroke:#2b7bb9,stroke-width:1px
+    style WrongWrite fill:#fde8e8,stroke:#e02424,stroke-width:2px
+    style FailClosed fill:#def7ec,stroke:#0e9f6e,stroke-width:2px
+```
 
 ### 1.3 So what problem is the tool registry actually solving?
 
@@ -143,6 +170,16 @@ fake honours it precisely so tests exercise the real contract.
 | `GoogleCalendar` | [`integrations/google_calendar/provider.py`](../../src/cowork_agent/integrations/google_calendar/provider.py) | The real thing. Network, OAuth, `googleapiclient`. |
 | `InMemoryCalendar` | bottom of `tools/calendar.py` | A dict. No network, no credentials, deterministic. |
 
+```mermaid
+flowchart LR
+    Caller["Domain Caller<br/>(ChatController / Runner)"] -->|"calls create_event()"| Port["«Protocol»<br/>CalendarPort"]
+    Port -.->|"implements (Prod)"| Google["GoogleCalendar Adapter<br/>- OAuth refresh<br/>- RFC3339 timezone<br/>- HTTP 409 handling<br/>- Google API client"]
+    Port -.->|"implements (Test)"| Memory["InMemoryCalendar Adapter<br/>- In-memory dict<br/>- 0 network / 0 creds<br/>- Deterministic fake"]
+
+    Google --> LiveAPI[("Google Calendar API")]
+    Memory --> State[("In-Memory State")]
+```
+
 This is why the whole tool is testable without a Google account. Not a testing
 trick — a design property, and one `AGENTS.md` requires.
 
@@ -191,6 +228,28 @@ Two reasons, both load-bearing:
    A sentence is. That is why `ToolResult.text` exists even on failure, and why
    every guard message is phrased as something a person could act on.
 
+```mermaid
+flowchart TD
+    subgraph Before["Before: Unhandled Exceptions (Failure Mode)"]
+        B_Ctrl["ChatController (mid-stream SSE)"] --> B_Tool["Tool execution"]
+        B_Tool -->|"raises HTTP 500 / ValidationError"| B_Err["Unhandled Python Exception"]
+        B_Err --> B_Crash["SSE connection crashes mid-flight!"]
+        B_Crash --> B_UI["Frontend shows broken stream / blank UI"]
+    end
+
+    subgraph After["After: Failures as Data (C5)"]
+        A_Ctrl["ChatController (mid-stream SSE)"] --> A_Reg["ToolRegistry.run()"]
+        A_Reg --> A_Tool["Tool execution / Google API"]
+        A_Tool -->|"fails / timeout / 400"| A_Catch["Catch all exceptions"]
+        A_Catch --> A_Res["Return ToolResult(ok=False, text='...')"]
+        A_Res --> A_SSE["Clean SSE event stream continues"]
+        A_SSE --> A_Model["LLM / ReAct reads text explanation & explains to user"]
+    end
+
+    style Before fill:#fde8e8,stroke:#e02424,stroke-width:1px
+    style After fill:#def7ec,stroke:#0e9f6e,stroke-width:1px
+```
+
 Exactly one exception propagates: `asyncio.CancelledError`. The user closing the
 tab is not a tool failure to report to a model.
 
@@ -218,6 +277,34 @@ fetching and returning the existing event's link
 ([`provider.py:97`](../../src/cowork_agent/integrations/google_calendar/provider.py)).
 
 Duplicate protection, one branch of code, no state of our own.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as Client / User Turn
+    participant Runner as ToolRunner
+    participant Adapter as GoogleCalendar Adapter
+    participant Google as Google Calendar API
+
+    Note over Client,Runner: 1st Attempt (Normal Creation)
+    Client->>Runner: Execute turn (idempotency_key = "abc-123")
+    Runner->>Adapter: create_event(seed="abc-123")
+    Adapter->>Google: POST /calendars/primary/events (id="coagent...")
+    Google-->>Adapter: 200 OK (Event created: link_url)
+    Adapter-->>Runner: Returns link_url
+    Runner-->>Client: "Created event on 2026-08-28..."
+
+    Note over Client,Runner: 2nd Attempt (Network Retry / Double-click)
+    Client->>Runner: Retry turn (idempotency_key = "abc-123")
+    Runner->>Adapter: create_event(seed="abc-123")
+    Adapter->>Google: POST /calendars/primary/events (id="coagent...")
+    Google-->>Adapter: 409 Conflict (Duplicate ID!)
+    Note over Adapter: C6: 409 treated as SUCCESS, not error!
+    Adapter->>Google: GET /calendars/primary/events/coagent...
+    Google-->>Adapter: 200 OK (Existing Event link_url)
+    Adapter-->>Runner: Returns existing link_url (No duplicate created!)
+    Runner-->>Client: "Created event on 2026-08-28..."
+```
 
 <details>
 <summary><strong>Aside: why <code>coagent</code> and not <code>cowork</code>?</strong></summary>
@@ -287,6 +374,28 @@ every user's events would land on one developer's calendar.
 replaced it: a writing tool runs **only** under a grant belonging to the turn's
 own user, and a user with no grant is refused rather than silently borrowing
 someone else's. That is invariant **J1**; the refusal is **J2**.
+
+```mermaid
+flowchart TD
+    subgraph Before["Before: Shared Environment Token (Dangerous Debt)"]
+        B_U1["User Alice"] --> B_Env["Single GOOGLE_CALENDAR_REFRESH_TOKEN in .env"]
+        B_U2["User Bob"] --> B_Env
+        B_Env --> B_DevCal[("Developer's Personal Google Calendar!")]
+    end
+
+    subgraph After["After: 3-Tier Gating and Per-User Grant (ADR-019)"]
+        A_Req["User Turn Request"] --> Gate1{"Tier 1: Axis Gate - USER_DOCUMENTS_TOOL_AXIS_ENABLED?"}
+        Gate1 -->|No| A_Ref1["Refuse: Tool axis disabled"]
+        Gate1 -->|Yes| Gate2{"Tier 2: Tool Capability - GOOGLE_CALENDAR_ENABLED?"}
+        Gate2 -->|No| A_Ref2["Refuse: Calendar tool not enabled"]
+        Gate2 -->|Yes| Gate3{"Tier 3: Per-User Authority - ToolBinder has grant?"}
+        Gate3 -->|No grant| A_Ref3["Refuse J2: Your calendar is not connected"]
+        Gate3 -->|Grant resolved J1| A_Write[("Write to Users OWN Google Calendar")]
+    end
+
+    style Before fill:#fde8e8,stroke:#e02424,stroke-width:1px
+    style After fill:#def7ec,stroke:#0e9f6e,stroke-width:1px
+```
 
 Note the direction of the refusal. It would have been *easier* to fall back to
 the environment token. The comment in [`app.py`](../../src/cowork_agent/app.py)
@@ -462,6 +571,31 @@ live call in three did exactly that (PROGRESS.md F4a).
 > If a component has no way to express "I don't know", it will express it as a
 > wrong answer.
 
+```mermaid
+flowchart TD
+    subgraph Before["Before: Strict Schema (No Refusal Channel - C10 Failure)"]
+        B_In["User: 'Gym sometime next week' (No time/day)"] --> B_LLM["LLM fills arguments"]
+        B_Schema["Strict Tool Schema: {title, start, end} REQUIRED"]
+        B_LLM --> B_Schema
+        B_Schema -->|"No way to say 'I don't know'"| B_Hallucinate["LLM invents fake datetime / partial schema"]
+        B_Hallucinate --> B_Crash["Schema Validation Crash: 'missing required start'<br/>Database/validation error shown to user!"]
+    end
+
+    subgraph After["After: Widened Schema with Refusal & Structural Resolution"]
+        A_In["User: 'Gym sometime next week' (Underdetermined)"] --> A_LLM["LLM fills arguments"]
+        A_Schema["Widened Schema: {title, start, end, error}"]
+        A_LLM --> A_Schema
+        A_Schema -->|"Populates refusal field"| A_Out["Payload: {error: 'What day and time?'}"]
+        A_Out --> A_Check{"Structural Check:<br/>Are required args complete?"}
+        A_Check -->|No / Error Present| A_Refuse["Return refusal question to chat turn"]
+        A_Check -->|Yes (All required present)| A_Dispatch["Dispatch to ToolRegistry.run()"]
+        A_Refuse --> A_Reply["Assistant asks user for missing info safely"]
+    end
+
+    style Before fill:#fde8e8,stroke:#e02424,stroke-width:1px
+    style After fill:#def7ec,stroke:#0e9f6e,stroke-width:1px
+```
+
 ### 3.5 Question 4 — authority and effect
 
 Tools are built **per turn**, not once at boot. That is what a `ToolBinder` is:
@@ -505,14 +639,17 @@ and *authority* per-turn is what makes the honest message possible.
 
 One composition root, one typed runtime, no global mutable state:
 
-```text
-create_app
-  └─ resolve GoogleCalendarSettings ONCE, capture for lifespan   (no per-turn .env reads)
-     └─ provider-upgrade block
-        └─ _chat_tool_runner(...) -> ChatToolRunner | None
-           └─ replace(chat_runtime, chat_tool_runner=...)
-              └─ _chat_controller_factory reads chat.chat_tool_runner
-                 └─ ChatController(tools=...)
+```mermaid
+flowchart TD
+    Start["FastAPI App Factory: create_app()"] --> Env["1. Resolve GoogleCalendarSettings ONCE<br/>(Captured for lifespan, no per-turn .env reads)"]
+    Env --> Upgrade["2. Provider-upgrade block<br/>Build _chat_tool_runner(settings, ...)"]
+    Upgrade --> Runtime["3. replace(chat_runtime, chat_tool_runner=...)<br/>(Frozen typed dataclass seam — ADR-013, NOT untyped app.state)"]
+    Runtime --> Factory["4. _chat_controller_factory(request)<br/>Reads chat_runtime.chat_tool_runner"]
+    Factory --> Controller["5. ChatController(tools=chat_tool_runner)<br/>Instantiated per-request with turn context"]
+
+    style Start fill:#f4f5f7,stroke:#6b7280,stroke-width:1px
+    style Runtime fill:#e1effe,stroke:#1e429f,stroke-width:2px
+    style Controller fill:#def7ec,stroke:#0e9f6e,stroke-width:2px
 ```
 
 Two rules were held here, both worth internalising:
@@ -793,6 +930,32 @@ reason -> act -> observe -> reason -> act -> observe -> ... -> answer
 The model sees each tool result and decides what to do next: retry with different
 arguments, call a different tool, or stop and answer.
 
+```mermaid
+flowchart TD
+    subgraph Current["Current: Single-Turn Execution (1 Tool Call Max)"]
+        C_In["User Turn"] --> C_Route["Router (TOOL)"]
+        C_Route --> C_Args["fill_arguments"]
+        C_Args --> C_Run["ToolRegistry.run()"]
+        C_Run --> C_Out["GenerationContext.tool_result"]
+        C_Out --> C_Reply["Reply Model → Answer User"]
+    end
+
+    subgraph Future["Future: Multi-Step ReAct Loop"]
+        F_In["User Turn"] --> F_Rea1["Reason (Step 1)"]
+        F_Rea1 --> F_Act1["Act: ToolRegistry.run(Tool A)"]
+        F_Act1 --> F_Obs1["Observe: ToolResult.text"]
+        F_Obs1 --> F_Rea2{"Reason (Step 2):<br/>Done or need another action?"}
+        F_Rea2 -->|"Need Tool B"| F_Act2["Act: ToolRegistry.run(Tool B)"]
+        F_Act2 --> F_Obs2["Observe: ToolResult.text"]
+        F_Obs2 --> F_Rea3["Reason (Step 3)"]
+        F_Rea2 -->|"Task Complete"| F_Answer["Final Reply → Answer User"]
+        F_Rea3 --> F_Answer
+    end
+
+    style Current fill:#f4f5f7,stroke:#6b7280,stroke-width:1px
+    style Future fill:#e1effe,stroke:#1e429f,stroke-width:1px
+```
+
 Here is the thing worth understanding: **the registry needs no change for this.**
 
 | Property already true | Why ReAct needs it |
@@ -814,6 +977,23 @@ not "try once more."
 Once providers emit tool calls natively, the second LLM call goes away. The model
 returns a structured call directly, and **the registry's schema validation —
 written for §4, before any of this — is what receives it.**
+
+```mermaid
+flowchart TD
+    subgraph CurrentMethod["Current Architecture (Portable Stand-in)"]
+        M1_User["User Message"] --> M1_Class["1st LLM: Intent Classifier"]
+        M1_Class -->|"route=TOOL"| M1_Fill["2nd LLM: fill_arguments(prompt)"]
+        M1_Fill --> M1_Val["ToolRegistry.run (JSON Schema Validation)"]
+    end
+
+    subgraph NativeMethod["Future Architecture (Native Tool-Calling)"]
+        M2_User["User Message"] --> M2_Native["Single LLM Call<br/>with native tools=specs()"]
+        M2_Native -->|"direct tool_calls output"| M2_Val["ToolRegistry.run (JSON Schema Validation)"]
+    end
+
+    style CurrentMethod fill:#fff8f1,stroke:#d03801,stroke-width:1px
+    style NativeMethod fill:#def7ec,stroke:#0e9f6e,stroke-width:1px
+```
 
 That is the payoff of writing `parameters` as JSON Schema from the start when
 nothing required it. A decision that cost nothing then removes a whole component
@@ -920,6 +1100,26 @@ does not work when a model is in the loop.
    resolving to 14:00 — *and writing*. A wrong default became a wrong write.
 6. **The fix was structural.** `ToolTurnContext` grew `user_message` (§6.3), and
    a guard now refuses in code, beside the range and schema checks.
+
+```mermaid
+flowchart TD
+    subgraph PromptFails["The Prompt Engineering Breakdown (Steps 1 to 5)"]
+        S1["1. Baseline: 'Gym at 2 Friday' (Bare hour)<br/>Correctly refused by prompt"] --> S2["2. Prompt Fix for relative dates<br/>Side effect: Model treats bare hour as 09:00 default!"]
+        S2 --> S3["3. Prompt Fix: 'Never replace named hour with default'<br/>Failed to fix, REGRESSED other test cases!"]
+        S3 --> S4["4. Model behavior degrades further:<br/>Model now guesses 14:00 (PM) and WRITES to calendar!"]
+        S4 --> S5["5. Result: SILENT WRONG WRITE (C1 Violation)"]
+    end
+
+    subgraph CodeFix["The Structural Solution (C17 - Step 6)"]
+        C_In["User: 'Gym at 2 Friday'"] --> C_Context["ToolTurnContext carries user_message"]
+        C_Context --> C_CodeGuard["Deterministic Python Guard:<br/>ambiguous_hour_question(user_message)"]
+        C_CodeGuard -->|"Detects bare '2' without sáng/chiều"| C_Refuse["Refuses write immediately (ok=False)"]
+        C_Refuse --> C_SafeReply["Asks user: 'Did you mean 2 AM or 2 PM?'"]
+    end
+
+    style PromptFails fill:#fde8e8,stroke:#e02424,stroke-width:1px
+    style CodeFix fill:#def7ec,stroke:#0e9f6e,stroke-width:2px
+```
 
 > **C17 — Two failed prompt fixes are evidence about the method, not the
 > wording.** Behaviour you need to be *reliable* belongs in code. Prompts shape
