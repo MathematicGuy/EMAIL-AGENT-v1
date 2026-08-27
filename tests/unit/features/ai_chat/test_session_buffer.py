@@ -148,6 +148,18 @@ def test_buffer_rejects_a_turn_for_another_session() -> None:
         buffer.append(_namespace(), _turn(1, session_id="session-2"))
 
 
+def test_buffer_without_ttl_never_expires() -> None:
+    clock = FakeClock()
+    buffer = InMemoryChatSessionBuffer(max_turns=2, clock=clock)
+    namespace = _namespace()
+    buffer.append(namespace, _turn(1))
+    buffer.append(namespace, _turn(2))
+
+    clock.advance(3600 * 24 * 365)  # 1 year later
+    assert buffer.read(namespace) == (_turn(1), _turn(2))
+    assert buffer.sweep() == 0
+
+
 @pytest.mark.parametrize(
     ("max_turns", "ttl_seconds"),
     [(0, 60), (-1, 60), (2, 0), (2, -1)],

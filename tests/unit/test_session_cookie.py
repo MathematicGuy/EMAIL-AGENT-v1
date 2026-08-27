@@ -117,12 +117,14 @@ def test_guest_bootstrap_preserves_an_existing_opaque_session() -> None:
             connection_repository=None,
         ),
     )
-    request = Request({
-        "type": "http",
-        "app": app,
-        "headers": [(b"cookie", b"cowork_session=existing-token")],
-        "path": "/",
-    })
+    request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": [(b"cookie", b"cowork_session=existing-token")],
+            "path": "/",
+        }
+    )
     response = Response(status_code=204)
 
     asyncio.run(issue_chat_guest_session(request, response))
@@ -171,12 +173,14 @@ def test_one_request_resolves_its_opaque_session_only_once() -> None:
             connection_repository=None,
         ),
     )
-    request = Request({
-        "type": "http",
-        "app": app,
-        "headers": [(b"cookie", b"cowork_session=live-token")],
-        "path": "/",
-    })
+    request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": [(b"cookie", b"cowork_session=live-token")],
+            "path": "/",
+        }
+    )
 
     async def scenario() -> None:
         assert await authenticated_principal(request) == principal

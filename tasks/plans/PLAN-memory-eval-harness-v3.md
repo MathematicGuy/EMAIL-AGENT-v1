@@ -126,9 +126,7 @@ def test_st_restraint_02_wrap_invention_is_invented() -> None:
         refusal_about=("người nhận hồ sơ", "tên người nhận"),
         invented_any=("Lê Thu Vân", "Thu Vân"),
     )
-    reply = (
-        "Các tài liệu không cung cấp thông tin đầy đủ; người nhận là Lê Thu Vân."
-    )
+    reply = "Các tài liệu không cung cấp thông tin đầy đủ; người nhận là Lê Thu Vân."
     assert score(reply, probe).outcome is Outcome.INVENTED
 
 
@@ -155,10 +153,7 @@ def test_lt_restraint_01_supplied_title_is_still_invented() -> None:
         test=ProbeTest.RESTRAINT,
         refusal_about=("chức danh", "chức vụ"),
     )
-    assert (
-        score("Chức danh của bạn là điều phối viên vận hành.", probe).outcome
-        is Outcome.INVENTED
-    )
+    assert score("Chức danh của bạn là điều phối viên vận hành.", probe).outcome is Outcome.INVENTED
 
 
 def test_politeness_only_is_not_a_refusal() -> None:
@@ -203,14 +198,14 @@ Expected: new tests fail (`invented_any` missing; CONTROL `đủ` reply still `I
 `_HAVING_NOTHING` append only:
 
 ```python
-"không cung cấp",
-"chưa cung cấp",
-"không đề cập",
-"chưa đề cập",
-"không đề cập đến",
-"chưa đề cập đến",
-"không có đủ",
-"chưa có đủ",
+("không cung cấp",)
+("chưa cung cấp",)
+("không đề cập",)
+("chưa đề cập",)
+("không đề cập đến",)
+("chưa đề cập đến",)
+("không có đủ",)
+("chưa có đủ",)
 ```
 
 Do **not** add passives, `"không ghi nhận"`, or policy nouns.
@@ -276,7 +271,9 @@ def test_a_long_term_probe_still_calls_seed_episodic_in_a_foreign_session(
         "cowork_agent.features.ai_chat.memory_eval.live_runner.seed_episodic",
         fake_episodic,
     )
-    session = _session(_Reply(), SeedSpec((), {"language": "vi"}, (EpisodeSeed("Tạo một tác vụ.", True),), None))
+    session = _session(
+        _Reply(), SeedSpec((), {"language": "vi"}, (EpisodeSeed("Tạo một tác vụ.", True),), None)
+    )
     asyncio.run(ask_live(session, _probe(targets=MemoryType.LONG_TERM), Arm.FULL, None))
     assert sessions
     assert all(item.endswith("-seed") for item in sessions)
@@ -381,7 +378,9 @@ def test_semantic_cache_hit_skips_passage_embeds(tmp_path: Path) -> None:
 
 def test_semantic_cache_misses_when_embedder_identity_changes(tmp_path: Path) -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
-    asyncio.run(seed_semantic(spec, _Embedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path))
+    asyncio.run(
+        seed_semantic(spec, _Embedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path)
+    )
     other = _Embedder(model="b")
     asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
     assert "retrieval.passage" in other.tasks

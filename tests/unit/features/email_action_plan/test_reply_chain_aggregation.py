@@ -304,6 +304,7 @@ def test_reply_chain_single_action_marks_entire_chain_as_action() -> None:
         )
 
         from cowork_agent.domain.target_contracts import EmailRouteDecision, ReasonCode, Route
+
         # Classifier gives NO_ACTION for m1 and m2, but ACTION_REQUIRED for m3
         custom_classifier = FakeRouteClassifier(
             decisions={
@@ -367,4 +368,3 @@ def test_reply_chain_single_action_marks_entire_chain_as_action() -> None:
         assert set(tasks[0].task.source_message_ids) == {"m1", "m2", "m3"}
 
     asyncio.run(scenario())
-

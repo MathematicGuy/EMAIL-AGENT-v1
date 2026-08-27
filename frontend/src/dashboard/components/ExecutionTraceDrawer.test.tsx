@@ -53,8 +53,7 @@ describe('ExecutionTraceDrawer', () => {
 
     expect(memoryTab.getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByText('1. Hiểu yêu cầu')).toBeNull();
-    expect(screen.getByText('Bộ nhớ tình tiết (Episodic):')).toBeTruthy();
-    expect(screen.getAllByText('Sẵn sàng & Đồng bộ')).toHaveLength(2);
+    expect(screen.getByText('Episodic (Ký ức tình tiết & Tác vụ)')).toBeTruthy();
 
     fireEvent.click(processTab);
     expect(screen.getByText('1. Hiểu yêu cầu')).toBeTruthy();
@@ -69,7 +68,7 @@ describe('ExecutionTraceDrawer', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Bộ nhớ/ }));
-    expect(screen.getAllByText('Một phần suy giảm')).toHaveLength(2);
+    expect(screen.getByText('Một phần suy giảm')).toBeTruthy();
   });
 
   it('shows the RAG route with chunk count, document pills and reasoning duration', () => {
@@ -222,8 +221,6 @@ describe('ExecutionTraceDrawer', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Bộ nhớ/ }));
-
-    expect(screen.getByText('4 Tầng Bộ Nhớ AI Đang Sử Dụng')).toBeTruthy();
     expect(screen.getByText('Short-Term (Session Buffer)')).toBeTruthy();
     expect(screen.getByText('Long-Term (Hồ sơ & Sở thích)')).toBeTruthy();
     expect(screen.getByText('Episodic (Ký ức tình tiết & Tác vụ)')).toBeTruthy();

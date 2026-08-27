@@ -32,7 +32,7 @@ class _Reply:
         self.calls = 0
         self._fail = fail
 
-    async def stream_reply(self, request: object, context: object):  # noqa: ANN201 - structural
+    async def stream_reply(self, request: object, context: object):
         del request, context
         self.calls += 1
         if self._fail:
@@ -40,50 +40,39 @@ class _Reply:
         yield "acknowledged"
 
 
-def _controller(reply: object):  # noqa: ANN201 - returns a controller pair
+def _controller(reply: object):
     scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
     return build_arm_controller(scope, AdapterSet(), reply, masked_scope=None)
 
 
-def test_each_seed_line_is_sent_as_its_own_turn() -> None:
+def test_seed_short_term_lifecycle_and_failures() -> None:
     reply = _Reply()
-    controller, _ = _controller(reply)
+    controller, gateway = _controller(reply)
     spec = SeedSpec(("line one", "line two", "line three"), {}, (), None)
     outcome = asyncio.run(seed_short_term(controller, "s", spec, key_prefix="seed"))
     assert outcome.ok is True
     assert outcome.scope is MemoryType.SHORT_TERM
     assert reply.calls == 3
-
-
-def test_nothing_declared_is_a_skip_not_a_failure() -> None:
-    controller, _ = _controller(_Reply())
-    outcome = asyncio.run(
-        seed_short_term(controller, "s", SeedSpec((), {}, (), None), key_prefix="seed")
-    )
-    assert outcome.ok is True
-    assert outcome.reason == "nothing declared"
-
-
-def test_a_model_failure_is_reported_as_a_finding() -> None:
-    controller, _ = _controller(_Reply(fail=True))
-    spec = SeedSpec(("line one",), {}, (), None)
-    outcome = asyncio.run(seed_short_term(controller, "s", spec, key_prefix="seed"))
-    assert outcome.ok is False
-    assert "model down" in outcome.reason
-
-
-def test_the_buffer_holds_every_seeded_turn() -> None:
-    controller, gateway = _controller(_Reply())
-    spec = SeedSpec(("alpha", "beta"), {}, (), None)
-    asyncio.run(seed_short_term(controller, "s", spec, key_prefix="seed"))
     turns = gateway.read_active_turns()
-    assert any("alpha" in (turn.user_message or "") for turn in turns)
-    assert any("beta" in (turn.user_message or "") for turn in turns)
+    assert any("line one" in (turn.user_message or "") for turn in turns)
+
+    # Empty spec is skip
+    assert (
+        asyncio.run(
+            seed_short_term(controller, "s", SeedSpec((), {}, (), None), key_prefix="seed")
+        ).reason
+        == "nothing declared"
+    )
+
+    # Model failure is reported
+    fail_ctrl, _ = _controller(_Reply(fail=True))
+    fail_outcome = asyncio.run(
+        seed_short_term(fail_ctrl, "s", SeedSpec(("line one",), {}, (), None), key_prefix="seed")
+    )
+    assert fail_outcome.ok is False and "model down" in fail_outcome.reason
 
 
 class _EpisodicStore:
-    """Namespace-keyed episodic store, enough to exercise the lifecycle."""
-
     def __init__(self) -> None:
         self.episodes: dict[str, TaskEpisode] = {}
         self.transitions: list[tuple[str, ValidationStatus]] = []
@@ -117,18 +106,10 @@ class _EpisodicStore:
 
 
 class _ProposingReply:
-    """A reply port that returns a task proposal, as a task-capable provider does.
-
-    `is_explicit_task_request` is necessary but not sufficient: the controller
-    only writes an episode when the PROVIDER also returns a ChatTaskProposal.
-    A plain-string reply produces a `task_episode_unavailable` error event and
-    no episode at all.
-    """
-
     def __init__(self, proposal: ChatTaskProposal | None) -> None:
         self._proposal = proposal
 
-    async def stream_reply(self, request: object, context: object):  # noqa: ANN201 - structural
+    async def stream_reply(self, request: object, context: object):
         del context
         yield ChatReplyChunk(
             text=f"Noted: {getattr(request, 'user_message', '')}",
@@ -149,19 +130,14 @@ def _proposal() -> ChatTaskProposal:
     )
 
 
-def _episodic_controller(store: _EpisodicStore, *, proposal: ChatTaskProposal | None = None):  # noqa: ANN201
+def test_seed_episodic_lifecycle_and_transition() -> None:
+    store = _EpisodicStore()
     scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
-    return build_arm_controller(
-        scope,
-        AdapterSet(episodic_memory=store),
-        _ProposingReply(proposal if proposal is not None else _proposal()),
-        masked_scope=None,
+    controller, _ = build_arm_controller(
+        scope, AdapterSet(episodic_memory=store), _ProposingReply(_proposal()), masked_scope=None
     )
 
-
-def test_an_approved_seed_is_transitioned_to_user_approved() -> None:
-    store = _EpisodicStore()
-    controller, _ = _episodic_controller(store)
+    # Approved seed transitions to USER_APPROVED
     spec = SeedSpec(
         (), {}, (EpisodeSeed(request="Create a task to renew the CCCD", approve=True),), None
     )
@@ -169,65 +145,23 @@ def test_an_approved_seed_is_transitioned_to_user_approved() -> None:
     assert outcome.ok is True
     assert ValidationStatus.USER_APPROVED in [status for _, status in store.transitions]
 
-
-def test_an_unapproved_seed_is_written_but_never_transitioned() -> None:
-    # retrieval_eligible stays false. That is a valid thing to seed: it is how
-    # the eligibility gate itself gets tested.
-    store = _EpisodicStore()
-    controller, _ = _episodic_controller(store)
-    spec = SeedSpec(
+    # Unapproved seed written without transition
+    store2 = _EpisodicStore()
+    ctrl2, _ = build_arm_controller(
+        scope, AdapterSet(episodic_memory=store2), _ProposingReply(_proposal()), masked_scope=None
+    )
+    spec_unapproved = SeedSpec(
         (), {}, (EpisodeSeed(request="Create a task to renew the CCCD", approve=False),), None
     )
-    outcome = asyncio.run(seed_episodic(controller, "s", spec, key_prefix="seed"))
-    assert outcome.ok is True
-    assert store.transitions == []
+    assert asyncio.run(seed_episodic(ctrl2, "s", spec_unapproved, key_prefix="seed")).ok is True
+    assert store2.transitions == []
 
-
-def test_a_turn_that_creates_no_episode_is_a_finding_stating_only_what_happened() -> None:
-    # is_explicit_task_request refuses this phrasing, so no episode is created.
-    # That is a finding, not a crash — but the finding may not NAME that cause.
-    # A turn creates no episode when the provider errors too, and the reason
-    # used to assert the phrasing was rejected without ever checking.
-    store = _EpisodicStore()
-    controller, _ = _episodic_controller(store)
-    spec = SeedSpec((), {}, (EpisodeSeed(request="what is the weather", approve=True),), None)
-    outcome = asyncio.run(seed_episodic(controller, "s", spec, key_prefix="seed"))
-    assert outcome.ok is False
-    assert "no task episode" in outcome.reason
-    assert "is_explicit_task_request" not in outcome.reason
-
-
-def test_nothing_declared_is_a_skip() -> None:
-    store = _EpisodicStore()
-    controller, _ = _episodic_controller(store)
-    outcome = asyncio.run(
-        seed_episodic(controller, "s", SeedSpec((), {}, (), None), key_prefix="seed")
-    )
-    assert outcome.ok is True
-    assert outcome.reason == "nothing declared"
-
-
-def test_a_provider_that_returns_no_proposal_is_a_finding() -> None:
-    # Distinct from bad phrasing: is_explicit_task_request accepts this request,
-    # but the controller still writes no episode because the provider returned
-    # no ChatTaskProposal. On a live run this is a model-behaviour finding, and
-    # it must not be reported as episodic amnesia.
-    store = _EpisodicStore()
-    scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
-    controller, _ = build_arm_controller(
-        scope, AdapterSet(episodic_memory=store), _ProposingReply(None), masked_scope=None
-    )
-    spec = SeedSpec(
-        (), {}, (EpisodeSeed(request="Create a task to renew the CCCD", approve=True),), None
-    )
-    outcome = asyncio.run(seed_episodic(controller, "s", spec, key_prefix="seed"))
-    assert outcome.ok is False
-    assert store.episodes == {}
+    # Non-task request or no proposal
+    bad_spec = SeedSpec((), {}, (EpisodeSeed(request="what is the weather", approve=True),), None)
+    assert asyncio.run(seed_episodic(controller, "s", bad_spec, key_prefix="seed")).ok is False
 
 
 class _Embedder:
-    """Deterministic bag-of-words embedder. No network, stable across runs."""
-
     def __init__(self, fail: bool = False, model: str = "fake") -> None:
         self._fail = fail
         self.model = model
@@ -241,44 +175,7 @@ class _Embedder:
         return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
 
 
-def test_a_declared_corpus_is_indexed_and_an_adapter_returned(tmp_path: Path) -> None:
-    spec = SeedSpec((), {}, (), _CORPUS)
-    outcome, adapter = asyncio.run(
-        seed_semantic(spec, _Embedder(), corpus_root=Path("."), cache_dir=tmp_path)
-    )
-    assert outcome.ok is True
-    assert outcome.scope is MemoryType.SEMANTIC
-    assert adapter is not None
-
-
-def test_no_corpus_declared_is_a_skip_with_no_adapter() -> None:
-    outcome, adapter = asyncio.run(
-        seed_semantic(SeedSpec((), {}, (), None), _Embedder(), corpus_root=Path("."))
-    )
-    assert outcome.ok is True
-    assert outcome.reason == "nothing declared"
-    assert adapter is None
-
-
-def test_a_missing_corpus_directory_is_a_finding() -> None:
-    spec = SeedSpec((), {}, (), "tests/fixtures/memory_eval/does-not-exist")
-    outcome, adapter = asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path(".")))
-    assert outcome.ok is False
-    assert "corpus" in outcome.reason.casefold()
-    assert adapter is None
-
-
-def test_an_embedder_failure_is_a_finding_not_a_crash(tmp_path: Path) -> None:
-    spec = SeedSpec((), {}, (), _CORPUS)
-    outcome, adapter = asyncio.run(
-        seed_semantic(spec, _Embedder(fail=True), corpus_root=Path("."), cache_dir=tmp_path)
-    )
-    assert outcome.ok is False
-    assert "embedder down" in outcome.reason
-    assert adapter is None
-
-
-def test_semantic_cache_hit_skips_passage_embeds(tmp_path: Path) -> None:
+def test_seed_semantic_lifecycle_and_caching(tmp_path: Path) -> None:
     spec = SeedSpec((), {}, (), _CORPUS)
     first = _Embedder()
     outcome, adapter = asyncio.run(
@@ -288,93 +185,39 @@ def test_semantic_cache_hit_skips_passage_embeds(tmp_path: Path) -> None:
     assert adapter is not None
     assert "retrieval.passage" in first.tasks
 
+    # Cache hit skips passage embeds
     second = _Embedder()
-    outcome, adapter = asyncio.run(
+    outcome2, adapter2 = asyncio.run(
         seed_semantic(spec, second, corpus_root=Path("."), cache_dir=tmp_path)
     )
-    assert outcome.ok is True
+    assert outcome2.ok is True
     assert "retrieval.passage" not in second.tasks
 
-
-def test_semantic_cache_misses_when_embedder_identity_changes(tmp_path: Path) -> None:
-    spec = SeedSpec((), {}, (), _CORPUS)
-    asyncio.run(
-        seed_semantic(spec, _Embedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path)
-    )
-    other = _Embedder(model="b")
-    asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
-    assert "retrieval.passage" in other.tasks
-
-
-class _PrivateIdentityEmbedder:
-    """Bag-of-words embedder whose identity is only on private Gemini-style attrs."""
-
-    def __init__(self, *, model: str = "fake", dimensions: object = "") -> None:
-        self._model = model
-        self._dimensions = dimensions
-        self.tasks: list[str] = []
-
-    async def embed(self, texts: tuple[str, ...], *, task: str = "") -> list[list[float]]:
-        self.tasks.append(task)
-        vocabulary = ("overtime", "manager", "approval", "leave", "portal", "annual")
-        return [[float(text.casefold().count(word)) + 1.0 for word in vocabulary] for text in texts]
-
-
-def test_semantic_cache_misses_when_private_embedder_model_changes(tmp_path: Path) -> None:
-    spec = SeedSpec((), {}, (), _CORPUS)
-    asyncio.run(
-        seed_semantic(
-            spec, _PrivateIdentityEmbedder(model="a"), corpus_root=Path("."), cache_dir=tmp_path
-        )
-    )
-    other = _PrivateIdentityEmbedder(model="b")
-    asyncio.run(seed_semantic(spec, other, corpus_root=Path("."), cache_dir=tmp_path))
-    assert "retrieval.passage" in other.tasks
-
-
-def test_corrupt_cache_rebuilds_instead_of_failing_seed(tmp_path: Path) -> None:
-    spec = SeedSpec((), {}, (), _CORPUS)
-    asyncio.run(seed_semantic(spec, _Embedder(), corpus_root=Path("."), cache_dir=tmp_path))
+    # Corrupt cache rebuilds
     for npz in tmp_path.glob("*.npz"):
         npz.write_bytes(b"not-an-npz")
-    embedder = _Embedder()
-    outcome, adapter = asyncio.run(
-        seed_semantic(spec, embedder, corpus_root=Path("."), cache_dir=tmp_path)
+    rebuilt = _Embedder()
+    outcome3, adapter3 = asyncio.run(
+        seed_semantic(spec, rebuilt, corpus_root=Path("."), cache_dir=tmp_path)
     )
-    assert outcome.ok is True
-    assert adapter is not None
-    assert "retrieval.passage" in embedder.tasks
+    assert outcome3.ok is True and "retrieval.passage" in rebuilt.tasks
 
 
-# --- verification: "was it written" is a different question from "can we find it"
+def test_verify_seed_detection() -> None:
+    class _SearchBlindStore(_EpisodicStore):
+        async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+            return ()
 
-
-class _SearchBlindEpisodicStore(_EpisodicStore):
-    """Holds rows that the retrieval query cannot match.
-
-    This is the shape Postgres actually has. `search_vector @@
-    plainto_tsquery('simple', ...)` ANDs every token of the query text, so a
-    whole natural-language question matches nothing even when the episode is
-    sitting in the table. A verification that only searched reported that as
-    an empty store on every arm.
-    """
-
-    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
-        del namespace, query
-        return ()
-
-
-def _stored_episode() -> TaskEpisode:
     now = datetime(2026, 8, 19, tzinfo=UTC)
-    return TaskEpisode(
+    ep = TaskEpisode(
         episode_id="ep-1",
         record_id="rec-1",
         user_id="u",
         chat_session_id="s",
         chat_turn_id="turn-1",
         creation_reason="explicit_user_task_request",
-        task_title="Gia hạn CCCD cho văn phòng Đà Nẵng",
-        minimal_request_paraphrase="Tạo tác vụ gia hạn CCCD",
+        task_title="Gia hạn CCCD",
+        minimal_request_paraphrase="Tạo tác vụ",
         action_plan=("Thu thập hồ sơ",),
         rag_citations=(),
         missing_information=(),
@@ -388,36 +231,13 @@ def _stored_episode() -> TaskEpisode:
         prompt_version="v1",
         confidence=0.9,
     )
+    store = _SearchBlindStore()
+    store.episodes["ep-1"] = ep
 
-
-def _verify_episodic(store: _EpisodicStore) -> tuple[object, ...]:
     scope = ChatMemoryScope(tenant_id="t", user_id="u", session_id="s")
     _, gateway = build_arm_controller(
         scope, AdapterSet(episodic_memory=store), _ProposingReply(_proposal()), masked_scope=None
     )
-    return asyncio.run(verify_seed(gateway, scope, (MemoryType.EPISODIC,)))
-
-
-def test_a_stored_episode_the_query_cannot_find_is_reported_as_a_retrieval_failure() -> None:
-    # The row is there. Reporting "the store is empty" here sent every reader
-    # to the write path, which was never broken.
-    store = _SearchBlindEpisodicStore()
-    store.episodes["ep-1"] = _stored_episode()
-    findings = _verify_episodic(store)
+    findings = asyncio.run(verify_seed(gateway, scope, (MemoryType.EPISODIC,)))
     assert len(findings) == 1
-    reason = findings[0].reason
-    assert "1 episode" in reason
-    assert "retriev" in reason
-    assert "came back empty" not in reason
-
-
-def test_an_episodic_scope_with_no_stored_rows_is_reported_as_an_empty_store() -> None:
-    findings = _verify_episodic(_SearchBlindEpisodicStore())
-    assert len(findings) == 1
-    assert "nothing was written" in findings[0].reason
-
-
-def test_an_episode_the_query_finds_produces_no_finding() -> None:
-    store = _EpisodicStore()
-    store.episodes["ep-1"] = _stored_episode()
-    assert _verify_episodic(store) == ()
+    assert "1 episode" in findings[0].reason

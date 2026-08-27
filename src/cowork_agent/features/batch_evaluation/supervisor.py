@@ -248,9 +248,7 @@ class EvaluationSupervisor:
         except asyncio.CancelledError:
             return
         except BaseException:
-            failure = self._failures.get(
-                job_id, SupervisorFailure(job_id, "RUNNER_CLEANUP_FAILED")
-            )
+            failure = self._failures.get(job_id, SupervisorFailure(job_id, "RUNNER_CLEANUP_FAILED"))
             raise EvaluationSupervisorError(failures=(failure,)) from None
 
     async def _require_job(self, job_id: str) -> EvaluationJob:
@@ -266,8 +264,6 @@ class EvaluationSupervisor:
         except asyncio.CancelledError:
             error = None
         if error is not None and not isinstance(error, _ManagedRunnerFailure):
-            self._failures.setdefault(
-                job_id, SupervisorFailure(job_id, "SUPERVISOR_TASK_FAILED")
-            )
+            self._failures.setdefault(job_id, SupervisorFailure(job_id, "SUPERVISOR_TASK_FAILED"))
         if self._tasks.get(job_id) is task:
             self._tasks.pop(job_id, None)

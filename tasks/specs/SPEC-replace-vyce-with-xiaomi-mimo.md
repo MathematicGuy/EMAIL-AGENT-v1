@@ -69,8 +69,10 @@ class MimoAPIError(RuntimeError):
     error_code = "MIMO_API_ERROR"
     safe_message = "Mimo không thể phân tích email. Vui lòng kiểm tra cấu hình model và thử lại."
 
+
 class MimoRateLimitError(MimoAPIError):
     error_code = "MIMO_RATE_LIMIT_ERROR"
+
 
 class MimoGatewayError(MimoAPIError):
     error_code = "MIMO_GATEWAY_ERROR"

@@ -118,49 +118,39 @@ def test_task_episode_policy_accepts_a_bounded_initial_write_with_optional_expir
     )
 
 
-@pytest.mark.parametrize(
-    "scope",
-    [
+def test_task_episode_policy_rejects_foreign_scope() -> None:
+    scopes = [
         ChatMemoryScope(user_id="other@example.com", session_id="session-1"),
         ChatMemoryScope(user_id="user@example.com", session_id="session-2"),
-    ],
-    ids=["user", "session"],
-)
-def test_task_episode_policy_rejects_foreign_scope(scope: ChatMemoryScope) -> None:
-    episode = _task_episode()
-    namespace = MemoryNamespace(
-        scope=scope,
-        memory_type=MemoryType.EPISODIC,
-        record_id=episode.record_id,
-        source_id=episode.chat_turn_id,
-    )
-
-    with pytest.raises(TaskEpisodeWriteRejected, match="scope"):
-        authorize_task_episode_write(namespace, episode, expires_at=None)
+    ]
+    for scope in scopes:
+        episode = _task_episode()
+        namespace = MemoryNamespace(
+            scope=scope,
+            memory_type=MemoryType.EPISODIC,
+            record_id=episode.record_id,
+            source_id=episode.chat_turn_id,
+        )
+        with pytest.raises(TaskEpisodeWriteRejected, match="scope"):
+            authorize_task_episode_write(namespace, episode, expires_at=None)
 
 
-@pytest.mark.parametrize(
-    ("record_id", "source_id", "match"),
-    [("record-2", "turn-1", "record"), ("record-1", "turn-2", "source")],
-)
-def test_task_episode_policy_rejects_a_mismatched_identity(
-    record_id: str, source_id: str, match: str
-) -> None:
-    episode = _task_episode()
-    namespace = MemoryNamespace(
-        scope=ChatMemoryScope(user_id="user@example.com", session_id="session-1"),
-        memory_type=MemoryType.EPISODIC,
-        record_id=record_id,
-        source_id=source_id,
-    )
-
-    with pytest.raises(TaskEpisodeWriteRejected, match=match):
-        authorize_task_episode_write(namespace, episode, expires_at=None)
+def test_task_episode_policy_rejects_a_mismatched_identity() -> None:
+    cases = [("record-2", "turn-1", "record"), ("record-1", "turn-2", "source")]
+    for record_id, source_id, match in cases:
+        episode = _task_episode()
+        namespace = MemoryNamespace(
+            scope=ChatMemoryScope(user_id="user@example.com", session_id="session-1"),
+            memory_type=MemoryType.EPISODIC,
+            record_id=record_id,
+            source_id=source_id,
+        )
+        with pytest.raises(TaskEpisodeWriteRejected, match=match):
+            authorize_task_episode_write(namespace, episode, expires_at=None)
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
+def test_task_episode_policy_reparses_and_rejects_tampered_shapes() -> None:
+    cases = [
         ("creation_reason", "implicit"),
         ("validation_status", ValidationStatus.USER_APPROVED),
         ("retrieval_eligible", True),
@@ -168,136 +158,99 @@ def test_task_episode_policy_rejects_a_mismatched_identity(
         ("action_plan", ("x" * 501,)),
         ("rag_citations", ({"raw_email": "copied"},)),
         ("missing_information", ({"tool_payload": {}},)),
-    ],
-    ids=[
-        "creation_reason",
-        "validation_status",
-        "retrieval_eligible",
-        "source_type",
-        "unbounded",
-        "raw_shaped",
-        "tool_shaped",
-    ],
-)
-def test_task_episode_policy_reparses_and_rejects_tampered_shapes(
-    field: str, value: object
-) -> None:
-    episode = _task_episode()
-    object.__setattr__(episode, field, value)
-
-    with pytest.raises(TaskEpisodeWriteRejected, match="invalid bounded shape"):
-        authorize_task_episode_write(_task_namespace(episode), episode, expires_at=None)
+    ]
+    for field, value in cases:
+        episode = _task_episode()
+        object.__setattr__(episode, field, value)
+        with pytest.raises(TaskEpisodeWriteRejected, match="invalid bounded shape"):
+            authorize_task_episode_write(_task_namespace(episode), episode, expires_at=None)
 
 
-@pytest.mark.parametrize(
-    "expires_at",
-    [
+def test_task_episode_policy_requires_an_aware_future_expiry() -> None:
+    cases = [
         datetime(2026, 8, 10, 9),
         datetime(2026, 8, 10, 9, tzinfo=UTC),
         "2026-08-11T09:00:00+00:00",
-    ],
-    ids=["naive", "not_later", "not_datetime"],
-)
-def test_task_episode_policy_requires_an_aware_future_expiry(expires_at: object) -> None:
-    episode = _task_episode()
-
-    with pytest.raises(TaskEpisodeWriteRejected, match="expires_at"):
-        authorize_task_episode_write(_task_namespace(episode), episode, expires_at=expires_at)
+    ]
+    for expires_at in cases:
+        episode = _task_episode()
+        with pytest.raises(TaskEpisodeWriteRejected, match="expires_at"):
+            authorize_task_episode_write(_task_namespace(episode), episode, expires_at=expires_at)
 
 
-@pytest.mark.parametrize(
-    ("from_status", "to_status", "retrieval_eligible"),
-    [
+def test_task_episode_transition_policy_builds_a_canonical_allowed_transition() -> None:
+    cases = [
         (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.USER_APPROVED, True),
         (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.COMPLETED, True),
         (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.REJECTED, False),
         (ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED, True),
         (ValidationStatus.USER_APPROVED, ValidationStatus.REJECTED, False),
-    ],
-)
-def test_task_episode_transition_policy_builds_a_canonical_allowed_transition(
-    from_status: ValidationStatus,
-    to_status: ValidationStatus,
-    retrieval_eligible: bool,
-) -> None:
-    episode = _task_episode()
-    namespace = _task_namespace(episode)
-    transitioned_at = datetime(2026, 8, 11, 9, tzinfo=UTC)
+    ]
+    for from_status, to_status, retrieval_eligible in cases:
+        episode = _task_episode()
+        namespace = _task_namespace(episode)
+        transitioned_at = datetime(2026, 8, 11, 9, tzinfo=UTC)
 
-    transition = build_task_episode_transition(
-        namespace,
-        episode_id=episode.episode_id,
-        from_status=from_status,
-        to_status=to_status,
-        transitioned_at=transitioned_at,
-    )
+        transition = build_task_episode_transition(
+            namespace,
+            episode_id=episode.episode_id,
+            from_status=from_status,
+            to_status=to_status,
+            transitioned_at=transitioned_at,
+        )
 
-    assert type(transition) is EpisodeTransition
-    assert transition == EpisodeTransition(
-        episode_id=episode.episode_id,
-        namespace=namespace,
-        from_status=from_status,
-        to_status=to_status,
-        retrieval_eligible=retrieval_eligible,
-        transitioned_at=transitioned_at,
-    )
+        assert type(transition) is EpisodeTransition
+        assert transition == EpisodeTransition(
+            episode_id=episode.episode_id,
+            namespace=namespace,
+            from_status=from_status,
+            to_status=to_status,
+            retrieval_eligible=retrieval_eligible,
+            transitioned_at=transitioned_at,
+        )
 
 
-@pytest.mark.parametrize(
-    ("from_status", "to_status"),
-    [
+def test_task_episode_transition_policy_rejects_invalid_status_changes() -> None:
+    cases = [
         (ValidationStatus.SYSTEM_GENERATED, ValidationStatus.SYSTEM_GENERATED),
         (ValidationStatus.COMPLETED, ValidationStatus.REJECTED),
         (ValidationStatus.REJECTED, ValidationStatus.USER_APPROVED),
         ("system_generated", ValidationStatus.USER_APPROVED),
-    ],
-)
-def test_task_episode_transition_policy_rejects_invalid_status_changes(
-    from_status: object, to_status: object
-) -> None:
-    episode = _task_episode()
-
-    with pytest.raises(TaskEpisodeTransitionRejected, match="transition"):
-        build_task_episode_transition(
-            _task_namespace(episode),
-            episode_id=episode.episode_id,
-            from_status=from_status,  # type: ignore[arg-type]
-            to_status=to_status,  # type: ignore[arg-type]
-            transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
-        )
+    ]
+    for from_status, to_status in cases:
+        episode = _task_episode()
+        with pytest.raises(TaskEpisodeTransitionRejected, match="transition"):
+            build_task_episode_transition(
+                _task_namespace(episode),
+                episode_id=episode.episode_id,
+                from_status=from_status,  # type: ignore[arg-type]
+                to_status=to_status,  # type: ignore[arg-type]
+                transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+            )
 
 
-@pytest.mark.parametrize(
-    "transitioned_at",
-    [datetime(2026, 8, 11, 9), "2026-08-11T09:00:00+00:00"],
-    ids=["naive", "not_datetime"],
-)
-def test_task_episode_transition_policy_requires_an_aware_datetime(
-    transitioned_at: object,
-) -> None:
-    episode = _task_episode()
-
-    with pytest.raises(TaskEpisodeTransitionRejected, match="transitioned_at"):
-        build_task_episode_transition(
-            _task_namespace(episode),
-            episode_id=episode.episode_id,
-            from_status=ValidationStatus.SYSTEM_GENERATED,
-            to_status=ValidationStatus.USER_APPROVED,
-            transitioned_at=transitioned_at,  # type: ignore[arg-type]
-        )
+def test_task_episode_transition_policy_requires_an_aware_datetime() -> None:
+    cases = [datetime(2026, 8, 11, 9), "2026-08-11T09:00:00+00:00"]
+    for transitioned_at in cases:
+        episode = _task_episode()
+        with pytest.raises(TaskEpisodeTransitionRejected, match="transitioned_at"):
+            build_task_episode_transition(
+                _task_namespace(episode),
+                episode_id=episode.episode_id,
+                from_status=ValidationStatus.SYSTEM_GENERATED,
+                to_status=ValidationStatus.USER_APPROVED,
+                transitioned_at=transitioned_at,  # type: ignore[arg-type]
+            )
 
 
-@pytest.mark.parametrize("episode_id", ["", 1], ids=["empty", "not_string"])
-def test_task_episode_transition_policy_rejects_invalid_episode_identity(
-    episode_id: object,
-) -> None:
-    episode = _task_episode()
-
-    with pytest.raises(TaskEpisodeTransitionRejected, match="transition"):
-        build_task_episode_transition(
-            _task_namespace(episode),
-            episode_id=episode_id,  # type: ignore[arg-type]
-            from_status=ValidationStatus.SYSTEM_GENERATED,
-            to_status=ValidationStatus.USER_APPROVED,
-            transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
-        )
+def test_task_episode_transition_policy_rejects_invalid_episode_identity() -> None:
+    for episode_id in ("", 1):
+        episode = _task_episode()
+        with pytest.raises(TaskEpisodeTransitionRejected, match="transition"):
+            build_task_episode_transition(
+                _task_namespace(episode),
+                episode_id=episode_id,  # type: ignore[arg-type]
+                from_status=ValidationStatus.SYSTEM_GENERATED,
+                to_status=ValidationStatus.USER_APPROVED,
+                transitioned_at=datetime(2026, 8, 11, 9, tzinfo=UTC),
+            )

@@ -89,8 +89,7 @@ def _ephemeral_run_id(namespace: MemoryNamespace) -> str:
 
     identifier = uuid5(
         NAMESPACE_URL,
-        "cowork-agent/chat-semantic/"
-        f"{namespace.user_id}/{namespace.session_id}",
+        f"cowork-agent/chat-semantic/{namespace.user_id}/{namespace.session_id}",
     )
     return f"chat-semantic-{identifier.hex}"
 

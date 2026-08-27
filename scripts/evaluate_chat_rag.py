@@ -322,9 +322,7 @@ def resolve_evaluator_models(
         emb_cfg = GeminiEmbeddingSettings.from_env()
         # Prohibit throughput model gemini-3.5-flash-lite as evaluator LLM default
         default_judge = (
-            "gemini-2.0-flash"
-            if gemini_cfg.model == "gemini-3.5-flash-lite"
-            else gemini_cfg.model
+            "gemini-2.0-flash" if gemini_cfg.model == "gemini-3.5-flash-lite" else gemini_cfg.model
         )
         llm_model = model_override or default_judge
         emb_model = embedding_override or emb_cfg.model

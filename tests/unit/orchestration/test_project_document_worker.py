@@ -25,9 +25,17 @@ class Repository:
     async def claim_job(self, document_id: str) -> ProjectDocument | None:
         assert document_id == "document-1"
         return ProjectDocument(
-            "document-1", "project-1", "workspace-1", "user-1", "source.pdf",
-            "application/pdf", len(SOURCE), hashlib.sha256(SOURCE).hexdigest(), "private/source",
-            "received", datetime.now(UTC) + timedelta(days=1),
+            "document-1",
+            "project-1",
+            "workspace-1",
+            "user-1",
+            "source.pdf",
+            "application/pdf",
+            len(SOURCE),
+            hashlib.sha256(SOURCE).hexdigest(),
+            "private/source",
+            "received",
+            datetime.now(UTC) + timedelta(days=1),
         )
 
     async def transition_document(self, document_id: str, **kwargs: object) -> bool:
@@ -91,9 +99,7 @@ def test_worker_logs_metadata_safe_stage_timings(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     async def scenario() -> None:
-        worker = ProjectDocumentIngestionWorker(
-            Repository(), Storage(), Extractor(), Vectors()
-        )
+        worker = ProjectDocumentIngestionWorker(Repository(), Storage(), Extractor(), Vectors())
         with caplog.at_level(logging.INFO):
             await worker.execute("document-1")
 
@@ -235,13 +241,15 @@ def test_worker_requeues_a_transient_index_failure_with_bounded_retry() -> None:
             repository, Storage(), Extractor(), FailingVectors()
         )
         await worker.execute("document-1")
-        assert repository.retries == [{
-            "document_id": "document-1",
-            "from_status": "indexing",
-            "error_code": "index_unavailable",
-            "max_attempts": 3,
-            "delay_seconds": 30,
-        }]
+        assert repository.retries == [
+            {
+                "document_id": "document-1",
+                "from_status": "indexing",
+                "error_code": "index_unavailable",
+                "max_attempts": 3,
+                "delay_seconds": 30,
+            }
+        ]
         assert repository.finished == []
 
     asyncio.run(scenario())
@@ -264,17 +272,21 @@ def test_worker_preserves_the_safe_native_extraction_failure_code(
         with caplog.at_level(logging.INFO):
             await worker.execute("document-1")
 
-        assert repository.transitions == [{
-            "document_id": "document-1",
-            "from_status": "extracting",
-            "to_status": "failed",
-            "error_code": "native_extraction_failed",
-        }]
-        assert repository.finished == [{
-            "document_id": "document-1",
-            "status": "failed",
-            "error_code": "native_extraction_failed",
-        }]
+        assert repository.transitions == [
+            {
+                "document_id": "document-1",
+                "from_status": "extracting",
+                "to_status": "failed",
+                "error_code": "native_extraction_failed",
+            }
+        ]
+        assert repository.finished == [
+            {
+                "document_id": "document-1",
+                "status": "failed",
+                "error_code": "native_extraction_failed",
+            }
+        ]
         timing = [
             record.getMessage()
             for record in caplog.records

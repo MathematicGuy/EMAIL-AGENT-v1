@@ -155,17 +155,20 @@ rest.
 ```python
 # src/cowork_agent/features/ai_chat/tools/registry.py
 
+
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     ok: bool
-    text: str          # what the model reads back; on failure, why it failed
+    text: str  # what the model reads back; on failure, why it failed
+
 
 @dataclass(frozen=True, slots=True)
 class Tool:
     name: str
-    description: str                       # one line, shown to the classifier
-    parameters: Mapping[str, object]       # JSON Schema, object type
+    description: str  # one line, shown to the classifier
+    parameters: Mapping[str, object]  # JSON Schema, object type
     handler: Callable[[Mapping[str, object]], Awaitable[ToolResult]]
+
 
 class ToolRegistry:
     def __init__(self, tools: Sequence[Tool]) -> None: ...

@@ -106,9 +106,7 @@ def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
             other = await identities.resolve_or_create_principal("other@example.com")
             await PostgresProjectRepository(pool).default_project(owner)
 
-            scope = await sessions.create(
-                tenant_id=owner.workspace_id, user_id=owner.user_id
-            )
+            scope = await sessions.create(tenant_id=owner.workspace_id, user_id=owner.user_id)
 
             assert scope.session_id == "session-1"
             async with pool.connection() as connection:
@@ -118,12 +116,15 @@ def test_chat_session_is_visible_only_to_its_workspace_member_owner() -> None:
                 row = await cursor.fetchone()
             assert row is not None
             assert row[0] is not None
-            assert await sessions.require(
-                scope.session_id, tenant_id=owner.workspace_id, user_id=owner.user_id
-            ) == scope
-            assert await sessions.list_for(
-                tenant_id=owner.workspace_id, user_id=owner.user_id
-            ) == (scope,)
+            assert (
+                await sessions.require(
+                    scope.session_id, tenant_id=owner.workspace_id, user_id=owner.user_id
+                )
+                == scope
+            )
+            assert await sessions.list_for(tenant_id=owner.workspace_id, user_id=owner.user_id) == (
+                scope,
+            )
             with pytest.raises(ChatSessionAccessDenied):
                 await sessions.require(
                     scope.session_id, tenant_id=other.workspace_id, user_id=other.user_id
@@ -143,15 +144,16 @@ def test_chat_history_begin_is_idempotent_and_completion_updates_in_place() -> N
             sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
             owner = await identities.resolve_or_create_principal("owner@example.com")
             await PostgresProjectRepository(pool).default_project(owner)
-            scope = await sessions.create(
-                tenant_id=owner.workspace_id, user_id=owner.user_id
-            )
+            scope = await sessions.create(tenant_id=owner.workspace_id, user_id=owner.user_id)
             repository = PostgresChatHistoryRepository(pool)
             pending = ChatTurn(
-                turn_id="turn-1", session_id=scope.session_id,
-                user_message="Keep this prompt while generating.", assistant_message=None,
+                turn_id="turn-1",
+                session_id=scope.session_id,
+                user_message="Keep this prompt while generating.",
+                assistant_message=None,
                 created_at=datetime(2026, 8, 17, tzinfo=UTC),
-                status=ChatTurnStatus.GENERATING, idempotency_key="submission-1",
+                status=ChatTurnStatus.GENERATING,
+                idempotency_key="submission-1",
             )
 
             first = await repository.begin_turn(
@@ -160,31 +162,41 @@ def test_chat_history_begin_is_idempotent_and_completion_updates_in_place() -> N
             replay = await repository.begin_turn(
                 scope,
                 ChatTurn(
-                    turn_id="turn-replayed", session_id=scope.session_id,
-                    user_message=pending.user_message, assistant_message=None,
+                    turn_id="turn-replayed",
+                    session_id=scope.session_id,
+                    user_message=pending.user_message,
+                    assistant_message=None,
                     created_at=datetime(2026, 8, 17, 0, 1, tzinfo=UTC),
-                    status=ChatTurnStatus.GENERATING, idempotency_key="submission-1",
+                    status=ChatTurnStatus.GENERATING,
+                    idempotency_key="submission-1",
                 ),
-                idempotency_key="submission-1", title="Ignored replay title",
+                idempotency_key="submission-1",
+                title="Ignored replay title",
             )
             with pytest.raises(ValueError, match="idempotency key"):
                 await repository.begin_turn(
                     scope,
                     ChatTurn(
-                        turn_id="turn-conflict", session_id=scope.session_id,
-                        user_message="A different prompt conflicts.", assistant_message=None,
+                        turn_id="turn-conflict",
+                        session_id=scope.session_id,
+                        user_message="A different prompt conflicts.",
+                        assistant_message=None,
                         created_at=datetime(2026, 8, 17, 0, 2, tzinfo=UTC),
                         status=ChatTurnStatus.GENERATING,
                         idempotency_key="submission-1",
                     ),
-                    idempotency_key="submission-1", title="Conflict",
+                    idempotency_key="submission-1",
+                    title="Conflict",
                 )
             completed = await repository.update_turn(
                 scope,
                 ChatTurn(
-                    turn_id=first.turn_id, session_id=first.session_id,
-                    user_message=first.user_message, assistant_message="The reply completed.",
-                    created_at=first.created_at, status=ChatTurnStatus.COMPLETED,
+                    turn_id=first.turn_id,
+                    session_id=first.session_id,
+                    user_message=first.user_message,
+                    assistant_message="The reply completed.",
+                    created_at=first.created_at,
+                    status=ChatTurnStatus.COMPLETED,
                     idempotency_key=first.idempotency_key,
                     activities=(
                         ChatActivity(
@@ -205,12 +217,8 @@ def test_chat_history_begin_is_idempotent_and_completion_updates_in_place() -> N
             assert completed.activities[0].code is ChatActivityCode.UNDERSTANDING_REQUEST
             assert completed.completed_at == first.created_at
             assert await repository.list_turns(scope) == (completed,)
-            assert await repository.titles_for((scope,)) == {
-                scope.session_id: "Generated title"
-            }
-            assert await repository.latest_turns_for((scope,)) == {
-                scope.session_id: completed
-            }
+            assert await repository.titles_for((scope,)) == {scope.session_id: "Generated title"}
+            assert await repository.latest_turns_for((scope,)) == {scope.session_id: completed}
         finally:
             await pool.close()
 
@@ -229,8 +237,7 @@ def test_chat_turn_lifecycle_migration_backfills_legacy_completed_turns(
             project_id = "00000000-0000-0000-0000-000000000003"
             session_id = "session-legacy"
             migrations = (
-                Path(__file__).resolve().parents[3]
-                / "src/cowork_agent/persistence/migrations"
+                Path(__file__).resolve().parents[3] / "src/cowork_agent/persistence/migrations"
             )
             async with pool.connection() as connection:
                 current_schema = await connection.execute("SELECT current_schema()")
@@ -267,9 +274,7 @@ def test_chat_turn_lifecycle_migration_backfills_legacy_completed_turns(
                     (session_id, workspace_id, user_id, project_id),
                 )
                 await connection.execute(
-                    (migrations / "014_chat_turn_lifecycle.down.sql").read_text(
-                        encoding="utf-8"
-                    )
+                    (migrations / "014_chat_turn_lifecycle.down.sql").read_text(encoding="utf-8")
                 )
                 await connection.execute(
                     "DELETE FROM schema_migrations WHERE filename = %s",
@@ -282,8 +287,11 @@ def test_chat_turn_lifecycle_migration_backfills_legacy_completed_turns(
                     ) VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
-                        session_id, "legacy-turn", "Legacy prompt",
-                        "Legacy reply", datetime(2026, 8, 16, tzinfo=UTC),
+                        session_id,
+                        "legacy-turn",
+                        "Legacy prompt",
+                        "Legacy reply",
+                        datetime(2026, 8, 16, tzinfo=UTC),
                     ),
                 )
 
@@ -315,9 +323,7 @@ def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() ->
             sessions = PostgresChatSessionRegistry(pool, new_id=lambda: "session-1")
             owner = await identities.resolve_or_create_principal("owner@example.com")
             await PostgresProjectRepository(pool).default_project(owner)
-            scope = await sessions.create(
-                tenant_id=owner.workspace_id, user_id=owner.user_id
-            )
+            scope = await sessions.create(tenant_id=owner.workspace_id, user_id=owner.user_id)
             turn = ChatTurn(
                 turn_id="turn-1",
                 session_id=scope.session_id,
@@ -342,9 +348,7 @@ def test_chat_history_survives_a_new_repository_instance_and_sets_its_title() ->
             assert stored[0].assistant_message == turn.assistant_message
             assert stored[0].status is ChatTurnStatus.COMPLETED
             assert stored[0].idempotency_key == turn.turn_id
-            assert await reader.titles_for((scope,)) == {
-                scope.session_id: "Quarterly report plan"
-            }
+            assert await reader.titles_for((scope,)) == {scope.session_id: "Quarterly report plan"}
         finally:
             await pool.close()
 
@@ -362,9 +366,7 @@ def test_chat_history_list_owned_turns_is_none_for_a_non_owner() -> None:
             owner = await identities.resolve_or_create_principal("owner@example.com")
             other = await identities.resolve_or_create_principal("other@example.com")
             await PostgresProjectRepository(pool).default_project(owner)
-            scope = await sessions.create(
-                tenant_id=owner.workspace_id, user_id=owner.user_id
-            )
+            scope = await sessions.create(tenant_id=owner.workspace_id, user_id=owner.user_id)
             turn = ChatTurn(
                 turn_id="turn-1",
                 session_id=scope.session_id,

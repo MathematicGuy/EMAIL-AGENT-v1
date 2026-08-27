@@ -100,9 +100,7 @@ def test_clarify_uses_non_retrieval_reply_mode_and_no_task_proposal() -> None:
     assert routing.calls == 1
     assert reply.contexts[0].response_mode is ChatResponseMode.CLARIFY
     assert [
-        event.event_type
-        for event in events
-        if event.event_type is not ChatEventType.ACTIVITY
+        event.event_type for event in events if event.event_type is not ChatEventType.ACTIVITY
     ] == [
         ChatEventType.STARTED,
         ChatEventType.ERROR,
@@ -159,7 +157,9 @@ def test_rag_empty_evidence_without_document_ids_falls_back_to_clarify() -> None
     controller = ChatController(
         scope=scope,
         memory=MemoryGateway(
-            scope=scope, session_buffer=buffer, project_documents=FakeProjectDocs()  # type: ignore[arg-type]
+            scope=scope,
+            session_buffer=buffer,
+            project_documents=FakeProjectDocs(),  # type: ignore[arg-type]
         ),
         reply=reply,
         routing=routing,  # type: ignore[arg-type]
@@ -172,9 +172,7 @@ def test_rag_empty_evidence_without_document_ids_falls_back_to_clarify() -> None
     assert routing.calls == 1
     assert reply.contexts[0].response_mode is ChatResponseMode.CLARIFY
     assert [
-        event.event_type
-        for event in events
-        if event.event_type is not ChatEventType.ACTIVITY
+        event.event_type for event in events if event.event_type is not ChatEventType.ACTIVITY
     ] == [
         ChatEventType.STARTED,
         ChatEventType.ERROR,

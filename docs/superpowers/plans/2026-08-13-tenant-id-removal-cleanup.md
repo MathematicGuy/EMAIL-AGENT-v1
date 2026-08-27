@@ -32,6 +32,7 @@
 def test_get_verified_principal_single_user():
     # Verify VerifiedPrincipal no longer has tenant_id and defaults user_id
     from cowork_agent.api.deps import VerifiedPrincipal
+
     principal = VerifiedPrincipal(user_id="user_123")
     assert principal.user_id == "user_123"
     assert not hasattr(principal, "tenant_id")
@@ -75,6 +76,7 @@ git commit -m "refactor: remove tenant_id and X-Workspace-ID from api deps"
 ```python
 def test_chat_memory_scope_without_tenant():
     from cowork_agent.domain._chat_contracts_memory import ChatMemoryScope
+
     scope = ChatMemoryScope(user_id="u1", session_id="s1")
     assert scope.user_id == "u1"
 ```

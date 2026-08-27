@@ -86,9 +86,7 @@ class InMemoryChatHistoryRepository:
             self._titles[scope.session_id] = title
         return stored
 
-    async def write_turn(
-        self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
-    ) -> None:
+    async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None:
         if turn.assistant_message is None:
             raise ValueError("only completed assistant replies may enter chat history")
         completed = replace(
@@ -111,9 +109,7 @@ class InMemoryChatHistoryRepository:
         if not self._is_owner(scope):
             return ()
         matching = (
-            turn
-            for (session_id, _), turn in self._turns.items()
-            if session_id == scope.session_id
+            turn for (session_id, _), turn in self._turns.items() if session_id == scope.session_id
         )
         return tuple(sorted(matching, key=lambda turn: (turn.created_at, turn.turn_id)))
 
@@ -124,9 +120,7 @@ class InMemoryChatHistoryRepository:
             if self._is_owner(scope) and scope.session_id in self._titles
         }
 
-    async def latest_turns_for(
-        self, scopes: Sequence[ChatMemoryScope]
-    ) -> Mapping[str, ChatTurn]:
+    async def latest_turns_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, ChatTurn]:
         latest: dict[str, ChatTurn] = {}
         for scope in scopes:
             turns = await self.list_turns(scope)

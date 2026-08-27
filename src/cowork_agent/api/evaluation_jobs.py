@@ -77,9 +77,7 @@ def create_evaluation_router() -> APIRouter:
         try:
             evaluation_request = EvaluationRequest.from_dict(payload)
         except (KeyError, TypeError, ValueError):
-            return _error_response(
-                422, "invalid_request", "evaluation request failed validation"
-            )
+            return _error_response(422, "invalid_request", "evaluation request failed validation")
         service = _evaluation_service(request)
         try:
             job = await service.submit(evaluation_request, idempotency_key=idempotency_key)

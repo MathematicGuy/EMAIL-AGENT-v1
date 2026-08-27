@@ -114,11 +114,7 @@ async def _smoke_alias(
     if not events:
         return _Observation(lease.alias, "failed", 0, completed_at_ms, None)
     event = events[-1]
-    rate_limited_at_ms = (
-        completed_at_ms
-        if event.status_code == 429
-        else None
-    )
+    rate_limited_at_ms = completed_at_ms if event.status_code == 429 else None
     return _Observation(
         alias=event.credential_alias,
         status_class=event.outcome,

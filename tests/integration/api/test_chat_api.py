@@ -79,9 +79,7 @@ class EpisodeStore:
         del namespace, limit
         return tuple(self.writes)
 
-    async def read_task_episode(
-        self, namespace: object, *, episode_id: str
-    ) -> TaskEpisode | None:
+    async def read_task_episode(self, namespace: object, *, episode_id: str) -> TaskEpisode | None:
         session_id = namespace.scope.session_id
         return next(
             (
@@ -159,17 +157,13 @@ class HistoryStore:
             or user_id != self.owner_user_id
         ):
             return None
-        scope = ChatMemoryScope(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id
-        )
+        scope = ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id=session_id)
         return scope, (self.turn,)
 
     async def titles_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, str]:
         return {scope.session_id: "Saved conversation" for scope in scopes}
 
-    async def latest_turns_for(
-        self, scopes: tuple[ChatMemoryScope, ...]
-    ) -> dict[str, ChatTurn]:
+    async def latest_turns_for(self, scopes: tuple[ChatMemoryScope, ...]) -> dict[str, ChatTurn]:
         return {
             scope.session_id: self.turn
             for scope in scopes
@@ -317,9 +311,7 @@ def test_session_message_endpoint_streams_existing_typed_events_in_order() -> No
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         events = _events(response.text)
-        non_activity_events = [
-            event for event in events if event["event_type"] != "activity"
-        ]
+        non_activity_events = [event for event in events if event["event_type"] != "activity"]
         assert [event["event_type"] for event in non_activity_events] == [
             "started",
             "error",
@@ -351,9 +343,7 @@ def test_guest_session_endpoint_sets_an_opaque_http_only_cookie() -> None:
 
         app.state.runtime = replace(
             app.state.runtime,
-            chat=replace(
-                app.state.runtime.chat, chat_guest_session_issuer=issue_guest_session
-            ),
+            chat=replace(app.state.runtime.chat, chat_guest_session_issuer=issue_guest_session),
         )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="https://chat.test"
@@ -509,9 +499,7 @@ def test_message_endpoint_hides_a_session_owned_by_another_principal() -> None:
 
             app.state.runtime = replace(
                 app.state.runtime,
-                chat=replace(
-                    app.state.runtime.chat, chat_principal_resolver=foreign_principal
-                ),
+                chat=replace(app.state.runtime.chat, chat_principal_resolver=foreign_principal),
             )
             response = await client.post(
                 "/v1/cowork/chat/sessions/session-1/messages",
@@ -584,9 +572,7 @@ def test_task_episode_controls_use_only_the_originating_session_and_gateway_life
             assert len(episodes.writes) == 1
             episode_id = episodes.writes[0].episode_id
             events = _events(created.text)
-            non_activity_events = [
-                event for event in events if event["event_type"] != "activity"
-            ]
+            non_activity_events = [event for event in events if event["event_type"] != "activity"]
             assert [event["event_type"] for event in non_activity_events] == [
                 "started",
                 "error",
@@ -647,9 +633,7 @@ def test_session_and_message_read_contracts_return_owned_history() -> None:
             foreign = await client.get("/v1/cowork/chat/sessions/session-9/messages")
 
         assert listed.status_code == 200
-        assert listed.json() == {
-            "sessions": [{"session_id": "session-1", "feature": "ai_chat"}]
-        }
+        assert listed.json() == {"sessions": [{"session_id": "session-1", "feature": "ai_chat"}]}
         assert history.status_code == 200
         turns = history.json()["turns"]
         assert [turn["user_message"] for turn in turns] == ["Hello"]
@@ -857,9 +841,10 @@ def test_mail_scan_activity_lifecycle_is_server_stamped_and_reloads() -> None:
         assert started.status_code == running.status_code == completed.status_code == 201
         assert started.json()["status"] == "generating"
         assert started.json()["activities"][0]["started_at"] is not None
-        assert running.json()["activities"][0]["started_at"] == started.json()["activities"][0][
-            "started_at"
-        ]
+        assert (
+            running.json()["activities"][0]["started_at"]
+            == started.json()["activities"][0]["started_at"]
+        )
         saved = completed.json()
         assert saved["status"] == "completed"
         assert saved["completed_at"] is not None
@@ -1070,9 +1055,7 @@ def test_profile_crud_round_trip_through_the_read_contract() -> None:
             updated = await client.put(
                 "/v1/cowork/chat/profile", json={"response_tone": "detailed"}
             )
-            oversized = await client.post(
-                "/v1/cowork/chat/profile", json={"language": "x" * 201}
-            )
+            oversized = await client.post("/v1/cowork/chat/profile", json={"language": "x" * 201})
             deleted = await client.delete("/v1/cowork/chat/profile")
             after = await client.get("/v1/cowork/chat/profile")
 

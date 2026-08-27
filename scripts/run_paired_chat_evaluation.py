@@ -30,9 +30,7 @@ from cowork_agent.features.ai_chat.evaluation_runner import (
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run paired chat evaluation")
-    parser.add_argument(
-        "--json", action="store_true", help="machine-readable JSON output"
-    )
+    parser.add_argument("--json", action="store_true", help="machine-readable JSON output")
     args = parser.parse_args(argv)
 
     # Load dataset and build scorer

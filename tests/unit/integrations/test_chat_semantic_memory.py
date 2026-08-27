@@ -98,10 +98,7 @@ def test_adapter_derives_exact_retrieval_request_and_serializes_current_company_
 
     assert memory.requests == [
         SemanticRetrievalRequest(
-            run_id=(
-                "chat-semantic-"
-                f"{uuid5(NAMESPACE_URL, _run_id_name()).hex}"
-            ),
+            run_id=(f"chat-semantic-{uuid5(NAMESPACE_URL, _run_id_name()).hex}"),
             user_id="user@example.com",
             query="What is the current travel expense policy?",
             knowledge_gaps=(),
@@ -123,9 +120,7 @@ def test_adapter_derives_exact_retrieval_request_and_serializes_current_company_
                 "document_version": "2026-08",
             },
         ),
-        "scores": (
-            {"chunk_id": "chunk-1", "relevance_score": 0.91, "rerank_score": 0.88},
-        ),
+        "scores": ({"chunk_id": "chunk-1", "relevance_score": 0.91, "rerank_score": 0.88},),
     }
 
 

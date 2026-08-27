@@ -143,9 +143,11 @@ def openai_request_body(
     max_output_tokens: int,
 ) -> dict[str, object]: ...
 
+
 def openai_completion_json(
     response: Mapping[str, Any],
 ) -> Mapping[str, Any]: ...
+
 
 def post_json(
     url: str,
@@ -244,13 +246,17 @@ class EmailProviderBundle:
     query_rewriter: object | None  # GeminiRetrievalQueryRewriter or None
     generation_concurrency: int
 
+
 @dataclass(frozen=True)
 class ChatProviderBundle:
     intent_classifier: IntentClassifierPort
     chat_reply: ChatReplyPort
 
+
 async def resolve_email_providers(provider: str) -> EmailProviderBundle: ...
-def resolve_chat_providers(provider: str, intent_settings: ChatIntentSettings) -> ChatProviderBundle: ...
+def resolve_chat_providers(
+    provider: str, intent_settings: ChatIntentSettings
+) -> ChatProviderBundle: ...
 ```
 
 **Replaces:**

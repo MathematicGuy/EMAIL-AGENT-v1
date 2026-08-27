@@ -81,17 +81,17 @@ class OutlookOAuthDriver(Protocol):
 
 
 class MicrosoftOAuthDriver:
-    def __init__(
-        self, settings: OutlookSettings, client: httpx.AsyncClient | None = None
-    ) -> None:
+    def __init__(self, settings: OutlookSettings, client: httpx.AsyncClient | None = None) -> None:
         _validate_scopes(settings.scopes)
         self._settings = settings
         self._client = client
 
     def authorization_url(self, state: str, code_verifier: str) -> str:
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode()).digest()
-        ).rstrip(b"=").decode()
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
         params = {
             "client_id": self._settings.client_id,
             "response_type": "code",
@@ -214,11 +214,7 @@ class OutlookConnectionService:
 
     async def _gmail_owner(self, connection_id: str) -> MailboxConnection:
         connection = await self._repository.get(connection_id)
-        if (
-            connection is None
-            or connection.status != "active"
-            or connection.provider != "gmail"
-        ):
+        if connection is None or connection.status != "active" or connection.provider != "gmail":
             raise MailboxNotConnectedError(connection_id)
         return connection
 
@@ -260,12 +256,16 @@ class OutlookMailboxAdapter:
         url = cursor or f"{self._graph_base}{base_path}"
         if cursor:
             self._validate_graph_url(cursor, base_path)
-        params = None if cursor else {
-            "$filter": "isRead eq false",
-            "$select": "id,conversationId",
-            "$top": str(min(max(page_size, 1), 1000)),
-            "$count": "true",
-        }
+        params = (
+            None
+            if cursor
+            else {
+                "$filter": "isRead eq false",
+                "$select": "id,conversationId",
+                "$top": str(min(max(page_size, 1), 1000)),
+                "$count": "true",
+            }
+        )
         response = await self._request_json(connection_id, url, params=params)
         messages = tuple(
             MessageRef(
@@ -309,9 +309,7 @@ class OutlookMailboxAdapter:
         messages.sort(key=lambda item: item.received_at)
         return tuple(messages)
 
-    async def get_message_received_at(
-        self, connection_id: str, message_id: str
-    ) -> datetime:
+    async def get_message_received_at(self, connection_id: str, message_id: str) -> datetime:
         provider_message_id = _strip_outlook_id(message_id)
         path = f"/me/messages/{quote(provider_message_id, safe='')}"
         response = await self._request_json(
@@ -459,16 +457,13 @@ class OutlookMailboxAdapter:
             # Graph canonicalizes the Inbox well-known folder to OData's
             # ``mailFolders('inbox')`` form in some @odata.nextLink values.
             # Keep the allowed path narrow: arbitrary folder IDs remain invalid.
-            allowed_paths.add(
-                f"{base.path.rstrip('/')}/me/mailFolders('inbox')/messages"
-            )
+            allowed_paths.add(f"{base.path.rstrip('/')}/me/mailFolders('inbox')/messages")
         if (
             candidate.scheme != base.scheme
             or candidate.netloc != base.netloc
             or candidate.username is not None
             or candidate.password is not None
-            or unquote(candidate.path).casefold()
-            not in {path.casefold() for path in allowed_paths}
+            or unquote(candidate.path).casefold() not in {path.casefold() for path in allowed_paths}
         ):
             raise ValueError("Invalid Outlook paging cursor")
 

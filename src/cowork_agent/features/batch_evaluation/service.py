@@ -263,9 +263,7 @@ def _status_view(
     for unit in units:
         progress[unit.state.value] += 1
     failure_classes = {
-        failure_class.value: sum(
-            attempt.failure_class is failure_class for attempt in attempts
-        )
+        failure_class.value: sum(attempt.failure_class is failure_class for attempt in attempts)
         for failure_class in FailureClass
     }
     return MappingProxyType(

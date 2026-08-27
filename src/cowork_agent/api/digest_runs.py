@@ -38,7 +38,6 @@ class CreateRunRequest(BaseModel):
     max_emails: int = Field(default=10, alias="maxEmails", ge=1, le=500)
 
 
-
 async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
     """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
     connection = await owned_connection(request, run.mailbox_connection_id, detail)
@@ -48,16 +47,13 @@ async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, deta
     require_owned_connection(principal, connection, detail=detail)
 
 
-
 def _digest_worker(request: Request) -> DigestWorker | None:
     email_rag = runtime(request).email_rag
     return email_rag.digest_worker if email_rag is not None else None
 
 
-
 def _is_development() -> bool:
     return os.getenv("APP_ENV", "development").lower() in {"development", "dev", "local"}
-
 
 
 def _run_history_item(run: DigestRun) -> dict[str, Any]:
@@ -78,7 +74,6 @@ def _run_history_item(run: DigestRun) -> dict[str, Any]:
             {"code": run.error_code, "message": run.error_message_safe} if run.error_code else None
         ),
     }
-
 
 
 def create_digest_router() -> APIRouter:

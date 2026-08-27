@@ -74,15 +74,7 @@ def test_split_frontmatter_without_leading_fence_returns_empty_fields() -> None:
 
 
 def test_split_frontmatter_ignores_unknown_keys_and_returns_body() -> None:
-    markdown = (
-        "---\n"
-        "document_id: policy-file\n"
-        "extra: ignored\n"
-        "title: Policy\n"
-        "---\n"
-        "\n"
-        "# Policy\n"
-    )
+    markdown = "---\ndocument_id: policy-file\nextra: ignored\ntitle: Policy\n---\n\n# Policy\n"
     fields, body = split_frontmatter(markdown)
 
     assert fields == {"document_id": "policy-file", "title": "Policy"}

@@ -145,10 +145,7 @@ class RerankerAdapter:
         if results is None:
             return original
 
-        return tuple(
-            replace(original[index], rerank_score=score)
-            for index, score in results
-        )
+        return tuple(replace(original[index], rerank_score=score) for index, score in results)
 
 
 def _determine_endpoint(model: str) -> str:

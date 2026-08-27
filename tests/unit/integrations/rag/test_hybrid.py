@@ -107,9 +107,7 @@ def test_hybrid_fuses_dense_and_bm25_candidate_union() -> None:
 
 
 def test_hybrid_applies_reranker_after_rrf_and_keeps_fused_scores() -> None:
-    memory, _ = _memory(
-        reranker=FakeJinaReranker(scores={"a": 0.99, "b": 0.1, "c": 0.5})
-    )
+    memory, _ = _memory(reranker=FakeJinaReranker(scores={"a": 0.99, "b": 0.1, "c": 0.5}))
 
     response = asyncio.run(memory.retrieve(_request()))
 
@@ -128,9 +126,7 @@ def test_hybrid_preserves_rrf_order_when_reranker_falls_back() -> None:
 
 
 def test_hybrid_truncates_only_after_reranking_all_fused_candidates() -> None:
-    memory, _ = _memory(
-        reranker=FakeJinaReranker(scores={"a": 0.99, "b": 0.1, "c": 0.5})
-    )
+    memory, _ = _memory(reranker=FakeJinaReranker(scores={"a": 0.99, "b": 0.1, "c": 0.5}))
 
     response = asyncio.run(memory.retrieve(_request(top_k=2)))
 
@@ -231,9 +227,7 @@ def test_hybrid_retrieve_copies_document_date_onto_semantic_chunk() -> None:
         top_k_default=5,
         min_score_default=0.0,
     )
-    memory = HybridSemanticMemory(
-        documents, embedder, dense=dense, min_score_default=0.0
-    )
+    memory = HybridSemanticMemory(documents, embedder, dense=dense, min_score_default=0.0)
     asyncio.run(memory.build_index())
 
     response = asyncio.run(memory.retrieve(_request()))

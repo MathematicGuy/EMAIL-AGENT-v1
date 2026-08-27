@@ -233,7 +233,9 @@ class EvaluationPlugin(Protocol):
     async def preflight(self, request: EvaluationRequest) -> PluginPlan: ...
     def build_work_units(self, plan: PluginPlan, lane_count: int) -> tuple[WorkUnit, ...]: ...
     async def execute_work(self, unit: WorkUnit, context: WorkContext) -> WorkUnitOutcome: ...
-    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle: ...
+    def aggregate(
+        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
+    ) -> ArtifactBundle: ...
     async def cleanup(self, context: WorkContext) -> CleanupOutcome: ...
     def classify_failure(self, error: BaseException) -> FailureClassification: ...
 ```
@@ -373,7 +375,11 @@ git commit -m "feat: add evaluation work planning"
 async def test_three_keys_can_be_leased_once_each_without_secret_repr() -> None:
     pool = CredentialLeasingPool.from_env(
         "MISTRAL_API_KEY",
-        {"MISTRAL_API_KEY": "secret-a", "MISTRAL_API_KEY2": "secret-b", "MISTRAL_API_KEY3": "secret-c"},
+        {
+            "MISTRAL_API_KEY": "secret-a",
+            "MISTRAL_API_KEY2": "secret-b",
+            "MISTRAL_API_KEY3": "secret-c",
+        },
         clock=FakeClock(),
     )
     leases = await asyncio.gather(pool.lease(), pool.lease(), pool.lease())
@@ -391,8 +397,14 @@ Parse an integer `Retry-After` value from `HTTPError.headers` when present; igno
 
 ```python
 class MistralAPIError(RuntimeError):
-    def __init__(self, detail: str, *, safe_message: str | None = None,
-                 status_code: int | None = None, retry_after_seconds: int | None = None) -> None:
+    def __init__(
+        self,
+        detail: str,
+        *,
+        safe_message: str | None = None,
+        status_code: int | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
         super().__init__(detail)
         self.safe_message = safe_message or DEFAULT_SAFE_MESSAGE
         self.status_code = status_code
@@ -649,8 +661,12 @@ Capture the current `run_probe_set()` output for a two-probe fake set, including
 rows = await run_probe_rows(probe_set, scripted_ask)
 assert [row.probe_id for row in rows] == [probe.probe_id for probe in probe_set.probes]
 assert calls == [
-    ("probe-1", Arm.FULL), ("probe-1", Arm.ABLATED), ("probe-1", Arm.CONTROL),
-    ("probe-2", Arm.FULL), ("probe-2", Arm.ABLATED), ("probe-2", Arm.CONTROL),
+    ("probe-1", Arm.FULL),
+    ("probe-1", Arm.ABLATED),
+    ("probe-1", Arm.CONTROL),
+    ("probe-2", Arm.FULL),
+    ("probe-2", Arm.ABLATED),
+    ("probe-2", Arm.CONTROL),
 ]
 ```
 
@@ -785,7 +801,9 @@ def test_max_workers_defaults_to_one(monkeypatch, tmp_path: Path) -> None:
     assert captured_requests[0].max_workers == 1
 
 
-def test_four_requested_workers_with_three_keys_reports_reduction(monkeypatch, tmp_path: Path) -> None:
+def test_four_requested_workers_with_three_keys_reports_reduction(
+    monkeypatch, tmp_path: Path
+) -> None:
     captured_requests: list[EvaluationRequest] = []
     configure_three_fake_mistral_keys(monkeypatch)
     install_fake_runtime(monkeypatch, captured_requests, effective_workers=3)

@@ -201,9 +201,7 @@ def test_canonical_signed_upload_status_download_and_authorization() -> None:
                     "content_sha256": "a" * 64,
                 },
             )
-            status = await client.get(
-                "/v1/cowork/chat/projects/project-1/documents/doc-1"
-            )
+            status = await client.get("/v1/cowork/chat/projects/project-1/documents/doc-1")
             download = await client.get(
                 "/v1/cowork/chat/projects/project-1/documents/doc-1/download"
             )
@@ -260,9 +258,7 @@ def test_document_routes_are_unavailable_when_feature_is_disabled() -> None:
                     "content_sha256": "a" * 64,
                 },
             )
-            documents = await client.get(
-                "/v1/cowork/chat/projects/project-1/documents"
-            )
+            documents = await client.get("/v1/cowork/chat/projects/project-1/documents")
             document_path = "/v1/cowork/chat/projects/project-1/documents/doc-1"
             document_responses = [
                 await client.get(document_path),

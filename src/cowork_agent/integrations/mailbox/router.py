@@ -47,9 +47,7 @@ class ProviderRoutingMailboxAdapter:
         adapter = await self._adapter(connection_id)
         return await adapter.get_thread(connection_id, thread_id)
 
-    async def get_message_received_at(
-        self, connection_id: str, message_id: str
-    ) -> datetime:
+    async def get_message_received_at(self, connection_id: str, message_id: str) -> datetime:
         adapter = await self._adapter(connection_id)
         return await adapter.get_message_received_at(connection_id, message_id)
 

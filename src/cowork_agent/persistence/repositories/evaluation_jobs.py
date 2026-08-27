@@ -683,12 +683,15 @@ class SQLiteEvaluationJobRepository:
                 raise InvalidStateTransition(
                     "unit requires explicit recovery before another attempt"
                 )
-            attempt_number = int(
-                database.execute(
-                    "SELECT COUNT(*) FROM evaluation_attempts WHERE job_id = ? AND unit_id = ?",
-                    (job_id, unit_id),
-                ).fetchone()[0]
-            ) + 1
+            attempt_number = (
+                int(
+                    database.execute(
+                        "SELECT COUNT(*) FROM evaluation_attempts WHERE job_id = ? AND unit_id = ?",
+                        (job_id, unit_id),
+                    ).fetchone()[0]
+                )
+                + 1
+            )
             database.execute(
                 """
                 INSERT INTO evaluation_attempts (

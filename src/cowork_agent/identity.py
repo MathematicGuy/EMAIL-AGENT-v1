@@ -22,9 +22,7 @@ class ConnectionNotOwnedError(LookupError):
 
 
 class OpaqueSessionResolver(Protocol):
-    async def resolve(
-        self, token: str, *, now: datetime
-    ) -> "VerifiedPrincipal | None": ...
+    async def resolve(self, token: str, *, now: datetime) -> "VerifiedPrincipal | None": ...
 
 
 @dataclass(frozen=True, slots=True)

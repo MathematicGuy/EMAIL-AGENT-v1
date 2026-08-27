@@ -97,10 +97,7 @@ def test_database_url_cloud_mode_rejects_transaction_pooler_port() -> None:
 
 
 def test_database_url_off_mode_is_the_sqlite_fallback() -> None:
-    assert (
-        database_url({"POSTGRES_MODE": "off", "DATABASE_URL": "postgresql://ignored/db"})
-        == ""
-    )
+    assert database_url({"POSTGRES_MODE": "off", "DATABASE_URL": "postgresql://ignored/db"}) == ""
 
 
 def test_database_url_without_mode_keeps_legacy_database_url() -> None:
@@ -133,9 +130,7 @@ def test_session_cookie_explicit_flag_wins_on_local_postgres_mode() -> None:
 
 
 def test_project_gemini_embedding_settings_default_to_1024() -> None:
-    settings = GeminiEmbeddingSettings.from_env(
-        {"GEMINI_API_KEY_1": "key-1"}
-    )
+    settings = GeminiEmbeddingSettings.from_env({"GEMINI_API_KEY_1": "key-1"})
 
     assert settings.model == "gemini-embedding-2"
     assert settings.dimensions == 1024
@@ -147,14 +142,8 @@ def test_project_documents_read_the_turbovec_index_root() -> None:
 
     environ = {"USER_DOCUMENTS_INDEX_ROOT": "var/private-project-indexes"}
 
-    assert (
-        UserDocumentsSettings.from_env(environ).index_root
-        == "var/private-project-indexes"
-    )
-    assert (
-        UserDocumentsSettings.from_env({}).index_root
-        == "var/project-indexes"
-    )
+    assert UserDocumentsSettings.from_env(environ).index_root == "var/private-project-indexes"
+    assert UserDocumentsSettings.from_env({}).index_root == "var/project-indexes"
 
 
 def test_project_documents_are_enabled_by_default() -> None:
@@ -178,12 +167,10 @@ def test_session_settings_load_cookie_contract() -> None:
     assert settings.cookie_secure is True
 
 
-@pytest.mark.parametrize("ttl", ["0", "-1"])
-def test_session_settings_reject_non_positive_ttl(ttl: str) -> None:
-    with pytest.raises(ValueError, match="must be positive"):
-        SessionSettings.from_env(
-            {"APP_SESSION_TTL_SECONDS": ttl}
-        )
+def test_session_settings_reject_non_positive_ttl() -> None:
+    for ttl in ("0", "-1"):
+        with pytest.raises(ValueError, match="must be positive"):
+            SessionSettings.from_env({"APP_SESSION_TTL_SECONDS": ttl})
 
 
 def test_supabase_storage_settings_keep_the_secret_out_of_repr() -> None:
@@ -233,19 +220,16 @@ _OPENROUTER_BASE = {
 }
 
 
-@pytest.mark.parametrize(
-    "environ",
-    [
+def test_openrouter_allowed_models_missing_is_empty() -> None:
+    environs = [
         _OPENROUTER_BASE,
         {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": ""},
         {**_OPENROUTER_BASE, "OPENROUTER_ALLOWED_MODELS": "   "},
-    ],
-)
-def test_openrouter_allowed_models_missing_is_empty(environ: dict[str, str]) -> None:
-    settings = OpenRouterSettings.from_env(environ)
-
-    assert settings.allowed_models == ()
-    assert settings.fallback_models() == ()
+    ]
+    for environ in environs:
+        settings = OpenRouterSettings.from_env(environ)
+        assert settings.allowed_models == ()
+        assert settings.fallback_models() == ()
 
 
 def test_openrouter_allowed_models_parses_json_list_in_order() -> None:
@@ -298,10 +282,9 @@ def test_openrouter_fallback_models_omits_primary_preserving_order() -> None:
 
     assert settings.fallback_models() == ("openai/gpt",)
 
+
 def test_email_rag_quality_settings_default_and_bounds() -> None:
     settings = EmailRagQualitySettings.from_env({})
     assert (settings.min_rerank_score, settings.relative_cutoff_ratio) == (0.30, 0.85)
     with pytest.raises(ValueError, match="EMAIL_RAG_MIN_RERANK_SCORE"):
-        EmailRagQualitySettings.from_env(
-            {"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"}
-        )
+        EmailRagQualitySettings.from_env({"EMAIL_RAG_MIN_RERANK_SCORE": "1.01"})

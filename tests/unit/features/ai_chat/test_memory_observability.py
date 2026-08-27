@@ -43,9 +43,7 @@ def test_metadata_only_event_never_exposes_sensitive_sentinels_and_bounds_counts
     ],
     ids=["negative_results", "unbounded_filtered", "negative_latency"],
 )
-def test_event_rejects_counts_outside_the_bounded_nonnegative_range(
-    field: str, value: int
-) -> None:
+def test_event_rejects_counts_outside_the_bounded_nonnegative_range(field: str, value: int) -> None:
     kwargs: dict[str, object] = {
         "memory_type": MemoryType.LONG_TERM,
         "operation": MemoryOperation.DELETE,

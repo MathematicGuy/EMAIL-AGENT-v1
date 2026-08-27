@@ -135,12 +135,7 @@ def test_load_corpus_copies_page_coordinates_and_omits_page_markers(
 ) -> None:
     doc = tmp_path / "paged.md"
     doc.write_text(
-        "# Title\n"
-        "<!-- Page 1 -->\n"
-        "First page body.\n"
-        "\n"
-        "<!-- Page 2 -->\n"
-        "Second page body.\n",
+        "# Title\n<!-- Page 1 -->\nFirst page body.\n\n<!-- Page 2 -->\nSecond page body.\n",
         encoding="utf-8",
     )
     (document,) = load_corpus(tmp_path)

@@ -95,9 +95,7 @@ def create_report_router() -> APIRouter:
             reveal_directory(location)
         except OSError as exc:
             logger.warning("Failed to open reports folder %s: %s", location, exc)
-            raise HTTPException(
-                status_code=500, detail=f"Không thể mở thư mục: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"Không thể mở thư mục: {exc}") from exc
         return {"status": "success", "path": str(location.resolve())}
 
     @router.get("/{filename}/download")

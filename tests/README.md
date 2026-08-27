@@ -18,23 +18,23 @@ what one route costs alone; the whole-suite row is parallel.
 
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 588 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 102 | 4.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 77 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
-| R5 | `tests/unit/integrations/gmail tests/unit/integrations/mailbox tests/unit/integrations/outlook` | 54 | 0.7 s | Gmail/Microsoft OAuth, PKCE, token cipher, provider router, mailbox adapters. |
-| R6 | `tests/unit/integrations` | 375 | 6.2 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 37 | 1.8 s | Repository logic against fakes. |
+| R1 | `tests/unit/domain` | 76 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 563 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 83 | 3.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 103 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail tests/unit/integrations/mailbox tests/unit/integrations/outlook` | 49 | 0.7 s | Gmail/Microsoft OAuth, PKCE, token cipher, provider router, mailbox adapters. |
+| R6 | `tests/unit/integrations` | 366 | 5.2 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 80 | 1.8 s | Repository logic against fakes. |
 | R8 | `tests/unit/orchestration` | 19 | 1.7 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 188 | 8.3 s | `scripts/*.py` eval CLIs. |
-| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 61 | 6.4 s | FastAPI via in-process ASGI transport. |
+| R9 | `tests/unit/scripts` | 100 | 4.2 s | `scripts/*.py` eval CLIs. |
+| R10 | `tests/unit/fixtures` | 23 | 1.1 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 78 | 6.4 s | FastAPI via in-process ASGI transport. |
 | R12 | `tests/integration/persistence` | 9 | 1.0 s | Real PostgreSQL (skips without server; `pg-control-plane` xdist group). |
 | R13 | `tests/integration/email_action_plan` | 38 | 2.8 s | Provider-neutral mailbox -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 100 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 1538 | 14.1 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 1350 | 9.1 s | R15 minus eval CLIs (default during regular development). |
-| — | *(everything)* | 1638 | **15 s parallel** | `uv run pytest -q` |
+| R14 | `tests/integration` | 117 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1369 | 9.8 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1269 | 6.8 s | R15 minus eval CLIs (default during regular development). |
+| — | *(everything)* | 1486 | **12 s parallel** | `uv run pytest -q` |
 
 ### Source -> Route Mapping
 

@@ -813,8 +813,7 @@ class PostgresTaskEpisodeRepository:
         _task_episode_read_namespace(namespace)
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                "DELETE FROM task_episodes"
-                " WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                "DELETE FROM task_episodes WHERE tenant_id = %s AND user_id = %s AND feature = %s",
                 (namespace.scope.tenant_id, namespace.user_id, namespace.feature),
             )
             return cursor.rowcount
@@ -861,9 +860,7 @@ def _profile_key(namespace: MemoryNamespace) -> str:
     # not used here.
     if namespace.memory_type is not MemoryType.LONG_TERM:
         raise ValueError("chat profiles require a long-term namespace")
-    return "/".join(
-        (namespace.scope.tenant_id, namespace.user_id, namespace.feature, "long_term")
-    )
+    return "/".join((namespace.scope.tenant_id, namespace.user_id, namespace.feature, "long_term"))
 
 
 def _chat_summary_key(namespace: MemoryNamespace) -> str:

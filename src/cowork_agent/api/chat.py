@@ -60,9 +60,7 @@ from cowork_agent.persistence.repositories.projects import Project, ProjectDocum
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
 
 
-def slim_listed_turn(
-    payload: dict[str, object], *, include_content: bool
-) -> dict[str, object]:
+def slim_listed_turn(payload: dict[str, object], *, include_content: bool) -> dict[str, object]:
     """Drop ``rag_evidence.content`` from GET /messages unless the client asks."""
     if include_content:
         return payload
@@ -320,10 +318,7 @@ def create_chat_router() -> APIRouter:
             if settings is None or not bool(getattr(settings, "enabled", False)):
                 raise HTTPException(status_code=503, detail="User documents are disabled")
             email_rag = runtime(request).email_rag
-            if (
-                email_rag is None
-                or email_rag.project_document_vectors is None
-            ):
+            if email_rag is None or email_rag.project_document_vectors is None:
                 raise HTTPException(
                     status_code=503,
                     detail="Project document retrieval unavailable",
@@ -339,9 +334,9 @@ def create_chat_router() -> APIRouter:
                 raise HTTPException(status_code=404, detail="Document not found")
             for document_id in message.document_ids:
                 if (
-                    document := await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
+                    document := await cast(CanonicalProjectRepository, repository).require_document(
+                        principal, scope.project_id, document_id
+                    )
                 ) is None:
                     raise HTTPException(status_code=404, detail="Document not found")
                 if document.status != "ready":
@@ -379,9 +374,7 @@ def create_chat_router() -> APIRouter:
             desired_activities = tuple(
                 _desired_mail_activity(activity) for activity in payload.activities
             )
-            activities = reconcile_mail_activities(
-                (), desired_activities, turn_status, at=now
-            )
+            activities = reconcile_mail_activities((), desired_activities, turn_status, at=now)
             turn = ChatTurn(
                 turn_id=payload.turn_id,
                 session_id=session_id,
@@ -471,8 +464,7 @@ def create_chat_router() -> APIRouter:
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
         serialized = [
-            slim_listed_turn(turn.to_dict(), include_content=include_content)
-            for turn in turns
+            slim_listed_turn(turn.to_dict(), include_content=include_content) for turn in turns
         ]
         return {"session_id": session_id, "turns": serialized}
 
@@ -744,9 +736,7 @@ def _profile_repository(request: Request) -> DeclarativeMemoryPort:
 
 def _episodic_repository(request: Request) -> EpisodicMemoryPort:
     control_plane = _control_plane(request)
-    repository = (
-        control_plane.chat_task_episode_repository if control_plane is not None else None
-    )
+    repository = control_plane.chat_task_episode_repository if control_plane is not None else None
     if repository is None:
         raise HTTPException(status_code=503, detail="Chat memory store unavailable")
     return repository  # type: ignore[return-value]

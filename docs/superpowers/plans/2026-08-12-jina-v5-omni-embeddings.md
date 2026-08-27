@@ -35,6 +35,7 @@ def test_jina_embedding_settings_default_to_v5_omni_small() -> None:
     settings = JinaEmbeddingSettings.from_env({"JINA_API_KEY": "test-key"}, load_env_file=False)
     assert (settings.model, settings.dimensions) == ("jina-embeddings-v5-omni-small", 1024)
 
+
 def test_hashing_embedder_accepts_retrieval_task() -> None:
     assert len(asyncio.run(HashingEmbedder().embed(["text"], task="retrieval.passage"))) == 1
 ```
@@ -120,7 +121,10 @@ Run: `git add src/cowork_agent/integrations/rag/embeddings.py tests/unit/integra
 def test_bootstrap_uses_jina_settings_without_gemini_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = JinaEmbeddingSettings.from_env({"JINA_API_KEY": "test-key"}, load_env_file=False)
     monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda _: HashingEmbedder())
-    assert not isinstance(asyncio.run(bootstrap.build_semantic_memory(settings, disabled_qdrant())), NullSemanticMemory)
+    assert not isinstance(
+        asyncio.run(bootstrap.build_semantic_memory(settings, disabled_qdrant())),
+        NullSemanticMemory,
+    )
 ```
 
 - [ ] **Step 2: Verify RED**

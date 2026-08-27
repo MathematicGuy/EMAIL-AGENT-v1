@@ -107,9 +107,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
     ) -> tuple[ChatMemoryScope, ...]:
         project_filter = "" if project_id is None else "AND sessions.project_id = %s"
         params: tuple[object, ...] = (
-            (user_id, tenant_id)
-            if project_id is None
-            else (user_id, tenant_id, project_id)
+            (user_id, tenant_id) if project_id is None else (user_id, tenant_id, project_id)
         )
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
@@ -139,9 +137,7 @@ class PostgresChatSessionRegistry(ChatSessionRegistryPort):
             for row in rows
         )
 
-    async def delete(
-        self, session_id: str, *, user_id: str, tenant_id: str = "local"
-    ) -> bool:
+    async def delete(self, session_id: str, *, user_id: str, tenant_id: str = "local") -> bool:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 """

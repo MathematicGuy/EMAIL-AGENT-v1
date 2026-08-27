@@ -22,47 +22,33 @@ def _reads() -> MemoryReadOptions:
     )
 
 
-def test_masking_none_changes_nothing() -> None:
+def test_mask_reads_all_scopes() -> None:
     reads = _reads()
     assert mask_reads(reads, None) == reads
 
+    st_masked = mask_reads(reads, MemoryType.SHORT_TERM)
+    assert st_masked.short_term is False and st_masked.long_term is True
 
-def test_masking_short_term_turns_it_off_and_leaves_the_rest() -> None:
-    masked = mask_reads(_reads(), MemoryType.SHORT_TERM)
-    assert masked.short_term is False
-    assert masked.long_term is True
-    assert isinstance(masked.episodic, EpisodicMemoryQuery)
-    assert isinstance(masked.semantic, SemanticMemoryQuery)
+    lt_masked = mask_reads(reads, MemoryType.LONG_TERM)
+    assert lt_masked.long_term is False and lt_masked.short_term is True
 
+    ep_masked = mask_reads(reads, MemoryType.EPISODIC)
+    assert (
+        isinstance(ep_masked.episodic, EpisodicMemoryRead) and ep_masked.episodic.enabled is False
+    )
 
-def test_masking_long_term_turns_it_off() -> None:
-    masked = mask_reads(_reads(), MemoryType.LONG_TERM)
-    assert masked.long_term is False
-    assert masked.short_term is True
+    sem_masked = mask_reads(reads, MemoryType.SEMANTIC)
+    assert (
+        isinstance(sem_masked.semantic, SemanticMemoryRead) and sem_masked.semantic.enabled is False
+    )
 
-
-def test_masking_episodic_swaps_in_the_disabled_read() -> None:
-    masked = mask_reads(_reads(), MemoryType.EPISODIC)
-    assert isinstance(masked.episodic, EpisodicMemoryRead)
-    assert masked.episodic.enabled is False
-    assert isinstance(masked.semantic, SemanticMemoryQuery)
-
-
-def test_masking_semantic_swaps_in_the_disabled_read() -> None:
-    masked = mask_reads(_reads(), MemoryType.SEMANTIC)
-    assert isinstance(masked.semantic, SemanticMemoryRead)
-    assert masked.semantic.enabled is False
-    assert isinstance(masked.episodic, EpisodicMemoryQuery)
-
-
-def test_masking_an_already_disabled_read_is_idempotent() -> None:
-    reads = MemoryReadOptions(
+    disabled = MemoryReadOptions(
         short_term=True,
         long_term=True,
         episodic=EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=1),
         semantic=SemanticMemoryRead(enabled=False),
     )
-    assert mask_reads(reads, MemoryType.EPISODIC) == reads
+    assert mask_reads(disabled, MemoryType.EPISODIC) == disabled
 
 
 def test_mask_request_preserves_scope_and_session() -> None:

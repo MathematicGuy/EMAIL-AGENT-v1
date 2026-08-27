@@ -21,9 +21,7 @@ class TransformedQuery:
 class QueryTransformerPort(Protocol):
     """Port interface for query transformation providers."""
 
-    async def transform(
-        self, query: str, knowledge_gaps: tuple[str, ...] = ()
-    ) -> TransformedQuery:
+    async def transform(self, query: str, knowledge_gaps: tuple[str, ...] = ()) -> TransformedQuery:
         """Transform a raw query into expanded queries and hypothetical documents."""
         ...
 
@@ -38,9 +36,7 @@ class RuleBasedQueryTransformer:
         self._num_expansions = num_expansions
         self._num_hyde = num_hyde
 
-    async def transform(
-        self, query: str, knowledge_gaps: tuple[str, ...] = ()
-    ) -> TransformedQuery:
+    async def transform(self, query: str, knowledge_gaps: tuple[str, ...] = ()) -> TransformedQuery:
         expansions: list[str] = []
         for gap in knowledge_gaps:
             if gap and gap not in expansions and gap != query:
@@ -90,9 +86,7 @@ class LLMQueryTransformer:
             num_hyde=num_hyde,
         )
 
-    async def transform(
-        self, query: str, knowledge_gaps: tuple[str, ...] = ()
-    ) -> TransformedQuery:
+    async def transform(self, query: str, knowledge_gaps: tuple[str, ...] = ()) -> TransformedQuery:
         if not self._enable_hyde:
             return await self._fallback.transform(query, knowledge_gaps)
 

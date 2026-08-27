@@ -125,6 +125,7 @@ def test_sqlite_chunks_keep_gemini_hybrid_retrieval_and_acl(tmp_path: Path) -> N
 
     asyncio.run(scenario())
 
+
 def test_sqlite_document_job_retries_after_indexing_failure(tmp_path: Path) -> None:
     async def scenario() -> None:
         projects = SQLiteProjectRepository(tmp_path / "projects.db")

@@ -152,9 +152,7 @@ PRIVATE_CONTENT_KEYS = frozenset({"gmail_content", "snippet", "normalized_body"}
 def atomic_write_json(value: Mapping[str, object], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
 ```
 
@@ -346,8 +344,7 @@ def resolver_expected_route(ground_truth: Mapping[str, object]) -> str:
         knowledge_gaps=tuple(str(item) for item in ground_truth["knowledge_gaps"]),
         retrieval_query=None,
         expected_document_types=tuple(
-            ExpectedDocumentType(str(item))
-            for item in ground_truth["expected_document_types"]
+            ExpectedDocumentType(str(item)) for item in ground_truth["expected_document_types"]
         ),
         reason_codes=(),
         confidence=1.0,

@@ -37,7 +37,6 @@ def configure_windows_reload() -> None:
         pass
 
 
-
 def run_app_coroutine(coro: object) -> None:
     """Run an async entry point with the SelectorEventLoop required by psycopg on Windows."""
     if sys.platform == "win32":
@@ -49,4 +48,3 @@ def run_app_coroutine(coro: object) -> None:
         )
     else:
         asyncio.run(coro)  # type: ignore[arg-type]
-

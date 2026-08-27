@@ -38,9 +38,7 @@ _MAIL_ACTIVITY_CODES = frozenset(
 )
 
 
-def validate_mail_turn_scan_status(
-    turn_status: ChatTurnStatus, mail_scan: MailScanSummary
-) -> None:
+def validate_mail_turn_scan_status(turn_status: ChatTurnStatus, mail_scan: MailScanSummary) -> None:
     allowed = {
         ChatTurnStatus.GENERATING: {"connecting", "queued", "running"},
         ChatTurnStatus.COMPLETED: {"succeeded", "partial"},
@@ -103,10 +101,7 @@ def _transition_to_desired_activity(
     *,
     at: datetime,
 ) -> ChatActivity:
-    if (
-        desired.outcome is not None
-        and desired.status is not ChatActivityStatus.COMPLETED
-    ):
+    if desired.outcome is not None and desired.status is not ChatActivityStatus.COMPLETED:
         raise ValueError("activity outcome requires completed status")
     if activity.status is desired.status:
         if activity.status is ChatActivityStatus.PENDING:
@@ -116,18 +111,14 @@ def _transition_to_desired_activity(
         return replace(
             activity,
             detail=desired.detail if desired.detail is not None else activity.detail,
-            outcome=(
-                desired.outcome
-                if activity.status is ChatActivityStatus.COMPLETED
-                else None
-            ),
+            outcome=(desired.outcome if activity.status is ChatActivityStatus.COMPLETED else None),
         )
     if activity.status not in {ChatActivityStatus.PENDING, ChatActivityStatus.RUNNING}:
         raise ValueError("terminal mail activity cannot regress")
-    if (
-        activity.status is ChatActivityStatus.PENDING
-        and desired.status in {ChatActivityStatus.COMPLETED, ChatActivityStatus.FAILED}
-    ):
+    if activity.status is ChatActivityStatus.PENDING and desired.status in {
+        ChatActivityStatus.COMPLETED,
+        ChatActivityStatus.FAILED,
+    }:
         activity = activity.transition(ChatActivityStatus.RUNNING, at=at)
     return activity.transition(
         desired.status,
@@ -159,11 +150,7 @@ def reconcile_mail_activities(
 
     merged: list[ChatActivity] = []
     for index, item in enumerate(desired):
-        activity = (
-            existing[index]
-            if index < len(existing)
-            else ChatActivity.pending(item.code)
-        )
+        activity = existing[index] if index < len(existing) else ChatActivity.pending(item.code)
         merged.append(_transition_to_desired_activity(activity, item, at=at))
     return _terminalize_mail_activities(tuple(merged), turn_status, at=at)
 
@@ -185,16 +172,12 @@ def reconcile_mail_turn(
         raise ValueError("terminal mail turn cannot regress")
     if existing.status is not ChatTurnStatus.GENERATING:
         return existing
-    if (
-        existing.status is ChatTurnStatus.GENERATING
-        and incoming.status
-        not in {
-            ChatTurnStatus.GENERATING,
-            ChatTurnStatus.COMPLETED,
-            ChatTurnStatus.FAILED,
-            ChatTurnStatus.CANCELLED,
-        }
-    ):
+    if existing.status is ChatTurnStatus.GENERATING and incoming.status not in {
+        ChatTurnStatus.GENERATING,
+        ChatTurnStatus.COMPLETED,
+        ChatTurnStatus.FAILED,
+        ChatTurnStatus.CANCELLED,
+    }:
         raise ValueError("unsupported mail turn transition")
     terminal = incoming.status is not ChatTurnStatus.GENERATING
     activities = reconcile_mail_activities(
@@ -238,8 +221,7 @@ def upsert_buffer_mail_turn(
         (
             position
             for position, turn in enumerate(turns)
-            if turn.turn_id == incoming.turn_id
-            or turn.idempotency_key == incoming.idempotency_key
+            if turn.turn_id == incoming.turn_id or turn.idempotency_key == incoming.idempotency_key
         ),
         None,
     )
@@ -247,9 +229,7 @@ def upsert_buffer_mail_turn(
         stored = incoming
         turns.append(stored)
     else:
-        stored = reconcile_mail_turn(
-            turns[index], incoming, desired_activities, at=at
-        )
+        stored = reconcile_mail_turn(turns[index], incoming, desired_activities, at=at)
         turns[index] = stored
     buffer.clear(namespace)
     for turn in turns:

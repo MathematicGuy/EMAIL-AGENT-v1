@@ -4,9 +4,7 @@ from cowork_agent.config import KnowledgeIngestionSettings
 
 
 def test_settings_require_key_only_when_ocr_enabled() -> None:
-    settings = KnowledgeIngestionSettings.from_env(
-        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}
-    )
+    settings = KnowledgeIngestionSettings.from_env({"KNOWLEDGE_INGEST_OCR_ENABLED": "false"})
 
     assert settings.ocr_enabled is False
     assert settings.api_key == ""
@@ -16,9 +14,7 @@ def test_settings_require_key_only_when_ocr_enabled() -> None:
 
 
 def test_settings_use_knowledge_ingestion_defaults() -> None:
-    settings = KnowledgeIngestionSettings.from_env(
-        {"MISTRAL_API_KEY": "secret"}
-    )
+    settings = KnowledgeIngestionSettings.from_env({"MISTRAL_API_KEY": "secret"})
 
     assert settings.model == "mistral-ocr-latest"
     assert settings.timeout_seconds == 60
@@ -29,23 +25,17 @@ def test_settings_use_knowledge_ingestion_defaults() -> None:
 
 
 def test_settings_hide_secret() -> None:
-    settings = KnowledgeIngestionSettings.from_env(
-        {"MISTRAL_API_KEY": "secret"}
-    )
+    settings = KnowledgeIngestionSettings.from_env({"MISTRAL_API_KEY": "secret"})
 
     assert "secret" not in repr(settings)
 
 
 def test_settings_supports_extraction_mode_env() -> None:
-    adaptive_settings = KnowledgeIngestionSettings.from_env(
-        {"EXTRACTION_MODE": "adaptive"}
-    )
+    adaptive_settings = KnowledgeIngestionSettings.from_env({"EXTRACTION_MODE": "adaptive"})
     assert adaptive_settings.extraction_mode == "adaptive"
     assert adaptive_settings.ocr_enabled is False
 
-    basic_settings = KnowledgeIngestionSettings.from_env(
-        {"EXTRACTION_MODE": "basic"}
-    )
+    basic_settings = KnowledgeIngestionSettings.from_env({"EXTRACTION_MODE": "basic"})
     assert basic_settings.extraction_mode == "adaptive"
     assert basic_settings.ocr_enabled is False
 
@@ -56,8 +46,4 @@ def test_settings_supports_extraction_mode_env() -> None:
     assert adv_settings.ocr_enabled is True
 
     with pytest.raises(ValueError, match="Invalid EXTRACTION_MODE"):
-        KnowledgeIngestionSettings.from_env(
-            {"EXTRACTION_MODE": "invalid"}
-        )
-
-
+        KnowledgeIngestionSettings.from_env({"EXTRACTION_MODE": "invalid"})

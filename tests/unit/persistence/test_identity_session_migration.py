@@ -15,9 +15,9 @@ def test_identity_session_schema_stores_only_a_token_hash() -> None:
     assert "CREATE TABLE workspace_members" in sql
     assert "CREATE TABLE app_sessions" in sql
     assert "token_hash char(64) PRIMARY KEY" in sql
-    session_table = sql.split("CREATE TABLE app_sessions", maxsplit=1)[1].split(
-        "\n);", maxsplit=1
-    )[0]
+    session_table = sql.split("CREATE TABLE app_sessions", maxsplit=1)[1].split("\n);", maxsplit=1)[
+        0
+    ]
     assert "workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE" in session_table
     assert "session_token" not in sql
 

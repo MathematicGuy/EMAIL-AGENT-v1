@@ -69,9 +69,7 @@ when the current message is not, keeping proper names, technical terms and docum
 numbers exactly as they appear."""
 
 
-def build_intent_prompt(
-    classifier_input: IntentClassifierInput, tools: Sequence[Tool] = ()
-) -> str:
+def build_intent_prompt(classifier_input: IntentClassifierInput, tools: Sequence[Tool] = ()) -> str:
     """Render only bounded turns and ready-document titles into the provider prompt.
 
     `tools` is trusted system text and is rendered outside the untrusted block.
@@ -91,8 +89,8 @@ def build_intent_prompt(
         "ready_document_titles": [item.title for item in classifier_input.ready_documents],
         "has_ready_documents": bool(classifier_input.ready_documents),
     }
-    bounded_evidence = _BOUNDED_EVIDENCE_HEADER + "\n" + wrap_json_block(
-        UNTRUSTED_DATA_TAG, evidence
+    bounded_evidence = (
+        _BOUNDED_EVIDENCE_HEADER + "\n" + wrap_json_block(UNTRUSTED_DATA_TAG, evidence)
     )
     sections = [
         _DECISION_PRINCIPLE,

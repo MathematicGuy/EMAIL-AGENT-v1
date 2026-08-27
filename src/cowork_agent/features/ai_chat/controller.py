@@ -244,9 +244,7 @@ class ChatSessionRegistryPort(Protocol):
         project_id: str | None = None,
     ) -> tuple[ChatMemoryScope, ...]: ...
 
-    async def delete(
-        self, session_id: str, *, user_id: str, tenant_id: str = "local"
-    ) -> bool: ...
+    async def delete(self, session_id: str, *, user_id: str, tenant_id: str = "local") -> bool: ...
 
     async def delete_project(
         self, *, user_id: str, project_id: str, tenant_id: str = "local"
@@ -359,9 +357,7 @@ class InMemoryChatSessionRegistry:
                 del self._sessions[session_id]
         return removed
 
-    async def delete(
-        self, session_id: str, *, user_id: str, tenant_id: str = "local"
-    ) -> bool:
+    async def delete(self, session_id: str, *, user_id: str, tenant_id: str = "local") -> bool:
         with self._lock:
             scope = self._sessions.get(session_id)
             if scope is None or scope.tenant_id != tenant_id or scope.user_id != user_id:
@@ -482,9 +478,7 @@ class ChatController:
                     if status is ChatTurnStatus.CANCELLED
                     else ChatActivityStatus.FAILED
                 )
-                activities = transition_activity_snapshot(
-                    activities, activity.code, target, at=at
-                )
+                activities = transition_activity_snapshot(activities, activity.code, target, at=at)
             elif activity.status is ChatActivityStatus.PENDING:
                 activities = transition_activity_snapshot(
                     activities, activity.code, ChatActivityStatus.SKIPPED, at=at
@@ -620,9 +614,9 @@ class ChatController:
                     error_code=None,
                     completed_at=None,
                     activities=(
-                        ChatActivity.pending(
-                            ChatActivityCode.UNDERSTANDING_REQUEST
-                        ).transition(ChatActivityStatus.RUNNING, at=self._clock()),
+                        ChatActivity.pending(ChatActivityCode.UNDERSTANDING_REQUEST).transition(
+                            ChatActivityStatus.RUNNING, at=self._clock()
+                        ),
                     ),
                 )
                 if self._history is not None:
@@ -775,9 +769,7 @@ class ChatController:
                     ChatActivityCode.SEARCHING_RELEVANT_INFORMATION,
                     ChatActivityStatus.COMPLETED,
                     outcome=search_outcome,
-                    detail=ChatActivityDetail(
-                        kind="documents_found", current=len(rag_evidence)
-                    ),
+                    detail=ChatActivityDetail(kind="documents_found", current=len(rag_evidence)),
                 )
                 emitted.append(activity_event)
                 yield activity_event
@@ -903,9 +895,7 @@ class ChatController:
                 and len(assistant_message.strip()) > 50
             ):
                 generated_report = GeneratedReportArtifact(
-                    filename=_fallback_report_filename(
-                        request.user_message, conversation_title
-                    ),
+                    filename=_fallback_report_filename(request.user_message, conversation_title),
                     title=conversation_title or "Báo cáo tổng hợp",
                     content=assistant_message,
                 )
@@ -938,9 +928,7 @@ class ChatController:
                         },
                     )
 
-            rag_evidence, retrieval_status = _rag_evidence(
-                generation_context, project_documents
-            )
+            rag_evidence, retrieval_status = _rag_evidence(generation_context, project_documents)
             reasoning = "\n".join(reasoning_parts).strip() or None
             reasoning_truncated = bool(
                 reasoning and len(reasoning) > MAX_EXECUTION_REASONING_LENGTH
@@ -962,9 +950,8 @@ class ChatController:
                 if trace_provider is not None and trace_model is not None and trace_mode is not None
                 else None
             )
-            task_requested = (
-                response_mode is ChatResponseMode.NORMAL
-                and is_explicit_task_request(request)
+            task_requested = response_mode is ChatResponseMode.NORMAL and is_explicit_task_request(
+                request
             )
             if not task_requested:
                 activity_event = await journal.record(
@@ -975,40 +962,34 @@ class ChatController:
                 emitted.append(activity_event)
                 yield activity_event
             turn = replace(
-                    journal.turn,
-                    assistant_message=assistant_message,
-                    status=(
-                        ChatTurnStatus.GENERATING
-                        if task_requested
-                        else ChatTurnStatus.COMPLETED
-                    ),
-                    error_code=None,
-                    citation_coordinates=tuple(
-                        {
-                            "citation_scope": "project_document",
-                            "project_id": item.project_id,
-                            "document_id": item.document_id,
-                            "document_title": item.title,
-                            "section": item.section,
-                            "page_start": item.page_start,
-                            "page_end": item.page_end,
-                        }
-                        for item in (
-                            project_documents.evidence if project_documents is not None else ()
-                        )
-                        if item.citation_id in selected_citation_ids
-                    ),
-                    rag_evidence=rag_evidence,
-                    retrieval_status=retrieval_status,
-                    execution_trace=execution_trace,
-                    artifact_refs=generated_artifact_refs,
-                    completed_at=None if task_requested else self._clock(),
+                journal.turn,
+                assistant_message=assistant_message,
+                status=(ChatTurnStatus.GENERATING if task_requested else ChatTurnStatus.COMPLETED),
+                error_code=None,
+                citation_coordinates=tuple(
+                    {
+                        "citation_scope": "project_document",
+                        "project_id": item.project_id,
+                        "document_id": item.document_id,
+                        "document_title": item.title,
+                        "section": item.section,
+                        "page_start": item.page_start,
+                        "page_end": item.page_end,
+                    }
+                    for item in (
+                        project_documents.evidence if project_documents is not None else ()
+                    )
+                    if item.citation_id in selected_citation_ids
+                ),
+                rag_evidence=rag_evidence,
+                retrieval_status=retrieval_status,
+                execution_trace=execution_trace,
+                artifact_refs=generated_artifact_refs,
+                completed_at=None if task_requested else self._clock(),
             )
             turn = await self._persist_completed_turn(
                 turn,
-                title=(
-                    conversation_title or _fallback_conversation_title(request.user_message)
-                ),
+                title=(conversation_title or _fallback_conversation_title(request.user_message)),
             )
             if not task_requested:
                 self._memory.append_turn(turn)
@@ -1075,8 +1056,7 @@ class ChatController:
                 turn = await self._persist_completed_turn(
                     turn,
                     title=(
-                        conversation_title
-                        or _fallback_conversation_title(request.user_message)
+                        conversation_title or _fallback_conversation_title(request.user_message)
                     ),
                 )
                 journal.adopt(turn)
@@ -1229,4 +1209,3 @@ def _fallback_report_filename(message: str, title: str | None) -> str:
     if not stem.startswith("bao-cao"):
         stem = f"bao-cao-{stem}"
     return f"{stem}.md"
-

@@ -78,27 +78,42 @@ def _row(
     completed_at: datetime | None = None,
 ) -> tuple[object, ...]:
     return (
-        "turn-1", "session-1", "Keep this prompt.", assistant,
-        datetime(2026, 8, 17, 9, tzinfo=UTC), [], [], None, None,
-        status, "submission-1", error_code, activities or [], completed_at,
+        "turn-1",
+        "session-1",
+        "Keep this prompt.",
+        assistant,
+        datetime(2026, 8, 17, 9, tzinfo=UTC),
+        [],
+        [],
+        None,
+        None,
+        status,
+        "submission-1",
+        error_code,
+        activities or [],
+        completed_at,
     )
 
 
 def test_begin_then_update_turn_returns_the_same_durable_turn_identity() -> None:
     async def scenario() -> None:
         repository = PostgresChatHistoryRepository(  # type: ignore[arg-type]
-            _Pool([
-                _row(status="generating", assistant=None, error_code=None),
-                _row(status="completed", assistant="Done.", error_code=None),
-            ])
+            _Pool(
+                [
+                    _row(status="generating", assistant=None, error_code=None),
+                    _row(status="completed", assistant="Done.", error_code=None),
+                ]
+            )
         )
-        scope = ChatMemoryScope(
-            tenant_id="workspace-1", user_id="user-1", session_id="session-1"
-        )
+        scope = ChatMemoryScope(tenant_id="workspace-1", user_id="user-1", session_id="session-1")
         pending = ChatTurn(
-            turn_id="turn-1", session_id="session-1", user_message="Keep this prompt.",
-            assistant_message=None, created_at=datetime(2026, 8, 17, 9, tzinfo=UTC),
-            status=ChatTurnStatus.GENERATING, idempotency_key="submission-1",
+            turn_id="turn-1",
+            session_id="session-1",
+            user_message="Keep this prompt.",
+            assistant_message=None,
+            created_at=datetime(2026, 8, 17, 9, tzinfo=UTC),
+            status=ChatTurnStatus.GENERATING,
+            idempotency_key="submission-1",
         )
 
         begun = await repository.begin_turn(
@@ -107,9 +122,12 @@ def test_begin_then_update_turn_returns_the_same_durable_turn_identity() -> None
         completed = await repository.update_turn(
             scope,
             ChatTurn(
-                turn_id=begun.turn_id, session_id=begun.session_id,
-                user_message=begun.user_message, assistant_message="Done.",
-                created_at=begun.created_at, status=ChatTurnStatus.COMPLETED,
+                turn_id=begun.turn_id,
+                session_id=begun.session_id,
+                user_message=begun.user_message,
+                assistant_message="Done.",
+                created_at=begun.created_at,
+                status=ChatTurnStatus.COMPLETED,
                 idempotency_key=begun.idempotency_key,
             ),
             title="Completed title",
@@ -130,9 +148,7 @@ def test_latest_turns_for_returns_one_latest_lifecycle_per_session() -> None:
         repository = PostgresChatHistoryRepository(  # type: ignore[arg-type]
             _Pool([], latest_rows=[latest])
         )
-        scope = ChatMemoryScope(
-            tenant_id="workspace-1", user_id="user-1", session_id="session-1"
-        )
+        scope = ChatMemoryScope(tenant_id="workspace-1", user_id="user-1", session_id="session-1")
 
         result = await repository.latest_turns_for((scope,))
 
@@ -164,9 +180,7 @@ def test_latest_turns_for_restores_durable_activity_and_completion_time() -> Non
         repository = PostgresChatHistoryRepository(  # type: ignore[arg-type]
             _Pool([], latest_rows=[latest])
         )
-        scope = ChatMemoryScope(
-            tenant_id="workspace-1", user_id="user-1", session_id="session-1"
-        )
+        scope = ChatMemoryScope(tenant_id="workspace-1", user_id="user-1", session_id="session-1")
 
         result = await repository.latest_turns_for((scope,))
 

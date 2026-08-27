@@ -74,7 +74,13 @@ Mở file [`tests/unit/features/ai_chat/test_user_intent_multiturn.py`](file:///
 def test_custom_multiturn_scenario() -> None:
     # 1. Định nghĩa lịch sử các lượt trước (recent turns)
     turns = (
-        ChatTurn("t-1", "s-1", "Quy chế bảo hiểm y tế thế nào?", "Bảo hiểm chi trả 80%.", datetime.now(UTC)),
+        ChatTurn(
+            "t-1",
+            "s-1",
+            "Quy chế bảo hiểm y tế thế nào?",
+            "Bảo hiểm chi trả 80%.",
+            datetime.now(UTC),
+        ),
     )
     # 2. Định nghĩa câu hỏi hiện tại có đại từ thay thế
     classifier_input = IntentClassifierInput(
@@ -113,7 +119,11 @@ Mở file [`tests/unit/features/ai_chat/test_user_intent_edge_cases.py`](file://
 ```python
 VALID_EDGE_QUERIES = [
     # ...
-    ("edge-custom-slang", "check dum to xem policy wfh tuan nay ntn nhe", ChatIntent.KNOWLEDGE_QUERY),
+    (
+        "edge-custom-slang",
+        "check dum to xem policy wfh tuan nay ntn nhe",
+        ChatIntent.KNOWLEDGE_QUERY,
+    ),
 ]
 ```
 

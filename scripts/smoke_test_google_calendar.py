@@ -120,9 +120,7 @@ def main() -> int:
     try:
         # ------------------------------------------------------------------
         section("CREATE - timed event (the 'todo at a time' path)")
-        start = (now_local + timedelta(days=1)).replace(
-            hour=15, minute=0, second=0, microsecond=0
-        )
+        start = (now_local + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
         end = start + timedelta(minutes=30)
         timed_id = google_event_id(f"turn-{run_id}-timed")
         body = {

@@ -85,15 +85,15 @@ provider branch.
 ```python
 @dataclass(frozen=True, slots=True)
 class CalendarConnection:
-    id: str                        # cal_<uuid4hex>
-    user_id: str                   # the principal, from the session
-    provider: str                  # "google_calendar"
-    external_account_id: str       # the Google account the grant belongs to
-    calendar_id: str               # "primary" unless the user picks another
-    encrypted_refresh_token: str   # same TokenCipher as the mailbox path
+    id: str  # cal_<uuid4hex>
+    user_id: str  # the principal, from the session
+    provider: str  # "google_calendar"
+    external_account_id: str  # the Google account the grant belongs to
+    calendar_id: str  # "primary" unless the user picks another
+    encrypted_refresh_token: str  # same TokenCipher as the mailbox path
     scopes: tuple[str, ...]
     timezone: str
-    status: str                    # "active" | "revoked"
+    status: str  # "active" | "revoked"
     created_at: datetime
     updated_at: datetime
 ```
@@ -174,6 +174,7 @@ seam widens to carry who the turn belongs to:
 
 ```python
 ToolBinder = Callable[[ToolTurnContext], Awaitable[Tool]]
+
 
 @dataclass(frozen=True, slots=True)
 class ToolTurnContext:

@@ -70,9 +70,7 @@ class RunIdentity:
         return f"{self.run_key}-{self.nonce}"
 
 
-def build_identity(
-    probe_set: ProbeSet, model: str, *, nonce: str | None = None
-) -> RunIdentity:
+def build_identity(probe_set: ProbeSet, model: str, *, nonce: str | None = None) -> RunIdentity:
     """Derive namespaced identities from the probe set, model, seed and a nonce.
 
     Three properties matter. A run can never touch a real user's memory. Because
@@ -258,9 +256,7 @@ async def _seed_for(
     # as "all three scopes are empty".
     where = f"[{probe.probe_id}/{arm.value}]"
     ritual_failures = [
-        f"{where} {outcome.scope.value}: {outcome.reason}"
-        for outcome in outcomes
-        if not outcome.ok
+        f"{where} {outcome.scope.value}: {outcome.reason}" for outcome in outcomes if not outcome.ok
     ]
     session.seed_failures.extend(ritual_failures)
     # A scope that declared nothing was never seeded, so verifying it would

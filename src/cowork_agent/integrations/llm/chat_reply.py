@@ -173,9 +173,7 @@ def system_prompt_sha() -> str:
 
 
 class _ConfiguredChatReply:
-    def __init__(
-        self, *, provider: str = "mistral", model: str, complete: Completion
-    ) -> None:
+    def __init__(self, *, provider: str = "mistral", model: str, complete: Completion) -> None:
         self._provider = provider
         self._model = model
         self._complete = complete
@@ -442,9 +440,7 @@ did not happen and why. Never state or imply that an action succeeded unless too
 says so."""
 
 
-def _request_payload(
-    request: ChatMessageRequest, context: GenerationContext
-) -> dict[str, object]:
+def _request_payload(request: ChatMessageRequest, context: GenerationContext) -> dict[str, object]:
     # A turn with no tool result sends exactly the payload it sent before
     # tools existed -- neither the extra instruction nor the extra key. That
     # is what keeps the flag-off guarantee literal rather than approximate.

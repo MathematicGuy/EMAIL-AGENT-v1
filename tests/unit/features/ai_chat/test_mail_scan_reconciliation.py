@@ -73,9 +73,7 @@ def test_reconcile_mail_activities_builds_a_server_stamped_terminal_snapshot() -
         ),
     )
 
-    activities = reconcile_mail_activities(
-        (), desired, ChatTurnStatus.COMPLETED, at=NOW
-    )
+    activities = reconcile_mail_activities((), desired, ChatTurnStatus.COMPLETED, at=NOW)
 
     assert [item.status for item in activities] == [
         ChatActivityStatus.COMPLETED,
@@ -84,9 +82,7 @@ def test_reconcile_mail_activities_builds_a_server_stamped_terminal_snapshot() -
     assert activities[0].started_at == NOW
     assert activities[0].completed_at == NOW
     assert activities[0].outcome is ChatActivityOutcome.SUCCESS
-    assert activities[0].detail == ChatActivityDetail(
-        kind="emails_processed", current=2, total=2
-    )
+    assert activities[0].detail == ChatActivityDetail(kind="emails_processed", current=2, total=2)
 
 
 def test_reconcile_mail_activities_terminalizes_unfinished_failure_work() -> None:
@@ -138,22 +134,14 @@ def test_reconcile_mail_activities_terminalizes_cancelled_work_as_cancelled() ->
         (
             (),
             (
-                DesiredMailActivity(
-                    ChatActivityCode.CHECKING_MAIL, ChatActivityStatus.PENDING
-                ),
-                DesiredMailActivity(
-                    ChatActivityCode.CHECKING_MAIL, ChatActivityStatus.PENDING
-                ),
+                DesiredMailActivity(ChatActivityCode.CHECKING_MAIL, ChatActivityStatus.PENDING),
+                DesiredMailActivity(ChatActivityCode.CHECKING_MAIL, ChatActivityStatus.PENDING),
             ),
             "codes must be unique",
         ),
         (
             (ChatActivity.pending(ChatActivityCode.CHECKING_MAIL),),
-            (
-                DesiredMailActivity(
-                    ChatActivityCode.PROCESSING_EMAIL, ChatActivityStatus.PENDING
-                ),
-            ),
+            (DesiredMailActivity(ChatActivityCode.PROCESSING_EMAIL, ChatActivityStatus.PENDING),),
             "plan is append-only",
         ),
     ],
@@ -164,9 +152,7 @@ def test_reconcile_mail_activities_rejects_non_monotonic_plans(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        reconcile_mail_activities(
-            existing, desired, ChatTurnStatus.GENERATING, at=NOW
-        )
+        reconcile_mail_activities(existing, desired, ChatTurnStatus.GENERATING, at=NOW)
 
 
 def test_reconcile_mail_turn_preserves_identity_and_lands_terminal_results() -> None:
@@ -192,9 +178,7 @@ def test_reconcile_mail_turn_preserves_identity_and_lands_terminal_results() -> 
         ),
     )
 
-    stored = reconcile_mail_turn(
-        existing, incoming, desired, at=NOW + timedelta(seconds=1)
-    )
+    stored = reconcile_mail_turn(existing, incoming, desired, at=NOW + timedelta(seconds=1))
 
     assert stored.turn_id == existing.turn_id
     assert stored.created_at == existing.created_at

@@ -184,8 +184,7 @@ def _is_reparse_point(path: Path) -> bool:
 def _json_text(value: object) -> str:
     try:
         return (
-            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False)
-            + "\n"
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True, allow_nan=False) + "\n"
         )
     except (TypeError, ValueError) as error:
         raise UnsafeArtifact("artifact values must be JSON-compatible") from error

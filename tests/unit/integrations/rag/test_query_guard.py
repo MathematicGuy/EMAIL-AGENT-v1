@@ -19,7 +19,6 @@ from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 
 
 class DummyEmbedder:
-
     async def embed(
         self, texts: Sequence[str], *, task: str = "retrieval.query"
     ) -> tuple[tuple[float, ...], ...]:

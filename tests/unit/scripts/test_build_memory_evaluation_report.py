@@ -136,9 +136,7 @@ def test_report_matching_hash_loads_bound_probe_set(
     assert "v3-seed" not in markdown
 
 
-def test_report_hash_mismatch_exits_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_report_hash_mismatch_exits_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     probes = tmp_path / "probes"
     probes.mkdir()
     v2 = _write_probe(

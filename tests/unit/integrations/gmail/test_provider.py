@@ -54,9 +54,7 @@ def test_gmail_settings_allow_readonly_scope_and_redact_secrets(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("value", ["0", "9"])
-def test_gmail_settings_reject_out_of_range_fetch_concurrency(
-    tmp_path: Path, value: str
-) -> None:
+def test_gmail_settings_reject_out_of_range_fetch_concurrency(tmp_path: Path, value: str) -> None:
     values = gmail_environment(tmp_path)
     values["GMAIL_FETCH_CONCURRENCY"] = value
 
@@ -336,7 +334,7 @@ def test_gmail_message_parser_deduplicates_urls_and_keeps_bare_link_label_null()
     html_body = (
         '<p><a href="https://example.test/item">Open item</a></p>'
         '<p><a href="https://example.test/item">Open again</a></p>'
-        '<p>Fallback https://example.test/bare</p>'
+        "<p>Fallback https://example.test/bare</p>"
     )
     rich = base64.urlsafe_b64encode(html_body.encode()).decode()
 
@@ -585,9 +583,8 @@ def test_gmail_message_parser_unescapes_plain_entities() -> None:
     assert message.normalized_body == "Terms & conditions – review"
 
 
-@pytest.mark.parametrize(
-    ("plain_body", "expected"),
-    [
+def test_gmail_message_parser_collapses_only_canonical_ref_wrappers() -> None:
+    cases = [
         (
             "Review [item](https://example.test/one https://example.test/two",
             "Review item [link1] [link2]",
@@ -596,27 +593,21 @@ def test_gmail_message_parser_unescapes_plain_entities() -> None:
             "Review [item](https://example.test/item\ntracking metadata)",
             "Review item [link1]",
         ),
-    ],
-)
-def test_gmail_message_parser_collapses_only_canonical_ref_wrappers(
-    plain_body: str,
-    expected: str,
-) -> None:
-    plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
-
-    message = _parse_message(
-        {
-            "id": "msg-ref-wrapper",
-            "threadId": "thread-ref-wrapper",
-            "internalDate": "1785729600000",
-            "payload": {
-                "headers": [],
-                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
-            },
-        }
-    )
-
-    assert message.normalized_body == expected
+    ]
+    for plain_body, expected in cases:
+        plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
+        message = _parse_message(
+            {
+                "id": "msg-ref-wrapper",
+                "threadId": "thread-ref-wrapper",
+                "internalDate": "1785729600000",
+                "payload": {
+                    "headers": [],
+                    "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+                },
+            }
+        )
+        assert message.normalized_body == expected
 
 
 def test_gmail_message_parser_marks_partial_fetch_without_usable_body() -> None:
@@ -877,37 +868,40 @@ def test_retry_delay_is_bounded_and_jittered() -> None:
     assert len({_retry_delay(1) for _ in range(100)}) > 1
 
 
-@pytest.mark.parametrize(
-    "transient_error",
-    [
+def test_call_retries_network_and_ssl_errors_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors = [
         ssl.SSLEOFError("EOF occurred in violation of protocol"),
         ssl.SSLError("SSL handshake failed"),
         ConnectionResetError("Connection reset by peer"),
         TimeoutError("Connection timed out"),
         httplib2.error.HttpLib2Error("HttpLib2 transport failed"),
-    ],
-)
-def test_call_retries_network_and_ssl_errors_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, transient_error: Exception
-) -> None:
-    sleeps: list[float] = []
+    ]
+    for transient_error in errors:
+        sleeps: list[float] = []
 
-    async def fake_sleep(delay: float) -> None:
-        sleeps.append(delay)
+        def _make_flaky(err: Exception, s_list: list[float]):
+            async def fake_sleep(delay: float) -> None:
+                s_list.append(delay)
 
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    calls = {"count": 0}
+            calls = {"count": 0}
 
-    def flaky_network() -> dict[str, object]:
-        calls["count"] += 1
-        if calls["count"] < 3:
-            raise transient_error
-        return {"ok": True}
+            def flaky_network() -> dict[str, object]:
+                calls["count"] += 1
+                if calls["count"] < 3:
+                    raise err
+                return {"ok": True}
 
-    result = asyncio.run(_adapter()._call(flaky_network))
-    assert result == {"ok": True}
-    assert calls["count"] == 3
-    assert len(sleeps) == 2
+            return fake_sleep, calls, flaky_network
+
+        fake_sleep_fn, calls_dict, flaky_fn = _make_flaky(transient_error, sleeps)
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep_fn)
+
+        result = asyncio.run(_adapter()._call(flaky_fn))
+        assert result == {"ok": True}
+        assert calls_dict["count"] == 3
+        assert len(sleeps) == 2
 
 
 def test_call_exhausts_network_error_into_temporary_error(

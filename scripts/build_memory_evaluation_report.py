@@ -219,9 +219,7 @@ def diagnose_needs_reading_probe(
         # (invented, pass, pass) — the grader is right; adding patterns would
         # swallow the near-miss. Concern A only if a blind arm also invented.
         wrap_signature = (
-            full_outcome == "invented"
-            and ablated_outcome == "pass"
-            and control_outcome == "pass"
+            full_outcome == "invented" and ablated_outcome == "pass" and control_outcome == "pass"
         )
         if wrap_signature:
             snippet = full_reply[:50].replace("\n", " ")
@@ -232,7 +230,7 @@ def diagnose_needs_reading_probe(
                     "Lỗi prompt, không phải bộ chấm điểm."
                 ),
                 (
-                    f"Full arm `invented` (\"{snippet}...\"); Ablated và Control `pass`. "
+                    f'Full arm `invented` ("{snippet}..."); Ablated và Control `pass`. '
                     "Cùng tín hiệu `prompt_fault`: bộ nhớ đã giao hàng, generation dùng nhầm. "
                     "Không bổ sung mẫu từ chối cho grader. Siết prompt (refuse-means-stop) "
                     f"trên vùng nhớ `{target_scope}`."
@@ -256,7 +254,7 @@ def diagnose_needs_reading_probe(
                 "cách diễn đạt này."
             ),
             (
-                f"Phản hồi Full arm thực tế đã từ chối (\"{snippet}...\") nhưng mẫu từ chối "
+                f'Phản hồi Full arm thực tế đã từ chối ("{snippet}...") nhưng mẫu từ chối '
                 "chưa khớp với regex của bộ chấm điểm, dẫn đến bị tính nhầm là ảo giác. "
                 "Cần bổ sung mẫu câu cho bộ chấm điểm."
             ),
@@ -363,14 +361,10 @@ def build_markdown_report(
     restraint_probes = [v for v in verdicts if v.get("test") == "restraint"]
     restraint_count = len(restraint_probes)
     restraint_safe = len([v for v in restraint_probes if v.get("full") != "invented"])
-    restraint_rate_pct = (
-        (restraint_safe / restraint_count * 100) if restraint_count > 0 else 100.0
-    )
+    restraint_rate_pct = (restraint_safe / restraint_count * 100) if restraint_count > 0 else 100.0
 
     # Latency Stats
-    latencies = [
-        float(v.get("latency_ms", 0)) for v in verdicts if v.get("latency_ms") is not None
-    ]
+    latencies = [float(v.get("latency_ms", 0)) for v in verdicts if v.get("latency_ms") is not None]
     avg_latency_sec = (sum(latencies) / len(latencies) / 1000.0) if latencies else 0.0
 
     # Arms Detail Map
@@ -475,7 +469,7 @@ def build_markdown_report(
                 continue
             seed_text = _format_seed_info(probe_set, scope_name)
             questions_text = "<br>".join(
-                f"{i+1}. *{p.question}*" for i, p in enumerate(scope_probes)
+                f"{i + 1}. *{p.question}*" for i, p in enumerate(scope_probes)
             )
             expected_text = "<br>".join(f"- {_format_expectations(p)}" for p in scope_probes)
             purposes_text = "<br>".join(
@@ -548,9 +542,7 @@ def build_markdown_report(
     lines.append("\n---\n")
 
     # 4.2 Detailed Needs Reading / Deep Dive
-    needs_reading_probes = [
-        v for v in verdicts if _is_anomaly_requiring_investigation(v)
-    ]
+    needs_reading_probes = [v for v in verdicts if _is_anomaly_requiring_investigation(v)]
     lines.append("### 4.2. Giải trình chi tiết các trường hợp Cần xem xét (Needs Reading)\n")
     if not needs_reading_probes:
         lines.append(
@@ -575,10 +567,10 @@ def build_markdown_report(
                 f"`certain: {certain}`)"
             )
             if q_text:
-                lines.append(f"- **Câu hỏi**: *\"{q_text}\"*")
-            lines.append(f"- **Phản hồi Full Arm**:\n  > *\"{full_reply}\"*")
-            lines.append(f"- **Phản hồi Ablated Arm**:\n  > *\"{abl_reply}\"*")
-            lines.append(f"- **Phản hồi Control Arm**:\n  > *\"{ctl_reply}\"*")
+                lines.append(f'- **Câu hỏi**: *"{q_text}"*')
+            lines.append(f'- **Phản hồi Full Arm**:\n  > *"{full_reply}"*')
+            lines.append(f'- **Phản hồi Ablated Arm**:\n  > *"{abl_reply}"*')
+            lines.append(f'- **Phản hồi Control Arm**:\n  > *"{ctl_reply}"*')
 
             badge, summary, tech_detail = diagnose_needs_reading_probe(
                 probe_id=pid,
@@ -611,9 +603,7 @@ def build_markdown_report(
         "hoặc cần mở rộng refusal patterns]_"
     )
     lines.append("2. **Concern B (The Question)**:")
-    lines.append(
-        "   - _[Agent điền đánh giá nếu câu hỏi quá dễ suy đoán hoặc bị rò rỉ context]_"
-    )
+    lines.append("   - _[Agent điền đánh giá nếu câu hỏi quá dễ suy đoán hoặc bị rò rỉ context]_")
     lines.append("3. **Concern C (Plumbing / Harness)**:")
     lines.append(
         "   - _[Agent điền đánh giá về cơ chế seeding, masking, gateway timeout "

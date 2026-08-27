@@ -534,9 +534,7 @@ class EvaluationJobRunner:
         units: tuple[WorkUnit, ...],
         ledger: BudgetLedger,
     ) -> tuple[EvaluationWarning, ...]:
-        assignments: list[list[WorkUnit]] = [
-            [] for _ in range(job.effective_workers)
-        ]
+        assignments: list[list[WorkUnit]] = [[] for _ in range(job.effective_workers)]
         for unit in units:
             assignments[unit.ordinal % job.effective_workers].append(unit)
         lane_tasks = tuple(
@@ -777,9 +775,7 @@ class EvaluationJobRunner:
                     worker_id=lane_id,
                 )
                 if await self._is_cancel_requested(job.job_id):
-                    return _ExecutedUnit(
-                        _cancelled_outcome(unit), None, tuple(unit_warnings)
-                    )
+                    return _ExecutedUnit(_cancelled_outcome(unit), None, tuple(unit_warnings))
                 if credential_cooling:
                     lane_stopped.set()
                 return _ExecutedUnit(outcome, outcome_ref, tuple(unit_warnings))
@@ -825,13 +821,9 @@ class EvaluationJobRunner:
                 and not lane_stopped.is_set()
                 and not ledger.exhausted
             ):
-                await self._sleeper(
-                    self._retry_delay(attempt_number, provider_retry_after)
-                )
+                await self._sleeper(self._retry_delay(attempt_number, provider_retry_after))
                 if await self._is_cancel_requested(job.job_id):
-                    return _ExecutedUnit(
-                        _cancelled_outcome(unit), None, tuple(unit_warnings)
-                    )
+                    return _ExecutedUnit(_cancelled_outcome(unit), None, tuple(unit_warnings))
                 if credential_cooling:
                     await lease.resume_after_cooldown()
                     credential_cooling = False
@@ -913,11 +905,7 @@ class EvaluationJobRunner:
                 raise
         ordered = tuple(sorted(outcomes, key=lambda outcome: (outcome.ordinal, outcome.unit_id)))
         succeeded = sum(outcome.state is UnitState.SUCCEEDED for outcome in ordered)
-        if (
-            succeeded == len(units)
-            and len(ordered) == len(units)
-            and not cleanup_warnings
-        ):
+        if succeeded == len(units) and len(ordered) == len(units) and not cleanup_warnings:
             terminal = JobState.SUCCEEDED
         elif succeeded:
             terminal = JobState.PARTIALLY_SUCCEEDED
@@ -1008,17 +996,12 @@ class EvaluationJobRunner:
             if (
                 len({unit.unit_id for unit in units}) != len(units)
                 or len({unit.ordinal for unit in units}) != len(units)
-                or any(
-                    expected_by_id.get(unit.unit_id) != unit
-                    for unit in units
-                )
+                or any(expected_by_id.get(unit.unit_id) != unit for unit in units)
             ):
                 raise ValueError("durable evaluation work units are inconsistent with the plan")
             durable_ids = {unit.unit_id for unit in units}
             missing = tuple(
-                _failed_outcome(unit)
-                for unit in expected
-                if unit.unit_id not in durable_ids
+                _failed_outcome(unit) for unit in expected if unit.unit_id not in durable_ids
             )
             return _DurableWorkIntegrity(expected, units, missing)
         valid_count = (

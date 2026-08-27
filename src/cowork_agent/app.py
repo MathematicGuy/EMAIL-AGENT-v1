@@ -335,9 +335,7 @@ def _chat_controller_factory(
                 scope=scope,
                 session_buffer=chat.chat_session_buffer,
                 declarative_memory=(
-                    control_plane.chat_profile_repository
-                    if control_plane is not None
-                    else None
+                    control_plane.chat_profile_repository if control_plane is not None else None
                 ),
                 episodic_memory=cast(
                     EpisodicMemoryPort | None,
@@ -637,9 +635,7 @@ def create_app() -> FastAPI:
         # the forwards it used to read are gone (ADR-013, slice 02-8). The
         # order is the old order exactly: evaluation first, then the
         # control-plane pool, then the storage client.
-        state_runtime = cast(
-            CoworkRuntime | None, getattr(app.state, "runtime", None)
-        )
+        state_runtime = cast(CoworkRuntime | None, getattr(app.state, "runtime", None))
         if state_runtime is not None:
             evaluation = state_runtime.evaluation
             if evaluation is not None:
@@ -650,10 +646,7 @@ def create_app() -> FastAPI:
             if teardown_control_plane is not None and teardown_control_plane.pg_pool is not None:
                 await teardown_control_plane.pg_pool.close()
             teardown_mailbox = state_runtime.mailbox
-            if (
-                teardown_mailbox is not None
-                and teardown_mailbox.private_storage_client is not None
-            ):
+            if teardown_mailbox is not None and teardown_mailbox.private_storage_client is not None:
                 await teardown_mailbox.private_storage_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)

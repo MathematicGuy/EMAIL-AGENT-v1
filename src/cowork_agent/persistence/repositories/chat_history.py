@@ -138,9 +138,7 @@ class PostgresChatHistoryRepository:
                 await _set_title(connection, scope, title)
         return _turn_from_row(row)
 
-    async def write_turn(
-        self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
-    ) -> None:
+    async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None:
         if turn.assistant_message is None:
             raise ValueError("only completed assistant replies may enter chat history")
         completed = replace(
@@ -234,9 +232,7 @@ class PostgresChatHistoryRepository:
             rows = await cursor.fetchall()
         return {str(row[0]): str(row[1]) for row in rows}
 
-    async def latest_turns_for(
-        self, scopes: Sequence[ChatMemoryScope]
-    ) -> Mapping[str, ChatTurn]:
+    async def latest_turns_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, ChatTurn]:
         """Return the newest durable turn for each requested owned session."""
         if not scopes:
             return {}
@@ -285,9 +281,7 @@ def _turn_from_row(row: Sequence[object]) -> ChatTurn:
             "idempotency_key": str(row[10]),
             "error_code": None if row[11] is None else str(row[11]),
             "activities": activities,
-            "completed_at": (
-                None if row[13] is None else cast(datetime, row[13]).isoformat()
-            ),
+            "completed_at": (None if row[13] is None else cast(datetime, row[13]).isoformat()),
         }
     )
 
@@ -297,9 +291,7 @@ def _validate_scope(scope: ChatMemoryScope, turn: ChatTurn) -> None:
         raise ValueError("chat turn session must match its history scope")
 
 
-async def _set_title_if_missing(
-    connection: object, scope: ChatMemoryScope, title: str
-) -> None:
+async def _set_title_if_missing(connection: object, scope: ChatMemoryScope, title: str) -> None:
     await connection.execute(  # type: ignore[attr-defined]
         """
         UPDATE chat_sessions

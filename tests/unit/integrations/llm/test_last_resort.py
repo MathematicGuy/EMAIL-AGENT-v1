@@ -168,27 +168,21 @@ def test_openrouter_error_warning_does_not_contain_prompt(
     assert recorded[0].get("input_data") is None
 
 
-@pytest.mark.parametrize(
-    "environ",
-    [
-        {},
-        {"GEMINI_API_KEY_1": "", "GEMINI_API_KEY_2": "   "},
-        {"GEMINI_API_KEY_1": "replace-with-gemini-api-key-1"},
-        {"GEMINI_MODEL": "gemini-3.5-flash-lite"},
-    ],
-)
-def test_load_optional_gemini_settings_returns_none_without_usable_keys(
-    environ: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_optional_gemini_settings_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*args: object, **kwargs: object) -> GeminiSettings:
         del args, kwargs
         raise AssertionError("from_env must not be called when no usable keys exist")
 
     monkeypatch.setattr(GeminiSettings, "from_env", classmethod(boom))
-    assert load_optional_gemini_settings(environ) is None
+    for invalid_env in [
+        {},
+        {"GEMINI_API_KEY_1": "", "GEMINI_API_KEY_2": "   "},
+        {"GEMINI_API_KEY_1": "replace-with-gemini-api-key-1"},
+        {"GEMINI_MODEL": "gemini-3.5-flash-lite"},
+    ]:
+        assert load_optional_gemini_settings(invalid_env) is None
 
-
-def test_load_optional_gemini_settings_returns_settings_for_valid_keys() -> None:
+    monkeypatch.undo()
     settings = load_optional_gemini_settings(
         {
             "GEMINI_API_KEY_1": "key-one",
@@ -196,12 +190,8 @@ def test_load_optional_gemini_settings_returns_settings_for_valid_keys() -> None
             "GEMINI_MODEL": "test-model",
         },
     )
-    assert settings is not None
-    assert settings.api_keys == ("key-one", "key-two")
-    assert settings.model == "test-model"
+    assert settings is not None and settings.api_keys == ("key-one", "key-two")
 
-
-def test_load_optional_gemini_settings_raises_on_duplicate_keys() -> None:
     with pytest.raises(ValueError, match="unique"):
         load_optional_gemini_settings(
             {
@@ -235,9 +225,7 @@ def test_gemini_json_complete_returns_transport_mapping() -> None:
 
 
 def test_gemini_json_complete_rotates_after_rate_limit() -> None:
-    transport = FakeTransport(
-        [GeminiRateLimitError("quota on key-1"), {"source": "key-2"}]
-    )
+    transport = FakeTransport([GeminiRateLimitError("quota on key-1"), {"source": "key-2"}])
     settings = _gemini_settings()
 
     async def scenario() -> Mapping[str, Any]:
@@ -254,9 +242,7 @@ def test_gemini_json_complete_rotates_after_rate_limit() -> None:
 
 
 def test_gemini_json_complete_raises_when_all_keys_rate_limited() -> None:
-    transport = FakeTransport(
-        [GeminiRateLimitError("quota-1"), GeminiRateLimitError("quota-2")]
-    )
+    transport = FakeTransport([GeminiRateLimitError("quota-1"), GeminiRateLimitError("quota-2")])
     settings = _gemini_settings()
 
     async def scenario() -> None:

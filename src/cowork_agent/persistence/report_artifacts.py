@@ -140,9 +140,7 @@ class InMemoryReportArtifactStore:
         return stored
 
     async def list_reports(self) -> tuple[StoredReport, ...]:
-        return tuple(
-            sorted(self._reports.values(), key=lambda item: item.updated_at, reverse=True)
-        )
+        return tuple(sorted(self._reports.values(), key=lambda item: item.updated_at, reverse=True))
 
     async def read(self, filename: ReportFilename) -> StoredReport | None:
         return self._reports.get(filename.value)

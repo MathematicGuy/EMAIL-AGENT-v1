@@ -133,9 +133,7 @@ class FakePlugin:
             private_result={"reply": "private reply"},
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         del plan
         return ArtifactBundle(
             public_result={"completed_units": len(outcomes)},
@@ -510,9 +508,7 @@ def test_result_conflicts_while_running_and_recovers_after_release(tmp_path: Pat
             payload = submitted.json()
             deadline = asyncio.get_event_loop().time() + 10.0
             while True:
-                status = (
-                    await client.get(payload["status_url"], headers=AUTH)
-                ).json()
+                status = (await client.get(payload["status_url"], headers=AUTH)).json()
                 if status["progress"]["running"] >= 1:
                     break
                 assert asyncio.get_event_loop().time() < deadline
@@ -538,12 +534,8 @@ def test_unknown_jobs_return_safe_404_on_every_route(tmp_path: Path) -> None:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             status = await client.get("/v1/evaluation-jobs/no-such-job", headers=AUTH)
-            result = await client.get(
-                "/v1/evaluation-jobs/no-such-job/result", headers=AUTH
-            )
-            cancel = await client.post(
-                "/v1/evaluation-jobs/no-such-job/cancel", headers=AUTH
-            )
+            result = await client.get("/v1/evaluation-jobs/no-such-job/result", headers=AUTH)
+            cancel = await client.post("/v1/evaluation-jobs/no-such-job/cancel", headers=AUTH)
 
         for response in (status, result, cancel):
             assert response.status_code == 404
@@ -568,9 +560,7 @@ def test_cancellation_is_accepted_idempotently_and_is_terminal(tmp_path: Path) -
             payload = submitted.json()
             deadline = asyncio.get_event_loop().time() + 10.0
             while True:
-                status = (
-                    await client.get(payload["status_url"], headers=AUTH)
-                ).json()
+                status = (await client.get(payload["status_url"], headers=AUTH)).json()
                 if status["progress"]["running"] >= 1:
                     break
                 assert asyncio.get_event_loop().time() < deadline
@@ -623,9 +613,7 @@ def test_type_listing_exposes_only_safe_static_metadata(tmp_path: Path) -> None:
 
 
 def test_max_worker_resolution_cases(tmp_path: Path) -> None:
-    async def run_case(
-        root: Path, key: str, max_workers: int | None
-    ) -> dict[str, object]:
+    async def run_case(root: Path, key: str, max_workers: int | None) -> dict[str, object]:
         # One fresh credential pool per case keeps healthy_count deterministic:
         # resolution reads currently-available credentials, and concurrently
         # executing jobs lease them, so sharing a pool across jobs races.
@@ -774,9 +762,7 @@ def test_create_app_excludes_evaluation_routes_when_disabled(
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                types = await client.get(
-                    "/v1/evaluation-types", headers=AUTH
-                )
+                types = await client.get("/v1/evaluation-types", headers=AUTH)
                 submit = await client.post(
                     "/v1/evaluation-jobs",
                     json=submission_body(),

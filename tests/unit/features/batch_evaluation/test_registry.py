@@ -44,9 +44,7 @@ class FakePlugin:
             private_result=None,
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         return ArtifactBundle(public_result={}, private_artifact_ids=())
 
     async def cleanup(self, context: WorkContext) -> CleanupOutcome:
@@ -103,9 +101,7 @@ def test_registry_lists_only_safe_plugin_type_metadata_in_stable_order() -> None
     first = FakePlugin()
     second = FakePlugin()
     second.evaluation_type = "chat-ragas"
-    second.supported_modes = frozenset(
-        {ExecutionMode.REQUEST_BATCH, ExecutionMode.WORKFLOW_SHARDS}
-    )
+    second.supported_modes = frozenset({ExecutionMode.REQUEST_BATCH, ExecutionMode.WORKFLOW_SHARDS})
     registry = PluginRegistry()
     registry.register(first)
     registry.register(second)

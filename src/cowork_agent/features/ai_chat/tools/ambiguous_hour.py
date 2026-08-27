@@ -112,6 +112,5 @@ def _question(hour: int) -> str:
 
     other = hour + 12 if hour < 12 else 0
     return (
-        f"The hour is undetermined: {hour:02d}:00 or {other:02d}:00. "
-        "Confirm which one was meant."
+        f"The hour is undetermined: {hour:02d}:00 or {other:02d}:00. Confirm which one was meant."
     )

@@ -57,6 +57,7 @@ Langfuse chịu trách nhiệm thu thập dữ liệu giám sát tự động (a
 ```python
 from langfuse import observe
 
+
 @observe(name="execute_digest_run")
 async def execute(self, run_id: str) -> RunExecutionResult:
     # Tự động ghi vết span, latency và status
@@ -67,6 +68,7 @@ async def execute(self, run_id: str) -> RunExecutionResult:
 ```python
 from langfuse import observe
 
+
 @observe(as_type="generation", name="gemini_route_classifier")
 async def classify(self, messages: Sequence[EphemeralEmailEnvelope]) -> ClassificationResult:
     # Tự động ghi vết LLM Generation, prompt/completion payload
@@ -76,6 +78,7 @@ async def classify(self, messages: Sequence[EphemeralEmailEnvelope]) -> Classifi
 ### Pattern 3: Decorate RAG Retriever Step
 ```python
 from langfuse import observe
+
 
 @observe(as_type="retriever", name="qdrant_semantic_retriever")
 async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:

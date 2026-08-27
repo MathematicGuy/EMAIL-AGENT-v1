@@ -100,8 +100,7 @@ def sanitize_text(text: str) -> str:
     """NFC-normalize body text without destroying Markdown structure."""
     text = unicodedata.normalize("NFC", text)
     text = "".join(
-        ch for ch in text
-        if not unicodedata.category(ch).startswith("C") or ch in "\n\t"
+        ch for ch in text if not unicodedata.category(ch).startswith("C") or ch in "\n\t"
     )
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"

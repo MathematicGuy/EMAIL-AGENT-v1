@@ -123,9 +123,7 @@ async def test_unknown_document_is_404(corpus: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_directory_traversal_cannot_escape_the_corpus(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_directory_traversal_cannot_escape_the_corpus(corpus: Path, tmp_path: Path) -> None:
     (tmp_path / "secrets.txt").write_text("do not serve me", encoding="utf-8")
 
     async with _client(create_app()) as client:
@@ -140,9 +138,7 @@ async def test_directory_traversal_cannot_escape_the_corpus(
 
 
 @pytest.mark.asyncio
-async def test_manifest_entry_escaping_the_corpus_is_ignored(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_manifest_entry_escaping_the_corpus_is_ignored(corpus: Path, tmp_path: Path) -> None:
     (tmp_path / "outside.md").write_text("secret outside the corpus", encoding="utf-8")
     (corpus.parent / "extracted" / "ingestion-manifest.json").write_text(
         '{"procedure.pdf": {"output": "../outside.md"}}', encoding="utf-8"
@@ -166,9 +162,7 @@ async def test_manifest_entry_escaping_the_corpus_is_ignored(
 
 
 @pytest.mark.asyncio
-async def test_upload_stores_the_file_and_records_metadata(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_upload_stores_the_file_and_records_metadata(corpus: Path, tmp_path: Path) -> None:
     app, repo = await _app_with_repo(tmp_path)
     async with _client(app) as client:
         res = await client.post(

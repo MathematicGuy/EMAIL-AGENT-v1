@@ -274,12 +274,9 @@ def _search(
     present = [int(vector_id) for vector_id in allowlist if index.contains(int(vector_id))]
     if not present:
         return ()
-    scores, ids = index.search(
-        query, k=limit, allowlist=np.asarray(present, dtype=np.uint64)
-    )
+    scores, ids = index.search(query, k=limit, allowlist=np.asarray(present, dtype=np.uint64))
     return tuple(
-        (int(vector_id), float(score))
-        for score, vector_id in zip(scores[0], ids[0], strict=True)
+        (int(vector_id), float(score)) for score, vector_id in zip(scores[0], ids[0], strict=True)
     )
 
 

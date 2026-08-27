@@ -209,8 +209,7 @@ def test_outlook_connect_requires_an_active_gmail_owner(
         assert inactive.status_code == 400
         assert "Gmail" in missing.json()["detail"]
         assert all(
-            "active Gmail" in response.json()["detail"]
-            for response in (wrong_provider, inactive)
+            "active Gmail" in response.json()["detail"] for response in (wrong_provider, inactive)
         )
 
     asyncio.run(scenario())
@@ -370,9 +369,7 @@ def test_outlook_preview_and_disconnect_use_generic_mailbox_contract(
             )
             router = RecordingMailboxRouter()
             _swap_mailbox(app, mailbox=router)
-            preview = await client.get(
-                f"/v1/mail-todo/connections/{OUTLOOK_ID}/unread-preview"
-            )
+            preview = await client.get(f"/v1/mail-todo/connections/{OUTLOOK_ID}/unread-preview")
             disconnected = await client.delete(f"/v1/mail-todo/connections/{OUTLOOK_ID}")
             stored = await app.state.runtime.control_plane.connection_repository.get(OUTLOOK_ID)
 

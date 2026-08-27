@@ -89,9 +89,7 @@ class SupabaseStorageSettings:
     bucket: str = "project-documents"
 
     @classmethod
-    def from_env(
-        cls, environ: Mapping[str, str] | None = None
-    ) -> "SupabaseStorageSettings":
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> "SupabaseStorageSettings":
         if environ is None:
             environ = os.environ
         url = environ.get("SUPABASE_URL", "").strip().rstrip("/")
@@ -127,9 +125,7 @@ class SessionSettings:
         return cls(
             session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
             cookie_name=cookie_name,
-            cookie_secure=_boolean(
-                environ, "APP_SESSION_COOKIE_SECURE", cookie_secure_default
-            ),
+            cookie_secure=_boolean(environ, "APP_SESSION_COOKIE_SECURE", cookie_secure_default),
         )
 
 
@@ -164,8 +160,7 @@ class KnowledgeIngestionSettings:
             extraction_mode = "adaptive"
         elif extraction_mode_env:
             msg = (
-                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. "
-                "Must be 'adaptive' or 'advance'."
+                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. Must be 'adaptive' or 'advance'."
             )
             raise ValueError(msg)
         else:
@@ -415,15 +410,11 @@ class OutlookSettings:
             if not (secure_remote or local_http):
                 raise ValueError("FRONTEND_URL must use HTTPS, except for localhost")
 
-        scopes = tuple(
-            environ.get("MICROSOFT_SCOPES", " ".join(MICROSOFT_DEFAULT_SCOPES)).split()
-        )
+        scopes = tuple(environ.get("MICROSOFT_SCOPES", " ".join(MICROSOFT_DEFAULT_SCOPES)).split())
         if set(scopes) != set(MICROSOFT_DEFAULT_SCOPES) or len(scopes) != len(
             MICROSOFT_DEFAULT_SCOPES
         ):
-            raise ValueError(
-                "Outlook must use only Mail.Read and standard OIDC/offline scopes"
-            )
+            raise ValueError("Outlook must use only Mail.Read and standard OIDC/offline scopes")
 
         tenant = environ.get("MICROSOFT_TENANT", "common").strip() or "common"
         if any(character in tenant for character in "/?#"):
@@ -571,9 +562,7 @@ class JinaEmbeddingSettings:
     ) -> "JinaEmbeddingSettings":
         if environ is None:
             environ = os.environ
-        rotator = APIKeyRotator.from_env(
-            "JINA_API_KEY", environ=environ, provider_name="Jina"
-        )
+        rotator = APIKeyRotator.from_env("JINA_API_KEY", environ=environ, provider_name="Jina")
         return cls(
             rotator=rotator,
             model=_non_empty_value(
@@ -581,9 +570,7 @@ class JinaEmbeddingSettings:
             ),
             dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
             timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
-            rotate_on_rate_limit=_boolean(
-                environ, "JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT", True
-            ),
+            rotate_on_rate_limit=_boolean(environ, "JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT", True),
             max_attempts=len(rotator.keys),
         )
 
@@ -731,18 +718,12 @@ class MimoSettings:
         if environ is None:
             environ = os.environ
         key_prefix = "MIMO_API_KEY"
-        rotator = APIKeyRotator.from_env(
-            key_prefix, environ=environ, provider_name="Mimo"
-        )
-        model = (
-            environ.get("MIMO_MODEL")
-            or "mimo-v2.5-pro"
-        ).strip()
+        rotator = APIKeyRotator.from_env(key_prefix, environ=environ, provider_name="Mimo")
+        model = (environ.get("MIMO_MODEL") or "mimo-v2.5-pro").strip()
         if not model or model.startswith("replace-with-"):
             raise ValueError("MIMO_MODEL must be a real Mimo model name")
         base_url = (
-            environ.get("MIMO_BASE_URL")
-            or "https://token-plan-ams.xiaomimimo.com/v1"
+            environ.get("MIMO_BASE_URL") or "https://token-plan-ams.xiaomimimo.com/v1"
         ).strip()
         rotate_on_rate_limit = _boolean(
             environ,
@@ -835,9 +816,7 @@ class OpenRouterSettings:
         return cls(
             api_key=_required_secret(environ, "OPENROUTER_API_KEY"),
             model=model,
-            max_emails_per_batch=_positive_int(
-                environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5
-            ),
+            max_emails_per_batch=_positive_int(environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5),
             max_output_tokens=_bounded_positive_int(
                 environ, "OPENROUTER_MAX_OUTPUT_TOKENS", 2048, maximum=4096
             ),
@@ -931,19 +910,13 @@ def _openrouter_allowed_models(environ: Mapping[str, str]) -> tuple[str, ...]:
             "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
         ) from exc
     if not isinstance(parsed, list):
-        raise ValueError(
-            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-        )
+        raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
     models: list[str] = []
     for item in parsed:
         if not isinstance(item, str):
-            raise ValueError(
-                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-            )
+            raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
         slug = item.strip()
         if not slug:
-            raise ValueError(
-                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-            )
+            raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
         models.append(slug)
     return tuple(models)

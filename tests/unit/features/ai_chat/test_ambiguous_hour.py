@@ -6,8 +6,6 @@ not be. The second half is the one that costs something when it is wrong, so it
 carries every phrasing the QA stories use.
 """
 
-import pytest
-
 from cowork_agent.features.ai_chat.tools import ambiguous_hour_question
 
 DETERMINED = [
@@ -48,14 +46,14 @@ UNDETERMINED = [
 ]
 
 
-@pytest.mark.parametrize("message", DETERMINED)
-def test_a_message_that_determines_its_hour_is_left_alone(message: str) -> None:
-    assert ambiguous_hour_question(message) is None
+def test_a_message_that_determines_its_hour_is_left_alone() -> None:
+    for message in DETERMINED:
+        assert ambiguous_hour_question(message) is None, f"Determined: {message!r}"
 
 
-@pytest.mark.parametrize("message", UNDETERMINED)
-def test_a_stated_but_undetermined_hour_is_refused(message: str) -> None:
-    assert ambiguous_hour_question(message) is not None
+def test_a_stated_but_undetermined_hour_is_refused() -> None:
+    for message in UNDETERMINED:
+        assert ambiguous_hour_question(message) is not None, f"Undetermined: {message!r}"
 
 
 def test_the_question_offers_both_readings_and_quotes_nothing() -> None:

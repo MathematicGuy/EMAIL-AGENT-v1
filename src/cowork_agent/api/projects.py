@@ -27,9 +27,7 @@ class ProjectRepository(Protocol):
         self, principal: VerifiedPrincipal, project_id: str
     ) -> Project | None: ...
 
-    async def create_or_get_document(
-        self, **kwargs: object
-    ) -> tuple[ProjectDocument, bool]: ...
+    async def create_or_get_document(self, **kwargs: object) -> tuple[ProjectDocument, bool]: ...
 
     async def require_document(
         self, principal: VerifiedPrincipal, project_id: str, document_id: str
@@ -156,9 +154,7 @@ def create_project_router() -> APIRouter:
         _require_user_documents_enabled(request)
         await _require_user_documents_ready(request)
         principal = await _principal(request)
-        document = await _projects(request).require_document(
-            principal, project_id, document_id
-        )
+        document = await _projects(request).require_document(principal, project_id, document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Project document not found")
         if document.status != "received":
@@ -218,13 +214,9 @@ def create_project_router() -> APIRouter:
         return {"document_id": document.id, "status": "deleting"}
 
     @router.delete("/projects/{project_id}", status_code=202, response_model=None)
-    async def delete_project(
-        project_id: str, request: Request
-    ) -> Response | dict[str, object]:
+    async def delete_project(project_id: str, request: Request) -> Response | dict[str, object]:
         principal = await _principal(request)
-        result = await _projects(request).begin_project_deletion(
-            principal, project_id
-        )
+        result = await _projects(request).begin_project_deletion(principal, project_id)
         if result is None:
             raise HTTPException(status_code=404, detail="Project not found")
         chat = runtime(request).chat

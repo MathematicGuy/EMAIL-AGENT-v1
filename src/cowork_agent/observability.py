@@ -104,9 +104,7 @@ def database_host_class(connection: object) -> DatabaseHostClass:
         except OSError:
             return "remote"
         resolved = {
-            str(item[4][0]).split("%", 1)[0]
-            for item in addresses
-            if item[4] and item[4][0]
+            str(item[4][0]).split("%", 1)[0] for item in addresses if item[4] and item[4][0]
         }
         return (
             "loopback"
@@ -168,9 +166,9 @@ def _write_jsonl_event_unchecked(
         occurred_at = occurred_at.replace(tzinfo=UTC)
     payload: dict[str, object] = {
         "schema_version": 1,
-        "timestamp": occurred_at.astimezone(UTC).isoformat(timespec="milliseconds").replace(
-            "+00:00", "Z"
-        ),
+        "timestamp": occurred_at.astimezone(UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "document_id": document_id,
         "stage": stage,
         "duration_ms": duration_ms,

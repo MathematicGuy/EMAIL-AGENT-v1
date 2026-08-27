@@ -98,9 +98,7 @@ class GoogleCalendar:
         body = event_body(draft)
         try:
             created = (
-                service.events()
-                .insert(calendarId=self._settings.calendar_id, body=body)
-                .execute()
+                service.events().insert(calendarId=self._settings.calendar_id, body=body).execute()
             )
         except HttpError as exc:
             if exc.resp.status == 409:

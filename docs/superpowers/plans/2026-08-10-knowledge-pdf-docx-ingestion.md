@@ -43,11 +43,15 @@
 
 ```python
 def test_settings_require_key_only_when_ocr_enabled() -> None:
-    assert KnowledgeIngestionSettings.from_env(
-        {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}, load_env_file=False
-    ).ocr_enabled is False
+    assert (
+        KnowledgeIngestionSettings.from_env(
+            {"KNOWLEDGE_INGEST_OCR_ENABLED": "false"}, load_env_file=False
+        ).ocr_enabled
+        is False
+    )
     with pytest.raises(ValueError, match="MISTRAL_API_KEY"):
         KnowledgeIngestionSettings.from_env({}, load_env_file=False)
+
 
 def test_settings_hide_secret() -> None:
     settings = KnowledgeIngestionSettings.from_env(
@@ -71,6 +75,7 @@ class PdfKind(StrEnum):
     SCANNED = "scanned"
     IMAGE_BASED = "image_based"
     MIXED = "mixed"
+
 
 @dataclass(frozen=True, slots=True)
 class PdfInspection:
@@ -104,6 +109,7 @@ def test_manifest_skips_only_successful_unchanged_source(tmp_path: Path) -> None
     store.record(ManifestEntry(source="a.pdf", sha256="abc", status="succeeded", output="a.md"))
     assert store.should_skip("a.pdf", "abc") is True
     assert store.should_skip("a.pdf", "different") is False
+
 
 def test_empty_markdown_does_not_replace_existing(tmp_path: Path) -> None:
     destination = tmp_path / "policy.md"
@@ -146,8 +152,11 @@ def test_docx_extractor_preserves_structure(tmp_path: Path) -> None:
     assert "- Hồ sơ" in markdown
     assert "| Giấy tờ | Bắt buộc |" in markdown
 
+
 def test_inspector_maps_mixed_pages(tmp_path: Path) -> None:
-    inspection = PdfInspector(FakeRunner('{"pdf_type":"mixed","pages_needing_ocr":[2]}')).inspect(tmp_path / "a.pdf")
+    inspection = PdfInspector(FakeRunner('{"pdf_type":"mixed","pages_needing_ocr":[2]}')).inspect(
+        tmp_path / "a.pdf"
+    )
     assert inspection.kind is PdfKind.MIXED
     assert inspection.pages_needing_ocr == (2,)
 ```
@@ -184,6 +193,7 @@ def test_ocr_sends_only_requested_zero_based_pages(tmp_path: Path) -> None:
     assert result == (OcrPage(number=2, markdown="Trang 2"),)
     assert client.calls[0]["pages"] == [1]
 
+
 def test_ocr_exhausted_retry_raises_safe_reason() -> None:
     client = FakeMistralClient(side_effects=[TimeoutError(), TimeoutError(), TimeoutError()])
     with pytest.raises(OcrUnavailableError, match="mistral_ocr_unavailable"):
@@ -218,14 +228,19 @@ git commit -m "feat: add selected-page Mistral OCR adapter"
 ```python
 def test_text_pdf_never_calls_ocr(tmp_path: Path) -> None:
     service, ocr = build_service(pdf_kind=PdfKind.TEXT_BASED, native={1: "Nội dung"})
-    assert service.ingest(tmp_path / "raw", tmp_path / "extracted", force=False)[0].status == "succeeded"
+    assert (
+        service.ingest(tmp_path / "raw", tmp_path / "extracted", force=False)[0].status
+        == "succeeded"
+    )
     assert ocr.calls == []
+
 
 def test_mixed_pdf_merges_pages_in_order(tmp_path: Path) -> None:
     service, _ = build_service(pdf_kind=PdfKind.MIXED, native={1: "Một", 3: "Ba"}, ocr={2: "Hai"})
     service.ingest(tmp_path / "raw", tmp_path / "extracted", force=False)
     text = (tmp_path / "extracted" / "source.md").read_text(encoding="utf-8")
     assert text.index("Một") < text.index("Hai") < text.index("Ba")
+
 
 def test_ingested_markdown_is_loadable_by_rag(tmp_path: Path) -> None:
     service, _ = build_service_for_docx(tmp_path)

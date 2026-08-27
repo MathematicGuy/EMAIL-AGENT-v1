@@ -97,10 +97,14 @@ async def test_mimo_fast_mode_disables_thinking_and_captures_reasoning(
         del url, key, timeout
         received.update(body)
         return {
-            "choices": [{"message": {
-                "content": '{"answer": true}',
-                "reasoning_content": "provider reasoning",
-            }}]
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"answer": true}',
+                        "reasoning_content": "provider reasoning",
+                    }
+                }
+            ]
         }
 
     monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", mock_post_json)

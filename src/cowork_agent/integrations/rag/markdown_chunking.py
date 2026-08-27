@@ -202,9 +202,7 @@ class _Draft:
     breadcrumb: str = ""
 
 
-def _parse_blocks(
-    pages: Iterable[MarkdownPage], profile: StructureProfile
-) -> list[_Block]:
+def _parse_blocks(pages: Iterable[MarkdownPage], profile: StructureProfile) -> list[_Block]:
     """Turn pages into blocks, recovering plain-text headings on the way.
 
     Normalization happens here rather than in each caller so there is one
@@ -285,9 +283,7 @@ def _classify(lines: tuple[str, ...]) -> str:
     # Only a block that opens with a comment can be comment-only, and the
     # backtracking `.*?` scan is the most expensive pattern here — so pay for
     # it on the handful of blocks that could possibly match.
-    if lines[0].lstrip().startswith(_COMMENT_OPEN) and _COMMENT_ONLY.match(
-        "\n".join(lines)
-    ):
+    if lines[0].lstrip().startswith(_COMMENT_OPEN) and _COMMENT_ONLY.match("\n".join(lines)):
         return _BOILERPLATE
     return _LIST if any(_LIST_ITEM.match(line) for line in lines) else _PARAGRAPH
 
@@ -325,9 +321,7 @@ def _emit(node: _Node, policy: ChunkingPolicy) -> list[_Draft]:
     # body only to discard it is the single largest source of wasted work here.
     size = _rendered_length(node.blocks)
     if size and size + overhead <= policy.max_chars:
-        drafts = [
-            _Draft(node.path, _render_blocks(node.blocks), tuple(node.blocks), breadcrumb)
-        ]
+        drafts = [_Draft(node.path, _render_blocks(node.blocks), tuple(node.blocks), breadcrumb)]
     else:
         drafts = _pack_blocks(node.blocks, node.path, budget, policy, breadcrumb)
     for child in node.children:
@@ -343,9 +337,7 @@ def _pack_blocks(
     breadcrumb: str,
 ) -> list[_Draft]:
     """Fill chunks with a node's own blocks, overlapping consecutive cuts."""
-    pieces = [
-        (part, block) for block in blocks for part in _split_block(block, budget)
-    ]
+    pieces = [(part, block) for block in blocks for part in _split_block(block, budget)]
     drafts: list[_Draft] = []
     current: list[str] = []
     used: list[_Block] = []
@@ -408,9 +400,7 @@ def _resume_prefix(stem: str, carry: str, part: str, budget: int) -> list[str]:
     return prefix
 
 
-def _merge_undersized(
-    drafts: Sequence[_Draft], policy: ChunkingPolicy
-) -> list[_Draft]:
+def _merge_undersized(drafts: Sequence[_Draft], policy: ChunkingPolicy) -> list[_Draft]:
     """Rejoin stub pieces of a section that splitting cut too finely.
 
     Merging is deliberately confined to chunks under the *same* heading. A
@@ -428,9 +418,7 @@ def _merge_undersized(
     return merged
 
 
-def _combine(
-    previous: _Draft, draft: _Draft, policy: ChunkingPolicy
-) -> _Draft | None:
+def _combine(previous: _Draft, draft: _Draft, policy: ChunkingPolicy) -> _Draft | None:
     if previous.path != draft.path:
         return None
     if len(previous.body) >= policy.min_chars and len(draft.body) >= policy.min_chars:
@@ -439,9 +427,7 @@ def _combine(
     overhead = len(draft.breadcrumb) + 2 if draft.breadcrumb else 0
     if len(body) + overhead > policy.max_chars:
         return None
-    return _Draft(
-        draft.path, body, previous.blocks + draft.blocks, draft.breadcrumb
-    )
+    return _Draft(draft.path, body, previous.blocks + draft.blocks, draft.breadcrumb)
 
 
 def _render_blocks(blocks: Sequence[_Block]) -> str:
@@ -465,9 +451,7 @@ def _breadcrumb(path: tuple[str, ...]) -> str:
 
 def _to_chunk(draft: _Draft) -> MarkdownChunk:
     breadcrumb = draft.breadcrumb
-    pages = [
-        block.page_number for block in draft.blocks if block.page_number is not None
-    ]
+    pages = [block.page_number for block in draft.blocks if block.page_number is not None]
     return MarkdownChunk(
         text=f"{breadcrumb}\n\n{draft.body}" if breadcrumb else draft.body,
         section=_section_label(draft.path[-1]) if draft.path else None,
@@ -561,9 +545,7 @@ def _split_list(lines: Sequence[str], budget: int) -> list[str]:
             items.append([line])
         else:
             items[-1].append(line)
-    return _pack_parts(
-        ["\n".join(item) for item in items], budget, "\n", _split_prose
-    )
+    return _pack_parts(["\n".join(item) for item in items], budget, "\n", _split_prose)
 
 
 def _split_prose(text: str, budget: int) -> list[str]:
@@ -574,9 +556,7 @@ def _split_prose(text: str, budget: int) -> list[str]:
 
 
 def _split_sentences(text: str, budget: int) -> list[str]:
-    sentences = [
-        part.strip() for part in _SENTENCE_BOUNDARY.split(text) if part.strip()
-    ]
+    sentences = [part.strip() for part in _SENTENCE_BOUNDARY.split(text) if part.strip()]
     if len(sentences) > 1:
         return _pack_parts(sentences, budget, " ", _hard_split)
     return _hard_split(text, budget)

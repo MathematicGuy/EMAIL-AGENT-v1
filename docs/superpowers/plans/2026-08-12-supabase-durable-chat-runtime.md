@@ -106,6 +106,7 @@ def test_redis_buffer_keeps_newest_turns_and_refreshes_ttl() -> None:
     assert buffer.read(namespace) == (turn_two, turn_three)
     assert fake_redis.ttl(buffer.redis_key(namespace)) == 60
 
+
 def test_gateway_reports_short_term_degradation_when_redis_is_unavailable() -> None:
     response = asyncio.run(gateway.read_context(request))
     assert response.degraded_sources == (DegradedMemorySource.SHORT_TERM,)

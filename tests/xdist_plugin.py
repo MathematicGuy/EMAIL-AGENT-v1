@@ -60,8 +60,6 @@ def reconcile_xdist_args(args: list[str]) -> None:
         args[:] = ["-n", "4", "--dist", "loadgroup", *args]
 
 
-def pytest_load_initial_conftests(
-    early_config: object, parser: object, args: list[str]
-) -> None:
+def pytest_load_initial_conftests(early_config: object, parser: object, args: list[str]) -> None:
     del early_config, parser
     reconcile_xdist_args(args)

@@ -142,9 +142,7 @@ def test_connect_flow_stores_verified_identity(principal_env) -> None:
                     ),
                 ),
             )
-            redirect = await client.get(
-                "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
-            )
+            redirect = await client.get("/v1/mail-todo/oauth/gmail/connect", follow_redirects=False)
             assert redirect.status_code == 302
             location = urlparse(redirect.headers["location"])
             state = parse_qs(location.query)["state"][0]
@@ -187,9 +185,7 @@ def test_oauth_callback_redirects_to_configured_frontend(
                     ),
                 ),
             )
-            connect = await client.get(
-                "/v1/mail-todo/oauth/gmail/connect", follow_redirects=False
-            )
+            connect = await client.get("/v1/mail-todo/oauth/gmail/connect", follow_redirects=False)
             state = parse_qs(urlparse(connect.headers["location"]).query)["state"][0]
             callback = await client.get(
                 "/v1/mail-todo/oauth/gmail/callback",
@@ -211,9 +207,7 @@ def test_oauth_callback_redirects_to_configured_frontend(
                 params={"state": "safe", "error": "access_denied"},
                 follow_redirects=False,
             )
-            assert parse_qs(urlparse(denied.headers["location"]).query)["gmail"] == [
-                "denied"
-            ]
+            assert parse_qs(urlparse(denied.headers["location"]).query)["gmail"] == ["denied"]
 
     asyncio.run(scenario())
 
@@ -286,9 +280,7 @@ def test_legacy_mismatched_identity_is_denied(principal_env) -> None:
             await app.state.runtime.control_plane.run_repository.save(orphan_run)
 
             assert (await client.get("/v1/mail-todo/runs/run_legacy")).status_code == 404
-            assert (
-                await client.get("/v1/mail-todo/runs/run_legacy/result")
-            ).status_code == 404
+            assert (await client.get("/v1/mail-todo/runs/run_legacy/result")).status_code == 404
             assert (await client.get("/v1/mail-todo/runs/run_orphan")).status_code == 404
             assert (
                 await client.delete(f"/v1/mail-todo/connections/{CONNECTION_ID}")

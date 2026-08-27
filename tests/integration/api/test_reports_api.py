@@ -81,9 +81,7 @@ async def test_saving_a_traversing_filename_lands_inside_the_folder(reports) -> 
 async def test_saving_a_name_that_addresses_no_file_is_rejected(reports) -> None:
     app, root = reports
     async with _client(app) as client:
-        res = await client.post(
-            "/api/v1/reports", json={"filename": "../..", "content": "nope"}
-        )
+        res = await client.post("/api/v1/reports", json={"filename": "../..", "content": "nope"})
 
     assert res.status_code == 400
     assert res.json()["detail"] == "Invalid filename"
@@ -108,9 +106,7 @@ async def test_delete_removes_the_file_and_is_idempotent(reports) -> None:
 async def test_download_serves_the_stored_document_as_an_attachment(reports) -> None:
     app, _ = reports
     async with _client(app) as client:
-        await client.post(
-            "/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"}
-        )
+        await client.post("/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"})
         res = await client.get("/api/v1/reports/bao-cao.md/download")
 
     assert res.status_code == 200
@@ -132,9 +128,7 @@ async def test_pdf_reports_its_own_absence_rather_than_404ing(reports) -> None:
     """No renderer is registered by default; the route says so in its own code."""
     app, _ = reports
     async with _client(app) as client:
-        await client.post(
-            "/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"}
-        )
+        await client.post("/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"})
         res = await client.get("/api/v1/reports/bao-cao.md/pdf")
 
     assert res.status_code == 501
@@ -154,9 +148,7 @@ async def test_pdf_uses_a_registered_renderer(reports) -> None:
         report_pdf_renderer=StubRenderer(),
     )
     async with _client(app) as client:
-        await client.post(
-            "/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"}
-        )
+        await client.post("/api/v1/reports", json={"filename": "bao-cao.md", "content": "noi dung"})
         res = await client.get("/api/v1/reports/bao-cao.md/pdf")
 
     assert res.status_code == 200

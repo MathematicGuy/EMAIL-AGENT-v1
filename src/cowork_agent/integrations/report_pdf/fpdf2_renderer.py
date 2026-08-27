@@ -109,9 +109,7 @@ def _inline_markup(text: str) -> str:
     """Escape source HTML, then admit only the supported inline Markdown."""
     escaped = html.escape(text, quote=True)
     escaped = _LINK_RE.sub(
-        lambda match: (
-            f"{match.group(1)} ({match.group(2)})"
-        ),
+        lambda match: f"{match.group(1)} ({match.group(2)})",
         escaped,
     )
     escaped = _INLINE_CODE_RE.sub(r"<code>\1</code>", escaped)
@@ -158,9 +156,7 @@ def _markdown_to_html(markdown: str) -> str:
     for line in markdown.splitlines():
         if _FENCE_RE.match(line):
             if in_code:
-                blocks.append(
-                    f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>"
-                )
+                blocks.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
                 code_lines.clear()
                 in_code = False
             else:

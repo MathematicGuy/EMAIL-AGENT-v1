@@ -32,9 +32,7 @@ def test_cli_loads_runtime_environment_before_parsing_settings(
     source = tmp_path / "source"
     source.mkdir()
 
-    exit_code = ingestion_cli.main(
-        ["--source", str(source), "--output", str(source / "out")]
-    )
+    exit_code = ingestion_cli.main(["--source", str(source), "--output", str(source / "out")])
 
     assert exit_code == 2
     assert "source_output_nested" in capsys.readouterr().err

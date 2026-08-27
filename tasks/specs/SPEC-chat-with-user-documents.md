@@ -301,7 +301,7 @@ filter riêng:
 
 ```python
 class UserDocumentQuery(_QueryScopedMemoryRead):
-    _max_items = MAX_USER_DOCUMENT_RETRIEVAL_ITEMS   # 8
+    _max_items = MAX_USER_DOCUMENT_RETRIEVAL_ITEMS  # 8
     _fixed_filter_name = "document_scope"
     _fixed_filter_value = "user_document"
 ```

@@ -22,9 +22,7 @@ _HAS_LETTER: Final = re.compile(r"[^\W\d_]", re.UNICODE)
 _TITLE_JOIN: Final = " — "
 
 
-def normalize_structure(
-    markdown: str, *, profile: StructureProfile = DEFAULT_PROFILE
-) -> str:
+def normalize_structure(markdown: str, *, profile: StructureProfile = DEFAULT_PROFILE) -> str:
     """Rewrite plain-text structural headings in ``markdown`` as ATX headings.
 
     Only standalone lines are considered — a line surrounded by blank lines or

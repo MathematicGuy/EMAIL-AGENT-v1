@@ -65,8 +65,12 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
     context = assemble_generation_context(
         request,
         MemoryContextResponse(
-            turns=(), profile=None, episodes=(), semantic_context=None,
-            degraded=False, degraded_sources=(),
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
         ),
     )
     reply = MistralChatReply(model="mistral-small-2603", complete=complete)
@@ -84,9 +88,7 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
 
 def test_configured_provider_settings_select_the_matching_chat_reply_adapter() -> None:
     assert isinstance(
-        GeminiChatReply.from_settings(
-            GeminiSettings(("key",), "model", True, 1, 1, 1, 1)
-        ),
+        GeminiChatReply.from_settings(GeminiSettings(("key",), "model", True, 1, 1, 1, 1)),
         GeminiChatReply,
     )
     assert isinstance(
@@ -218,8 +220,12 @@ def test_configured_reply_rejects_citations_without_current_company_evidence() -
     context = assemble_generation_context(
         request,
         MemoryContextResponse(
-            turns=(), profile=None, episodes=(), semantic_context=None,
-            degraded=False, degraded_sources=(),
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
         ),
     )
 
@@ -284,7 +290,9 @@ def test_configured_reply_projects_real_semantic_adapter_citations_to_task_coord
 
     assert chunks[0].task_proposal is not None
     assert chunks[0].task_proposal.rag_citations == (
-        EpisodeCitation("travel-policy", "Travel Policy", "Receipts", "https://docs.example.com/travel"),
+        EpisodeCitation(
+            "travel-policy", "Travel Policy", "Receipts", "https://docs.example.com/travel"
+        ),
     )
 
 
@@ -431,6 +439,8 @@ def _eligible_episode() -> TaskEpisode:
         prompt_version=None,
         confidence=None,
     )
+
+
 async def _collect(reply: object, request: ChatMessageRequest, context: object):
     return [chunk async for chunk in reply.stream_reply(request, context)]  # type: ignore[attr-defined]
 
@@ -600,9 +610,7 @@ def _openrouter_settings() -> OpenRouterSettings:
     )
 
 
-def _dated_episode(
-    *, episode_id: str, title: str, plan: str, updated_at: datetime
-) -> TaskEpisode:
+def _dated_episode(*, episode_id: str, title: str, plan: str, updated_at: datetime) -> TaskEpisode:
     return TaskEpisode(
         episode_id=episode_id,
         record_id=f"record-{episode_id}",

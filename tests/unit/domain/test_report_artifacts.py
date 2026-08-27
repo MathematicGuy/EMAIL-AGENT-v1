@@ -14,29 +14,27 @@ from cowork_agent.domain.report_artifacts import (
 )
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
+def test_parse_strips_every_directory_part() -> None:
+    """A traversing name reduces to its last component or is refused outright."""
+    cases = [
         "../../../etc/passwd",
         "..\\..\\Windows\\System32\\evil.md",
         "subdir/report.md",
         "subdir\\report.md",
         "/absolute/report.md",
         "C:\\Users\\PC\\report.md",
-    ],
-)
-def test_parse_strips_every_directory_part(raw: str) -> None:
-    """A traversing name reduces to its last component or is refused outright."""
-    parsed = ReportFilename.parse(raw)
-    assert "/" not in parsed.value
-    assert "\\" not in parsed.value
-    assert parsed.value not in {"", ".", ".."}
+    ]
+    for raw in cases:
+        parsed = ReportFilename.parse(raw)
+        assert "/" not in parsed.value
+        assert "\\" not in parsed.value
+        assert parsed.value not in {"", ".", ".."}
 
 
-@pytest.mark.parametrize("raw", ["", "   ", ".", "..", "../..", "report\x00.md"])
-def test_parse_refuses_names_that_address_no_file(raw: str) -> None:
-    with pytest.raises(InvalidReportFilename):
-        ReportFilename.parse(raw)
+def test_parse_refuses_names_that_address_no_file() -> None:
+    for raw in ("", "   ", ".", "..", "../..", "report\x00.md"):
+        with pytest.raises(InvalidReportFilename):
+            ReportFilename.parse(raw)
 
 
 def test_parse_refuses_a_dotfile() -> None:
@@ -52,9 +50,7 @@ def test_parse_refuses_an_over_long_name() -> None:
 
 
 def test_parse_keeps_a_usable_name_untouched() -> None:
-    assert ReportFilename.parse("bao-cao-quy-trinh-cccd.md").value == (
-        "bao-cao-quy-trinh-cccd.md"
-    )
+    assert ReportFilename.parse("bao-cao-quy-trinh-cccd.md").value == ("bao-cao-quy-trinh-cccd.md")
 
 
 def test_constructing_directly_still_validates() -> None:
@@ -63,9 +59,9 @@ def test_constructing_directly_still_validates() -> None:
         ReportFilename("../escape.md")
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
+def test_sanitize_never_raises_and_always_yields_a_safe_name() -> None:
+    """The provider names this file, so a bad name degrades — it does not raise."""
+    cases = [
         "../../../etc/passwd",
         "..\\..\\evil.md",
         "",
@@ -76,16 +72,14 @@ def test_constructing_directly_still_validates() -> None:
         "///",
         "a" * 400,
         "?*<>|.md",
-    ],
-)
-def test_sanitize_never_raises_and_always_yields_a_safe_name(raw: str) -> None:
-    """The provider names this file, so a bad name degrades — it does not raise."""
-    name = ReportFilename.sanitize(raw)
-    assert "/" not in name.value
-    assert "\\" not in name.value
-    assert not name.value.startswith(".")
-    assert len(name.value) <= MAX_REPORT_FILENAME_LENGTH
-    assert name.value not in {"", ".", ".."}
+    ]
+    for raw in cases:
+        name = ReportFilename.sanitize(raw)
+        assert "/" not in name.value
+        assert "\\" not in name.value
+        assert not name.value.startswith(".")
+        assert len(name.value) <= MAX_REPORT_FILENAME_LENGTH
+        assert name.value not in {"", ".", ".."}
 
 
 def test_sanitize_folds_vietnamese_diacritics_into_an_ascii_slug() -> None:

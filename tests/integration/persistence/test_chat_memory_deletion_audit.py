@@ -26,9 +26,7 @@ try:
     import psycopg
     from psycopg_pool import AsyncConnectionPool
 except ImportError:  # pragma: no cover - environment-dependent
-    pytest.skip(
-        "psycopg is not installed (pip install '.[postgres]')", allow_module_level=True
-    )
+    pytest.skip("psycopg is not installed (pip install '.[postgres]')", allow_module_level=True)
 
 from cowork_agent.domain.chat_contracts import (  # noqa: E402
     ChatMemoryScope,
@@ -93,9 +91,7 @@ def _profile_namespace(
     *, tenant_id: str = "tenant-1", user_id: str = "user@example.com"
 ) -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope(
-            tenant_id=tenant_id, user_id=user_id, session_id="session-1"
-        ),
+        scope=ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id="session-1"),
         memory_type=MemoryType.LONG_TERM,
         record_id=None,
         source_id=None,
@@ -130,9 +126,7 @@ def _episode_namespace(
     turn_id: str = "turn-1",
 ) -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id
-        ),
+        scope=ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id=session_id),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
         source_id=turn_id,
@@ -171,8 +165,7 @@ def _episode(
         ),
         missing_information=("Reporting deadline is not stated.",),
         validation_status=status,
-        retrieval_eligible=status
-        in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED},
+        retrieval_eligible=status in {ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED},
         source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
         created_at=created_at,
         updated_at=updated_at,
@@ -192,16 +185,10 @@ def test_expired_episode_is_excluded_from_reads_before_purge() -> None:
             past_created = NOW - timedelta(days=10)
             past_expires = NOW - timedelta(days=5)
             namespace = _episode_namespace()
-            episode = _episode(
-                created_at=past_created, updated_at=past_created
-            )
-            await episodes_repo.write_task_episode(
-                namespace, episode, expires_at=past_expires
-            )
+            episode = _episode(created_at=past_created, updated_at=past_created)
+            await episodes_repo.write_task_episode(namespace, episode, expires_at=past_expires)
             # Read must exclude the expired row even before purge.
-            query = EpisodicMemoryQuery(
-                query="report", max_items=10, min_score=0.0, timeout_ms=100
-            )
+            query = EpisodicMemoryQuery(query="report", max_items=10, min_score=0.0, timeout_ms=100)
             found = await episodes_repo.read_episodes(
                 _episode_namespace(session_id="new-session"), query
             )
@@ -210,9 +197,7 @@ def test_expired_episode_is_excluded_from_reads_before_purge() -> None:
             purged = await episodes_repo.purge_expired(datetime.now(UTC))
             assert purged >= 1
             async with pool.connection() as connection:
-                cursor = await connection.execute(
-                    "SELECT count(*) FROM task_episodes"
-                )
+                cursor = await connection.execute("SELECT count(*) FROM task_episodes")
                 assert (await cursor.fetchone())[0] == 0  # type: ignore[index]
         finally:
             await pool.close()
@@ -228,9 +213,7 @@ def test_user_wide_deletion_removes_all_owned_rows_and_preserves_other_users() -
         try:
             namespace = _episode_namespace()
             # Seed a profile.
-            await profiles_repo.write_profile(
-                _profile_namespace(), _profile()
-            )
+            await profiles_repo.write_profile(_profile_namespace(), _profile())
             # Seed two episodes: one approved eligible, one system_generated.
             approved = _episode(
                 episode_id="ep-approved",
@@ -243,16 +226,12 @@ def test_user_wide_deletion_removes_all_owned_rows_and_preserves_other_users() -
                 turn_id="turn-generated",
             )
             for ep in (approved, generated):
-                ns = _episode_namespace(
-                    record_id=ep.record_id, turn_id=ep.chat_turn_id
-                )
+                ns = _episode_namespace(record_id=ep.record_id, turn_id=ep.chat_turn_id)
                 await episodes_repo.write_task_episode(ns, ep, expires_at=None)
             # Transition approved episode to USER_APPROVED for retrieval eligibility.
             from cowork_agent.domain.chat_contracts import EpisodeTransition
 
-            approved_ns = _episode_namespace(
-                record_id="rec-approved", turn_id="turn-approved"
-            )
+            approved_ns = _episode_namespace(record_id="rec-approved", turn_id="turn-approved")
             transition = EpisodeTransition(
                 episode_id="ep-approved",
                 namespace=approved_ns,
@@ -274,26 +253,20 @@ def test_user_wide_deletion_removes_all_owned_rows_and_preserves_other_users() -
                 user_id="other@example.com",
                 turn_id="turn-other",
             )
-            await episodes_repo.write_task_episode(
-                other_user_ns, other_user_ep, expires_at=None
-            )
+            await episodes_repo.write_task_episode(other_user_ns, other_user_ep, expires_at=None)
             # Delete: profile + all episodes for the target user.
             assert await profiles_repo.delete_profile(_profile_namespace()) is True
             deleted_count = await episodes_repo.delete_all_for_user(namespace)
             assert deleted_count == 2
             # Subsequent eligible retrieval returns zero rows for this user.
-            query = EpisodicMemoryQuery(
-                query="report", max_items=10, min_score=0.0, timeout_ms=100
-            )
+            query = EpisodicMemoryQuery(query="report", max_items=10, min_score=0.0, timeout_ms=100)
             found = await episodes_repo.read_episodes(
                 _episode_namespace(session_id="new-session"), query
             )
             assert len(found) == 0
             # A different user's episode remains untouched.
             other_found = await episodes_repo.read_episodes(
-                _episode_namespace(
-                    user_id="other@example.com", session_id="new-session"
-                ),
+                _episode_namespace(user_id="other@example.com", session_id="new-session"),
                 query,
             )
             # Company RAG is not in this deletion path; no semantic RAG call is made.
@@ -318,16 +291,12 @@ def test_purge_live_removes_expired_profile_and_episode() -> None:
         try:
             past = datetime.now(UTC) - timedelta(seconds=2)
             # Expired profile.
-            await profiles_repo.write_profile(
-                _profile_namespace(), _profile(expires_at=past)
-            )
+            await profiles_repo.write_profile(_profile_namespace(), _profile(expires_at=past))
             # Expired episode.
             past_created = NOW - timedelta(days=3)
             namespace = _episode_namespace()
             episode = _episode(created_at=past_created, updated_at=past_created)
-            await episodes_repo.write_task_episode(
-                namespace, episode, expires_at=past
-            )
+            await episodes_repo.write_task_episode(namespace, episode, expires_at=past)
             # Both purges must remove at least one row.
             profile_purged = await profiles_repo.purge_expired(datetime.now(UTC))
             episode_purged = await episodes_repo.purge_expired(datetime.now(UTC))
@@ -335,13 +304,9 @@ def test_purge_live_removes_expired_profile_and_episode() -> None:
             assert episode_purged >= 1
             # Rows are gone.
             async with pool.connection() as connection:
-                cursor = await connection.execute(
-                    "SELECT count(*) FROM chat_profiles"
-                )
+                cursor = await connection.execute("SELECT count(*) FROM chat_profiles")
                 assert (await cursor.fetchone())[0] == 0  # type: ignore[index]
-                cursor = await connection.execute(
-                    "SELECT count(*) FROM task_episodes"
-                )
+                cursor = await connection.execute("SELECT count(*) FROM task_episodes")
                 assert (await cursor.fetchone())[0] == 0  # type: ignore[index]
         finally:
             await pool.close()

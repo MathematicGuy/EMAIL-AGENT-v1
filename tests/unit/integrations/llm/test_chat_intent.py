@@ -41,9 +41,7 @@ def test_configured_classifier_maps_schema_errors_to_retryable_error() -> None:
 
     with pytest.raises(IntentClassifierInvalidOutput):
         asyncio.run(
-            ConfiguredIntentClassifier(complete).classify(
-                IntentClassifierInput("Hi", (), ())
-            )
+            ConfiguredIntentClassifier(complete).classify(IntentClassifierInput("Hi", (), ()))
         )
 
 

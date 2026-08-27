@@ -105,9 +105,7 @@ def test_unknown_provider_degrades_to_null(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("RAG_STORE_PROVIDER", "pinecone")
     monkeypatch.setattr(bootstrap, "JinaEmbeddingAdapter", lambda settings: HashingEmbedder())
 
-    memory = asyncio.run(
-        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
-    )
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
 
     assert isinstance(memory, NullSemanticMemory)
 
@@ -130,9 +128,7 @@ def test_turbovec_provider_failure_degrades_to_null(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(bootstrap, "load_corpus", _boom)
 
-    memory = asyncio.run(
-        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings())
-    )
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings()))
 
     assert isinstance(memory, NullSemanticMemory)
 ```
@@ -258,9 +254,7 @@ def test_null_factory_retrieve_is_structured_no_results(
 ) -> None:
     monkeypatch.setenv("RAG_STORE_PROVIDER", "")
     memory = asyncio.run(
-        bootstrap.build_semantic_memory(
-            _jina_settings(), _qdrant_settings(QDRANT_ENABLED="false")
-        )
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings(QDRANT_ENABLED="false"))
     )
     response = asyncio.run(memory.retrieve(_retrieval_request()))
 
@@ -417,9 +411,7 @@ Add:
 def test_null_provider_is_not_wrapped_in_hybrid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAG_STORE_PROVIDER", "")
     memory = asyncio.run(
-        bootstrap.build_semantic_memory(
-            _jina_settings(), _qdrant_settings(QDRANT_ENABLED="false")
-        )
+        bootstrap.build_semantic_memory(_jina_settings(), _qdrant_settings(QDRANT_ENABLED="false"))
     )
     assert isinstance(memory, NullSemanticMemory)
 ```

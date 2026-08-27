@@ -15,23 +15,25 @@ def _utc_now() -> datetime:
 @dataclass(slots=True)
 class _SessionEntry:
     turns: tuple[ChatTurn, ...]
-    expires_at: datetime
+    expires_at: datetime | None = None
 
 
 class InMemoryChatSessionBuffer:
-    """Newest-N logical turns with an inactivity TTL refreshed by appends."""
+    """Newest-N logical turns (optionally with an inactivity TTL)."""
 
     def __init__(
         self,
         *,
         max_turns: int,
-        ttl_seconds: int,
+        ttl_seconds: int | None = None,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
-        if max_turns <= 0 or ttl_seconds <= 0:
-            raise ValueError("max_turns and ttl_seconds must be positive")
+        if max_turns <= 0:
+            raise ValueError("max_turns must be positive")
+        if ttl_seconds is not None and ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive when provided")
         self._max_turns = max_turns
-        self._ttl = timedelta(seconds=ttl_seconds)
+        self._ttl = timedelta(seconds=ttl_seconds) if ttl_seconds is not None else None
         self._clock = clock
         self._entries: dict[str, _SessionEntry] = {}
         self._lock = threading.Lock()
@@ -47,7 +49,7 @@ class InMemoryChatSessionBuffer:
             turns = (() if existing is None else existing.turns) + (turn,)
             self._entries[key] = _SessionEntry(
                 turns=turns[-self._max_turns :],
-                expires_at=now + self._ttl,
+                expires_at=(now + self._ttl) if self._ttl is not None else None,
             )
 
     def read(self, namespace: MemoryNamespace) -> tuple[ChatTurn, ...]:
@@ -56,7 +58,7 @@ class InMemoryChatSessionBuffer:
             entry = self._entries.get(key)
             if entry is None:
                 return ()
-            if entry.expires_at <= self._clock():
+            if entry.expires_at is not None and entry.expires_at <= self._clock():
                 del self._entries[key]
                 return ()
             return entry.turns
@@ -81,7 +83,11 @@ class InMemoryChatSessionBuffer:
         return namespace.logical_key()
 
     def _sweep_locked(self, now: datetime) -> int:
-        expired = [key for key, entry in self._entries.items() if entry.expires_at <= now]
+        expired = [
+            key
+            for key, entry in self._entries.items()
+            if entry.expires_at is not None and entry.expires_at <= now
+        ]
         for key in expired:
             del self._entries[key]
         return len(expired)

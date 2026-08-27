@@ -142,9 +142,7 @@ async def resolve_email_providers(provider: str) -> EmailProviderBundle:
     )
 
 
-def resolve_chat_providers(
-    provider: str, *, tools: Sequence[Tool] = ()
-) -> ChatProviderBundle:
+def resolve_chat_providers(provider: str, *, tools: Sequence[Tool] = ()) -> ChatProviderBundle:
     name = normalize_llm_provider(provider)
     if name == "gemini":
         gemini_settings = GeminiSettings.from_env()

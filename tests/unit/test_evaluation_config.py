@@ -18,44 +18,24 @@ def test_evaluation_api_is_disabled_by_default() -> None:
     assert settings.artifact_root == ".data/evaluation-jobs"
 
 
-@pytest.mark.parametrize("flag", ("0", "false", "False"))
-def test_evaluation_api_can_be_disabled_explicitly(flag: str) -> None:
-    settings = EvaluationSettings.from_env(
-        {"EVALUATION_API_ENABLED": flag}
-    )
+def test_evaluation_settings_enabled_disabled_and_validation() -> None:
+    for flag in ("0", "false", "False"):
+        assert EvaluationSettings.from_env({"EVALUATION_API_ENABLED": flag}).enabled is False
 
-    assert settings.enabled is False
-
-
-@pytest.mark.parametrize("flag", ("1", "true", "True"))
-def test_evaluation_api_can_be_enabled(flag: str) -> None:
-    settings = EvaluationSettings.from_env(
-        {"EVALUATION_API_ENABLED": flag, "EVALUATION_API_TOKEN": TOKEN},
-    )
-
-    assert settings.enabled is True
-    assert settings.api_token == TOKEN
-
-
-def test_invalid_enabled_flag_is_rejected() -> None:
-    with pytest.raises(ValueError, match="EVALUATION_API_ENABLED"):
-        EvaluationSettings.from_env(
-            {"EVALUATION_API_ENABLED": "maybe"}
+    for flag in ("1", "true", "True"):
+        settings = EvaluationSettings.from_env(
+            {"EVALUATION_API_ENABLED": flag, "EVALUATION_API_TOKEN": TOKEN}
         )
+        assert settings.enabled is True
+        assert settings.api_token == TOKEN
 
-
-def test_enabled_without_token_is_rejected_at_startup() -> None:
-    with pytest.raises(ValueError, match="EVALUATION_API_TOKEN"):
-        EvaluationSettings.from_env(
-            {"EVALUATION_API_ENABLED": "1"}
-        )
-
-
-def test_enabled_with_short_token_is_rejected_at_startup() -> None:
-    with pytest.raises(ValueError, match="EVALUATION_API_TOKEN"):
-        EvaluationSettings.from_env(
-            {"EVALUATION_API_ENABLED": "1", "EVALUATION_API_TOKEN": "short"},
-        )
+    for bad_env, match in [
+        ({"EVALUATION_API_ENABLED": "maybe"}, "EVALUATION_API_ENABLED"),
+        ({"EVALUATION_API_ENABLED": "1"}, "EVALUATION_API_TOKEN"),
+        ({"EVALUATION_API_ENABLED": "1", "EVALUATION_API_TOKEN": "short"}, "EVALUATION_API_TOKEN"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            EvaluationSettings.from_env(bad_env)
 
 
 def test_token_never_appears_in_representation() -> None:

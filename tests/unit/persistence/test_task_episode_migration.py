@@ -26,7 +26,7 @@ def test_task_episode_migration_binds_all_public_compact_limits_and_privacy_cons
     schema_sql = "\n".join(line for line in migration.splitlines() if not line.startswith("--"))
 
     def regex_limit(chunk_size: int, groups: int) -> str:
-        return f'^(?:.{{1,{chunk_size}}}){{1,{groups}}}$'
+        return f"^(?:.{{1,{chunk_size}}}){{1,{groups}}}$"
 
     assert f"char_length(task_title) <= {MAX_TASK_TITLE_LENGTH}" in schema_sql
     assert (
@@ -84,8 +84,6 @@ def test_task_episode_down_migration_drops_only_its_table() -> None:
 
 
 def test_task_episode_retrieval_uses_explicit_fts_matching() -> None:
-    repository = (MIGRATIONS.parent / "repositories" / "postgres.py").read_text(
-        encoding="utf-8"
-    )
+    repository = (MIGRATIONS.parent / "repositories" / "postgres.py").read_text(encoding="utf-8")
 
     assert "search_vector @@ terms.tsquery" in repository

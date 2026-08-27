@@ -88,9 +88,7 @@ class ActivityInspectingProfile(ProfileReader):
 
 
 class FakeReply:
-    def __init__(
-        self, chunks: tuple[str | ChatReplyChunk, ...] = ("Hello", " there")
-    ) -> None:
+    def __init__(self, chunks: tuple[str | ChatReplyChunk, ...] = ("Hello", " there")) -> None:
         self.chunks = chunks
         self.calls: list[tuple[ChatMessageRequest, GenerationContext]] = []
 
@@ -139,6 +137,7 @@ class EpisodeWriter:
 
     async def transition_task_episode(self, transition: object) -> TaskEpisode | None:
         from dataclasses import replace
+
         to_status = getattr(transition, "to_status", ValidationStatus.USER_APPROVED)
         eligible = to_status in (ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED)
         for idx, item in enumerate(self.writes):
@@ -220,9 +219,7 @@ class CompletedHistory(HistoryWriter):
         idempotency_key: str,
         title: str,
     ) -> ChatTurn:
-        await super().begin_turn(
-            scope, turn, idempotency_key=idempotency_key, title=title
-        )
+        await super().begin_turn(scope, turn, idempotency_key=idempotency_key, title=title)
         return replace(
             turn,
             assistant_message="Previously completed answer",
@@ -392,9 +389,7 @@ def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
         ChatActivityCode.REVIEWING_CONTEXT,
         ChatActivityCode.PREPARING_RESPONSE,
     ]
-    assert all(
-        activity.status is ChatActivityStatus.COMPLETED for activity in snapshots[-1]
-    )
+    assert all(activity.status is ChatActivityStatus.COMPLETED for activity in snapshots[-1])
     assert history.updates[-1][1].activities == snapshots[-1]
     assert history.updates[-1][1].completed_at == NOW
 
@@ -402,13 +397,17 @@ def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
 def test_controller_persists_provider_reasoning_and_filename_only_trace() -> None:
     history = HistoryWriter()
     controller, _ = _controller(
-        reply=FakeReply((ChatReplyChunk(
-            text="Answer",
-            provider="mimo",
-            model="mimo-v2.5-pro",
-            reasoning_mode="fast",
-            reasoning="Use the supplied context.",
-        ),)),
+        reply=FakeReply(
+            (
+                ChatReplyChunk(
+                    text="Answer",
+                    provider="mimo",
+                    model="mimo-v2.5-pro",
+                    reasoning_mode="fast",
+                    reasoning="Use the supplied context.",
+                ),
+            )
+        ),
         profile=ProfileReader(_profile()),
         history=history,
     )
@@ -433,9 +432,7 @@ def test_controller_persists_provider_reasoning_and_filename_only_trace() -> Non
 def test_controller_marks_context_review_running_before_memory_read() -> None:
     history = HistoryWriter()
     profile = ActivityInspectingProfile(history)
-    controller, _ = _controller(
-        reply=FakeReply(("Answer",)), profile=profile, history=history
-    )
+    controller, _ = _controller(reply=FakeReply(("Answer",)), profile=profile, history=history)
 
     asyncio.run(_collect(controller, _request()))
 
@@ -462,9 +459,7 @@ def test_controller_reports_retrieval_result_as_a_safe_aggregate() -> None:
         _collect(controller, _request(user_message="What does company policy say?"))
     )
     final_snapshot = next(
-        event.activities
-        for event in reversed(events)
-        if event.event_type is ChatEventType.ACTIVITY
+        event.activities for event in reversed(events) if event.event_type is ChatEventType.ACTIVITY
     )
     search = next(
         item
@@ -490,9 +485,7 @@ def test_controller_persists_partial_activity_history_when_generation_fails() ->
 
     events = asyncio.run(_collect(controller, _request()))
     terminal = next(
-        event.activities
-        for event in reversed(events)
-        if event.event_type is ChatEventType.ACTIVITY
+        event.activities for event in reversed(events) if event.event_type is ChatEventType.ACTIVITY
     )
 
     assert [item.status for item in terminal] == [
@@ -713,9 +706,7 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     task_events = asyncio.run(
         _collect(controller, _request(user_message="Please create a task for this."))
     )
-    ordinary_request = _request(
-        idempotency_key="idem-2", user_message="Help me plan today."
-    )
+    ordinary_request = _request(idempotency_key="idem-2", user_message="Help me plan today.")
     asyncio.run(_collect(controller, ordinary_request))
 
     assert len(episodes.writes) == 1
@@ -824,14 +815,17 @@ def test_disconnect_after_a_delta_does_not_append_a_partial_turn() -> None:
         assert first.event_type is ChatEventType.DELTA
         disconnected = True
         assert [event async for event in stream] == []
-        assert buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
-        ) == ()
+            == ()
+        )
 
     asyncio.run(scenario())
 
@@ -853,14 +847,17 @@ def test_cancel_turn_stops_only_the_named_durable_turn() -> None:
         assert reply.calls == []
         assert history.updates[-1][1].status.value == "cancelled"
         assert history.updates[-1][1].turn_id == started.turn_id
-        assert buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
-        ) == ()
+            == ()
+        )
 
     asyncio.run(scenario())
 
@@ -886,14 +883,17 @@ def test_cancel_turn_stops_a_turn_already_streaming_deltas() -> None:
         assert await controller.cancel_turn(started.turn_id) is True
         assert [remaining async for remaining in stream] == []
         assert history.updates[-1][1].status.value == "cancelled"
-        assert buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
-        ) == ()
+            == ()
+        )
 
     asyncio.run(scenario())
 
@@ -949,20 +949,21 @@ def test_completed_event_is_not_emitted_when_durable_completion_fails() -> None:
         ChatEventType.ERROR,
     ]
     assert events[-1].code == "chat_history_unavailable"
-    assert buffer.read(
-        MemoryNamespace(
-            scope=_scope(),
-            memory_type=MemoryType.SHORT_TERM,
-            record_id="session-1",
-            source_id=None,
+    assert (
+        buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
         )
-    ) == ()
+        == ()
+    )
 
 
 def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() -> None:
-    controller, buffer = _controller(
-        reply=BrokenReply(), profile=ProfileReader(_profile())
-    )
+    controller, buffer = _controller(reply=BrokenReply(), profile=ProfileReader(_profile()))
 
     events = asyncio.run(_collect(controller, _request()))
 
@@ -973,14 +974,17 @@ def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() ->
     ]
     assert visible_events[1].code == "chat_provider_unavailable"
     assert "sensitive" not in visible_events[1].safe_message
-    assert buffer.read(
-        MemoryNamespace(
-            scope=_scope(),
-            memory_type=MemoryType.SHORT_TERM,
-            record_id="session-1",
-            source_id=None,
+    assert (
+        buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
         )
-    ) == ()
+        == ()
+    )
 
 
 def test_completed_idempotent_request_replays_events_without_a_second_turn() -> None:
@@ -992,16 +996,19 @@ def test_completed_idempotent_request_replays_events_without_a_second_turn() -> 
 
     assert replay == first
     assert len(reply.calls) == 1
-    assert len(
-        buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+    assert (
+        len(
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_durable_completed_idempotent_request_replays_without_calling_the_provider() -> None:
@@ -1026,8 +1033,9 @@ def test_durable_completed_idempotent_request_replays_without_calling_the_provid
     assert history.updates == []
 
 
-def test_transient_task_episode_failure_retries_the_same_pending_write_without_a_second_reply(
-) -> None:
+def test_transient_task_episode_failure_retries_the_same_pending_write_without_a_second_reply() -> (
+    None
+):
     proposal = ChatTaskProposal(
         task_title="Submit report",
         minimal_request_paraphrase="Prepare the report",
@@ -1083,16 +1091,19 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     assert episodes.attempts[0].chat_turn_id == episodes.attempts[1].chat_turn_id
     assert episodes.attempts[0].action_plan == episodes.attempts[1].action_plan
     assert episodes.writes == [episodes.attempts[0]]
-    assert len(
-        buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+    assert (
+        len(
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
@@ -1102,13 +1113,9 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
     async def scenario() -> None:
         scope = await registry.create(user_id="user@example.com")
 
-        assert await registry.require(
-            scope.session_id, user_id="user@example.com"
-        ) == scope
+        assert await registry.require(scope.session_id, user_id="user@example.com") == scope
         with pytest.raises(ChatSessionAccessDenied):
-            await registry.require(
-                scope.session_id, user_id="other@example.com"
-            )
+            await registry.require(scope.session_id, user_id="other@example.com")
 
     asyncio.run(scenario())
 
@@ -1195,7 +1202,6 @@ def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() 
     assert approved_episode.retrieval_eligible is True
 
 
-
 def test_a_task_turn_reports_the_same_failure_as_a_normal_turn_when_completion_fails() -> None:
     """Both completion paths share one durable write, so they must abort alike."""
 
@@ -1233,14 +1239,17 @@ def test_a_task_turn_reports_the_same_failure_as_a_normal_turn_when_completion_f
         ChatEventType.ERROR,
     ]
     assert events[-1].code == "chat_history_unavailable"
-    assert buffer.read(
-        MemoryNamespace(
-            scope=_scope(),
-            memory_type=MemoryType.SHORT_TERM,
-            record_id="session-1",
-            source_id=None,
+    assert (
+        buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
         )
-    ) == ()
+        == ()
+    )
 
 
 def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
@@ -1323,9 +1332,7 @@ def test_a_traversing_provider_filename_is_confined_to_the_report_store() -> Non
         )
     )
     store = InMemoryReportArtifactStore()
-    controller, _ = _controller(
-        reply=fake_reply, profile=ProfileReader(_profile()), reports=store
-    )
+    controller, _ = _controller(reply=fake_reply, profile=ProfileReader(_profile()), reports=store)
 
     events = asyncio.run(_collect(controller, _request(user_message="tạo báo cáo")))
 
@@ -1365,4 +1372,3 @@ def test_a_failing_report_store_does_not_fail_the_turn() -> None:
     completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
     assert completed.artifact_refs == ()
     assert not any(e.event_type is ChatEventType.ERROR for e in events)
-

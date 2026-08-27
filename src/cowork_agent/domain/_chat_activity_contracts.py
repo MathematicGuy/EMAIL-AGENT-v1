@@ -190,7 +190,12 @@ class ChatActivity:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         unexpected = set(data) - {
-            "code", "status", "outcome", "detail", "started_at", "completed_at"
+            "code",
+            "status",
+            "outcome",
+            "detail",
+            "started_at",
+            "completed_at",
         }
         if unexpected:
             raise ValueError(f"unexpected activity field(s): {sorted(unexpected)}")
@@ -215,9 +220,7 @@ class ChatActivity:
                 _as_datetime(raw_started, "started_at") if raw_started is not None else None
             ),
             completed_at=(
-                _as_datetime(raw_completed, "completed_at")
-                if raw_completed is not None
-                else None
+                _as_datetime(raw_completed, "completed_at") if raw_completed is not None else None
             ),
         )
 
@@ -249,8 +252,6 @@ def transition_activity_snapshot(
     code = _as_enum(code, ChatActivityCode, "code")
     for index, activity in enumerate(snapshot):
         if activity.code is code:
-            transitioned = activity.transition(
-                status, at=at, outcome=outcome, detail=detail
-            )
+            transitioned = activity.transition(status, at=at, outcome=outcome, detail=detail)
             return (*snapshot[:index], transitioned, *snapshot[index + 1 :])
     raise ValueError(f"activity is absent from snapshot: {code.value}")

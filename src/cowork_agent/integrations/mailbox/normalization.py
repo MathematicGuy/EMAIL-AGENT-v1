@@ -73,9 +73,7 @@ _TRAILING = ".,;:!?"
 _CONTROLS = frozenset("\u00ad\u034f\u200b\u200e\u200f\ufeff")
 _SEPARATOR = re.compile(r"^[ \t]*[-=_*|—–]{2,}[ \t]*$")
 _MULTI_REF = re.compile(r"\[([^\]\r\n]+)\]\(\s*((?:\[link\d+\]\s*){2,})\r?$", re.MULTILINE)
-_CROSS_REF = re.compile(
-    r"\[([^\]\r\n]+)\]\(\s*(\[link\d+\])\r?\n[^\[\]()\r\n]*\)", re.MULTILINE
-)
+_CROSS_REF = re.compile(r"\[([^\]\r\n]+)\]\(\s*(\[link\d+\])\r?\n[^\[\]()\r\n]*\)", re.MULTILINE)
 _FOOTER_LABEL = re.compile(
     r"(?i)^(?:unsubscribe|switch to the weekly digest|careers?|help center|"
     r"privacy(?: policy)?|terms(?: of service)?|control your recommendations|"
@@ -227,8 +225,7 @@ def strip_suspicious_format_controls(value: str) -> str:
         if character == "\u200c" and _is_joining(left) and _is_joining(right):
             cleaned.append(character)
         elif character == "\u200d" and (
-            (_is_emoji(left) and _is_emoji(right))
-            or (_is_joining(left) and _is_joining(right))
+            (_is_emoji(left) and _is_emoji(right)) or (_is_joining(left) and _is_joining(right))
         ):
             cleaned.append(character)
     return "".join(cleaned)

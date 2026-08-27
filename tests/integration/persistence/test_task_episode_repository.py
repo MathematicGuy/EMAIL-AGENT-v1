@@ -502,9 +502,12 @@ def test_transition_and_deletion_are_isolated_by_every_mutation_guard() -> None:
             for namespace in namespaces:
                 assert await repository.transition_task_episode(_transition(namespace)) is None
                 assert not await repository.delete_task_episode(namespace, episode_id="episode-1")
-            assert await repository.transition_task_episode(
-                _transition(_namespace(), episode_id="other-episode")
-            ) is None
+            assert (
+                await repository.transition_task_episode(
+                    _transition(_namespace(), episode_id="other-episode")
+                )
+                is None
+            )
             assert not await repository.delete_task_episode(
                 _namespace(), episode_id="other-episode"
             )
@@ -541,8 +544,14 @@ def test_generated_eligibility_tampering_is_refused_and_down_migration_rolls_bac
                     )
             async with pool.connection() as connection:
                 await connection.execute(
-                    (Path(__file__).resolve().parents[3] / "src" / "cowork_agent" / "persistence"
-                     / "migrations" / "004_task_episodes.down.sql").read_text(encoding="utf-8")
+                    (
+                        Path(__file__).resolve().parents[3]
+                        / "src"
+                        / "cowork_agent"
+                        / "persistence"
+                        / "migrations"
+                        / "004_task_episodes.down.sql"
+                    ).read_text(encoding="utf-8")
                 )
                 cursor = await connection.execute("SELECT to_regclass('public.task_episodes')")
                 assert await cursor.fetchone() == (None,)
@@ -718,9 +727,7 @@ def test_a_multi_word_search_matches_an_episode_that_holds_only_some_of_the_word
             assert (
                 await repository.read_episodes(
                     _namespace(session_id="new-session"),
-                    EpisodicMemoryQuery(
-                        query="- - -", max_items=10, min_score=0.0, timeout_ms=500
-                    ),
+                    EpisodicMemoryQuery(query="- - -", max_items=10, min_score=0.0, timeout_ms=500),
                 )
                 == ()
             )

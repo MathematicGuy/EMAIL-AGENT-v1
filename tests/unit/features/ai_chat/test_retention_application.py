@@ -112,9 +112,7 @@ def test_retry_reuses_same_expiry_boundary() -> None:
     from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
 
     fixed_now = datetime(2026, 8, 11, tzinfo=UTC)
-    scope = ChatMemoryScope(
-        user_id="user@example.com", session_id="session-1"
-    )
+    scope = ChatMemoryScope(user_id="user@example.com", session_id="session-1")
 
     class RecordingEpisodicPort:
         def __init__(self) -> None:
@@ -168,9 +166,7 @@ def test_retry_reuses_same_expiry_boundary() -> None:
 
     port = RecordingEpisodicPort()
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
-    gateway = MemoryGateway(
-        scope=scope, session_buffer=buffer, episodic_memory=port
-    )
+    gateway = MemoryGateway(scope=scope, session_buffer=buffer, episodic_memory=port)
     ids = iter(f"id-{n}" for n in range(1, 30))
     controller = ChatController(
         scope=scope,
@@ -246,4 +242,3 @@ def test_purge_coordinator_sink_failure_does_not_break_purge() -> None:
     assert result.profile_count == 2
     assert result.episode_count == 3
     assert result.complete is True
-

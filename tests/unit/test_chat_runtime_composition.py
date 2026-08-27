@@ -101,19 +101,30 @@ class RecordingEpisodes:
         self.reads.append(query)
         return (
             TaskEpisode(
-                episode_id="episode-1", record_id="record-1",
-                user_id="user@example.com", chat_session_id="earlier-session",
-                chat_turn_id="turn-1", creation_reason="explicit_user_task_request",
+                episode_id="episode-1",
+                record_id="record-1",
+                user_id="user@example.com",
+                chat_session_id="earlier-session",
+                chat_turn_id="turn-1",
+                creation_reason="explicit_user_task_request",
                 task_title="Submit travel report",
                 minimal_request_paraphrase="Submit the travel report",
                 action_plan=("Collect receipts",),
-                rag_citations=(EpisodeCitation("travel-policy", "Travel Policy", None, "https://docs.example.com/travel"),),
-                missing_information=(), validation_status=ValidationStatus.USER_APPROVED,
+                rag_citations=(
+                    EpisodeCitation(
+                        "travel-policy", "Travel Policy", None, "https://docs.example.com/travel"
+                    ),
+                ),
+                missing_information=(),
+                validation_status=ValidationStatus.USER_APPROVED,
                 retrieval_eligible=True,
                 source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
                 created_at=datetime(2026, 8, 11, tzinfo=UTC),
-                updated_at=datetime(2026, 8, 11, tzinfo=UTC), pipeline_version="v2-m4",
-                model_id=None, prompt_version=None, confidence=None,
+                updated_at=datetime(2026, 8, 11, tzinfo=UTC),
+                pipeline_version="v2-m4",
+                model_id=None,
+                prompt_version=None,
+                confidence=None,
             ),
         )
 
@@ -157,9 +168,7 @@ def _runtime(
     ``app.state`` keys.
     """
     chat = ChatRuntime(
-        chat_memory_settings=(
-            memory_settings or ChatMemorySettings(max_turns=4, ttl_seconds=60)
-        ),
+        chat_memory_settings=(memory_settings or ChatMemorySettings(max_turns=4, ttl_seconds=60)),
         chat_sessions=None,  # type: ignore[arg-type]
         chat_session_buffer=InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60),
         memory_metrics=None,  # type: ignore[arg-type]
@@ -212,9 +221,7 @@ def test_runtime_composition_passes_current_company_evidence_only_through_gatewa
         _events(controller, _request("What does the company policy say about travel?", key="1"))
     )
 
-    non_activity_events = [
-        event for event in events if event.event_type.value != "activity"
-    ]
+    non_activity_events = [event for event in events if event.event_type.value != "activity"]
     assert [event.event_type.value for event in non_activity_events] == [
         "started",
         "error",
@@ -224,8 +231,7 @@ def test_runtime_composition_passes_current_company_evidence_only_through_gatewa
     assert len(semantic_memory.requests) == 1
     assert reply.contexts[0].current_company_evidence is not None
     assert (
-        reply.contexts[0].current_company_evidence.value.source_label
-        == "current_company_evidence"
+        reply.contexts[0].current_company_evidence.value.source_label == "current_company_evidence"
     )
 
 
@@ -297,9 +303,7 @@ def test_runtime_composition_degrades_when_semantic_retrieval_fails() -> None:
         _events(controller, _request("What does the company procedure say?", key="3"))
     )
 
-    non_activity_events = [
-        event for event in events if event.event_type.value != "activity"
-    ]
+    non_activity_events = [event for event in events if event.event_type.value != "activity"]
     assert [event.event_type.value for event in non_activity_events] == [
         "started",
         "error",
@@ -338,9 +342,7 @@ def test_runtime_injection_records_gateway_events() -> None:
         _events(controller, _request("What does the company policy say about travel?", key="5"))
     )
 
-    non_activity_events = [
-        event for event in events if event.event_type.value != "activity"
-    ]
+    non_activity_events = [event for event in events if event.event_type.value != "activity"]
     assert [event.event_type.value for event in non_activity_events] == [
         "started",
         "error",
@@ -364,9 +366,7 @@ def test_runtime_sink_failure_isolation() -> None:
         _events(controller, _request("What does the company procedure say?", key="6"))
     )
 
-    non_activity_events = [
-        event for event in events if event.event_type.value != "activity"
-    ]
+    non_activity_events = [event for event in events if event.event_type.value != "activity"]
     assert [event.event_type.value for event in non_activity_events] == [
         "started",
         "error",
@@ -411,9 +411,7 @@ def test_factory_passes_episode_retention_seconds_from_chat_memory_settings() ->
             return 0
 
     class TaskProposalReply:
-        async def stream_reply(
-            self, request: object, context: object
-        ) -> object:
+        async def stream_reply(self, request: object, context: object) -> object:
             yield ChatReplyChunk(
                 "task",
                 ChatTaskProposal(

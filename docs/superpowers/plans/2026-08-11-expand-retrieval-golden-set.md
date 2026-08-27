@@ -36,6 +36,7 @@ def test_repository_fixture_requires_one_hundred_cases() -> None:
     with pytest.raises(loader.RetrievalFixtureError, match="exactly 100"):
         loader._validate_repository_fixture_contract((), FIXTURE_PATH)
 
+
 def test_load_corpus_reads_seventeen_committed_documents() -> None:
     assert len(load_corpus(CORPUS_DIR, tenant_id="local")) == 17
 ```
@@ -49,6 +50,7 @@ Run `python -m pytest tests/unit/fixtures/test_retrieval_golden.py::test_reposit
 ```python
 EXPANDED_CASE_COUNT = 100
 LEGACY_CASE_IDS = tuple(f"q-{number:03d}" for number in range(1, 33))
+
 
 def _validate_repository_fixture_contract(cases: Sequence[RetrievalCase], source: Path) -> None:
     if len(cases) != EXPANDED_CASE_COUNT:
@@ -128,11 +130,16 @@ Run `python -m pytest tests/integration/email_action_plan/test_rag_retrieval_gol
 - [ ] **Step 3: Implement fixed legacy scope and verify green**
 
 ```python
-LEGACY_EMAIL_DOCUMENT_IDS = frozenset({
-    "cap_lai_cccd", "dang_ky_ket_hon", "dang_ky_xe",
-    "huong_dan_nop_ho_so_dai_hoc_vinuni", "thue_dien_tu",
-    "thu_tuc_dang_ky_bhxh_luatvietnam",
-})
+LEGACY_EMAIL_DOCUMENT_IDS = frozenset(
+    {
+        "cap_lai_cccd",
+        "dang_ky_ket_hon",
+        "dang_ky_xe",
+        "huong_dan_nop_ho_so_dai_hoc_vinuni",
+        "thue_dien_tu",
+        "thu_tuc_dang_ky_bhxh_luatvietnam",
+    }
+)
 ```
 
 Use this set for the coverage assertion. Run `python -m pytest tests/integration/email_action_plan/test_rag_retrieval_golden.py -q`. Expect PASS. Commit as `test: separate retrieval and email rag fixtures`.
@@ -150,7 +157,9 @@ Use this set for the coverage assertion. Run `python -m pytest tests/integration
 
 ```python
 def test_build_retriever_constructs_qdrant(documents: tuple[KnowledgeDocument, ...]) -> None:
-    retriever = evaluate_retrieval.build_retriever("qdrant", documents, HashingEmbedder(), top_k=5, min_score=0.2)
+    retriever = evaluate_retrieval.build_retriever(
+        "qdrant", documents, HashingEmbedder(), top_k=5, min_score=0.2
+    )
     assert isinstance(retriever, evaluate_retrieval.QdrantEvaluationRetriever)
 ```
 
@@ -164,7 +173,13 @@ Run `python -m pytest tests/unit/scripts/test_evaluate_retrieval.py::test_build_
 class QdrantEvaluationRetriever:
     async def build_index(self) -> None:
         await ingest_corpus(self._client, "retrieval-eval", self._documents, self._embedder)
-        self._memory = QdrantSemanticMemory(self._client, "retrieval-eval", self._embedder, top_k_default=self._top_k, min_score_default=self._min_score)
+        self._memory = QdrantSemanticMemory(
+            self._client,
+            "retrieval-eval",
+            self._embedder,
+            top_k_default=self._top_k,
+            min_score_default=self._min_score,
+        )
 
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         if self._memory is None:

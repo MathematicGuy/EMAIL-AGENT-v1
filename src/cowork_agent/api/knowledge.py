@@ -51,7 +51,6 @@ class KnowledgeChatRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
-
 def _resolve_raw_document(filename: str) -> tuple[str, Path]:
     """Map a request path segment onto a real file directly inside ``RAW_DOCS_DIR``.
 
@@ -66,7 +65,6 @@ def _resolve_raw_document(filename: str) -> tuple[str, Path]:
     if not target.is_file() or not target.resolve().is_relative_to(RAW_DOCS_DIR.resolve()):
         raise HTTPException(status_code=404, detail="Raw document not found")
     return safe_name, target
-
 
 
 def _load_raw_manifest() -> dict[str, str]:
@@ -167,9 +165,7 @@ def create_knowledge_router() -> APIRouter:
         if email_rag is not None and email_rag.document_embeddings_configured:
             checks["gemini_embeddings"] = "configured"
         checks["classifier"] = (
-            "ready"
-            if chat is not None and chat.chat_routing_service is not None
-            else "unavailable"
+            "ready" if chat is not None and chat.chat_routing_service is not None else "unavailable"
         )
         pool = control_plane.pg_pool if control_plane is not None else None
         if pool is not None:
@@ -204,9 +200,7 @@ def create_knowledge_router() -> APIRouter:
                 )
             except OSError:
                 checks["project_index"] = "unavailable"
-        project_repository = (
-            control_plane.project_repository if control_plane is not None else None
-        )
+        project_repository = control_plane.project_repository if control_plane is not None else None
         if project_repository is not None:
             try:
                 if await project_repository.worker_heartbeat_is_fresh(max_age_seconds=120):

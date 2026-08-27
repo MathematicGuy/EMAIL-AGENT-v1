@@ -44,19 +44,15 @@ def environment(**overrides: str) -> dict[str, str]:
     return values
 
 
-def test_settings_load_three_unique_keys_without_exposing_them_in_repr() -> None:
+def test_gemini_settings_loading_and_concurrency_bounds() -> None:
     settings = GeminiSettings.from_env(environment())
     assert settings.api_keys == ("key-one", "key-two", "key-three")
     assert settings.action_plan_concurrency == 3
     assert "key-one" not in repr(settings)
 
-
-@pytest.mark.parametrize("value", ["0", "9"])
-def test_settings_reject_out_of_range_action_plan_concurrency(value: str) -> None:
-    with pytest.raises(ValueError, match="GEMINI_ACTION_PLAN_CONCURRENCY"):
-        GeminiSettings.from_env(
-            environment(GEMINI_ACTION_PLAN_CONCURRENCY=value)
-        )
+    for bad_val in ("0", "9"):
+        with pytest.raises(ValueError, match="GEMINI_ACTION_PLAN_CONCURRENCY"):
+            GeminiSettings.from_env(environment(GEMINI_ACTION_PLAN_CONCURRENCY=bad_val))
 
 
 def test_settings_load_all_numbered_gemini_keys() -> None:
@@ -205,9 +201,7 @@ class QueryTransport(RecordingTransport):
 def test_query_rewriter_rotates_keys_and_wraps_untrusted_email_data() -> None:
     async def scenario() -> None:
         transport = QueryTransport({"key-one"})
-        rewriter = GeminiRetrievalQueryRewriter(
-            GeminiSettings.from_env(environment()), transport
-        )
+        rewriter = GeminiRetrievalQueryRewriter(GeminiSettings.from_env(environment()), transport)
         query = await rewriter.rewrite(
             QueryRewriteInput(
                 candidate_action_items=("Xin nghi phep",),

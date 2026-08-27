@@ -879,6 +879,7 @@ byte-identical, before and after**:
 
 ```python
 """Route-table oracle: flatten FastAPI's lazy _IncludedRouter wrappers."""
+
 import io, json, sys
 
 

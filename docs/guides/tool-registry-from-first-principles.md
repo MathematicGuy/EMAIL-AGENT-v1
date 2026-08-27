@@ -450,7 +450,7 @@ the error with the schema's own description text. So a refusal is detected
 arguments = {k: v for k, v in payload.items() if k != REFUSAL_FIELD}
 missing = _required_fields(tool) - arguments.keys()
 if arguments and not missing:
-    return arguments          # complete arguments always win
+    return arguments  # complete arguments always win
 ```
 
 `not missing` is load-bearing. A *partial* object used to count as a fill, get
@@ -474,10 +474,10 @@ ToolBinder = Callable[[ToolTurnContext], Awaitable[Tool]]
 carries everything a tool needs to know about the turn it serves:
 
 ```python
-idempotency_key: str   # C6  — makes a retry safe
-now: datetime          # C9a — makes relative dates arithmetic
-user_message: str      # F5/F7 (Part 8) — lets a guard read what was actually asked
-user_id: str | None    # C8b — whose grant to resolve
+idempotency_key: str  # C6  — makes a retry safe
+now: datetime  # C9a — makes relative dates arithmetic
+user_message: str  # F5/F7 (Part 8) — lets a guard read what was actually asked
+user_id: str | None  # C8b — whose grant to resolve
 ```
 
 It is `async` for one reason: resolving the grant is a **repository read**. The

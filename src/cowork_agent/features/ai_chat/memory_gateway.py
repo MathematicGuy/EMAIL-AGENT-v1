@@ -178,9 +178,7 @@ class MemoryGateway:
                         started=started,
                     )
                 else:
-                    if profile is not None and (
-                        profile.user_id != self._scope.user_id
-                    ):
+                    if profile is not None and (profile.user_id != self._scope.user_id):
                         self._emit(
                             MemoryType.LONG_TERM,
                             MemoryOperation.READ,
@@ -243,14 +241,10 @@ class MemoryGateway:
                     # above may retire another, so a rejected revision cannot hide an
                     # approved ancestor.
                     superseded_ids = {
-                        episode.supersedes
-                        for episode in eligible
-                        if episode.supersedes is not None
+                        episode.supersedes for episode in eligible if episode.supersedes is not None
                     }
                     episodes = tuple(
-                        episode
-                        for episode in eligible
-                        if episode.episode_id not in superseded_ids
+                        episode for episode in eligible if episode.episode_id not in superseded_ids
                     )[: request.reads.episodic.max_items]
                     self._emit(
                         MemoryType.EPISODIC,

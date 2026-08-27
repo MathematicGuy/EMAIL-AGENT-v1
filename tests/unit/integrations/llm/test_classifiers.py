@@ -516,13 +516,11 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await gemini_classifier(
             ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
         ).classify("UTC", datetime.now(UTC), message)
-        await MimoRouteClassifier(
-            MimoSettings.from_env({"MIMO_API_KEY": "test-key"})
-        ).classify("UTC", datetime.now(UTC), message)
+        await MimoRouteClassifier(MimoSettings.from_env({"MIMO_API_KEY": "test-key"})).classify(
+            "UTC", datetime.now(UTC), message
+        )
         await MistralRouteClassifier(
-            MistralSettings.from_env(
-                {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}
-            )
+            MistralSettings.from_env({"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"})
         ).classify("UTC", datetime.now(UTC), message)
         await OpenRouterRouteClassifier(
             OpenRouterSettings.from_env(

@@ -213,9 +213,7 @@ def build_live_classifier(tools: Sequence[Tool]):
     raise ValueError("LLM_PROVIDER must be gemini, mimo, or mistral")
 
 
-def build_report(
-    results: tuple[ChatRoutingEvalResult, ...], model_id: str
-) -> dict[str, object]:
+def build_report(results: tuple[ChatRoutingEvalResult, ...], model_id: str) -> dict[str, object]:
     metrics = compute_chat_routing_metrics(results)
     return {
         "date": datetime.now(UTC).date().isoformat(),
@@ -246,8 +244,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     target = args.output_dir / f"chat-routing-eval-{report['date']}.json"
     target.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(
-        f"Evaluated {len(results)} chat-routing cases; "
-        f"passed={report['passed']}; report={target}"
+        f"Evaluated {len(results)} chat-routing cases; passed={report['passed']}; report={target}"
     )
     return 0 if report["passed"] else 1
 

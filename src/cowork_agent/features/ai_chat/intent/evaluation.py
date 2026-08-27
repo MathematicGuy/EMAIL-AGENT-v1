@@ -63,9 +63,7 @@ def compute_chat_routing_metrics(
 ) -> ChatRoutingMetrics:
     if not results:
         raise ValueError("chat routing evaluation requires at least one result")
-    downgraded = tuple(
-        result.case_id for result in results if _is_rag_tool_downgrade(result)
-    )
+    downgraded = tuple(result.case_id for result in results if _is_rag_tool_downgrade(result))
     # A case labelled as needing both retrieval and a tool is routed to `TOOL`
     # with the retrieval half dropped -- that is `finalize_route`'s deliberate
     # RAG_TOOL downgrade (PROGRESS.md F1), not a classifier miss. Scoring it as
@@ -90,9 +88,7 @@ def compute_chat_routing_metrics(
         missed_rag_rate=round(len(missed) / len(expected_rag), 4) if expected_rag else 0,
         classifier_p95_ms=latencies[p95_index],
         missed_case_ids=missed,
-        tool_recall=round(
-            tool_true_positive / len(expected_tool) if expected_tool else 1.0, 4
-        ),
+        tool_recall=round(tool_true_positive / len(expected_tool) if expected_tool else 1.0, 4),
         tool_precision=round(
             tool_true_positive / len(predicted_tool) if predicted_tool else 1.0, 4
         ),

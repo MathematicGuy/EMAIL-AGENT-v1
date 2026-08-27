@@ -93,48 +93,7 @@ def _outcome(case: ToolIntentCase) -> RoutingOutcome:
 
 
 # --------------------------------------------------------------------------
-# I1, I2 -- the gates
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("case", CASES, ids=IDS)
-def test_the_route_matches_the_story(case: ToolIntentCase) -> None:
-    """I1: capability gates narrow, never widen."""
-
-    assert _outcome(case).route is case.expected_final_route, case.why_it_matters
-
-
-@pytest.mark.parametrize("case", CASES, ids=IDS)
-def test_the_server_appends_exactly_the_expected_reason_codes(case: ToolIntentCase) -> None:
-    """I2: a disabled tool and an absent tool are different words, said once."""
-
-    appended = tuple(
-        code for code in _outcome(case).reason_codes if code in SERVER_OWNED_REASON_CODES
-    )
-
-    assert appended == case.expected_appended_reason_codes, case.why_it_matters
-
-
-def test_a_disabled_axis_does_not_also_claim_the_tool_is_missing() -> None:
-    """Two codes for one cause reads as two problems and sends the user hunting."""
-
-    codes = _outcome(BY_ID["tq-021"]).reason_codes
-
-    assert IntentReasonCode.TOOL_REQUESTED_BUT_DISABLED in codes
-    assert IntentReasonCode.TOOL_NOT_AVAILABLE not in codes
-
-
-def test_a_tool_the_registry_does_not_hold_is_narrowed_by_name() -> None:
-    """ADR-004: naming `send_email` must not reach a handler by near-miss."""
-
-    case = BY_ID["tq-023"]
-
-    assert case.classifier_labels.tool_name == "send_email"
-    assert _outcome(case).route is ChatRoute.CHAT
-
-
-# --------------------------------------------------------------------------
-# I3, I4, I6, I7 -- what actually lands in the calendar
+# I1, I2, I3, I4, I6, I7 -- story execution & invariants
 # --------------------------------------------------------------------------
 
 
@@ -224,12 +183,17 @@ def _run_turn(
 
 
 @pytest.mark.parametrize("case", CASES, ids=IDS)
-def test_the_calendar_holds_exactly_what_the_story_expects(case: ToolIntentCase) -> None:
-    """I4 and I7 for the non-tool routes, I3 and the write count for the rest.
+def test_tool_intent_story_end_to_end(case: ToolIntentCase) -> None:
+    """I1, I2, I4, I7: verify route, reason codes, calendar writes, and event timing."""
+    outcome = _outcome(case)
+    # I1: capability gates narrow, never widen
+    assert outcome.route is case.expected_final_route, case.why_it_matters
 
-    Every case runs through the real controller, so a route that should never
-    touch the calendar is proven not to rather than assumed not to."""
+    # I2: server appends exactly the expected reason codes
+    appended = tuple(code for code in outcome.reason_codes if code in SERVER_OWNED_REASON_CODES)
+    assert appended == case.expected_appended_reason_codes, case.why_it_matters
 
+    # I3, I4, I7: calendar outcome verification
     calendar = InMemoryCalendar()
     expected = case.expected_tool_outcome
     arguments = _scripted_arguments(case) if expected is not None else None
@@ -237,33 +201,29 @@ def test_the_calendar_holds_exactly_what_the_story_expects(case: ToolIntentCase)
     _run_turn(case, calendar, arguments=arguments, idempotency_key=f"idem-{case.id}")
 
     assert len(calendar.events) == (expected.events_created if expected else 0), case.why_it_matters
+    if expected is not None and expected.expect_start is not None:
+        (event,) = calendar.events.values()
+        assert event.start == expected.expect_start
+        if expected.expect_end is not None:
+            assert event.end == expected.expect_end
 
 
-@pytest.mark.parametrize(
-    "case",
-    [case for case in CASES if case.expected_tool_outcome is not None],
-    ids=[case.id for case in CASES if case.expected_tool_outcome is not None],
-)
-def test_a_created_event_lands_at_the_stated_instant(case: ToolIntentCase) -> None:
-    """The offset survives the round trip: 02:00 +07:00 is not 02:00 UTC."""
+def test_a_disabled_axis_does_not_also_claim_the_tool_is_missing() -> None:
+    """Two codes for one cause reads as two problems and sends the user hunting."""
 
-    outcome = case.expected_tool_outcome
-    assert outcome is not None
-    if outcome.expect_start is None:
-        pytest.skip("this story asserts a count, not a time")
-    calendar = InMemoryCalendar()
+    codes = _outcome(BY_ID["tq-021"]).reason_codes
 
-    _run_turn(
-        case,
-        calendar,
-        arguments=_scripted_arguments(case),
-        idempotency_key=f"idem-{case.id}",
-    )
+    assert IntentReasonCode.TOOL_REQUESTED_BUT_DISABLED in codes
+    assert IntentReasonCode.TOOL_NOT_AVAILABLE not in codes
 
-    (event,) = calendar.events.values()
-    assert event.start == outcome.expect_start
-    if outcome.expect_end is not None:
-        assert event.end == outcome.expect_end
+
+def test_a_tool_the_registry_does_not_hold_is_narrowed_by_name() -> None:
+    """ADR-004: naming `send_email` must not reach a handler by near-miss."""
+
+    case = BY_ID["tq-023"]
+
+    assert case.classifier_labels.tool_name == "send_email"
+    assert _outcome(case).route is ChatRoute.CHAT
 
 
 def test_a_model_that_declines_writes_nothing_and_says_why() -> None:

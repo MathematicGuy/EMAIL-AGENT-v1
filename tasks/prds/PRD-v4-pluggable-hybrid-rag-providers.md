@@ -48,9 +48,7 @@ Implement a unified, configuration-driven **Pluggable Hybrid RAG Provider Archit
 - **Unified Interface Contract (`SemanticMemoryPort`):** All vector search backends must implement the strict protocol contract:
   ```python
   class SemanticMemoryPort(Protocol):
-      async def retrieve(
-          self, request: SemanticRetrievalRequest
-      ) -> SemanticRetrievalResponse: ...
+      async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse: ...
   ```
   Downstream callers (`workflow.py` for Email Action Plan and `memory_gateway.py` for AI Chat) will only accept `SemanticMemoryPort`.
 

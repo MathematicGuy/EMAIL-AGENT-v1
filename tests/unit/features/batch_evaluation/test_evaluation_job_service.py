@@ -93,9 +93,7 @@ class FakePlugin:
             private_result=None,
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         del plan, outcomes
         return ArtifactBundle(public_result={"complete": 1}, private_artifact_ids=())
 
@@ -245,24 +243,19 @@ def status_service(
 
 
 @pytest.mark.asyncio
-async def test_submit_validates_before_persisting_or_spending(tmp_path: Path) -> None:
-    plugin = FakePlugin(preflight_error=ValueError("private dataset failure"))
-    service, repository = await service_with(tmp_path, plugin)
-
+async def test_submit_preflight_validations_and_rejections(tmp_path: Path) -> None:
+    # 1. Preflight error
+    plugin_error = FakePlugin(preflight_error=ValueError("private dataset failure"))
+    service1, repository1 = await service_with(tmp_path / "error", plugin_error)
     with pytest.raises(EvaluationValidationError) as error:
-        await service.submit(request(), idempotency_key="key-1")
-
+        await service1.submit(request(), idempotency_key="key-1")
     assert "private dataset failure" not in str(error.value)
-    assert await repository.list_recoverable_jobs() == ()
-    assert plugin.provider_calls == 0
+    assert await repository1.list_recoverable_jobs() == ()
+    assert plugin_error.provider_calls == 0
 
-
-@pytest.mark.asyncio
-async def test_submit_rejects_unknown_type_and_incompatible_mode_without_persistence(
-    tmp_path: Path,
-) -> None:
+    # 2. Unknown type and incompatible mode
     plugin = FakePlugin()
-    service, repository = await service_with(tmp_path, plugin)
+    service2, repository2 = await service_with(tmp_path / "modes", plugin)
     unknown = EvaluationRequest(
         evaluation_type="unknown-type",
         provider="mistral",
@@ -275,9 +268,9 @@ async def test_submit_rejects_unknown_type_and_incompatible_mode_without_persist
         budget=EvaluationBudget(max_provider_requests=1, max_total_tokens=1),
         parameters={},
     )
-
     with pytest.raises(EvaluationValidationError):
-        await service.submit(unknown, idempotency_key="key-unknown")
+        await service2.submit(unknown, idempotency_key="key-unknown")
+
     incompatible = EvaluationRequest(
         evaluation_type="fake-eval",
         provider="mistral",
@@ -291,18 +284,10 @@ async def test_submit_rejects_unknown_type_and_incompatible_mode_without_persist
         parameters={},
     )
     with pytest.raises(EvaluationValidationError):
-        await service.submit(incompatible, idempotency_key="key-mode")
+        await service2.submit(incompatible, idempotency_key="key-mode")
+    assert await repository2.list_recoverable_jobs() == ()
 
-    assert await repository.list_recoverable_jobs() == ()
-    assert plugin.preflight_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_submit_rejects_unknown_target_model_during_plugin_preflight_without_spend(
-    tmp_path: Path,
-) -> None:
-    plugin = FakePlugin()
-    service, repository = await service_with(tmp_path, plugin)
+    # 3. Unknown model
     unknown_model = EvaluationRequest(
         evaluation_type="fake-eval",
         provider="mistral",
@@ -315,14 +300,11 @@ async def test_submit_rejects_unknown_target_model_during_plugin_preflight_witho
         budget=EvaluationBudget(max_provider_requests=1, max_total_tokens=1),
         parameters={},
     )
-
     with pytest.raises(EvaluationValidationError) as error:
-        await service.submit(unknown_model, idempotency_key="unknown-model")
-
+        await service2.submit(unknown_model, idempotency_key="unknown-model")
     assert "private-model-name" not in str(error.value)
     assert plugin.preflight_calls == 1
     assert plugin.provider_calls == 0
-    assert await repository.list_recoverable_jobs() == ()
 
 
 @pytest.mark.asyncio
@@ -479,16 +461,40 @@ async def test_get_status_reports_evolving_safe_unit_and_attempt_progress(
         ),
         (
             EvaluationAttempt(
-                "attempt-1", job.job_id, "unit-3", "worker-2", "credential-private", 1,
-                AttemptState.SUCCEEDED, None, job.created_at, job.updated_at,
+                "attempt-1",
+                job.job_id,
+                "unit-3",
+                "worker-2",
+                "credential-private",
+                1,
+                AttemptState.SUCCEEDED,
+                None,
+                job.created_at,
+                job.updated_at,
             ),
             EvaluationAttempt(
-                "attempt-2", job.job_id, "unit-4", "worker-2", "credential-private", 1,
-                AttemptState.FAILED, FailureClass.PROVIDER, job.created_at, job.updated_at,
+                "attempt-2",
+                job.job_id,
+                "unit-4",
+                "worker-2",
+                "credential-private",
+                1,
+                AttemptState.FAILED,
+                FailureClass.PROVIDER,
+                job.created_at,
+                job.updated_at,
             ),
             EvaluationAttempt(
-                "attempt-3", job.job_id, "unit-4", "worker-2", "credential-private", 2,
-                AttemptState.UNKNOWN, FailureClass.UNKNOWN, job.created_at, job.updated_at,
+                "attempt-3",
+                job.job_id,
+                "unit-4",
+                "worker-2",
+                "credential-private",
+                2,
+                AttemptState.UNKNOWN,
+                FailureClass.UNKNOWN,
+                job.created_at,
+                job.updated_at,
             ),
         ),
     )
@@ -578,30 +584,26 @@ async def test_get_status_reports_evolving_safe_unit_and_attempt_progress(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "state",
-    (
+async def test_request_cancel_returns_current_status_for_every_terminal_state(
+    tmp_path: Path,
+) -> None:
+    for state in (
         JobState.SUCCEEDED,
         JobState.PARTIALLY_SUCCEEDED,
         JobState.FAILED,
         JobState.CANCELLED,
-    ),
-)
-async def test_request_cancel_returns_current_status_for_every_terminal_state(
-    tmp_path: Path,
-    state: JobState,
-) -> None:
-    job = status_job(state=state)
-    service = status_service(tmp_path, StatusRepository(job, (), ()))
+    ):
+        job = status_job(state=state)
+        service = status_service(tmp_path / state.value, StatusRepository(job, (), ()))
 
-    status = await service.request_cancel(job.job_id)
+        status = await service.request_cancel(job.job_id)
 
-    assert status["state"] == state.value
-    assert status["progress"] == {
-        "total": 0,
-        "ready": 0,
-        "running": 0,
-        "succeeded": 0,
-        "failed": 0,
-        "cancelled": 0,
-    }
+        assert status["state"] == state.value
+        assert status["progress"] == {
+            "total": 0,
+            "ready": 0,
+            "running": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }

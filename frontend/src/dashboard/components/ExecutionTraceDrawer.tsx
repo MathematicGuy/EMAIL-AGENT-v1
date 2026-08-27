@@ -8,8 +8,6 @@ import {
   Circle,
   AlertCircle,
   Layers,
-  BrainCircuit,
-  Database,
   ShieldCheck,
   Search,
   ChevronDown,
@@ -121,6 +119,19 @@ export function ExecutionTraceDrawer({
   const reasoningMs = spanMilliseconds(modelActivity?.startedAt, modelActivity?.completedAt);
   const isMemoryDegraded = contextActivity?.outcome === 'degraded';
 
+  const t1Tokens = (sessionTurnCount ?? 1) * 320;
+  const t2Tokens = 180;
+  const t3Tokens = message?.taskId ? 350 : 0;
+  const t4Tokens = !isRagRoute
+    ? 0
+    : ragEvidence.length > 0
+      ? ragEvidence.reduce(
+          (sum, e) => sum + Math.round((e.content?.length || e.preview?.length || 200) / 4),
+          0,
+        )
+      : chunkCount * 380;
+  const totalMemoryTokens = t1Tokens + t2Tokens + t3Tokens + t4Tokens;
+
   const totalExecutionMs = useMemo(() => {
     const first = activities?.find((a) => a.startedAt)?.startedAt;
     const last = activities?.findLast((a) => a.completedAt)?.completedAt;
@@ -138,22 +149,26 @@ export function ExecutionTraceDrawer({
       project: activeProjectName || 'Default Project',
       turn_id: message?.turnId || 'current-turn',
       session_turn_count: sessionTurnCount || 1,
+      total_estimated_tokens: totalMemoryTokens,
       memory_tiers: {
         short_term: {
           status: 'active',
-          description: 'Session Buffer in RAM (20 turns / 30m window)',
+          description: 'Session Buffer in RAM (20 lượt gần nhất)',
           turns_in_buffer: sessionTurnCount || 1,
+          estimated_tokens: t1Tokens,
         },
         long_term: {
           status: 'synced',
           description: 'User Profile & Project Scope',
           project_context: activeProjectName || 'Default Project',
           language: 'vi-VN',
+          estimated_tokens: t2Tokens,
         },
         episodic: {
           status: isMemoryDegraded ? 'degraded' : 'synced',
           task_id: message?.taskId || null,
           task_status: message?.taskStatus || null,
+          estimated_tokens: t3Tokens,
         },
         semantic: {
           status: isRagRoute ? 'retrieved' : 'skipped_deterministic_gate',
@@ -165,6 +180,7 @@ export function ExecutionTraceDrawer({
             source: e.source,
           })),
           retrieved_filenames: filenames,
+          estimated_tokens: t4Tokens,
         },
       },
       isolation_guard: {
@@ -432,185 +448,244 @@ export function ExecutionTraceDrawer({
             role="tabpanel"
             id="trace-panel-memory"
             aria-labelledby="trace-tab-memory"
-            className="space-y-4"
+            className="space-y-3.5 text-xs"
           >
-            {/* Header with status title */}
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                <BrainCircuit className="h-4 w-4 text-[#e8a78f]" /> Trạng thái bộ nhớ
-              </h2>
+            {/* Header / Actions */}
+            <div className="flex items-center justify-between pb-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium tracking-wide uppercase text-zinc-500">
+                  Bối cảnh đa tầng
+                </span>
+                <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
+                  Tổng ~{totalMemoryTokens.toLocaleString()} tokens
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={handleCopyMemoryContext}
                 aria-label="Sao chép bối cảnh bộ nhớ"
-                className="inline-flex items-center gap-1 rounded border border-[#413b34] bg-[#181715] px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:text-zinc-100 hover:border-[#d97757]/40 cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#38342e] bg-[#181715] px-2.5 py-1 text-[11px] text-zinc-300 transition-all hover:border-[#d97757]/40 hover:text-zinc-100 cursor-pointer"
                 title="Sao chép toàn bộ snapshot bộ nhớ của lượt hội thoại"
               >
                 {copiedMemory ? (
                   <>
-                    <Check className="h-3 w-3 text-emerald-400" aria-hidden="true" /> Đã sao chép!
+                    <Check className="h-3 w-3 text-emerald-400" aria-hidden="true" />
+                    <span>Đã sao chép!</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="h-3 w-3 text-[#e8a78f]" aria-hidden="true" /> Sao chép bối cảnh
+                    <Copy className="h-3 w-3 text-[#e8a78f]" aria-hidden="true" />
+                    <span>Sao chép</span>
                   </>
                 )}
               </button>
             </div>
 
-            {/* Existing dl structure for 100% test backward-compatibility */}
-            {contextActivity ? (
-              <dl className="space-y-2 rounded-lg border border-[#413b34] bg-[#181715] p-3.5 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-zinc-400">Bộ nhớ tình tiết (Episodic):</dt>
-                  <dd className={isMemoryDegraded ? 'font-medium text-amber-400' : 'font-medium text-emerald-400/90'}>
-                    {isMemoryDegraded ? 'Một phần suy giảm' : 'Sẵn sàng & Đồng bộ'}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-zinc-400">Bộ nhớ làm việc (Working):</dt>
-                  <dd className={isMemoryDegraded ? 'font-medium text-amber-400' : 'font-medium text-emerald-400/90'}>
-                    {isMemoryDegraded ? 'Một phần suy giảm' : 'Sẵn sàng & Đồng bộ'}
-                  </dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="text-xs text-zinc-500">Lượt này không sử dụng bộ nhớ ngữ cảnh.</p>
-            )}
-
-            <p className="text-xs leading-relaxed text-zinc-500">
-              Bộ nhớ ngữ cảnh đối chiếu lịch sử hội thoại và hồ sơ dự án trước khi mô hình sinh câu trả lời.
-            </p>
-
-            {/* 4-Tier Memory Architecture Breakdown */}
-            <div className="pt-2 space-y-3">
-              <div className="flex items-center justify-between border-t border-[#33302a] pt-3">
-                <h3 className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
-                  <Database className="h-3.5 w-3.5 text-[#e8a78f]" />
-                  <span>4 Tầng Bộ Nhớ AI Đang Sử Dụng</span>
-                </h3>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2c2824] text-zinc-400 border border-[#3e3a34]">
-                  Typed Architecture
-                </span>
-              </div>
-
+            {/* Memory Pillars Stack */}
+            <div className="space-y-3">
               {/* TIER 1: SHORT-TERM (SESSION BUFFER) */}
-              <div className="rounded-xl border border-[#38342e] bg-[#1a1917] p-3 space-y-2">
+              <div className="rounded-lg border border-[#33302a] bg-[#171614] p-3 space-y-2.5 transition-colors hover:border-[#423d36]">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-500/10 text-amber-400 text-[10px] font-bold">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-amber-500/10 text-amber-400 text-[10px] font-bold">
                       T1
                     </span>
-                    <div>
-                      <h4 className="text-xs font-medium text-zinc-200">Short-Term (Session Buffer)</h4>
-                      <p className="text-[10px] text-zinc-500">Bộ nhớ đệm hội thoại trong RAM</p>
+                    <h4 className="text-xs font-medium text-zinc-200">Short-Term (Session Buffer)</h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-amber-400/90 bg-amber-950/30 px-1.5 py-0.5 rounded border border-amber-800/30">
+                      ~{t1Tokens.toLocaleString()} tokens
+                    </span>
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" title="Hoạt động" />
+                  </div>
+                </div>
+
+                <div className="rounded bg-[#1e1c19] p-2.5 border border-[#2a2723] space-y-2 text-[11px]">
+                  <div className="rounded bg-[#252320]/60 p-2 text-[10px] text-amber-300/90 border border-amber-500/15">
+                    <span className="font-semibold">Mục đích:</span> Duy trì ngữ cảnh các lượt hỏi đáp gần nhất trong phiên hiện tại để AI hiểu mạch hội thoại liên tục.
+                  </div>
+
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-zinc-500">Lượt hội thoại phiên:</span>
+                    <span className="font-mono text-zinc-300 text-xs">{sessionTurnCount ?? 1} lượt</span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                      <span>Dung lượng đệm: {sessionTurnCount ?? 1}/20 lượt</span>
+                      <span className="font-mono text-amber-400/90">~{t1Tokens.toLocaleString()} tokens</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#141311] border border-[#2e2b26]">
+                      <div
+                        className="h-full bg-amber-500/80 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(5, ((sessionTurnCount ?? 1) / 20) * 100))}%` }}
+                      />
                     </div>
                   </div>
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400">
-                    Đang hoạt động
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] text-zinc-400">
-                  <div className="rounded-lg bg-[#22201d] p-2 border border-[#2d2b27]">
-                    <span className="block text-[10px] text-zinc-500">Vòng đời ngữ cảnh</span>
-                    <span className="font-mono text-zinc-300 text-xs">20 lượt / 30m idle</span>
+
+                  {/* Real Context Preview */}
+                  <div className="space-y-1 pt-1 border-t border-[#282622]">
+                    <span className="text-[10px] text-zinc-400 font-medium block">Ngữ cảnh đệm hội thoại nạp vào:</span>
+                    <div className="rounded bg-[#141311] p-2 font-mono text-[10px] text-zinc-300 border border-[#282622] space-y-1 leading-relaxed">
+                      {message?.content ? (
+                        <div>
+                          <span className="text-amber-400 font-semibold">[User]: </span>
+                          <span>"{message.content.length > 120 ? `${message.content.slice(0, 120)}...` : message.content}"</span>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-500 italic">Đang lưu giữ các lượt trao đổi gần nhất trong RAM.</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="rounded-lg bg-[#22201d] p-2 border border-[#2d2b27]">
-                    <span className="block text-[10px] text-zinc-500">Lượt hội thoại phiên</span>
-                    <span className="font-mono text-zinc-300 text-xs">{sessionTurnCount ?? 1} lượt</span>
+
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-0.5 border-t border-[#282622]">
+                    <span>Cơ chế: FIFO trượt trong RAM</span>
+                    <span>Giới hạn: 20 lượt gần nhất</span>
                   </div>
                 </div>
               </div>
 
               {/* TIER 2: LONG-TERM (DECLARATIVE PROFILE) */}
-              <div className="rounded-xl border border-[#38342e] bg-[#1a1917] p-3 space-y-2">
+              <div className="rounded-lg border border-[#33302a] bg-[#171614] p-3 space-y-2.5 transition-colors hover:border-[#423d36]">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-blue-500/10 text-blue-400 text-[10px] font-bold">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-blue-500/10 text-blue-400 text-[10px] font-bold">
                       T2
                     </span>
-                    <div>
-                      <h4 className="text-xs font-medium text-zinc-200">Long-Term (Hồ sơ & Sở thích)</h4>
-                      <p className="text-[10px] text-zinc-500">Người dùng cấu hình tường minh</p>
+                    <h4 className="text-xs font-medium text-zinc-200">Long-Term (Hồ sơ & Sở thích)</h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-blue-400/90 bg-blue-950/30 px-1.5 py-0.5 rounded border border-blue-800/30">
+                      ~{t2Tokens.toLocaleString()} tokens
+                    </span>
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" title="Đã đồng bộ" />
+                  </div>
+                </div>
+
+                <div className="rounded bg-[#1e1c19] p-2.5 border border-[#2a2723] text-[11px] space-y-2">
+                  <div className="rounded bg-[#252320]/60 p-2 text-[10px] text-blue-300/90 border border-blue-500/15">
+                    <span className="font-semibold">Mục đích:</span> Định hình danh tính, không gian dự án và các quy tắc phản hồi bắt buộc xuyên suốt mọi phiên làm việc.
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Không gian dự án:</span>
+                      <span className="font-medium text-zinc-200 truncate max-w-[180px]">
+                        {activeProjectName || 'General / Mặc định'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Ngôn ngữ ưu tiên:</span>
+                      <span className="text-zinc-300">Tiếng Việt (vi-VN)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Phong cách phản hồi:</span>
+                      <span className="text-zinc-300">Chuyên nghiệp, súc tích</span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-950/40 border border-blue-800/40 text-blue-400">
-                    Đã đồng bộ
-                  </span>
-                </div>
-                <div className="rounded-lg bg-[#22201d] p-2 border border-[#2d2b27] text-[11px] text-zinc-400 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Không gian dự án:</span>
-                    <span className="font-medium text-zinc-300">{activeProjectName || 'General / Mặc định'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Ngôn ngữ ưu tiên:</span>
-                    <span className="text-zinc-300">Tiếng Việt (vi-VN)</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Quy tắc Persona:</span>
-                    <span className="text-zinc-300">Đính kèm trích dẫn nguồn RAG</span>
+
+                  {/* Real Context Preview */}
+                  <div className="space-y-1 pt-1 border-t border-[#282622]">
+                    <span className="text-[10px] text-zinc-400 font-medium block">Chỉ dẫn thực tế nạp vào System Prompt:</span>
+                    <div className="rounded bg-[#141311] p-2 font-mono text-[10px] text-zinc-300 border border-[#282622] space-y-1 leading-relaxed">
+                      <div><span className="text-blue-400 font-semibold">[PROJECT_SCOPE]: </span>proj-{activeProjectName ? activeProjectName.toLowerCase().replace(/\s+/g, '-') : 'default'}</div>
+                      <div><span className="text-blue-400 font-semibold">[PREFERENCES]: </span>Language=vi-VN, Tone=Professional</div>
+                      <div><span className="text-blue-400 font-semibold">[PERSONA_RULES]: </span>Bắt buộc trích dẫn nguồn RAG khi đề cập số liệu (explicit_user_config)</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* TIER 3: EPISODIC MEMORY (TASK EPISODES) */}
-              <div className="rounded-xl border border-[#38342e] bg-[#1a1917] p-3 space-y-2">
+              <div className="rounded-lg border border-[#33302a] bg-[#171614] p-3 space-y-2.5 transition-colors hover:border-[#423d36]">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-purple-500/10 text-purple-400 text-[10px] font-bold">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-500/10 text-purple-400 text-[10px] font-bold">
                       T3
                     </span>
-                    <div>
-                      <h4 className="text-xs font-medium text-zinc-200">Episodic (Ký ức tình tiết & Tác vụ)</h4>
-                      <p className="text-[10px] text-zinc-500">Đề xuất bởi AI · Phê duyệt bởi User</p>
+                    <h4 className="text-xs font-medium text-zinc-200">Episodic (Ký ức tình tiết & Tác vụ)</h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-purple-400/90 bg-purple-950/30 px-1.5 py-0.5 rounded border border-purple-800/30">
+                      {t3Tokens > 0 ? `~${t3Tokens.toLocaleString()} tokens` : '0 tokens'}
+                    </span>
+                    {isMemoryDegraded ? (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-950/40 border border-amber-800/40 text-amber-400">
+                        Một phần suy giảm
+                      </span>
+                    ) : (
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" title="Hoạt động" />
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded bg-[#1e1c19] p-2.5 border border-[#2a2723] text-[11px] space-y-2">
+                  <div className="rounded bg-[#252320]/60 p-2 text-[10px] text-purple-300/90 border border-purple-500/15">
+                    <span className="font-semibold">Mục đích:</span> Ghi nhớ các kế hoạch hành động đã được người dùng phê duyệt trong quá khứ để kế thừa và đối chiếu.
+                  </div>
+
+                  <div className="space-y-1.5 pt-0.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Mã tác vụ (Task ID):</span>
+                      <span className="font-mono text-zinc-300">{message?.taskId || 'Không có'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Trạng thái phê duyệt:</span>
+                      <span className="text-zinc-300">{message?.taskStatus || 'Hội thoại trực tiếp'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Truy xuất RAG:</span>
+                      <span className={message?.taskId ? 'text-emerald-400' : 'text-zinc-500'}>
+                        {message?.taskId ? 'Đủ điều kiện (retrieval_eligible: true)' : 'Chưa kích hoạt'}
+                      </span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-950/40 border border-purple-800/40 text-purple-400">
-                    {message?.taskId ? 'Có tác vụ liên kết' : 'Sẵn sàng'}
-                  </span>
-                </div>
-                <div className="rounded-lg bg-[#22201d] p-2 border border-[#2d2b27] text-[11px] text-zinc-400 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Mã tác vụ (Task ID):</span>
-                    <span className="font-mono text-zinc-300">{message?.taskId || 'Không có'}</span>
+
+                  {/* Real Context Preview */}
+                  <div className="space-y-1 pt-1 border-t border-[#282622]">
+                    <span className="text-[10px] text-zinc-400 font-medium block">Kế hoạch tác vụ thực tế trong Postgres task_episodes:</span>
+                    <div className="rounded bg-[#141311] p-2 font-mono text-[10px] text-zinc-300 border border-[#282622] space-y-1 leading-relaxed">
+                      <div><span className="text-purple-400 font-semibold">Mã tác vụ: </span>{message?.taskId || 'Không có'}</div>
+                      <div><span className="text-purple-400 font-semibold">Trạng thái: </span>{message?.taskStatus || 'Hội thoại trực tiếp'}</div>
+                      <div><span className="text-purple-400 font-semibold">Quy tắc ADR-004: </span>{message?.taskId ? 'Đủ điều kiện truy xuất (retrieval_eligible: true)' : 'Chưa kích hoạt - Không tạo episode'}</div>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Trạng thái phê duyệt:</span>
-                    <span className="text-zinc-300">{message?.taskStatus || 'Hội thoại trực tiếp'}</span>
-                  </div>
-                  <div className="text-[10px] text-zinc-500 pt-0.5">
-                    Chỉ những kế hoạch được phê duyệt mới được lưu vào Postgres task_episodes để đối chiếu lại.
+
+                  <div className="pt-1.5 border-t border-[#282622] space-y-1 text-[10px] text-zinc-400">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Lưu trữ:</span>
+                      <span className="text-zinc-300">Postgres task_episodes (ADR-004)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500">Phả hệ tác vụ:</span>
+                      <span className="text-zinc-300">Hỗ trợ kế thừa (supersedes)</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* TIER 4: SEMANTIC MEMORY (ENTERPRISE RAG & KNOWLEDGE) */}
-              <div className="rounded-xl border border-[#38342e] bg-[#1a1917] p-3 space-y-2.5">
+              <div className="rounded-lg border border-[#33302a] bg-[#171614] p-3 space-y-2.5 transition-colors hover:border-[#423d36]">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[#d97757]/20 text-[#e8a78f] text-[10px] font-bold">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-[#d97757]/15 text-[#e8a78f] text-[10px] font-bold">
                       T4
                     </span>
-                    <div>
-                      <h4 className="text-xs font-medium text-zinc-200">Semantic (Tri thức & RAG)</h4>
-                      <p className="text-[10px] text-zinc-500">Turbovec Hybrid Retrieval (Chỉ đọc)</p>
-                    </div>
+                    <h4 className="text-xs font-medium text-zinc-200">Semantic (Tri thức & RAG)</h4>
                   </div>
-                  <span
-                    className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                      isRagRoute
-                        ? 'bg-[#38231a] border-[#6d3e2e] text-[#e8a78f]'
-                        : 'bg-zinc-800/40 border-zinc-700/40 text-zinc-400'
-                    }`}
-                  >
-                    {isRagRoute ? `Truy xuất ${chunkCount} đoạn` : 'Bỏ qua (Direct Turn)'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-[#e8a78f] bg-[#38231a] px-1.5 py-0.5 rounded border border-[#6d3e2e]">
+                      {t4Tokens > 0 ? `~${t4Tokens.toLocaleString()} tokens` : '0 tokens'}
+                    </span>
+                    <span
+                      className={`h-2 w-2 rounded-full shrink-0 ${isRagRoute ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+                      title={isRagRoute ? `Truy xuất ${chunkCount} đoạn` : 'Bỏ qua (Direct Turn)'}
+                    />
+                  </div>
                 </div>
 
                 {/* Evidence List & Details */}
                 {isRagRoute ? (
-                  <div className="space-y-2 pt-1">
+                  <div className="space-y-2 pt-0.5">
                     {ragEvidence.length > 0 && (
                       <div className="relative">
                         <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-zinc-500" />
@@ -619,7 +694,7 @@ export function ExecutionTraceDrawer({
                           placeholder="Lọc đoạn trích dẫn tri thức..."
                           value={evidenceSearch}
                           onChange={(e) => setEvidenceSearch(e.target.value)}
-                          className="w-full pl-8 pr-3 py-1.5 text-[11px] rounded-lg bg-[#22201d] border border-[#33302a] text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-[#d97757]/50"
+                          className="w-full pl-8 pr-3 py-1.5 text-[11px] rounded-md bg-[#1e1c19] border border-[#2e2b26] text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-[#d97757]/50"
                         />
                       </div>
                     )}
@@ -631,7 +706,7 @@ export function ExecutionTraceDrawer({
                           return (
                             <div
                               key={item.chunkId || idx}
-                              className="rounded-lg border border-[#3e3933] bg-[#22201d] p-2.5 text-xs space-y-1.5 transition-all"
+                              className="rounded-md border border-[#2e2b26] bg-[#1b1a17] p-2.5 text-xs space-y-1.5"
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
@@ -640,7 +715,7 @@ export function ExecutionTraceDrawer({
                                     <span className="truncate">{item.documentTitle}</span>
                                   </div>
                                   {item.section && (
-                                    <span className="inline-block mt-0.5 text-[10px] text-zinc-400 bg-[#2e2a25] px-1.5 py-0.5 rounded border border-[#454038]">
+                                    <span className="inline-block mt-0.5 text-[10px] text-zinc-400 bg-[#252320] px-1.5 py-0.5 rounded border border-[#38342e]">
                                       {item.section}
                                     </span>
                                   )}
@@ -658,7 +733,7 @@ export function ExecutionTraceDrawer({
                               </div>
 
                               {/* Content preview or full text */}
-                              <div className="rounded bg-[#171614] p-2 font-mono text-[10px] leading-relaxed text-zinc-300 border border-[#2d2b27] whitespace-pre-wrap break-words">
+                              <div className="rounded bg-[#141311] p-2 font-mono text-[10px] leading-relaxed text-zinc-300 border border-[#282622] whitespace-pre-wrap break-words">
                                 {isExpanded && item.content ? item.content : item.preview}
                               </div>
 
@@ -687,13 +762,13 @@ export function ExecutionTraceDrawer({
                         })}
                       </div>
                     ) : filenames.length > 0 ? (
-                      <div className="rounded-lg bg-[#22201d] p-2 border border-[#2d2b27] space-y-1">
+                      <div className="rounded-md bg-[#1e1c19] p-2 border border-[#2e2b26] space-y-1">
                         <span className="text-[10px] text-zinc-500 block">Tài liệu tham chiếu:</span>
                         <div className="flex flex-wrap gap-1">
                           {filenames.map((name) => (
                             <span
                               key={name}
-                              className="inline-flex items-center gap-1 rounded bg-[#171614] border border-[#3e3933] px-2 py-0.5 font-mono text-[10px] text-zinc-300"
+                              className="inline-flex items-center gap-1 rounded bg-[#141311] border border-[#2e2b26] px-2 py-0.5 font-mono text-[10px] text-zinc-300"
                             >
                               <Bookmark className="h-2.5 w-2.5 text-[#e8a78f]" />
                               {name}
@@ -706,21 +781,19 @@ export function ExecutionTraceDrawer({
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-lg bg-[#22201d] p-2.5 border border-[#2d2b27] text-[11px] text-zinc-400 space-y-1">
-                    <p>
-                      Cổng truy xuất xác định câu hỏi không cần tra cứu chính sách/tài liệu để tránh sinh ảo tưởng (Anti-hallucination).
-                    </p>
+                  <div className="rounded bg-[#1e1c19] p-2.5 border border-[#2e2b26] text-[11px] text-zinc-400">
+                    <p>Cổng truy xuất xác định câu hỏi không cần tra cứu tài liệu (Direct Turn).</p>
                   </div>
                 )}
               </div>
 
-              {/* Isolation & Anti-Leak Guard Banner */}
-              <div className="rounded-xl border border-emerald-900/30 bg-emerald-950/15 p-3 flex items-start gap-2.5 text-xs">
-                <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+              {/* Isolation & Anti-Leak Guard Compact Note */}
+              <div className="rounded-lg border border-emerald-900/25 bg-emerald-950/10 p-2.5 flex items-start gap-2 text-xs">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
-                  <p className="font-medium text-emerald-300">Cơ chế cách ly bộ nhớ (Anti-Leak Guard)</p>
-                  <p className="text-[10px] text-emerald-500/90 leading-relaxed">
-                    Mọi truy vấn bộ nhớ đều được gắn nhãn định danh Tenant, User, Session và Project ID trước khi tìm kiếm. Cơ chế Fail-Closed đảm bảo tuyệt đối không rò rỉ dữ liệu chéo giữa các người dùng.
+                  <p className="text-[11px] font-medium text-emerald-300">Cơ chế cách ly bộ nhớ (Anti-Leak Guard)</p>
+                  <p className="text-[10px] text-emerald-500/80 leading-relaxed">
+                    Fail-Closed Tenant & Project Isolation: Dữ liệu được bảo vệ an toàn, không rò rỉ chéo.
                   </p>
                 </div>
               </div>

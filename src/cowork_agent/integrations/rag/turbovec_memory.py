@@ -100,9 +100,7 @@ class TurbovecSemanticMemory:
             self._index.write(str(self._index_path))
             logger.info("Saved Turbovec index snapshot to: %s", self._index_path)
 
-    async def retrieve(
-        self, request: SemanticRetrievalRequest
-    ) -> SemanticRetrievalResponse:
+    async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         if self._index is None:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
@@ -129,16 +127,12 @@ class TurbovecSemanticMemory:
         # Turbovec SIMD Search with allowlist filtering
         top_k = request.limits.top_k if request.limits.top_k > 0 else self._top_k_default
         min_score = (
-            request.limits.min_score
-            if request.limits.min_score >= 0
-            else self._min_score_default
+            request.limits.min_score if request.limits.min_score >= 0 else self._min_score_default
         )
         allowed_arr = np.array(allowed_indices, dtype=np.uint64)
 
         # Turbovec search returns (scores_2d, ids_2d)
-        scores_arr, ids_arr = self._index.search(
-            padded_query, k=top_k, allowlist=allowed_arr
-        )
+        scores_arr, ids_arr = self._index.search(padded_query, k=top_k, allowlist=allowed_arr)
 
         raw_scores = scores_arr[0]
         raw_ids = ids_arr[0]

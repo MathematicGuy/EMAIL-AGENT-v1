@@ -67,4 +67,3 @@ def reorder_u_shaped(items: Sequence[T]) -> tuple[T, ...]:
             right.append(item)
 
     return tuple(left + right[::-1])
-

@@ -525,9 +525,7 @@ class _LinkCollector:
 
 
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"'\[\]]+", re.IGNORECASE)
-_MARKDOWN_LINK_PATTERN = re.compile(
-    r"\[([^\]\r\n]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE
-)
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]\r\n]+)\]\((https?://[^\s)]+)\)", re.IGNORECASE)
 _HTML_LIKE_PLAIN_PATTERN = re.compile(
     r"(?is)<!--|</?(?:a|body|br|div|html|p|strong|table|tbody|td|th|thead|tr|"
     r"v:[\w-]+|w:[\w-]+)\b"
@@ -648,12 +646,8 @@ def _anchor_label(value: str) -> str:
     visible = re.sub(r"\s+", " ", html.unescape(visible)).strip()
     if visible:
         return visible
-    alt_values = re.findall(
-        r"(?is)<img\b[^>]*?\balt\s*=\s*(['\"])(.*?)\1", value
-    )
-    return re.sub(
-        r"\s+", " ", " ".join(html.unescape(alt) for _, alt in alt_values)
-    ).strip()
+    alt_values = re.findall(r"(?is)<img\b[^>]*?\balt\s*=\s*(['\"])(.*?)\1", value)
+    return re.sub(r"\s+", " ", " ".join(html.unescape(alt) for _, alt in alt_values)).strip()
 
 
 def _html_to_text(value: str, links: _LinkCollector | None = None) -> str:
@@ -748,9 +742,7 @@ def _anchor_to_text(match: re.Match[str], links: _LinkCollector) -> str:
     return f" {source_label} [{ref}] " if source_label else " "
 
 
-def _extract_html_links(
-    value: str, links: _LinkCollector
-) -> list[tuple[str, str]]:
+def _extract_html_links(value: str, links: _LinkCollector) -> list[tuple[str, str]]:
     anchor_pattern = r"(?is)<a\b[^>]*?href\s*=\s*(['\"])(.*?)\1[^>]*>(.*?)</a>"
     extracted: list[tuple[str, str]] = []
     for match in re.finditer(anchor_pattern, value):

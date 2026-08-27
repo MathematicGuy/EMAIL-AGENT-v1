@@ -214,9 +214,7 @@ class HybridProjectDocumentStore:
             if len(vectors) != len(chunks) or not vectors or not vectors[0]:
                 raise ValueError("embedding response does not match project chunks")
             if any(len(vector) != self._vector_size for vector in vectors):
-                raise ValueError(
-                    "project embedding dimension does not match index configuration"
-                )
+                raise ValueError("project embedding dimension does not match index configuration")
             stage_outcome = "success"
         finally:
             log_project_document_timing(
@@ -408,9 +406,7 @@ class HybridProjectDocumentStore:
                 score=scores[chunk.vector_id],
             )
             for chunk in (
-                by_vector_id[vector_id]
-                for vector_id in scores
-                if vector_id in by_vector_id
+                by_vector_id[vector_id] for vector_id in scores if vector_id in by_vector_id
             )
         )
 
@@ -479,20 +475,14 @@ class CanonicalProjectDocumentRetriever:
                 timeout=self._timeout_seconds,
             )
         except TimeoutError:
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="retrieval_timeout"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="retrieval_timeout")
         except ProjectIndexUnavailable:
             # The project's .tvim is missing or unreadable. Fail closed rather
             # than rebuild: reconstruction means re-embedding every chunk, which
             # does not belong behind a user's query.
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="index_unavailable"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="index_unavailable")
         except Exception:
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="retrieval_unavailable"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="retrieval_unavailable")
 
     async def _retrieve_with_retries(
         self, request: ProjectDocumentQuery

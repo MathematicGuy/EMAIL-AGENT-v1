@@ -13,9 +13,7 @@ class StorageUnavailable(RuntimeError):
 class SupabasePrivateStorage:
     """Creates signed URLs without ever returning the server credential."""
 
-    def __init__(
-        self, url: str, secret_key: str, bucket: str, client: httpx.AsyncClient
-    ) -> None:
+    def __init__(self, url: str, secret_key: str, bucket: str, client: httpx.AsyncClient) -> None:
         self._url = url.rstrip("/")
         self._secret_key = secret_key
         self._bucket = bucket

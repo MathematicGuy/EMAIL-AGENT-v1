@@ -1,12 +1,9 @@
-
 from cowork_agent.integrations.rag.structure_normalizer import normalize_structure
 from cowork_agent.integrations.rag.structure_profile import DEFAULT_PROFILE
 
 
 def test_promotes_plain_text_article_to_its_own_depth() -> None:
-    assert normalize_structure("Điều 1. Phạm vi điều chỉnh") == (
-        "#### Điều 1. Phạm vi điều chỉnh"
-    )
+    assert normalize_structure("Điều 1. Phạm vi điều chỉnh") == ("#### Điều 1. Phạm vi điều chỉnh")
 
 
 def test_promotes_each_division_to_its_own_depth() -> None:
@@ -21,9 +18,7 @@ def test_promotes_each_division_to_its_own_depth() -> None:
 
 
 def test_bare_division_adopts_the_uppercase_title_beneath_it() -> None:
-    assert normalize_structure("Chương I\n\nQUY ĐỊNH CHUNG") == (
-        "## Chương I — QUY ĐỊNH CHUNG"
-    )
+    assert normalize_structure("Chương I\n\nQUY ĐỊNH CHUNG") == ("## Chương I — QUY ĐỊNH CHUNG")
 
 
 def test_long_numbered_clause_is_left_as_prose() -> None:

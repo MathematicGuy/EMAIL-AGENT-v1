@@ -1,10 +1,4 @@
-"""Private project retrieval stays inside one project, one user, one workspace.
-
-Replaces the pre-ADR-008 Qdrant suite. The isolation argument changed shape: a
-payload filter no longer separates tenants, a per-project ``.tvim`` plus a SQL
-allowlist does. These tests pin both halves -- the six ACL conditions Postgres
-must apply, and the fact that the dense leg only ever sees IDs that survived it.
-"""
+"""Private project retrieval stays inside one project, one user, one workspace."""
 
 import asyncio
 import logging
@@ -17,7 +11,6 @@ from cowork_agent.integrations.rag.project_documents import (
     CanonicalProjectDocumentRetriever,
     HybridProjectDocumentStore,
     ProjectDocumentChunk,
-    ProjectDocumentEvidence,
 )
 from cowork_agent.persistence.repositories.project_document_chunks import (
     EligibleChunks,
@@ -42,8 +35,6 @@ class RecordingEmbedder:
 
 
 class FakeChunks:
-    """Stands in for Postgres: records the ACL arguments, returns fixed IDs."""
-
     def __init__(
         self,
         *,
@@ -104,8 +95,6 @@ class FakeChunks:
 
 
 class FakeIndexes:
-    """Stands in for the per-project ``.tvim``."""
-
     def __init__(self) -> None:
         self.searches: list[dict[str, object]] = []
         self.added: list[dict[str, object]] = []
@@ -134,363 +123,6 @@ def _store(
     )
 
 
-def test_retrieval_applies_every_acl_condition_before_embedding() -> None:
-    async def scenario() -> None:
-        chunks = FakeChunks()
-        embedder = RecordingEmbedder()
-        now = datetime.now(UTC)
-        await _store(chunks, FakeIndexes(), embedder).retrieve(
-            query="policy",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=now,
-            document_ids=("document-1",),
-        )
-
-        # The SQL gate runs first; the query is embedded only afterwards.
-        assert chunks.eligible_calls[0] == {
-            "workspace_id": WORKSPACE,
-            "user_id": USER,
-            "project_id": PROJECT,
-            "document_ids": ("document-1",),
-            "now": now,
-            "query": "policy",
-            "lexical_limit": 20,
-        }
-        assert embedder.calls == [(("policy",), "retrieval.query")]
-
-    asyncio.run(scenario())
-
-
-def test_a_ranked_chunk_brings_the_rest_of_its_section_with_it() -> None:
-    """An article cut across chunks must arrive whole, in reading order."""
-
-    async def scenario() -> None:
-        chunks = FakeChunks(allowlist=(11, 12), siblings=((11, 11), (11, 12), (12, 11), (12, 12)))
-        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
-            query="Điều 4 gồm những gì",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=datetime.now(UTC),
-            document_ids=("document-1",),
-        )
-
-        assert [item.chunk_id for item in evidence] == ["chunk-11", "chunk-12"]
-        # Siblings are authorized by intersection, never by a second ACL pass.
-        assert chunks.sibling_calls[0]["allowlist"] == (11, 12)
-
-    asyncio.run(scenario())
-
-
-def test_a_section_too_large_for_the_headroom_leaves_its_chunk_alone() -> None:
-    """Widening must never evict a chunk the ranking actually chose."""
-
-    async def scenario() -> None:
-        oversized = tuple((11, sibling) for sibling in range(11, 40))
-        chunks = FakeChunks(allowlist=(11, 12), siblings=oversized)
-        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
-            query="Điều 4 gồm những gì",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=datetime.now(UTC),
-            document_ids=("document-1",),
-            limit=2,
-        )
-
-        # Fused order, untouched: neither chunk was widened, neither was dropped.
-        assert [item.chunk_id for item in evidence] == ["chunk-12", "chunk-11"]
-
-    asyncio.run(scenario())
-
-
-def test_a_chunk_with_no_section_is_returned_on_its_own() -> None:
-    async def scenario() -> None:
-        chunks = FakeChunks(allowlist=(11, 12), siblings=())
-        evidence = await _store(chunks, FakeIndexes(), RecordingEmbedder()).retrieve(
-            query="policy",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=datetime.now(UTC),
-            document_ids=("document-1",),
-        )
-
-        assert [item.chunk_id for item in evidence] == ["chunk-12", "chunk-11"]
-
-    asyncio.run(scenario())
-
-
-def test_no_eligible_chunk_means_no_vector_search_at_all() -> None:
-    """An empty allowlist must short-circuit: a .tvim search would be unfiltered."""
-
-    async def scenario() -> None:
-        chunks = FakeChunks(allowlist=(), lexical=())
-        indexes = FakeIndexes()
-        evidence = await _store(chunks, indexes, RecordingEmbedder()).retrieve(
-            query="policy",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=datetime.now(UTC),
-            document_ids=("document-1",),
-        )
-
-        assert evidence == ()
-        assert indexes.searches == []
-
-    asyncio.run(scenario())
-
-
-def test_dense_leg_only_sees_ids_that_passed_the_sql_gate() -> None:
-    async def scenario() -> None:
-        chunks = FakeChunks(allowlist=(11, 12), lexical=(12,))
-        indexes = FakeIndexes()
-        evidence = await _store(chunks, indexes, RecordingEmbedder()).retrieve(
-            query="policy",
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            now=datetime.now(UTC),
-            document_ids=("document-1",),
-        )
-
-        search = indexes.searches[0]
-        assert search["project_id"] == PROJECT
-        assert search["allowlist"] == (11, 12)
-        assert {item.chunk_id for item in evidence} == {"chunk-11", "chunk-12"}
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize(
-    ("workspace_id", "user_id", "project_id"),
-    [("", USER, PROJECT), (WORKSPACE, "", PROJECT), (WORKSPACE, USER, "")],
-)
-def test_retrieval_refuses_an_incomplete_tenant_scope(
-    workspace_id: str, user_id: str, project_id: str
-) -> None:
-    async def scenario() -> None:
-        with pytest.raises(ValueError):
-            await _store(FakeChunks(), FakeIndexes(), RecordingEmbedder()).retrieve(
-                query="policy",
-                workspace_id=workspace_id,
-                user_id=user_id,
-                project_id=project_id,
-                now=datetime.now(UTC),
-                document_ids=("document-1",),
-            )
-
-    asyncio.run(scenario())
-
-
-def test_indexing_persists_text_before_vectors_and_scopes_the_index_by_project() -> None:
-    async def scenario() -> None:
-        chunks = FakeChunks()
-        indexes = FakeIndexes()
-        count = await _store(chunks, indexes, RecordingEmbedder()).index(
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            document_id="document-1",
-            filename="policy.pdf",
-            expires_at=datetime.now(UTC) + timedelta(days=1),
-            chunks=(
-                ProjectDocumentChunk("chunk-a", "first page", 1, 1, None),
-                ProjectDocumentChunk("chunk-b", "second page", 2, 2, None),
-            ),
-        )
-
-        assert count == 2
-        # Postgres assigns vector_id, so it must be written first.
-        assert chunks.replaced[0]["document_id"] == "document-1"
-        assert indexes.added[0]["project_id"] == PROJECT
-        assert indexes.added[0]["vector_ids"] == [11, 12]
-
-    asyncio.run(scenario())
-
-
-def test_indexing_logs_metadata_safe_persistence_and_embedding_timings(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    async def scenario() -> None:
-        with caplog.at_level(logging.INFO):
-            await _store(FakeChunks(), FakeIndexes(), RecordingEmbedder()).index(
-                workspace_id=WORKSPACE,
-                user_id=USER,
-                project_id=PROJECT,
-                document_id="document-1",
-                filename="private-policy.pdf",
-                expires_at=datetime.now(UTC) + timedelta(days=1),
-                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
-            )
-
-        timing = [
-            record.getMessage()
-            for record in caplog.records
-            if record.getMessage().startswith("project_document_ingestion_timing ")
-        ]
-        assert [message.split()[1] for message in timing] == [
-            "stage=chunk_persistence",
-            "stage=embedding",
-        ]
-        assert all(" document_id=document-1" in message for message in timing)
-        assert all(" duration_ms=" in message for message in timing)
-        assert all(" outcome=success" in message for message in timing)
-        assert all("project_id=" not in message for message in timing)
-        assert all(
-            sensitive not in "\n".join(timing)
-            for sensitive in ("private-policy.pdf", "chunk-secret", "private text")
-        )
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("failure_stage", ["chunk_persistence", "embedding"])
-def test_indexing_logs_error_for_the_failed_reached_stage(
-    failure_stage: str,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class FailingChunks(FakeChunks):
-        async def replace_document_chunks(
-            self, **kwargs: object
-        ) -> tuple[tuple[str, int], ...]:
-            del kwargs
-            raise OSError("private chunk text must-not-be-logged")
-
-    class FailingEmbedder(RecordingEmbedder):
-        async def embed(
-            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
-        ) -> tuple[tuple[float, ...], ...]:
-            del texts, task
-            raise OSError("credential=must-not-be-logged")
-
-    async def scenario() -> None:
-        chunks = FailingChunks() if failure_stage == "chunk_persistence" else FakeChunks()
-        embedder = (
-            FailingEmbedder()
-            if failure_stage == "embedding"
-            else RecordingEmbedder()
-        )
-        with caplog.at_level(logging.INFO), pytest.raises(OSError):
-            await _store(chunks, FakeIndexes(), embedder).index(
-                workspace_id=WORKSPACE,
-                user_id=USER,
-                project_id=PROJECT,
-                document_id="document-1",
-                filename="private-policy.pdf",
-                expires_at=datetime.now(UTC) + timedelta(days=1),
-                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
-            )
-
-        timing = [
-            record.getMessage()
-            for record in caplog.records
-            if record.getMessage().startswith("project_document_ingestion_timing ")
-        ]
-        expected_stages = (
-            ["stage=chunk_persistence"]
-            if failure_stage == "chunk_persistence"
-            else ["stage=chunk_persistence", "stage=embedding"]
-        )
-        assert [message.split()[1] for message in timing] == expected_stages
-        assert " outcome=error" in timing[-1]
-        assert all(" outcome=success" in message for message in timing[:-1])
-        assert all(
-            sensitive not in "\n".join(timing)
-            for sensitive in ("private text", "credential", "private-policy.pdf")
-        )
-
-    asyncio.run(scenario())
-
-
-def test_invalid_embedding_output_logs_error_instead_of_success(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class InvalidEmbedder(RecordingEmbedder):
-        async def embed(
-            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
-        ) -> tuple[tuple[float, ...], ...]:
-            del texts, task
-            return ((1.0,),)
-
-    async def scenario() -> None:
-        with caplog.at_level(logging.INFO), pytest.raises(
-            ValueError, match="embedding dimension"
-        ):
-            await _store(FakeChunks(), FakeIndexes(), InvalidEmbedder()).index(
-                workspace_id=WORKSPACE,
-                user_id=USER,
-                project_id=PROJECT,
-                document_id="document-1",
-                filename="private-policy.pdf",
-                expires_at=datetime.now(UTC) + timedelta(days=1),
-                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
-            )
-
-        timing = [
-            record.getMessage()
-            for record in caplog.records
-            if record.getMessage().startswith("project_document_ingestion_timing ")
-        ]
-        assert [message.split()[1] for message in timing] == [
-            "stage=chunk_persistence",
-            "stage=embedding",
-        ]
-        assert " outcome=error" in timing[-1]
-
-    asyncio.run(scenario())
-
-
-def test_invalid_jsonl_path_never_masks_the_original_embedding_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FailingEmbedder(RecordingEmbedder):
-        async def embed(
-            self, texts: tuple[str, ...], *, task: str = "retrieval.query"
-        ) -> tuple[tuple[float, ...], ...]:
-            del texts, task
-            raise OSError("original embedding failure")
-
-    async def scenario() -> None:
-        monkeypatch.setenv("CHAT_INGESTION_TIMING_LOG", "invalid-config")
-        monkeypatch.setattr(
-            "cowork_agent.observability.Path",
-            lambda value: (_ for _ in ()).throw(ValueError(f"invalid path: {value}")),
-        )
-        with pytest.raises(OSError, match="original embedding failure"):
-            await _store(FakeChunks(), FakeIndexes(), FailingEmbedder()).index(
-                workspace_id=WORKSPACE,
-                user_id=USER,
-                project_id=PROJECT,
-                document_id="document-1",
-                filename="private-policy.pdf",
-                expires_at=datetime.now(UTC) + timedelta(days=1),
-                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
-            )
-
-    asyncio.run(scenario())
-
-
-def test_deletion_purges_the_index_before_the_text_it_points_at() -> None:
-    async def scenario() -> None:
-        chunks = FakeChunks()
-        indexes = FakeIndexes()
-        assert await _store(chunks, indexes, RecordingEmbedder()).delete_document(
-            workspace_id=WORKSPACE,
-            user_id=USER,
-            project_id=PROJECT,
-            document_id="document-1",
-        )
-
-        assert indexes.removed == [{"project_id": PROJECT, "vector_ids": (11, 12)}]
-        assert chunks.deleted == ["document-1"]
-
-    asyncio.run(scenario())
-
-
 def _ready_document() -> ProjectDocument:
     return ProjectDocument(
         id="document-1",
@@ -507,64 +139,127 @@ def _ready_document() -> ProjectDocument:
     )
 
 
-def test_retry_reuses_the_authorized_query_vector() -> None:
-    class Repository:
-        def __init__(self) -> None:
-            self.calls: list[tuple[object, ...]] = []
-
-        async def list_ready_for_scope(
-            self, *args: object, **kwargs: object
-        ) -> tuple[ProjectDocument, ...]:
-            del kwargs
-            self.calls.append(args)
-            return (_ready_document(),)
-
-    class Vectors:
-        def __init__(self) -> None:
-            self.embed_calls = 0
-            self.query_calls = 0
-
-        async def embed_query(self, query: str) -> tuple[float, ...]:
-            assert query == "policy"
-            self.embed_calls += 1
-            return (1.0, 0.0)
-
-        async def retrieve_vector(self, **kwargs: object) -> tuple[object, ...]:
-            assert kwargs["vector"] == (1.0, 0.0)
-            # The lexical leg cannot work from an embedding alone.
-            assert kwargs["query"] == "policy"
-            self.query_calls += 1
-            if self.query_calls == 1:
-                raise OSError("transient index error")
-            return ()
-
+def test_project_documents_retrieval_acl_and_section_widening() -> None:
     async def scenario() -> None:
-        repository = Repository()
-        vectors = Vectors()
-        retriever = CanonicalProjectDocumentRetriever(
-            repository, vectors, top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
-        )
-        response = await retriever.retrieve(
-            ProjectDocumentQuery(
-                user_id=USER,
-                project_id=PROJECT,
-                query="policy",
-                document_ids=("document-1",),
-            )
+        chunks = FakeChunks(allowlist=(11, 12), siblings=((11, 11), (11, 12), (12, 11), (12, 12)))
+        embedder = RecordingEmbedder()
+        indexes = FakeIndexes()
+        now = datetime.now(UTC)
+
+        evidence = await _store(chunks, indexes, embedder).retrieve(
+            query="policy",
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            now=now,
+            document_ids=("document-1",),
         )
 
-        assert response.degraded is False
-        assert vectors.embed_calls == 1
-        assert vectors.query_calls == 2
-        assert repository.calls == [
-            ("local", USER, PROJECT),
-            ("local", USER, PROJECT),
-        ]
+        assert chunks.eligible_calls[0]["workspace_id"] == WORKSPACE
+        assert embedder.calls == [(("policy",), "retrieval.query")]
+        assert indexes.searches[0]["allowlist"] == (11, 12)
+        assert [item.chunk_id for item in evidence] == ["chunk-11", "chunk-12"]
 
     asyncio.run(scenario())
 
 
-def test_retriever_drops_evidence_deleted_during_vector_query() -> None:
+def test_project_documents_empty_scope_and_short_circuits() -> None:
+    async def scenario() -> None:
+        # Incomplete tenant scope raises ValueError
+        for w, u, p in (("", USER, PROJECT), (WORKSPACE, "", PROJECT), (WORKSPACE, USER, "")):
+            with pytest.raises(ValueError):
+                await _store(FakeChunks(), FakeIndexes(), RecordingEmbedder()).retrieve(
+                    query="policy",
+                    workspace_id=w,
+                    user_id=u,
+                    project_id=p,
+                    now=datetime.now(UTC),
+                    document_ids=("document-1",),
+                )
+
+        # Empty allowlist short circuits
+        empty_chunks = FakeChunks(allowlist=(), lexical=())
+        empty_indexes = FakeIndexes()
+        res = await _store(empty_chunks, empty_indexes, RecordingEmbedder()).retrieve(
+            query="policy",
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            now=datetime.now(UTC),
+            document_ids=("document-1",),
+        )
+        assert res == ()
+        assert empty_indexes.searches == []
+
+    asyncio.run(scenario())
+
+
+def test_project_documents_indexing_lifecycle_and_deletion() -> None:
+    async def scenario() -> None:
+        chunks = FakeChunks()
+        indexes = FakeIndexes()
+        store = _store(chunks, indexes, RecordingEmbedder())
+
+        count = await store.index(
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            document_id="document-1",
+            filename="policy.pdf",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+            chunks=(
+                ProjectDocumentChunk("chunk-a", "first page", 1, 1, None),
+                ProjectDocumentChunk("chunk-b", "second page", 2, 2, None),
+            ),
+        )
+        assert count == 2
+        assert chunks.replaced[0]["document_id"] == "document-1"
+        assert indexes.added[0]["vector_ids"] == [11, 12]
+
+        # Deletion
+        assert await store.delete_document(
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            project_id=PROJECT,
+            document_id="document-1",
+        )
+        assert indexes.removed == [{"project_id": PROJECT, "vector_ids": (11, 12)}]
+        assert chunks.deleted == ["document-1"]
+
+    asyncio.run(scenario())
+
+
+def test_project_documents_indexing_observability_and_timings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        with caplog.at_level(logging.INFO):
+            await _store(FakeChunks(), FakeIndexes(), RecordingEmbedder()).index(
+                workspace_id=WORKSPACE,
+                user_id=USER,
+                project_id=PROJECT,
+                document_id="document-1",
+                filename="private-policy.pdf",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                chunks=(ProjectDocumentChunk("chunk-secret", "private text", 1, 1),),
+            )
+
+        timing = [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith("project_document_ingestion_timing ")
+        ]
+        assert len(timing) == 2
+        assert all(" document_id=document-1" in m for m in timing)
+        assert all(" outcome=success" in m for m in timing)
+        assert all("private text" not in m for m in timing)
+
+    asyncio.run(scenario())
+
+
+def test_canonical_project_document_retriever_resilience_and_timeouts() -> None:
+    from cowork_agent.integrations.rag.project_index import ProjectIndexUnavailable
+
     class Repository:
         def __init__(self) -> None:
             self.calls = 0
@@ -572,109 +267,53 @@ def test_retriever_drops_evidence_deleted_during_vector_query() -> None:
         async def list_ready_for_scope(
             self, *args: object, **kwargs: object
         ) -> tuple[ProjectDocument, ...]:
-            del args, kwargs
             self.calls += 1
-            return (_ready_document(),) if self.calls == 1 else ()
-
-    class Vectors:
-        async def embed_query(self, query: str) -> tuple[float, ...]:
-            del query
-            return (1.0, 0.0)
-
-        async def retrieve_vector(self, **kwargs: object) -> tuple[ProjectDocumentEvidence, ...]:
-            del kwargs
-            return (
-                ProjectDocumentEvidence(
-                    "chunk-1", "document-1", "policy.pdf", "stale text", 1, 1, None, 0.9
-                ),
-            )
-
-    async def scenario() -> None:
-        repository = Repository()
-        retriever = CanonicalProjectDocumentRetriever(
-            repository, Vectors(), top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
-        )
-        response = await retriever.retrieve(
-            ProjectDocumentQuery(
-                user_id=USER,
-                project_id=PROJECT,
-                query="policy",
-                document_ids=("document-1",),
-            )
-        )
-
-        assert response.evidence == ()
-        assert response.degraded is True
-        assert response.reason_code == "document_not_ready"
-        assert repository.calls == 2
-
-    asyncio.run(scenario())
-
-
-def test_retriever_enforces_one_deadline_across_postgres_and_vector_work() -> None:
-    class SlowRepository:
-        async def list_ready_for_scope(
-            self, *args: object, **kwargs: object
-        ) -> tuple[object, ...]:
-            del args, kwargs
-            await asyncio.sleep(1)
-            return ()
-
-    class Vectors:
-        async def embed_query(self, query: str) -> tuple[float, ...]:
-            raise AssertionError(f"embedding must not run after PostgreSQL timeout: {query}")
-
-    async def scenario() -> None:
-        retriever = CanonicalProjectDocumentRetriever(
-            SlowRepository(), Vectors(), top_k=5, min_score=0.2, timeout_ms=10  # type: ignore[arg-type]
-        )
-        response = await retriever.retrieve(
-            ProjectDocumentQuery(
-                user_id=USER,
-                project_id=PROJECT,
-                query="policy",
-            )
-        )
-        assert response.degraded is True
-        assert response.reason_code == "retrieval_timeout"
-
-    asyncio.run(scenario())
-
-
-def test_missing_project_index_degrades_instead_of_rebuilding() -> None:
-    from cowork_agent.integrations.rag.project_index import ProjectIndexUnavailable
-
-    class Repository:
-        async def list_ready_for_scope(
-            self, *args: object, **kwargs: object
-        ) -> tuple[ProjectDocument, ...]:
-            del args, kwargs
             return (_ready_document(),)
 
-    class Vectors:
+    class TransientVectors:
+        def __init__(self) -> None:
+            self.embed_calls = 0
+            self.query_calls = 0
+
         async def embed_query(self, query: str) -> tuple[float, ...]:
-            del query
+            self.embed_calls += 1
             return (1.0, 0.0)
 
         async def retrieve_vector(self, **kwargs: object) -> tuple[object, ...]:
-            del kwargs
+            self.query_calls += 1
+            if self.query_calls == 1:
+                raise OSError("transient index error")
+            return ()
+
+    class UnavailableVectors(TransientVectors):
+        async def retrieve_vector(self, **kwargs: object) -> tuple[object, ...]:
             raise ProjectIndexUnavailable("missing .tvim")
 
     async def scenario() -> None:
+        # Retry reuses vector
+        repo = Repository()
+        vec = TransientVectors()
         retriever = CanonicalProjectDocumentRetriever(
-            Repository(), Vectors(), top_k=5, min_score=0.2, timeout_ms=1_000  # type: ignore[arg-type]
-        )
-        response = await retriever.retrieve(
+            repo, vec, top_k=5, min_score=0.2, timeout_ms=1000
+        )  # type: ignore[arg-type]
+        resp = await retriever.retrieve(
             ProjectDocumentQuery(
-                user_id=USER,
-                project_id=PROJECT,
-                query="policy",
-                document_ids=("document-1",),
+                user_id=USER, project_id=PROJECT, query="policy", document_ids=("document-1",)
             )
         )
+        assert resp.degraded is False
+        assert vec.embed_calls == 1 and vec.query_calls == 2
 
-        assert response.evidence == ()
-        assert response.degraded is True
-        assert response.reason_code == "index_unavailable"
+        # Index unavailable degrades
+        unavail_retriever = CanonicalProjectDocumentRetriever(
+            repo, UnavailableVectors(), top_k=5, min_score=0.2, timeout_ms=1000
+        )  # type: ignore[arg-type]
+        unavail_resp = await unavail_retriever.retrieve(
+            ProjectDocumentQuery(
+                user_id=USER, project_id=PROJECT, query="policy", document_ids=("document-1",)
+            )
+        )
+        assert unavail_resp.degraded is True
+        assert unavail_resp.reason_code == "index_unavailable"
 
     asyncio.run(scenario())

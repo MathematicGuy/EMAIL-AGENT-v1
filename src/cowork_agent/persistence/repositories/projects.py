@@ -225,7 +225,7 @@ class PostgresProjectRepository:
                 if quota is not None and int(cast(int, quota[1])) + byte_size > max_project_bytes:
                     raise ValueError("project_storage_quota_exceeded")
                 cursor = await connection.execute(
-                """
+                    """
                 INSERT INTO project_documents (
                     id, workspace_id, user_id, project_id, filename, media_type, byte_size,
                     content_sha256, storage_key, status, expires_at
@@ -235,31 +235,31 @@ class PostgresProjectRepository:
                     content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
                     chunk_count, error_code, deleted_at, created_at, updated_at
                 """,
-                (
-                    document_id,
-                    project.workspace_id,
-                    principal.user_id,
-                    project_id,
-                    filename.strip(),
-                    media_type,
-                    byte_size,
-                    content_sha256,
-                    storage_key,
-                    datetime.now(UTC) + timedelta(seconds=expires_in_seconds),
-                ),
+                    (
+                        document_id,
+                        project.workspace_id,
+                        principal.user_id,
+                        project_id,
+                        filename.strip(),
+                        media_type,
+                        byte_size,
+                        content_sha256,
+                        storage_key,
+                        datetime.now(UTC) + timedelta(seconds=expires_in_seconds),
+                    ),
                 )
                 row = await cursor.fetchone()
                 if row is not None:
                     return _document(row), True
                 cursor = await connection.execute(
-                """
+                    """
                 SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
                     content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
                     chunk_count, error_code, deleted_at, created_at, updated_at
                 FROM project_documents
                 WHERE project_id = %s AND content_sha256 = %s AND status <> 'deleted'
                 """,
-                (project_id, content_sha256),
+                    (project_id, content_sha256),
                 )
                 existing = await cursor.fetchone()
                 if existing is not None and str(existing[9]) == "failed":
@@ -909,14 +909,10 @@ def _document(row: tuple[object, ...]) -> ProjectDocument:
         storage_key=str(row[8]),
         status=str(row[9]),
         expires_at=(
-            row[10]
-            if isinstance(row[10], datetime)
-            else datetime.fromisoformat(str(row[10]))
+            row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10]))
         ),
         page_count=int(cast(int, row[11])) if len(row) > 11 and row[11] is not None else None,
-        ocr_page_count=(
-            int(cast(int, row[12])) if len(row) > 12 and row[12] is not None else None
-        ),
+        ocr_page_count=(int(cast(int, row[12])) if len(row) > 12 and row[12] is not None else None),
         chunk_count=int(cast(int, row[13])) if len(row) > 13 and row[13] is not None else None,
         error_code=str(row[14]) if len(row) > 14 and row[14] is not None else None,
         deleted_at=_optional_datetime(row[15]) if len(row) > 15 else None,
