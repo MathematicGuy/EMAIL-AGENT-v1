@@ -295,24 +295,22 @@ export async function openDashboard(page: Page): Promise<void> {
   // Wait for the composer textarea – reliable signal the dashboard has mounted
   await expect(page.locator('textarea')).toBeVisible({ timeout: 20_000 });
 
-  // 1. If sidebar is collapsed, expand it
-  const showToggle = page.getByRole('button', { name: 'Show sidebar' });
-  if (await showToggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await showToggle.click();
-    await expect(page.getByText('DỰ ÁN', { exact: true })).toBeVisible({ timeout: 10_000 });
+  // 1. If sidebar is collapsed, expand it. The name matches either locale so a
+  // Vietnamese-rendered CI run finds the same control.
+  const showSidebar = page.getByRole('button', { name: /Show sidebar|Hiện thanh bên/i });
+  if (await showSidebar.isVisible().catch(() => false)) {
+    await showSidebar.click();
   }
-
-  // 2. Expand the project accordion – projects load async so wait up to 10s for it
-  //    aria-label="Expand <project.name>" set in Taskbar.tsx when accordion is closed
-  const expandBtn = page.getByRole('button', { name: /Expand Latency Project/i });
-  try {
-    await expandBtn.waitFor({ state: 'visible', timeout: 10_000 });
-    await expandBtn.click();
-  } catch {
-    // Already expanded or project name differs – fall through
-  }
-
-  // 3. Wait for at least one recent-chat item to become visible
+  // Wait on the expander *or* an existing recent chat: a project that is
+  // already expanded never renders the button, and waiting only on the button
+  // is what made this flake in CI.
+  const expandBtn = page.getByRole('button', { name: /Expand Latency Project|Expand Default Project|Expand/i });
   const recents = page.getByTestId('recent-chat').first();
+  await expect(expandBtn.or(recents)).toBeVisible({ timeout: 20_000 });
+  if (await expandBtn.isVisible().catch(() => false)) {
+    await expandBtn.click();
+  }
+
+  // 2. Wait for at least one recent-chat item to become visible.
   await expect(recents).toBeVisible({ timeout: 25_000 });
 }

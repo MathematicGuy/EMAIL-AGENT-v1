@@ -734,6 +734,10 @@ def _gmail_env(tmp_path: Path) -> dict[str, str]:
         "MISTRAL_MODEL": "mistral-small-2603",
         "MICROSOFT_CLIENT_ID": "",
         "MICROSOFT_CLIENT_SECRET": "",
+        # Both sides of the merge added a Mistral key here; the one above wins
+        # because it pairs with MISTRAL_MODEL. The Gemini key is `main`'s CI fix
+        # and stays: provider selection must not fall through to a real lookup.
+        "GEMINI_API_KEY": "dummy-test-key",
     }
 
 

@@ -98,6 +98,7 @@ export interface EmailSourceLink {
   ref: string;
   label: string | null;
   url: string;
+  threat_level?: string;
 }
 
 export interface DigestTask {
@@ -121,6 +122,15 @@ export interface DigestTask {
   generation_confidence: number | null;
   validation_status: string;
   created_at: string;
+  security_threat_level?: string;
+  quarantined?: boolean;
+  security_reports?: Array<{
+    original_url: string;
+    resolved_url: string;
+    threat_level: string;
+    threat_category: string;
+    details?: string | null;
+  }>;
 }
 
 export interface AttachmentWarning {

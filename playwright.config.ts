@@ -39,6 +39,9 @@ export default defineConfig({
     {
       // Tier B: real backend on TIER_B_URL, only Google's HTTP call faked.
       // Opt-in via TIER_B=1 -- these turns call a real model and cost money.
+      // The opt-in is enforced by a group-level `test.skip` in the spec, not
+      // here: the project stays defined so `--project=calendar-tier-b` remains
+      // addressable and reports skips instead of failing as an unknown project.
       // Records video and every screenshot: the artifacts are the deliverable,
       // not a debugging aid, so they are captured on pass as well as failure.
       name: 'calendar-tier-b',

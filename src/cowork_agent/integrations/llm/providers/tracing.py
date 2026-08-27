@@ -60,3 +60,21 @@ def _update_current_span(
         )
     except Exception as exc:  # pragma: no cover - telemetry must never break routing
         _CLASSIFIER_LOGGER.debug("Langfuse span update failed: %s", type(exc).__name__)
+
+
+def _update_current_trace(
+    *,
+    tags: list[str] | None = None,
+    metadata: Mapping[str, object] | None = None,
+) -> None:
+    """Update root Langfuse trace with security quarantine tags and metadata."""
+    if not _langfuse_configured():
+        return
+    try:
+        get_client().update_current_trace(
+            tags=tags,
+            metadata=dict(metadata) if metadata is not None else None,
+        )
+    except Exception as exc:  # pragma: no cover - telemetry must never break routing
+        _CLASSIFIER_LOGGER.debug("Langfuse trace update failed: %s", type(exc).__name__)
+

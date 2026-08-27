@@ -17,7 +17,10 @@ from cowork_agent.domain import (
 )
 from cowork_agent.domain.target_contracts import (
     ActionPlanOutput,
+    AttachmentSafetyReport,
     EphemeralEmailEnvelope,
+    LinkSafetyReport,
+    SecurityScanResult,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     Task,
@@ -68,6 +71,26 @@ class AttachmentExtractorPort(Protocol):
         content: AsyncIterator[bytes],
         limits: ExtractionLimits,
     ) -> ExtractedAttachment: ...
+
+
+class ThreatIntelPort(Protocol):
+    """Port for querying threat intelligence reputation feeds for URLs and file hashes."""
+
+    async def check_url(self, url: str) -> LinkSafetyReport: ...
+
+    async def check_file_hash(self, sha256: str, filename: str) -> AttachmentSafetyReport: ...
+
+
+class EmailSecurityScannerPort(Protocol):
+    """Port for scanning links and attachments across ephemeral email envelopes."""
+
+    async def scan_envelope(
+        self, envelope: EphemeralEmailEnvelope
+    ) -> SecurityScanResult: ...
+
+    async def scan_envelopes(
+        self, envelopes: Sequence[EphemeralEmailEnvelope]
+    ) -> Sequence[SecurityScanResult]: ...
 
 
 class RouteClassifierPort(Protocol):

@@ -66,6 +66,7 @@ from cowork_agent.config import (
     EvaluationSettings,
     GmailSettings,
     OutlookSettings,
+    SecuritySettings,
     SessionSettings,
     SupabaseStorageSettings,
     UserDocumentsSettings,
@@ -137,6 +138,12 @@ from cowork_agent.integrations.rag.project_documents import (
 from cowork_agent.integrations.rag.project_index import (
     SnapshotStorage,
     TurbovecProjectIndexStore,
+)
+from cowork_agent.integrations.security import (
+    CompositeThreatIntel,
+    EmailSecurityScanner,
+    GoogleWebRiskThreatIntel,
+    ThreatCache,
 )
 from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
 from cowork_agent.orchestration.local import InMemoryOutbox
@@ -832,6 +839,35 @@ async def build_email_rag(
     )
 
 
+def _email_security_scanner() -> EmailSecurityScanner | None:
+    """The attachment/URL threat scanner, or None when scanning is off.
+
+    Arrived on `main` wired directly into the old `app.state.digest_worker`
+    construction. That construction moved behind the typed seam here (ADR-013,
+    slice 02-5), so the scanner moves with it rather than staying in `app.py` —
+    the worker's dependencies are composed in one place or the strangler is not
+    finished.
+
+    Degrades in two steps rather than one: scanning off yields no scanner at
+    all, and scanning on without a Web Risk key still yields a scanner whose
+    threat intel is cache-and-local only. A missing key must not take email
+    processing offline.
+    """
+
+    security_settings = SecuritySettings.from_env()
+    if not security_settings.enabled:
+        return None
+    threat_cache = ThreatCache(default_ttl_seconds=security_settings.cache_ttl_seconds)
+    webrisk_intel = (
+        GoogleWebRiskThreatIntel(api_key=security_settings.webrisk_api_key)
+        if security_settings.webrisk_api_key
+        else None
+    )
+    return EmailSecurityScanner(
+        threat_intel=CompositeThreatIntel(cloud_intel=webrisk_intel, cache=threat_cache)
+    )
+
+
 def upgrade_email_rag_providers(
     email_rag: EmailRagRuntime,
     *,
@@ -877,6 +913,7 @@ def upgrade_email_rag_providers(
             settings.connection_db_path.parent, settings.token_encryption_key
         ),
         completion_outbox=outbox_repository,
+        security_scanner=_email_security_scanner(),
         mailbox_fetch_concurrency=settings.fetch_concurrency,
         generation_concurrency=email_providers.generation_concurrency,
     )

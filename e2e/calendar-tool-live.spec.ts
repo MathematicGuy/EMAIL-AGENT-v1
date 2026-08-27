@@ -25,6 +25,16 @@ interface RecordedEvent {
 test.describe('Calendar tool, live backend', () => {
   test.describe.configure({ mode: 'serial', timeout: 300_000 });
 
+  // The opt-in gate lives here, not in the config. `playwright.config.ts` only
+  // gates the harness *webServer* on TIER_B, so without this the project still
+  // collected and every test failed on a 502 from a backend CI never started.
+  // Skipping in the spec keeps the run output honest -- five reported skips,
+  // the same as the other @live specs, rather than a project that vanishes.
+  test.skip(
+    !process.env.TIER_B,
+    'Tier B needs the harness on TIER_B_URL and calls a real model: set TIER_B=1.'
+  );
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/#dashboard');
     // Mint the principal explicitly rather than racing the app's own guest
