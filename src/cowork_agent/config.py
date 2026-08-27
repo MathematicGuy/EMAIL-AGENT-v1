@@ -130,6 +130,54 @@ class SessionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class SecuritySettings:
+    """Configuration for email security scanning, threat feeds, and quarantine policy."""
+
+    enabled: bool
+    webrisk_api_key: str = field(repr=False)
+    cache_ttl_seconds: int
+    quarantine_malicious_emails: bool
+    virustotal_api_key: str = field(default="", repr=False)
+    malwarebazaar_enabled: bool = True
+    clamav_enabled: bool = False
+    clamav_host: str = "localhost"
+    clamav_port: int = 3310
+    clamav_socket_path: str = ""
+    clamav_timeout_seconds: float = 5.0
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        load_env_file: bool = True,
+    ) -> "SecuritySettings":
+        if environ is None:
+            if load_env_file:
+                load_runtime_environment()
+            environ = os.environ
+        return cls(
+            enabled=_boolean(environ, "SECURITY_SCAN_ENABLED", True),
+            webrisk_api_key=environ.get("SECURITY_WEBRISK_API_KEY", "").strip(),
+            cache_ttl_seconds=_positive_int(environ, "SECURITY_CACHE_TTL_SECONDS", 86_400),
+            quarantine_malicious_emails=_boolean(
+                environ, "SECURITY_QUARANTINE_ENABLED", True
+            ),
+            virustotal_api_key=environ.get("SECURITY_VIRUSTOTAL_API_KEY", "").strip(),
+            malwarebazaar_enabled=_boolean(
+                environ, "SECURITY_MALWAREBAZAAR_ENABLED", True
+            ),
+            clamav_enabled=_boolean(environ, "SECURITY_CLAMAV_ENABLED", False),
+            clamav_host=environ.get("SECURITY_CLAMAV_HOST", "localhost").strip(),
+            clamav_port=_positive_int(environ, "SECURITY_CLAMAV_PORT", 3310),
+            clamav_socket_path=environ.get("SECURITY_CLAMAV_SOCKET_PATH", "").strip(),
+            clamav_timeout_seconds=_bounded_float(
+                environ, "SECURITY_CLAMAV_TIMEOUT_SECONDS", 5.0, minimum=0.1, maximum=60.0
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeIngestionSettings:
     """Configuration for the administrator-operated knowledge ingestion CLI."""
 

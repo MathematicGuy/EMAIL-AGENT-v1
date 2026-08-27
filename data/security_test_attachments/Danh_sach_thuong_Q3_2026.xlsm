@@ -1,0 +1,8 @@
+[Simulated Macro-Enabled Spreadsheet Data]
+Auto_Open()
+Sub Auto_Open()
+    MsgBox "Macro security alert test"
+End Sub
+Employee_ID,Name,Bonus_Amount_VND
+NV001,Nguyen Van A,15000000
+NV002,Tran Thi B,12000000

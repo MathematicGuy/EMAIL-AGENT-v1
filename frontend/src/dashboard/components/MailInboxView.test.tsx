@@ -307,4 +307,92 @@ describe('MailInboxView', () => {
     expect(await screen.findByText('Đã kết nối Outlook thành công.')).toBeTruthy();
     await waitFor(() => expect(window.location.search).not.toContain('outlook='));
   });
+
+  it('renders quarantine security badge and opens warning modal on suspicious link click', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v1/mail-todo/runs?')) {
+        return Promise.resolve(
+          response({
+            runs: [{ id: 'run-1', status: 'succeeded', createdAt: '2026-08-10T00:00:00Z' }],
+          })
+        );
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1/result')) {
+        return Promise.resolve(
+          response({
+            run: {},
+            actionItems: [{}],
+            nextActions: [{}],
+            attachmentWarnings: [],
+            message: null,
+          })
+        );
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1/tasks')) {
+        return Promise.resolve(
+          response({
+            tasks: [
+              {
+                task_id: 'task-sec-1',
+                run_id: 'run-1',
+                gmail_message_id: 'message-phish',
+                gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-phish',
+                source_message_ids: ['message-phish'],
+                source_links: [
+                  {
+                    ref: 'link-bad',
+                    label: 'Fake Banking Login',
+                    url: 'https://bank-login-fake.example.com/signin',
+                    threat_level: 'malicious',
+                  },
+                ],
+                incident_key: null,
+                title: '[CẢNH BÁO BẢO MẬT] Phát hiện Email Phishing',
+                request_summary: 'Email này đã bị cách ly.',
+                actionability: 'actionable',
+                route: 'no_action',
+                priority: 'urgent',
+                deadline: null,
+                action_plan: [
+                  { step: 1, instruction: 'Tuyệt đối không bấm link', supporting_citation_ids: [] },
+                ],
+                supporting_documents: [],
+                missing_information: [],
+                classifier_confidence: 1.0,
+                generation_confidence: 1.0,
+                validation_status: 'system_generated',
+                created_at: '2026-08-10T00:00:00Z',
+                quarantined: true,
+                security_threat_level: 'malicious',
+              },
+            ],
+          })
+        );
+      }
+      return baseFetch(input);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<MailInboxView />);
+
+    // Check quarantine badge is rendered
+    expect(await screen.findByText(/Đã cách ly \(Mã độc \/ Phishing\)/)).toBeTruthy();
+    expect(screen.getByText('[CẢNH BÁO BẢO MẬT] Phát hiện Email Phishing')).toBeTruthy();
+
+    // Expand source links and click the malicious link
+    fireEvent.click(screen.getByText('Source links (1)'));
+    const badLinkBtn = screen.getByText('Fake Banking Login');
+    expect(screen.getByText('NGUY HIỂM')).toBeTruthy();
+
+    // Click link -> Should trigger warning modal instead of directly navigating
+    fireEvent.click(badLinkBtn);
+
+    expect(await screen.findByText('CẢNH BÁO BẢO MẬT: LIÊN KẾT NGUY HIỂM')).toBeTruthy();
+    expect(screen.getByText('https://bank-login-fake.example.com/signin')).toBeTruthy();
+    expect(screen.getByText('Quay lại an toàn')).toBeTruthy();
+
+    // Dismiss modal
+    fireEvent.click(screen.getByText('Quay lại an toàn'));
+    expect(screen.queryByText('CẢNH BÁO BẢO MẬT: LIÊN KẾT NGUY HIỂM')).toBeNull();
+  });
 });

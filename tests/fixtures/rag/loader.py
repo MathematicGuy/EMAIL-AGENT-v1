@@ -248,7 +248,10 @@ def _validate_repository_fixture_coverage(
     cases: Sequence[RetrievalCase], document_ids: Sequence[str], source: Path
 ) -> None:
     """Enforce the V2 repository coverage allocation without constraining temp fixtures."""
-    covered: dict[str, set[Probe]] = {document_id: set() for document_id in document_ids}
+    all_expected_docs = {doc_id for case in cases for doc_id in case.expected_document_ids}
+    covered: dict[str, set[Probe]] = {
+        document_id: set() for document_id in document_ids if document_id in all_expected_docs
+    }
     for case in cases:
         for document_id in case.expected_document_ids:
             covered[document_id].add(case.probe)

@@ -27,5 +27,17 @@ services:
       retries: 10
       start_period: 10s
 
+  clamav:
+    image: clamav/clamav:latest
+    container_name: cowork-clamav
+    restart: unless-stopped
+    ports:
+      - "3310:3310"
+    environment:
+      - CLAMAV_NO_FRESHCLAM=false
+    volumes:
+      - cowork_clamav_data:/var/lib/clamav
+
 volumes:
   cowork_pg_data:
+  cowork_clamav_data:

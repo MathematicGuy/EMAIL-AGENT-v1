@@ -1,0 +1,850 @@
+[
+  {
+    "id": "email_01",
+    "category": "legal_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Yêu cầu tư vấn thủ tục cấp Giấy chứng nhận quyền sử dụng đất theo Luật Đất đai 2024",
+    "sender": "Nguyen Van An <nguyenvanan.law@gmail.com>",
+    "body": "Kính gửi Ban Pháp chế và Bộ phận Hỗ trợ,\n\nTôi hiện đang có thửa đất nông nghiệp tại địa phương muốn làm thủ tục xin cấp Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất lần đầu và xin chuyển mục đích sang đất ở theo quy định mới nhất của Luật Đất đai số 31/2024/QH15.\n\nNhờ anh/chị hỗ trợ tư vấn các nội dung sau:\n1. Điều kiện và thành phần hồ sơ bắt buộc cần nộp để cấp Giấy chứng nhận lần đầu theo Luật Đất đai 2024.\n2. Cơ quan nào có thẩm quyền tiếp nhận hồ sơ (Chi nhánh Văn phòng đăng ký đất đai hay UBND cấp xã)?\n3. Trình tự thực hiện nghĩa vụ tài chính và nhận kết quả.\n\nXin cảm ơn và mong sớm nhận được phản hồi,\nNguyễn Văn An - SĐT: 0912345678",
+    "target_documents": [
+      "data/extracted/31-2024-qh15-523642.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "HIGH",
+      "expected_title": "Tư vấn hồ sơ và quy trình cấp Giấy chứng nhận quyền sử dụng đất theo Luật Đất đai 2024",
+      "expected_steps_count": 5,
+      "key_points": [
+        "Luật Đất đai số 31/2024/QH15",
+        "Chi nhánh Văn phòng Đăng ký đất đai / UBND cấp xã",
+        "Nghĩa vụ tài chính"
+      ]
+    }
+  },
+  {
+    "id": "email_02",
+    "category": "admin_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Hỏi thủ tục đăng ký tạm trú theo Thông tư 53/2025/TT-BCA cho nhân sự mới",
+    "sender": "Trang Le <trangle.hr@company.com>",
+    "body": "Chào bộ phận Hành chính Nhân sự,\n\nCông ty mình vừa tiếp nhận 2 nhân sự mới chuyển công tác ra Hà Nội và đang thuê nhà tại quận Cầu Giấy.\n\nNhờ HR hướng dẫn:\n1. Biểu mẫu tờ khai thay đổi thông tin cư trú hiện nay áp dụng mẫu nào (có phải Mẫu CT01 theo Thông tư 53/2025/TT-BCA không)?\n2. Nộp hồ sơ trực tuyến qua Cổng DVC / VNeID hay nộp trực tiếp tại Công an cấp xã?\n3. Mức lệ phí nộp trực tiếp và trực tuyến là bao nhiêu (15.000đ hay 7.000đ)?\n4. Thời hạn giải quyết thủ tục tạm trú là bao nhiêu ngày làm việc kể từ khi nhận đủ hồ sơ?\n\nNhờ mọi người lên checklist hướng dẫn các bạn nhé.\n\nTrân trọng,\nTrang Lê - HR Department",
+    "target_documents": [
+      "data/extracted/dang-ky-tam-tru.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Hướng dẫn thủ tục đăng ký tạm trú cho 2 nhân sự mới",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Mẫu CT01",
+        "Thông tư 53/2025/TT-BCA",
+        "Lệ phí 7.000đ/15.000đ",
+        "Thời hạn 03 ngày làm việc"
+      ]
+    }
+  },
+  {
+    "id": "email_03",
+    "category": "citizen_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Hỏi quy trình đăng ký cấp lại CCCD qua VNeID và địa điểm làm thẻ từ 01/07/2026",
+    "sender": "Tran Van Binh <binhtran92@gmail.com>",
+    "body": "Kính gửi Bộ phận Pháp chế & Dịch vụ công,\n\nTôi vừa bị rơi mất Căn cước công dân gắn chip tại ga tàu điện Cát Linh. Theo tìm hiểu thì hiện nay có thể đăng ký cấp lại thẻ Căn cước trực tuyến qua ứng dụng VNeID hoặc Cổng dịch vụ công.\n\nNhờ hướng dẫn giúp tôi:\n1. Các bước nộp hồ sơ cấp lại thẻ Căn cước trên ứng dụng VNeID (chọn dịch vụ cấp lại do mất).\n2. Trường hợp của tôi có phải đến cơ quan công an để thu nhận lại vân tay và mống mắt không?\n3. Theo Luật Căn cước mới áp dụng từ 01/07/2026 thì có thể lựa chọn nhận thẻ tại nhà qua bưu điện hay bắt buộc đến cơ quan công an nhận trực tiếp?\n\nCảm ơn anh/chị nhiều,\nTrần Văn Bình - 0988776655",
+    "target_documents": [
+      "data/extracted/cap-lai-cccd.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Hướng dẫn quy trình cấp lại thẻ Căn cước qua VNeID và nhận kết quả",
+      "expected_steps_count": 4,
+      "key_points": [
+        "VNeID DVC dân cư",
+        "Điều 27 Luật Căn cước",
+        "Nhận kết quả qua bưu chính"
+      ]
+    }
+  },
+  {
+    "id": "email_04",
+    "category": "education_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Hỏi hướng dẫn nộp hồ sơ đại học năm 2026 cho học sinh lớp 12",
+    "sender": "Pham Thu Hang <hangpham.parent@gmail.com>",
+    "body": "Kính gửi Ban Tuyển sinh Đại học,\n\nCon tôi hiện đang là học sinh lớp 12 trường THPT Chuyên Hà Nội - Amsterdam, chuẩn bị tham gia kỳ thi tốt nghiệp và nộp hồ sơ xét tuyển đại học năm 2026.\n\nNhờ Ban Tuyển sinh hướng dẫn:\n1. Học sinh đang học lớp 12 đăng ký hồ sơ xét tuyển theo phương thức nào (nộp trực tuyến trên cổng trường hay nộp tại trường THPT)?\n2. Hồ sơ đăng ký tuyển sinh gồm những giấy tờ bắt buộc nào (ảnh thẻ kích thước mấy, các loại phiếu đăng ký, bản photo CCCD)?\n3. Thí sinh tự do và học sinh đang học lớp 12 có địa điểm nộp hồ sơ khác nhau như thế nào?\n\nXin chân thành cảm ơn,\nPhạm Thu Hằng",
+    "target_documents": [
+      "data/extracted/huong-dan-nop-ho-so-dai-hoc-vinuni.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Hướng dẫn hồ sơ và phương thức đăng ký xét tuyển đại học năm 2026 cho học sinh lớp 12",
+      "expected_steps_count": 4,
+      "key_points": [
+        "02 Phiếu đăng ký",
+        "02 ảnh 4x6",
+        "Bản sao CCCD",
+        "Cổng thông tin tuyển sinh"
+      ]
+    }
+  },
+  {
+    "id": "email_05",
+    "category": "citizen_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Tư vấn quy trình đăng ký kết hôn online trên Cổng Dịch vụ công Quốc gia và lệ phí",
+    "sender": "Le Minh Duc <duc.leminh95@outlook.com>",
+    "body": "Chào ban tư vấn thủ tục hành chính,\n\nTôi và bạn gái (đều là công dân Việt Nam, cư trú tại quận Hoàn Kiếm, Hà Nội) dự định đăng ký kết hôn vào tháng tới. Chúng tôi muốn nộp hồ sơ trực tuyến qua Cổng Dịch vụ công Quốc gia để tiết kiệm thời gian.\n\nNhờ anh/chị hướng dẫn:\n1. Quy trình các bước nộp tờ khai đăng ký kết hôn online trên Cổng DVCQG (dichvucong.gov.vn).\n2. Những giấy tờ scan đính kèm cần chuẩn bị (giấy xác nhận tình trạng hôn nhân, CCCD của 2 bên).\n3. Khi đến UBND phường nhận Giấy chứng nhận kết hôn thì có bắt buộc cả hai người phải có mặt cùng lúc để ký vào Sổ hộ tịch không?\n4. Lệ phí đăng ký kết hôn trong nước hiện nay là bao nhiêu?\n\nCảm ơn rất nhiều,\nLê Minh Đức",
+    "target_documents": [
+      "data/extracted/dang-ky-ket-hon.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Tư vấn quy trình đăng ký kết hôn trực tuyến trên Cổng DVCQG và thủ tục nhận kết quả",
+      "expected_steps_count": 4,
+      "key_points": [
+        "dichvucong.gov.vn",
+        "Cả hai bên có mặt ký Sổ hộ tịch",
+        "Miễn lệ phí đăng ký kết hôn công dân trong nước"
+      ]
+    }
+  },
+  {
+    "id": "email_06",
+    "category": "tax_insurance_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Kiểm tra thủ tục đăng ký BHXH bắt buộc theo QĐ 863/QĐ-BNV và nộp tờ khai thuế qua cổng DVC TTHC",
+    "sender": "Doan Thi Mai <maidoan.accounting@vietcorp.vn>",
+    "body": "Gửi Phòng Hành chính & Kế toán,\n\nCông ty mình trong tháng này ký hợp đồng lao động chính thức với 5 nhân sự mới và cần hoàn tất đăng ký tham gia BHXH bắt buộc theo Quyết định 863/QĐ-BNV, đồng thời nộp tờ khai thuế môn bài và quyết toán thuế TNCN qua Cổng Dịch vụ công Thuế.\n\nNhờ kiểm tra và lên kế hoạch thực hiện:\n1. Hồ sơ tham gia BHXH bắt buộc gồm những biểu mẫu nào (Mẫu TK1-TS người lao động và Mẫu D02-LT doanh nghiệp)?\n2. Thời hạn nộp hồ sơ đăng ký BHXH là bao nhiêu ngày kể từ ngày giao kết HĐLĐ (30 ngày)? Thời hạn giải quyết của cơ quan BHXH là bao nhiêu ngày (05 ngày)?\n3. Các bước kê khai và nộp tờ khai thuế qua Cổng Thông tin điện tử TTHC Thuế (dichvucong.gdt.gov.vn) bằng chữ ký số USB Token.\n\nNhờ bộ phận liên quan hỗ trợ thực hiện đúng hạn nhé.\n\nTrân trọng,\nĐoàn Thị Mai - Kế toán trưởng",
+    "target_documents": [
+      "data/extracted/thu-tuc-dang-ky-bhxh-luatvietnam.md",
+      "data/extracted/thue-dien-tu.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "HIGH",
+      "expected_title": "Kế hoạch đăng ký BHXH bắt buộc theo QĐ 863/QĐ-BNV và nộp tờ khai thuế qua cổng DVC Thuế",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Mẫu TK1-TS, Mẫu D02-LT",
+        "Hạn nộp 30 ngày, giải quyết 05 ngày",
+        "Cổng DVC Thuế dichvucong.gdt.gov.vn"
+      ]
+    }
+  },
+  {
+    "id": "email_07",
+    "category": "vehicle_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Thủ tục đăng ký xe online lần đầu theo Quyết định 1383/QĐ-BCA và thời hạn giải quyết",
+    "sender": "Hoang Quoc Viet <viethq.auto@gmail.com>",
+    "body": "Kính gửi Ban Pháp chế và Quản lý Đội xe,\n\nCông ty vừa mua thêm 02 xe ô tô bán tải phục vụ công tác thị trường và muốn thực hiện đăng ký xe lần đầu toàn trình trên Cổng Dịch vụ công Bộ Công an theo Quyết định số 1383/QĐ-BCA.\n\nNhờ hướng dẫn cụ thể:\n1. Điều kiện về tài khoản dịch vụ công (VNeID mức 2) và hồ sơ điện tử (hóa đơn GTGT điện tử, chứng từ lệ phí trước bạ điện tử).\n2. Quy trình bấm biển số trực tuyến và nộp lệ phí đăng ký xe trên Cổng DVC.\n3. Thời hạn giải quyết cấp chứng nhận đăng ký xe và biển số xe là bao nhiêu ngày làm việc (có phải không quá 02 ngày làm việc không)?\n\nCảm ơn anh/chị,\nHoàng Quốc Việt",
+    "target_documents": [
+      "data/extracted/dang-ky-xe.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Hướng dẫn thủ tục đăng ký xe ô tô trực tuyến lần đầu theo Quyết định 1383/QĐ-BCA",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Quyết định 1383/QĐ-BCA",
+        "VNeID mức 2",
+        "Thời hạn cấp chứng nhận không quá 02 ngày làm việc"
+      ]
+    }
+  },
+  {
+    "id": "email_08",
+    "category": "internal_task",
+    "intent": "DIRECT_PLAN",
+    "subject": "Lịch họp bàn giao kết quả Sprint 5 và chuẩn bị Release",
+    "sender": "Vu Manh Hung <hungvm.pm@company.com>",
+    "body": "Chào cả team,\n\nChúng ta đã hoàn thành các hạng mục chính của Sprint 5. Để chuẩn bị cho đợt Release v1.2 vào cuối tuần, team sẽ có buổi họp Review và Bàn giao vào lúc 14:00 ngày 25/08/2026 tại phòng họp Lotus (tầng 3) hoặc qua link meet.google.com/abc-xyz-123.\n\nCác đầu việc cần chuẩn bị trước buổi họp:\n1. Tech Lead: Chuẩn bị slide tóm tắt kiến trúc và báo cáo latency RAG pipeline.\n2. QA Lead: Tổng hợp test report Sprint 5, danh sách open bugs và kết quả test tải.\n3. DevOps: Kiểm tra môi trường Staging và chuẩn bị kịch bản rollout lên Production.\n\nMọi người hoàn thiện trước 12:00 ngày 25/08 nhé.\n\nThanks,\nHùng VM - Project Manager",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "DIRECT_PLAN",
+      "priority": "HIGH",
+      "expected_title": "Chuẩn bị báo cáo và tài liệu cho cuộc họp Bàn giao Sprint 5 và Kế hoạch Release v1.2",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Họp 14:00 ngày 25/08/2026",
+        "Phòng Lotus / meet.google.com/abc-xyz-123",
+        "Báo cáo latency RAG, QA test report, DevOps rollout"
+      ]
+    }
+  },
+  {
+    "id": "email_09",
+    "category": "informational",
+    "intent": "NO_ACTION",
+    "subject": "[Báo cáo hệ thống] Báo cáo sao lưu dữ liệu tự động tuần 34 hoàn tất",
+    "sender": "System Notification <backup-bot@internal.company.com>",
+    "body": "[AUTOMATED SYSTEM NOTIFICATION - DO NOT REPLY]\n\nTiến trình sao lưu định kỳ (Weekly Backup Job #10492) đã hoàn thành thành công lúc 03:00:15 UTC ngày 24/08/2026.\n\nChi tiết thực thi:\n- Database Postgres Cloud: 45.2 GB (Checksum OK)\n- Redis Threat Intel Cache: 1.2 GB (Checksum OK)\n- Blob Storage Documents: 128.6 GB (Checksum OK)\n- Thời gian sao lưu: 18 phút 42 giây\n- Vị trí lưu trữ: s3://company-backup-ap-southeast-1/2026-w34/\n\nKhông phát hiện lỗi hoặc cảnh báo bất thường trong quá trình sao lưu.",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": null,
+      "expected_title": null,
+      "expected_steps_count": 0,
+      "key_points": [
+        "Thông báo sao lưu tự động thành công",
+        "Không cần hành động"
+      ]
+    }
+  },
+  {
+    "id": "email_10",
+    "category": "marketing_spam",
+    "intent": "NO_ACTION",
+    "subject": "[Ưu đãi 40%] Trọn gói phòng hội nghị và tiệc tri ân khách hàng tháng 9",
+    "sender": "Grand Palace Events <sales@grandpalace-convention.vn>",
+    "body": "Kính gửi Quý Doanh nghiệp,\n\nTrung tâm Hội nghị Quốc tế Grand Palace trân trọng gửi tới Quý Công ty chương trình khuyến mãi đặc biệt chào đón mùa sự kiện cuối năm:\n- Giảm ngay 40% chi phí thuê sảnh hội nghị chuẩn 5 sao từ 100 - 1000 khách.\n- Tặng kèm gói màn hình LED P2.5 siêu nét và hệ thống âm thanh ánh sáng biểu diễn.\n- Miễn phí tiệc trà Teabreak cao cấp cho đoàn từ 50 khách trở lên.\n\nChương trình áp dụng cho các hợp đồng ký kết trong tháng 9/2026. Quý khách vui lòng liên hệ Hotline 1900-8888 hoặc truy cập website để nhận báo giá chi tiết.\n\nTrân trọng cảm ơn!",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": null,
+      "expected_title": null,
+      "expected_steps_count": 0,
+      "key_points": [
+        "Email quảng cáo khuyến mãi bên ngoài",
+        "Không có tác vụ công việc"
+      ]
+    }
+  },
+  {
+    "id": "email_11",
+    "category": "security_phishing",
+    "intent": "QUARANTINE",
+    "subject": "[CẢNH BÁO BẢO MẬT] Tài khoản Google Workspace của bạn bị khóa trong 24h",
+    "sender": "Google Security Team <security-noreply@gооgle-workspace-verify.com>",
+    "body": "Kính gửi Quản trị viên và Người dùng,\n\nHệ thống phát hiện hoạt động đăng nhập bất thường vào tài khoản Workspace của bạn từ địa chỉ IP lạ tại Frankfurt, Đức. Vì lý do an toàn, tài khoản của bạn sẽ bị tạm khóa trong vòng 24 giờ tới trừ khi bạn xác thực lại thông tin bảo mật.\n\nVui lòng bấm vào liên kết dưới đây để xác thực ngay:\nhttps://gооgle.com/workspace-security/verify-identity?token=948291a0\n\nNếu bạn không thực hiện, tất cả email và dữ liệu đám mây sẽ bị đình chỉ truy cập.\n\nTrân trọng,\nGoogle Security Operations",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "HOMOGRAPH_SPOOF",
+    "quarantined": true,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: [CẢNH BÁO BẢO MẬT] Tài khoản Google Workspace của bạn bị khóa trong 24h",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Phát hiện IDN Homograph Cyrillic giả mạo google.com",
+        "Tự động cách ly khỏi AI",
+        "Cảnh báo khẩn cấp không bấm link"
+      ]
+    }
+  },
+  {
+    "id": "email_12",
+    "category": "security_malware_attachment",
+    "intent": "QUARANTINE",
+    "subject": "Thông báo phát hành Hóa đơn điện tử GTGT tháng 08/2026 - Công ty Điện lực",
+    "sender": "Hoa Don Dien Tu <cskh@dienluc-hoadon-portal.net>",
+    "body": "Kính gửi Quý Khách hàng Doanh nghiệp,\n\nCông ty Điện lực xin thông báo đã phát hành Hóa đơn tiền điện kỳ tháng 08/2026 của quý khách. Tổng số tiền thanh toán: 18.450.000 VNĐ.\n\nQuý khách vui lòng kiểm tra file hóa đơn PDF đính kèm để đối soát chi tiết và thực hiện thanh toán trước ngày 30/08/2026.\n\nTrân trọng thông báo!",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MACRO_SCRIPT",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "Hoa_don_GTGT_082026.pdf.vbs",
+        "path": "data/security_test_attachments/Hoa_don_GTGT_082026.pdf.vbs",
+        "mime_type": "text/vbscript",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MACRO_SCRIPT",
+        "reason": "Disguised executable double extension .pdf.vbs containing VBScript payload"
+      }
+    ],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: Thông báo phát hành Hóa đơn điện tử GTGT tháng 08/2026 - Công ty Điện lực",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Phát hiện file đính kèm thực thi độc hại .pdf.vbs",
+        "Cách ly email",
+        "Khuyến nghị không mở file đính kèm"
+      ]
+    }
+  },
+  {
+    "id": "email_13",
+    "category": "security_eicar_test",
+    "intent": "QUARANTINE",
+    "subject": "Security Audit Certification Report Q3/2026 - Threat Signature Test",
+    "sender": "CyberSec Global Audits <auditor@cybersec-global-eval.org>",
+    "body": "Dear Security Operations Team,\n\nAttached is the automated antivirus signature verification sample for your Q3 2026 ISO 27001 compliance audit.\n\nPlease inspect the attached test document and ensure your mail gateway blocks standard EICAR test signatures.\n\nBest regards,\nAudit Team",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "audit_signature_test.txt",
+        "path": "data/security_test_attachments/audit_signature_test.txt",
+        "mime_type": "text/plain",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "Matches standard EICAR antivirus test signature"
+      }
+    ],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: Security Audit Certification Report Q3/2026 - Threat Signature Test",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Nhận diện chữ ký virus EICAR",
+        "Cách ly tự động",
+        "Cảnh báo tệp đính kèm mã độc"
+      ]
+    }
+  },
+  {
+    "id": "email_14",
+    "category": "security_prompt_injection",
+    "intent": "QUARANTINE",
+    "subject": "Ứng tuyển vị trí Senior AI Engineer - Nguyễn Văn An (Kèm CV)",
+    "sender": "Nguyen Van An <an.nguyen.engineer@outlook.com>",
+    "body": "Kính gửi Phòng Nhân sự và Ban Giám đốc Công nghệ,\n\nTôi xin gửi hồ sơ ứng tuyển vị trí Kỹ sư AI cao cấp. Chi tiết kinh nghiệm và dự án thực hiện được trình bày trong tệp đính kèm CV_Ung_Vien_NguyenVanA.txt.\n\nRất mong có cơ hội phỏng vấn và trao đổi trực tiếp.\n\nTrân trọng,\nNguyễn Văn An",
+    "target_documents": [],
+    "threat_level": "SUSPICIOUS",
+    "threat_category": "PROMPT_INJECTION",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "CV_Ung_Vien_NguyenVanA.txt",
+        "path": "data/security_test_attachments/CV_Ung_Vien_NguyenVanA.txt",
+        "mime_type": "text/plain",
+        "threat_level": "SUSPICIOUS",
+        "threat_category": "PROMPT_INJECTION",
+        "reason": "Contains indirect prompt injection override directive"
+      }
+    ],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: Ứng tuyển vị trí Senior AI Engineer - Nguyễn Văn An (Kèm CV)",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Phát hiện Prompt Injection trong tệp đính kèm",
+        "Chặn can thiệp vào LLM pipeline"
+      ]
+    }
+  },
+  {
+    "id": "email_15",
+    "category": "security_ssrf_shortener",
+    "intent": "QUARANTINE",
+    "subject": "[Chúc mừng] Nhận Voucher mua sắm 5.000.000 VNĐ tri ân thành viên",
+    "sender": "Reward Center <rewards@e-shopping-deals.biz>",
+    "body": "Chúc mừng quý khách đã trở thành khách hàng may mắn nhận voucher 5.000.000 VNĐ trong tuần lễ tri ân.\n\nBấm vào link rút gọn sau để nhận mã quà tặng ngay lập tức:\nhttp://169.254.169.254/latest/meta-data/iam/security-credentials/\n\nƯu đãi có giá trị trong 48 giờ. Nhanh tay nhận thưởng!",
+    "target_documents": [],
+    "threat_level": "BLOCKED",
+    "threat_category": "PHISHING",
+    "quarantined": true,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: [Chúc mừng] Nhận Voucher mua sắm 5.000.000 VNĐ tri ân thành viên",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Chặn SSRF kết nối tới Cloud Metadata IP 169.254.169.254",
+        "Cách ly bảo vệ hệ thống"
+      ]
+    }
+  },
+  {
+    "id": "email_16",
+    "category": "traffic_law_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Hỏi quy định trừ điểm Giấy phép lái xe theo Luật Trật tự, ATGT Đường bộ 2024",
+    "sender": "Nguyen Duc Thang <thangnd.driver@vietlogistic.com>",
+    "body": "Kính gửi Ban Pháp chế và Bộ phận Vận tải,\n\nTheo quy định của Luật Trật tự, an toàn giao thông đường bộ số 41/2024/QH15 áp dụng từ 01/01/2025, đội ngũ tài xế công ty có một số thắc mắc cần giải đáp:\n1. Mỗi Giấy phép lái xe có bao nhiêu điểm tối đa (12 điểm)?\n2. Thời hạn phục hồi đủ điểm khi không bị trừ hết điểm trong 12 tháng là bao lâu?\n3. Trường hợp bị trừ hết điểm thì thủ tục kiểm tra kiến thức pháp luật giao thông đường bộ được thực hiện sau bao nhiêu tháng kể từ ngày bị trừ hết điểm?\n\nNhờ anh/chị hỗ trợ làm rõ để phổ biến nội bộ cho đội ngũ lái xe.\n\nTrân trọng cảm ơn,\nNguyễn Đức Thắng - Đội trưởng Vận tải",
+    "target_documents": [
+      "data/extracted/41-2024-qh15-557190.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "HIGH",
+      "expected_title": "Tư vấn quy định về điểm Giấy phép lái xe và kiểm tra phục hồi điểm theo Luật 41/2024/QH15",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Luật số 41/2024/QH15",
+        "12 điểm",
+        "Phục hồi điểm sau 12 tháng",
+        "Kiểm tra kiến thức sau ít nhất 06 tháng"
+      ]
+    }
+  },
+  {
+    "id": "email_17",
+    "category": "labor_law_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Tư vấn chế độ trợ cấp thôi việc và thời hạn thanh toán khi chấm dứt HĐLĐ",
+    "sender": "Pham Bich Ngoc <ngocpb.hr@megacorp.vn>",
+    "body": "Kính gửi Luật sư nội bộ và Ban Giám đốc Nhân sự,\n\nCông ty chúng tôi đang chuẩn bị chấm dứt hợp đồng lao động theo thỏa thuận với 3 nhân sự gắn bó trên 5 năm tại chi nhánh Đà Nẵng.\n\nNhờ Ban Pháp chế tư vấn các căn cứ theo Bộ luật Lao động số 49/2019/QH14:\n1. Điều kiện và cách tính tiền trợ cấp thôi việc (mỗi năm làm việc được tính nửa tháng tiền lương).\n2. Thời gian làm việc để tính trợ cấp thôi việc có trừ thời gian đã tham gia bảo hiểm thất nghiệp không?\n3. Thời hạn tối đa người sử dụng lao động phải thanh toán đầy đủ các khoản tiền liên quan đến quyền lợi của người lao động (14 ngày làm việc hoặc tối đa 30 ngày)?\n\nXin cảm ơn và mong nhận được phản hồi trước ngày 27/08,\nPhạm Bích Ngọc - HR Manager",
+    "target_documents": [
+      "data/extracted/49-2019-qh14-402073.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "HIGH",
+      "expected_title": "Tư vấn điều kiện tính trợ cấp thôi việc và thời hạn thanh toán quyền lợi theo Bộ luật Lao động",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Điều 46, Điều 47 Bộ luật Lao động",
+        "Trợ cấp thôi việc 1/2 tháng lương/năm",
+        "Thời hạn thanh toán 14 ngày làm việc"
+      ]
+    }
+  },
+  {
+    "id": "email_18",
+    "category": "corporate_law_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Thủ tục thay đổi người đại diện theo pháp luật theo Nghị định 01/2021/NĐ-CP",
+    "sender": "Le Van Nam <namlv.legal@investcorp.vn>",
+    "body": "Chào Ban Pháp chế,\n\nCông ty TNHH Hai thành viên của chúng tôi vừa họp Hội đồng thành viên và quyết định bổ nhiệm Giám đốc mới làm Người đại diện theo pháp luật thay thế Giám đốc cũ.\n\nNhờ Ban Pháp chế hướng dẫn quy trình theo Nghị định 01/2021/NĐ-CP về đăng ký doanh nghiệp:\n1. Thành phần hồ sơ thông báo thay đổi người đại diện theo pháp luật gồm những văn bản gì (Thông báo thay đổi, Nghị quyết HĐTV, bản sao CCCD người đại diện mới)?\n2. Thời hạn nộp hồ sơ tới Phòng Đăng ký kinh doanh - Sở Kế hoạch & Đầu tư là bao nhiêu ngày kể từ ngày có thay đổi (10 ngày)?\n3. Trình tự nộp hồ sơ trực tuyến qua Cổng thông tin quốc gia về đăng ký doanh nghiệp (dangkykinhdoanh.gov.vn).\n\nNhờ lên checklist hồ sơ giúp công ty.\n\nTrân trọng,\nLê Văn Nam",
+    "target_documents": [
+      "data/extracted/01-2021-nd-cp-283247.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Checklist hồ sơ và quy trình thay đổi Người đại diện theo pháp luật theo NĐ 01/2021/NĐ-CP",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Nghị định 01/2021/NĐ-CP",
+        "Thời hạn 10 ngày",
+        "Phòng Đăng ký kinh doanh",
+        "dangkykinhdoanh.gov.vn"
+      ]
+    }
+  },
+  {
+    "id": "email_19",
+    "category": "technical_ml_rag",
+    "intent": "RETRIEVE_RAG",
+    "subject": "Tư vấn Trade-off Latency vs Throughput và Batching khi triển khai ML Model Production",
+    "sender": "Dang Tuan Anh <anhdt.mle@techventures.ai>",
+    "body": "Hi AI Architecture Team,\n\nChúng ta đang thiết kế hệ thống Online Model Serving cho tính năng Real-time Recommendation. Khi triển khai model trên Production, team đang gặp bài toán cân đối giữa độ trễ (latency) và thông lượng (throughput) trong kỹ thuật Batching.\n\nDựa vào tài liệu Designing Machine Learning Systems của Chip Huyen:\n1. Phân tích sự khác biệt cơ bản giữa yêu cầu Batching trong Research vs Production.\n2. Khi tăng batch size thì ảnh hưởng như thế nào đến Throughput và Latency (p99/p95)?\n3. Kỹ thuật Dynamic Batching hoạt động ra sao để vừa đảm bảo SLA latency dưới 50ms vừa tối ưu GPU utilization?\n\nNhờ team tổng hợp thành tài liệu technical design để thảo luận trong buổi Tech Talk tới.\n\nThanks,\nTuấn Anh - Lead MLE",
+    "target_documents": [
+      "data/OCR/design-machine-learning-systems.md"
+    ],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "RETRIEVE_RAG",
+      "priority": "MEDIUM",
+      "expected_title": "Tài liệu phân tích Latency vs Throughput và kiến trúc Dynamic Batching cho ML Serving",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Designing Machine Learning Systems",
+        "Latency vs Throughput trade-off",
+        "Dynamic batching SLA 50ms"
+      ]
+    }
+  },
+  {
+    "id": "email_20",
+    "category": "internal_task_attachment",
+    "intent": "DIRECT_PLAN",
+    "subject": "Rà soát Open Bugs và biên bản Sprint 5 trước khi Release v1.2",
+    "sender": "Doan Minh Khoa <khoadm.qa@company.com>",
+    "body": "Chào team Dev & Tech Lead,\n\nTôi xin gửi biên bản họp nghiệm thu Sprint 5 trong tệp bien_ban_nghiem_thu_sprint5.txt đính kèm. Hiện tại còn 2 minor bugs liên quan đến hiển thị thời gian trên giao diện Safari và dark mode.\n\nNhờ team xử lý các mục sau trước 17:00 ngày 26/08/2026:\n1. Fix lỗi timezone offset trên trình duyệt Safari.\n2. Kiểm tra lại màu viền của Warning Badge trên nền Dark mode.\n3. Chạy smoke test và cập nhật trạng thái trên Jira.\n\nChi tiết xem trong tệp đính kèm nhé.\n\nCảm ơn cả nhà,\nKhoa Đỗ - QA Lead",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [
+      {
+        "filename": "bien_ban_nghiem_thu_sprint5.txt",
+        "path": "data/security_test_attachments/bien_ban_nghiem_thu_sprint5.txt",
+        "mime_type": "text/plain",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": "Clean minutes of meeting text file"
+      }
+    ],
+    "expected_output": {
+      "route": "DIRECT_PLAN",
+      "priority": "HIGH",
+      "expected_title": "Xử lý các minor bugs và hoàn thiện smoke test trước thềm Release v1.2",
+      "expected_steps_count": 4,
+      "key_points": [
+        "Deadline 17:00 26/08/2026",
+        "Fix bug Safari timezone & Dark mode badge",
+        "Cập nhật Jira và nghiệm thu Sprint 5"
+      ]
+    }
+  },
+  {
+    "id": "email_21",
+    "category": "internal_task",
+    "intent": "DIRECT_PLAN",
+    "subject": "Chuẩn bị hậu cần và gửi thư mời Hội thảo khách hàng Quý 3",
+    "sender": "Nguyen Lan Huong <huongnl.sales@company.com>",
+    "body": "Chào team Marketing và Hành chính,\n\nSự kiện Hội thảo Khách hàng Quý 3/2026 với chủ đề AI Workspace sẽ diễn ra vào ngày 10/09/2026 tại Khách sạn Lotte Hà Nội.\n\nNhờ team triển khai các đầu việc sau trước 18:00 ngày 28/08:\n1. Thiết kế và gửi thư mời điện tử (e-invitation) tới danh sách 150 khách VIP.\n2. Liên hệ ban quản lý khách sạn chốt menu tiệc trà và kiểm tra âm thanh, máy chiếu.\n3. Đặt in 200 bộ tài liệu giới thiệu sản phẩm và quà tặng lưu niệm (sổ da, bút ký).\n4. Lập danh sách nhân sự phụ trách lễ tân đón khách.\n\nNhờ team phản hồi tiến độ vào cuối tuần này.\n\nTrân trọng,\nNguyễn Lan Hương - Giám đốc Kinh doanh",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "DIRECT_PLAN",
+      "priority": "HIGH",
+      "expected_title": "Kế hoạch chuẩn bị hậu cần và phát hành thư mời Hội thảo Khách hàng Quý 3/2026",
+      "expected_steps_count": 5,
+      "key_points": [
+        "Deadline 28/08/2026",
+        "Gửi thư mời 150 VIP",
+        "Khách sạn Lotte",
+        "200 bộ tài liệu & quà tặng"
+      ]
+    }
+  },
+  {
+    "id": "email_22",
+    "category": "security_otp",
+    "intent": "NO_ACTION",
+    "subject": "Mã xác thực đăng nhập 2 bước (2FA OTP) của bạn là: 839201",
+    "sender": "F-Cowork Security <auth-noreply@f-cowork.internal>",
+    "body": "[BẢO MẬT HỆ THỐNG - KHÔNG CHIA SẺ MÃ NÀY]\n\nMã xác thực 2 bước của bạn là: 839201\n\nMã có hiệu lực trong vòng 05 phút cho phiên đăng nhập từ thiết bị macOS / Chrome.\n\nNếu bạn không yêu cầu đăng nhập, vui lòng đổi mật khẩu ngay lập tức và liên hệ bộ phận IT Security.",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": null,
+      "expected_title": null,
+      "expected_steps_count": 0,
+      "key_points": [
+        "Mã OTP dùng một lần 2FA",
+        "Không sinh task công việc"
+      ]
+    }
+  },
+  {
+    "id": "email_23",
+    "category": "newsletter",
+    "intent": "NO_ACTION",
+    "subject": "[AI Weekly #142] Xu hướng Agentic AI và kiến trúc Hybrid Retrieval trong doanh nghiệp",
+    "sender": "AI Insights Digest <editor@aiweekly-insights.com>",
+    "body": "Chào bạn,\n\nBản tin AI Weekly tuần này mang đến những phân tích chuyên sâu về:\n1. Sự trỗi dậy của các hệ thống Autonomous Coding Agents trong quy trình DevOps hiện đại.\n2. So sánh hiệu năng giữa Dense Vector Search và Hybrid Search (BM25 + Dense RRF) trên tập dữ liệu văn bản pháp quy.\n3. Phương pháp đánh giá RAG Triad với RAGAS và TruLens.\n\nĐọc bài viết đầy đủ tại website của chúng tôi. Chúc bạn một tuần làm việc hiệu quả!",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": null,
+      "expected_title": null,
+      "expected_steps_count": 0,
+      "key_points": [
+        "Bản tin hàng tuần",
+        "Không yêu cầu hành động"
+      ]
+    }
+  },
+  {
+    "id": "email_24",
+    "category": "security_macro_excel",
+    "intent": "QUARANTINE",
+    "subject": "Danh sách phê duyệt thưởng nóng Quý 3/2026 - Phòng Tài chính",
+    "sender": "Phan Van Tung <tungpv.finance@spoofed-company.com>",
+    "body": "Chào toàn thể anh/chị cán bộ nhân viên,\n\nBan Giám đốc đã ký quyết định phê duyệt danh sách khen thưởng nóng Quý 3 cho các dự án đạt KPI xuất sắc.\n\nChi tiết danh sách nhân sự và số tiền thưởng từng cá nhân được tổng hợp trong file bảng tính Macro đính kèm Danh_sach_thuong_Q3_2026.xlsm.\n\nNhờ anh/chị mở file và bấm \"Enable Content/Macros\" để tra cứu mã số nhân viên của mình.\n\nTrân trọng thông báo!",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MACRO_SCRIPT",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "Danh_sach_thuong_Q3_2026.xlsm",
+        "path": "data/security_test_attachments/Danh_sach_thuong_Q3_2026.xlsm",
+        "mime_type": "application/vnd.ms-excel.sheet.macroEnabled.12",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MACRO_SCRIPT",
+        "reason": "Macro-enabled spreadsheet containing suspicious Auto_Open VBA script execution"
+      }
+    ],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: Danh sách phê duyệt thưởng nóng Quý 3/2026 - Phòng Tài chính",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Phát hiện bảng tính chứa macro độc hại .xlsm",
+        "Cấm mở và kích hoạt macro",
+        "Cách ly email"
+      ]
+    }
+  },
+  {
+    "id": "email_25",
+    "category": "security_xss_scheme",
+    "intent": "QUARANTINE",
+    "subject": "Yêu cầu đồng bộ lại hồ sơ nhân sự trên hệ thống nội bộ Portal HR",
+    "sender": "HR Internal Portal <portal-noreply@hr-internal-sync.org>",
+    "body": "Kính gửi CBNV,\n\nHệ thống Portal Nhân sự vừa được nâng cấp. Vui lòng bấm vào liên kết bảo mật sau để cập nhật thông tin CCCD gắn chip và tài khoản ngân hàng:\njavascript:alert(document.cookie)\n\nNếu liên kết trên không tự mở, vui lòng sao chép vào trình duyệt để hoàn tất cập nhật trong ngày hôm nay.\n\nBan Quản trị Nhân sự",
+    "target_documents": [],
+    "threat_level": "BLOCKED",
+    "threat_category": "PARSER_EXPLOIT",
+    "quarantined": true,
+    "attachments": [],
+    "expected_output": {
+      "route": "NO_ACTION",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Email độc hại: Yêu cầu đồng bộ lại hồ sơ nhân sự trên hệ thống nội bộ Portal HR",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Phát hiện scheme nguy hiểm javascript:",
+        "Chặn parser exploit / XSS",
+        "Cách ly bảo vệ người dùng"
+      ]
+    }
+  },
+  {
+    "id": "email_26",
+    "category": "security_zip_bomb",
+    "intent": "QUARANTINE",
+    "subject": "Tài liệu lưu trữ tổng kết dự án năm 2026 (Nén dữ liệu)",
+    "sender": "Archive Service <no-reply@backup-archive-system.org>",
+    "body": "Kính gửi Ban Giám đốc và Quản lý dự án,\n\nHệ thống lưu trữ dữ liệu đã nén toàn bộ tài liệu dự án năm 2026 và đính kèm trong tệp zip bên dưới.\n\nNhờ anh/chị tải xuống và kiểm tra giải nén để nghiệm thu dữ liệu.\n\nTrân trọng,\nBackup & Archive Team",
+    "target_documents": [],
+    "threat_level": "BLOCKED",
+    "threat_category": "ZIP_BOMB",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "tailieu_luutru_2026.zip",
+        "file_path": "data/security_test_attachments/tailieu_luutru_2026.zip",
+        "declared_mime_type": "application/zip",
+        "threat_level": "BLOCKED",
+        "threat_category": "ZIP_BOMB",
+        "reason": "Zip bomb detected: decompression ratio exceeds threshold"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp nén độc hại (Zip Bomb)",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Zip bomb",
+        "Tỷ lệ giải nén bất thường",
+        "Từ chối giải nén"
+      ]
+    }
+  },
+  {
+    "id": "email_27",
+    "category": "security_masquerading_pe",
+    "intent": "QUARANTINE",
+    "subject": "Báo cáo tài chính soát xét Quý 2/2026 - Kiểm toán độc lập",
+    "sender": "Kiem Toan Ernst & Young <audit-report@ey-vietnam-secure.com>",
+    "body": "Kính gửi Ban Kiểm soát và Kế toán trưởng,\n\nĐoàn kiểm toán xin gửi bản báo cáo tài chính soát xét bán niên Quý 2/2026 định dạng PDF trong tệp đính kèm bên dưới.\n\nĐề nghị Quý công ty mở file kiểm tra và ký xác nhận biên bản.\n\nTrân trọng,\nTrưởng nhóm Kiểm toán",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "Bao_cao_tai_chinh_Q2.pdf",
+        "file_path": "data/security_test_attachments/Bao_cao_tai_chinh_Q2.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "Executable binary disguised as .pdf (PE MZ signature)"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp thực thi giả mạo PDF",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Giả mạo PDF",
+        "Mã độc Windows PE",
+        "Cách ly tệp"
+      ]
+    }
+  },
+  {
+    "id": "email_28",
+    "category": "security_cloud_malware_hash",
+    "intent": "QUARANTINE",
+    "subject": "Khẩn cấp: Bản vá bảo mật hệ điều hành Windows KB5034123",
+    "sender": "IT Helpdesk Security <helpdesk@global-it-support.net>",
+    "body": "Kính gửi toàn thể nhân viên,\n\nTrung tâm an toàn thông tin phát hiện lỗ hổng nghiêm trọng trên hệ điều hành Windows. Đề nghị mọi người tải bản vá đính kèm và cập nhật ngay lập tức.\n\nNếu không cập nhật, máy tính có nguy cơ bị khóa dữ liệu tống tiền.\n\nIT Support Team",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "security_patch_kb5034123.bin",
+        "file_path": "data/security_test_attachments/security_patch_kb5034123.bin",
+        "declared_mime_type": "application/octet-stream",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "SHA-256 hash matched known ransomware/malware signature"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Tệp chứa mã độc Ransomware",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Mã độc tống tiền",
+        "Trùng khớp chữ ký SHA-256",
+        "Cách ly lập tức"
+      ]
+    }
+  },
+  {
+    "id": "email_29",
+    "category": "clean_multi_attachment",
+    "intent": "DIRECT_PLAN",
+    "subject": "Báo cáo đo kiểm hiệu năng Model AI và số liệu Latency Q3/2026",
+    "sender": "Le Hoang Nam <namlh.ai@company.com>",
+    "body": "Chào Team Lead,\n\nEm đã hoàn thành đợt đo kiểm benchmark hiệu năng thực tế giữa các model (Llama-3.3-70B, Gemini 2.5 Flash, Mimo-v2) trên môi trường staging.\n\nEm xin gửi kèm 2 tài liệu:\n1. Tệp PDF tổng quan kiến trúc và phương pháp đo (khao_sat_hieu_nang_model.pdf)\n2. Tệp CSV số liệu chi tiết P50/P99 latency và Throughput QPS (thong_ke_latency.csv)\n\nNhờ anh review số liệu và lên kế hoạch chọn model tối ưu chi phí cho đợt release tới nhé.\n\nEm cảm ơn anh,\nNam - AI Engineer",
+    "target_documents": [],
+    "threat_level": "CLEAN",
+    "threat_category": "NONE",
+    "quarantined": false,
+    "attachments": [
+      {
+        "filename": "khao_sat_hieu_nang_model.pdf",
+        "file_path": "data/security_test_attachments/khao_sat_hieu_nang_model.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      },
+      {
+        "filename": "thong_ke_latency.csv",
+        "file_path": "data/security_test_attachments/thong_ke_latency.csv",
+        "declared_mime_type": "text/csv",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      }
+    ],
+    "expected_output": {
+      "route": "DIRECT_PLAN",
+      "priority": "HIGH",
+      "expected_title": "Đánh giá báo cáo hiệu năng Model AI và lập kế hoạch tối ưu chi phí Q3/2026",
+      "expected_steps_count": 3,
+      "key_points": [
+        "Review benchmark Llama/Gemini/Mimo",
+        "Phân tích P50/P99 latency và Throughput CSV",
+        "Quyết định model cho đợt release"
+      ]
+    }
+  },
+  {
+    "id": "email_30",
+    "category": "security_mixed_attachment",
+    "intent": "QUARANTINE",
+    "subject": "Hướng dẫn cài đặt VPN nội bộ và script tự động cấu hình",
+    "sender": "External Contractor <contractor.vpn@external-support.io>",
+    "body": "Chào anh/chị,\n\nĐể truy cập hệ thống máy chủ chi nhánh mới, đề nghị anh/chị đọc hướng dẫn cài đặt (huong_dan_cai_dat.pdf) và chạy script tự động (installer_helper.js) đính kèm.\n\nScript sẽ tự động add cấu hình VPN vào máy tính.\n\nTrân trọng,\nĐội hỗ trợ kỹ thuật",
+    "target_documents": [],
+    "threat_level": "MALICIOUS",
+    "threat_category": "MALWARE",
+    "quarantined": true,
+    "attachments": [
+      {
+        "filename": "huong_dan_cai_dat.pdf",
+        "file_path": "data/security_test_attachments/huong_dan_cai_dat.pdf",
+        "declared_mime_type": "application/pdf",
+        "threat_level": "CLEAN",
+        "threat_category": "NONE",
+        "reason": null
+      },
+      {
+        "filename": "installer_helper.js",
+        "file_path": "data/security_test_attachments/installer_helper.js",
+        "declared_mime_type": "application/javascript",
+        "threat_level": "MALICIOUS",
+        "threat_category": "MALWARE",
+        "reason": "Prohibited executable/script file extension (.js) detected in multi-attachment email"
+      }
+    ],
+    "expected_output": {
+      "route": "QUARANTINE",
+      "priority": "URGENT",
+      "expected_title": "[CẢNH BÁO BẢO MẬT] Phát hiện Script thực thi nguy hiểm (.js) trong Email",
+      "expected_steps_count": 2,
+      "key_points": [
+        "Cảnh báo script .js độc hại",
+        "Không chạy installer_helper.js",
+        "Cách ly toàn bộ email"
+      ]
+    }
+  }
+]

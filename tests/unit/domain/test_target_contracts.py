@@ -14,23 +14,28 @@ from cowork_agent.domain.target_contracts import (
     TRACE_DEVELOPMENT_MARKER,
     Actionability,
     ActionPlanOutput,
+    AttachmentSafetyReport,
     BodyFormat,
     EmailRouteDecision,
     EmailSourceLink,
     EphemeralEmailEnvelope,
     ExpectedDocumentType,
     FetchStatus,
+    LinkSafetyReport,
     PlanStep,
     ReasonCode,
     RetrievalFilters,
     RetrievalLimits,
     RetrievalStatus,
     Route,
+    SecurityScanResult,
     SemanticChunk,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     SupportingDocument,
     Task,
+    ThreatCategory,
+    ThreatLevel,
     TraceEvent,
     TraceLatency,
     TraceStatus,
@@ -240,7 +245,10 @@ def test_domain_enum_values_and_constants():
         "rejected",
     }
     assert {member.value for member in TraceStatus} == {"success", "partial", "failed"}
-    assert TARGET_CONTRACTS_VERSION == "1.3.0"
+    # 1.4.0 added the security contracts (threat levels, link/attachment safety
+    # reports, scan results). Bumped on `main`; asserted here so the constant and
+    # the contracts it versions cannot drift apart.
+    assert TARGET_CONTRACTS_VERSION == "1.4.0"
     assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
     assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
     assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
@@ -389,3 +397,197 @@ def test_retrieval_filters_options_and_round_trip():
     assert restored == filters_rich
     text = json.dumps(payload)
     assert RetrievalFilters.from_dict(json.loads(text)) == filters_rich
+
+
+# --- security contracts (added on `main` with TARGET_CONTRACTS_VERSION 1.4.0) ---
+# Kept verbatim through the merge: the consolidation on `dev` predates these
+# contracts, so dropping them would have shipped the security types untested.
+
+
+def test_threat_level_enum_values():
+    assert [level.value for level in ThreatLevel] == [
+        "clean",
+        "suspicious",
+        "malicious",
+        "blocked",
+    ]
+    assert ThreatLevel.CLEAN == "clean"
+    assert ThreatLevel.MALICIOUS == "malicious"
+
+
+def test_threat_category_enum_values():
+    assert [cat.value for cat in ThreatCategory] == [
+        "none",
+        "phishing",
+        "malware",
+        "macro_script",
+        "parser_exploit",
+        "prompt_injection",
+        "homograph_spoof",
+        "zip_bomb",
+    ]
+
+
+def test_link_safety_report_round_trip():
+    report = LinkSafetyReport(
+        original_url="http://xn--gogle-pra.com",
+        resolved_url="http://gооgle.com",
+        threat_level=ThreatLevel.SUSPICIOUS,
+        threat_category=ThreatCategory.HOMOGRAPH_SPOOF,
+        details="IDN Homograph attack detected",
+    )
+    payload = report.to_dict()
+    assert payload["threat_level"] == "suspicious"
+    assert payload["threat_category"] == "homograph_spoof"
+    restored = LinkSafetyReport.from_dict(payload)
+    assert restored == report
+
+    with pytest.raises(FrozenInstanceError):
+        report.threat_level = ThreatLevel.CLEAN  # type: ignore[misc]
+
+
+def test_attachment_safety_report_round_trip():
+    report = AttachmentSafetyReport(
+        filename="invoice.exe",
+        sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        detected_mime_type="application/x-dosexec",
+        threat_level=ThreatLevel.BLOCKED,
+        threat_category=ThreatCategory.MALWARE,
+        is_safe_to_extract=False,
+        reason="Executable file disguised as document",
+    )
+    payload = report.to_dict()
+    assert payload["threat_level"] == "blocked"
+    assert payload["is_safe_to_extract"] is False
+    restored = AttachmentSafetyReport.from_dict(payload)
+    assert restored == report
+
+    with pytest.raises(FrozenInstanceError):
+        report.is_safe_to_extract = True  # type: ignore[misc]
+
+
+def test_security_scan_result_round_trip():
+    scanned_at = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    link_report = LinkSafetyReport(
+        original_url="https://phish.example.com",
+        resolved_url="https://phish.example.com/login",
+        threat_level=ThreatLevel.MALICIOUS,
+        threat_category=ThreatCategory.PHISHING,
+        details="Known credential harvesting endpoint",
+    )
+    att_report = AttachmentSafetyReport(
+        filename="doc.pdf",
+        sha256="abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+        detected_mime_type="application/pdf",
+        threat_level=ThreatLevel.CLEAN,
+        threat_category=ThreatCategory.NONE,
+        is_safe_to_extract=True,
+    )
+    scan_result = SecurityScanResult(
+        email_id="msg-101",
+        overall_threat_level=ThreatLevel.MALICIOUS,
+        scanned_at=scanned_at,
+        links=(link_report,),
+        attachments=(att_report,),
+        quarantined=True,
+        recommended_action="quarantine",
+    )
+    payload = scan_result.to_dict()
+    assert payload["overall_threat_level"] == "malicious"
+    assert payload["quarantined"] is True
+    assert payload["recommended_action"] == "quarantine"
+    assert len(payload["links"]) == 1  # type: ignore[arg-type]
+    assert len(payload["attachments"]) == 1  # type: ignore[arg-type]
+
+    restored = SecurityScanResult.from_dict(payload)
+    assert restored == scan_result
+    text = json.dumps(payload)
+    assert SecurityScanResult.from_dict(json.loads(text)) == scan_result
+
+
+def test_email_source_link_threat_level_defaults_and_round_trip():
+    default_link = EmailSourceLink(ref="link1", label="Portal", url="https://portal.example.com")
+    assert default_link.threat_level == ThreatLevel.CLEAN
+    payload = default_link.to_dict()
+    assert payload["threat_level"] == "clean"
+    assert EmailSourceLink.from_dict(payload) == default_link
+
+    # Test backward compatibility when threat_level is absent in payload
+    legacy_payload = {"ref": "link1", "label": "Portal", "url": "https://portal.example.com"}
+    restored_legacy = EmailSourceLink.from_dict(legacy_payload)
+    assert restored_legacy.threat_level == ThreatLevel.CLEAN
+
+    # Custom threat level
+    suspicious_link = EmailSourceLink(
+        ref="link2",
+        label="Phishing Link",
+        url="http://evil.com",
+        threat_level=ThreatLevel.SUSPICIOUS,
+    )
+    assert suspicious_link.threat_level == ThreatLevel.SUSPICIOUS
+    payload_suspicious = suspicious_link.to_dict()
+    assert payload_suspicious["threat_level"] == "suspicious"
+    assert EmailSourceLink.from_dict(payload_suspicious) == suspicious_link
+
+
+def test_task_security_fields_defaults_and_round_trip():
+    task = _task()
+    assert task.security_threat_level == ThreatLevel.CLEAN
+    assert task.quarantined is False
+    assert task.security_reports == ()
+
+    payload = task.to_dict()
+    assert payload["security_threat_level"] == "clean"
+    assert payload["quarantined"] is False
+    assert payload["security_reports"] == []
+    assert Task.from_dict(payload) == task
+
+    # Backward compatibility with payload lacking security fields
+    legacy_task_payload = dict(payload)
+    legacy_task_payload.pop("security_threat_level", None)
+    legacy_task_payload.pop("quarantined", None)
+    legacy_task_payload.pop("security_reports", None)
+    restored_legacy = Task.from_dict(legacy_task_payload)
+    assert restored_legacy == task
+
+    # Task with security threat information
+    report = LinkSafetyReport(
+        original_url="http://bad.com",
+        resolved_url="http://bad.com/payload",
+        threat_level=ThreatLevel.MALICIOUS,
+        threat_category=ThreatCategory.MALWARE,
+    )
+    quarantined_task = Task(
+        task_id="task-quarantine-1",
+        run_id="run-1",
+        gmail_message_id="msg-1",
+        gmail_url="https://mail.google.com/mail/u/0#all/msg-1",
+        source_message_ids=("msg-1",),
+        incident_key=None,
+        title="[CẢNH BÁO BẢO MẬT] Phát hiện Email chứa mã độc",
+        request_summary="Email chứa URL độc hại đã bị cách ly.",
+        actionability=Actionability.ACTION_REQUIRED,
+        route=Route.NO_ACTION,
+        priority=Priority.URGENT,
+        deadline=None,
+        action_plan=(),
+        supporting_documents=(),
+        missing_information=(),
+        classifier_confidence=1.0,
+        generation_confidence=1.0,
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        created_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        source_links=(),
+        security_threat_level=ThreatLevel.MALICIOUS,
+        quarantined=True,
+        security_reports=(report,),
+    )
+    q_payload = quarantined_task.to_dict()
+    assert q_payload["security_threat_level"] == "malicious"
+    assert q_payload["quarantined"] is True
+    assert len(q_payload["security_reports"]) == 1  # type: ignore[arg-type]
+
+    restored_q = Task.from_dict(q_payload)
+    assert restored_q == quarantined_task
+    text_q = json.dumps(q_payload)
+    assert Task.from_dict(json.loads(text_q)) == quarantined_task

@@ -7,6 +7,8 @@ import {
   Link2,
   LogOut,
   Mail,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
 import {
   MailApiError,
@@ -93,6 +95,11 @@ export const MailInboxView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(initialOAuthBanner);
   const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
+  const [warningLink, setWarningLink] = useState<{
+    url: string;
+    displayLabel: string;
+    threat_level?: string;
+  } | null>(null);
 
   const selectedConnection = useMemo(
     () => connections.find((connection) => connection.id === selectedConnectionId) ?? null,
@@ -383,6 +390,12 @@ export const MailInboxView: React.FC = () => {
                 <div className="mx-auto max-w-4xl space-y-4">
                   {tasks.map((task) => {
                     const selected = selectedTask?.task_id === task.task_id;
+                    const isQuarantined =
+                      task.quarantined ||
+                      task.security_threat_level === 'malicious' ||
+                      task.security_threat_level === 'blocked';
+                    const isSuspicious = task.security_threat_level === 'suspicious';
+
                     const sourceLinks = (task.source_links ?? []).flatMap((link) => {
                       try {
                         const parsed = new URL(link.url);
@@ -399,7 +412,11 @@ export const MailInboxView: React.FC = () => {
                       <article
                         key={task.task_id}
                         className={`overflow-hidden rounded-xl border transition ${
-                          selected
+                          isQuarantined
+                            ? selected
+                              ? 'border-red-500 bg-red-950/20'
+                              : 'border-red-500/60 bg-red-950/10 hover:border-red-400'
+                            : selected
                             ? 'border-[#d97757]/70 bg-[#24211d]'
                             : 'border-zinc-700 bg-[#22211e] hover:border-zinc-500'
                         }`}
@@ -417,7 +434,17 @@ export const MailInboxView: React.FC = () => {
                                 <h3 className="text-base font-semibold leading-snug md:text-lg">
                                   {task.title}
                                 </h3>
-                                <div className="flex shrink-0 flex-wrap gap-2 text-xs">
+                                <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+                                  {isQuarantined && (
+                                    <span className="flex items-center gap-1 rounded-full border border-red-500/40 bg-red-500/20 px-2.5 py-1 font-medium text-red-300">
+                                      <ShieldAlert className="h-3.5 w-3.5" /> Đã cách ly (Mã độc / Phishing)
+                                    </span>
+                                  )}
+                                  {isSuspicious && !isQuarantined && (
+                                    <span className="flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/20 px-2.5 py-1 font-medium text-amber-300">
+                                      <AlertTriangle className="h-3.5 w-3.5" /> Link đáng ngờ
+                                    </span>
+                                  )}
                                   <span className="rounded-full bg-[#d97757]/15 px-2.5 py-1 text-[#e8a78f]">
                                     {task.priority ?? 'unknown'}
                                   </span>
@@ -485,19 +512,56 @@ export const MailInboxView: React.FC = () => {
                                   Source links ({sourceLinks.length})
                                 </summary>
                                 <ul className="space-y-2 border-t border-zinc-700 px-3 py-3">
-                                  {sourceLinks.map((link) => (
-                                    <li key={link.ref}>
-                                      <a
-                                        href={link.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex items-center gap-1.5 break-all text-sm text-sky-300 hover:text-sky-200"
-                                      >
-                                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                                        {link.displayLabel}
-                                      </a>
-                                    </li>
-                                  ))}
+                                  {sourceLinks.map((link) => {
+                                    const isLinkDangerous =
+                                      link.threat_level === 'malicious' ||
+                                      link.threat_level === 'blocked' ||
+                                      isQuarantined;
+                                    const isLinkSuspicious = link.threat_level === 'suspicious';
+
+                                    return (
+                                      <li key={link.ref}>
+                                        <a
+                                          href={link.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(event) => {
+                                            if (isLinkDangerous || isLinkSuspicious) {
+                                              event.preventDefault();
+                                              event.stopPropagation();
+                                              setWarningLink(link);
+                                            }
+                                          }}
+                                          className={`inline-flex items-center gap-1.5 break-all text-left text-sm ${
+                                            isLinkDangerous
+                                              ? 'text-red-400 underline hover:text-red-300'
+                                              : isLinkSuspicious
+                                              ? 'text-amber-400 underline hover:text-amber-300'
+                                              : 'text-sky-300 hover:text-sky-200'
+                                          }`}
+                                        >
+                                          {isLinkDangerous ? (
+                                            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-red-400" />
+                                          ) : isLinkSuspicious ? (
+                                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                                          ) : (
+                                            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                          )}
+                                          <span>{link.displayLabel}</span>
+                                          {isLinkDangerous && (
+                                            <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">
+                                              NGUY HIỂM
+                                            </span>
+                                          )}
+                                          {isLinkSuspicious && !isLinkDangerous && (
+                                            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                                              NGHI NGỜ
+                                            </span>
+                                          )}
+                                        </a>
+                                      </li>
+                                    );
+                                  })}
                                 </ul>
                               </details>
                             )}
@@ -534,6 +598,62 @@ export const MailInboxView: React.FC = () => {
               )}
             </section>
 
+          </div>
+        )}
+
+        {/* Security Warning Modal for Suspicious/Malicious Links */}
+        {warningLink && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-red-500/50 bg-[#1e1c19] p-6 shadow-2xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2 text-red-400">
+                  <ShieldAlert className="h-6 w-6 shrink-0" />
+                  <h3 className="text-lg font-bold text-red-400">
+                    CẢNH BÁO BẢO MẬT: LIÊN KẾT NGUY HIỂM
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWarningLink(null)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3 text-sm text-zinc-300">
+                <p>
+                  Đường dẫn này được hệ thống bảo mật cảnh báo có nguy cơ chứa mã độc, giả mạo tên miền (Homograph / Phishing) hoặc tấn công đánh cắp dữ liệu:
+                </p>
+                <div className="rounded-lg border border-red-500/30 bg-red-950/30 p-3 font-mono text-xs text-red-300 break-all">
+                  {warningLink.url}
+                </div>
+                <p className="text-xs text-zinc-400">
+                  Khuyến nghị: Tuyệt đối không mở liên kết này trừ khi bạn đã xác thực độ tin cậy của người gửi qua kênh liên lạc trực tiếp an toàn.
+                </p>
+              </div>
+
+              <div className="mt-6 flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWarningLink(null)}
+                  className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition"
+                >
+                  Quay lại an toàn
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetUrl = warningLink.url;
+                    setWarningLink(null);
+                    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="rounded-xl border border-red-500/40 bg-red-600/20 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-600/30 transition"
+                >
+                  Vẫn tiếp tục mở (Không khuyến nghị)
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

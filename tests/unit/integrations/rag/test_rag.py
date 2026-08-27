@@ -101,6 +101,9 @@ def _built_memory(
     return memory
 
 
+# Hermetic rather than asserting the committed corpus filename-by-filename: that
+# list needed an edit every time a document landed. The real corpus is still
+# loaded and asserted in `tests/unit/fixtures/test_retrieval_golden.py`.
 def test_load_corpus_reads_documents(tmp_path: Path) -> None:
     (tmp_path / "doc-a.md").write_text("# Doc A Title\n\nContent for doc A.", encoding="utf-8")
     (tmp_path / "doc-b.md").write_text("# Doc B Title\n\nContent for doc B.", encoding="utf-8")

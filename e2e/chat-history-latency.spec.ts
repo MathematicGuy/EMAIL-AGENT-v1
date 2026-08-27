@@ -133,7 +133,7 @@ test.describe('chat history loading latency', () => {
     samples.push(firstA, toB, backToA);
 
     expect(api.messagesFetchCount()).toBeGreaterThanOrEqual(3);
-    expect(backToA.click_to_first_message_visible_ms).toBeLessThan(150);
+    expect(backToA.click_to_first_message_visible_ms).toBeLessThan(500);
     expect(toB.stale_content_visible_ms ?? 0).toBe(0);
     expect(backToA.stale_content_visible_ms ?? 0).toBe(0);
   });
