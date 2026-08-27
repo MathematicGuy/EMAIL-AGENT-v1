@@ -308,7 +308,7 @@ def init_evaluator(
     try:
         from ragas.llms import llm_factory
         from ragas.embeddings import embedding_factory
-        
+
         evaluator_llm = llm_factory(model, provider=provider)
         evaluator_embeddings = embedding_factory(provider=provider, model=emb_model)
         return evaluator_llm, evaluator_embeddings
@@ -319,11 +319,13 @@ def init_evaluator(
 
         if provider == "mistral":
             from langchain_mistralai import ChatMistralAI, MistralAIEmbeddings
+
             llm = ChatMistralAI(model=model)
             emb = MistralAIEmbeddings(model=emb_model)
             return LangchainLLMWrapper(llm), LangchainEmbeddingsWrapper(emb)
         else:
             from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
             llm = ChatGoogleGenerativeAI(model=model)
             emb = GoogleGenerativeAIEmbeddings(model=emb_model)
             return LangchainLLMWrapper(llm), LangchainEmbeddingsWrapper(emb)

@@ -18,9 +18,7 @@ SCRIPT = REPO_ROOT / "scripts" / "run_paired_chat_evaluation.py"
 
 
 def _load_module() -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "run_paired_chat_evaluation_under_test", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("run_paired_chat_evaluation_under_test", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

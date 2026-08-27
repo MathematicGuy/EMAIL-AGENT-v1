@@ -78,7 +78,9 @@ class Probe(StrEnum):
     MIXED = "mixed"
     UNANSWERABLE = "unanswerable"
 
+
 class RetrievalFixtureError(ValueError): ...
+
 
 @dataclass(frozen=True)
 class RetrievalCase:
@@ -89,6 +91,7 @@ class RetrievalCase:
     expected_sections: tuple[str, ...]
     email_body: str | None
     notes: str | None
+
 
 def load_retrieval_golden(
     path: Path | None = None, *, corpus_dir: Path | None = None

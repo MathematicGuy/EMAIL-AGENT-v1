@@ -157,8 +157,11 @@ async def _seed_for(session, probe, arm, scope, probe_controller, probe_gateway)
     # Caller already skipped CONTROL.
     outcomes = [
         await seed_long_term(
-            probe_gateway, scope, session.seed,
-            now=datetime.now(UTC), profile_id=session.identity.namespace,
+            probe_gateway,
+            scope,
+            session.seed,
+            now=datetime.now(UTC),
+            profile_id=session.identity.namespace,
         )
     ]
     seed_session_id = f"{scope.session_id}-seed"
@@ -166,8 +169,11 @@ async def _seed_for(session, probe, arm, scope, probe_controller, probe_gateway)
         tenant_id=scope.tenant_id, user_id=scope.user_id, session_id=seed_session_id
     )
     seed_controller, seed_gateway = build_arm_controller(
-        seed_scope, session.adapters, session.reply,
-        masked_scope=None, company_rag_enabled=session.company_rag_enabled,
+        seed_scope,
+        session.adapters,
+        session.reply,
+        masked_scope=None,
+        company_rag_enabled=session.company_rag_enabled,
     )
     session.gateways.append(seed_gateway)
     outcomes.append(
@@ -178,7 +184,9 @@ async def _seed_for(session, probe, arm, scope, probe_controller, probe_gateway)
     if probe.targets is MemoryType.SHORT_TERM:
         outcomes.append(
             await seed_short_term(
-                probe_controller, scope.session_id, session.seed,
+                probe_controller,
+                scope.session_id,
+                session.seed,
                 key_prefix=scope.session_id,
             )
         )
@@ -216,18 +224,18 @@ forbids it).
 # ("không được cung cấp", "chưa được cung cấp"): they already stand alone
 # in REFUSAL_PHRASES. Do not add "không ghi nhận": "ghi nhận" is already
 # a _WHAT_IS_MISSING noun.
-"không cung cấp",
-"chưa cung cấp",
-"không đề cập",
-"chưa đề cập",
-"không đề cập đến",
-"chưa đề cập đến",
+("không cung cấp",)
+("chưa cung cấp",)
+("không đề cập",)
+("chưa đề cập",)
+("không đề cập đến",)
+("chưa đề cập đến",)
 # NEW — quantity hedge sitting between "không có" and the noun.
 # Do not insert a free " đủ" particle after every lack verb; that loosens
 # adjacency. These two forms generate "không có đủ thông tin" and the
 # same cell over refusal_about.
-"không có đủ",
-"chưa có đủ",
+("không có đủ",)
+("chưa có đủ",)
 ```
 
 Leave `_WHAT_IS_MISSING` unchanged. Do **not** add `"chính sách"`,

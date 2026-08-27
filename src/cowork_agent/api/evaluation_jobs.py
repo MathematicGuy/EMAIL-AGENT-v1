@@ -17,11 +17,12 @@ import re
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from hmac import compare_digest
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from cowork_agent.composition import runtime
 from cowork_agent.features.batch_evaluation.contracts import EvaluationRequest
 from cowork_agent.features.batch_evaluation.service import (
     EvaluationConflict,
@@ -55,7 +56,7 @@ _PRIVATE_KEY_COMPACTS = frozenset({"apikey", "accesstoken"})
 
 
 def create_evaluation_router() -> APIRouter:
-    """Build the bearer-protected evaluation routes over ``app.state`` services."""
+    """Build the bearer-protected evaluation routes over the composed runtime."""
 
     router = APIRouter(tags=["evaluation"])
 
@@ -76,9 +77,7 @@ def create_evaluation_router() -> APIRouter:
         try:
             evaluation_request = EvaluationRequest.from_dict(payload)
         except (KeyError, TypeError, ValueError):
-            return _error_response(
-                422, "invalid_request", "evaluation request failed validation"
-            )
+            return _error_response(422, "invalid_request", "evaluation request failed validation")
         service = _evaluation_service(request)
         try:
             job = await service.submit(evaluation_request, idempotency_key=idempotency_key)
@@ -175,13 +174,22 @@ def create_evaluation_router() -> APIRouter:
 
 
 def _evaluation_service(request: Request) -> EvaluationJobService:
-    return cast(EvaluationJobService, request.app.state.evaluation_service)
+    # Typed read through the runtime seam (ADR-013): the router is mounted
+    # only when the evaluation group is composed, but defend the interface
+    # with an explicit failure instead of an attribute crash deep in a route.
+    bundle = runtime(request).evaluation
+    if bundle is None:
+        raise RuntimeError("the evaluation group is not composed")
+    return bundle.service
 
 
 def _authorization_error(request: Request) -> JSONResponse | None:
     """Return the SPEC auth errors without ever echoing the configured token."""
 
-    expected = str(getattr(request.app.state, "evaluation_api_token", "") or "")
+    # An absent evaluation group degrades to an empty expected token exactly
+    # as the old missing-key getattr did: the comparison fails closed (403).
+    bundle = runtime(request).evaluation
+    expected = bundle.api_token if bundle is not None else ""
     header = request.headers.get("authorization", "")
     scheme, _, presented = header.partition(" ")
     presented = presented.strip()

@@ -87,9 +87,10 @@ def test_manifest_persists_and_reloads_nonempty_title(tmp_path: Path) -> None:
 
     assert store.load() == {"a.pdf": entry}
     assert store.load()["a.pdf"].title == "Company Policy"
-    assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"][
-        "title"
-    ] == "Company Policy"
+    assert (
+        json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"]["title"]
+        == "Company Policy"
+    )
     assert store.should_skip("a.pdf", "abc") is True
 
 
@@ -133,9 +134,12 @@ def test_manifest_persists_and_reloads_nonempty_document_date(tmp_path: Path) ->
 
     assert store.load() == {"a.pdf": entry}
     assert store.load()["a.pdf"].document_date == "2026-08-07"
-    assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"][
-        "document_date"
-    ] == "2026-08-07"
+    assert (
+        json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))["a.pdf"][
+            "document_date"
+        ]
+        == "2026-08-07"
+    )
 
 
 def test_manifest_missing_document_date_key_loads_as_empty(tmp_path: Path) -> None:

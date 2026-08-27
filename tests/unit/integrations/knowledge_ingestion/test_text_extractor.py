@@ -20,12 +20,7 @@ def test_utf8_txt_returns_body_and_page_count_one(tmp_path: Path) -> None:
 def test_md_with_leading_closed_frontmatter_returns_only_body(tmp_path: Path) -> None:
     path = tmp_path / "policy.md"
     path.write_text(
-        "---\n"
-        "document_id: policy-file\n"
-        "title: Policy\n"
-        "---\n"
-        "\n"
-        "# Policy\n",
+        "---\ndocument_id: policy-file\ntitle: Policy\n---\n\n# Policy\n",
         encoding="utf-8",
     )
 

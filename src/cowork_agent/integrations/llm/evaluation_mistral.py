@@ -83,9 +83,7 @@ class _AttemptObservableMistralReply:
 
         return _AttemptObservableStream(stream, emit_terminal)
 
-    async def _emit(
-        self, error: BaseException | None, started_at: float, request_id: str
-    ) -> None:
+    async def _emit(self, error: BaseException | None, started_at: float, request_id: str) -> None:
         status_code, retry_after_seconds, outcome = _attempt_metadata(error)
         event = ProviderAttemptEvent(
             credential_alias=self._credential_alias,
@@ -176,6 +174,7 @@ class _AttemptObservableStream(AsyncIterator[str | ChatReplyChunk]):
                 await close()
             except BaseException:
                 pass
+
 
 def _attempt_metadata(error: BaseException | None) -> tuple[int | None, int | None, str]:
     if error is None:

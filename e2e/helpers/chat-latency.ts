@@ -291,15 +291,26 @@ export async function openDashboard(page: Page): Promise<void> {
     window.localStorage.setItem('v-assistant-active-project-id', 'project-latency');
   });
   await page.goto('/#dashboard');
+
+  // Wait for the composer textarea – reliable signal the dashboard has mounted
+  await expect(page.locator('textarea')).toBeVisible({ timeout: 20_000 });
+
+  // 1. If sidebar is collapsed, expand it. The name matches either locale so a
+  // Vietnamese-rendered CI run finds the same control.
   const showSidebar = page.getByRole('button', { name: /Show sidebar|Hiện thanh bên/i });
   if (await showSidebar.isVisible().catch(() => false)) {
     await showSidebar.click();
   }
+  // Wait on the expander *or* an existing recent chat: a project that is
+  // already expanded never renders the button, and waiting only on the button
+  // is what made this flake in CI.
   const expandBtn = page.getByRole('button', { name: /Expand Latency Project|Expand Default Project|Expand/i });
   const recents = page.getByTestId('recent-chat').first();
   await expect(expandBtn.or(recents)).toBeVisible({ timeout: 20_000 });
   if (await expandBtn.isVisible().catch(() => false)) {
     await expandBtn.click();
   }
-  await expect(recents).toBeVisible({ timeout: 20_000 });
+
+  // 2. Wait for at least one recent-chat item to become visible.
+  await expect(recents).toBeVisible({ timeout: 25_000 });
 }

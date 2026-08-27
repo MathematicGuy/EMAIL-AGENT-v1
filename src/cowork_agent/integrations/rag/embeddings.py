@@ -141,10 +141,7 @@ class JinaEmbeddingAdapter:
                         )
                         await self._settings.rotator.mark_exhausted(key)
                         continue
-                    if (
-                        _is_rate_limit_error(exc)
-                        and self._settings.rotate_on_rate_limit
-                    ):
+                    if _is_rate_limit_error(exc) and self._settings.rotate_on_rate_limit:
                         logger.warning(
                             "Jina embedding rate limit for key %s; rotating key",
                             mask_api_key(key),
@@ -176,10 +173,7 @@ def _is_insufficient_balance_error(exc: Exception) -> bool:
     if not isinstance(exc, HTTPError) or exc.code != 403:
         return False
     payload = _http_error_body(exc).lower()
-    return (
-        "authz_insufficient_balance" in payload
-        or "insufficient account balance" in payload
-    )
+    return "authz_insufficient_balance" in payload or "insufficient account balance" in payload
 
 
 def _is_unrecoverable_auth_error(exc: Exception) -> bool:
@@ -242,9 +236,7 @@ class GeminiEmbeddingAdapter:
             # text separately so every project-document chunk receives its own
             # embedding. Earlier text models retain their supported batching.
             requests = (
-                [[text] for text in batch]
-                if "gemini-embedding-2" in self._model
-                else [batch]
+                [[text] for text in batch] if "gemini-embedding-2" in self._model else [batch]
             )
             sem = asyncio.Semaphore(4)
 
@@ -282,9 +274,7 @@ class GeminiEmbeddingAdapter:
         config = (
             types.EmbedContentConfig(
                 task_type=(
-                    "RETRIEVAL_DOCUMENT"
-                    if task == "retrieval.passage"
-                    else "RETRIEVAL_QUERY"
+                    "RETRIEVAL_DOCUMENT" if task == "retrieval.passage" else "RETRIEVAL_QUERY"
                 ),
                 output_dimensionality=self._dimensions,
             )

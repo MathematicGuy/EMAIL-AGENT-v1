@@ -26,17 +26,26 @@ def _request() -> ChatMessageRequest:
 
 def _episode() -> TaskEpisode:
     return TaskEpisode(
-        episode_id="episode-1", record_id="record-1",
-        user_id="user@example.com", chat_session_id="session-1",
-        chat_turn_id="turn-1", creation_reason="explicit_user_task_request",
+        episode_id="episode-1",
+        record_id="record-1",
+        user_id="user@example.com",
+        chat_session_id="session-1",
+        chat_turn_id="turn-1",
+        creation_reason="explicit_user_task_request",
         task_title="Submit report",
-        minimal_request_paraphrase="Submit report", action_plan=("Submit it",),
+        minimal_request_paraphrase="Submit report",
+        action_plan=("Submit it",),
         rag_citations=(EpisodeCitation("doc-1", "Procedure", None, "https://docs.example.com"),),
-        missing_information=(), validation_status=ValidationStatus.USER_APPROVED,
+        missing_information=(),
+        validation_status=ValidationStatus.USER_APPROVED,
         retrieval_eligible=True,
         source_type=EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK,
-        created_at=NOW, updated_at=NOW, pipeline_version="2", model_id=None,
-        prompt_version=None, confidence=None,
+        created_at=NOW,
+        updated_at=NOW,
+        pipeline_version="2",
+        model_id=None,
+        prompt_version=None,
+        confidence=None,
     )
 
 
@@ -53,7 +62,9 @@ def _context(*, semantic_context: object = None) -> MemoryContextResponse:
             created_at=NOW,
             updated_at=NOW,
         ),
-        episodes=(_episode(),), semantic_context=semantic_context, degraded=False,
+        episodes=(_episode(),),
+        semantic_context=semantic_context,
+        degraded=False,
         degraded_sources=(),
     )
 
@@ -61,12 +72,15 @@ def _context(*, semantic_context: object = None) -> MemoryContextResponse:
 def test_assembler_labels_all_sources_and_declares_exact_conflict_precedence() -> None:
     context = assemble_generation_context(
         _request(),
-        _context(semantic_context={
-            "source_label": "current_company_evidence", "retrieval_status": "success",
-            "chunks": ({"chunk_id": "chunk-1"},),
-            "citations": ({"document_id": "doc-1", "source_url": "https://docs.example.com"},),
-            "scores": (),
-        }),
+        _context(
+            semantic_context={
+                "source_label": "current_company_evidence",
+                "retrieval_status": "success",
+                "chunks": ({"chunk_id": "chunk-1"},),
+                "citations": ({"document_id": "doc-1", "source_url": "https://docs.example.com"},),
+                "scores": (),
+            }
+        ),
     )
 
     assert context.current_instruction.label is ContextSource.CURRENT_INSTRUCTION

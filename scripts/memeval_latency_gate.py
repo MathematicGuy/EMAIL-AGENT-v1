@@ -191,7 +191,7 @@ def run_latency_gate(provider: str, model: str, *, fail_open: bool = False) -> b
 
             print(
                 f"  [{i}/{sample_count}] {probe.name} -> "
-                f"SUCCESS: {dur_ms:.1f}ms ({dur_ms/1000:.2f}s)"
+                f"SUCCESS: {dur_ms:.1f}ms ({dur_ms / 1000:.2f}s)"
                 f"{schema_status} | Preview: {clean_preview}..."
             )
         except Exception as exc:
@@ -217,10 +217,7 @@ def run_latency_gate(provider: str, model: str, *, fail_open: bool = False) -> b
         f"Threshold: < {MAX_ALLOWED_AVG_LATENCY_SECONDS}s)"
     )
     fail_detail = f" ({len(schema_failures)} errors: {schema_failures})" if schema_failures else ""
-    print(
-        f"  [3] Hard Schema Check    : "
-        f"{'PASSED' if schema_passed else f'FAILED{fail_detail}'}"
-    )
+    print(f"  [3] Hard Schema Check    : {'PASSED' if schema_passed else f'FAILED{fail_detail}'}")
 
     if latency_passed and schema_passed:
         print(f"\n[GATE RESULT: PASSED] Model {model} satisfies all admission criteria.")

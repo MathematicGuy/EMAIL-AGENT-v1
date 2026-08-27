@@ -190,5 +190,6 @@ pnpm lint
 
 - **Target Architecture:** [`docs/architectures/TARGET-ARCHITECTURE.md`](docs/architectures/TARGET-ARCHITECTURE.md)
 - **Test Routing Index:** [`tests/README.md`](tests/README.md)
+- **Chat tools walkthrough:** [`docs/guides/tool-registry-from-first-principles.md`](docs/guides/tool-registry-from-first-principles.md)
 - **Experience Registry:** [`docs/references/agent-experience-registry.md`](docs/references/agent-experience-registry.md)
 - **PRDs:** [`tasks/prds/PRD-v1-Core-Email-and-RAG.md`](tasks/prds/PRD-v1-Core-Email-and-RAG.md) · [`tasks/prds/PRD-v2-Memory-Extension.md`](tasks/prds/PRD-v2-Memory-Extension.md)

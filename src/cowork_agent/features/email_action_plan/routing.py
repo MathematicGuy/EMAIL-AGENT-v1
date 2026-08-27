@@ -265,8 +265,10 @@ def resolve_candidate_after_retrieval(
         decision.email_is_sufficient and decision.confidence > confidence_floor
         for decision in actionable
     )
-    allows_full_direct = all_sufficient and not guard_fired and all(
-        decision.actionability is not Actionability.UNCLEAR for decision in actionable
+    allows_full_direct = (
+        all_sufficient
+        and not guard_fired
+        and all(decision.actionability is not Actionability.UNCLEAR for decision in actionable)
     )
     return RouteResolution(
         route=Route.DIRECT_PLAN,

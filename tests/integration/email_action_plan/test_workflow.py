@@ -172,9 +172,9 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         # Cardinality (frozen contract rule 6): exactly one Generator call per
         # resolved non-NO_ACTION candidate — the informational email is skipped.
         assert generator.call_count == 1
-        assert [
-            candidate.source_message_ids for candidate in generator.received_candidates
-        ] == [("m1",)]
+        assert [candidate.source_message_ids for candidate in generator.received_candidates] == [
+            ("m1",)
+        ]
 
     asyncio.run(scenario())
 
@@ -943,6 +943,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
 
     asyncio.run(scenario())
 
+
 #: Route Decision resolving to RETRIEVE_RAG with explicit gaps and query.
 RAG_DECISION = EmailRouteDecision(
     actionability=Actionability.ACTION_REQUIRED,
@@ -1282,9 +1283,9 @@ def test_terminal_runs_append_completion_events_to_outbox() -> None:
         await worker(FakePlanGenerator((task_for("m1", "Gửi báo cáo"),))).execute(
             ok_run.id, now=NOW
         )
-        await worker(
-            FailingPlanGenerator(GenerationSchemaError("boom"))
-        ).execute(failed_run.id, now=NOW)
+        await worker(FailingPlanGenerator(GenerationSchemaError("boom"))).execute(
+            failed_run.id, now=NOW
+        )
 
         # T5.3: every terminal run yields exactly one metadata-only
         # lifecycle event, on success and on failure alike.
@@ -1360,7 +1361,7 @@ def test_validated_tasks_are_persisted_with_identity_and_pipeline_version() -> N
         assert stored[0].pointer.mailbox_connection_id == "mbx1"
         assert stored[0].pointer.provider_thread_id == "t1"
         assert stored[0].freshness is ActionFreshness.NEW
-        (tenant_id, user_id, message_id, pipeline_version), = task_repository.tasks
+        ((tenant_id, user_id, message_id, pipeline_version),) = task_repository.tasks
         assert tenant_id == LOCAL_TENANT_ID
         assert user_id == "u1"
         assert message_id == "m1"
@@ -1538,9 +1539,7 @@ def test_telemetry_marks_failed_run_with_error_code_only() -> None:
         assert outcome.generation_status == "GENERATION_SCHEMA_ERROR"
         for event in sink.events:
             assert "secret detail" not in json.dumps(event.to_dict(), ensure_ascii=False)
-            assert "Nội dung email riêng tư." not in json.dumps(
-                event.to_dict(), ensure_ascii=False
-            )
+            assert "Nội dung email riêng tư." not in json.dumps(event.to_dict(), ensure_ascii=False)
 
     asyncio.run(scenario())
 
@@ -1683,9 +1682,7 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
 
     async def scenario() -> None:
         documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
-        memory = TurbovecSemanticMemory(
-            documents, HashingEmbedder(), min_score_default=0.0
-        )
+        memory = TurbovecSemanticMemory(documents, HashingEmbedder(), min_score_default=0.0)
         await memory.build_index()
 
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))

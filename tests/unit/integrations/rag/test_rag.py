@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -22,9 +24,6 @@ from cowork_agent.integrations.rag.knowledge_base import (
     load_corpus,
 )
 from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-CORPUS_DIR = REPO_ROOT / "data" / "extracted"
 
 
 def _request(
@@ -62,42 +61,62 @@ def _filter_chunk(
     )
 
 
-def _built_memory(corpus_dir: Path = CORPUS_DIR):
-    documents = load_corpus(corpus_dir)
+def _built_memory(
+    documents: tuple[KnowledgeDocument, ...] | None = None,
+) -> InRepoSemanticMemory:
+    if documents is None:
+        documents = (
+            KnowledgeDocument(
+                "cap-lai-cccd",
+                "Cấp lại CCCD",
+                "cap-lai-cccd.md",
+                (
+                    _filter_chunk(
+                        "cccd#0",
+                        "cap-lai-cccd",
+                        text="Thủ tục cấp lại căn cước công dân VNeID trực tuyến.",
+                    ),
+                    _filter_chunk(
+                        "cccd#1",
+                        "cap-lai-cccd",
+                        text="Lệ phí và thời gian trả kết quả căn cước.",
+                    ),
+                ),
+            ),
+            KnowledgeDocument(
+                "dang-ky-tam-tru",
+                "Đăng ký tạm trú",
+                "dang-ky-tam-tru.md",
+                (
+                    _filter_chunk(
+                        "tam-tru#0",
+                        "dang-ky-tam-tru",
+                        text="Hồ sơ và thủ tục đăng ký tạm trú cho công dân.",
+                    ),
+                ),
+            ),
+        )
     memory = InRepoSemanticMemory(documents, HashingEmbedder())
     asyncio.run(memory.build_index())
     return memory
 
 
-def test_load_corpus_reads_the_committed_documents() -> None:
-    documents = load_corpus(CORPUS_DIR)
-    assert [doc.document_id for doc in documents] == [
-        "01-2021-nd-cp-283247",
-        "31-2024-qh15-523642",
-        "41-2024-qh15-557190",
-        "49-2019-qh14-402073",
-        "cap-lai-cccd",
-        "chi-tiet-thu-tuc-1-004194-1786097965866",
-        "chi-tiet-thu-tuc-1-115132-1786096253281",
-        "chi-tiet-thu-tuc-1-115970-1786097982328",
-        "chi-tiet-thu-tuc-1-116194-1786096137126",
-        "chi-tiet-thu-tuc-2-001194-1786096928665",
-        "chi-tiet-thu-tuc-3-000228-1786096860852",
-        "dang-ky-ket-hon",
-        "dang-ky-tam-tru",
-        "dang-ky-xe",
-        "design-machine-learning-systems",
-        "huong-dan-nop-ho-so-dai-hoc-vinuni",
-        "thu-tuc-dang-ky-bhxh-luatvietnam",
-        "thue-dien-tu",
-    ]
+# Hermetic rather than asserting the committed corpus filename-by-filename: that
+# list needed an edit every time a document landed. The real corpus is still
+# loaded and asserted in `tests/unit/fixtures/test_retrieval_golden.py`.
+def test_load_corpus_reads_documents(tmp_path: Path) -> None:
+    (tmp_path / "doc-a.md").write_text("# Doc A Title\n\nContent for doc A.", encoding="utf-8")
+    (tmp_path / "doc-b.md").write_text("# Doc B Title\n\nContent for doc B.", encoding="utf-8")
+
+    documents = load_corpus(tmp_path)
+    assert [doc.document_id for doc in documents] == ["doc-a", "doc-b"]
+    assert [doc.title for doc in documents] == ["Doc A Title", "Doc B Title"]
     for document in documents:
-        assert document.title
         assert document.chunks
         for chunk in document.chunks:
             assert chunk.text.strip()
             assert chunk.document_id == document.document_id
-            assert chunk.source_url.startswith("data/extracted/")
+            assert chunk.source_url == f"{document.document_id}.md"
 
 
 def test_load_corpus_chunks_by_h2_sections(tmp_path: Path) -> None:
@@ -119,12 +138,7 @@ def test_load_corpus_copies_page_coordinates_and_omits_page_markers(
 ) -> None:
     doc = tmp_path / "paged.md"
     doc.write_text(
-        "# Title\n"
-        "<!-- Page 1 -->\n"
-        "First page body.\n"
-        "\n"
-        "<!-- Page 2 -->\n"
-        "Second page body.\n",
+        "# Title\n<!-- Page 1 -->\nFirst page body.\n\n<!-- Page 2 -->\nSecond page body.\n",
         encoding="utf-8",
     )
     (document,) = load_corpus(tmp_path)
@@ -299,9 +313,7 @@ def test_null_semantic_memory_returns_structured_no_results() -> None:
 
 
 def test_timeout_status_when_embedder_times_out() -> None:
-    documents = load_corpus(CORPUS_DIR)
-    memory = InRepoSemanticMemory(documents, HashingEmbedder())
-    asyncio.run(memory.build_index())
+    memory = _built_memory()
     memory._embedder = SlowEmbedder()
     response = asyncio.run(memory.retrieve(_request()))
     assert response.retrieval_status is RetrievalStatus.TIMEOUT
@@ -420,6 +432,11 @@ class _CountingEmbedder:
         self.calls = 0
         self._inner = HashingEmbedder()
 
-    async def embed(self, texts, *, task: str = "retrieval.query"):
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task: Literal["retrieval.query", "retrieval.passage"] = "retrieval.query",
+    ) -> tuple[tuple[float, ...], ...]:
         self.calls += 1
         return await self._inner.embed(texts, task=task)

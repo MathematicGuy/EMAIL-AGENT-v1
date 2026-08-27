@@ -133,9 +133,7 @@ def _environment_probe_environ(environ: Mapping[str, str]) -> dict[str, str]:
     """Keep Mistral credentials in the pool while preserving probe semantics."""
 
     probe_environ = {
-        name: value
-        for name, value in environ.items()
-        if not name.startswith("MISTRAL_API_KEY")
+        name: value for name, value in environ.items() if not name.startswith("MISTRAL_API_KEY")
     }
     for key_name in ("GEMINI_API_KEY", "JINA_API_KEY"):
         if probe_environ.get(key_name):

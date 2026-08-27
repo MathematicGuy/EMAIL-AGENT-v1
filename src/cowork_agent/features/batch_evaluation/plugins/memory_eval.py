@@ -241,19 +241,14 @@ class MemoryEvalPlugin(EvaluationPlugin):
             ),
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         memory_plan = _memory_plan(plan)
         decoded, failed_units = _successful_shards(outcomes, memory_plan.report_nonce)
         valid, invalid_units = _valid_shards(decoded, memory_plan.probe_set)
         failed_unit_count = failed_units + invalid_units
-        completed_probe_count = len(
-            {row.probe_id for shard in valid for row in shard.result.rows}
-        )
-        incomplete = (
-            failed_unit_count > 0
-            or completed_probe_count != len(memory_plan.probe_set.probes)
+        completed_probe_count = len({row.probe_id for shard in valid for row in shard.result.rows})
+        incomplete = failed_unit_count > 0 or completed_probe_count != len(
+            memory_plan.probe_set.probes
         )
         report_inputs = _ordered_report_inputs(valid, memory_plan.probe_set)
         if incomplete or not report_inputs:
@@ -357,10 +352,7 @@ def _is_complete_success(
         row.probe_id == probe.probe_id
         and row.targets is probe.targets
         and row.test is probe.test
-        and all(
-            isinstance(outcome, Outcome)
-            for outcome in (row.full, row.ablated, row.control)
-        )
+        and all(isinstance(outcome, Outcome) for outcome in (row.full, row.ablated, row.control))
         for row, probe in zip(result.rows, probe_set.probes, strict=True)
     )
     aborted = any(finding.startswith("aborted: ") for finding in result.provider_findings)
@@ -409,8 +401,7 @@ def _ordinal_sequence(value: object) -> tuple[int, ...]:
         raise ValueError("memory shard ordinals must be a sequence")
     items = tuple(value)
     if not all(
-        isinstance(item, int) and not isinstance(item, bool) and item >= 0
-        for item in items
+        isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in items
     ):
         raise ValueError("memory shard ordinals must contain non-negative integers")
     return cast(tuple[int, ...], items)
@@ -506,11 +497,7 @@ def _ordered_report_inputs(
 ) -> list[MemoryShardResult]:
     if not shards:
         return []
-    rows_by_id = {
-        row.probe_id: row
-        for shard in shards
-        for row in shard.result.rows
-    }
+    rows_by_id = {row.probe_id: row for shard in shards for row in shard.result.rows}
     first = shards[0].result
     return [
         MemoryShardResult(
@@ -520,24 +507,12 @@ def _ordered_report_inputs(
                 if probe.probe_id in rows_by_id
             ),
             seed_failure_ids=tuple(
-                sorted(
-                    {
-                        failure
-                        for shard in shards
-                        for failure in shard.result.seed_failure_ids
-                    }
-                )
+                sorted({failure for shard in shards for failure in shard.result.seed_failure_ids})
             ),
             private_transcript=(),
             nonce=first.nonce,
             provider_findings=tuple(
-                sorted(
-                    {
-                        finding
-                        for shard in shards
-                        for finding in shard.result.provider_findings
-                    }
-                )
+                sorted({finding for shard in shards for finding in shard.result.provider_findings})
             ),
             scratch_removed=all(shard.result.scratch_removed for shard in shards),
             report_nonce=first.report_nonce,
@@ -545,9 +520,7 @@ def _ordered_report_inputs(
     ]
 
 
-def _decode_private_result(
-    value: object, *, unit_id: str, ordinal: int
-) -> _DecodedShardResult:
+def _decode_private_result(value: object, *, unit_id: str, ordinal: int) -> _DecodedShardResult:
     payload = _object(value, "memory private result")
     expected = {
         "schema_version",

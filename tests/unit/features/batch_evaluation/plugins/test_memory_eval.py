@@ -68,34 +68,25 @@ def _plugin(*, environment: LiveEnvironment | None = None) -> MemoryEvalPlugin:
     )
 
 
-@pytest.mark.parametrize(
-    ("dataset_ref", "probe_set_id"),
-    (
+def test_catalog_resolves_only_canonical_probe_ids() -> None:
+    catalog = MemoryProbeCatalog(_PROBES_DIR)
+    cases = (
         ("v1-four-scopes", "v1_four_scopes"),
         ("v2-four-scopes-wide", "v2_four_scopes_wide"),
         ("v3-four-scopes-hard", "v3_four_scopes_hard"),
-    ),
-)
-def test_catalog_resolves_only_canonical_probe_ids(
-    dataset_ref: str, probe_set_id: str
-) -> None:
+    )
+    for dataset_ref, probe_set_id in cases:
+        probe_set = catalog.resolve(dataset_ref)
+        assert probe_set.probe_set_id == probe_set_id
+        assert probe_set.probes
+
+
+def test_catalog_rejects_path_like_and_unknown_dataset_refs() -> None:
     catalog = MemoryProbeCatalog(_PROBES_DIR)
-
-    probe_set = catalog.resolve(dataset_ref)
-
-    assert probe_set.probe_set_id == probe_set_id
-    assert probe_set.probes
-
-
-@pytest.mark.parametrize(
-    "dataset_ref",
-    ("../v1-four-scopes", "v1-four-scopes.json", "unknown", r"C:\\probes\\v1.json"),
-)
-def test_catalog_rejects_path_like_and_unknown_dataset_refs(dataset_ref: str) -> None:
-    catalog = MemoryProbeCatalog(_PROBES_DIR)
-
-    with pytest.raises(ValueError):
-        catalog.resolve(dataset_ref)
+    invalid_refs = ("../v1-four-scopes", "v1-four-scopes.json", "unknown", r"C:\\probes\\v1.json")
+    for dataset_ref in invalid_refs:
+        with pytest.raises(ValueError):
+            catalog.resolve(dataset_ref)
 
 
 @pytest.mark.asyncio
@@ -408,8 +399,7 @@ async def test_execute_work_isolates_concurrent_shards_and_encodes_private_resul
     )
     for key in ("tenant", "user", "session", "nonce", "transcript", "output", "reply"):
         values = {
-            id(entry[key]) if key in {"transcript", "reply"} else entry[key]
-            for entry in observed
+            id(entry[key]) if key in {"transcript", "reply"} else entry[key] for entry in observed
         }
         assert len(values) == len(observed)
     assert len({entry["report_nonce"] for entry in observed}) == 1
@@ -418,74 +408,71 @@ async def test_execute_work_isolates_concurrent_shards_and_encodes_private_resul
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure_kind",
-    ("aborted", "missing-row", "incomplete-row", "cleanup"),
-)
 async def test_execute_work_returns_failed_for_dishonest_shard_results(
-    failure_kind: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    plugin = _plugin()
-    plan = await plugin.preflight(_request(max_workers=2))
-    unit = plugin.build_work_units(plan, lane_count=2)[0]
+    for failure_kind in ("aborted", "missing-row", "incomplete-row", "cleanup"):
+        plugin = _plugin()
+        plan = await plugin.preflight(_request(max_workers=2))
+        unit = plugin.build_work_units(plan, lane_count=2)[0]
 
-    async def fake_execute_memory_shard(
-        probe_set: ProbeSet,
-        environment: LiveEnvironment,
-        reply: object,
-        *,
-        report_nonce: str,
-        **_: object,
-    ) -> MemoryShardResult:
-        del reply
-        assert environment.sqlite_path is not None
-        rows = tuple(
-            ProbeRow(
-                probe_id=probe.probe_id,
-                targets=probe.targets,
-                test=probe.test,
-                full=Outcome.PASS,
-                ablated=Outcome.MISS,
-                control=Outcome.MISS,
-                certain=True,
-                latency_ms=1,
-            )
-            for probe in probe_set.probes
+        def _make_fake_shard(kind: str):
+            async def fake_execute_memory_shard(
+                probe_set: ProbeSet,
+                environment: LiveEnvironment,
+                reply: object,
+                *,
+                report_nonce: str,
+                **_: object,
+            ) -> MemoryShardResult:
+                del reply
+                assert environment.sqlite_path is not None
+                rows = tuple(
+                    ProbeRow(
+                        probe_id=probe.probe_id,
+                        targets=probe.targets,
+                        test=probe.test,
+                        full=Outcome.PASS,
+                        ablated=Outcome.MISS,
+                        control=Outcome.MISS,
+                        certain=True,
+                        latency_ms=1,
+                    )
+                    for probe in probe_set.probes
+                )
+                if kind == "missing-row":
+                    rows = rows[:-1]
+                elif kind == "incomplete-row":
+                    rows = (replace(rows[0], full=cast(Outcome, "not-an-outcome")), *rows[1:])
+                return MemoryShardResult(
+                    rows=rows,
+                    seed_failure_ids=(),
+                    private_transcript=({"question": "private", "reply": "private"},),
+                    nonce="identity",
+                    provider_findings=("aborted: provider limit",) if kind == "aborted" else (),
+                    scratch_removed=kind != "cleanup",
+                    report_nonce=report_nonce,
+                )
+
+            return fake_execute_memory_shard
+
+        monkeypatch.setattr(memory_eval, "execute_memory_shard", _make_fake_shard(failure_kind))
+        outcome = await plugin.execute_work(
+            unit,
+            WorkContext(
+                job_id="memory-job",
+                attempt_id=f"attempt-{failure_kind}",
+                lane_id="lane-1",
+                credential_alias="mistral-1",
+                plugin_plan=plan,
+                provider_client=object(),
+                scratch_dir=tmp_path / failure_kind,
+            ),
         )
-        if failure_kind == "missing-row":
-            rows = rows[:-1]
-        elif failure_kind == "incomplete-row":
-            rows = (replace(rows[0], full=cast(Outcome, "not-an-outcome")), *rows[1:])
-        return MemoryShardResult(
-            rows=rows,
-            seed_failure_ids=(),
-            private_transcript=({"question": "private", "reply": "private"},),
-            nonce="identity",
-            provider_findings=("aborted: provider limit",)
-            if failure_kind == "aborted"
-            else (),
-            scratch_removed=failure_kind != "cleanup",
-            report_nonce=report_nonce,
-        )
 
-    monkeypatch.setattr(memory_eval, "execute_memory_shard", fake_execute_memory_shard)
-    outcome = await plugin.execute_work(
-        unit,
-        WorkContext(
-            job_id="memory-job",
-            attempt_id="attempt-failed",
-            lane_id="lane-1",
-            credential_alias="mistral-1",
-            plugin_plan=plan,
-            provider_client=object(),
-            scratch_dir=tmp_path,
-        ),
-    )
-
-    assert outcome.state is UnitState.FAILED
-    assert outcome.private_result is None
+        assert outcome.state is UnitState.FAILED
+        assert outcome.private_result is None
 
 
 @pytest.mark.asyncio
@@ -503,9 +490,7 @@ async def test_aggregate_decodes_durable_results_once_in_original_probe_order_an
         nonlocal calls
         calls += 1
         shard_results = args[1]
-        merged_probe_ids.extend(
-            row.probe_id for shard in shard_results for row in shard.rows
-        )
+        merged_probe_ids.extend(row.probe_id for shard in shard_results for row in shard.rows)
         return original_build(*args, **kwargs)  # type: ignore[arg-type]
 
     async def fake_execute_memory_shard(

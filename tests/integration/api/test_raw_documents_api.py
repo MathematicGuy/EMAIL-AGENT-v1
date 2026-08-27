@@ -7,12 +7,15 @@ tempts tests into writing into a tracked directory.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import cowork_agent.app as app_module
+import cowork_agent.api.knowledge as knowledge_api
 from cowork_agent.app import create_app
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.persistence.repositories.sqlite_raw_documents import (
     SQLiteRawDocumentRepository,
 )
@@ -36,16 +39,27 @@ def corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(app_module, "RAW_DOCS_DIR", raw_dir)
-    monkeypatch.setattr(app_module, "EXTRACTED_DIR", extracted_dir)
+    # The corpus locations moved to the knowledge router with the handlers
+    # that read them (slice 03-1); patch them where they are now defined.
+    monkeypatch.setattr(knowledge_api, "RAW_DOCS_DIR", raw_dir)
+    monkeypatch.setattr(knowledge_api, "EXTRACTED_DIR", extracted_dir)
     return raw_dir
 
 
 async def _app_with_repo(tmp_path: Path):
+    """An app whose composed control plane owns a throwaway metadata store.
+
+    The write endpoints read the repository off the runtime like every other
+    group (ADR-013); the ``app.state.raw_document_repository`` memo they used
+    to fall back on is gone, so a test that writes has to compose one.
+    """
     app = create_app()
     repo = SQLiteRawDocumentRepository(tmp_path / "raw_docs.db")
     await repo.initialize()
-    app.state.raw_document_repository = repo
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=cast(Any, SimpleNamespace(raw_document_repository=repo)),
+    )
     return app, repo
 
 
@@ -109,9 +123,7 @@ async def test_unknown_document_is_404(corpus: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_directory_traversal_cannot_escape_the_corpus(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_directory_traversal_cannot_escape_the_corpus(corpus: Path, tmp_path: Path) -> None:
     (tmp_path / "secrets.txt").write_text("do not serve me", encoding="utf-8")
 
     async with _client(create_app()) as client:
@@ -126,9 +138,7 @@ async def test_directory_traversal_cannot_escape_the_corpus(
 
 
 @pytest.mark.asyncio
-async def test_manifest_entry_escaping_the_corpus_is_ignored(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_manifest_entry_escaping_the_corpus_is_ignored(corpus: Path, tmp_path: Path) -> None:
     (tmp_path / "outside.md").write_text("secret outside the corpus", encoding="utf-8")
     (corpus.parent / "extracted" / "ingestion-manifest.json").write_text(
         '{"procedure.pdf": {"output": "../outside.md"}}', encoding="utf-8"
@@ -152,9 +162,7 @@ async def test_manifest_entry_escaping_the_corpus_is_ignored(
 
 
 @pytest.mark.asyncio
-async def test_upload_stores_the_file_and_records_metadata(
-    corpus: Path, tmp_path: Path
-) -> None:
+async def test_upload_stores_the_file_and_records_metadata(corpus: Path, tmp_path: Path) -> None:
     app, repo = await _app_with_repo(tmp_path)
     async with _client(app) as client:
         res = await client.post(
@@ -235,7 +243,7 @@ async def test_delete_removes_the_raw_file_and_its_extracted_markdown(
     assert res.json()["status"] == "deleted"
     assert not (corpus / "procedure.pdf").exists()
     assert not extracted.exists()
-    # Regression: `_raw_document_repo` is async, and the delete path used to call it
-    # without awaiting -- `hasattr(coroutine, "delete")` is False, so the metadata
-    # row silently survived the delete.
+    # Regression: the delete path once reached the repository through an
+    # unawaited coroutine behind a `hasattr(repo, "delete")` guard, so the
+    # metadata row silently survived the delete.
     assert await repo.get("procedure.pdf") is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from math import ceil
 from typing import cast
@@ -27,6 +27,7 @@ from cowork_agent.features.ai_chat.intent.service import (
     IntentClassifierInvalidOutput,
     IntentClassifierUnavailable,
 )
+from cowork_agent.features.ai_chat.tools.registry import Tool
 
 Completion = Callable[[str], Awaitable[Mapping[str, object]]]
 
@@ -81,12 +82,13 @@ INTENT_RESPONSE_SCHEMA: dict[str, object] = {
 class ConfiguredIntentClassifier:
     """Provider-neutral parser boundary used by production adapters and tests."""
 
-    def __init__(self, complete: Completion) -> None:
+    def __init__(self, complete: Completion, tools: Sequence[Tool] = ()) -> None:
         self._complete = complete
+        self._tools = tuple(tools)
 
     async def classify(self, classifier_input: IntentClassifierInput) -> IntentDecision:
         try:
-            payload = await self._complete(build_intent_prompt(classifier_input))
+            payload = await self._complete(build_intent_prompt(classifier_input, self._tools))
             return classifier_decision_from_dict(payload)
         except IntentClassifierError:
             raise
@@ -101,7 +103,11 @@ class ConfiguredIntentClassifier:
 class GeminiIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: GeminiSettings, intent: ChatIntentSettings
+        cls,
+        provider: GeminiSettings,
+        intent: ChatIntentSettings,
+        *,
+        tools: Sequence[Tool] = (),
     ) -> GeminiIntentClassifier:
         from .providers.gemini import (
             GeminiKeyRotator,
@@ -131,13 +137,17 @@ class GeminiIntentClassifier(ConfiguredIntentClassifier):
                         raise
             raise last_error or IntentClassifierUnavailable("no Gemini API key was attempted")
 
-        return cls(complete)
+        return cls(complete, tools)
 
 
 class MimoIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: MimoSettings, intent: ChatIntentSettings
+        cls,
+        provider: MimoSettings,
+        intent: ChatIntentSettings,
+        *,
+        tools: Sequence[Tool] = (),
     ) -> MimoIntentClassifier:
         from .providers.mimo import execute_chat_completion
 
@@ -156,13 +166,17 @@ class MimoIntentClassifier(ConfiguredIntentClassifier):
                 INTENT_RESPONSE_SCHEMA,
             )
 
-        return cls(complete)
+        return cls(complete, tools)
 
 
 class MistralIntentClassifier(ConfiguredIntentClassifier):
     @classmethod
     def from_settings(
-        cls, provider: MistralSettings, intent: ChatIntentSettings
+        cls,
+        provider: MistralSettings,
+        intent: ChatIntentSettings,
+        *,
+        tools: Sequence[Tool] = (),
     ) -> MistralIntentClassifier:
         from .providers.mistral import (
             MISTRAL_CHAT_COMPLETIONS_URL,
@@ -187,7 +201,7 @@ class MistralIntentClassifier(ConfiguredIntentClassifier):
             )
             return cast(Mapping[str, object], _completion_json(response))
 
-        return cls(complete)
+        return cls(complete, tools)
 
 
 class OpenRouterIntentClassifier(ConfiguredIntentClassifier):
@@ -197,6 +211,8 @@ class OpenRouterIntentClassifier(ConfiguredIntentClassifier):
         provider: OpenRouterSettings,
         intent: ChatIntentSettings,
         last_resort: GeminiSettings | None = None,
+        *,
+        tools: Sequence[Tool] = (),
     ) -> OpenRouterIntentClassifier:
         from .last_resort import complete_with_gemini_last_resort, gemini_json_complete
         from .providers.openrouter import execute_chat_completion
@@ -230,7 +246,7 @@ class OpenRouterIntentClassifier(ConfiguredIntentClassifier):
                 primary, fallback if last_resort else None
             )
 
-        return cls(complete)
+        return cls(complete, tools)
 
 
 def _json_object(value: object) -> Mapping[str, object]:

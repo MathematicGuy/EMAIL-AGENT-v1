@@ -117,9 +117,15 @@ def outlook_environment() -> dict[str, str]:
 
 
 def id_token() -> str:
-    claims = base64.urlsafe_b64encode(
-        json.dumps({"oid": "outlook-account", "preferred_username": "user@outlook.com"}).encode()
-    ).rstrip(b"=").decode()
+    claims = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"oid": "outlook-account", "preferred_username": "user@outlook.com"}
+            ).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
     return f"header.{claims}.signature"
 
 
@@ -132,9 +138,7 @@ def test_authorization_url_is_pkce_and_read_only() -> None:
 
 
 def test_config_defaults_to_common_and_the_exact_read_only_scope_set() -> None:
-    settings = ConfigOutlookSettings.from_env(
-        outlook_environment(), load_env_file=False
-    )
+    settings = ConfigOutlookSettings.from_env(outlook_environment())
     assert settings.tenant == "common"
     assert settings.scopes == MICROSOFT_DEFAULT_SCOPES
 
@@ -143,7 +147,7 @@ def test_config_rejects_mail_write_scope() -> None:
     values = outlook_environment()
     values["MICROSOFT_SCOPES"] = " ".join((*MICROSOFT_DEFAULT_SCOPES, "Mail.ReadWrite"))
     with pytest.raises(ValueError, match="only Mail.Read"):
-        ConfigOutlookSettings.from_env(values, load_env_file=False)
+        ConfigOutlookSettings.from_env(values)
 
 
 def test_driver_rejects_any_scope_change() -> None:
@@ -244,11 +248,12 @@ async def test_graph_accepts_normalized_unread_query_and_maps_envelope() -> None
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookMailboxAdapter(
-            Settings(), repository, token_cipher, client  # type: ignore[arg-type]
+            Settings(),
+            repository,
+            token_cipher,
+            client,  # type: ignore[arg-type]
         )
-        page = await adapter.search_unread(
-            connection.id, "is:unread in:inbox category:primary", 10
-        )
+        page = await adapter.search_unread(connection.id, "is:unread in:inbox category:primary", 10)
         assert page.messages[0].message_id == "outlook:message-1"
         assert page.messages[0].thread_id == "outlook:thread-1"
         thread = await adapter.get_thread(connection.id, page.messages[0].thread_id)
@@ -258,9 +263,7 @@ async def test_graph_accepts_normalized_unread_query_and_maps_envelope() -> None
         assert thread[0].attachments_present is True
         assert thread[0].attachments_processed is False
         assert thread[0].source_links[0].url == "https://example.com/x"
-        await adapter.search_unread(
-            connection.id, "is:unread in:inbox category:primary", 10
-        )
+        await adapter.search_unread(connection.id, "is:unread in:inbox category:primary", 10)
     assert token_calls == 1
     stored = await repository.get(connection.id)
     assert stored is not None
@@ -272,7 +275,9 @@ async def test_graph_rejects_filters_other_than_unread_inbox() -> None:
     token_cipher = cipher()
     connection = mailbox(token_cipher)
     adapter = OutlookMailboxAdapter(
-        Settings(), Repository(connection), token_cipher  # type: ignore[arg-type]
+        Settings(),
+        Repository(connection),
+        token_cipher,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ValueError, match="only the unread inbox"):
@@ -306,13 +311,14 @@ async def test_graph_paginates_complete_conversation_and_sorts_chronologically()
                     "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=2",
                 },
             )
-        return httpx.Response(
-            200, json={"value": [message("older", "2026-08-04T01:00:00Z")]}
-        )
+        return httpx.Response(200, json={"value": [message("older", "2026-08-04T01:00:00Z")]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookMailboxAdapter(
-            Settings(), Repository(connection), token_cipher, client  # type: ignore[arg-type]
+            Settings(),
+            Repository(connection),
+            token_cipher,
+            client,  # type: ignore[arg-type]
         )
         thread = await adapter.get_thread(connection.id, "outlook:thread-1")
     assert [item.gmail_message_id for item in thread] == ["outlook:older", "outlook:newer"]
@@ -323,7 +329,9 @@ async def test_graph_rejects_cross_origin_and_wrong_path_cursors() -> None:
     token_cipher = cipher()
     connection = mailbox(token_cipher)
     adapter = OutlookMailboxAdapter(
-        Settings(), Repository(connection), token_cipher  # type: ignore[arg-type]
+        Settings(),
+        Repository(connection),
+        token_cipher,  # type: ignore[arg-type]
     )
     for cursor in (
         "https://attacker.example/v1.0/me/mailFolders/inbox/messages?$skip=1",
@@ -347,7 +355,10 @@ async def test_graph_permission_failure_is_safe() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookMailboxAdapter(
-            Settings(), Repository(connection), token_cipher, client  # type: ignore[arg-type]
+            Settings(),
+            Repository(connection),
+            token_cipher,
+            client,  # type: ignore[arg-type]
         )
         with pytest.raises(MailboxPermissionDeniedError) as raised:
             await adapter.search_unread(connection.id, "unread_inbox", 10)
@@ -379,7 +390,10 @@ async def test_graph_transient_failures_use_a_bounded_retry_budget(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         adapter = OutlookMailboxAdapter(
-            Settings(), Repository(connection), token_cipher, client  # type: ignore[arg-type]
+            Settings(),
+            Repository(connection),
+            token_cipher,
+            client,  # type: ignore[arg-type]
         )
         assert await adapter.search_unread(connection.id, "unread_inbox", 10) == SearchPage(())
     assert graph_calls == 3

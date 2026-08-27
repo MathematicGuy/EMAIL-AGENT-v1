@@ -89,12 +89,12 @@ class MemoryGateway:
         self._session_buffer.append(self._namespace(MemoryType.SHORT_TERM), turn)
         return True
 
-    def _read_active_turns(self) -> tuple[ChatTurn, ...]:
+    def read_active_turns(self) -> tuple[ChatTurn, ...]:
         """Read the verified session buffer for bounded classifier evidence."""
 
         return self._session_buffer.read(self._namespace(MemoryType.SHORT_TERM))
 
-    async def _read_project_documents(
+    async def read_project_documents(
         self,
         *,
         query: str,
@@ -103,6 +103,12 @@ class MemoryGateway:
         min_score: float = 0.6,
         timeout_ms: int = 3_000,
     ) -> ProjectDocumentResponse:
+        """Retrieve project-document evidence for the verified scope.
+
+        An unconfigured store is a degraded answer, not an error: the caller
+        turns the reason code into a user-facing warning and keeps generating.
+        """
+
         if self._project_documents is None:
             return ProjectDocumentResponse(
                 (), degraded=True, reason_code="project_document_store_not_configured"
@@ -172,9 +178,7 @@ class MemoryGateway:
                         started=started,
                     )
                 else:
-                    if profile is not None and (
-                        profile.user_id != self._scope.user_id
-                    ):
+                    if profile is not None and (profile.user_id != self._scope.user_id):
                         self._emit(
                             MemoryType.LONG_TERM,
                             MemoryOperation.READ,
@@ -237,14 +241,10 @@ class MemoryGateway:
                     # above may retire another, so a rejected revision cannot hide an
                     # approved ancestor.
                     superseded_ids = {
-                        episode.supersedes
-                        for episode in eligible
-                        if episode.supersedes is not None
+                        episode.supersedes for episode in eligible if episode.supersedes is not None
                     }
                     episodes = tuple(
-                        episode
-                        for episode in eligible
-                        if episode.episode_id not in superseded_ids
+                        episode for episode in eligible if episode.episode_id not in superseded_ids
                     )[: request.reads.episodic.max_items]
                     self._emit(
                         MemoryType.EPISODIC,
@@ -375,7 +375,7 @@ class MemoryGateway:
         self._emit(MemoryType.EPISODIC, MemoryOperation.WRITE, MemoryOutcome.SUCCESS)
         return result
 
-    async def _read_task_episode(self, episode_id: str) -> TaskEpisode | None:
+    async def read_task_episode(self, episode_id: str) -> TaskEpisode | None:
         """Load one originating-session episode for a request-scoped controller."""
 
         namespace = self._namespace(MemoryType.EPISODIC)

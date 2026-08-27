@@ -124,9 +124,7 @@ class CaseResult:
         if len(lengths) != 1:
             raise ValueError("returned ids, sections, and scores must be parallel")
         if self.configured_score_kind not in SCORE_KINDS:
-            raise ValueError(
-                f"unknown configured_score_kind {self.configured_score_kind!r}"
-            )
+            raise ValueError(f"unknown configured_score_kind {self.configured_score_kind!r}")
         if self.observed_score_kind is not None and self.observed_score_kind not in SCORE_KINDS:
             raise ValueError(f"unknown observed_score_kind {self.observed_score_kind!r}")
         if any(
@@ -161,9 +159,7 @@ class CaseResult:
             self.observed_score_kind is not None
             and self.observed_score_kind not in compatible_observed_kinds
         ):
-            raise ValueError(
-                "configured_score_kind and observed_score_kind must be compatible"
-            )
+            raise ValueError("configured_score_kind and observed_score_kind must be compatible")
 
 
 def score_summary(result: CaseResult) -> dict[str, float | None]:
@@ -203,10 +199,7 @@ def score_evidence(results: Sequence[CaseResult]) -> dict[str, list[dict[str, An
 
 def candidate_thresholds(values: Sequence[float]) -> tuple[float, ...]:
     """Minimum, unique midpoints, and one value just above the maximum."""
-    if any(
-        isinstance(value, bool) or not isinstance(value, (int, float))
-        for value in values
-    ):
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
         raise ValueError("candidate values must be numeric and non-boolean")
     normalized = tuple(float(value) for value in values)
     if any(not math.isfinite(value) for value in normalized):
@@ -278,20 +271,14 @@ def calibration_sweep(
     summaries = [(result, score_summary(result)) for result in matching]
     value_key = "top_score" if gate_kind == ABSOLUTE_SCORE_GATE else "delta"
     observed_values = [
-        value
-        for _result, summary in summaries
-        if (value := summary[value_key]) is not None
+        value for _result, summary in summaries if (value := summary[value_key]) is not None
     ]
     thresholds = (
-        tuple(candidates)
-        if candidates is not None
-        else candidate_thresholds(observed_values)
+        tuple(candidates) if candidates is not None else candidate_thresholds(observed_values)
     )
     inherited = sorted(result.case_id for result in results if _abstained(result))
     undefined_margins = sorted(
-        result.case_id
-        for result, summary in summaries
-        if summary["delta"] is None
+        result.case_id for result, summary in summaries if summary["delta"] is None
     )
     output: list[dict[str, Any]] = []
     for threshold in thresholds:
@@ -338,9 +325,7 @@ def calibration_sweep(
                     "case_count": len(answerable),
                     "false_abstention_count": len(false_abstentions),
                     "false_abstention_rate": (
-                        round(len(false_abstentions) / len(answerable), 4)
-                        if answerable
-                        else None
+                        round(len(false_abstentions) / len(answerable), 4) if answerable else None
                     ),
                     "affected_case_ids": newly_affected,
                 },
@@ -366,17 +351,11 @@ def calibration_sweeps(results: Sequence[CaseResult]) -> dict[str, list[dict[str
     )
     for score_kind in observed_kinds:
         absolute.extend(
-            calibration_sweep(
-                results, score_kind=score_kind, gate_kind=ABSOLUTE_SCORE_GATE
-            )
+            calibration_sweep(results, score_kind=score_kind, gate_kind=ABSOLUTE_SCORE_GATE)
         )
-        kind_margin = calibration_sweep(
-            results, score_kind=score_kind, gate_kind=MARGIN_GATE
-        )
+        kind_margin = calibration_sweep(results, score_kind=score_kind, gate_kind=MARGIN_GATE)
         margin.extend(kind_margin)
-        matching = [
-            result for result in results if result.observed_score_kind == score_kind
-        ]
+        matching = [result for result in results if result.observed_score_kind == score_kind]
         undefined = sorted(
             result.case_id for result in matching if score_summary(result)["delta"] is None
         )
@@ -436,9 +415,7 @@ def mean_reciprocal_rank(results: Sequence[CaseResult], *, level: str) -> float:
     scored = scored_cases(results, level=level)
     if not scored:
         return 0.0
-    total = sum(
-        reciprocal_rank(rank_of_first_relevant(result, level=level)) for result in scored
-    )
+    total = sum(reciprocal_rank(rank_of_first_relevant(result, level=level)) for result in scored)
     return round(total / len(scored), 4)
 
 
@@ -505,9 +482,7 @@ def aggregate(results: Sequence[CaseResult]) -> dict[str, Any]:
         document_id for result in answerable for document_id in result.expected_document_ids
     }
     for document_id in sorted(expected_ids):
-        subset = [
-            result for result in answerable if document_id in result.expected_document_ids
-        ]
+        subset = [result for result in answerable if document_id in result.expected_document_ids]
         by_document[document_id] = {
             "case_count": len(subset),
             "mrr": mean_reciprocal_rank(subset, level=DOCUMENT_LEVEL),
@@ -562,15 +537,11 @@ def miss_report(results: Sequence[CaseResult]) -> list[dict[str, Any]]:
 
 
 def _ranked_pairs(result: CaseResult) -> list[tuple[str, str | None]]:
-    return list(
-        zip(result.returned_document_ids, result.returned_sections, strict=True)
-    )
+    return list(zip(result.returned_document_ids, result.returned_sections, strict=True))
 
 
 def _expected_labels(result: CaseResult, *, level: str) -> tuple[str, ...]:
-    return (
-        result.expected_sections if level == SECTION_LEVEL else result.expected_document_ids
-    )
+    return result.expected_sections if level == SECTION_LEVEL else result.expected_document_ids
 
 
 def _found_labels(result: CaseResult, k: int, *, level: str) -> set[str]:
@@ -641,9 +612,10 @@ def build_embedder(name: str) -> EmbeddingPort | None:
         from cowork_agent.integrations.rag.fakes import HashingEmbedder
 
         return HashingEmbedder()
-    from cowork_agent.config import GeminiSettings
+    from cowork_agent.config import GeminiSettings, load_runtime_environment
     from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
 
+    load_runtime_environment()
     try:
         return GeminiEmbeddingAdapter(GeminiSettings.from_env())
     except ValueError as exc:
@@ -687,9 +659,7 @@ class Bm25OnlyRetriever:
     its place.
     """
 
-    def __init__(
-        self, documents: Sequence[KnowledgeDocument], *, top_k_default: int = 5
-    ) -> None:
+    def __init__(self, documents: Sequence[KnowledgeDocument], *, top_k_default: int = 5) -> None:
         from cowork_agent.integrations.rag.bm25 import BM25SearchAdapter
 
         self._chunks_by_id: dict[str, KnowledgeChunk] = {
@@ -736,9 +706,7 @@ class Bm25OnlyRetriever:
         return SemanticRetrievalResponse(
             query_id=f"q_{uuid4().hex}",
             chunks=chunks,
-            retrieval_status=(
-                RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS
-            ),
+            retrieval_status=(RetrievalStatus.SUCCESS if chunks else RetrievalStatus.NO_RESULTS),
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
         )
 
@@ -1076,26 +1044,21 @@ def launch_gate_failures(
     failures: list[str] = []
     section_mrr = report["section_level"]["mrr"]
     if min_section_mrr is not None and section_mrr < min_section_mrr:
-        failures.append(
-            f"section-level MRR {section_mrr} < --fail-under-mrr {min_section_mrr}"
-        )
+        failures.append(f"section-level MRR {section_mrr} < --fail-under-mrr {min_section_mrr}")
     document_mrr = report["document_level"]["mrr"]
     if min_document_mrr is not None and document_mrr < min_document_mrr:
         failures.append(
-            "document-level MRR "
-            f"{document_mrr} < --fail-under-doc-mrr {min_document_mrr}"
+            f"document-level MRR {document_mrr} < --fail-under-doc-mrr {min_document_mrr}"
         )
     document_recall = report["document_level"]["recall_at_5"]
     if min_document_recall is not None and document_recall < min_document_recall:
         failures.append(
-            "document-level Recall@5 "
-            f"{document_recall} < --fail-under-recall {min_document_recall}"
+            f"document-level Recall@5 {document_recall} < --fail-under-recall {min_document_recall}"
         )
     latency_p95 = report["latency_ms"]["p95"]
     if max_latency_p95 is not None and latency_p95 > max_latency_p95:
         failures.append(
-            f"p95 latency {latency_p95}ms > "
-            f"--fail-over-latency-p95 {max_latency_p95}ms"
+            f"p95 latency {latency_p95}ms > --fail-over-latency-p95 {max_latency_p95}ms"
         )
     return failures
 
@@ -1105,8 +1068,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.rerank and args.retriever != HYBRID:
         print(
-            f"--rerank only applies to --retriever {HYBRID}; "
-            f"{args.retriever} has no rerank stage.",
+            f"--rerank only applies to --retriever {HYBRID}; {args.retriever} has no rerank stage.",
             file=sys.stderr,
         )
         return 2
@@ -1159,8 +1121,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     target = write_report(
         report,
-        args.output
-        or default_output_path(embedder_name, args.retriever, reranked=args.rerank),
+        args.output or default_output_path(embedder_name, args.retriever, reranked=args.rerank),
     )
     print_summary(report, target)
 

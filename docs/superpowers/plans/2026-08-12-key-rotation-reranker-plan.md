@@ -37,6 +37,7 @@ from cowork_agent.integrations.key_rotation import (
     parse_api_keys_from_env,
 )
 
+
 def test_parse_api_keys_from_env_flexible_patterns():
     env = {
         "COHERE_API_KEY": "key1",
@@ -51,10 +52,12 @@ def test_parse_api_keys_from_env_flexible_patterns():
     gemini_keys = parse_api_keys_from_env(env, "GEMINI_API_KEY")
     assert gemini_keys == ("gkey1", "gkey2")
 
+
 def test_mask_api_key():
     assert mask_api_key("cohere_1234567890abcdef") == "cohe...cdef"
     assert mask_api_key("short") == "sh***"
     assert mask_api_key("") == "***"
+
 
 @pytest.mark.asyncio
 async def test_key_rotator_round_robin():
@@ -84,11 +87,13 @@ import asyncio
 import re
 from collections.abc import Mapping, Sequence
 
+
 def mask_api_key(key: str) -> str:
     """Safely mask API key values for logging compliance."""
     if not key:
         return "***"
     return f"{key[:4]}...{key[-4:]}" if len(key) >= 10 else f"{key[:2]}***"
+
 
 def parse_api_keys_from_env(
     environ: Mapping[str, str],
@@ -119,6 +124,7 @@ def parse_api_keys_from_env(
 
     return keys
 
+
 class APIKeyRotator:
     """Thread/async-safe round-robin API key rotator."""
 
@@ -138,9 +144,12 @@ class APIKeyRotator:
         provider_name: str | None = None,
     ) -> APIKeyRotator:
         import os
+
         if environ is None:
             environ = os.environ
-        resolved_provider = provider_name or prefix.removesuffix("_API_KEY").removesuffix("_KEY").capitalize()
+        resolved_provider = (
+            provider_name or prefix.removesuffix("_API_KEY").removesuffix("_KEY").capitalize()
+        )
         keys = parse_api_keys_from_env(environ, prefix)
         return cls(keys, provider_name=resolved_provider)
 
@@ -202,6 +211,7 @@ from cowork_agent.integrations.rag.reranker import (
     RerankerSettings,
 )
 
+
 class FakeTransport:
     def __init__(self, responses: list[dict | Exception]):
         self._responses = list(responses)
@@ -214,20 +224,33 @@ class FakeTransport:
             raise resp
         return resp
 
+
 @pytest.fixture
 def sample_candidates():
     return (
-        SemanticChunk(chunk_id="c1", text="Doc 1", relevance_score=0.5, doc_id="d1", title="T1", filepath="f1"),
-        SemanticChunk(chunk_id="c2", text="Doc 2", relevance_score=0.8, doc_id="d2", title="T2", filepath="f2"),
+        SemanticChunk(
+            chunk_id="c1", text="Doc 1", relevance_score=0.5, doc_id="d1", title="T1", filepath="f1"
+        ),
+        SemanticChunk(
+            chunk_id="c2", text="Doc 2", relevance_score=0.8, doc_id="d2", title="T2", filepath="f2"
+        ),
     )
+
 
 @pytest.mark.asyncio
 async def test_cohere_rerank_success(sample_candidates):
     rotator = APIKeyRotator(["key_cohere_1"])
     settings = RerankerSettings(model="rerank-v4.0-fast", rotator=rotator)
-    transport = FakeTransport([
-        {"results": [{"index": 1, "relevance_score": 0.99}, {"index": 0, "relevance_score": 0.12}]}
-    ])
+    transport = FakeTransport(
+        [
+            {
+                "results": [
+                    {"index": 1, "relevance_score": 0.99},
+                    {"index": 0, "relevance_score": 0.12},
+                ]
+            }
+        ]
+    )
     adapter = RerankerAdapter(settings=settings, transport=transport)
     results = await adapter.rerank(query="test", candidates=sample_candidates)
 
@@ -237,6 +260,7 @@ async def test_cohere_rerank_success(sample_candidates):
     assert results[1].chunk_id == "c1"
     assert results[1].rerank_score == 0.12
 
+
 @pytest.mark.asyncio
 async def test_cohere_rerank_key_rotation_on_429(sample_candidates):
     class HTTP429Error(RuntimeError):
@@ -244,10 +268,17 @@ async def test_cohere_rerank_key_rotation_on_429(sample_candidates):
 
     rotator = APIKeyRotator(["bad_key", "good_key"])
     settings = RerankerSettings(model="rerank-v4.0-fast", rotator=rotator, max_attempts=2)
-    transport = FakeTransport([
-        HTTP429Error("Rate limit exceeded"),
-        {"results": [{"index": 0, "relevance_score": 0.95}, {"index": 1, "relevance_score": 0.40}]}
-    ])
+    transport = FakeTransport(
+        [
+            HTTP429Error("Rate limit exceeded"),
+            {
+                "results": [
+                    {"index": 0, "relevance_score": 0.95},
+                    {"index": 1, "relevance_score": 0.40},
+                ]
+            },
+        ]
+    )
     adapter = RerankerAdapter(settings=settings, transport=transport)
     results = await adapter.rerank(query="test", candidates=sample_candidates)
 
@@ -288,6 +319,7 @@ _USER_AGENT = "cowork-agent/1.0"
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True, slots=True)
 class RerankerSettings:
     model: str
@@ -295,6 +327,7 @@ class RerankerSettings:
     timeout_seconds: float = 10.0
     rotate_on_rate_limit: bool = True
     max_attempts: int = 3
+
 
 class RerankerTransport(Protocol):
     async def post_json(
@@ -305,6 +338,7 @@ class RerankerTransport(Protocol):
         payload: Mapping[str, object],
         timeout_seconds: float,
     ) -> Mapping[str, object]: ...
+
 
 class StdlibRerankerTransport:
     async def post_json(
@@ -325,6 +359,7 @@ class StdlibRerankerTransport:
             ),
             timeout=timeout_seconds,
         )
+
 
 class RerankerAdapter:
     """Strategy-driven reranker for Cohere and Jina endpoints with key rotation."""
@@ -353,7 +388,9 @@ class RerankerAdapter:
         if result_count is None:
             return original
 
-        is_cohere = self._settings.model.startswith("rerank-") or "cohere" in self._settings.model.lower()
+        is_cohere = (
+            self._settings.model.startswith("rerank-") or "cohere" in self._settings.model.lower()
+        )
         url = COHERE_RERANK_ENDPOINT if is_cohere else JINA_RERANK_ENDPOINT
 
         payload: dict[str, object] = {
@@ -390,14 +427,18 @@ class RerankerAdapter:
                 if is_rate_limit:
                     logger.warning(
                         "⚠️ [Reranker] Rate limit (429) on %s Key %d/%d (%s), rotating key...",
-                        self._rotator.provider_name, idx, len(keys), mask_api_key(key)
+                        self._rotator.provider_name,
+                        idx,
+                        len(keys),
+                        mask_api_key(key),
                     )
                     if not self._settings.rotate_on_rate_limit:
                         return original
                     continue
                 logger.warning(
                     "⚠️ [Reranker] Endpoint error (%s: %s); degrading to un-reranked candidates",
-                    type(exc).__name__, exc
+                    type(exc).__name__,
+                    exc,
                 )
                 return original
 
@@ -412,10 +453,8 @@ class RerankerAdapter:
         if results is None:
             return original
 
-        return tuple(
-            replace(original[index], rerank_score=score)
-            for index, score in results
-        )
+        return tuple(replace(original[index], rerank_score=score) for index, score in results)
+
 
 def _requested_result_count(*, top_n: int | None, candidate_count: int) -> int | None:
     if top_n is None:
@@ -423,6 +462,7 @@ def _requested_result_count(*, top_n: int | None, candidate_count: int) -> int |
     if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n <= 0:
         return None
     return min(top_n, candidate_count)
+
 
 def _validated_results(
     *,
@@ -459,6 +499,7 @@ def _validated_results(
         seen_indexes.add(index)
         parsed.append((index, float(score)))
     return tuple(parsed)
+
 
 def _post_json(
     *,

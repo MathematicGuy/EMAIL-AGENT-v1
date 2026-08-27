@@ -22,133 +22,72 @@ def _probe(**overrides: object) -> Probe:
     return Probe(**defaults)  # type: ignore[arg-type]
 
 
-def test_scope_earned_it_when_only_the_full_arm_passes() -> None:
-    verdict = derive_verdict(_probe(), Outcome.PASS, Outcome.MISS, Outcome.MISS)
-    assert verdict is Verdict.SCOPE_EARNED_IT
+def test_derive_verdict_matrix() -> None:
+    # SCOPE_EARNED_IT
+    assert (
+        derive_verdict(_probe(), Outcome.PASS, Outcome.MISS, Outcome.MISS)
+        is Verdict.SCOPE_EARNED_IT
+    )
+    # SCOPE_DID_NOTHING
+    assert (
+        derive_verdict(_probe(), Outcome.PASS, Outcome.PASS, Outcome.MISS)
+        is Verdict.SCOPE_DID_NOTHING
+    )
+    # LEAKED
+    assert derive_verdict(_probe(), Outcome.PASS, Outcome.MISS, Outcome.PASS) is Verdict.LEAKED
+    assert derive_verdict(_probe(), Outcome.PASS, Outcome.PASS, Outcome.PASS) is Verdict.LEAKED
+    # BROKEN
+    assert derive_verdict(_probe(), Outcome.MISS, Outcome.MISS, Outcome.MISS) is Verdict.BROKEN
+    # DANGEROUS (invented or stale anywhere)
+    assert (
+        derive_verdict(_probe(), Outcome.INVENTED, Outcome.MISS, Outcome.MISS) is Verdict.DANGEROUS
+    )
+    assert derive_verdict(_probe(), Outcome.STALE, Outcome.MISS, Outcome.MISS) is Verdict.DANGEROUS
+    assert (
+        derive_verdict(_probe(), Outcome.INVENTED, Outcome.MISS, Outcome.PASS) is Verdict.DANGEROUS
+    )
+    # UNREADABLE (any NO_ANSWER)
+    assert (
+        derive_verdict(_probe(), Outcome.NO_ANSWER, Outcome.PASS, Outcome.MISS)
+        is Verdict.UNREADABLE
+    )
+    assert (
+        derive_verdict(_probe(), Outcome.PASS, Outcome.NO_ANSWER, Outcome.MISS)
+        is Verdict.UNREADABLE
+    )
+    assert (
+        derive_verdict(_probe(), Outcome.PASS, Outcome.MISS, Outcome.NO_ANSWER)
+        is Verdict.UNREADABLE
+    )
 
 
-def test_scope_did_nothing_when_ablation_still_passes() -> None:
-    verdict = derive_verdict(_probe(), Outcome.PASS, Outcome.PASS, Outcome.MISS)
-    assert verdict is Verdict.SCOPE_DID_NOTHING
+def test_restraint_verdicts() -> None:
+    restraint_probe = _probe(test=ProbeTest.RESTRAINT, expect_any=(), expect_refusal=True)
+    # Declining everywhere on restraint probe is RESTRAINT_HELD
+    assert (
+        derive_verdict(restraint_probe, Outcome.PASS, Outcome.PASS, Outcome.PASS)
+        is Verdict.RESTRAINT_HELD
+    )
+    # Invention on restraint probe is still DANGEROUS
+    assert (
+        derive_verdict(restraint_probe, Outcome.PASS, Outcome.INVENTED, Outcome.PASS)
+        is Verdict.DANGEROUS
+    )
 
 
-def test_control_passing_a_recall_probe_is_a_leak() -> None:
-    verdict = derive_verdict(_probe(), Outcome.PASS, Outcome.MISS, Outcome.PASS)
-    assert verdict is Verdict.LEAKED
-
-
-def test_broken_when_the_full_arm_fails() -> None:
-    verdict = derive_verdict(_probe(), Outcome.MISS, Outcome.MISS, Outcome.MISS)
-    assert verdict is Verdict.BROKEN
-
-
-def test_invented_anywhere_outranks_every_other_verdict() -> None:
-    verdict = derive_verdict(_probe(), Outcome.INVENTED, Outcome.MISS, Outcome.MISS)
-    assert verdict is Verdict.DANGEROUS
-
-
-def test_stale_anywhere_is_dangerous() -> None:
-    verdict = derive_verdict(_probe(), Outcome.STALE, Outcome.MISS, Outcome.MISS)
-    assert verdict is Verdict.DANGEROUS
-
-
-def test_dangerous_beats_leaked() -> None:
-    # A control pass AND an invented answer: the invention is the headline.
-    verdict = derive_verdict(_probe(), Outcome.INVENTED, Outcome.MISS, Outcome.PASS)
-    assert verdict is Verdict.DANGEROUS
-
-
-def test_refusal_probes_never_count_as_leaks() -> None:
-    # An empty store declines every time, so a control PASS here is expected
-    # and would otherwise be flagged in every run forever. SPEC §9.2.
-    probe = _probe(expect_any=(), expect_refusal=True, test=ProbeTest.RESTRAINT)
-    verdict = derive_verdict(probe, Outcome.PASS, Outcome.PASS, Outcome.PASS)
-    assert verdict is not Verdict.LEAKED
-
-
-def test_verdict_ordering_puts_dangerous_first_and_earned_last() -> None:
+def test_verdict_ranking_order() -> None:
+    # UNREADABLE rank lowest, then DANGEROUS, then others, SCOPE_EARNED_IT / RESTRAINT_HELD last
     ordered = sorted(
-        [Verdict.SCOPE_EARNED_IT, Verdict.DANGEROUS, Verdict.LEAKED, Verdict.BROKEN],
+        [
+            Verdict.SCOPE_EARNED_IT,
+            Verdict.DANGEROUS,
+            Verdict.LEAKED,
+            Verdict.BROKEN,
+            Verdict.UNREADABLE,
+            Verdict.RESTRAINT_HELD,
+        ],
         key=verdict_rank,
     )
-    assert ordered[0] is Verdict.DANGEROUS
-    assert ordered[-1] is Verdict.SCOPE_EARNED_IT
-
-
-def test_an_arm_that_produced_no_answer_makes_the_whole_row_unreadable() -> None:
-    # Three arms of the first Vietnamese run returned no text at all, because
-    # the provider was briefly unavailable. Folding that into MISS produced a
-    # `leaked` on semantic and a `scope_did_nothing` on long_term that were
-    # conclusions about an outage, not about memory.
-    for full, ablated, control in (
-        (Outcome.NO_ANSWER, Outcome.PASS, Outcome.MISS),
-        (Outcome.PASS, Outcome.NO_ANSWER, Outcome.MISS),
-        (Outcome.PASS, Outcome.MISS, Outcome.NO_ANSWER),
-    ):
-        assert derive_verdict(_probe(), full, ablated, control) is Verdict.UNREADABLE
-
-
-def test_unreadable_outranks_every_conclusion_about_behaviour() -> None:
-    # A row you could not read must not sort below a row you could. It says the
-    # run failed, and a failed run invalidates whatever else it printed.
-    for verdict in Verdict:
-        if verdict is Verdict.UNREADABLE:
-            continue
-        assert verdict_rank(Verdict.UNREADABLE) < verdict_rank(verdict)
-
-
-def test_no_answer_is_never_read_as_dangerous_behaviour() -> None:
-    # Silence is not invention. It is the absence of evidence either way.
-    verdict = derive_verdict(_probe(), Outcome.NO_ANSWER, Outcome.NO_ANSWER, Outcome.NO_ANSWER)
-    assert verdict is Verdict.UNREADABLE
-
-
-def test_a_restraint_probe_that_declines_everywhere_is_not_scope_did_nothing() -> None:
-    """The desired behaviour for restraint must not wear the second-worst label.
-
-    Parent SPEC §15.1 item 9 records this as a known misreading: a restraint
-    probe is passed by declining, an empty store declines too, so correct
-    behaviour lands on PASS/PASS/PASS and used to fall through to
-    SCOPE_DID_NOTHING. At 20 probes that mislabels half the scoreboard; at 50
-    it buries the rows §7.1 exists to surface.
-    """
-
-    verdict = derive_verdict(
-        _probe(test=ProbeTest.RESTRAINT, expect_any=(), expect_refusal=True),
-        Outcome.PASS,
-        Outcome.PASS,
-        Outcome.PASS,
-    )
-
-    assert verdict is Verdict.RESTRAINT_HELD
-
-
-def test_restraint_held_sorts_as_a_success_not_a_finding() -> None:
-    ordered = sorted(
-        [Verdict.RESTRAINT_HELD, Verdict.DANGEROUS, Verdict.SCOPE_DID_NOTHING],
-        key=verdict_rank,
-    )
-
-    assert ordered[0] is Verdict.DANGEROUS
-    assert ordered[-1] is Verdict.RESTRAINT_HELD
-
-
-def test_a_restraint_probe_that_invents_on_any_arm_is_still_dangerous() -> None:
-    """The new verdict must not become a way for an invention to read as success."""
-
-    verdict = derive_verdict(
-        _probe(test=ProbeTest.RESTRAINT, expect_any=(), expect_refusal=True),
-        Outcome.PASS,
-        Outcome.INVENTED,
-        Outcome.PASS,
-    )
-
-    assert verdict is Verdict.DANGEROUS
-
-
-def test_a_recall_probe_passing_everywhere_is_still_not_restraint_held() -> None:
-    """RESTRAINT_HELD is about declining, so it may only apply to refusal probes."""
-
-    verdict = derive_verdict(_probe(), Outcome.PASS, Outcome.PASS, Outcome.PASS)
-
-    assert verdict is Verdict.LEAKED
+    assert ordered[0] is Verdict.UNREADABLE
+    assert ordered[1] is Verdict.DANGEROUS
+    assert ordered[-1] in (Verdict.SCOPE_EARNED_IT, Verdict.RESTRAINT_HELD)

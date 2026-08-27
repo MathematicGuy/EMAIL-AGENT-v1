@@ -89,12 +89,8 @@ class SupabaseStorageSettings:
     bucket: str = "project-documents"
 
     @classmethod
-    def from_env(
-        cls, environ: Mapping[str, str] | None = None, *, load_env_file: bool = True
-    ) -> "SupabaseStorageSettings":
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> "SupabaseStorageSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         url = environ.get("SUPABASE_URL", "").strip().rstrip("/")
         if not url.startswith("https://"):
@@ -118,12 +114,8 @@ class SessionSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "SessionSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         cookie_name = environ.get("APP_SESSION_COOKIE_NAME", "cowork_session").strip()
         if not cookie_name:
@@ -133,9 +125,7 @@ class SessionSettings:
         return cls(
             session_ttl_seconds=_positive_int(environ, "APP_SESSION_TTL_SECONDS", 2_592_000),
             cookie_name=cookie_name,
-            cookie_secure=_boolean(
-                environ, "APP_SESSION_COOKIE_SECURE", cookie_secure_default
-            ),
+            cookie_secure=_boolean(environ, "APP_SESSION_COOKIE_SECURE", cookie_secure_default),
         )
 
 
@@ -205,12 +195,8 @@ class KnowledgeIngestionSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "KnowledgeIngestionSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
 
         extraction_mode_env = environ.get("EXTRACTION_MODE", "").strip().lower()
@@ -222,8 +208,7 @@ class KnowledgeIngestionSettings:
             extraction_mode = "adaptive"
         elif extraction_mode_env:
             msg = (
-                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. "
-                "Must be 'adaptive' or 'advance'."
+                f"Invalid EXTRACTION_MODE: {extraction_mode_env}. Must be 'adaptive' or 'advance'."
             )
             raise ValueError(msg)
         else:
@@ -259,12 +244,8 @@ class ChatMemorySettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "ChatMemorySettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         return cls(
             max_turns=_positive_int(environ, "CHAT_MEMORY_MAX_TURNS", 20),
@@ -295,11 +276,8 @@ class ChatIntentSettings:
         environ: Mapping[str, str] | None = None,
         *,
         default_model: str,
-        load_env_file: bool = True,
     ) -> "ChatIntentSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         model = environ.get("CHAT_INTENT_CLASSIFIER_MODEL", "").strip() or default_model
         if not model or model.startswith("replace-with-"):
@@ -337,12 +315,8 @@ class UserDocumentsSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "UserDocumentsSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         enabled = _boolean(environ, "USER_DOCUMENTS_ENABLED", True)
         min_score = float(environ.get("USER_DOCUMENTS_MIN_SCORE", "0.6"))
@@ -395,12 +369,8 @@ class GmailSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "GmailSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
 
         client_id = _required_secret(environ, "GMAIL_CLIENT_ID")
@@ -466,12 +436,8 @@ class OutlookSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "OutlookSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
 
         redirect_uri = environ.get(
@@ -492,15 +458,11 @@ class OutlookSettings:
             if not (secure_remote or local_http):
                 raise ValueError("FRONTEND_URL must use HTTPS, except for localhost")
 
-        scopes = tuple(
-            environ.get("MICROSOFT_SCOPES", " ".join(MICROSOFT_DEFAULT_SCOPES)).split()
-        )
+        scopes = tuple(environ.get("MICROSOFT_SCOPES", " ".join(MICROSOFT_DEFAULT_SCOPES)).split())
         if set(scopes) != set(MICROSOFT_DEFAULT_SCOPES) or len(scopes) != len(
             MICROSOFT_DEFAULT_SCOPES
         ):
-            raise ValueError(
-                "Outlook must use only Mail.Read and standard OIDC/offline scopes"
-            )
+            raise ValueError("Outlook must use only Mail.Read and standard OIDC/offline scopes")
 
         tenant = environ.get("MICROSOFT_TENANT", "common").strip() or "common"
         if any(character in tenant for character in "/?#"):
@@ -534,12 +496,8 @@ class GeminiSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "GeminiSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
 
         numbered_keys = sorted(
@@ -600,14 +558,10 @@ class GeminiEmbeddingSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "GeminiEmbeddingSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
-        generation = GeminiSettings.from_env(environ, load_env_file=False)
+        generation = GeminiSettings.from_env(environ)
         dimensions = _bounded_positive_int(
             environ, "GEMINI_EMBEDDING_DIMENSIONS", 1024, maximum=3072
         )
@@ -628,13 +582,9 @@ class GeminiEmbeddingSettings:
 
 def document_embedding_provider(
     environ: Mapping[str, str] | None = None,
-    *,
-    load_env_file: bool = True,
 ) -> str:
     """Resolve active document embedding provider ('gemini' | 'jina')."""
     if environ is None:
-        if load_env_file:
-            load_runtime_environment()
         environ = os.environ
     provider = environ.get("DOCUMENT_EMBEDDING_PROVIDER", "gemini").strip().lower()
     if provider in {"jina", "gemini"}:
@@ -657,16 +607,10 @@ class JinaEmbeddingSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "JinaEmbeddingSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
-        rotator = APIKeyRotator.from_env(
-            "JINA_API_KEY", environ=environ, provider_name="Jina"
-        )
+        rotator = APIKeyRotator.from_env("JINA_API_KEY", environ=environ, provider_name="Jina")
         return cls(
             rotator=rotator,
             model=_non_empty_value(
@@ -674,9 +618,7 @@ class JinaEmbeddingSettings:
             ),
             dimensions=_positive_int(environ, "JINA_EMBEDDING_DIMENSIONS", 1024),
             timeout_seconds=_positive_int(environ, "JINA_EMBEDDING_TIMEOUT_SECONDS", 30),
-            rotate_on_rate_limit=_boolean(
-                environ, "JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT", True
-            ),
+            rotate_on_rate_limit=_boolean(environ, "JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT", True),
             max_attempts=len(rotator.keys),
         )
 
@@ -695,12 +637,8 @@ class RerankerSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "RerankerSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
 
         model = environ.get("RERANKER_MODEL", "rerank-v4.0-fast").strip() or "rerank-v4.0-fast"
@@ -736,12 +674,8 @@ class EmailRagQualitySettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "EmailRagQualitySettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         return cls(
             min_rerank_score=_bounded_float(
@@ -775,12 +709,8 @@ class EvaluationSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "EvaluationSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         enabled = _evaluation_flag(environ, "EVALUATION_API_ENABLED", default=False)
         api_token = environ.get("EVALUATION_API_TOKEN", "").strip()
@@ -832,26 +762,16 @@ class MimoSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "MimoSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         key_prefix = "MIMO_API_KEY"
-        rotator = APIKeyRotator.from_env(
-            key_prefix, environ=environ, provider_name="Mimo"
-        )
-        model = (
-            environ.get("MIMO_MODEL")
-            or "mimo-v2.5-pro"
-        ).strip()
+        rotator = APIKeyRotator.from_env(key_prefix, environ=environ, provider_name="Mimo")
+        model = (environ.get("MIMO_MODEL") or "mimo-v2.5-pro").strip()
         if not model or model.startswith("replace-with-"):
             raise ValueError("MIMO_MODEL must be a real Mimo model name")
         base_url = (
-            environ.get("MIMO_BASE_URL")
-            or "https://token-plan-ams.xiaomimimo.com/v1"
+            environ.get("MIMO_BASE_URL") or "https://token-plan-ams.xiaomimimo.com/v1"
         ).strip()
         rotate_on_rate_limit = _boolean(
             environ,
@@ -901,12 +821,8 @@ class MistralSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "MistralSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         model = environ.get("MISTRAL_MODEL", "mistral-small-2603").strip()
         if not model or model.startswith("replace-with-"):
@@ -939,12 +855,8 @@ class OpenRouterSettings:
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        load_env_file: bool = True,
     ) -> "OpenRouterSettings":
         if environ is None:
-            if load_env_file:
-                load_runtime_environment()
             environ = os.environ
         model = environ.get("OPENROUTER_MODEL", "").strip()
         if not model or model.startswith("replace-with-"):
@@ -952,9 +864,7 @@ class OpenRouterSettings:
         return cls(
             api_key=_required_secret(environ, "OPENROUTER_API_KEY"),
             model=model,
-            max_emails_per_batch=_positive_int(
-                environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5
-            ),
+            max_emails_per_batch=_positive_int(environ, "OPENROUTER_MAX_EMAILS_PER_BATCH", 5),
             max_output_tokens=_bounded_positive_int(
                 environ, "OPENROUTER_MAX_OUTPUT_TOKENS", 2048, maximum=4096
             ),
@@ -1048,19 +958,13 @@ def _openrouter_allowed_models(environ: Mapping[str, str]) -> tuple[str, ...]:
             "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
         ) from exc
     if not isinstance(parsed, list):
-        raise ValueError(
-            "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-        )
+        raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
     models: list[str] = []
     for item in parsed:
         if not isinstance(item, str):
-            raise ValueError(
-                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-            )
+            raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
         slug = item.strip()
         if not slug:
-            raise ValueError(
-                "OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings"
-            )
+            raise ValueError("OPENROUTER_ALLOWED_MODELS must be a JSON list of non-empty strings")
         models.append(slug)
     return tuple(models)

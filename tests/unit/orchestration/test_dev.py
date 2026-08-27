@@ -55,4 +55,3 @@ def test_run_dev_passes_reload_flag_to_api() -> None:
     assert run_dev(reload=False, spawn=spawn, sleep=lambda _: None) == 1
     assert commands[0][-1] == "cowork_agent.app"
     assert commands[1][-1] == "cowork_agent.orchestration.worker"
-

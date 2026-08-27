@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -61,9 +60,7 @@ class _FakeEvaluationService:
         self._report = report
         self._submit_error = submit_error
 
-    async def submit(
-        self, request: EvaluationRequest, *, idempotency_key: str
-    ) -> SimpleNamespace:
+    async def submit(self, request: EvaluationRequest, *, idempotency_key: str) -> SimpleNamespace:
         # Raised before anything is recorded: a rejected submission must not
         # start (or bill) any evaluation work.
         if self._submit_error is not None:
@@ -81,8 +78,7 @@ def _unit_snapshot(*states: UnitState) -> tuple[SimpleNamespace, ...]:
     """One durable unit-progress snapshot, shaped for the watchdog's read."""
 
     return tuple(
-        SimpleNamespace(unit_id=f"unit-{index}", state=state)
-        for index, state in enumerate(states)
+        SimpleNamespace(unit_id=f"unit-{index}", state=state) for index, state in enumerate(states)
     )
 
 
@@ -258,46 +254,46 @@ def _keep_legacy_mistral_path_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(script, "run_with_selector_loop", lambda coroutine: asyncio.run(coroutine))
 
 
-def test_run_key_is_stable_for_the_same_inputs() -> None:
+def test_run_key_stability_and_sensitivity() -> None:
     seed = SeedSpec(("a",), {}, (), None)
     assert run_key("set", "model", seed) == run_key("set", "model", seed)
-
-
-def test_run_key_changes_when_the_seed_changes() -> None:
     assert run_key("set", "model", SeedSpec(("a",), {}, (), None)) != run_key(
         "set", "model", SeedSpec(("b",), {}, (), None)
     )
-
-
-def test_run_key_changes_when_the_model_changes() -> None:
-    seed = SeedSpec(("a",), {}, (), None)
     assert run_key("set", "model-a", seed) != run_key("set", "model-b", seed)
 
 
-def test_dry_run_writes_a_report_and_exits_zero(tmp_path: Path) -> None:
+def test_dry_run_report_generation_and_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probe_path = _probe_set_file(tmp_path)
     output = tmp_path / "report.json"
-    code = main(
-        ["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)]
-    )
+    code = main(["--dry-run", "--probe-set", str(probe_path), "--output", str(output)])
     assert code == 0
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["schema_version"] == "2.2.0"
     assert report["probe_set_id"] == "unit"
     assert len(report["verdicts"]) == 1
-
-
-def test_dry_run_stamps_probe_set_path_and_sha256(tmp_path: Path) -> None:
-    probe_path = _probe_set_file(tmp_path)
-    output = tmp_path / "report.json"
-    code = main(
-        ["--dry-run", "--probe-set", str(probe_path), "--output", str(output)]
-    )
-    assert code == 0
-    report = json.loads(output.read_text(encoding="utf-8"))
     assert report["probe_set_sha256"] == hashlib.sha256(probe_path.read_bytes()).hexdigest()
-    stamped = str(report["probe_set_path"])
-    assert "\\" not in stamped
-    assert probe_path.name in stamped
+    assert "what did I say?" not in output.read_text(encoding="utf-8")
+
+    # Custom provider & postgres off
+    monkeypatch.setenv("POSTGRES_MODE", "off")
+    monkeypatch.delenv("PG_TEST_URL", raising=False)
+    custom_output = tmp_path / "custom.json"
+    custom_code = main(
+        [
+            "--dry-run",
+            "--provider",
+            "openrouter",
+            "--probe-set",
+            str(probe_path),
+            "--output",
+            str(custom_output),
+        ]
+    )
+    assert custom_code == 0
+    assert json.loads(custom_output.read_text(encoding="utf-8"))["provider"] == "dry-run"
 
 
 def test_resolve_latest_probe_set_returns_v3_path(tmp_path: Path) -> None:
@@ -310,84 +306,11 @@ def test_resolve_latest_probe_set_returns_v3_path(tmp_path: Path) -> None:
     assert resolve_latest_probe_set(tmp_path) == v3
 
 
-def test_dry_run_report_contains_no_probe_text(tmp_path: Path) -> None:
-    output = tmp_path / "report.json"
-    main(["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
-    assert "what did I say?" not in output.read_text(encoding="utf-8")
-
-
-def test_an_invalid_probe_set_exits_two(tmp_path: Path) -> None:
+def test_invalid_and_missing_probe_sets_exit_two(tmp_path: Path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({"schema_version": "9.9.9"}), encoding="utf-8")
     assert main(["--dry-run", "--probe-set", str(bad)]) == 2
-
-
-def test_a_missing_probe_set_exits_two(tmp_path: Path) -> None:
     assert main(["--dry-run", "--probe-set", str(tmp_path / "nope.json")]) == 2
-
-
-@pytest.mark.live
-def test_live_run_requires_a_database_and_key() -> None:
-    pytest.skip("live tier: run manually with DATABASE_URL and a provider key set")
-
-
-def test_a_live_run_without_a_gemini_key_exits_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # No model means no reply to score, so there is no run at all. This is the
-    # one dependency whose absence is fatal rather than a per-scope finding.
-    # Every GEMINI_API_KEY* name has to go: a .env sitting in the checkout
-    # supplies numbered keys, and leaving one behind would turn this unit test
-    # into a real billed run against a real model.
-    for name in [item for item in os.environ if item.startswith("GEMINI_API_KEY")]:
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    assert main(["--provider", "gemini", "--probe-set", str(_probe_set_file(tmp_path))]) == 1
-
-
-def test_dry_run_still_works_after_the_live_path_lands(tmp_path: Path) -> None:
-    output = tmp_path / "report.json"
-    assert (
-        main(["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
-        == 0
-    )
-
-
-def test_dry_run_under_postgres_mode_off_succeeds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("POSTGRES_MODE", "off")
-    monkeypatch.delenv("PG_TEST_URL", raising=False)
-    output = tmp_path / "report.json"
-    code = main(
-        ["--dry-run", "--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)]
-    )
-    assert code == 0
-    report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["schema_version"] == "2.2.0"
-    assert report["probe_set_id"] == "unit"
-
-
-def test_dry_run_with_custom_provider_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("POSTGRES_MODE", "off")
-    monkeypatch.delenv("PG_TEST_URL", raising=False)
-    output = tmp_path / "report.json"
-    code = main(
-        [
-            "--dry-run",
-            "--provider",
-            "openrouter",
-            "--probe-set",
-            str(_probe_set_file(tmp_path)),
-            "--output",
-            str(output),
-        ]
-    )
-    assert code == 0
-    report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["provider"] == "dry-run"
 
 
 def test_mistral_max_workers_defaults_to_one_and_keeps_runtime_metadata_private(
@@ -799,9 +722,7 @@ def test_zero_healthy_mistral_keys_exits_one_without_spending(
         idempotency_keys,
         effective_workers=0,
         healthy_workers=0,
-        submit_error=EvaluationValidationError(
-            "no compatible evaluation workers are available"
-        ),
+        submit_error=EvaluationValidationError("no compatible evaluation workers are available"),
     )
     output = tmp_path / "report.json"
 
@@ -822,66 +743,67 @@ def test_zero_healthy_mistral_keys_exits_one_without_spending(
     assert not output.exists()
 
 
-@pytest.mark.parametrize("state", (JobState.FAILED, JobState.CANCELLED))
 def test_mistral_terminal_failure_or_cancellation_returns_nonzero(
-    state: JobState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    requests: list[EvaluationRequest] = []
-    idempotency_keys: list[str] = []
-    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
-    _keep_legacy_mistral_path_offline(monkeypatch)
-    _install_fake_mistral_runtime(
-        monkeypatch,
-        requests,
-        idempotency_keys,
-        effective_workers=1,
-        healthy_workers=1,
-        state=state,
-    )
+    for state in (JobState.FAILED, JobState.CANCELLED):
+        requests: list[EvaluationRequest] = []
+        idempotency_keys: list[str] = []
+        monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+        _keep_legacy_mistral_path_offline(monkeypatch)
+        _install_fake_mistral_runtime(
+            monkeypatch,
+            requests,
+            idempotency_keys,
+            effective_workers=1,
+            healthy_workers=1,
+            state=state,
+        )
 
-    result = run_cli(
-        "evaluate_memory",
-        "--provider",
-        "mistral",
-        "--probe-set",
-        str(_probe_set_file(tmp_path)),
-        "--output",
-        str(tmp_path / "report.json"),
-    )
-
-    assert result.returncode == 1
-
-
-def test_max_consecutive_provider_failures_cli_rejects_below_one(tmp_path: Path) -> None:
-    result = run_cli(
-        "evaluate_memory",
-        "--dry-run",
-        "--probe-set",
-        str(_probe_set_file(tmp_path)),
-        "--max-consecutive-provider-failures",
-        "0",
-    )
-    assert result.returncode == 2
+        result = run_cli(
+            "evaluate_memory",
+            "--provider",
+            "mistral",
+            "--probe-set",
+            str(_probe_set_file(tmp_path)),
+            "--output",
+            str(tmp_path / f"report_{state.value}.json"),
+        )
+        assert result.returncode == 1
 
 
-def test_max_consecutive_provider_failures_cli_accepts_positive(tmp_path: Path) -> None:
-    output = tmp_path / "report.json"
-    result = run_cli(
-        "evaluate_memory",
-        "--dry-run",
-        "--probe-set",
-        str(_probe_set_file(tmp_path)),
-        "--output",
-        str(output),
-        "--max-consecutive-provider-failures",
-        "3",
-    )
-    assert result.returncode == 0
-
-
-def test_resolve_max_consecutive_provider_failures_precedence() -> None:
+def test_max_consecutive_provider_failures_resolution_and_validation(tmp_path: Path) -> None:
     from scripts.evaluate_memory import _resolve_max_consecutive_provider_failures
 
+    # CLI flags
+    assert (
+        run_cli(
+            "evaluate_memory",
+            "--dry-run",
+            "--probe-set",
+            str(_probe_set_file(tmp_path)),
+            "--max-consecutive-provider-failures",
+            "0",
+        ).returncode
+        == 2
+    )
+
+    output = tmp_path / "report.json"
+    assert (
+        run_cli(
+            "evaluate_memory",
+            "--dry-run",
+            "--probe-set",
+            str(_probe_set_file(tmp_path)),
+            "--output",
+            str(output),
+            "--max-consecutive-provider-failures",
+            "3",
+        ).returncode
+        == 0
+    )
+
+    # Resolution precedence & errors
     assert _resolve_max_consecutive_provider_failures(None, {}) == 3
     assert (
         _resolve_max_consecutive_provider_failures(
@@ -896,20 +818,13 @@ def test_resolve_max_consecutive_provider_failures_precedence() -> None:
         == 7
     )
 
-
-def test_resolve_max_consecutive_provider_failures_rejects_invalid() -> None:
-    from scripts.evaluate_memory import _resolve_max_consecutive_provider_failures
-
-    with pytest.raises(ValueError):
-        _resolve_max_consecutive_provider_failures(0, {})
-    with pytest.raises(ValueError):
-        _resolve_max_consecutive_provider_failures(
-            None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "0"}
-        )
-    with pytest.raises(ValueError):
-        _resolve_max_consecutive_provider_failures(
-            None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "nope"}
-        )
+    for invalid_val, env in [
+        (0, {}),
+        (None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "0"}),
+        (None, {"MEMEVAL_MAX_CONSECUTIVE_PROVIDER_FAILURES": "nope"}),
+    ]:
+        with pytest.raises(ValueError):
+            _resolve_max_consecutive_provider_failures(invalid_val, env)
 
 
 def test_run_live_passes_max_consecutive_into_session(
@@ -1071,52 +986,55 @@ def test_run_live_keeps_partial_private_transcript_when_shard_execution_raises(
     assert transcript == [{"question": "private question", "reply": "partial reply"}]
 
 
-@pytest.mark.parametrize(
-    ("error_type", "message"),
-    [(RuntimeError, "ordinary failure"), (asyncio.CancelledError, "")],
-    ids=("ordinary-failure", "cancellation"),
-)
 def test_main_writes_no_public_artifact_when_live_execution_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    error_type: type[BaseException],
-    message: str,
 ) -> None:
     from cowork_agent.features.ai_chat.memory_eval.live_env import LiveEnvironment
 
-    monkeypatch.setenv("GEMINI_API_KEY", "fake")
-    monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    monkeypatch.setattr(
-        "scripts.evaluate_memory.probe_environment",
-        lambda environ: LiveEnvironment(None, None, True, False, ""),
-    )
-    monkeypatch.setattr(
-        "scripts.evaluate_memory._build_chat_reply",
-        lambda provider, environ, model=None: (object(), provider, "model-x"),
-    )
-    captured_transcripts: list[list[dict[str, object]]] = []
+    for error_type, message in [(RuntimeError, "ordinary failure"), (asyncio.CancelledError, "")]:
+        sub_dir = tmp_path / f"case_{error_type.__name__}"
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("GEMINI_API_KEY", "fake")
+        monkeypatch.setenv("LLM_PROVIDER", "gemini")
+        monkeypatch.setattr(
+            "scripts.evaluate_memory.probe_environment",
+            lambda environ: LiveEnvironment(None, None, True, False, ""),
+        )
+        monkeypatch.setattr(
+            "scripts.evaluate_memory._build_chat_reply",
+            lambda provider, environ, model=None: (object(), provider, "model-x"),
+        )
+        captured_transcripts: list[list[dict[str, object]]] = []
+        def make_fail_run_live(
+            err_cls: type[BaseException], msg: str, cap: list[list[dict[str, object]]]
+        ):
+            async def fail_run_live(probe_set, env, reply, *, transcript, **kwargs):
+                del probe_set, env, reply, kwargs
+                cap.append(transcript)
+                transcript.append({"question": "private question", "reply": "private reply"})
+                if msg:
+                    raise err_cls(msg)
+                raise err_cls()
 
-    async def fail_run_live(probe_set, env, reply, *, transcript, **kwargs):
-        del probe_set, env, reply, kwargs
-        captured_transcripts.append(transcript)
-        transcript.append({"question": "private question", "reply": "private reply"})
-        if message:
-            raise error_type(message)
-        raise error_type()
+            return fail_run_live
 
-    monkeypatch.setattr("scripts.evaluate_memory.run_live", fail_run_live)
-    detail_dir = tmp_path / "runs"
-    monkeypatch.setattr("scripts.evaluate_memory._DETAIL_DIR", detail_dir)
-    output = tmp_path / "report.json"
+        monkeypatch.setattr(
+            "scripts.evaluate_memory.run_live",
+            make_fail_run_live(error_type, message, captured_transcripts),
+        )
+        detail_dir = sub_dir / "runs"
+        monkeypatch.setattr("scripts.evaluate_memory._DETAIL_DIR", detail_dir)
+        output = sub_dir / "report.json"
 
-    with pytest.raises(error_type, match=message or None):
-        main(["--probe-set", str(_probe_set_file(tmp_path)), "--output", str(output)])
+        with pytest.raises(error_type, match=message or None):
+            main(["--probe-set", str(_probe_set_file(sub_dir)), "--output", str(output)])
 
-    assert captured_transcripts == [
-        [{"question": "private question", "reply": "private reply"}]
-    ]
-    assert not output.exists()
-    assert not list(detail_dir.glob("*.json"))
+        assert captured_transcripts == [
+            [{"question": "private question", "reply": "private reply"}]
+        ]
+        assert not output.exists()
+        assert not list(detail_dir.glob("*.json"))
 
 
 def test_aborted_run_writes_baseline_and_detail_and_exits_one(

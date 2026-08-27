@@ -83,10 +83,12 @@ def _decision_from_case(case: loader.RoutingCase) -> EmailRouteDecision:
     )
 
 
-@pytest.mark.parametrize("case", _CASES, ids=lambda case: case.id)
-def test_resolve_route_reproduces_fixture_labels(case: loader.RoutingCase) -> None:
-    resolution = resolve_route(_decision_from_case(case))
-    assert resolution.route is Route[case.labels.expected_route.name]
+def test_resolve_route_reproduces_fixture_labels() -> None:
+    for case in _CASES:
+        resolution = resolve_route(_decision_from_case(case))
+        assert resolution.route is Route[case.labels.expected_route.name], (
+            f"Failed on case {case.id}"
+        )
 
 
 def test_unclear_but_sufficient_plans_directly_per_fr06() -> None:
@@ -135,40 +137,33 @@ def test_guard_table_matches_readme_category_mapping() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    ("document_type", "reason_code"), list(GUARD_REASON_BY_DOCUMENT_TYPE.items())
-)
-def test_each_guard_category_forces_retrieval_even_when_sufficient(
-    document_type: ExpectedDocumentType,
-    reason_code: ReasonCode,
-) -> None:
-    decision = _decision(
-        email_is_sufficient=True,
-        expected_document_types=(document_type,),
-        reason_codes=(reason_code,),
-    )
-    resolution = resolve_route(decision)
-    assert resolution.route is Route.RETRIEVE_RAG
-    assert resolution.forced_by_guard is True
-    assert reason_code in resolution.reason_codes
+def test_each_guard_category_forces_retrieval_even_when_sufficient() -> None:
+    for document_type, reason_code in GUARD_REASON_BY_DOCUMENT_TYPE.items():
+        decision = _decision(
+            email_is_sufficient=True,
+            expected_document_types=(document_type,),
+            reason_codes=(reason_code,),
+        )
+        resolution = resolve_route(decision)
+        assert resolution.route is Route.RETRIEVE_RAG
+        assert resolution.forced_by_guard is True
+        assert reason_code in resolution.reason_codes
 
 
-@pytest.mark.parametrize(
-    "reason_code",
-    [
+def test_guard_fires_on_trigger_code_without_document_types() -> None:
+    trigger_codes = [
         ReasonCode.COMPANY_PROCEDURE_REQUIRED,
         ReasonCode.GOVERNANCE_REQUIRED,
         ReasonCode.POLICY_REQUIRED,
         ReasonCode.TEMPLATE_REQUIRED,
         ReasonCode.DOMAIN_KNOWLEDGE_REQUIRED,
         ReasonCode.INTERNAL_TERM_UNRESOLVED,
-    ],
-)
-def test_guard_fires_on_trigger_code_without_document_types(reason_code: ReasonCode) -> None:
-    decision = _decision(email_is_sufficient=True, reason_codes=(reason_code,))
-    resolution = resolve_route(decision)
-    assert resolution.route is Route.RETRIEVE_RAG
-    assert resolution.forced_by_guard is True
+    ]
+    for reason_code in trigger_codes:
+        decision = _decision(email_is_sufficient=True, reason_codes=(reason_code,))
+        resolution = resolve_route(decision)
+        assert resolution.route is Route.RETRIEVE_RAG
+        assert resolution.forced_by_guard is True
 
 
 def test_guard_does_not_fire_without_trigger_signals() -> None:
@@ -197,22 +192,18 @@ def test_guard_codes_keep_decision_order_then_mapped_codes() -> None:
     assert resolution.reason_codes == codes
 
 
-@pytest.mark.parametrize(
-    "actionability", [Actionability.INFORMATIONAL, Actionability.IRRELEVANT]
-)
-@pytest.mark.parametrize("email_is_sufficient", [True, False])
-def test_informational_and_irrelevant_never_retrieve(
-    actionability: Actionability, email_is_sufficient: bool
-) -> None:
-    decision = _decision(
-        actionability=actionability,
-        email_is_sufficient=email_is_sufficient,
-        reason_codes=(ReasonCode.NO_ACTION,),
-    )
-    resolution = resolve_route(decision)
-    assert resolution.route is Route.NO_ACTION
-    assert resolution.forced_by_guard is False
-    assert resolution.mode == "full"
+def test_informational_and_irrelevant_never_retrieve() -> None:
+    for actionability in (Actionability.INFORMATIONAL, Actionability.IRRELEVANT):
+        for email_is_sufficient in (True, False):
+            decision = _decision(
+                actionability=actionability,
+                email_is_sufficient=email_is_sufficient,
+                reason_codes=(ReasonCode.NO_ACTION,),
+            )
+            resolution = resolve_route(decision)
+            assert resolution.route is Route.NO_ACTION
+            assert resolution.forced_by_guard is False
+            assert resolution.mode == "full"
 
 
 def test_no_action_rung_beats_guard_categories() -> None:
@@ -232,9 +223,7 @@ def test_no_action_defaults_to_no_action_reason_code() -> None:
 
 
 def test_direct_fallback_is_partial_when_no_retrievable_gap() -> None:
-    decision = _decision(
-        email_is_sufficient=False, reason_codes=(ReasonCode.EMAIL_SELF_CONTAINED,)
-    )
+    decision = _decision(email_is_sufficient=False, reason_codes=(ReasonCode.EMAIL_SELF_CONTAINED,))
     resolution = resolve_route(decision)
     assert resolution.route is Route.DIRECT_PLAN
     assert resolution.mode == "partial"
@@ -283,11 +272,11 @@ def test_retrieval_query_without_guard_codes_routes_to_retrieval() -> None:
     assert resolve_route(decision).route is Route.RETRIEVE_RAG
 
 
-@pytest.mark.parametrize("proposed_route", list(Route))
-def test_resolver_ignores_classifier_proposed_route(proposed_route: Route) -> None:
-    resolution = resolve_route(_decision(route=proposed_route))
-    assert resolution.route is Route.DIRECT_PLAN
-    assert resolution == resolve_route(_decision(route=Route.NO_ACTION))
+def test_resolver_ignores_classifier_proposed_route() -> None:
+    for proposed_route in Route:
+        resolution = resolve_route(_decision(route=proposed_route))
+        assert resolution.route is Route.DIRECT_PLAN
+        assert resolution == resolve_route(_decision(route=Route.NO_ACTION))
 
 
 def test_same_decision_resolves_identically_twice() -> None:
@@ -367,9 +356,8 @@ def test_post_retrieval_route_matrix_for_self_sufficient_candidate(
     assert (resolution.route, resolution.mode) == (route, mode)
 
 
-@pytest.mark.parametrize(
-    "decision",
-    [
+def test_unsupported_evidence_produces_partial_direct_plan_when_not_safe_for_full() -> None:
+    decisions = [
         _decision(email_is_sufficient=False),
         _decision(confidence=0.5),
         _decision(
@@ -377,16 +365,13 @@ def test_post_retrieval_route_matrix_for_self_sufficient_candidate(
             reason_codes=(ReasonCode.POLICY_REQUIRED,),
         ),
         _decision(actionability=Actionability.UNCLEAR),
-    ],
-)
-def test_unsupported_evidence_produces_partial_direct_plan_when_not_safe_for_full(
-    decision: EmailRouteDecision,
-) -> None:
-    resolution = resolve_candidate_after_retrieval(
-        _candidate(decision), EvidenceStatus.UNSUPPORTED
-    )
-    assert resolution.route is Route.DIRECT_PLAN
-    assert resolution.mode == "partial"
+    ]
+    for decision in decisions:
+        resolution = resolve_candidate_after_retrieval(
+            _candidate(decision), EvidenceStatus.UNSUPPORTED
+        )
+        assert resolution.route is Route.DIRECT_PLAN
+        assert resolution.mode == "partial"
 
 
 def test_candidate_processing_filter_keeps_unclear_and_drops_only_no_action() -> None:

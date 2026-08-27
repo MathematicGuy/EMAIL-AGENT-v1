@@ -273,9 +273,7 @@ def test_claim_is_compare_and_set_single_winner() -> None:
             repository = PostgresRunRepository(pool)
             await repository.create(_run())
 
-            claims = await asyncio.gather(
-                *(repository.claim("run_1", NOW) for _ in range(5))
-            )
+            claims = await asyncio.gather(*(repository.claim("run_1", NOW) for _ in range(5)))
             winners = [claimed for claimed in claims if claimed is not None]
             assert len(winners) == 1
             assert winners[0].status is RunStatus.RUNNING
@@ -338,20 +336,14 @@ def test_list_stuck_runs_filters_by_status_and_age() -> None:
 
             long_ago = wall_now - timedelta(hours=1)
             assert (
-                await repository.list_stuck_runs(
-                    running_before=long_ago, queued_before=long_ago
-                )
+                await repository.list_stuck_runs(running_before=long_ago, queued_before=long_ago)
                 == ()
             )
 
             # CAS reset: succeeds while still RUNNING-past-threshold, then
             # refuses once the run is back in QUEUED.
-            assert await repository.reset_stuck_run(
-                "run_1", started_before=far_future
-            )
-            reset_again = await repository.reset_stuck_run(
-                "run_1", started_before=far_future
-            )
+            assert await repository.reset_stuck_run("run_1", started_before=far_future)
+            reset_again = await repository.reset_stuck_run("run_1", started_before=far_future)
             assert reset_again is False
             reloaded = await repository.get("run_1")
             assert reloaded is not None

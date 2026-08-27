@@ -21,9 +21,7 @@ def test_unset_url_is_unavailable_without_touching_the_network() -> None:
     assert pg_probe.server_available("") is False
 
 
-@pytest.mark.parametrize(
-    "error", [TimeoutError(), ConnectionRefusedError(), socket.gaierror()]
-)
+@pytest.mark.parametrize("error", [TimeoutError(), ConnectionRefusedError(), socket.gaierror()])
 def test_definitive_tcp_failure_reports_unreachable(
     monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
@@ -66,6 +64,4 @@ def test_preflight_ceiling_stays_far_below_the_connect_timeout() -> None:
     # The pre-flight is an optimization, not a second timeout policy: if it ever
     # approaches CONNECT_TIMEOUT_SECONDS it has stopped saving anything and
     # started deciding availability on its own.
-    assert (
-        pg_probe.REMOTE_PREFLIGHT_TIMEOUT_SECONDS < pg_probe.CONNECT_TIMEOUT_SECONDS / 2
-    )
+    assert pg_probe.REMOTE_PREFLIGHT_TIMEOUT_SECONDS < pg_probe.CONNECT_TIMEOUT_SECONDS / 2

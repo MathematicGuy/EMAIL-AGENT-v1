@@ -16,6 +16,7 @@ from fastapi import FastAPI
 import cowork_agent.api.evaluation_jobs as evaluation_jobs_api
 from cowork_agent.api.evaluation_jobs import create_evaluation_router
 from cowork_agent.app import create_app
+from cowork_agent.composition import CoworkRuntime, EvaluationBundle
 from cowork_agent.config import GMAIL_READONLY_SCOPE
 from cowork_agent.features.batch_evaluation.artifacts import FilesystemEvaluationArtifactStore
 from cowork_agent.features.batch_evaluation.contracts import (
@@ -132,9 +133,7 @@ class FakePlugin:
             private_result={"reply": "private reply"},
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         del plan
         return ArtifactBundle(
             public_result={"completed_units": len(outcomes)},
@@ -200,8 +199,18 @@ async def build_harness(
 def build_app(harness: Harness) -> FastAPI:
     app = FastAPI()
     app.include_router(create_evaluation_router())
-    app.state.evaluation_service = harness.service
-    app.state.evaluation_api_token = TOKEN
+    # The routes read through the typed runtime seam (ADR-013): inject the
+    # evaluation group directly. ``runtime``/``reports`` are absent here and
+    # never reached by these routes, so None keeps the fixture minimal.
+    app.state.runtime = CoworkRuntime(
+        reports=None,
+        evaluation=EvaluationBundle(
+            runtime=None,
+            service=harness.service,
+            supervisor=harness.supervisor,
+            api_token=TOKEN,
+        ),
+    )
     return app
 
 
@@ -499,9 +508,7 @@ def test_result_conflicts_while_running_and_recovers_after_release(tmp_path: Pat
             payload = submitted.json()
             deadline = asyncio.get_event_loop().time() + 10.0
             while True:
-                status = (
-                    await client.get(payload["status_url"], headers=AUTH)
-                ).json()
+                status = (await client.get(payload["status_url"], headers=AUTH)).json()
                 if status["progress"]["running"] >= 1:
                     break
                 assert asyncio.get_event_loop().time() < deadline
@@ -527,12 +534,8 @@ def test_unknown_jobs_return_safe_404_on_every_route(tmp_path: Path) -> None:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             status = await client.get("/v1/evaluation-jobs/no-such-job", headers=AUTH)
-            result = await client.get(
-                "/v1/evaluation-jobs/no-such-job/result", headers=AUTH
-            )
-            cancel = await client.post(
-                "/v1/evaluation-jobs/no-such-job/cancel", headers=AUTH
-            )
+            result = await client.get("/v1/evaluation-jobs/no-such-job/result", headers=AUTH)
+            cancel = await client.post("/v1/evaluation-jobs/no-such-job/cancel", headers=AUTH)
 
         for response in (status, result, cancel):
             assert response.status_code == 404
@@ -557,9 +560,7 @@ def test_cancellation_is_accepted_idempotently_and_is_terminal(tmp_path: Path) -
             payload = submitted.json()
             deadline = asyncio.get_event_loop().time() + 10.0
             while True:
-                status = (
-                    await client.get(payload["status_url"], headers=AUTH)
-                ).json()
+                status = (await client.get(payload["status_url"], headers=AUTH)).json()
                 if status["progress"]["running"] >= 1:
                     break
                 assert asyncio.get_event_loop().time() < deadline
@@ -612,9 +613,7 @@ def test_type_listing_exposes_only_safe_static_metadata(tmp_path: Path) -> None:
 
 
 def test_max_worker_resolution_cases(tmp_path: Path) -> None:
-    async def run_case(
-        root: Path, key: str, max_workers: int | None
-    ) -> dict[str, object]:
+    async def run_case(root: Path, key: str, max_workers: int | None) -> dict[str, object]:
         # One fresh credential pool per case keeps healthy_count deterministic:
         # resolution reads currently-available credentials, and concurrently
         # executing jobs lease them, so sharing a pool across jobs races.
@@ -730,9 +729,14 @@ def _gmail_env(tmp_path: Path) -> dict[str, str]:
         "GMAIL_CONNECTION_DB_PATH": str(tmp_path / "connections.db"),
         "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "OAUTH_STATE_SECRET": "state-secret-that-is-at-least-32-characters",
+        "LLM_PROVIDER": "mistral",
+        "MISTRAL_API_KEY": "test-mistral-key",
+        "MISTRAL_MODEL": "mistral-small-2603",
         "MICROSOFT_CLIENT_ID": "",
         "MICROSOFT_CLIENT_SECRET": "",
-        "MISTRAL_API_KEY": "dummy-test-key",
+        # Both sides of the merge added a Mistral key here; the one above wins
+        # because it pairs with MISTRAL_MODEL. The Gemini key is `main`'s CI fix
+        # and stays: provider selection must not fall through to a real lookup.
         "GEMINI_API_KEY": "dummy-test-key",
     }
 
@@ -762,9 +766,7 @@ def test_create_app_excludes_evaluation_routes_when_disabled(
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                types = await client.get(
-                    "/v1/evaluation-types", headers=AUTH
-                )
+                types = await client.get("/v1/evaluation-types", headers=AUTH)
                 submit = await client.post(
                     "/v1/evaluation-jobs",
                     json=submission_body(),
@@ -792,8 +794,10 @@ def test_create_app_wires_runtime_recovery_and_auth_when_enabled(
     async def scenario() -> None:
         app = create_app()
         async with app.router.lifespan_context(app):
-            assert app.state.evaluation_service is not None
-            assert app.state.evaluation_supervisor is not None
+            evaluation = app.state.runtime.evaluation
+            assert evaluation is not None
+            assert evaluation.service is not None
+            assert evaluation.supervisor is not None
             assert (tmp_path / "evaluation-jobs.db").exists()
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

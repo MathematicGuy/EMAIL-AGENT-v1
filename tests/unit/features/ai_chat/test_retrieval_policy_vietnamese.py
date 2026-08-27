@@ -18,8 +18,6 @@ types. The cues are stored accented and the tests below assert on accented text.
 
 from __future__ import annotations
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import (
     ChatMessageRequest,
     EpisodicMemoryQuery,
@@ -42,84 +40,53 @@ def _request(user_message: str) -> ChatMessageRequest:
     )
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_vietnamese_episodic_cues_enable_episodic_retrieval() -> None:
+    cases = [
         "Tôi còn tác vụ trước nào về bảng lương chưa xong không?",
         "Cho tôi xem công việc trước đó về bảng lương.",
         "Nhiệm vụ trước của tôi về hợp đồng thuê nhà là gì?",
         "Có việc trước đó nào liên quan đến hồ sơ CCCD không?",
-    ],
-)
-def test_vietnamese_episodic_cues_enable_episodic_retrieval(user_message: str) -> None:
-    # One phrasing per Vietnamese cue, each naming a subject. The subject is
-    # what changed here: these read "... about payroll", "... about the lease",
-    # because a cue alone no longer starts a search (see the test below).
-    reads = select_memory_reads(_request(user_message))
-
-    assert isinstance(reads.episodic, EpisodicMemoryQuery)
-    assert isinstance(reads.semantic, SemanticMemoryRead)
+    ]
+    for user_message in cases:
+        reads = select_memory_reads(_request(user_message))
+        assert isinstance(reads.episodic, EpisodicMemoryQuery)
+        assert isinstance(reads.semantic, SemanticMemoryRead)
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_a_vietnamese_cue_with_no_subject_starts_no_search() -> None:
+    cases = [
         "Tôi còn tác vụ trước nào chưa xong không?",
         "Nhiệm vụ trước của tôi là gì?",
         "Có việc trước đó nào liên quan không?",
-    ],
-)
-def test_a_vietnamese_cue_with_no_subject_starts_no_search(user_message: str) -> None:
-    # The cue is recognised - that is what the test above establishes - but
-    # these questions name no episode. Every word is the cue, the interrogative
-    # frame, or a status word the index does not carry, so there is nothing to
-    # search on and searching anyway can only return whatever shares a filler
-    # word. See test_episodic_search_text.py for the measurements.
-    #
-    # These are enumeration requests: "which of my tasks are still open".
-    # Answering them means listing episodes, not searching for one, and
-    # `MemoryGateway.list_task_episodes` already does that. Routing this intent
-    # to it is a contract change and is deliberately not made here - so for now
-    # the honest behaviour is to return nothing rather than the wrong episode.
-    assert episodic_search_text(user_message) == ""
-
-    reads = select_memory_reads(_request(user_message))
-
-    assert isinstance(reads.episodic, EpisodicMemoryRead)
+    ]
+    for user_message in cases:
+        assert episodic_search_text(user_message) == ""
+        reads = select_memory_reads(_request(user_message))
+        assert isinstance(reads.episodic, EpisodicMemoryRead)
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_vietnamese_semantic_cues_enable_semantic_retrieval() -> None:
+    cases = [
         "Chính sách công ty nói gì về làm thêm giờ?",
         "Chính sách của công ty về nghỉ phép ra sao?",
         "Quy định công ty về công tác phí là gì?",
         "Quy định của công ty nói gì về việc này?",
         "Sổ tay nhân viên có nói về làm thêm giờ không?",
-    ],
-)
-def test_vietnamese_semantic_cues_enable_semantic_retrieval(user_message: str) -> None:
-    reads = select_memory_reads(_request(user_message))
-
-    assert isinstance(reads.semantic, SemanticMemoryQuery)
-    assert isinstance(reads.episodic, EpisodicMemoryRead)
+    ]
+    for user_message in cases:
+        reads = select_memory_reads(_request(user_message))
+        assert isinstance(reads.semantic, SemanticMemoryQuery)
+        assert isinstance(reads.episodic, EpisodicMemoryRead)
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_truoc_as_the_preposition_before_is_not_an_episodic_cue() -> None:
+    cases = [
         "Soạn danh sách bàn giao công việc trước khi nghỉ phép.",
         "Gửi báo cáo công việc trước cuộc họp.",
-    ],
-)
-def test_truoc_as_the_preposition_before_is_not_an_episodic_cue(user_message: str) -> None:
-    # `trước` means both "previous" and "before". A bare "công việc trước" cue
-    # was tried and fired on the first sentence here, which is "hand over work
-    # BEFORE taking leave" - an unrelated turn paying for a retrieval it never
-    # asked for. The cue now requires the trailing `đó`.
-    reads = select_memory_reads(_request(user_message))
-
-    assert isinstance(reads.episodic, EpisodicMemoryRead)
+    ]
+    for user_message in cases:
+        reads = select_memory_reads(_request(user_message))
+        assert isinstance(reads.episodic, EpisodicMemoryRead)
 
 
 def test_vietnamese_cues_stay_off_without_a_cue() -> None:
@@ -140,32 +107,24 @@ def test_vietnamese_semantic_cue_still_respects_the_company_rag_flag() -> None:
     assert isinstance(reads.semantic, SemanticMemoryRead)
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_vietnamese_task_directives_are_explicit_task_requests() -> None:
+    cases = [
         "Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.",
         "Lập nhiệm vụ kiểm tra hợp đồng.",
         "Tạo công việc theo dõi hồ sơ.",
         "Lên kế hoạch cho buổi họp tuần sau.",
-    ],
-)
-def test_vietnamese_task_directives_are_explicit_task_requests(user_message: str) -> None:
-    # `_TASK_DIRECTIVE_VERBS` carried Vietnamese verbs, but the task TARGET
-    # nouns were English apart from "kế hoạch" - so "tạo một tác vụ" was
-    # rejected and only "tạo kế hoạch" worked. A verb list without a matching
-    # noun list authorizes nothing.
-    assert is_explicit_task_request(_request(user_message))
+    ]
+    for user_message in cases:
+        assert is_explicit_task_request(_request(user_message))
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_vietnamese_negation_still_blocks_task_creation() -> None:
+    cases = [
         "Không cần tạo tác vụ nào cả.",
         "Đừng tạo nhiệm vụ cho việc này.",
-    ],
-)
-def test_vietnamese_negation_still_blocks_task_creation(user_message: str) -> None:
-    assert not is_explicit_task_request(_request(user_message))
+    ]
+    for user_message in cases:
+        assert not is_explicit_task_request(_request(user_message))
 
 
 def test_a_bare_vietnamese_noun_is_not_a_task_directive() -> None:

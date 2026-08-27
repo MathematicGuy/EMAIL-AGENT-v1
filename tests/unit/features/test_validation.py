@@ -3,8 +3,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-import pytest
-
 from cowork_agent.domain.target_contracts import (
     Actionability,
     ActionPlanOutput,
@@ -158,22 +156,20 @@ def test_valid_task_passes_untouched() -> None:
     assert result.violations == ()
 
 
-@pytest.mark.parametrize(
-    ("overrides", "expected_code"),
-    [
+def test_fatal_violation_drops_task() -> None:
+    cases = [
         ({"title": "   "}, MISSING_TITLE),
         ({"request_summary": ""}, MISSING_REQUEST_SUMMARY),
         ({"action_plan": ()}, EMPTY_ACTION_PLAN),
         ({"action_plan": (_step("Bước một"), _step(" "))}, EMPTY_STEP_INSTRUCTION),
         ({"actionability": Actionability.UNCLEAR}, ACTIONABILITY_NOT_ALLOWED),
         ({"actionability": Actionability.IRRELEVANT}, ACTIONABILITY_NOT_ALLOWED),
-    ],
-)
-def test_fatal_violation_drops_task(overrides: dict[str, object], expected_code: str) -> None:
-    result = _validate(_task(**overrides))
-    assert result.task is None
-    assert [violation.code for violation in result.violations] == [expected_code]
-    assert {violation.severity for violation in result.violations} == {SEVERITY_FATAL}
+    ]
+    for overrides, expected_code in cases:
+        result = _validate(_task(**overrides))
+        assert result.task is None
+        assert [violation.code for violation in result.violations] == [expected_code]
+        assert {violation.severity for violation in result.violations} == {SEVERITY_FATAL}
 
 
 def test_fatal_violation_reports_no_repairable_violations() -> None:
@@ -190,11 +186,11 @@ def test_short_body_echo_is_not_a_leak() -> None:
     assert result.violations == ()
 
 
-@pytest.mark.parametrize("field", ["title", "request_summary"])
-def test_medium_body_echo_drops_task(field: str) -> None:
-    result = _validate(_task(**{field: _MEDIUM_BODY}), envelopes=[_envelope(_MEDIUM_BODY)])
-    assert result.task is None
-    assert [violation.code for violation in result.violations] == [RAW_BODY_LEAK]
+def test_medium_body_echo_drops_task() -> None:
+    for field in ("title", "request_summary"):
+        result = _validate(_task(**{field: _MEDIUM_BODY}), envelopes=[_envelope(_MEDIUM_BODY)])
+        assert result.task is None
+        assert [violation.code for violation in result.violations] == [RAW_BODY_LEAK]
 
 
 def test_leak_in_step_instruction_drops_task() -> None:
@@ -308,9 +304,7 @@ def test_empty_retrieval_strips_every_citation() -> None:
         action_plan=(_step("Bước một", citations=("cit_1",)),),
     )
     for retrieval in (None, _retrieval()):
-        result = _validate(
-            task, resolution=_resolution(Route.RETRIEVE_RAG), retrieval=retrieval
-        )
+        result = _validate(task, resolution=_resolution(Route.RETRIEVE_RAG), retrieval=retrieval)
         assert result.task is not None
         assert result.task.supporting_documents == ()
         assert result.task.action_plan[0].supporting_citation_ids == ()

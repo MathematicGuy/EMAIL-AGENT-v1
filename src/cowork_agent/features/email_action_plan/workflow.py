@@ -414,9 +414,7 @@ class DigestWorker:
                 len(candidates),
                 classifier_ms,
             )
-            run_context = GenerationContext(
-                run_id=run.id, user_id=run.user_id
-            )
+            run_context = GenerationContext(run_id=run.id, user_id=run.user_id)
             actionable_candidates: list[TaskCandidate] = []
             for task_candidate in candidates:
                 logger.info(
@@ -660,9 +658,7 @@ class DigestWorker:
         )
 
         all_envelopes: list[EphemeralEmailEnvelope] = []
-        for (_thread_id, selected_ids), thread in zip(
-            thread_items, thread_results, strict=True
-        ):
+        for (_thread_id, selected_ids), thread in zip(thread_items, thread_results, strict=True):
             if thread is None or not thread:
                 skipped_threads += 1
                 continue

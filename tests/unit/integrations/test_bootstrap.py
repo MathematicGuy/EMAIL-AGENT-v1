@@ -33,7 +33,6 @@ _BUILD_RERANKER = bootstrap._build_reranker
 def _jina_settings() -> JinaEmbeddingSettings:
     return JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "key-1", "JINA_EMBEDDING_MODEL": "jina-embeddings-v5-omni-small"},
-        load_env_file=False,
     )
 
 

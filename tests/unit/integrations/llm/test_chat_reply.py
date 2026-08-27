@@ -65,8 +65,12 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
     context = assemble_generation_context(
         request,
         MemoryContextResponse(
-            turns=(), profile=None, episodes=(), semantic_context=None,
-            degraded=False, degraded_sources=(),
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
         ),
     )
     reply = MistralChatReply(model="mistral-small-2603", complete=complete)
@@ -84,9 +88,7 @@ def test_configured_chat_reply_uses_only_generation_context_and_returns_proposal
 
 def test_configured_provider_settings_select_the_matching_chat_reply_adapter() -> None:
     assert isinstance(
-        GeminiChatReply.from_settings(
-            GeminiSettings(("key",), "model", True, 1, 1, 1, 1)
-        ),
+        GeminiChatReply.from_settings(GeminiSettings(("key",), "model", True, 1, 1, 1, 1)),
         GeminiChatReply,
     )
     assert isinstance(
@@ -218,8 +220,12 @@ def test_configured_reply_rejects_citations_without_current_company_evidence() -
     context = assemble_generation_context(
         request,
         MemoryContextResponse(
-            turns=(), profile=None, episodes=(), semantic_context=None,
-            degraded=False, degraded_sources=(),
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
         ),
     )
 
@@ -284,7 +290,9 @@ def test_configured_reply_projects_real_semantic_adapter_citations_to_task_coord
 
     assert chunks[0].task_proposal is not None
     assert chunks[0].task_proposal.rag_citations == (
-        EpisodeCitation("travel-policy", "Travel Policy", "Receipts", "https://docs.example.com/travel"),
+        EpisodeCitation(
+            "travel-policy", "Travel Policy", "Receipts", "https://docs.example.com/travel"
+        ),
     )
 
 
@@ -431,6 +439,8 @@ def _eligible_episode() -> TaskEpisode:
         prompt_version=None,
         confidence=None,
     )
+
+
 async def _collect(reply: object, request: ChatMessageRequest, context: object):
     return [chunk async for chunk in reply.stream_reply(request, context)]  # type: ignore[attr-defined]
 
@@ -597,13 +607,10 @@ def test_openrouter_chat_reply_from_settings_without_last_resort() -> None:
 def _openrouter_settings() -> OpenRouterSettings:
     return OpenRouterSettings.from_env(
         {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "deepseek/x"},
-        load_env_file=False,
     )
 
 
-def _dated_episode(
-    *, episode_id: str, title: str, plan: str, updated_at: datetime
-) -> TaskEpisode:
+def _dated_episode(*, episode_id: str, title: str, plan: str, updated_at: datetime) -> TaskEpisode:
     return TaskEpisode(
         episode_id=episode_id,
         record_id=f"record-{episode_id}",
@@ -740,3 +747,51 @@ def test_a_provider_that_raises_is_still_a_provider_outage() -> None:
     with pytest.raises(ChatReplyUnavailable) as caught:
         asyncio.run(_collect(reply, request, context))
     assert not isinstance(caught.value, ChatResponseInvalid)
+
+
+def test_project_evidence_allows_empty_citation_ids_when_evidence_is_not_used() -> None:
+    from cowork_agent.domain.project_documents import (
+        ProjectDocumentEvidence,
+        ProjectDocumentResponse,
+    )
+
+    request = ChatMessageRequest("session-1", "How to optimize team workflows?", "idem-empty-cite")
+    evidence = ProjectDocumentEvidence(
+        citation_id="cite-1",
+        chunk_id="chunk-1",
+        document_id="doc-1",
+        project_id="proj-1",
+        title="Leave Policy",
+        text="Annual leave guidelines.",
+        page_start=1,
+        page_end=1,
+        section="Section 1",
+        score=0.3,
+    )
+    project_documents = ProjectDocumentResponse((evidence,), degraded=False)
+    context = assemble_generation_context(
+        request,
+        MemoryContextResponse(
+            turns=(),
+            profile=None,
+            episodes=(),
+            semantic_context=None,
+            degraded=False,
+            degraded_sources=(),
+        ),
+        project_documents=project_documents,
+    )
+
+    async def complete_no_citations(payload: dict[str, object]) -> dict[str, object]:
+        del payload
+        return {
+            "assistant_text": "The documents do not contain team workflow optimization guidelines.",
+            "conversation_title": "Workflow Optimization",
+            "citation_ids": [],
+            "task_proposal": None,
+        }
+
+    reply = MistralChatReply(model="mistral-small-2603", complete=complete_no_citations)
+    chunks = asyncio.run(_collect(reply, request, context))
+    assert chunks[0].text == "The documents do not contain team workflow optimization guidelines."
+    assert chunks[0].citation_ids == ()

@@ -1,16 +1,18 @@
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
 from starlette.requests import Request
 
-from cowork_agent.app import (
-    _authenticated_principal,
-    _connection_principal,
-    _issue_chat_guest_session,
-    _set_session_cookie,
+from cowork_agent.api.dependencies import (
+    authenticated_principal,
+    connection_principal,
+    issue_chat_guest_session,
+    set_session_cookie,
 )
+from cowork_agent.composition import CoworkRuntime
 from cowork_agent.config import SessionSettings
 from cowork_agent.domain import MailboxConnection
 from cowork_agent.identity import VerifiedPrincipal
@@ -20,7 +22,7 @@ def test_session_cookie_is_httponly_secure_lax_and_never_added_to_redirect_url()
     response = RedirectResponse("https://app.example.test/dashboard")
     settings = SessionSettings(3600, "cowork_session", True)
 
-    _set_session_cookie(response, settings, "opaque-token")
+    set_session_cookie(response, settings, "opaque-token")
 
     cookie = response.headers["set-cookie"]
     assert "cowork_session=opaque-token" in cookie
@@ -34,12 +36,21 @@ def test_session_cookie_is_httponly_secure_lax_and_never_added_to_redirect_url()
 
 def test_postgres_runtime_rejects_a_request_without_an_opaque_session_cookie() -> None:
     app = FastAPI()
-    app.state.session_repository = object()
-    app.state.session_settings = SessionSettings(3600, "cowork_session", True)
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            session_repository=object(),
+            session_settings=SessionSettings(3600, "cowork_session", True),
+            identity_repository=None,
+            chat_identity_repository=None,
+            chat_opaque_session_repository=None,
+            connection_repository=None,
+        ),
+    )
     request = Request({"type": "http", "app": app, "headers": [], "path": "/"})
 
     try:
-        asyncio.run(_authenticated_principal(request))
+        asyncio.run(authenticated_principal(request))
     except HTTPException as exc:
         assert exc.status_code == 401
     else:
@@ -48,8 +59,17 @@ def test_postgres_runtime_rejects_a_request_without_an_opaque_session_cookie() -
 
 def test_postgres_runtime_never_falls_back_to_mailbox_identity_without_a_cookie() -> None:
     app = FastAPI()
-    app.state.session_repository = object()
-    app.state.session_settings = SessionSettings(3600, "cowork_session", True)
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            session_repository=object(),
+            session_settings=SessionSettings(3600, "cowork_session", True),
+            identity_repository=None,
+            chat_identity_repository=None,
+            chat_opaque_session_repository=None,
+            connection_repository=None,
+        ),
+    )
     request = Request({"type": "http", "app": app, "headers": [], "path": "/"})
     now = datetime.now(UTC)
     connection = MailboxConnection(
@@ -66,7 +86,7 @@ def test_postgres_runtime_never_falls_back_to_mailbox_identity_without_a_cookie(
     )
 
     try:
-        asyncio.run(_connection_principal(request, connection))
+        asyncio.run(connection_principal(request, connection))
     except HTTPException as exc:
         assert exc.status_code == 401
     else:
@@ -86,17 +106,87 @@ def test_guest_bootstrap_preserves_an_existing_opaque_session() -> None:
             raise AssertionError("an existing browser session must not be replaced")
 
     app = FastAPI()
-    app.state.session_repository = Sessions()
-    app.state.identity_repository = object()
-    app.state.session_settings = SessionSettings(3600, "cowork_session", True)
-    request = Request({
-        "type": "http",
-        "app": app,
-        "headers": [(b"cookie", b"cowork_session=existing-token")],
-        "path": "/",
-    })
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            session_repository=Sessions(),
+            session_settings=SessionSettings(3600, "cowork_session", True),
+            identity_repository=object(),
+            chat_identity_repository=None,
+            chat_opaque_session_repository=None,
+            connection_repository=None,
+        ),
+    )
+    request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": [(b"cookie", b"cowork_session=existing-token")],
+            "path": "/",
+        }
+    )
     response = Response(status_code=204)
 
-    asyncio.run(_issue_chat_guest_session(request, response))
+    asyncio.run(issue_chat_guest_session(request, response))
 
     assert "set-cookie" not in response.headers
+
+
+def test_one_request_resolves_its_opaque_session_only_once() -> None:
+    """Ownership checks resolve the caller, then their handler resolves again.
+
+    Both reads hit the session store, for a cookie that cannot change inside
+    one request. The memo on ``request.state`` collapses them.
+    """
+    principal = VerifiedPrincipal(tenant_id="workspace-1", user_id="internal-user")
+    reads = 0
+
+    class CountingSessions:
+        async def resolve(self, token: str, *, now: datetime) -> VerifiedPrincipal:
+            nonlocal reads
+            del now, token
+            reads += 1
+            return principal
+
+    now = datetime.now(UTC)
+    connection = MailboxConnection(
+        id="mbx-1",
+        user_id="internal-user",
+        provider="gmail",
+        external_account_id="owner@example.com",
+        email_address="owner@example.com",
+        encrypted_refresh_token="encrypted",
+        scopes=("scope",),
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+    app = FastAPI()
+    app.state.runtime = CoworkRuntime(
+        reports=None,  # type: ignore[arg-type]
+        control_plane=SimpleNamespace(
+            session_repository=CountingSessions(),
+            session_settings=SessionSettings(3600, "cowork_session", True),
+            identity_repository=None,
+            chat_identity_repository=None,
+            chat_opaque_session_repository=None,
+            connection_repository=None,
+        ),
+    )
+    request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": [(b"cookie", b"cowork_session=live-token")],
+            "path": "/",
+        }
+    )
+
+    async def scenario() -> None:
+        assert await authenticated_principal(request) == principal
+        assert await connection_principal(request, connection) == principal
+        assert await authenticated_principal(request) == principal
+
+    asyncio.run(scenario())
+
+    assert reads == 1, reads

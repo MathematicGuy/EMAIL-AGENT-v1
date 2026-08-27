@@ -9,6 +9,7 @@ import httpx
 from fastapi import FastAPI, Request
 
 from cowork_agent.api.projects import create_project_router
+from cowork_agent.composition import ChatRuntime, CoworkRuntime, EmailRagRuntime, MailboxRuntime
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.persistence.repositories.projects import (
     DocumentIngestionJob,
@@ -104,27 +105,89 @@ class Storage:
         return object_key.endswith("/source")
 
 
+def _runtime_with(
+    *,
+    project_repository: object,
+    private_storage: object,
+    user_documents_settings: object,
+    chat_principal_resolver: object,
+    project_document_vectors: object = None,
+    chat_routing_service: object = None,
+) -> CoworkRuntime:
+    """Inject only the fields the project routes read through the runtime seam.
+
+    Unlisted group fields stay None: these tests exercise the routes' reads,
+    not group composition, and the routes treat every absent field as the
+    same 503 the old missing ``app.state`` keys produced.
+    """
+
+    return CoworkRuntime(
+        reports=None,
+        control_plane=SimpleNamespace(project_repository=project_repository),
+        mailbox=MailboxRuntime(
+            gmail_settings=None,
+            gmail_connections=None,
+            gmail_mailbox=None,
+            outlook_connections=None,
+            outlook_mailbox=None,
+            outlook_settings=None,
+            outlook_configuration_error=None,
+            provider_availability={},
+            mailbox=None,
+            user_documents_settings=None,
+            private_storage_client=None,
+            private_storage=private_storage,
+        ),
+        chat=ChatRuntime(
+            chat_memory_settings=None,
+            chat_sessions=None,
+            chat_session_buffer=None,
+            memory_metrics=None,
+            memory_operation_sink=None,
+            user_documents_settings=user_documents_settings,
+            ready_document_catalog=None,
+            chat_principal_resolver=chat_principal_resolver,
+            chat_guest_session_issuer=None,
+            chat_reply=None,
+            chat_intent_settings=None,
+            chat_routing_service=chat_routing_service,
+            chat_tool_runner=None,
+        ),
+        email_rag=EmailRagRuntime(
+            semantic_memory=None,
+            knowledge_documents=(),
+            digest_worker=None,
+            llm_configuration_error=None,
+            llm_provider_label="none",
+            document_embeddings_configured=False,
+            project_document_vectors=project_document_vectors,
+            project_document_index=None,
+        ),
+    )
+
+
 def test_canonical_signed_upload_status_download_and_authorization() -> None:
     async def scenario() -> None:
-        app = FastAPI()
-        app.include_router(create_project_router())
-        app.state.project_repository = Projects()
-        app.state.private_storage = Storage()
-        app.state.project_document_vectors = object()
-        app.state.chat_routing_service = object()
-        app.state.user_documents_settings = SimpleNamespace(
-            enabled=True,
-            retention_days=30,
-            max_file_bytes=25 * 1024 * 1024,
-            max_documents_per_project=50,
-            max_project_bytes=500 * 1024 * 1024,
-        )
-
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
             return VerifiedPrincipal(user_id="user-1")
 
-        app.state.chat_principal_resolver = principal
+        app = FastAPI()
+        app.include_router(create_project_router())
+        app.state.runtime = _runtime_with(
+            project_repository=Projects(),
+            private_storage=Storage(),
+            user_documents_settings=SimpleNamespace(
+                enabled=True,
+                retention_days=30,
+                max_file_bytes=25 * 1024 * 1024,
+                max_documents_per_project=50,
+                max_project_bytes=500 * 1024 * 1024,
+            ),
+            chat_principal_resolver=principal,
+            project_document_vectors=object(),
+            chat_routing_service=object(),
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -138,9 +201,7 @@ def test_canonical_signed_upload_status_download_and_authorization() -> None:
                     "content_sha256": "a" * 64,
                 },
             )
-            status = await client.get(
-                "/v1/cowork/chat/projects/project-1/documents/doc-1"
-            )
+            status = await client.get("/v1/cowork/chat/projects/project-1/documents/doc-1")
             download = await client.get(
                 "/v1/cowork/chat/projects/project-1/documents/doc-1/download"
             )
@@ -171,18 +232,19 @@ def test_canonical_signed_upload_status_download_and_authorization() -> None:
 
 def test_document_routes_are_unavailable_when_feature_is_disabled() -> None:
     async def scenario() -> None:
-        app = FastAPI()
-        app.include_router(create_project_router())
-        projects = Projects()
-        app.state.project_repository = projects
-        app.state.private_storage = Storage()
-        app.state.user_documents_settings = SimpleNamespace(enabled=False)
-
         async def principal(request: Request) -> VerifiedPrincipal:
             del request
             return VerifiedPrincipal(user_id="user-1")
 
-        app.state.chat_principal_resolver = principal
+        app = FastAPI()
+        app.include_router(create_project_router())
+        projects = Projects()
+        app.state.runtime = _runtime_with(
+            project_repository=projects,
+            private_storage=Storage(),
+            user_documents_settings=SimpleNamespace(enabled=False),
+            chat_principal_resolver=principal,
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -196,9 +258,7 @@ def test_document_routes_are_unavailable_when_feature_is_disabled() -> None:
                     "content_sha256": "a" * 64,
                 },
             )
-            documents = await client.get(
-                "/v1/cowork/chat/projects/project-1/documents"
-            )
+            documents = await client.get("/v1/cowork/chat/projects/project-1/documents")
             document_path = "/v1/cowork/chat/projects/project-1/documents/doc-1"
             document_responses = [
                 await client.get(document_path),

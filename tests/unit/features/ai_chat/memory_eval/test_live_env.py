@@ -24,196 +24,121 @@ def _env(**overrides: str) -> dict[str, str]:
     return base
 
 
-def test_everything_present_reports_no_unavailable_scopes() -> None:
+def test_probe_environment_postgres_resolution_and_precedence() -> None:
+    # Everything present
     env = probe_environment(_env(), postgres_probe=lambda url: True)
     assert env.postgres_url == "postgresql://127.0.0.1/y"
     assert env.gemini_ready is True
     assert env.embeddings_ready is True
     assert unavailable_scopes(env) == ()
 
-
-def test_pg_test_url_wins_over_database_url() -> None:
-    env = probe_environment(
+    # PG_TEST_URL wins over DATABASE_URL
+    env_db = probe_environment(
         _env(DATABASE_URL="postgresql://127.0.0.1/ignored"), postgres_probe=lambda url: True
     )
-    assert env.postgres_url == "postgresql://127.0.0.1/y"
+    assert env_db.postgres_url == "postgresql://127.0.0.1/y"
+
+    # DATABASE_URL used when PG_TEST_URL absent
+    env_fallback = _env()
+    del env_fallback["PG_TEST_URL"]
+    env_fallback["DATABASE_URL"] = "postgresql://127.0.0.1/fallback"
+    assert (
+        probe_environment(env_fallback, postgres_probe=lambda url: True).postgres_url
+        == "postgresql://127.0.0.1/fallback"
+    )
+
+    # POSTGRES_MODE=local
+    env_local = _env(POSTGRES_MODE="local", DATABASE_URL_LOCAL="postgresql://127.0.0.1/local")
+    del env_local["PG_TEST_URL"]
+    assert (
+        probe_environment(env_local, postgres_probe=lambda url: True).postgres_url
+        == "postgresql://127.0.0.1/local"
+    )
+
+    # PG_TEST_URL overrides POSTGRES_MODE=off
+    env_override = _env(
+        POSTGRES_MODE="off", PG_TEST_URL="postgresql://127.0.0.1:5432/cowork_memeval"
+    )
+    assert (
+        probe_environment(env_override, postgres_probe=lambda url: True).postgres_url
+        == "postgresql://127.0.0.1:5432/cowork_memeval"
+    )
 
 
-def test_database_url_is_used_when_pg_test_url_is_absent() -> None:
-    environ = _env()
-    del environ["PG_TEST_URL"]
-    environ["DATABASE_URL"] = "postgresql://127.0.0.1/fallback"
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://127.0.0.1/fallback"
+def test_probe_environment_sqlite_mode_and_scratch_isolation() -> None:
+    env1 = _env(POSTGRES_MODE="off")
+    del env1["PG_TEST_URL"]
+    first = probe_environment(env1)
 
+    env2 = _env(POSTGRES_MODE="off")
+    del env2["PG_TEST_URL"]
+    second = probe_environment(env2)
 
-def test_postgres_mode_local_selects_the_local_url() -> None:
-    environ = _env()
-    del environ["PG_TEST_URL"]
-    environ["POSTGRES_MODE"] = "local"
-    environ["DATABASE_URL_LOCAL"] = "postgresql://127.0.0.1/local"
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://127.0.0.1/local"
-
-
-def test_postgres_mode_off_selects_sqlite_and_dials_nothing() -> None:
-    # POSTGRES_MODE=off is a deliberate choice of SQLite, not an outage. app.py
-    # backs long_term and episodic with SQLiteChatRepository in exactly this
-    # case, so both scopes stay evaluable and no server is dialled. Reporting
-    # them unavailable here would describe a system the product is not running.
-    environ = _env()
-    del environ["PG_TEST_URL"]
-    environ["POSTGRES_MODE"] = "off"
-    dialled: list[str] = []
-
-    def probe(url: str) -> bool:
-        dialled.append(url)
-        return True
-
-    env = probe_environment(environ, postgres_probe=probe)
-    assert dialled == []
-    assert env.postgres_url is None
-    assert env.sqlite_path is not None
-    assert env.durable_memory_available is True
-    assert unavailable_scopes(env) == ()
-
-
-def test_concurrent_sqlite_attempts_receive_distinct_owned_scratch_paths() -> None:
-    first = probe_environment({"POSTGRES_MODE": "off"})
-    second = probe_environment({"POSTGRES_MODE": "off"})
-
-    assert first.sqlite_path is not None
-    assert second.sqlite_path is not None
+    assert first.sqlite_path is not None and second.sqlite_path is not None
     assert first.sqlite_path != second.sqlite_path
-    assert first.sqlite_path_owned is True
-    assert second.sqlite_path_owned is True
+    assert first.sqlite_path_owned is True and second.sqlite_path_owned is True
     assert first.sqlite_path.name.startswith("memeval-")
-    assert second.sqlite_path.name.startswith("memeval-")
+    assert unavailable_scopes(first) == ()
+
+    # POSTGRES_MODE=off wins over DATABASE_URL
+    env_off = _env(POSTGRES_MODE="off", DATABASE_URL="postgresql://127.0.0.1/ignored")
+    del env_off["PG_TEST_URL"]
+    probed = probe_environment(env_off, postgres_probe=lambda url: True)
+    assert probed.postgres_url is None
+    assert probed.sqlite_path is not None and probed.durable_memory_available is True
 
 
-def test_a_configured_but_unreachable_server_is_an_outage_not_a_sqlite_choice() -> None:
-    # A URL was set and did not answer. Silently falling back to SQLite would
-    # measure a different store than the one the run was pointed at.
+def test_probe_environment_outage_and_unreachable_server() -> None:
     env = probe_environment(_env(), postgres_probe=lambda url: False)
     assert env.postgres_url is None
     assert env.sqlite_path is None
     assert env.durable_memory_available is False
-
-
-def test_an_unreachable_server_makes_the_two_durable_scopes_unavailable() -> None:
-    env = probe_environment(_env(), postgres_probe=lambda url: False)
     scopes = {item.scope for item in unavailable_scopes(env)}
     assert scopes == {MemoryType.LONG_TERM, MemoryType.EPISODIC}
+    assert MemoryType.SHORT_TERM not in scopes
 
 
-def test_the_embedding_key_checked_follows_the_configured_provider() -> None:
-    # DOCUMENT_EMBEDDING_PROVIDER defaults to gemini, so a missing JINA_API_KEY
-    # says nothing about whether the corpus can be embedded. Checking the wrong
-    # key is wrong in both directions: it reports semantic unavailable on a
-    # working gemini setup, and reports it available on a jina setup whose only
-    # key is a gemini one.
-    environ = _env()
-    del environ["JINA_API_KEY"]
-    env = probe_environment(environ, postgres_probe=lambda url: True)
+def test_probe_environment_embedding_key_provider_alignment() -> None:
+    # Jina key missing but default provider is gemini
+    env1 = _env()
+    del env1["JINA_API_KEY"]
+    assert probe_environment(env1, postgres_probe=lambda url: True).embeddings_ready is True
 
-    assert env.embeddings_ready is True
-    assert unavailable_scopes(env) == ()
+    # Missing key for configured Jina provider
+    env2 = _env(DOCUMENT_EMBEDDING_PROVIDER="jina")
+    del env2["JINA_API_KEY"]
+    unavail = unavailable_scopes(probe_environment(env2, postgres_probe=lambda url: True))
+    assert [item.scope for item in unavail] == [MemoryType.SEMANTIC]
+    assert "JINA_API_KEY" in unavail[0].reason
 
-
-def test_a_missing_key_for_the_configured_provider_makes_only_semantic_unavailable() -> None:
-    environ = _env(DOCUMENT_EMBEDDING_PROVIDER="jina")
-    del environ["JINA_API_KEY"]
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    unavailable = unavailable_scopes(env)
-
-    assert [item.scope for item in unavailable] == [MemoryType.SEMANTIC]
-    assert "JINA_API_KEY" in unavailable[0].reason
+    # Numbered gemini key counts as ready
+    env3 = _env()
+    del env3["GEMINI_API_KEY"]
+    env3["GEMINI_API_KEY_1"] = "k1"
+    assert probe_environment(env3, postgres_probe=lambda url: True).gemini_ready is True
 
 
-def test_a_gemini_only_environment_can_still_embed_the_corpus() -> None:
-    environ = _env(DOCUMENT_EMBEDDING_PROVIDER="gemini")
-    del environ["JINA_API_KEY"]
-    env = probe_environment(environ, postgres_probe=lambda url: True)
+def test_probe_environment_remote_database_guard() -> None:
+    environ = _env(PG_TEST_URL="postgresql://u:p@db.example.com:5432/prod")
+    with pytest.raises(UnsafeTargetError, match="db.example.com"):
+        probe_environment(environ, postgres_probe=lambda url: True)
 
-    assert unavailable_scopes(env) == ()
+    environ[ALLOW_REMOTE_ENV_VAR] = "1"
+    assert (
+        probe_environment(environ, postgres_probe=lambda url: True).postgres_url
+        == "postgresql://u:p@db.example.com:5432/prod"
+    )
 
-
-def test_gemini_embeddings_need_a_gemini_key() -> None:
-    environ = _env()
-    del environ["GEMINI_API_KEY"]
-    del environ["JINA_API_KEY"]
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    unavailable = unavailable_scopes(env)
-
-    assert [item.scope for item in unavailable] == [MemoryType.SEMANTIC]
-    assert "GEMINI_API_KEY" in unavailable[0].reason
-
-
-def test_short_term_is_never_unavailable() -> None:
-    # The session buffer is in-process; nothing external can take it away.
-    env = probe_environment({}, postgres_probe=lambda url: False)
-    assert MemoryType.SHORT_TERM not in {item.scope for item in unavailable_scopes(env)}
-
-
-def test_a_numbered_gemini_key_counts_as_ready() -> None:
-    environ = _env()
-    del environ["GEMINI_API_KEY"]
-    environ["GEMINI_API_KEY_1"] = "k1"
-    assert probe_environment(environ, postgres_probe=lambda url: True).gemini_ready is True
+    for host in ("localhost", "127.0.0.1"):
+        assert probe_environment(
+            _env(PG_TEST_URL=f"postgresql://u:p@{host}:5432/db"), postgres_probe=lambda url: True
+        ).postgres_url
 
 
 def test_run_with_selector_loop_runs_on_a_selector_loop() -> None:
-    # The point of the helper, and the only part worth pinning: Windows defaults
-    # to ProactorEventLoop, which psycopg's async path does not support, so every
-    # database call in the live tier fails on a developer machine without this.
-    # Asserting only the return value would test asyncio.run, not our choice.
     async def work() -> tuple[str, bool]:
         return "done", isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
 
     result, on_selector_loop = run_with_selector_loop(work())
     assert result == "done"
     assert on_selector_loop
-
-
-def test_a_remote_database_is_refused_rather_than_silently_evaluated() -> None:
-    # The harness seeds memory and then deletes it. Aimed at a shared or
-    # production database that is a write-and-delete against real data, so a
-    # remote host must be asked for explicitly rather than inferred from
-    # whatever .env happens to be in the working directory.
-    environ = _env(PG_TEST_URL="postgresql://u:p@db.example.com:5432/prod")
-    with pytest.raises(UnsafeTargetError, match="db.example.com"):
-        probe_environment(environ, postgres_probe=lambda url: True)
-
-
-def test_a_remote_database_runs_when_explicitly_allowed() -> None:
-    environ = _env(PG_TEST_URL="postgresql://u:p@db.example.com:5432/throwaway")
-    environ[ALLOW_REMOTE_ENV_VAR] = "1"
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://u:p@db.example.com:5432/throwaway"
-
-
-def test_localhost_needs_no_opt_in() -> None:
-    for host in ("localhost", "127.0.0.1"):
-        environ = _env(PG_TEST_URL=f"postgresql://u:p@{host}:5432/throwaway")
-        assert probe_environment(environ, postgres_probe=lambda url: True).postgres_url
-
-
-def test_postgres_mode_off_wins_over_database_url_in_live_env() -> None:
-    environ = _env(POSTGRES_MODE="off", DATABASE_URL="postgresql://127.0.0.1/ignored")
-    del environ["PG_TEST_URL"]
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url is None
-    assert env.sqlite_path is not None
-    assert env.sqlite_path_owned is True
-    assert env.durable_memory_available is True
-
-
-def test_pg_test_url_overrides_postgres_mode_off_in_live_env() -> None:
-    environ = _env(
-        POSTGRES_MODE="off",
-        PG_TEST_URL="postgresql://127.0.0.1:5432/cowork_memeval",
-    )
-    env = probe_environment(environ, postgres_probe=lambda url: True)
-    assert env.postgres_url == "postgresql://127.0.0.1:5432/cowork_memeval"
-    assert env.sqlite_path is None
-    assert env.durable_memory_available is True

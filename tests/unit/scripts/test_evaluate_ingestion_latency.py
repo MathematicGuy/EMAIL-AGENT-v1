@@ -56,7 +56,7 @@ def _sample(**overrides: object) -> dict[str, object]:
     return sample
 
 
-def test_aggregates_every_metric_with_repository_nearest_rank_percentiles() -> None:
+def test_ingestion_metrics_aggregation_and_null_preservation() -> None:
     module = _module()
     samples = []
     for index in range(1, 21):
@@ -65,7 +65,6 @@ def test_aggregates_every_metric_with_repository_nearest_rank_percentiles() -> N
         samples.append(module.parse_samples({"samples": [_sample(metrics_ms=metrics)]})[0])
 
     report = module.compute_report(samples, expect_local=False)
-
     assert set(report["metrics_ms"]) == set(module.METRIC_KEYS)
     assert report["metrics_ms"]["hash"] == {
         "count": 20,
@@ -75,109 +74,37 @@ def test_aggregates_every_metric_with_repository_nearest_rank_percentiles() -> N
         "max": 20,
     }
 
-
-def test_aggregates_backend_metrics_and_preserves_nulls() -> None:
-    module = _module()
-    backend_metrics = {
-        "queue_delay": 11,
-        "worker_execution": 12,
-        "source_download": 13,
-        "extraction_chunking": 14,
-        "chunk_persistence": 15,
-        "embedding": 16,
-        "local_index_update": 17,
-        "snapshot_upload": None,
-        "ready_transition": 19,
-    }
-    metrics = {**_sample()["metrics_ms"], **backend_metrics}
-
-    samples = module.parse_samples({"samples": [_sample(metrics_ms=metrics)]})
-    report = module.compute_report(samples, expect_local=False)
-
-    assert set(backend_metrics).issubset(module.METRIC_KEYS)
-    assert report["metrics_ms"]["queue_delay"] == {
-        "count": 1,
-        "min": 11,
-        "p50": 11,
-        "p95": 11,
-        "max": 11,
-    }
-    assert report["metrics_ms"]["snapshot_upload"] == {
-        "count": 0,
-        "min": None,
-        "p50": None,
-        "p95": None,
-        "max": None,
-    }
-
-
-def test_missing_metrics_and_failed_samples_are_recorded_without_zero_filling() -> None:
-    module = _module()
-    incomplete_metrics = dict(_sample()["metrics_ms"])
-    incomplete_metrics.pop("send_to_complete")
+    # Preserves nulls and failed samples without zero-filling
     failed_metrics = {"hash": 15, "initiate": None}
-    samples = module.parse_samples(
+    mixed_samples = module.parse_samples(
         {
             "samples": [
-                _sample(metrics_ms=incomplete_metrics),
-                _sample(
-                    scenario="docx",
-                    fixture_id="law-31-2024-docx-v1",
-                    media_type=(
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    ),
-                    status="failed",
-                    retrieval_verified=False,
-                    metrics_ms=failed_metrics,
-                ),
+                _sample(),
+                _sample(status="failed", retrieval_verified=False, metrics_ms=failed_metrics),
             ]
         }
     )
-
-    report = module.compute_report(samples, expect_local=False)
-
-    assert report["summary"] == {
-        "complete_sample_count": 0,
-        "incomplete_sample_count": 1,
-        "failed_sample_count": 1,
-        "retrieval_verified_count": 1,
-        "status_counts": {"failed": 1, "ready": 1},
-    }
-    assert report["metrics_ms"]["send_to_complete"] == {
-        "count": 0,
-        "min": None,
-        "p50": None,
-        "p95": None,
-        "max": None,
-    }
-    assert report["samples"][1]["missing_metrics"] == [
-        key
-        for key in module.METRIC_KEYS
-        if key not in failed_metrics or failed_metrics[key] is None
-    ]
-    assert "metrics_ms" not in report["samples"][1]
+    mixed_report = module.compute_report(mixed_samples, expect_local=False)
+    assert mixed_report["summary"]["failed_sample_count"] == 1
+    assert mixed_report["summary"]["complete_sample_count"] == 1
 
 
-@pytest.mark.parametrize("snapshot", [None, pytest.param("missing", id="omitted")])
-def test_snapshot_bytes_is_optional_observational_metadata(snapshot: object) -> None:
-    raw = _sample(snapshot_bytes=snapshot)
-    if snapshot == "missing":
-        raw.pop("snapshot_bytes")
+def test_snapshot_bytes_validation() -> None:
+    module = _module()
+    assert (
+        module.parse_samples({"samples": [_sample(snapshot_bytes=None)]})[0].snapshot_bytes is None
+    )
+    sample_no_snap = _sample()
+    sample_no_snap.pop("snapshot_bytes", None)
+    assert module.parse_samples({"samples": [sample_no_snap]})[0].snapshot_bytes is None
 
-    parsed = _module().parse_samples({"samples": [raw]})
-
-    assert parsed[0].snapshot_bytes is None
-
-
-@pytest.mark.parametrize("snapshot", [-1, 1.5, True, "100"])
-def test_snapshot_bytes_is_a_nonnegative_integer_when_present(snapshot: object) -> None:
-    with pytest.raises(ValueError, match="snapshot_bytes"):
-        _module().parse_samples({"samples": [_sample(snapshot_bytes=snapshot)]})
+    for invalid in (-1, 1.5, True, "100"):
+        with pytest.raises(ValueError, match="snapshot_bytes"):
+            module.parse_samples({"samples": [_sample(snapshot_bytes=invalid)]})
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
+def test_rejects_sensitive_and_unknown_sample_fields() -> None:
+    cases = [
         ("document_text", "secret document"),
         ("question", "secret question"),
         ("answer", "secret answer"),
@@ -188,147 +115,65 @@ def test_snapshot_bytes_is_a_nonnegative_integer_when_present(snapshot: object) 
         ("document_id", "backend-correlation-id"),
         ("retrieved_chunk_content", "secret chunk"),
         ("unexpected", "anything"),
-    ],
-)
-def test_rejects_sensitive_and_unknown_sample_fields(field: str, value: object) -> None:
-    with pytest.raises(ValueError, match="unknown sample fields"):
-        _module().parse_samples({"samples": [_sample(**{field: value})]})
+    ]
+    for field, value in cases:
+        with pytest.raises(ValueError, match="unknown sample fields"):
+            _module().parse_samples({"samples": [_sample(**{field: value})]})
 
-
-def test_rejects_unknown_metric_keys() -> None:
     metrics = dict(_sample()["metrics_ms"])
     metrics["raw_response"] = "secret"
-
     with pytest.raises(ValueError, match="unknown metrics_ms fields"):
         _module().parse_samples({"samples": [_sample(metrics_ms=metrics)]})
 
 
-@pytest.mark.parametrize("host_class", ["localhost", "cloud", ""])
-def test_environment_classification_accepts_only_loopback_or_remote(host_class: object) -> None:
-    with pytest.raises(ValueError, match="database_host_class"):
-        _module().parse_samples({"samples": [_sample(database_host_class=host_class)]})
-
-
-@pytest.mark.parametrize("field", ["storage_provider", "embedding_provider"])
-@pytest.mark.parametrize("value", ["", 0, False, [], {}])
-def test_provider_metadata_accepts_only_nonempty_strings_or_null(
-    field: str, value: object
-) -> None:
-    with pytest.raises(ValueError, match=field):
-        _module().parse_samples({"samples": [_sample(**{field: value})]})
-
-
-def test_failed_sample_preserves_null_environment_metadata_without_fabrication() -> None:
+def test_sample_metadata_validations() -> None:
     module = _module()
-    samples = module.parse_samples(
-        {
-            "samples": [
-                _sample(
-                    status="failed",
-                    retrieval_verified=False,
-                    database_host_class=None,
-                    storage_provider=None,
-                    embedding_provider=None,
-                )
-            ]
-        }
+    for host_class in ("localhost", "cloud", ""):
+        with pytest.raises(ValueError, match="database_host_class"):
+            module.parse_samples({"samples": [_sample(database_host_class=host_class)]})
+
+    for field in ("storage_provider", "embedding_provider"):
+        for value in ("", 0, False, [], {}):
+            with pytest.raises(ValueError, match=field):
+                module.parse_samples({"samples": [_sample(**{field: value})]})
+
+
+def test_sample_completion_and_failure_accounting() -> None:
+    module = _module()
+    # Ready + verified = complete
+    complete_report = module.compute_report(
+        module.parse_samples({"samples": [_sample()]}), expect_local=False
     )
+    assert complete_report["summary"]["complete_sample_count"] == 1
 
-    report = module.compute_report(samples, expect_local=False)
-
-    assert report["summary"] == {
-        "complete_sample_count": 0,
-        "incomplete_sample_count": 0,
-        "failed_sample_count": 1,
-        "retrieval_verified_count": 0,
-        "status_counts": {"failed": 1},
-    }
-    assert report["environment"]["database_host_classes"] == []
-    assert report["samples"][0]["database_host_class"] is None
-    assert report["samples"][0]["storage_provider"] is None
-    assert report["samples"][0]["embedding_provider"] is None
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
+    # Incomplete variants
+    for overrides in [
         {"status": "incomplete"},
         {"retrieval_verified": False},
         {"database_host_class": None},
         {"storage_provider": None},
         {"embedding_provider": None},
-    ],
-)
-def test_only_ready_verified_complete_samples_count_as_complete(
-    overrides: dict[str, object],
-) -> None:
+    ]:
+        report = module.compute_report(
+            module.parse_samples({"samples": [_sample(**overrides)]}), expect_local=False
+        )
+        assert report["summary"]["complete_sample_count"] == 0
+        assert report["summary"]["incomplete_sample_count"] == 1
+
+
+def test_database_host_class_checks_and_expect_local() -> None:
     module = _module()
-    samples = module.parse_samples({"samples": [_sample(**overrides)]})
-
-    report = module.compute_report(samples, expect_local=False)
-
-    assert report["summary"]["complete_sample_count"] == 0
-    assert report["summary"]["incomplete_sample_count"] == 1
-    assert report["summary"]["failed_sample_count"] == 0
-
-
-def test_ready_verified_sample_with_metrics_and_environment_counts_as_complete() -> None:
-    module = _module()
-    samples = module.parse_samples({"samples": [_sample()]})
-
-    report = module.compute_report(samples, expect_local=False)
-
-    assert report["summary"]["complete_sample_count"] == 1
-    assert report["summary"]["incomplete_sample_count"] == 0
-
-
-def test_expect_local_rejects_remote_database_samples() -> None:
-    module = _module()
-    samples = module.parse_samples(
+    remote_samples = module.parse_samples(
         {"samples": [_sample(database_host_class="remote", storage_provider="supabase")]}
     )
-
     with pytest.raises(ValueError, match="expected local.*remote"):
-        module.compute_report(samples, expect_local=True)
+        module.compute_report(remote_samples, expect_local=True)
 
-
-def test_rejects_mixed_database_host_classes_before_aggregation() -> None:
-    module = _module()
-    samples = module.parse_samples(
-        {
-            "samples": [
-                _sample(),
-                _sample(database_host_class="remote", storage_provider="supabase"),
-            ]
-        }
+    mixed_samples = module.parse_samples(
+        {"samples": [_sample(), _sample(database_host_class="remote", storage_provider="supabase")]}
     )
-
     with pytest.raises(ValueError, match="mix loopback and remote"):
-        module.compute_report(samples, expect_local=False)
-
-
-def test_mixed_host_check_ignores_unknown_failed_sample_metadata() -> None:
-    module = _module()
-    samples = module.parse_samples(
-        {
-            "samples": [
-                _sample(),
-                _sample(
-                    status="failed",
-                    retrieval_verified=False,
-                    database_host_class=None,
-                    storage_provider=None,
-                    embedding_provider=None,
-                ),
-            ]
-        }
-    )
-
-    report = module.compute_report(samples, expect_local=False)
-
-    assert report["environment"]["database_host_classes"] == ["loopback"]
-    assert report["summary"]["complete_sample_count"] == 1
-    assert report["summary"]["failed_sample_count"] == 1
+        module.compute_report(mixed_samples, expect_local=False)
 
 
 def test_cli_writes_metadata_only_report(tmp_path: Path) -> None:

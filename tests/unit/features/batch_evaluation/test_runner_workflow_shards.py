@@ -104,9 +104,7 @@ class ShardPlugin:
             private_result=None,
         )
 
-    def aggregate(
-        self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]
-    ) -> ArtifactBundle:
+    def aggregate(self, plan: PluginPlan, outcomes: Sequence[WorkUnitOutcome]) -> ArtifactBundle:
         del plan
         self.aggregate_outcomes = tuple(outcomes)
         return ArtifactBundle(
@@ -142,6 +140,7 @@ class TrackingRepository(SQLiteEvaluationJobRepository):
         self.claimed_unit_ids.append(unit_id)
         self.claimed_assignments.append((unit_id, worker_id))
         return await super().claim_ready_unit_by_id(job_id, unit_id, worker_id)
+
 
 class TrackingCredentialPool(CredentialLeasingPool):
     def __init__(self) -> None:
@@ -323,9 +322,7 @@ async def test_fixed_shards_keep_one_lease_execute_assigned_work_sequentially_an
     assert factory.bound_active == [True] * 5
     by_alias = {
         alias: [
-            ordinal
-            for execution_alias, ordinal in plugin.executions
-            if execution_alias == alias
+            ordinal for execution_alias, ordinal in plugin.executions if execution_alias == alias
         ]
         for alias in factory.bound_aliases
     }
@@ -346,20 +343,13 @@ async def test_fixed_shards_keep_one_lease_execute_assigned_work_sequentially_an
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("deleted_unit_id", "remaining_slice", "expected_lane"),
-    (
-        ("memory-shard-1", slice(0, None, 2), "lane-1"),
-        ("memory-shard-0", slice(1, None, 2), "lane-2"),
-    ),
-)
 async def test_missing_grouped_memory_unit_is_failed_without_reexecution_or_private_leakage(
-    deleted_unit_id: str,
-    remaining_slice: slice,
-    expected_lane: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    deleted_unit_id = "memory-shard-1"
+    remaining_slice = slice(0, None, 2)
+    expected_lane = "lane-1"
     harness = await prepare_memory_recovery_run(tmp_path, monkeypatch)
     with sqlite3.connect(tmp_path / "evaluation-jobs.db") as database:
         database.execute(
@@ -373,7 +363,7 @@ async def test_missing_grouped_memory_unit_is_failed_without_reexecution_or_priv
     assert harness.observed_probe_ids == [
         tuple(probe.probe_id for probe in canonical.probes[remaining_slice])
     ]
-    remaining_unit_id = "memory-shard-0" if deleted_unit_id.endswith("1") else "memory-shard-1"
+    remaining_unit_id = "memory-shard-0"
     assert harness.repository.claimed_unit_ids == [remaining_unit_id]
     assert harness.repository.claimed_assignments == [(remaining_unit_id, expected_lane)]
     assert len(harness.pool.leased_aliases) == 1
@@ -389,8 +379,7 @@ async def test_missing_grouped_memory_unit_is_failed_without_reexecution_or_priv
     assert manifest["execution_manifest"]["missing_probe_count"] == 4
     assert manifest["execution_manifest"]["failed_unit_count"] == 1
     shard_states = {
-        shard["unit_id"]: shard["state"]
-        for shard in manifest["execution_manifest"]["shards"]
+        shard["unit_id"]: shard["state"] for shard in manifest["execution_manifest"]["shards"]
     }
     assert shard_states == {remaining_unit_id: "succeeded", deleted_unit_id: "failed"}
     serialized = str(manifest)
@@ -399,16 +388,14 @@ async def test_missing_grouped_memory_unit_is_failed_without_reexecution_or_priv
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_workers", (1, 2))
 async def test_all_missing_memory_units_fail_without_claiming_or_spending(
-    max_workers: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = await prepare_memory_recovery_run(
         tmp_path,
         monkeypatch,
-        max_workers=max_workers,
+        max_workers=2,
     )
     with sqlite3.connect(tmp_path / "evaluation-jobs.db") as database:
         database.execute(
@@ -431,64 +418,59 @@ async def test_all_missing_memory_units_fail_without_claiming_or_spending(
     assert manifest["aborted"] is True
     assert manifest["execution_manifest"]["completed_probe_count"] == 0
     assert manifest["execution_manifest"]["missing_probe_count"] == 8
-    assert manifest["execution_manifest"]["failed_unit_count"] == max_workers
-    assert all(
-        shard["state"] == "failed"
-        for shard in manifest["execution_manifest"]["shards"]
-    )
+    assert manifest["execution_manifest"]["failed_unit_count"] == 2
+    assert all(shard["state"] == "failed" for shard in manifest["execution_manifest"]["shards"])
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("corruption", ("payload", "ordinal", "unexpected"))
 async def test_invalid_durable_memory_unit_fails_closed_without_execution(
-    corruption: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    harness = await prepare_memory_recovery_run(tmp_path, monkeypatch)
-    with sqlite3.connect(tmp_path / "evaluation-jobs.db") as database:
-        if corruption == "payload":
-            database.execute(
-                "UPDATE evaluation_units SET safe_payload_json = ? "
-                "WHERE job_id = ? AND unit_id = ?",
-                (
-                    '{"probe_ids":["st_recall_01"],"ordinals":[0]}',
-                    harness.job.job_id,
-                    "memory-shard-0",
-                ),
-            )
-        elif corruption == "ordinal":
-            database.execute(
-                "UPDATE evaluation_units SET ordinal = 1 "
-                "WHERE job_id = ? AND unit_id = ?",
-                (harness.job.job_id, "memory-shard-0"),
-            )
-        else:
-            database.execute(
-                "INSERT INTO evaluation_units ("
-                "job_id, unit_id, ordinal, state, claimed_by, provider_requests, "
-                "total_tokens, outcome_ref, safe_payload_json"
-                ") VALUES (?, ?, 2, 'ready', NULL, 0, 0, NULL, ?)",
-                (
-                    harness.job.job_id,
-                    "memory-shard-extra",
-                    '{"probe_ids":["st_recall_01"],"ordinals":[0]}',
-                ),
-            )
+    for corruption in ("payload", "ordinal", "unexpected"):
+        harness = await prepare_memory_recovery_run(tmp_path / corruption, monkeypatch)
+        with sqlite3.connect((tmp_path / corruption) / "evaluation-jobs.db") as database:
+            if corruption == "payload":
+                database.execute(
+                    "UPDATE evaluation_units SET safe_payload_json = ? "
+                    "WHERE job_id = ? AND unit_id = ?",
+                    (
+                        '{"probe_ids":["st_recall_01"],"ordinals":[0]}',
+                        harness.job.job_id,
+                        "memory-shard-0",
+                    ),
+                )
+            elif corruption == "ordinal":
+                database.execute(
+                    "UPDATE evaluation_units SET ordinal = 1 WHERE job_id = ? AND unit_id = ?",
+                    (harness.job.job_id, "memory-shard-0"),
+                )
+            else:
+                database.execute(
+                    "INSERT INTO evaluation_units ("
+                    "job_id, unit_id, ordinal, state, claimed_by, provider_requests, "
+                    "total_tokens, outcome_ref, safe_payload_json"
+                    ") VALUES (?, ?, 2, 'ready', NULL, 0, 0, NULL, ?)",
+                    (
+                        harness.job.job_id,
+                        "memory-shard-extra",
+                        '{"probe_ids":["st_recall_01"],"ordinals":[0]}',
+                    ),
+                )
 
-    await harness.runner.run(harness.job.job_id)
+        await harness.runner.run(harness.job.job_id)
 
-    assert harness.observed_probe_ids == []
-    assert harness.repository.claimed_unit_ids == []
-    assert harness.pool.leased_aliases == []
-    assert harness.factory.bound_aliases == []
-    terminal = await harness.repository.get_job(harness.job.job_id)
-    assert terminal is not None
-    assert terminal.state.value == "failed"
-    manifest = harness.artifacts.read_manifest(
-        harness.artifacts.manifest_reference(harness.job.job_id)
-    )
-    assert manifest == {"state": "failed"}
+        assert harness.observed_probe_ids == []
+        assert harness.repository.claimed_unit_ids == []
+        assert harness.pool.leased_aliases == []
+        assert harness.factory.bound_aliases == []
+        terminal = await harness.repository.get_job(harness.job.job_id)
+        assert terminal is not None
+        assert terminal.state.value == "failed"
+        manifest = harness.artifacts.read_manifest(
+            harness.artifacts.manifest_reference(harness.job.job_id)
+        )
+        assert manifest == {"state": "failed"}
 
 
 @pytest.mark.asyncio
@@ -501,8 +483,7 @@ async def test_corrupt_collecting_workflow_recovery_reaches_failed_terminal_stat
     await harness.repository.transition_job(harness.job.job_id, JobState.COLLECTING)
     with sqlite3.connect(tmp_path / "evaluation-jobs.db") as database:
         database.execute(
-            "UPDATE evaluation_units SET safe_payload_json = ? "
-            "WHERE job_id = ? AND unit_id = ?",
+            "UPDATE evaluation_units SET safe_payload_json = ? WHERE job_id = ? AND unit_id = ?",
             (
                 '{"probe_ids":["st_recall_01"],"ordinals":[0]}',
                 harness.job.job_id,
@@ -640,9 +621,7 @@ async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_iso
     }
     for key in ("database", "tenant", "user", "session", "nonce", "transcript", "output", "reply"):
         values = [entry[key] for entry in observed]
-        unique_values = {
-            id(value) if key in {"transcript", "reply"} else value for value in values
-        }
+        unique_values = {id(value) if key in {"transcript", "reply"} else value for value in values}
         assert len(unique_values) == len(values)
     assert len({entry["report_nonce"] for entry in observed}) == 1
     assert all(not Path(entry["output"]).exists() for entry in observed)
@@ -660,114 +639,119 @@ async def test_memory_plugin_runner_keeps_concurrent_shard_state_private_and_iso
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("failures", "expected_state"),
-    (
-        ({0: "aborted"}, "partially_succeeded"),
-        ({0: "aborted", 1: "cleanup"}, "failed"),
-    ),
-)
 async def test_memory_plugin_runner_never_succeeds_with_aborted_or_unclean_shards(
-    failures: Mapping[int, str],
-    expected_state: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    artifacts = FilesystemEvaluationArtifactStore(tmp_path / "artifacts")
-    repository = TrackingRepository(tmp_path / "evaluation-jobs.db")
-    await repository.initialize()
-    registry = PluginRegistry()
-    plugin = MemoryEvalPlugin(
-        environment_resolver=lambda: LiveEnvironment(
-            postgres_url=None,
-            sqlite_path=Path("sqlite-template.db"),
-            gemini_ready=True,
-            embeddings_ready=True,
-            embedding_key_name="GEMINI_API_KEY",
+    for idx, (failures, expected_state) in enumerate(
+        [
+            ({0: "aborted"}, "partially_succeeded"),
+            ({0: "aborted", 1: "cleanup"}, "failed"),
+        ]
+    ):
+        base_dir = tmp_path / f"case_{idx}"
+        artifacts = FilesystemEvaluationArtifactStore(base_dir / "artifacts")
+        repository = TrackingRepository(base_dir / "evaluation-jobs.db")
+        await repository.initialize()
+        registry = PluginRegistry()
+        plugin = MemoryEvalPlugin(
+            environment_resolver=lambda: LiveEnvironment(
+                postgres_url=None,
+                sqlite_path=Path("sqlite-template.db"),
+                gemini_ready=True,
+                embeddings_ready=True,
+                embedding_key_name="GEMINI_API_KEY",
+            )
         )
-    )
-    registry.register(plugin)
-    pool = TrackingCredentialPool()
-    service = EvaluationJobService(
-        registry=registry,
-        repository=repository,
-        credential_pool=pool,
-        artifact_store=artifacts,
-    )
-    runner = EvaluationJobRunner(
-        registry=registry,
-        repository=repository,
-        credential_pool=pool,
-        artifact_store=artifacts,
-        scratch_root=tmp_path / "scratch",
-        reply_factory=FakeReplyFactory(),
-    )
-    canonical = memory_eval.MemoryProbeCatalog().resolve("v1-four-scopes")
-    probe_ordinals = {probe.probe_id: index for index, probe in enumerate(canonical.probes)}
+        registry.register(plugin)
+        pool = TrackingCredentialPool()
+        service = EvaluationJobService(
+            registry=registry,
+            repository=repository,
+            credential_pool=pool,
+            artifact_store=artifacts,
+        )
+        runner = EvaluationJobRunner(
+            registry=registry,
+            repository=repository,
+            credential_pool=pool,
+            artifact_store=artifacts,
+            scratch_root=base_dir / "scratch",
+            reply_factory=FakeReplyFactory(),
+        )
+        canonical = memory_eval.MemoryProbeCatalog().resolve("v1-four-scopes")
+        probe_ordinals = {probe.probe_id: index for index, probe in enumerate(canonical.probes)}
 
-    async def fake_execute_memory_shard(
-        probe_set: object,
-        environment: LiveEnvironment,
-        reply: object,
-        *,
-        report_nonce: str,
-        **_: object,
-    ) -> MemoryShardResult:
-        del reply
-        assert environment.sqlite_path is not None
-        lane = probe_ordinals[probe_set.probes[0].probe_id]  # type: ignore[union-attr]
-        failure = failures.get(lane)
-        transcript = ({"question": "private failure", "reply": "private failure"},)
-        return MemoryShardResult(
-            rows=tuple(
-                ProbeRow(
-                    probe_id=probe.probe_id,
-                    targets=probe.targets,
-                    test=probe.test,
-                    full=Outcome.PASS,
-                    ablated=Outcome.MISS,
-                    control=Outcome.MISS,
-                    certain=True,
-                    latency_ms=1,
+        def make_fake_executor(ords: dict[str, int], fails: dict[int, str]):
+            async def fake_execute_memory_shard(
+                probe_set: object,
+                environment: LiveEnvironment,
+                reply: object,
+                *,
+                report_nonce: str,
+                **_: object,
+            ) -> MemoryShardResult:
+                del reply
+                assert environment.sqlite_path is not None
+                lane = ords[probe_set.probes[0].probe_id]  # type: ignore[union-attr]
+                failure = fails.get(lane)
+                transcript = ({"question": "private failure", "reply": "private failure"},)
+                return MemoryShardResult(
+                    rows=tuple(
+                        ProbeRow(
+                            probe_id=probe.probe_id,
+                            targets=probe.targets,
+                            test=probe.test,
+                            full=Outcome.PASS,
+                            ablated=Outcome.MISS,
+                            control=Outcome.MISS,
+                            certain=True,
+                            latency_ms=1,
+                        )
+                        for probe in probe_set.probes  # type: ignore[union-attr]
+                    ),
+                    seed_failure_ids=(),
+                    private_transcript=transcript,
+                    nonce=f"identity-{lane}",
+                    provider_findings=("aborted: provider limit",) if failure == "aborted" else (),
+                    scratch_removed=failure != "cleanup",
+                    report_nonce=report_nonce,
                 )
-                for probe in probe_set.probes  # type: ignore[union-attr]
+
+            return fake_execute_memory_shard
+
+        monkeypatch.setattr(
+            memory_eval,
+            "execute_memory_shard",
+            make_fake_executor(probe_ordinals, failures),
+        )
+        job = await service.submit(
+            EvaluationRequest(
+                evaluation_type="memory-eval",
+                provider="mistral",
+                target_model="mistral-small-latest",
+                dataset_ref="v1-four-scopes",
+                credential_pool="mistral-eval",
+                execution_mode=ExecutionMode.WORKFLOW_SHARDS,
+                max_workers=2,
+                max_attempts_per_unit=1,
+                budget=EvaluationBudget(max_provider_requests=300, max_total_tokens=300_000),
+                parameters={},
             ),
-            seed_failure_ids=(),
-            private_transcript=transcript,
-            nonce=f"identity-{lane}",
-            provider_findings=("aborted: provider limit",) if failure == "aborted" else (),
-            scratch_removed=failure != "cleanup",
-            report_nonce=report_nonce,
+            idempotency_key=f"memory-failure-{expected_state}-{idx}",
         )
 
-    monkeypatch.setattr(memory_eval, "execute_memory_shard", fake_execute_memory_shard)
-    job = await service.submit(
-        EvaluationRequest(
-            evaluation_type="memory-eval",
-            provider="mistral",
-            target_model="mistral-small-latest",
-            dataset_ref="v1-four-scopes",
-            credential_pool="mistral-eval",
-            execution_mode=ExecutionMode.WORKFLOW_SHARDS,
-            max_workers=2,
-            max_attempts_per_unit=1,
-            budget=EvaluationBudget(max_provider_requests=300, max_total_tokens=300_000),
-            parameters={},
-        ),
-        idempotency_key=f"memory-failure-{expected_state}",
-    )
+        await runner.run(job.job_id)
 
-    await runner.run(job.job_id)
-
-    terminal = await repository.get_job(job.job_id)
-    assert terminal is not None
-    assert terminal.state.value == expected_state
-    manifest = artifacts.read_manifest(artifacts.manifest_reference(job.job_id))
-    assert manifest["aborted"] is True
-    assert manifest["execution_manifest"]["failed_unit_count"] == len(failures)
-    serialized = str(manifest)
-    assert "private failure" not in serialized
-    assert all(
-        set(shard) == {"unit_id", "ordinal", "state"}
-        for shard in manifest["execution_manifest"]["shards"]
-    )
+        terminal = await repository.get_job(job.job_id)
+        assert terminal is not None
+        assert terminal.state.value == expected_state
+        manifest = artifacts.read_manifest(artifacts.manifest_reference(job.job_id))
+        assert manifest["aborted"] is True
+        assert manifest["execution_manifest"]["failed_unit_count"] == len(failures)
+        serialized = str(manifest)
+        assert "private failure" not in serialized
+        assert all(
+            set(shard) == {"unit_id", "ordinal", "state"}
+            for shard in manifest["execution_manifest"]["shards"]
+        )

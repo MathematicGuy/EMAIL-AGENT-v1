@@ -7,7 +7,7 @@ import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from cowork_agent.config import GeminiSettings, load_runtime_environment
+from cowork_agent.config import GeminiSettings
 from cowork_agent.integrations.llm.providers.gemini import (
     GeminiKeyRotator,
     GeminiRateLimitError,
@@ -36,16 +36,12 @@ def _usable_numbered_gemini_keys(environ: Mapping[str, str]) -> tuple[str, ...]:
 
 def load_optional_gemini_settings(
     environ: Mapping[str, str] | None = None,
-    *,
-    load_env_file: bool = True,
 ) -> GeminiSettings | None:
     if environ is None:
-        if load_env_file:
-            load_runtime_environment()
         environ = os.environ
     if not _usable_numbered_gemini_keys(environ):
         return None
-    return GeminiSettings.from_env(environ, load_env_file=False)
+    return GeminiSettings.from_env(environ)
 
 
 async def complete_with_gemini_last_resort(

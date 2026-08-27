@@ -1,6 +1,5 @@
 """Unit tests for the BM25 lexical search adapter."""
 
-
 from cowork_agent.integrations.rag.bm25 import BM25SearchAdapter
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk
 
@@ -16,8 +15,7 @@ def _chunk(chunk_id: str, text: str) -> KnowledgeChunk:
     )
 
 
-def test_search_ranks_exact_english_and_vietnamese_terms_despite_markdown_case_and_punctuation(
-) -> None:
+def test_search_ranks_english_and_vietnamese_terms_case_and_punctuation() -> None:
     adapter = BM25SearchAdapter(
         (
             _chunk("matching", "## VNeID guide\n\nCấp lại **CCCD** through VNeID."),

@@ -487,7 +487,7 @@
     "sender": "Dang Tuan Anh <anhdt.mle@techventures.ai>",
     "body": "Hi AI Architecture Team,\n\nChúng ta đang thiết kế hệ thống Online Model Serving cho tính năng Real-time Recommendation. Khi triển khai model trên Production, team đang gặp bài toán cân đối giữa độ trễ (latency) và thông lượng (throughput) trong kỹ thuật Batching.\n\nDựa vào tài liệu Designing Machine Learning Systems của Chip Huyen:\n1. Phân tích sự khác biệt cơ bản giữa yêu cầu Batching trong Research vs Production.\n2. Khi tăng batch size thì ảnh hưởng như thế nào đến Throughput và Latency (p99/p95)?\n3. Kỹ thuật Dynamic Batching hoạt động ra sao để vừa đảm bảo SLA latency dưới 50ms vừa tối ưu GPU utilization?\n\nNhờ team tổng hợp thành tài liệu technical design để thảo luận trong buổi Tech Talk tới.\n\nThanks,\nTuấn Anh - Lead MLE",
     "target_documents": [
-      "data/extracted/design-machine-learning-systems.md"
+      "data/OCR/design-machine-learning-systems.md"
     ],
     "threat_level": "CLEAN",
     "threat_category": "NONE",

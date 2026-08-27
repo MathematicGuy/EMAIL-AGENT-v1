@@ -85,7 +85,6 @@ def test_classifier_complete_sends_settings_fallback_models(
             "OPENROUTER_MODEL": "deepseek/x",
             "OPENROUTER_ALLOWED_MODELS": '["openai/gpt", "deepseek/x"]',
         },
-        load_env_file=False,
     )
 
     async def scenario() -> None:
@@ -141,7 +140,6 @@ def _openrouter_settings() -> OpenRouterSettings:
             "OPENROUTER_API_KEY": "test-key",
             "OPENROUTER_MODEL": "test-model",
         },
-        load_env_file=False,
     )
 
 

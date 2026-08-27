@@ -257,9 +257,7 @@ class TestErrorStates:
         resp = client.get("/v1/mail-todo/oauth/gmail/connect", follow_redirects=False)
         assert resp.status_code == 302
         location = resp.headers["location"]
-        assert "accounts.google.com" in location, (
-            f"Expected Google OAuth redirect, got: {location}"
-        )
+        assert "accounts.google.com" in location, f"Expected Google OAuth redirect, got: {location}"
         assert "gmail.readonly" in location, (
             f"gmail.readonly scope missing from OAuth URL: {location}"
         )
@@ -318,6 +316,7 @@ class TestErrorStates:
         secret-shaped strings (long hex/base64 runs).
         """
         import re
+
         resp = client.get("/v1/mail-todo/runs/definitely-not-real")
         assert resp.status_code == 404
         # A raw Fernet key or API key would be 44+ chars of base64/hex
@@ -396,8 +395,7 @@ class TestWithRealConnection:
         # 503 means LLM not configured — still validates the HTTP contract
         if resp.status_code == 503:
             pytest.skip(
-                "LLM provider returned 503 (not configured). "
-                "Check LLM_PROVIDER / API key in .env."
+                "LLM provider returned 503 (not configured). Check LLM_PROVIDER / API key in .env."
             )
         assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
         body = resp.json()
@@ -405,9 +403,7 @@ class TestWithRealConnection:
         assert "statusUrl" in body
         assert body["statusUrl"].startswith("/v1/mail-todo/runs/")
 
-    def test_idempotent_run_creation(
-        self, client: httpx.Client, first_connection_id: str
-    ) -> None:
+    def test_idempotent_run_creation(self, client: httpx.Client, first_connection_id: str) -> None:
         """SPEC §8.5: two POSTs with the same Idempotency-Key must return the same run id."""
         key = "e2e-idempotency-test-key-001"
         payload = {"mailboxConnectionId": first_connection_id, "maxEmails": 2}
@@ -423,9 +419,7 @@ class TestWithRealConnection:
         assert r2.status_code == 202, f"Second POST failed: {r2.status_code} {r2.text}"
         run_id_2 = r2.json()["id"]
 
-        assert run_id_1 == run_id_2, (
-            f"Idempotency violated: first={run_id_1}, second={run_id_2}"
-        )
+        assert run_id_1 == run_id_2, f"Idempotency violated: first={run_id_1}, second={run_id_2}"
 
     def test_run_status_has_progress_fields(
         self, client: httpx.Client, first_connection_id: str
@@ -517,6 +511,7 @@ class TestWithRealConnection:
         """SPEC §8.1 + §8.7: poll until completion, then assert result shape and
         no raw email body at any path in the JSON response."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -574,6 +569,7 @@ class TestWithRealConnection:
         """SPEC §8.2: every task card exposes title, route, actionability,
         source_message_ids.  Steps and citations present when non-empty plan."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -628,6 +624,7 @@ class TestWithRealConnection:
         when partial tasks are actually returned by the LLM.
         """
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 5},
@@ -665,6 +662,7 @@ class TestWithRealConnection:
     ) -> None:
         """SPEC §8.4: tasks with source_message_ids expose a gmail_url / deep_link."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -707,6 +705,7 @@ class TestWithRealConnection:
     ) -> None:
         """SPEC §8.7 invariant: tasks endpoint must never return raw email body content."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},

@@ -71,8 +71,7 @@ class APIKeyRotator:
         if environ is None:
             environ = os.environ
         resolved_provider = (
-            provider_name
-            or prefix.removesuffix("_API_KEY").removesuffix("_KEY").capitalize()
+            provider_name or prefix.removesuffix("_API_KEY").removesuffix("_KEY").capitalize()
         )
         keys = parse_api_keys_from_env(environ, prefix)
         return cls(keys, provider_name=resolved_provider)
@@ -94,10 +93,7 @@ class APIKeyRotator:
             start = self._index % len(active)
             self._index = (start + 1) % len(active)
             attempts = min(max_attempts, len(active))
-            return tuple(
-                active[(start + offset) % len(active)]
-                for offset in range(attempts)
-            )
+            return tuple(active[(start + offset) % len(active)] for offset in range(attempts))
 
     @property
     def keys(self) -> tuple[str, ...]:

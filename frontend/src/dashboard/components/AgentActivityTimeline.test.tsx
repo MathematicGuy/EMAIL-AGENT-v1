@@ -66,4 +66,30 @@ describe('AgentActivityTimeline', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByText('Hiểu yêu cầu')).not.toBeNull();
   });
+
+  it('renders step processing time badge for completed activities', () => {
+    const timedActivities: ChatActivity[] = [
+      {
+        code: 'understanding_request',
+        status: 'completed',
+        outcome: 'success',
+        startedAt: '2026-08-24T00:00:00.000Z',
+        completedAt: '2026-08-24T00:00:02.000Z',
+      },
+      {
+        code: 'searching_relevant_information',
+        status: 'completed',
+        outcome: 'success',
+        startedAt: '2026-08-24T00:00:02.000Z',
+        completedAt: '2026-08-24T00:00:03.200Z',
+      },
+    ];
+
+    render(
+      <AgentActivityTimeline activities={timedActivities} generationStatus="generating" />
+    );
+
+    expect(screen.getByText('2s')).not.toBeNull();
+    expect(screen.getByText('1,2s')).not.toBeNull();
+  });
 });

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from cowork_agent.domain.chat_contracts import (
     ChatRoute,
     IntentDecision,
@@ -32,13 +34,23 @@ def finalize_route(
     classifier_retried: bool,
     fallback_used: bool,
     prompt_version: str,
+    available_tools: Collection[str] = (),
 ) -> RoutingOutcome:
-    """Apply tool and readiness gates without mutating the classifier decision."""
+    """Apply tool and readiness gates without mutating the classifier decision.
+
+    `available_tools` is the registry's tool names. Narrowing is exact: a
+    `tool_name` that is not registered falls back to chat rather than matching
+    the nearest one, because a near-miss on a tool that writes to a real
+    calendar creates the wrong event.
+    """
 
     effective_tool = decision.needs_tool and tool_axis_enabled
     reasons = list(decision.reason_codes)
     if decision.needs_tool and not tool_axis_enabled:
         _append_unique(reasons, IntentReasonCode.TOOL_REQUESTED_BUT_DISABLED)
+    if effective_tool and decision.tool_name not in available_tools:
+        effective_tool = False
+        _append_unique(reasons, IntentReasonCode.TOOL_NOT_AVAILABLE)
     route = resolve_route(
         needs_rag=decision.needs_rag,
         needs_tool=effective_tool,
@@ -46,6 +58,14 @@ def finalize_route(
     )
     effective_rag = decision.needs_rag
     retrieval_query = decision.retrieval_query if effective_rag else None
+    if route is ChatRoute.RAG_TOOL:
+        # RAG_TOOL has no implementation. Creating a calendar event never needs
+        # document evidence, so the tool half is the half worth keeping; the
+        # combined path stays untested surface until a tool actually needs
+        # retrieved evidence.
+        route = ChatRoute.TOOL
+        effective_rag = False
+        retrieval_query = None
     if route is ChatRoute.RAG and not has_ready_documents:
         route = ChatRoute.CHAT
         effective_rag = False

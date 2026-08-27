@@ -34,10 +34,7 @@ def authorize_chat_summary_write(namespace: MemoryNamespace, episode: ChatSummar
         raise ChatSummaryWriteRejected("chat summary has an invalid bounded shape") from error
     if namespace.memory_type is not MemoryType.EPISODIC:
         raise ChatSummaryWriteRejected("chat summaries require an episodic namespace")
-    if (
-        namespace.user_id != episode.user_id
-        or namespace.session_id != episode.chat_session_id
-    ):
+    if namespace.user_id != episode.user_id or namespace.session_id != episode.chat_session_id:
         raise ChatSummaryWriteRejected("summary scope does not match the write namespace")
     if namespace.record_id != episode.record_id:
         raise ChatSummaryWriteRejected("summary record does not match the write namespace")

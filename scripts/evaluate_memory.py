@@ -78,9 +78,7 @@ def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
     except ValueError as error:
-        raise argparse.ArgumentTypeError(
-            f"must be an integer >= 1, got {value!r}"
-        ) from error
+        raise argparse.ArgumentTypeError(f"must be an integer >= 1, got {value!r}") from error
     if parsed < 1:
         raise argparse.ArgumentTypeError(f"must be an integer >= 1, got {value!r}")
     return parsed
@@ -94,8 +92,7 @@ def _resolve_max_consecutive_provider_failures(
     if cli_value is not None:
         if cli_value < 1:
             raise ValueError(
-                "--max-consecutive-provider-failures must be an integer >= 1, "
-                f"got {cli_value}"
+                f"--max-consecutive-provider-failures must be an integer >= 1, got {cli_value}"
             )
         return cli_value
     raw = environ.get(_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES, "").strip()
@@ -105,13 +102,11 @@ def _resolve_max_consecutive_provider_failures(
         parsed = int(raw)
     except ValueError:
         raise ValueError(
-            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, "
-            f"got {raw!r}"
+            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, got {raw!r}"
         ) from None
     if parsed < 1:
         raise ValueError(
-            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, "
-            f"got {raw!r}"
+            f"{_ENV_MAX_CONSECUTIVE_PROVIDER_FAILURES} must be an integer >= 1, got {raw!r}"
         )
     return parsed
 
@@ -409,9 +404,7 @@ async def _wait_for_terminal_mistral_job(
         if job.state in _TERMINAL_JOB_STATES:
             return job
         units = await repository.list_units(job_id)
-        unit_progress = tuple(
-            sorted((unit.unit_id, unit.state.value) for unit in units)
-        )
+        unit_progress = tuple(sorted((unit.unit_id, unit.state.value) for unit in units))
         progress = (job.state, job.updated_at, unit_progress)
         if progress != last_progress:
             last_progress = progress

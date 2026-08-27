@@ -88,6 +88,7 @@ class Probe:
     answer_would_be_numeric: bool = False
     note: str = ""
 
+
 @dataclass(frozen=True, slots=True)
 class ProbeSet:
     schema_version: str
@@ -142,8 +143,7 @@ def _load_probe(data: Mapping[str, object]) -> Probe:
         targets = MemoryType(raw_target)
     except ValueError as error:
         raise ProbeSetError(
-            f"probe {probe_id}: targets must be one of "
-            f"{[member.value for member in MemoryType]}"
+            f"probe {probe_id}: targets must be one of {[member.value for member in MemoryType]}"
         ) from error
 
     raw_test = data.get("test")
@@ -300,7 +300,5 @@ def find_probe_set_file(probes_dir: Path, probe_set_id: str) -> Path:
         raise ProbeSetError(f"no probe set file with probe_set_id {probe_set_id!r}")
     if len(matches) > 1:
         names = ", ".join(path.name for path in matches)
-        raise ProbeSetError(
-            f"multiple probe set files with probe_set_id {probe_set_id!r}: {names}"
-        )
+        raise ProbeSetError(f"multiple probe set files with probe_set_id {probe_set_id!r}: {names}")
     return matches[0]

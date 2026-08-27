@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from cowork_agent.config import (
@@ -14,6 +15,8 @@ from cowork_agent.config import (
     OpenRouterSettings,
 )
 from cowork_agent.features.ai_chat.ports import ChatReplyPort, IntentClassifierPort
+from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion
+from cowork_agent.features.ai_chat.tools.registry import Tool
 from cowork_agent.features.email_action_plan.ports import (
     ActionPlanGeneratorPort,
     RouteClassifierPort,
@@ -49,6 +52,12 @@ from cowork_agent.integrations.llm.providers.openrouter import (
     OpenRouterActionPlanGenerator,
     OpenRouterRouteClassifier,
 )
+from cowork_agent.integrations.llm.tool_arguments import (
+    gemini_tool_arguments,
+    mimo_tool_arguments,
+    mistral_tool_arguments,
+    openrouter_tool_arguments,
+)
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +78,7 @@ class ChatProviderBundle:
     intent_classifier: IntentClassifierPort
     chat_reply: ChatReplyPort
     intent_settings: ChatIntentSettings
+    tool_arguments: ToolArgumentCompletion
 
 
 def normalize_llm_provider(provider: str) -> str:
@@ -132,43 +142,54 @@ async def resolve_email_providers(provider: str) -> EmailProviderBundle:
     )
 
 
-def resolve_chat_providers(provider: str) -> ChatProviderBundle:
+def resolve_chat_providers(provider: str, *, tools: Sequence[Tool] = ()) -> ChatProviderBundle:
     name = normalize_llm_provider(provider)
     if name == "gemini":
         gemini_settings = GeminiSettings.from_env()
         intent_settings = ChatIntentSettings.from_env(default_model=gemini_settings.model)
         return ChatProviderBundle(
             intent_classifier=GeminiIntentClassifier.from_settings(
-                gemini_settings, intent_settings
+                gemini_settings, intent_settings, tools=tools
             ),
             chat_reply=GeminiChatReply.from_settings(gemini_settings),
             intent_settings=intent_settings,
+            tool_arguments=gemini_tool_arguments(gemini_settings, intent_settings),
         )
     if name == "mimo":
         mimo_settings = MimoSettings.from_env()
         intent_settings = ChatIntentSettings.from_env(default_model=mimo_settings.model)
         return ChatProviderBundle(
-            intent_classifier=MimoIntentClassifier.from_settings(mimo_settings, intent_settings),
+            intent_classifier=MimoIntentClassifier.from_settings(
+                mimo_settings, intent_settings, tools=tools
+            ),
             chat_reply=MimoChatReply.from_settings(mimo_settings),
             intent_settings=intent_settings,
+            tool_arguments=mimo_tool_arguments(mimo_settings, intent_settings),
         )
     if name == "mistral":
         mistral_settings = MistralSettings.from_env()
         intent_settings = ChatIntentSettings.from_env(default_model=mistral_settings.model)
         return ChatProviderBundle(
             intent_classifier=MistralIntentClassifier.from_settings(
-                mistral_settings, intent_settings
+                mistral_settings, intent_settings, tools=tools
             ),
             chat_reply=MistralChatReply.from_settings(mistral_settings),
             intent_settings=intent_settings,
+            tool_arguments=mistral_tool_arguments(mistral_settings, intent_settings),
         )
     openrouter_settings = OpenRouterSettings.from_env()
     last_resort = _openrouter_last_resort(log_status=False)
     intent_settings = ChatIntentSettings.from_env(default_model=openrouter_settings.model)
     return ChatProviderBundle(
         intent_classifier=OpenRouterIntentClassifier.from_settings(
-            openrouter_settings, intent_settings, last_resort=last_resort
+            openrouter_settings,
+            intent_settings,
+            last_resort=last_resort,
+            tools=tools,
         ),
         chat_reply=OpenRouterChatReply.from_settings(openrouter_settings, last_resort=last_resort),
         intent_settings=intent_settings,
+        tool_arguments=openrouter_tool_arguments(
+            openrouter_settings, intent_settings, last_resort=last_resort
+        ),
     )

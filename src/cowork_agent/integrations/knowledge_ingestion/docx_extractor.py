@@ -58,9 +58,7 @@ def _block_to_markdown(block: Paragraph | Table, profile: StructureProfile) -> s
     return f"{'#' * level} {text}" if level else text
 
 
-def _emphasised_heading_level(
-    block: Paragraph, text: str, profile: StructureProfile
-) -> int | None:
+def _emphasised_heading_level(block: Paragraph, text: str, profile: StructureProfile) -> int | None:
     """Read a fully bold, short paragraph as a heading.
 
     Vietnamese legal DOCX files style every paragraph ``Normal`` and mark

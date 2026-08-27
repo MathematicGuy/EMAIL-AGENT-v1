@@ -87,9 +87,7 @@ def test_invented_any_phrases_exist_somewhere_in_the_seed(probe_set_path: Path) 
         for phrase in probe.get("invented_any") or []:
             if phrase.casefold() not in material:
                 missing.append(f"{probe['id']}:{phrase!r}")
-    assert not missing, (
-        f"{probe_set_path.name} invented_any phrases absent from seed: {missing}"
-    )
+    assert not missing, f"{probe_set_path.name} invented_any phrases absent from seed: {missing}"
 ```
 
 - [ ] **Step 2: Prove it can fail**

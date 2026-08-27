@@ -164,9 +164,7 @@ def parse_samples(payload: Mapping[str, object]) -> tuple[IngestionLatencySample
             raise ValueError("metrics_ms must be an object")
         unknown_metrics = set(raw_metrics) - set(METRIC_KEYS)
         if unknown_metrics:
-            raise ValueError(
-                f"unknown metrics_ms fields: {', '.join(sorted(unknown_metrics))}"
-            )
+            raise ValueError(f"unknown metrics_ms fields: {', '.join(sorted(unknown_metrics))}")
 
         host_class = _optional_non_empty_string(
             raw_sample["database_host_class"], "database_host_class"
@@ -197,9 +195,7 @@ def parse_samples(payload: Mapping[str, object]) -> tuple[IngestionLatencySample
                 ),
                 status=_non_empty_string(raw_sample["status"], "status"),
                 retrieval_verified=retrieval_verified,
-                metrics_ms={
-                    key: _metric(raw_metrics.get(key), key) for key in METRIC_KEYS
-                },
+                metrics_ms={key: _metric(raw_metrics.get(key), key) for key in METRIC_KEYS},
             )
         )
     return tuple(samples)
@@ -239,18 +235,12 @@ def compute_report(
     samples: Sequence[IngestionLatencySample], *, expect_local: bool
 ) -> dict[str, object]:
     database_host_classes = {
-        sample.database_host_class
-        for sample in samples
-        if sample.database_host_class is not None
+        sample.database_host_class for sample in samples if sample.database_host_class is not None
     }
     if len(database_host_classes) > 1:
-        raise ValueError(
-            "cannot mix loopback and remote database_host_class samples in one report"
-        )
+        raise ValueError("cannot mix loopback and remote database_host_class samples in one report")
     remote_samples = [
-        sample.fixture_id
-        for sample in samples
-        if sample.database_host_class == "remote"
+        sample.fixture_id for sample in samples if sample.database_host_class == "remote"
     ]
     if expect_local and remote_samples:
         raise ValueError(
@@ -282,11 +272,7 @@ def compute_report(
         },
         "metrics_ms": {
             key: _metric_summary(
-                [
-                    value
-                    for sample in samples
-                    if (value := sample.metrics_ms[key]) is not None
-                ]
+                [value for sample in samples if (value := sample.metrics_ms[key]) is not None]
             )
             for key in METRIC_KEYS
         },

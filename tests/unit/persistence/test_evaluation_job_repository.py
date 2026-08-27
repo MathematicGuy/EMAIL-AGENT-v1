@@ -192,9 +192,7 @@ def test_attempt_steps_and_orphan_recovery_never_requeues_running_work(tmp_path:
         await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
 
-        attempt = await repository.start_attempt(
-            job.job_id, "unit-1", "worker-1", "credential-1"
-        )
+        attempt = await repository.start_attempt(job.job_id, "unit-1", "worker-1", "credential-1")
         assert attempt.attempt_number == 1
         step = await repository.write_step(
             job.job_id,
@@ -336,9 +334,7 @@ def test_claim_and_attempt_ownership_are_persisted_and_enforced(tmp_path: Path) 
         with pytest.raises(InvalidStateTransition):
             await repository.start_attempt(job.job_id, "unit-1", "worker-2", "credential-1")
 
-        attempt = await repository.start_attempt(
-            job.job_id, "unit-1", "worker-1", "credential-1"
-        )
+        attempt = await repository.start_attempt(job.job_id, "unit-1", "worker-1", "credential-1")
         assert attempt.worker_id == "worker-1"
         with pytest.raises(InvalidStateTransition):
             await repository.start_attempt(job.job_id, "unit-1", "worker-1", "credential-1")
@@ -485,9 +481,7 @@ def test_step_metadata_rejects_non_finite_json_values(tmp_path: Path) -> None:
         )
         await queue_job(repository, job.job_id)
         assert await repository.claim_ready_unit(job.job_id, "worker-1") is not None
-        attempt = await repository.start_attempt(
-            job.job_id, "unit-1", "worker-1", "credential-1"
-        )
+        attempt = await repository.start_attempt(job.job_id, "unit-1", "worker-1", "credential-1")
 
         with pytest.raises(ValueError):
             await repository.write_step(
@@ -688,9 +682,7 @@ def test_step_writes_require_the_live_attempt_owner_and_unit(tmp_path: Path) -> 
                 state=StepState.RUNNING,
                 safe_metadata={"request_id": "request-1"},
             )
-        first = await repository.start_attempt(
-            job.job_id, "unit-1", "worker-1", "credential-1"
-        )
+        first = await repository.start_attempt(job.job_id, "unit-1", "worker-1", "credential-1")
         with pytest.raises(InvalidStateTransition):
             await repository.write_step(
                 job.job_id,
@@ -726,9 +718,7 @@ def test_step_writes_require_the_live_attempt_owner_and_unit(tmp_path: Path) -> 
                 safe_metadata={"request_id": "request-1"},
             )
 
-        second = await repository.start_attempt(
-            job.job_id, "unit-2", "worker-2", "credential-1"
-        )
+        second = await repository.start_attempt(job.job_id, "unit-2", "worker-2", "credential-1")
         await repository.recover_orphaned_attempts(job.job_id)
         with pytest.raises(InvalidStateTransition):
             await repository.write_step(
@@ -745,30 +735,32 @@ def test_step_writes_require_the_live_attempt_owner_and_unit(tmp_path: Path) -> 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("constant", ("NaN", "Infinity", "-Infinity"))
 def test_repository_rejects_handcrafted_non_finite_persisted_json(
-    tmp_path: Path, constant: str
+    tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
-        database_path = tmp_path / "evaluation-jobs.db"
-        repository = SQLiteEvaluationJobRepository(database_path)
-        await repository.initialize()
-        job, _ = await repository.create_or_get(request(), "crafted-json-key", "hash-a")
-        request_json = (
-            '{"evaluation_type":"memory_eval","provider":"openai","target_model":"model_1",'
-            '"dataset_ref":"probe_set_1","credential_pool":"eval_pool",'
-            '"execution_mode":"workflow_shards","max_workers":2,'
-            '"max_attempts_per_unit":2,"budget":{"max_provider_requests":10,'
-            '"max_total_tokens":1000},"parameters":{"threshold":' + constant + "}}"
-        )
-        with sqlite3.connect(database_path) as database:
-            database.execute(
-                "UPDATE evaluation_jobs SET request_json = ? WHERE job_id = ?",
-                (request_json, job.job_id),
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            database_path = tmp_path / f"evaluation-jobs-{constant}.db"
+            repository = SQLiteEvaluationJobRepository(database_path)
+            await repository.initialize()
+            job, _ = await repository.create_or_get(
+                request(), f"crafted-json-key-{constant}", "hash-a"
             )
+            request_json = (
+                '{"evaluation_type":"memory_eval","provider":"openai","target_model":"model_1",'
+                '"dataset_ref":"probe_set_1","credential_pool":"eval_pool",'
+                '"execution_mode":"workflow_shards","max_workers":2,'
+                '"max_attempts_per_unit":2,"budget":{"max_provider_requests":10,'
+                '"max_total_tokens":1000},"parameters":{"threshold":' + constant + "}}"
+            )
+            with sqlite3.connect(database_path) as database:
+                database.execute(
+                    "UPDATE evaluation_jobs SET request_json = ? WHERE job_id = ?",
+                    (request_json, job.job_id),
+                )
 
-        with pytest.raises(ValueError):
-            await repository.get_job(job.job_id)
+            with pytest.raises(ValueError):
+                await repository.get_job(job.job_id)
 
     asyncio.run(scenario())
 
@@ -1097,9 +1089,7 @@ def test_successful_units_require_safe_relative_outcome_references(tmp_path: Pat
             r"C:\\private\\outcome.json",
         ):
             with pytest.raises(ValueError, match="outcome_ref"):
-                await repository.complete_unit(
-                    job.job_id, outcome, outcome_ref=unsafe_reference
-                )
+                await repository.complete_unit(job.job_id, outcome, outcome_ref=unsafe_reference)
         stored = await repository.get_unit(job.job_id, "unit-1")
         assert stored is not None
         assert stored.state is UnitState.RUNNING
@@ -1200,9 +1190,7 @@ def test_append_warnings_preserves_existing_worker_warnings_in_canonical_form(
             code="WORKER_COUNT_REDUCED",
             details={"requested_workers": 4, "available_workers": 3},
         )
-        await repository.transition_job(
-            job.job_id, JobState.VALIDATING, warnings=(worker_warning,)
-        )
+        await repository.transition_job(job.job_id, JobState.VALIDATING, warnings=(worker_warning,))
 
         updated = await repository.append_warnings(job.job_id, (cleanup_warning,))
 

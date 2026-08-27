@@ -78,8 +78,9 @@ as current. Vietnamese revision cues include dời, hoãn, đổi, sửa, cập 
 supersedes_index=null only when no advisory episode covers the task being changed, and never use
 an index that was not listed under advisory eligible episodes.
 citation_ids may contain only IDs supplied with current project evidence, and never an invented
-ID. When current project evidence is supplied and response_mode is normal, citation_ids must
-contain at least one ID from that evidence, naming the IDs that support your factual claims.
+ID. When current project evidence is supplied and response_mode is normal, include the citation
+IDs that directly support your factual claims (or citation_ids=[] if the evidence does not contain
+the requested information).
 When no current project evidence is supplied, citation_ids must be []: company evidence chunk
 IDs do not belong there, and company evidence is credited through task_proposal.rag_citations.
 conversation_title must be a concise title of at most 120 characters.
@@ -172,9 +173,7 @@ def system_prompt_sha() -> str:
 
 
 class _ConfiguredChatReply:
-    def __init__(
-        self, *, provider: str = "mistral", model: str, complete: Completion
-    ) -> None:
+    def __init__(self, *, provider: str = "mistral", model: str, complete: Completion) -> None:
         self._provider = provider
         self._model = model
         self._complete = complete
@@ -434,8 +433,18 @@ class GeminiChatReply(_ConfiguredChatReply):
         return cls(provider="gemini", model=settings.model, complete=complete)
 
 
+_TOOL_RESULT_INSTRUCTION = """tool_result is the outcome of an action already carried out on
+the user's behalf, and is the one exception to the rule above about not mentioning tools.
+Report it plainly, including any link it contains. When it reports a failure, say the action
+did not happen and why. Never state or imply that an action succeeded unless tool_result
+says so."""
+
+
 def _request_payload(request: ChatMessageRequest, context: GenerationContext) -> dict[str, object]:
-    return {
+    # A turn with no tool result sends exactly the payload it sent before
+    # tools existed -- neither the extra instruction nor the extra key. That
+    # is what keeps the flag-off guarantee literal rather than approximate.
+    payload: dict[str, object] = {
         "system": _SYSTEM_INSTRUCTION,
         "context": {
             "current_instruction": context.current_instruction.value,
@@ -457,6 +466,12 @@ def _request_payload(request: ChatMessageRequest, context: GenerationContext) ->
             ),
         },
     }
+    if context.tool_result is not None:
+        payload["system"] = "\n".join((_SYSTEM_INSTRUCTION, _TOOL_RESULT_INSTRUCTION))
+        # A fact about the world, not evidence to weigh, so it stays outside
+        # conflict_precedence.
+        cast(dict[str, object], payload["context"])["tool_result"] = context.tool_result
+    return payload
 
 
 def _project_evidence(context: GenerationContext) -> list[dict[str, object]]:
@@ -497,8 +512,6 @@ def _validated_citation_ids(
         return ()
     if not set(ids).issubset(allowed):
         raise ValueError("citation_ids must match current project evidence")
-    if allowed and context.response_mode is ChatResponseMode.NORMAL and not ids:
-        raise ValueError("document-grounded responses require at least one citation")
     if context.response_mode is not ChatResponseMode.NORMAL and ids:
         raise ValueError("non-grounded response modes must not contain citations")
     return ids

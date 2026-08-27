@@ -127,9 +127,7 @@ def _task() -> Task:
         generation_confidence=0.81,
         validation_status=ValidationStatus.SYSTEM_GENERATED,
         created_at=datetime(2026, 8, 7, 9, 35, tzinfo=UTC),
-        source_links=(
-            EmailSourceLink("link1", None, "https://portal.example.com/report"),
-        ),
+        source_links=(EmailSourceLink("link1", None, "https://portal.example.com/report"),),
     )
 
 
@@ -170,17 +168,13 @@ _ROUND_TRIP_CASES = {
 }
 
 
-@pytest.mark.parametrize("build", list(_ROUND_TRIP_CASES.values()), ids=_ROUND_TRIP_CASES)
-def test_round_trip_dict_and_json(build):
-    instance = build()
-    payload = instance.to_dict()
-
-    # Round-trip through the plain dict.
-    assert type(instance).from_dict(payload) == instance
-
-    # The payload must be JSON-safe and survive an actual JSON round-trip.
-    text = json.dumps(payload)
-    assert type(instance).from_dict(json.loads(text)) == instance
+def test_round_trip_dict_and_json():
+    for name, build in _ROUND_TRIP_CASES.items():
+        instance = build()
+        payload = instance.to_dict()
+        assert type(instance).from_dict(payload) == instance, f"Failed for {name}"
+        text = json.dumps(payload)
+        assert type(instance).from_dict(json.loads(text)) == instance, f"Failed JSON for {name}"
 
 
 def test_to_dict_is_json_safe():
@@ -197,19 +191,15 @@ def test_to_dict_is_json_safe():
     assert task_payload["task"]["action_plan"][0]["supporting_citation_ids"] == ["cit-1"]
 
 
-def test_attachments_processed_defaults_to_false():
+def test_attachments_processed_and_source_links_defaults():
     assert _envelope().attachments_processed is False
     assert EphemeralEmailEnvelope.from_dict(_envelope().to_dict()).attachments_processed is False
 
-
-def test_attachments_processed_rejects_true():
     payload = _envelope().to_dict()
     payload["attachments_processed"] = True
     with pytest.raises(ValueError, match="attachments_processed"):
         EphemeralEmailEnvelope.from_dict(payload)
 
-
-def test_source_links_default_to_empty_when_reading_older_payloads():
     envelope_payload = _envelope().to_dict()
     envelope_payload.pop("source_links")
     assert EphemeralEmailEnvelope.from_dict(envelope_payload).source_links == ()
@@ -219,7 +209,7 @@ def test_source_links_default_to_empty_when_reading_older_payloads():
     assert Task.from_dict(task_payload).source_links == ()
 
 
-def test_actionability_values():
+def test_domain_enum_values_and_constants():
     assert {member.value for member in Actionability} == {
         "action_required",
         "action_suggested",
@@ -227,13 +217,7 @@ def test_actionability_values():
         "unclear",
         "irrelevant",
     }
-
-
-def test_route_values():
     assert {member.value for member in Route} == {"no_action", "direct_plan", "retrieve_rag"}
-
-
-def test_reason_code_values():
     assert {member.value for member in ReasonCode} == {
         "no_action",
         "email_self_contained",
@@ -244,9 +228,6 @@ def test_reason_code_values():
         "internal_term_unresolved",
         "domain_knowledge_required",
     }
-
-
-def test_expected_document_type_values():
     assert {member.value for member in ExpectedDocumentType} == {
         "company_policy",
         "governance_document",
@@ -255,9 +236,6 @@ def test_expected_document_type_values():
         "template",
         "product_documentation",
     }
-
-
-def test_supporting_enum_values():
     assert {member.value for member in BodyFormat} == {"text", "html_converted"}
     assert {member.value for member in FetchStatus} == {"complete", "partial"}
     assert {member.value for member in ValidationStatus} == {
@@ -267,15 +245,19 @@ def test_supporting_enum_values():
         "rejected",
     }
     assert {member.value for member in TraceStatus} == {"success", "partial", "failed"}
+    # 1.4.0 added the security contracts (threat levels, link/attachment safety
+    # reports, scan results). Bumped on `main`; asserted here so the constant and
+    # the contracts it versions cannot drift apart.
+    assert TARGET_CONTRACTS_VERSION == "1.4.0"
+    assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
+    assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
+    assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
 
 
-def test_task_priority_supports_urgent():
+def test_task_priority_and_trace_latency():
     assert _task().priority is Priority.URGENT
     restored = ActionPlanOutput.from_dict(_action_plan_output().to_dict()).task
     assert restored.priority is Priority.URGENT
-
-
-def test_trace_latency_defaults_to_all_none():
     assert TraceLatency() == TraceLatency(
         email=None,
         memory=None,
@@ -286,30 +268,17 @@ def test_trace_latency_defaults_to_all_none():
     )
 
 
-@pytest.mark.parametrize(
-    ("build", "field"),
-    [
+def test_frozen_rejects_mutation():
+    cases = [
         (_envelope, "subject"),
         (_route_decision, "confidence"),
         (_action_plan_output, "task"),
         (_trace_event, "event_name"),
-    ],
-    ids=list(_ROUND_TRIP_CASES),
-)
-def test_frozen_rejects_mutation(build, field):
-    instance = build()
-    with pytest.raises(FrozenInstanceError):
-        setattr(instance, field, "mutated")
-
-
-def test_target_contracts_version():
-    assert TARGET_CONTRACTS_VERSION == "1.4.0"
-
-
-def test_trace_content_policy_constants():
-    assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
-    assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
-    assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
+    ]
+    for build, field in cases:
+        instance = build()
+        with pytest.raises(FrozenInstanceError):
+            setattr(instance, field, "mutated")
 
 
 def _retrieval_request() -> SemanticRetrievalRequest:
@@ -344,18 +313,13 @@ def _retrieval_response() -> SemanticRetrievalResponse:
     )
 
 
-@pytest.mark.parametrize(
-    "build", [_retrieval_request, _retrieval_response], ids=["request", "response"]
-)
-def test_retrieval_contract_round_trip(build):
-    instance = build()
-    payload = instance.to_dict()
-    assert type(instance).from_dict(payload) == instance
-    text = json.dumps(payload)
-    assert type(instance).from_dict(json.loads(text)) == instance
+def test_retrieval_contract_round_trip():
+    for instance in (_retrieval_request(), _retrieval_response()):
+        payload = instance.to_dict()
+        assert type(instance).from_dict(payload) == instance
+        text = json.dumps(payload)
+        assert type(instance).from_dict(json.loads(text)) == instance
 
-
-def test_retrieval_status_values():
     assert {member.value for member in RetrievalStatus} == {
         "success",
         "no_results",
@@ -366,28 +330,22 @@ def test_retrieval_status_values():
     }
 
 
-def test_retrieval_response_chunk_page_fields_default_none():
+def test_semantic_chunk_coordinates_and_document_date():
     chunk = _retrieval_response().chunks[0]
     assert chunk.page_start is None
     assert chunk.page_end is None
-    restored = SemanticRetrievalResponse.from_dict(_retrieval_response().to_dict())
-    assert restored == _retrieval_response()
-    assert restored.chunks[0].page_start is None
-    assert restored.chunks[0].page_end is None
+    assert chunk.document_date is None
 
-
-def test_semantic_chunk_from_dict_omits_page_keys():
     payload = _retrieval_response().to_dict()["chunks"][0]
-    assert isinstance(payload, dict)
     payload.pop("page_start", None)
     payload.pop("page_end", None)
-    chunk = SemanticChunk.from_dict(payload)
-    assert chunk.page_start is None
-    assert chunk.page_end is None
+    payload.pop("document_date", None)
+    restored_default = SemanticChunk.from_dict(payload)
+    assert restored_default.page_start is None
+    assert restored_default.page_end is None
+    assert restored_default.document_date is None
 
-
-def test_semantic_chunk_from_dict_round_trips_page_coordinates():
-    chunk = SemanticChunk(
+    chunk_with_coords = SemanticChunk(
         chunk_id="doc#0",
         document_id="doc",
         document_title="Quarterly Report Template",
@@ -399,88 +357,51 @@ def test_semantic_chunk_from_dict_round_trips_page_coordinates():
         rerank_score=None,
         page_start=1,
         page_end=2,
+        document_date=date(2026, 8, 7),
     )
-    restored = SemanticChunk.from_dict(chunk.to_dict())
-    assert restored == chunk
-    assert restored.page_start == 1
-    assert restored.page_end == 2
+    payload_coords = chunk_with_coords.to_dict()
+    assert payload_coords["page_start"] == 1
+    assert payload_coords["page_end"] == 2
+    assert payload_coords["document_date"] == "2026-08-07"
+    restored_coords = SemanticChunk.from_dict(payload_coords)
+    assert restored_coords == chunk_with_coords
+    assert restored_coords.document_date == date(2026, 8, 7)
 
 
-def test_retrieval_filters_defaults_document_ids_years_months_empty():
+def test_retrieval_filters_options_and_round_trip():
     filters = RetrievalFilters()
     assert filters.document_status == ("ready",)
     assert filters.document_ids == ()
     assert filters.years == ()
     assert filters.months == ()
 
+    from_dict_sparse = RetrievalFilters.from_dict({"document_status": ["ready"]})
+    assert from_dict_sparse == filters
 
-def test_retrieval_filters_from_dict_without_new_keys_still_works():
-    filters = RetrievalFilters.from_dict({"document_status": ["ready"]})
-    assert filters.document_status == ("ready",)
-    assert filters.document_ids == ()
-    assert filters.years == ()
-    assert filters.months == ()
-
-
-def test_retrieval_filters_from_dict_ignores_unknown_extra_keys():
-    filters = RetrievalFilters.from_dict(
-        {
-            "document_status": ["ready"],
-            "category": "policy",
-            "unexpected": True,
-        }
+    from_dict_extra = RetrievalFilters.from_dict(
+        {"document_status": ["ready"], "category": "policy", "unexpected": True}
     )
-    assert filters.document_status == ("ready",)
-    assert filters.document_ids == ()
-    assert filters.years == ()
-    assert filters.months == ()
+    assert from_dict_extra == filters
 
-
-def test_retrieval_filters_round_trip_with_document_ids_years_months():
-    filters = RetrievalFilters(
+    filters_rich = RetrievalFilters(
         document_status=("ready",),
         document_ids=("doc-1", "doc-2"),
         years=(2025, 2026),
         months=(1, 8, 12),
     )
-    payload = filters.to_dict()
+    payload = filters_rich.to_dict()
     assert payload["document_ids"] == ["doc-1", "doc-2"]
     assert payload["years"] == [2025, 2026]
     assert payload["months"] == [1, 8, 12]
     restored = RetrievalFilters.from_dict(payload)
-    assert restored == filters
+    assert restored == filters_rich
     text = json.dumps(payload)
-    assert RetrievalFilters.from_dict(json.loads(text)) == filters
+    assert RetrievalFilters.from_dict(json.loads(text)) == filters_rich
 
 
-def test_semantic_chunk_document_date_defaults_none():
-    chunk = _retrieval_response().chunks[0]
-    assert chunk.document_date is None
-    payload = chunk.to_dict()
-    payload.pop("document_date", None)
-    restored = SemanticChunk.from_dict(payload)
-    assert restored.document_date is None
-
-
-def test_semantic_chunk_round_trip_with_document_date():
-    chunk = SemanticChunk(
-        chunk_id="doc#0",
-        document_id="doc",
-        document_title="Quarterly Report Template",
-        section="Usage",
-        text="Use the shared template.",
-        source_url="data/extracted/doc.md",
-        document_version=None,
-        relevance_score=0.91,
-        rerank_score=None,
-        document_date=date(2026, 8, 7),
-    )
-    payload = chunk.to_dict()
-    assert payload["document_date"] == "2026-08-07"
-    text = json.dumps(payload)
-    restored = SemanticChunk.from_dict(json.loads(text))
-    assert restored == chunk
-    assert restored.document_date == date(2026, 8, 7)
+# --- security contracts (added on `main` with TARGET_CONTRACTS_VERSION 1.4.0) ---
+# Kept verbatim through the merge: the consolidation on `dev` predates these
+# contracts, so dropping them would have shipped the security types untested.
 
 
 def test_threat_level_enum_values():

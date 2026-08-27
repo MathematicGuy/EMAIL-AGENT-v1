@@ -108,14 +108,17 @@ class KnowledgeIngestionService:
             document_id = Path(output_name).stem
             title = resolve_title(body, document_id)
             processed_at = datetime.now(UTC).isoformat()
-            markdown = build_frontmatter(
-                document_id=document_id,
-                title=title,
-                source_file=relative,
-                extractor=extractor,
-                page_count=page_count,
-                processed_at=processed_at,
-            ) + body
+            markdown = (
+                build_frontmatter(
+                    document_id=document_id,
+                    title=title,
+                    source_file=relative,
+                    extractor=extractor,
+                    page_count=page_count,
+                    processed_at=processed_at,
+                )
+                + body
+            )
             write_markdown_atomically(output_dir / output_name, markdown)
             harvested = harvest_document_date(path)
             manifest.record(

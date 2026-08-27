@@ -18,23 +18,23 @@ what one route costs alone; the whole-suite row is parallel.
 
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 179 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 588 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 102 | 4.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 77 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
-| R5 | `tests/unit/integrations/gmail tests/unit/integrations/mailbox tests/unit/integrations/outlook` | 54 | 0.7 s | Gmail/Microsoft OAuth, PKCE, token cipher, provider router, mailbox adapters. |
-| R6 | `tests/unit/integrations` | 375 | 6.2 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 37 | 1.8 s | Repository logic against fakes. |
+| R1 | `tests/unit/domain` | 76 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 563 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 83 | 3.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 103 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail tests/unit/integrations/mailbox tests/unit/integrations/outlook` | 49 | 0.7 s | Gmail/Microsoft OAuth, PKCE, token cipher, provider router, mailbox adapters. |
+| R6 | `tests/unit/integrations` | 366 | 5.2 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 80 | 1.8 s | Repository logic against fakes. |
 | R8 | `tests/unit/orchestration` | 19 | 1.7 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 188 | 8.3 s | `scripts/*.py` eval CLIs. |
-| R10 | `tests/unit/fixtures` | 33 | 2.2 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 61 | 6.4 s | FastAPI via in-process ASGI transport. |
+| R9 | `tests/unit/scripts` | 100 | 4.2 s | `scripts/*.py` eval CLIs. |
+| R10 | `tests/unit/fixtures` | 23 | 1.1 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 78 | 6.4 s | FastAPI via in-process ASGI transport. |
 | R12 | `tests/integration/persistence` | 9 | 1.0 s | Real PostgreSQL (skips without server; `pg-control-plane` xdist group). |
 | R13 | `tests/integration/email_action_plan` | 38 | 2.8 s | Provider-neutral mailbox -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 100 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 1538 | 14.1 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 1350 | 9.1 s | R15 minus eval CLIs (default during regular development). |
-| — | *(everything)* | 1638 | **15 s parallel** | `uv run pytest -q` |
+| R14 | `tests/integration` | 117 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1369 | 9.8 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1269 | 6.8 s | R15 minus eval CLIs (default during regular development). |
+| — | *(everything)* | 1486 | **12 s parallel** | `uv run pytest -q` |
 
 ### Source -> Route Mapping
 
@@ -47,10 +47,11 @@ what one route costs alone; the whole-suite row is parallel.
 | `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
+| `integrations/google_calendar/` | `tests/unit/integrations/google_calendar` + `tests/unit/api` + `tests/unit/features/ai_chat/test_calendar_binder.py` + `tests/unit/features/ai_chat/test_agenda_tool.py` |
 | `integrations/mailbox/`, `integrations/outlook/` | R5 + R11 + R13 |
 | `persistence/` | R7 + R12 |
 | `orchestration/` | R8 |
-| `app.py`, API routes | R11 |
+| `app.py`, API routes | R11 (+ `tests/unit/api` for router-level invariants) |
 | `identity.py`, session/cookie | R11 + `tests/unit/test_identity.py` |
 | `scripts/*.py` | R9 |
 | `data/extracted/*.md` (corpus) | R10 + R3 |
@@ -103,6 +104,16 @@ Before writing a test, check if its invariant is already owned.
 | Evaluation SQLite shard isolation | `unit/features/batch_evaluation/plugins/test_memory_eval.py` | runner, API, scripts |
 | Memory baseline metadata privacy | `unit/scripts/test_evaluate_memory.py` | report builders and API |
 | Mistral key-independence smoke metadata and 429 gate | `unit/scripts/test_smoke_test_mistral_evaluation_keys.py` | provider/lease unit tests |
+| Report filename rule (traversal, reserved names, slug fallback) | `unit/domain/test_report_artifacts.py` | store, route and chat-controller tests |
+| Report store stays inside its injected root | `unit/persistence/test_report_artifact_store.py` | API tests |
+| `runtime(request)` returns the composed `CoworkRuntime` value | `unit/test_composition.py` | API tests |
+| Per-user calendar grant: whose token a turn resolves, and the refusal when there is none (J1, J2) | `unit/features/ai_chat/test_calendar_binder.py` | controller and tool tests |
+| A chained calendar consent never costs the mail connection or mints a session (J4, J5) | `unit/api/test_calendar_router.py` | mailbox API tests |
+| Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
+| Which messages determine an hour and which do not (PROGRESS.md F5/F7) | `unit/features/ai_chat/test_ambiguous_hour.py` | calendar tool and QA tier tests, which assert only that the guard is *reached* |
+| What the routing launch gate measures, tool axis included | `unit/scripts/test_evaluate_chat_routing.py` | fixture and resolver tests, which own the labels and the narrowing |
+| Reading a calendar window is not writing one: the past is allowed, and a day is a day in the calendar's zone (PROGRESS.md F9) | `unit/features/ai_chat/test_agenda_tool.py` | `test_calendar_tool.py`, which owns the write-side bounds |
+| Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
 ### Critical Invariants
 - **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.

@@ -101,9 +101,7 @@ class InRepoSemanticMemory:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
         query_text = _query_text(request)
         try:
-            (query_vector,) = await self._embedder.embed(
-                (query_text,), task="retrieval.query"
-            )
+            (query_vector,) = await self._embedder.embed((query_text,), task="retrieval.query")
         except Exception:
             return _response(request, (), RetrievalStatus.TIMEOUT, started)
 

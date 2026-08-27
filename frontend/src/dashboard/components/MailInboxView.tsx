@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  CalendarCheck,
   ChevronDown,
   ExternalLink,
   Link2,
@@ -11,7 +12,9 @@ import {
 } from 'lucide-react';
 import {
   MailApiError,
+  disconnectCalendar,
   disconnectConnection,
+  getCalendarConnectUrl,
   getDigestResult,
   getDigestTasks,
   getGmailConnectUrl,
@@ -19,7 +22,9 @@ import {
   getSelectedMailboxId,
   listConnections,
   listDigestRuns,
+  readCalendarConnection,
   setSelectedMailboxId,
+  type CalendarConnection,
   type DigestResult,
   type DigestRunView,
   type DigestTask,
@@ -52,16 +57,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Đã xảy ra lỗi không xác định.';
 }
 
-function initialOAuthBanner(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const provider: MailProvider | null = params.has('outlook') ? 'outlook' : params.has('gmail') ? 'gmail' : null;
-  if (!provider) return null;
-  const outcome = params.get(provider);
-  const label = providerLabel(provider);
+function outcomeSentence(label: string, outcome: string | null): string | null {
   if (outcome === 'connected') return `Đã kết nối ${label} thành công.`;
   if (outcome === 'denied') return `Bạn đã từ chối quyền kết nối ${label}.`;
   if (outcome === 'error') return `Không thể hoàn tất kết nối ${label}. Vui lòng thử lại.`;
+  if (outcome === 'unauthenticated') return `Phiên đăng nhập đã hết hạn, chưa kết nối ${label}.`;
   return null;
+}
+
+/** What the two-step connect journey reports when the browser lands back here.
+ *
+ * Mail and Calendar are two consents in one journey, so both outcomes arrive
+ * together and both are said out loud. Reporting only the failing half is what
+ * makes a user think their mail connection broke when only the calendar
+ * consent was declined.
+ */
+function initialOAuthBanner(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const provider: MailProvider | null = params.has('outlook') ? 'outlook' : params.has('gmail') ? 'gmail' : null;
+  const sentences = [
+    provider ? outcomeSentence(providerLabel(provider), params.get(provider)) : null,
+    params.has('calendar') ? outcomeSentence('Google Calendar', params.get('calendar')) : null,
+  ].filter((sentence): sentence is string => sentence !== null);
+  return sentences.length > 0 ? sentences.join(' ') : null;
 }
 
 export const MailInboxView: React.FC = () => {
@@ -76,6 +94,7 @@ export const MailInboxView: React.FC = () => {
   const [loadingMailbox, setLoadingMailbox] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(initialOAuthBanner);
+  const [calendar, setCalendar] = useState<CalendarConnection | null>(null);
   const [warningLink, setWarningLink] = useState<{
     url: string;
     displayLabel: string;
@@ -157,10 +176,11 @@ export const MailInboxView: React.FC = () => {
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams(window.location.search);
-    const hasOAuthOutcome = params.has('gmail') || params.has('outlook');
+    const hasOAuthOutcome = params.has('gmail') || params.has('outlook') || params.has('calendar');
     if (hasOAuthOutcome) {
       params.delete('gmail');
       params.delete('outlook');
+      params.delete('calendar');
       const query = params.toString();
       window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
     }
@@ -170,6 +190,17 @@ export const MailInboxView: React.FC = () => {
       controller.abort();
     };
   }, [refreshConnections]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Read on its own, and fail quietly. The calendar is the second half of
+    // the connect journey; a problem with it must never take the mail view
+    // down, which is the same rule the callback follows on the server (J4).
+    void readCalendarConnection(controller.signal)
+      .then(setCalendar)
+      .catch(() => setCalendar(null));
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!selectedConnectionId) return;
@@ -183,6 +214,21 @@ export const MailInboxView: React.FC = () => {
       controller.abort();
     };
   }, [loadMailbox, selectedConnectionId]);
+
+  const handleCalendarDisconnect = async () => {
+    if (!calendar) return;
+    if (!window.confirm(`Ngắt kết nối Google Calendar (${calendar.account})?`)) return;
+    setError(null);
+    try {
+      await disconnectCalendar();
+      setCalendar(null);
+      // Only the calendar grant goes. The mail connection and the session it
+      // minted are untouched, and the copy says so.
+      setBanner('Đã ngắt kết nối Google Calendar. Hộp thư vẫn được giữ nguyên.');
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
 
   const handleDisconnect = async () => {
     if (!selectedConnection || hasActiveRun) return;
@@ -276,6 +322,28 @@ export const MailInboxView: React.FC = () => {
             {!outlookConnectEnabled && outlookUnavailableReason && (
               <span className="text-xs text-zinc-500">{outlookUnavailableReason}</span>
             )}
+            {/* Three states, never two: connected, mail-only, and neither.
+                Collapsing "mail connected but calendar is not" into the same
+                empty state as "nothing connected" is what sends a user back to
+                re-run a mail consent they already completed. */}
+            {calendar ? (
+              <span className="ml-auto flex items-center gap-2 text-sm text-zinc-300">
+                <CalendarCheck className="h-4 w-4 text-emerald-400" />
+                Google Calendar · {calendar.account}
+                <button
+                  type="button"
+                  onClick={() => void handleCalendarDisconnect()}
+                  title="Ngắt kết nối Google Calendar"
+                  className="rounded-lg border border-zinc-700 p-1.5 text-zinc-400 hover:text-red-300"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ) : (
+              <a href={getCalendarConnectUrl()} className="rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-[#d97757]">
+                {gmailOwner ? 'Kết nối Google Calendar' : 'Kết nối Google Calendar (cần đăng nhập)'}
+              </a>
+            )}
           </div>
         )}
 
@@ -283,7 +351,10 @@ export const MailInboxView: React.FC = () => {
           <div className="rounded-xl border border-zinc-700 bg-[#242320] p-10 text-center">
             <Link2 className="mx-auto mb-3 h-8 w-8 text-[#d97757]" />
             <h2 className="font-medium">Chưa có tài khoản email</h2>
-            <p className="mt-2 text-sm text-zinc-400">Kết nối Gmail bằng quyền chỉ đọc để bắt đầu.</p>
+            <p className="mt-2 text-sm text-zinc-400">
+              Kết nối Gmail bằng quyền chỉ đọc để bắt đầu. Google sẽ hỏi thêm một lần nữa
+              cho Google Calendar — đó là bước thứ hai của cùng một lần kết nối.
+            </p>
           </div>
         )}
 

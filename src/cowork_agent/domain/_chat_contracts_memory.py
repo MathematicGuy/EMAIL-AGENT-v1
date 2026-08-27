@@ -1024,9 +1024,7 @@ class ChatExecutionTrace:
         if self.mode not in {"fast", "reasoning"}:
             raise ValueError("mode must be fast or reasoning")
         if self.reasoning is not None:
-            _require_bounded_string(
-                self.reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH
-            )
+            _require_bounded_string(self.reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH)
         filenames = _as_sequence(self.retrieved_filenames, "retrieved_filenames")
         if len(filenames) > MAX_EXECUTION_TRACE_FILENAMES:
             raise ValueError(
@@ -1053,9 +1051,7 @@ class ChatExecutionTrace:
             model=_require_bounded_string(data["model"], "model", 200),
             mode=cast(Literal["fast", "reasoning"], data["mode"]),
             reasoning=(
-                _require_bounded_string(
-                    reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH
-                )
+                _require_bounded_string(reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH)
                 if reasoning is not None
                 else None
             ),
@@ -1066,9 +1062,7 @@ class ChatExecutionTrace:
                     "retrieved_filenames item",
                     MAX_EXECUTION_TRACE_FILENAME_LENGTH,
                 )
-                for item in _as_sequence(
-                    data.get("retrieved_filenames", ()), "retrieved_filenames"
-                )
+                for item in _as_sequence(data.get("retrieved_filenames", ()), "retrieved_filenames")
             ),
         )
 
@@ -1184,9 +1178,7 @@ class ChatTurn:
                 if data.get("mail_scan") is not None
                 else None
             ),
-            status=_as_enum(
-                data.get("status", ChatTurnStatus.COMPLETED), ChatTurnStatus, "status"
-            ),
+            status=_as_enum(data.get("status", ChatTurnStatus.COMPLETED), ChatTurnStatus, "status"),
             idempotency_key=(
                 _require_string(data["idempotency_key"], "idempotency_key")
                 if data.get("idempotency_key") is not None

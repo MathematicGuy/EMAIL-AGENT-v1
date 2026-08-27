@@ -60,10 +60,7 @@ def _compile_scanner(rules: tuple[HeadingRule, ...]) -> re.Pattern[str]:
     rule fired.
     """
     return re.compile(
-        "|".join(
-            f"(?P<rule{index}>{rule.pattern.pattern})"
-            for index, rule in enumerate(rules)
-        )
+        "|".join(f"(?P<rule{index}>{rule.pattern.pattern})" for index, rule in enumerate(rules))
     )
 
 

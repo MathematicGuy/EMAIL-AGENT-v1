@@ -119,7 +119,7 @@ class ClassifierRecordingTransport:
 
 
 def gemini_classifier(transport: ClassifierRecordingTransport) -> GeminiRouteClassifier:
-    settings = GeminiSettings.from_env(environment(), load_env_file=False)
+    settings = GeminiSettings.from_env(environment())
     return GeminiRouteClassifier(settings, transport)
 
 
@@ -396,7 +396,7 @@ def test_mimo_classifier_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("cowork_agent.integrations.llm.providers.mimo._post_json", fake_post_json)
 
     async def scenario() -> None:
-        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
+        settings = MimoSettings.from_env({"MIMO_API_KEY": "test-key"})
         result = await MimoRouteClassifier(settings).classify(
             "Asia/Ho_Chi_Minh", datetime.now(UTC), (envelope("msg-1"), envelope("msg-2"))
         )
@@ -437,7 +437,6 @@ def test_mistral_malformed_transport_json_falls_back_without_logging_email_body(
     )
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
-        load_env_file=False,
     )
 
     async def scenario() -> None:
@@ -473,7 +472,6 @@ def test_mistral_classifier_parses_decision(
     )
     settings = MistralSettings.from_env(
         {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"},
-        load_env_file=False,
     )
 
     async def scenario() -> None:
@@ -518,18 +516,15 @@ def test_all_email_classifier_telemetry_uses_the_immutable_prompt_version(
         await gemini_classifier(
             ClassifierRecordingTransport([{"emails": [decision_payload("msg")]}])
         ).classify("UTC", datetime.now(UTC), message)
-        await MimoRouteClassifier(
-            MimoSettings.from_env({"MIMO_API_KEY": "test-key"}, load_env_file=False)
-        ).classify("UTC", datetime.now(UTC), message)
+        await MimoRouteClassifier(MimoSettings.from_env({"MIMO_API_KEY": "test-key"})).classify(
+            "UTC", datetime.now(UTC), message
+        )
         await MistralRouteClassifier(
-            MistralSettings.from_env(
-                {"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"}, load_env_file=False
-            )
+            MistralSettings.from_env({"MISTRAL_API_KEY": "test-key", "MISTRAL_MODEL": "test-model"})
         ).classify("UTC", datetime.now(UTC), message)
         await OpenRouterRouteClassifier(
             OpenRouterSettings.from_env(
                 {"OPENROUTER_API_KEY": "test-key", "OPENROUTER_MODEL": "test-model"},
-                load_env_file=False,
             )
         ).classify("UTC", datetime.now(UTC), message)
 

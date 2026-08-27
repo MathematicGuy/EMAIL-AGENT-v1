@@ -35,6 +35,14 @@ function baseFetch(input: string | URL | Request): Promise<Response> {
   throw new Error(`Unexpected request: ${url}`);
 }
 
+function calendarAwareFetch(calendar: unknown) {
+  return async (input: string | URL | Request): Promise<Response> => {
+    const url = String(input);
+    if (url.endsWith('/v1/calendar/connection')) return response(calendar);
+    return baseFetch(input);
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -222,6 +230,73 @@ describe('MailInboxView', () => {
     expect(screen.getByRole('link', { name: 'Kết nối Outlook' }).getAttribute('href')).toContain(
       'ownerConnectionId=mbx-1'
     );
+  });
+
+  it('renders the three connect states: connected, mail-only, and neither', async () => {
+    // Connected. The account is named so the user can tell which Google
+    // account the events will land on.
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({
+      connected: true,
+      connection: {
+        id: 'cal-1',
+        provider: 'google_calendar',
+        account: 'owner@example.com',
+        calendar_id: 'primary',
+        timezone: 'Asia/Ho_Chi_Minh',
+        status: 'active',
+        connected_at: '2026-08-26T00:00:00Z',
+      },
+    })));
+    render(<MailInboxView />);
+    expect(await screen.findByText(/Google Calendar · owner@example.com/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Kết nối Google Calendar/ })).toBeNull();
+    cleanup();
+
+    // Mail connected, calendar not: the offer is still there, and the mail
+    // view is unaffected.
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({ connected: false, connection: null })));
+    render(<MailInboxView />);
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
+    const offer = await screen.findByRole('link', { name: 'Kết nối Google Calendar' });
+    expect(offer.getAttribute('href')).toContain('/v1/calendar/oauth/google/connect');
+    cleanup();
+
+    // Neither. The calendar offer says a sign-in is needed first.
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = String(input);
+      if (url.endsWith('/v1/calendar/connection')) {
+        return response({ detail: 'Authentication required' }, 401);
+      }
+      return response({ connections: [] });
+    }));
+    render(<MailInboxView />);
+    expect(
+      await screen.findByRole('link', { name: 'Kết nối Google Calendar (cần đăng nhập)' })
+    ).toBeTruthy();
+  });
+
+  it('reports both consents when the chained journey lands back here', async () => {
+    window.history.replaceState(null, '', '/?view=mail&gmail=connected&calendar=denied');
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({ connected: false, connection: null })));
+    render(<MailInboxView />);
+
+    // The whole point of saying both: a declined calendar consent must not
+    // read as a failed mail connection.
+    expect(await screen.findByText(/Đã kết nối Gmail thành công\./)).toBeTruthy();
+    expect(screen.getByText(/từ chối quyền kết nối Google Calendar/)).toBeTruthy();
+    await waitFor(() => expect(window.location.search).not.toContain('calendar='));
+  });
+
+  it('keeps the mail view working when the calendar status cannot be read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = String(input);
+      if (url.endsWith('/v1/calendar/connection')) throw new Error('network down');
+      return baseFetch(input);
+    }));
+    render(<MailInboxView />);
+
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows and clears an Outlook OAuth outcome marker', async () => {

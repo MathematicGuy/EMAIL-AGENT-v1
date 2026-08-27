@@ -61,9 +61,7 @@ class ProjectDocumentRepository(Protocol):
 class ProjectDocumentCleanupRepository(Protocol):
     async def claim_cleanup(self, document_id: str) -> ProjectDocument | None: ...
 
-    async def finish_cleanup(
-        self, document_id: str, *, error_code: str | None = None
-    ) -> bool: ...
+    async def finish_cleanup(self, document_id: str, *, error_code: str | None = None) -> bool: ...
 
 
 class PrivateSourceStorage(Protocol):

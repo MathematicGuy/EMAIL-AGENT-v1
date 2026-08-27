@@ -135,4 +135,3 @@ def build_document_embedder() -> tuple[EmbeddingPort, int]:
         return JinaEmbeddingAdapter(settings), settings.dimensions
     gemini_settings = GeminiEmbeddingSettings.from_env()
     return GeminiEmbeddingAdapter(gemini_settings), gemini_settings.dimensions
-

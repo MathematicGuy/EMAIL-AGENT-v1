@@ -12,6 +12,7 @@ dependencies = [
   "aiohttp>=3.12,<4",
   "cryptography>=44,<51",
   "fastapi>=0.115,<1",
+  "fpdf2>=2.8,<3",
   "google-api-python-client>=2.160,<3",
   "google-auth-httplib2>=0.2,<1",
   "google-auth-oauthlib>=1.2,<2",
@@ -28,6 +29,9 @@ dependencies = [
   "python-dotenv>=1.0,<2",
   "python-multipart>=0.0.20,<1",
   "turbovec>=0.8.0",
+  # Windows ships no IANA tz database; zoneinfo needs this to resolve
+  # timezone keys such as Asia/Ho_Chi_Minh.
+  "tzdata>=2025.1; sys_platform == 'win32'",
   "uvicorn[standard]>=0.34,<1",
 ]
 
@@ -35,6 +39,7 @@ dependencies = [
 dev = [
   "coverage>=7",
   "mypy>=1.14",
+  "pypdf>=6,<7",
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6",
@@ -56,6 +61,9 @@ mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"cowork_agent.integrations.report_pdf" = ["fonts/*.ttf", "fonts/OFL.txt", "fonts/SOURCE.md"]
 
 [tool.pytest.ini_options]
 # "." because test modules import shared helpers as `tests.fixtures.*`; without

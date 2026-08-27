@@ -143,6 +143,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <button
             onClick={onToggleSidebar}
             title="Hiện thanh bên"
+            aria-label="Show sidebar"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
             <SidebarToggleIcon className="w-4 h-4" />
@@ -243,6 +244,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <button
               onClick={onToggleSidebar}
               title="Thu gọn thanh bên"
+              aria-label="Hide sidebar"
               className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
             >
               <SidebarToggleIcon className="w-4 h-4" />
@@ -258,43 +260,59 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
         <button
           onClick={onNewChat}
-          className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
+          className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-[#272522] hover:bg-[#302d29] text-zinc-100 text-xs font-medium border border-zinc-700/50 shadow-xs transition-colors cursor-pointer"
         >
-          <Plus className="w-4 h-4 text-zinc-400" />
+          <Plus className="w-4 h-4 text-zinc-300" />
           <span>Tạo cuộc trò chuyện mới</span>
         </button>
 
-        <div className="flex flex-col gap-0.5 text-xs">
+        <div className="space-y-0.5 mt-1">
           <button
-            onClick={() => onChangeView?.('artifacts')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'artifacts'
-                ? 'bg-[#272522] text-[#d97757] font-semibold'
-                : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            title="Đoạn chat"
+            onClick={() => onChangeView?.('chat')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'chat'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
             }`}
           >
-            <GitBranch className={`w-3.5 h-3.5 ${activeView === 'artifacts' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
-            <span>Artifacts</span>
+            <MessageSquare className={`w-3.5 h-3.5 ${activeView === 'chat' ? 'text-white' : 'text-zinc-400'}`} />
+            <span>Đoạn chat</span>
           </button>
 
           <button
             title="Hộp thư"
             onClick={() => onChangeView?.('mail')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'mail'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
             }`}
           >
-            <Mail className={`w-3.5 h-3.5 ${activeView === 'mail' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
+            <Mail className={`w-3.5 h-3.5 ${activeView === 'mail' ? 'text-white' : 'text-zinc-400'}`} />
             <span>Hộp thư</span>
+          </button>
+
+          <button
+            title="Artifacts"
+            onClick={() => onChangeView?.('artifacts')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'artifacts'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
+            }`}
+          >
+            <GitBranch className={`w-3.5 h-3.5 ${activeView === 'artifacts' ? 'text-white' : 'text-zinc-400'}`} />
+            <span>Artifacts</span>
           </button>
 
           <button
             title="Tài liệu quy trình"
             onClick={() => onChangeView?.('raw-documents')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
               activeView === 'raw-documents'
-                ? 'bg-[#272522] text-[#d97757] font-semibold'
-                : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+                ? 'bg-[#2a2824] text-[#d97757] border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
             }`}
           >
             <BookOpen className={`w-3.5 h-3.5 ${activeView === 'raw-documents' ? 'text-[#d97757]' : 'text-zinc-400'}`} />

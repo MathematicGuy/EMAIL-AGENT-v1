@@ -137,6 +137,4 @@ def test_canonical_catalog_uses_the_scope_tenant_for_project_document_lookup() -
     )
 
     assert asyncio.run(catalog.list_ready(scope, at=datetime(2026, 8, 13, tzinfo=UTC))) == ()
-    assert repository.calls == [
-        ("b60a66cb-44fb-4bea-b6c8-53fd9d04e4e1", "user-1", "project-1")
-    ]
+    assert repository.calls == [("b60a66cb-44fb-4bea-b6c8-53fd9d04e4e1", "user-1", "project-1")]

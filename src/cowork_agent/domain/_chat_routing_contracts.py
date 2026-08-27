@@ -50,6 +50,7 @@ class IntentReasonCode(StrEnum):
     CLASSIFIER_UNAVAILABLE = "classifier_unavailable"
     NO_READY_DOCUMENTS = "no_ready_documents"
     TOOL_REQUESTED_BUT_DISABLED = "tool_requested_but_disabled"
+    TOOL_NOT_AVAILABLE = "tool_not_available"
 
 
 CLASSIFIER_REASON_CODES = frozenset(

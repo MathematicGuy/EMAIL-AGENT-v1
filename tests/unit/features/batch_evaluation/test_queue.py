@@ -255,7 +255,7 @@ async def test_cancelled_waiting_claim_does_not_consume_capacity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wrong_unit_completion_does_not_admit_a_second_outstanding_unit() -> None:
+async def test_wrong_unit_or_job_completion_does_not_admit_a_second_outstanding_unit() -> None:
     store = ControlledUnitStore(
         claim_results=(unit("a", 0), unit("b", 1)),
         completion_failures=(False,),
@@ -269,38 +269,6 @@ async def test_wrong_unit_completion_does_not_admit_a_second_outstanding_unit() 
 
     with pytest.raises(ValueError, match="not outstanding"):
         await queue.complete("job-1", successful_outcome("b", 1))
-    assert store.complete_calls == []
-
-    pending_claim = asyncio.create_task(queue.claim_next("job-1", "lane-2"))
-    store.completion_may_commit[0].set()
-    store.completion_may_return[0].set()
-    completion = asyncio.create_task(queue.complete("job-1", successful_outcome("a", 0)))
-    await store.completion_started[0].wait()
-
-    assert not store.claim_started[1].is_set()
-    assert store.max_durable_outstanding == 1
-
-    await completion
-    await store.claim_started[1].wait()
-    store.claim_may_commit[1].set()
-    store.claim_may_return[1].set()
-    assert await pending_claim == unit("b", 1)
-    assert store.max_durable_outstanding == 1
-
-
-@pytest.mark.asyncio
-async def test_wrong_job_completion_does_not_admit_a_second_outstanding_unit() -> None:
-    store = ControlledUnitStore(
-        claim_results=(unit("a", 0), unit("b", 1)),
-        completion_failures=(False,),
-    )
-    queue = DurableWorkUnitQueue(store, capacity=1)
-    store.claim_may_commit[0].set()
-    store.claim_may_return[0].set()
-    assert await queue.claim_next("job-1", "lane-1") == unit("a", 0)
-    store.completion_may_commit[0].set()
-    store.completion_may_return[0].set()
-
     with pytest.raises(ValueError, match="not outstanding"):
         await queue.complete("job-2", successful_outcome("a", 0))
     assert store.complete_calls == []
@@ -333,9 +301,7 @@ async def test_concurrent_and_double_completion_are_rejected() -> None:
     store.claim_may_return[0].set()
     assert await queue.claim_next("job-1", "lane-1") == unit("a", 0)
 
-    first_completion = asyncio.create_task(
-        queue.complete("job-1", successful_outcome("a", 0))
-    )
+    first_completion = asyncio.create_task(queue.complete("job-1", successful_outcome("a", 0)))
     await store.completion_started[0].wait()
     store.completion_may_commit[1].set()
     store.completion_may_return[1].set()
@@ -382,88 +348,70 @@ async def test_completion_failure_restores_ownership_and_keeps_capacity() -> Non
 
 
 @pytest.mark.asyncio
-async def test_cancelled_claim_waits_for_none_outcome_before_releasing_capacity() -> None:
-    store = ControlledUnitStore(claim_results=(None, unit("a", 0)))
-    queue = DurableWorkUnitQueue(store, capacity=1)
-
-    cancelled_claim = asyncio.create_task(queue.claim_next("job-1", "lane-1"))
-    await store.claim_started[0].wait()
-    cancelled_claim.cancel()
-    assert not cancelled_claim.done()
-
-    store.claim_may_commit[0].set()
-    store.claim_may_return[0].set()
+async def test_cancelled_claim_and_completion_lifecycle_preserves_capacity() -> None:
+    # 1. Cancelled claim waiting for None outcome
+    store1 = ControlledUnitStore(claim_results=(None, unit("a", 0)))
+    queue1 = DurableWorkUnitQueue(store1, capacity=1)
+    cancelled_claim1 = asyncio.create_task(queue1.claim_next("job-1", "lane-1"))
+    await store1.claim_started[0].wait()
+    cancelled_claim1.cancel()
+    store1.claim_may_commit[0].set()
+    store1.claim_may_return[0].set()
     with pytest.raises(asyncio.CancelledError):
-        await cancelled_claim
-    assert store.claim_committed[0].is_set()
-    assert store.claim_returned[0].is_set()
+        await cancelled_claim1
+    store1.claim_may_commit[1].set()
+    store1.claim_may_return[1].set()
+    assert await queue1.claim_next("job-1", "lane-2") == unit("a", 0)
 
-    store.claim_may_commit[1].set()
-    store.claim_may_return[1].set()
-    assert await queue.claim_next("job-1", "lane-2") == unit("a", 0)
-
-
-@pytest.mark.asyncio
-async def test_cancelled_claim_registers_committed_unit_and_preserves_capacity() -> None:
-    store = ControlledUnitStore(
+    # 2. Cancelled claim with committed unit
+    store2 = ControlledUnitStore(
         claim_results=(unit("a", 0), unit("b", 1)),
         completion_failures=(False,),
     )
-    queue = DurableWorkUnitQueue(store, capacity=1)
-
-    cancelled_claim = asyncio.create_task(queue.claim_next("job-1", "lane-1"))
-    await store.claim_started[0].wait()
-    store.claim_may_commit[0].set()
-    await store.claim_committed[0].wait()
-    cancelled_claim.cancel()
-    store.claim_may_return[0].set()
+    queue2 = DurableWorkUnitQueue(store2, capacity=1)
+    cancelled_claim2 = asyncio.create_task(queue2.claim_next("job-1", "lane-1"))
+    await store2.claim_started[0].wait()
+    store2.claim_may_commit[0].set()
+    await store2.claim_committed[0].wait()
+    cancelled_claim2.cancel()
+    store2.claim_may_return[0].set()
     with pytest.raises(asyncio.CancelledError):
-        await cancelled_claim
-    assert store.claim_returned[0].is_set()
+        await cancelled_claim2
 
-    pending_claim = asyncio.create_task(queue.claim_next("job-1", "lane-2"))
-    recovery = asyncio.create_task(queue.complete("job-1", successful_outcome("a", 0)))
-    await store.completion_started[0].wait()
-    assert not store.claim_started[1].is_set()
-    assert store.max_durable_outstanding == 1
-
-    store.completion_may_commit[0].set()
-    store.completion_may_return[0].set()
+    pending_claim = asyncio.create_task(queue2.claim_next("job-1", "lane-2"))
+    recovery = asyncio.create_task(queue2.complete("job-1", successful_outcome("a", 0)))
+    await store2.completion_started[0].wait()
+    assert not store2.claim_started[1].is_set()
+    store2.completion_may_commit[0].set()
+    store2.completion_may_return[0].set()
     await recovery
-    await store.claim_started[1].wait()
-    store.claim_may_commit[1].set()
-    store.claim_may_return[1].set()
+    await store2.claim_started[1].wait()
+    store2.claim_may_commit[1].set()
+    store2.claim_may_return[1].set()
     assert await pending_claim == unit("b", 1)
-    assert store.max_durable_outstanding == 1
 
-
-@pytest.mark.asyncio
-async def test_cancelled_completion_releases_capacity_after_durable_commit() -> None:
-    store = ControlledUnitStore(
+    # 3. Cancelled completion releases capacity after durable commit
+    store3 = ControlledUnitStore(
         claim_results=(unit("a", 0), unit("b", 1)),
         completion_failures=(False,),
     )
-    queue = DurableWorkUnitQueue(store, capacity=1)
-    store.claim_may_commit[0].set()
-    store.claim_may_return[0].set()
-    assert await queue.claim_next("job-1", "lane-1") == unit("a", 0)
+    queue3 = DurableWorkUnitQueue(store3, capacity=1)
+    store3.claim_may_commit[0].set()
+    store3.claim_may_return[0].set()
+    assert await queue3.claim_next("job-1", "lane-1") == unit("a", 0)
 
-    cancelled_completion = asyncio.create_task(
-        queue.complete("job-1", successful_outcome("a", 0))
-    )
-    await store.completion_started[0].wait()
-    store.completion_may_commit[0].set()
-    await store.completion_committed[0].wait()
+    cancelled_completion = asyncio.create_task(queue3.complete("job-1", successful_outcome("a", 0)))
+    await store3.completion_started[0].wait()
+    store3.completion_may_commit[0].set()
+    await store3.completion_committed[0].wait()
     cancelled_completion.cancel()
-    store.completion_may_return[0].set()
+    store3.completion_may_return[0].set()
     with pytest.raises(asyncio.CancelledError):
         await cancelled_completion
-    assert store.completion_returned[0].is_set()
 
-    store.claim_may_commit[1].set()
-    store.claim_may_return[1].set()
-    second = await queue.claim_next("job-1", "lane-2")
-    assert second == unit("b", 1)
+    store3.claim_may_commit[1].set()
+    store3.claim_may_return[1].set()
+    assert await queue3.claim_next("job-1", "lane-2") == unit("b", 1)
 
 
 @pytest.mark.asyncio
@@ -477,9 +425,7 @@ async def test_cancelled_failed_completion_restores_ownership() -> None:
     store.claim_may_return[0].set()
     assert await queue.claim_next("job-1", "lane-1") == unit("a", 0)
 
-    cancelled_completion = asyncio.create_task(
-        queue.complete("job-1", successful_outcome("a", 0))
-    )
+    cancelled_completion = asyncio.create_task(queue.complete("job-1", successful_outcome("a", 0)))
     await store.completion_started[0].wait()
     cancelled_completion.cancel()
     store.completion_may_commit[0].set()

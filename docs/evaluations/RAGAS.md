@@ -64,7 +64,8 @@ Code hiện tại trong `run_ragas()` nhắm API legacy và chưa ghim dependenc
 ```python
 from datasets import Dataset
 from ragas import evaluate
-from ragas.metrics import faithfulness, answer_relevancy   # object mức module
+from ragas.metrics import faithfulness, answer_relevancy  # object mức module
+
 result = evaluate(dataset=Dataset.from_list(records), metrics=[...])
 ```
 

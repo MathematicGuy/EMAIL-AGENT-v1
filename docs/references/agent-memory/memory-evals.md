@@ -299,15 +299,17 @@ Execute an evaluation run directly from Python:
 ```python
 from waku.ops import memory_arena
 
+
 def event_logger(kind, payload):
     print(f"[{kind.upper()}] {payload}")
+
 
 # Run memory arena across SQLite and Mem0
 memory_arena.run_arena(
     backends=["sqlite", "mem0", "control"],
     track="example",
     emit=event_logger,
-    model="anthropic:claude-3-5-sonnet-20241022"
+    model="anthropic:claude-3-5-sonnet-20241022",
 )
 ```
 

@@ -47,6 +47,7 @@ Expected: import failure because session helpers do not exist.
 def new_session_token() -> str:
     return secrets.token_urlsafe(48)
 
+
 def session_token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 ```
@@ -192,9 +193,13 @@ Build Postgres connection/identity/session repositories when `DATABASE_URL` is s
 
 ```python
 response.set_cookie(
-    key=settings.cookie_name, value=token, httponly=True,
-    secure=settings.cookie_secure, samesite="lax",
-    max_age=settings.session_ttl_seconds, path="/",
+    key=settings.cookie_name,
+    value=token,
+    httponly=True,
+    secure=settings.cookie_secure,
+    samesite="lax",
+    max_age=settings.session_ttl_seconds,
+    path="/",
 )
 ```
 

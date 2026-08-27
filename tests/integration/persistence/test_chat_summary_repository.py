@@ -184,9 +184,12 @@ def test_same_summary_identity_in_two_tenants_persists_and_deletes_independently
                 )
                 assert await cursor.fetchall() == [("tenant-1",), ("tenant-2",)]
 
-            assert await repository.delete_chat_summary(
-                _namespace(tenant_id="tenant-1", chat_turn_id=None)
-            ) is True
+            assert (
+                await repository.delete_chat_summary(
+                    _namespace(tenant_id="tenant-1", chat_turn_id=None)
+                )
+                is True
+            )
             async with pool.connection() as connection:
                 cursor = await connection.execute(
                     "SELECT tenant_id FROM chat_summary_episodes ORDER BY tenant_id"
@@ -211,9 +214,7 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
         repository, pool = await _repository()
         try:
             exact_namespace = scoped_namespace("tenant-1", "user@example.com", "turn-exact")
-            foreign_user_namespace = scoped_namespace(
-                "tenant-1", "other@example.com", "turn-user"
-            )
+            foreign_user_namespace = scoped_namespace("tenant-1", "other@example.com", "turn-user")
             await repository.write_chat_summary(
                 exact_namespace,
                 replace(_episode(), record_id="record-turn-exact", chat_turn_id="turn-exact"),
@@ -249,9 +250,7 @@ def test_expiry_purge_and_schema_stay_compact_and_body_free() -> None:
         repository, pool = await _repository()
         try:
             expires_at = NOW + timedelta(minutes=1)
-            await repository.write_chat_summary(
-                _namespace(), _episode(expires_at=expires_at)
-            )
+            await repository.write_chat_summary(_namespace(), _episode(expires_at=expires_at))
 
             assert await repository.purge_expired(expires_at) == 1
             assert await repository.purge_expired(expires_at) == 0

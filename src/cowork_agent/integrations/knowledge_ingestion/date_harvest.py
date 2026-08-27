@@ -15,9 +15,7 @@ _PDF_STREAM = re.compile(
     rb"<<(.*?)>>\s*stream(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)?endstream",
     re.DOTALL,
 )
-_PDF_LITERAL_OR_HEX = re.compile(
-    rb"\((?P<lit>(?:\\.|[^\\)])*)\)|<(?P<hex>[0-9A-Fa-f\s]*)>"
-)
+_PDF_LITERAL_OR_HEX = re.compile(rb"\((?P<lit>(?:\\.|[^\\)])*)\)|<(?P<hex>[0-9A-Fa-f\s]*)>")
 _PDF_LITERAL_ESCAPE = re.compile(rb"\\([nrtbf()\\]|[0-7]{1,3})")
 
 

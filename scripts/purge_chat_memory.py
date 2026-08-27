@@ -33,9 +33,7 @@ async def run_purge(database_url: str) -> MemoryPurgeReport:
     try:
         profiles = PostgresChatProfileRepository(pool)
         episodes = PostgresTaskEpisodeRepository(pool)
-        coordinator = MemoryPurgeCoordinator(
-            profiles, episodes, sink=LoggingMemoryOperationSink()
-        )
+        coordinator = MemoryPurgeCoordinator(profiles, episodes, sink=LoggingMemoryOperationSink())
         report = await coordinator.purge_expired(datetime.now(UTC))
     finally:
         await pool.close()

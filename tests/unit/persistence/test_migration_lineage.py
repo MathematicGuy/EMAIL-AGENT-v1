@@ -16,11 +16,7 @@ import collections
 from pathlib import Path
 
 _MIGRATIONS_DIR = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "cowork_agent"
-    / "persistence"
-    / "migrations"
+    Path(__file__).resolve().parents[3] / "src" / "cowork_agent" / "persistence" / "migrations"
 )
 
 #: Numbers already duplicated when this guard was added. They cannot be
@@ -32,9 +28,7 @@ _KNOWN_COLLISIONS = frozenset({"005", "006", "007", "012", "014"})
 
 def _forward_migrations() -> list[Path]:
     return sorted(
-        path
-        for path in _MIGRATIONS_DIR.glob("*.sql")
-        if not path.name.endswith(".down.sql")
+        path for path in _MIGRATIONS_DIR.glob("*.sql") if not path.name.endswith(".down.sql")
     )
 
 
@@ -48,13 +42,9 @@ def test_no_new_duplicate_migration_numbers() -> None:
     for path in _forward_migrations():
         by_number[path.name.split("_", 1)[0]].append(path.name)
 
-    duplicates = {
-        number: names for number, names in by_number.items() if len(names) > 1
-    }
+    duplicates = {number: names for number, names in by_number.items() if len(names) > 1}
     unexpected = {
-        number: names
-        for number, names in duplicates.items()
-        if number not in _KNOWN_COLLISIONS
+        number: names for number, names in duplicates.items() if number not in _KNOWN_COLLISIONS
     }
     assert not unexpected, (
         "migrations share a number, so filename order decides which wins and the "
@@ -69,7 +59,5 @@ def test_known_collisions_are_still_collisions() -> None:
     for path in _forward_migrations():
         by_number[path.name.split("_", 1)[0]].append(path.name)
 
-    stale = {
-        number for number in _KNOWN_COLLISIONS if len(by_number.get(number, [])) < 2
-    }
+    stale = {number for number in _KNOWN_COLLISIONS if len(by_number.get(number, [])) < 2}
     assert not stale, f"these numbers no longer collide; remove them from the allowlist: {stale}"
