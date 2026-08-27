@@ -365,12 +365,69 @@ the tool as well as the filler: `declined` means "nothing reached the calendar"
 and a new `refused_by` field says which layer did it. Without that the gate would
 have stayed red while the guard worked.
 
-**Still owed:** the live re-run. `declined_when_underdetermined` is red on the
-recorded evidence and only a live run can turn it green:
+**Measured live, 2026-08-27** —
+[`tool-intent-eval-2026-08-27.json`](../../../evaluations/CHAT/qa-test/tool-intent/tool-intent-eval-2026-08-27.json),
+14 cases against `mimo-v2.5-pro`:
 
-```bash
-uv run python scripts/evaluate_tool_intent.py
+| gate | 2026-08-26 | 2026-08-27 |
+|---|---|---|
+| `start_exact` | 7/7 ✅ | 7/7 ✅ |
+| `declined_when_underdetermined` | 1/2 ❌ | **2/2 ✅** |
+| `no_backwards_resolution` | 14/14 ✅ | 14/14 ✅ |
+| `schema_accepted` | 9/12 ❌ | 10/12 ❌ |
+
+F5/F7 is closed on live evidence. Two things in that run are worth keeping.
+
+**The guard did not have to fire.** Both refusals carry `refused_by: "filler"` —
+the model asked the question itself, and well: *"Bạn muốn lịch gym lúc 2 giờ
+chiều hay 2 giờ sáng?"* The guard stayed the backstop rather than the actor. That
+is the outcome the `refused_by` field was added to make visible; without it the
+report would say "declined" and a reader would credit the wrong layer. It is also
+why the guard's own tests drive it directly rather than through a model — a run
+where the filler happens to behave proves nothing about the boundary.
+
+**`schema_accepted` is now measuring F1, not a schema problem.** The two failures
+are `tq-013` and `tq-014`, the compound requests. The filler asked for more
+detail instead of filling, which is the correct behaviour for a request whose
+arguments live in a document nobody retrieved. The gate counts it as a schema
+miss because it cannot tell a product gap from a defect. Same shape as `cr-063`
+in the routing benchmark below, and it should be treated the same way — but that
+is a scoring change, not a code fix, and it is not made here.
+
+### The 64-case routing benchmark, live *(new, 2026-08-27)*
+
+[`chat-routing-eval-2026-08-27.json`](../../../evaluations/CHAT/baselines/chat-routing-eval-2026-08-27.json)
+— the first live run with the tool axis on, `mimo-v2.5-pro`, prompt
+`chat-intent-v4`.
+
 ```
+retrieval_recall     1.0        retrieval_precision  1.0     missed_rag_rate 0.0
+tool_recall          1.0        tool_precision       1.0
+classifier_p95_ms    8506  ❌   (gate: <= 1500)
+rag_tool_downgraded  cr-063
+```
+
+**The tool axis is clean.** Both labelled tool cases routed to `tool`, and not
+one of the other 62 did — including `cr-062`, the calendar-mention distractor
+the block exists to trap. That is the direction that writes to a real calendar,
+and it is the direction the gate checks.
+
+**F8 — the classifier misses its latency budget by 5.7x.** The only failing
+metric, and it is not close: p95 is 8506 ms against a 1500 ms gate, and the
+*fastest* of the 64 calls took 2084 ms. No configuration of this provider passes.
+The threshold was set when `gemini-3.5-flash-lite` was the configured
+classifier; `config` now sets `LLM_PROVIDER=mimo`. This is on the critical path
+of every chat turn, before any answer starts streaming. Two honest options —
+move the provider back for routing, or re-baseline the gate against the provider
+actually in use — and the gate should not be relaxed just to turn the report
+green. 2 of 64 calls fell back and 7 retried, which is the same instability seen
+from a different angle.
+
+**`cr-062` routed to `clarify` rather than `chat`.** *"Lịch tuần này của tôi kín
+quá, có cách nào sắp xếp hiệu quả hơn không?"* — the model asked what to
+rearrange instead of answering. No metric scores it: the report compares the rag
+and tool booleans, not the route string. Harmless in the safe direction, and
+recorded here because nothing else would record it.
 
 ## 6. Still open
 
@@ -378,13 +435,15 @@ uv run python scripts/evaluate_tool_intent.py
    that silently puts a real event at the wrong hour. Needs the product decision
    in §5 F6 before a guard can be written.
 
-1. **F5 — the ambiguous-hour guard: written, not yet re-measured.** The guard
-   landed 2026-08-27 (§5 F5/F7 fixed) and is proven offline. The gate stays red
-   until a live run confirms it, because the recorded evidence predates it:
+1. **F8 — the classifier misses the routing latency budget.** New, and now the
+   only failing metric in the routing benchmark: p95 8506 ms against a 1500 ms
+   gate, with the fastest of 64 calls at 2084 ms. The threshold was set against
+   `gemini-3.5-flash-lite`; `config` sets `LLM_PROVIDER=mimo`. Either move the
+   classifier back or re-baseline the gate against the provider in use — but not
+   by relaxing the threshold to make the report green. See §5.
 
-   ```bash
-   uv run python scripts/evaluate_tool_intent.py
-   ```
+   ~~**F5 — the ambiguous-hour guard: written, not yet re-measured.**~~ Closed
+   2026-08-27: `declined_when_underdetermined` is 2/2 live.
 
 2. **The §11 classifier fixtures — merged, not yet re-measured.** `cr-061` to
    `cr-064` now live in
@@ -399,12 +458,10 @@ uv run python scripts/evaluate_tool_intent.py
    `rag_tool_downgraded_case_ids`: F1 drops its retrieval half by design, and
    scoring that as a classifier miss would never clear.
 
-   What is still owed is the **64-call live re-run**. Until it happens the
-   recorded baseline describes 60 cases and a scorer blind to the tool axis.
-
-   ```bash
-   uv run python scripts/evaluate_chat_routing.py
-   ```
+   ~~What is still owed is the 64-call live re-run.~~ Run 2026-08-27:
+   [`chat-routing-eval-2026-08-27.json`](../../../evaluations/CHAT/baselines/chat-routing-eval-2026-08-27.json).
+   Retrieval and tool metrics are all 1.0; the gate fails on latency alone
+   (F8 above).
 
 3. **The executable-chat-tool ADR — written.**
    [ADR-019](../../../tasks/adr/ADR-019-executable-chat-tools-run-under-a-per-user-grant.md)

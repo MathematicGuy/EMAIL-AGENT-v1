@@ -33,6 +33,7 @@ from cowork_agent.config import (
     GeminiSettings,
     MimoSettings,
     MistralSettings,
+    load_runtime_environment,
 )
 from cowork_agent.domain.chat_contracts import ChatRoute
 from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion, fill_arguments
@@ -269,6 +270,11 @@ def build_live_completion() -> tuple[ToolArgumentCompletion, str]:
         mistral_tool_arguments,
     )
 
+    # Same as the routing scorer: without this the script only runs for someone
+    # who has already exported their keys, and fails with "At least one numbered
+    # GEMINI_API_KEY must be configured" for everyone else. `override=False`
+    # keeps the shell authoritative.
+    load_runtime_environment()
     provider_name = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     if provider_name == "gemini":
         provider = GeminiSettings.from_env()

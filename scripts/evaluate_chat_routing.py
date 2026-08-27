@@ -201,15 +201,15 @@ def build_live_classifier(tools: Sequence[Tool]):
     if provider_name == "gemini":
         provider = GeminiSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return GeminiIntentClassifier.from_settings(provider, intent, tools), intent.model
+        return GeminiIntentClassifier.from_settings(provider, intent, tools=tools), intent.model
     if provider_name == "mimo":
         provider = MimoSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return MimoIntentClassifier.from_settings(provider, intent, tools), intent.model
+        return MimoIntentClassifier.from_settings(provider, intent, tools=tools), intent.model
     if provider_name == "mistral":
         provider = MistralSettings.from_env()
         intent = ChatIntentSettings.from_env(default_model=provider.model)
-        return MistralIntentClassifier.from_settings(provider, intent, tools), intent.model
+        return MistralIntentClassifier.from_settings(provider, intent, tools=tools), intent.model
     raise ValueError("LLM_PROVIDER must be gemini, mimo, or mistral")
 
 
