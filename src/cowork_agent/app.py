@@ -48,11 +48,15 @@ from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
 from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
 from cowork_agent.features.ai_chat.tools import (
+    AGENDA_TOOL_DESCRIPTION,
+    AGENDA_TOOL_NAME,
+    AGENDA_TOOL_SCHEMA,
     CALENDAR_TOOL_DESCRIPTION,
     CALENDAR_TOOL_NAME,
     CALENDAR_TOOL_SCHEMA,
     Tool,
     ToolResult,
+    build_agenda_tool,
     build_calendar_tool,
 )
 from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner, ToolTurnContext
@@ -143,26 +147,55 @@ CALENDAR_NOT_CONNECTED = (
     "Your Google Calendar is not connected yet, so I could not create the event. "
     "Connect it from the dashboard and ask me again."
 )
+#: The same refusal for a turn that only wanted to read. Saying "I could not
+#: create the event" to someone who asked what was on Friday is a wrong answer
+#: about what the system tried to do.
+CALENDAR_NOT_CONNECTED_READ = (
+    "Your Google Calendar is not connected yet, so I could not look anything up. "
+    "Connect it from the dashboard and ask me again."
+)
 
 
-def _not_connected_tool() -> Tool:
-    """A calendar tool that refuses instead of writing.
+def _not_connected_tool(
+    name: str,
+    description: str,
+    parameters: Mapping[str, object],
+    message: str,
+) -> Tool:
+    """A tool that refuses instead of reaching the calendar.
 
     Returned rather than binding no tool at all, so the turn degrades into a
     reply that says what did not happen -- the same shape every other tool
     failure takes -- instead of the router and the runner disagreeing about
     whether the tool exists.
+
+    Parameterized once the second tool arrived. It had been written around the
+    one tool that existed, so a `list_calendar_events` turn with no grant would
+    have been refused under the writing tool's name and schema (PROGRESS.md F9).
     """
 
     async def handler(arguments: Mapping[str, object]) -> ToolResult:
         del arguments
-        return ToolResult(ok=False, text=CALENDAR_NOT_CONNECTED)
+        return ToolResult(ok=False, text=message)
 
-    return Tool(
-        name=CALENDAR_TOOL_NAME,
-        description=CALENDAR_TOOL_DESCRIPTION,
-        parameters=CALENDAR_TOOL_SCHEMA,
-        handler=handler,
+    return Tool(name=name, description=description, parameters=parameters, handler=handler)
+
+
+def _calendar_not_connected() -> Tool:
+    return _not_connected_tool(
+        CALENDAR_TOOL_NAME,
+        CALENDAR_TOOL_DESCRIPTION,
+        CALENDAR_TOOL_SCHEMA,
+        CALENDAR_NOT_CONNECTED,
+    )
+
+
+def _agenda_not_connected() -> Tool:
+    return _not_connected_tool(
+        AGENDA_TOOL_NAME,
+        AGENDA_TOOL_DESCRIPTION,
+        AGENDA_TOOL_SCHEMA,
+        CALENDAR_NOT_CONNECTED_READ,
     )
 
 
@@ -185,9 +218,10 @@ def _calendar_classifier_tools(
     if settings is None or not settings.enabled:
         return ()
     timezone = ZoneInfo(settings.timezone)
+    calendar = GoogleCalendar(settings)
     return (
         build_calendar_tool(
-            GoogleCalendar(settings),
+            calendar,
             idempotency_key="classifier-tool-spec",
             timezone=settings.timezone,
             now=datetime.now(timezone),
@@ -195,6 +229,7 @@ def _calendar_classifier_tools(
             # to read. Harmless here: this value's handler is never called.
             user_message="",
         ),
+        build_agenda_tool(calendar, timezone=settings.timezone),
     )
 
 
@@ -221,20 +256,33 @@ def _chat_tool_runner(
     if settings is None or not settings.enabled:
         return None
 
-    async def bind(context: ToolTurnContext) -> Tool:
-        resolved = settings
+    async def resolve(context: ToolTurnContext) -> GoogleCalendarSettings | None:
+        """The grant this turn may use, or None when there is none.
+
+        Extracted when the second tool arrived: both binders need the same
+        answer, and the two must never disagree about whose calendar a turn
+        touches. Returning `None` rather than raising keeps each binder free to
+        pick its own refusal, which reads differently for a read and a write.
+        """
+
         if context.user_id and calendar_plane is not None:
             connection = await calendar_plane.repository.get_for_user(context.user_id)
             if connection is None:
                 # No silent fallback to `settings`. A signed-in user without a
                 # grant is told so; substituting the environment token here is
                 # how one person's event lands on another person's calendar.
-                return _not_connected_tool()
-            resolved = calendar_settings_for(
+                return None
+            return calendar_settings_for(
                 connection, calendar_plane.oauth_settings, calendar_plane.cipher
             )
-        elif context.user_id and calendar_plane is None:
-            return _not_connected_tool()
+        if context.user_id and calendar_plane is None:
+            return None
+        return settings
+
+    async def bind_create(context: ToolTurnContext) -> Tool:
+        resolved = await resolve(context)
+        if resolved is None:
+            return _calendar_not_connected()
         return build_calendar_tool(
             GoogleCalendar(resolved),
             idempotency_key=context.idempotency_key,
@@ -243,7 +291,18 @@ def _chat_tool_runner(
             user_message=context.user_message,
         )
 
-    return ChatToolRunner({CALENDAR_TOOL_NAME: bind}, complete=chat_providers.tool_arguments)
+    async def bind_agenda(context: ToolTurnContext) -> Tool:
+        resolved = await resolve(context)
+        if resolved is None:
+            return _agenda_not_connected()
+        # Reads nothing else off the context. The agenda tool is bound to a
+        # grant, not to a turn -- see `build_agenda_tool`.
+        return build_agenda_tool(GoogleCalendar(resolved), timezone=resolved.timezone)
+
+    return ChatToolRunner(
+        {CALENDAR_TOOL_NAME: bind_create, AGENDA_TOOL_NAME: bind_agenda},
+        complete=chat_providers.tool_arguments,
+    )
 
 
 def _chat_controller_factory(

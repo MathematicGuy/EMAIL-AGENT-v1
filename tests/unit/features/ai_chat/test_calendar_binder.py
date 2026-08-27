@@ -21,7 +21,7 @@ from cryptography.fernet import Fernet
 from cowork_agent import app as app_module
 from cowork_agent.composition import CalendarRuntime
 from cowork_agent.domain import CalendarConnection
-from cowork_agent.features.ai_chat.tools import CALENDAR_TOOL_NAME
+from cowork_agent.features.ai_chat.tools import AGENDA_TOOL_NAME, CALENDAR_TOOL_NAME
 from cowork_agent.integrations.gmail.auth import TokenCipher
 from cowork_agent.integrations.google_calendar import (
     GoogleCalendarOAuthSettings,
@@ -199,4 +199,4 @@ def test_the_tool_name_does_not_depend_on_the_user(plane: CalendarRuntime) -> No
 
     # The router narrows on `names` before any binding happens. A name that
     # appeared per user would make routing depend on connection state.
-    assert runner.names == frozenset({CALENDAR_TOOL_NAME})
+    assert runner.names == frozenset({CALENDAR_TOOL_NAME, AGENDA_TOOL_NAME})

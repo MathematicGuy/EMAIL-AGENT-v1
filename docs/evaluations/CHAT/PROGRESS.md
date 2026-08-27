@@ -429,6 +429,65 @@ rearrange instead of answering. No metric scores it: the report compares the rag
 and tool booleans, not the route string. Harmless in the safe direction, and
 recorded here because nothing else would record it.
 
+### F9 — the second tool: what it did *not* need *(design finding, no defect)*
+
+`list_calendar_events` shipped on 2026-08-27 as the second executable tool. SPEC
+§10 item 2 asked for it precisely because *"one adapter is a hypothetical seam;
+two is a real one"* — the point was to find out which of the registry's shapes
+were the domain's and which were the first tool's habits. Four answers, none of
+which required changing a shape:
+
+**1. `ToolTurnContext` is write-shaped.** `build_calendar_tool` takes four
+per-turn arguments; `build_agenda_tool` takes none of them. `idempotency_key`
+has nothing to make idempotent (a repeated read is not a second event),
+`user_message` feeds a guard that protects a write, and `now` is needed to
+*fill* a window — "next week" is arithmetic — but the filler already holds it,
+so the handler only ever sees an absolute range. The read tool is bound to a
+grant, not to a turn. The context object is not wrong, but its name promises
+something more general than it delivers, and a third tool that needs a *fifth*
+turn-scoped field will make that visible again.
+
+**2. Guards do not generalize; ranges do.** `parse_range` and `CalendarError`
+moved to `calendar_core.py` because both tools genuinely need them — the
+mixed-kind rule ("start and end must both be dates or both be times") is a
+property of the strings, not of the operation. `_validate_range` deliberately
+stayed in `calendar.py`. Its lower bound refuses a start more than a day behind
+`now`, which is the F6-adjacent guard against a model writing the wrong year;
+copying it to the read side would have refused *"what did I have last week?"* in
+the name of a guard with nothing to protect. The read tool's `_validate_window`
+has an upper width bound and no lower bound at all, and that asymmetry is the
+finding: what is safe to **write** and what is sensible to **read** are
+different questions that happen to share a parser.
+
+**3. `ToolResult.text`-only survived; rendering did not get a home.** A tool
+returning a *list* was the case most likely to break the single-string result,
+and it did not: both consumers of a `ToolResult` are models reading a string —
+the reply model today, a ReAct loop later — so a structured field would have
+been serialised for either of them anyway. What is missing is one level down.
+`_agenda()` is one tool's private idea of how a list looks, including the
+truncation notice; a third tool returning a list will write its own, and the two
+will drift. Not worth an abstraction at n=2, worth naming at n=3.
+
+**4. The not-connected path had been written around one tool.** `_not_connected_tool`
+in `app.py` carried the calendar tool's name, description, schema and message as
+literals. Registering a second tool turned it into a function with four
+parameters — a two-minute change, and exactly the kind of single-tool assumption
+that only surfaces when a second one arrives. `_calendar_classifier_tools`
+returning a one-tuple had the same shape, and two tests unpacked it as one.
+
+**Also found: F6 again, in the fake.** `InMemoryCalendar` resolved an all-day
+window bound to midnight **UTC**. 06:00+07 is 23:00Z the day before, so a
+breakfast meeting fell out of its own day's agenda — the fake would have agreed
+with every read test and with nothing the deployment does. The real adapter
+widens in the calendar's own zone (`_bound_instant`), and the fake now does too.
+Pinned by `test_an_early_morning_event_is_on_its_own_day_not_the_previous_one`.
+
+**No new consent.** The grant is already
+`https://www.googleapis.com/auth/calendar`, which covers `events.list`, so
+nothing in `SPEC-per-user-google-calendar-oauth` §3's J1–J7 moves. The read tool
+returns title and bounds only — no id, no link, no description, no attendees —
+so a reply model cannot leak a field the question did not ask for.
+
 ## 6. Still open
 
 0. **F6 — the UTC-offset write.** The highest-severity item here and the only one

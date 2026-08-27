@@ -10,6 +10,7 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from .ambiguous_hour import ambiguous_hour_question
+from .calendar_core import CalendarError, parse_range
 from .registry import Tool, ToolResult
 
 CALENDAR_TOOL_NAME = "create_calendar_event"
@@ -56,10 +57,6 @@ class CalendarEventDraft:
     @property
     def all_day(self) -> bool:
         return not isinstance(self.start, datetime)
-
-
-class CalendarError(Exception):
-    """The calendar could not be written to. Carries text a model can read."""
 
 
 class CalendarPort(Protocol):
@@ -117,7 +114,7 @@ def build_calendar_tool(
         if not title:
             return ToolResult(ok=False, text="The event needs a title.")
 
-        parsed = _parse_range(str(arguments["start"]), str(arguments["end"]), tz)
+        parsed = parse_range(str(arguments["start"]), str(arguments["end"]), tz)
         if isinstance(parsed, str):
             return ToolResult(ok=False, text=parsed)
         start, end = parsed
@@ -158,41 +155,6 @@ def build_calendar_tool(
     )
 
 
-def _parse_range(
-    raw_start: str, raw_end: str, tz: ZoneInfo
-) -> tuple[datetime, datetime] | tuple[date, date] | str:
-    """Both values as dates or both as datetimes, or a problem description."""
-
-    start = _parse_moment(raw_start, tz)
-    end = _parse_moment(raw_end, tz)
-    if start is None or end is None:
-        unreadable = raw_start if start is None else raw_end
-        return f"Could not read {unreadable!r} as a date or time."
-    if isinstance(start, datetime) != isinstance(end, datetime):
-        # An all-day start with a timed end is a model that changed its mind
-        # halfway through. Guessing which half it meant creates the wrong event.
-        return "Start and end must both be dates or both be times."
-    return (start, end)
-
-
-def _parse_moment(raw: str, tz: ZoneInfo) -> datetime | date | None:
-    text = raw.strip()
-    if not text:
-        return None
-    try:
-        if len(text) == 10:
-            return date.fromisoformat(text)
-        moment = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    # Option A (Wall-clock wins): Re-interpret the wall-clock digits in the
-    # calendar's zone (e.g. 02:00 UTC emitted by an LLM becomes 02:00 in Asia/Ho_Chi_Minh).
-    # Google accepts an explicit offset and honors it over timeZone, so attaching
-    # the target calendar's tzinfo directly ensures the event lands on the exact
-    # wall-clock hour the user requested.
-    return moment.replace(tzinfo=tz)
-
-
 def _validate_range(start: datetime | date, end: datetime | date, *, now: datetime) -> str | None:
     if end <= start:
         return "The event ends before it starts."
@@ -222,22 +184,3 @@ def _confirmation(draft: CalendarEventDraft, link: str) -> str:
     if link:
         parts.append(link)
     return " ".join(parts)
-
-
-class InMemoryCalendar:
-    """Deterministic `CalendarPort` for tests: no network, no credentials.
-
-    Mirrors the two Google behaviours the handler depends on -- a re-used
-    `event_id` resolves to the existing event instead of duplicating it, and a
-    created event always has a link.
-    """
-
-    def __init__(self, *, fail_with: str | None = None) -> None:
-        self.events: dict[str, CalendarEventDraft] = {}
-        self._fail_with = fail_with
-
-    async def create_event(self, draft: CalendarEventDraft) -> str:
-        if self._fail_with is not None:
-            raise CalendarError(self._fail_with)
-        self.events.setdefault(draft.event_id, draft)
-        return f"https://calendar.google.com/event?eid={draft.event_id}"

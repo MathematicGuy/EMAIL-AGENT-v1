@@ -47,7 +47,7 @@ what one route costs alone; the whole-suite row is parallel.
 | `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
-| `integrations/google_calendar/` | `tests/unit/integrations/google_calendar` + `tests/unit/api` + `tests/unit/features/ai_chat/test_calendar_binder.py` |
+| `integrations/google_calendar/` | `tests/unit/integrations/google_calendar` + `tests/unit/api` + `tests/unit/features/ai_chat/test_calendar_binder.py` + `tests/unit/features/ai_chat/test_agenda_tool.py` |
 | `integrations/mailbox/`, `integrations/outlook/` | R5 + R11 + R13 |
 | `persistence/` | R7 + R12 |
 | `orchestration/` | R8 |
@@ -112,6 +112,7 @@ Before writing a test, check if its invariant is already owned.
 | Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
 | Which messages determine an hour and which do not (PROGRESS.md F5/F7) | `unit/features/ai_chat/test_ambiguous_hour.py` | calendar tool and QA tier tests, which assert only that the guard is *reached* |
 | What the routing launch gate measures, tool axis included | `unit/scripts/test_evaluate_chat_routing.py` | fixture and resolver tests, which own the labels and the narrowing |
+| Reading a calendar window is not writing one: the past is allowed, and a day is a day in the calendar's zone (PROGRESS.md F9) | `unit/features/ai_chat/test_agenda_tool.py` | `test_calendar_tool.py`, which owns the write-side bounds |
 | Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
 ### Critical Invariants

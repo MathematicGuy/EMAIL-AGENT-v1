@@ -7,7 +7,12 @@ import httplib2
 import pytest
 from googleapiclient.errors import HttpError
 
-from cowork_agent.features.ai_chat.tools import CalendarError, CalendarEventDraft
+from cowork_agent.features.ai_chat.tools import (
+    CalendarError,
+    CalendarEventDraft,
+    CalendarEventSummary,
+    CalendarWindow,
+)
 from cowork_agent.integrations.google_calendar import GoogleCalendar, GoogleCalendarSettings
 from cowork_agent.integrations.google_calendar.provider import event_body
 
@@ -35,6 +40,12 @@ ALL_DAY = CalendarEventDraft(
     end=date(2026, 8, 28),
     timezone="Asia/Ho_Chi_Minh",
 )
+WINDOW = CalendarWindow(
+    start=date(2026, 8, 26),
+    end=date(2026, 8, 29),
+    timezone="Asia/Ho_Chi_Minh",
+    limit=20,
+)
 
 
 def _http_error(status: int, reason: str = "boom") -> HttpError:
@@ -52,11 +63,13 @@ class _Request:
 
 
 class _Events:
-    def __init__(self, *, insert: Any, get: Any = None) -> None:
+    def __init__(self, *, insert: Any = None, get: Any = None, listed: Any = None) -> None:
         self._insert = insert
         self._get = get
+        self._listed = listed
         self.insert_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
+        self.list_calls: list[dict[str, Any]] = []
 
     def insert(self, **kwargs: Any) -> _Request:
         self.insert_calls.append(kwargs)
@@ -65,6 +78,10 @@ class _Events:
     def get(self, **kwargs: Any) -> _Request:
         self.get_calls.append(kwargs)
         return _Request(self._get)
+
+    def list(self, **kwargs: Any) -> _Request:
+        self.list_calls.append(kwargs)
+        return _Request(self._listed)
 
 
 class _Service:
@@ -78,6 +95,11 @@ class _Service:
 def _create(events: _Events, draft: CalendarEventDraft = TIMED) -> str:
     calendar = GoogleCalendar(SETTINGS, service=_Service(events))
     return asyncio.run(calendar.create_event(draft))
+
+
+def _list(events: _Events, window: CalendarWindow = WINDOW) -> tuple[CalendarEventSummary, ...]:
+    calendar = GoogleCalendar(SETTINGS, service=_Service(events))
+    return asyncio.run(calendar.list_events(window))
 
 
 def test_a_timed_body_carries_both_an_offset_and_the_named_timezone() -> None:
@@ -139,6 +161,125 @@ def test_other_api_errors_become_calendar_errors_carrying_the_status(status: int
 
     with pytest.raises(CalendarError, match=str(status)):
         _create(events)
+
+
+def test_a_listing_asks_google_to_expand_recurrences_and_order_them() -> None:
+    """`singleEvents` and `orderBy` are contract, not tuning.
+
+    Without expansion Google refuses to order at all, and the caller's port
+    promises soonest-first. A change here breaks `list_calendar_events`
+    silently, which is why it is asserted on the request rather than the reply.
+    """
+
+    events = _Events(listed={"items": []})
+
+    _list(events)
+
+    sent = events.list_calls[0]
+    assert sent["singleEvents"] is True
+    assert sent["orderBy"] == "startTime"
+    assert sent["maxResults"] == WINDOW.limit
+    assert sent["calendarId"] == SETTINGS.calendar_id
+
+
+def test_an_all_day_window_bound_is_widened_in_the_calendars_zone_not_utc() -> None:
+    """`timeMin`/`timeMax` reject a bare date, and UTC would start the day early."""
+
+    events = _Events(listed={"items": []})
+
+    _list(events)
+
+    sent = events.list_calls[0]
+    assert sent["timeMin"] == "2026-08-26T00:00:00+07:00"
+    assert sent["timeMax"] == "2026-08-29T00:00:00+07:00"
+
+
+def test_a_listed_event_keeps_its_title_and_bounds() -> None:
+    events = _Events(
+        listed={
+            "items": [
+                {
+                    "summary": "Họp team",
+                    "start": {"dateTime": "2026-08-26T15:00:00+07:00"},
+                    "end": {"dateTime": "2026-08-26T15:30:00+07:00"},
+                }
+            ]
+        }
+    )
+
+    (event,) = _list(events)
+
+    assert event.title == "Họp team"
+    assert event.start == datetime(2026, 8, 26, 15, 0, tzinfo=TZ)
+    assert event.all_day is False
+
+
+def test_an_all_day_item_comes_back_as_a_date_rather_than_midnight() -> None:
+    events = _Events(
+        listed={
+            "items": [
+                {
+                    "summary": "Nộp báo cáo",
+                    "start": {"date": "2026-08-27"},
+                    "end": {"date": "2026-08-28"},
+                }
+            ]
+        }
+    )
+
+    (event,) = _list(events)
+
+    assert event.start == date(2026, 8, 27)
+    assert event.all_day is True
+
+
+def test_a_cancelled_recurring_instance_is_skipped_rather_than_given_a_time() -> None:
+    """It arrives with no `start` at all; inventing one puts a dead meeting on the agenda."""
+
+    events = _Events(
+        listed={
+            "items": [
+                {"summary": "Standup", "status": "cancelled"},
+                {
+                    "summary": "Retro",
+                    "start": {"dateTime": "2026-08-28T15:00:00+07:00"},
+                    "end": {"dateTime": "2026-08-28T16:00:00+07:00"},
+                },
+            ]
+        }
+    )
+
+    listed = _list(events)
+
+    assert [event.title for event in listed] == ["Retro"]
+
+
+def test_an_item_without_a_title_is_named_rather_than_blank() -> None:
+    events = _Events(
+        listed={
+            "items": [
+                {
+                    "start": {"dateTime": "2026-08-28T15:00:00+07:00"},
+                    "end": {"dateTime": "2026-08-28T16:00:00+07:00"},
+                }
+            ]
+        }
+    )
+
+    (event,) = _list(events)
+
+    assert event.title == "(no title)"
+
+
+def test_a_failed_listing_becomes_a_calendar_error_carrying_the_status() -> None:
+    """A read failure is data too -- the handler turns this into `ok=False` text."""
+
+    events = _Events(listed=_http_error(403))
+
+    with pytest.raises(CalendarError) as caught:
+        _list(events)
+
+    assert "403" in str(caught.value)
 
 
 def test_from_env_returns_none_without_a_complete_grant() -> None:

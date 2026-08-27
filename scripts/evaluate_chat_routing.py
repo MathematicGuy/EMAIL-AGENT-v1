@@ -37,7 +37,7 @@ from cowork_agent.features.ai_chat.intent.evaluation import (
 )
 from cowork_agent.features.ai_chat.intent.prompt import INTENT_PROMPT_VERSION
 from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
-from cowork_agent.features.ai_chat.tools.calendar import (
+from cowork_agent.features.ai_chat.tools import (
     CALENDAR_TOOL_NAME,
     InMemoryCalendar,
     build_calendar_tool,

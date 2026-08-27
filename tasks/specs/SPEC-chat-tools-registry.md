@@ -383,9 +383,19 @@ Fix in this order when the slice proves out:
    ship to real users.~~ **Done** — [`SPEC-per-user-google-calendar-oauth.md`](SPEC-per-user-google-calendar-oauth.md),
    2026-08-26. The grant is per user, chained to the mail consent, and a turn
    with no grant refuses rather than borrowing one.
-2. **A second tool.** One adapter is a hypothetical seam. The second is what
+2. ~~**A second tool.** One adapter is a hypothetical seam. The second is what
    reveals whether `Tool` and `ToolResult` are actually the right shapes — expect
-   to change them, and prefer changing them then over guessing now.
+   to change them, and prefer changing them then over guessing now.~~ **Done** —
+   `list_calendar_events`, 2026-08-27. A *read*, deliberately: a second write
+   would have re-used every shape unchanged and proven nothing. `Tool` and
+   `ToolResult` both survived without a change, including under a tool that
+   returns a list. What did move was one layer down — `parse_range` and
+   `CalendarError` to `calendar_core.py`, `InMemoryCalendar` to
+   `fake_calendar.py`, and `_not_connected_tool` from four literals to four
+   parameters. `_validate_range` deliberately did **not** move: what is safe to
+   write and what is sensible to read are different questions. Findings, including
+   the three shapes that turned out to be write-specific rather than general, in
+   [`PROGRESS.md` F9](../../docs/evaluations/CHAT/PROGRESS.md).
 3. Activity code, trace entry, and observability events.
 4. `RAG_TOOL`, once a tool exists that genuinely needs retrieved evidence.
 
@@ -401,6 +411,7 @@ transport endpoint.
 |---|---|
 | `tests/unit/features/ai_chat/test_tool_registry.py` | `run` never raises: unknown name, schema violation, handler exception, timeout |
 | `tests/unit/features/ai_chat/test_calendar_tool.py` | All-day vs timed; `end <= start` rejected; out-of-range year rejected; `409` treated as success; `htmlLink` in the result — all against the fake |
+| `tests/unit/features/ai_chat/test_agenda_tool.py` | Ordering, overlap not containment, the truncation notice, the empty-window text; the read-side window rules that are *not* the write-side ones (past allowed, no lower bound) |
 | `tests/unit/features/ai_chat/test_intent_resolver.py` *(extend)* | Unknown `tool_name` ⇒ `CHAT`; `RAG_TOOL` ⇒ `TOOL` |
 | `tests/unit/features/ai_chat/test_controller_tool_route.py` | `TOOL` route runs the tool once; `ok=False` degrades the turn without failing it |
 | `tests/unit/features/ai_chat/test_intent_prompt.py` *(extend)* | TIER 4.5 renders from `specs()`; empty registry omits it |

@@ -36,12 +36,12 @@ from cowork_agent.config import (
     load_runtime_environment,
 )
 from cowork_agent.domain.chat_contracts import ChatRoute
-from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion, fill_arguments
-from cowork_agent.features.ai_chat.tools.calendar import (
+from cowork_agent.features.ai_chat.tools import (
     CALENDAR_TOOL_NAME,
     InMemoryCalendar,
     build_calendar_tool,
 )
+from cowork_agent.features.ai_chat.tools.arguments import ToolArgumentCompletion, fill_arguments
 from cowork_agent.features.ai_chat.tools.registry import ToolRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
