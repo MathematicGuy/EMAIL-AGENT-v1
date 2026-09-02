@@ -1,183 +1,114 @@
----
-c4_level: index
-view_key: null
-diagram: null
-owns: docs/architectures
-status: implemented
-last_verified: 2026-08-27
----
+# System Architecture Dashboard & Status Tracker
 
-# Architecture Harness
-
-This directory documents **Cowork Agent as it is implemented**. There is no target
-or aspirational architecture here — proposals live in `tasks/prds/` and `tasks/specs/`,
-and decisions live in `tasks/adr/`.
-
-This file is the harness, not prose. Read it before writing or reviewing anything
-under `docs/architectures/`.
+**Architecture level:** Level 1 — High-Level Component & System Overview (Least Complexity)
+**Last Updated:** 2026-08-26
+**Target Reference:** [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)
 
 ---
 
-## 1. The one rule
+## 1. System Overview Dashboard
 
-> **[`workspace.dsl`](workspace.dsl) is the only place an element or a relationship is
-> defined.** Markdown narrates the model; it never re-draws it.
+The Cowork Agent project consists of two primary product flows operating over a unified control plane and persistence engine:
+1. **Email Action Plan & RAG Subsystem (PRD-v1):** Standalone, single-turn, memory-free digest over unread Gmail (`gmail.readonly`) or SQLite-linked Outlook (`Mail.Read`), with one provider-neutral route resolver (`NO_ACTION` / `DIRECT_PLAN` / `RETRIEVE_RAG`) and optional company RAG. The React UI dispatches mail scans through one `runMailScanProtocol` operation and persists one `MailScanSummary` card; mail is not an AI Chat tool.
+2. **AI Chat Assistant with Typed Memory (V2):** Multi-turn SSE chat with four memory scopes, live reasoning streaming, execution trace inspector, report artifact generation, chat-native `TaskEpisode` proposals (with `supersedes` support, [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)), and classifier-gated project documents ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md)). Aggregate mail cards enter through the chat route and are reconciled by transport-free feature policy. Company RAG in chat is flag-gated (`CHAT_COMPANY_RAG_ENABLED`, default false).
 
-Everything in [`diagrams/`](diagrams) is **generated output**. Editing a `.puml` or a
-`.png` by hand produces a change that the next regeneration silently destroys, and a
-diagram that disagrees with the model it claims to render. Do not do it.
+```mermaid
+flowchart TB
+    subgraph CLIENTS["Presentation Layer (Level 1)"]
+        UI_REACT["React 19 SPA Client<br/>(Execution Trace Drawer & DOCX Viewer)"]
+    end
 
-Concretely:
+    subgraph API["FastAPI Control Plane (app.py + api/ routers)"]
+        EMAIL_API["Email Action Plan API<br/>(/v1/mail-todo/*)"]
+        CHAT_API["AI Chat API & SSE Stream<br/>(/v1/cowork/chat/*)"]
+        DOC_API["Project / Raw Document APIs<br/>(/v1/cowork/chat/projects, /api/v1/raw-documents/*)"]
+        REPORT_API["Report Artifact API<br/>(/api/v1/reports/*)"]
+    end
 
-| You want to… | Do this |
-|---|---|
-| Add / rename / retire a system, container or component | Edit `workspace.dsl`, then regenerate (§4) |
-| Change what two elements say to each other | Edit the relationship in `workspace.dsl`, then regenerate |
-| Add a new diagram | Add a `view` to `workspace.dsl`, regenerate, then add the matching Markdown doc from [`TEMPLATE.md`](TEMPLATE.md) |
-| Explain *why* something is shaped that way | Edit the Markdown doc — or write an ADR in `tasks/adr/` and link it |
-| Record a decision | ADR in `tasks/adr/`. Never here |
+    subgraph SUBSYSTEMS["Core Subsystems"]
+        SUB_EMAIL["1. Email RAG Subsystem<br/>Gmail / Outlook + Router + RAG"]
+        SUB_CHAT["2. AI Chat Subsystem<br/>Controller + Memory Gateway<br/>+ Mail-Scan Reconciliation"]
+        SUB_DOCS["3. User Documents Subsystem<br/>Project docs; OCR deferred"]
+        SUB_RAW["4. Raw Documents Subsystem<br/>DOCX/PDF Viewer & Ingestion"]
+    end
 
-Mermaid is not used in this directory. A hand-drawn diagram is a second source of
-truth, and the reason the previous version of these docs drifted.
+    subgraph STORES["Persistence & Vector Stores"]
+        DB_LOCAL[("SQLite Local Engine<br/>(8 .data/*.db files)")]
+        DB_PG[("Supabase PostgreSQL<br/>(Migrations 001-016)")]
+        VECTOR[("Turbovec Vector Store<br/>(Company .tvim + Project .tvim)")]
+        REPORTS[("Report Artifacts<br/>(data/reports/ + fpdf2 export)")]
+    end
 
----
+    CLIENTS --> API
+    EMAIL_API --> SUB_EMAIL
+    CHAT_API --> SUB_CHAT
+    DOC_API --> SUB_DOCS
+    DOC_API --> SUB_RAW
+    REPORT_API --> REPORTS
+    SUB_CHAT --> REPORTS
 
-## 2. Document index
-
-One Markdown document per view. The file name is the view key.
-
-### Level 1 — System Context
-
-| Document | What it answers |
-|---|---|
-| [c1-system-context.md](c1-system-context.md) | Who uses Cowork Agent, and which external systems it depends on |
-
-### Level 2 — Containers
-
-| Document | What it answers |
-|---|---|
-| [c2-containers.md](c2-containers.md) | What is deployed and what stores state, plus the two end-to-end product flows |
-| [deployment.md](deployment.md) | Where those containers run in the `local` and `cloud` modes |
-
-### Level 3 — Components
-
-| Document | Container | What it answers |
-|---|---|---|
-| [c3-api-email-action-plan.md](c3-api-email-action-plan.md) | Control Plane API | The single-turn, memory-free mail pipeline |
-| [c3-api-ai-chat.md](c3-api-ai-chat.md) | Control Plane API | The multi-turn chat turn, typed memory, and the tool axis |
-| [c3-api-retrieval.md](c3-api-retrieval.md) | Control Plane API | Hybrid retrieval over the company corpus and per-project indexes |
-| [c3-api-platform.md](c3-api-platform.md) | Control Plane API | Composition, configuration, identity, persistence, observability |
-| [c3-worker.md](c3-worker.md) | Background Worker | Out-of-process pollers, recovery and retention |
-| [c3-ingestion-cli.md](c3-ingestion-cli.md) | Knowledge Ingestion CLI | Offline conversion of source documents into the committed corpus |
-
-Level 4 (code) is deliberately not documented. The source is the code-level model;
-a Level 4 diagram would be stale the day it is written.
-
----
-
-## 3. The document contract
-
-Every Markdown file in this directory starts with this frontmatter block. Every field
-is required, and the values are checked by §5.
-
-```yaml
----
-c4_level: 1 | 2 | 3 | index          # which C4 level this document narrates
-view_key: c3-api-ai-chat             # must match a view key in workspace.dsl
-diagram: diagrams/structurizr-c3-api-ai-chat.png
-owns: src/cowork_agent/features/ai_chat   # the source path this document is accountable for
-status: implemented                  # implemented | partial | deprecated
-last_verified: 2026-08-27            # ISO date the prose was last checked against the code
----
-```
-
-`status` describes the **document**, not an ambition:
-
-- `implemented` — every element in the view exists in `src/` or `frontend/` today.
-- `partial` — the view is accurate but the prose knowingly omits a live area; the gap
-  must be named in §6 *Known gaps* of that document.
-- `deprecated` — the code is gone; the document is awaiting deletion.
-
-`also_narrates` is an optional list of extra view keys the same document covers. Use it
-only when a second view is meaningless on its own — the two deployment topologies, or a
-dynamic flow through containers already described. Every view in `workspace.dsl` must be
-claimed by exactly one document, through `view_key` or `also_narrates`.
-
-Section order is fixed by [`TEMPLATE.md`](TEMPLATE.md). Do not invent section
-numbering per document — that is what made the previous docs unreadable.
-
----
-
-## 4. Regenerating the diagrams
-
-Requires Docker. Run from **this directory** (`docs/architectures/`).
-
-Validate the model:
-
-```bash
-docker run --rm -v "$PWD:/usr/local/structurizr" structurizr/structurizr validate -workspace /usr/local/structurizr/workspace.dsl
-```
-
-Export the C4-PlantUML sources:
-
-```bash
-docker run --rm -v "$PWD:/usr/local/structurizr" structurizr/structurizr export -workspace /usr/local/structurizr/workspace.dsl -format plantuml/c4plantuml -output /usr/local/structurizr/diagrams
-```
-
-Render the PNGs (the size limit matters — the container view exceeds PlantUML's 4096px default):
-
-```bash
-docker run --rm -e PLANTUML_LIMIT_SIZE=16384 -v "$PWD/diagrams:/data" plantuml/plantuml -tpng /data/*.puml
-```
-
-On Windows Git Bash, prefix each command with `MSYS_NO_PATHCONV=1` and use
-`"$(pwd -W)"` instead of `"$PWD"` so the bind mount resolves.
-
-Commit `workspace.dsl`, the `.puml` files and the `.png` files together. A commit that
-changes the DSL without the regenerated output is incomplete.
-
----
-
-## 5. Verification
-
-Before opening a PR that touches `docs/architectures/`:
-
-1. **The model parses.** `structurizr validate` exits `0`.
-2. **The diagrams are current.** Re-export and re-render; `git status` shows no
-   unexpected diff under `diagrams/`. A diff you did not intend means someone
-   hand-edited generated output.
-3. **Every `view_key` resolves.** Each document's `view_key` matches a view in
-   `workspace.dsl`, and each view in `workspace.dsl` has exactly one document.
-4. **Every link resolves.** No relative link in this directory 404s.
-5. **Every `owns:` path exists.** The source path a document claims is still there.
-
-Checks 3–5 are mechanical:
-
-```bash
-uv run python docs/architectures/check_docs.py
+    SUB_CHAT <--> SUB_DOCS
+    SUB_EMAIL <--> VECTOR
+    SUB_CHAT <--> VECTOR
+    SUB_DOCS <--> VECTOR
+    SUBSYSTEMS <--> DB_LOCAL
+    SUBSYSTEMS <--> DB_PG
 ```
 
 ---
 
-## 6. When code changes
+## 2. Live Module Status Matrix
 
-Update this directory in the same PR as the code when a change:
-
-- adds, removes or renames a **container** (a process, a store, a deployable);
-- adds, removes or renames a **component** already named in a Level 3 view;
-- changes **who talks to whom**, or over what protocol;
-- adds or drops an **external dependency**;
-- moves a **trust or privacy boundary** — what is persisted, what is sent off-box.
-
-A change inside a component that alters none of the above needs no architecture edit.
-Bump `last_verified` on the documents you touched.
+| Module / Component | Implemented Scope | Status | Target Architecture Alignment | Authoritative Code Location |
+|---|---|---|---|---|
+| **Email Action Plan & RAG** | Unread Gmail or SQLite-linked Outlook; provider-neutral route resolver, attachment presence only, body-free plans | **Live / Implemented** | Aligned; Outlook is an additive variance | [`features/email_action_plan`](../../../src/cowork_agent/features/email_action_plan) |
+| **Enterprise RAG Store** | Hybrid Turbovec + BM25 + RRF over committed `data/extracted/*.md` | **Live / Implemented** | Fully Aligned | [`integrations/rag`](../../../src/cowork_agent/integrations/rag) |
+| **AI Chat Controller** | Multi-turn SSE chat with reasoning traces, report artifacts, and `MailScanSummary` cards | **Live / Implemented** | Mostly Aligned | [`controller.py`](../../../src/cowork_agent/features/ai_chat/controller.py) |
+| **Chat Tool Registry** | One `ToolRegistry` boundary (`specs()` / `run()`), a per-turn `ChatToolRunner`, and one Google Calendar tool reached from the router's `TOOL` route | **Implemented — flag-off everywhere** | **Drift — a new executable-chat-tool ADR is required before either flag is enabled outside local development** | [`features/ai_chat/tools`](../../../src/cowork_agent/features/ai_chat/tools), [`integrations/google_calendar`](../../../src/cowork_agent/integrations/google_calendar) |
+| **Mail-Scan Turn Reconciliation** | Transport-free desired activity, scan/turn validation, append-only activity reconciliation, durable-turn merge, and buffer upsert; `chat.py` retains the endpoint and maps Pydantic payloads once | **Live / Implemented** | Fully Aligned with dependency direction | [`mail_scan_reconciliation.py`](../../../src/cowork_agent/features/ai_chat/mail_scan_reconciliation.py), [`api/chat.py`](../../../src/cowork_agent/api/chat.py) |
+| **Frontend Mail Scan Protocol** | Concurrent Gmail/Outlook connection selection, digest creation, polling, ordered aggregation, and cancellation behind one snapshot interface | **Live / Implemented** | Fully Aligned | [`mailScanProtocol.ts`](../../../frontend/src/dashboard/hooks/mailScanProtocol.ts) |
+| **4-Type Memory Gateway** | Short-term, declarative, episodic (with `supersedes`), and flag-gated semantic memory | **Live / Implemented** | Mostly Aligned | [`memory_gateway.py`](../../../src/cowork_agent/features/ai_chat/memory_gateway.py) |
+| **User Documents Subsystem** | Project-scoped upload, index, and retrieval | **Live / Implemented** | Mostly Aligned | [`project_documents.py`](../../../src/cowork_agent/integrations/rag/project_documents.py) |
+| **Document Ingestion Pipeline** | Offline document conversion and committed Markdown generation | **Live / Implemented** | Fully Aligned | [`knowledge_ingestion`](../../../src/cowork_agent/integrations/knowledge_ingestion) |
+| **DOCX Viewing & Raw Ingestion** | In-browser Word/PDF viewer and direct upload | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
+| **Report Artifacts & PDF Export** | One `ReportFilename` rule and store port shared by both writers; fpdf2 exports the explicit Markdown subset with bundled Noto Sans and extractable Vietnamese text ([ADR-018](../../../tasks/adr/ADR-018-report-pdfs-use-fpdf2-and-bundled-noto-sans.md)) | **Live / Implemented** | Additive product surface; internally aligned | [`domain/report_artifacts.py`](../../../src/cowork_agent/domain/report_artifacts.py) / [`persistence/report_artifacts.py`](../../../src/cowork_agent/persistence/report_artifacts.py) / [`integrations/report_pdf`](../../../src/cowork_agent/integrations/report_pdf) / [`api/reports.py`](../../../src/cowork_agent/api/reports.py) |
+| **Control Plane & Auth** | Google identity plus linked Microsoft OAuth with PKCE; Langfuse tracing; Outlook is SQLite-only | **Live / Implemented** | Aligned on identity and decoupling | [`api/mailboxes.py`](../../../src/cowork_agent/api/mailboxes.py), [`api/dependencies.py`](../../../src/cowork_agent/api/dependencies.py) |
+| **Typed Composition Root** | One frozen `CoworkRuntime` value (`reports`, `report_pdf_renderer`, `control_plane`, `mailbox`, `chat`, `email_rag`, `evaluation`) built once and read through `runtime(request)`; only the request-time chat cache/factory remain documented app-state exceptions ([ADR-013](../../../tasks/adr/ADR-013-composition-as-typed-value.md)) | **Live / Implemented** | Fully Aligned | [`composition.py`](../../../src/cowork_agent/composition.py) |
+| **Explicit Runtime Configuration** | Settings parsers validate only a supplied mapping or `os.environ`; executable boundaries load `.env` once through `load_runtime_environment()` ([ADR-017](../../../tasks/adr/ADR-017-settings-parsing-is-pure.md)) | **Live / Implemented** | Fully Aligned | [`config.py`](../../../src/cowork_agent/config.py) |
+| **Dual Persistence Engine** | SQLite local mode and Supabase Postgres mode (migrations 001–016) | **Live / Implemented** | Fully Aligned | [`repositories`](../../../src/cowork_agent/persistence/repositories) |
+| **Presentation Layers** | React 19 + Vite + Tailwind 4 SPA (Execution Trace Drawer, Live Reasoning, Report Artifacts, DOCX Viewer/Editor) | **Live / Implemented** | Fully Aligned | [`frontend/`](../../../frontend) |
 
 ---
 
-## 7. Related
+## 3. Architecture Diff Matrix (Current Implementation vs TARGET-ARCHITECTURE.md)
 
-- Decisions: [`tasks/adr/`](../../tasks/adr)
-- Product requirements: [`tasks/prds/`](../../tasks/prds)
-- Specifications: [`tasks/specs/`](../../tasks/specs)
-- Test harness: [`tests/README.md`](../../tests/README.md)
-- Evaluation harness: [`evaluations/README.md`](../../evaluations/README.md)
+| System Aspect | Target Specification ([TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md)) | Current Live Implementation | Diff / Variance Status |
+|---|---|---|---|
+| **Email & Chat Decoupling** | Standalone stateless Email Agent; AI Chat remains decoupled | The frontend recognizes `@email`, `@outlook`, and `@mail`, starts provider runs outside the AI Chat tool loop, and persists one body-free summary card. | **0 workflow-boundary diff** |
+| **Mailbox providers** | Gmail is the documented source | Gmail plus linked Microsoft Graph mailboxes share an envelope and workflow. Outlook is disabled in both Postgres modes and requires no migration. | **Additive variance — Outlook is SQLite-only** |
+| **TaskEpisode Lifecycle** | Tasks proposed in chat start `retrieval_eligible=false` until explicit user approval | Created only on explicit task requests; eligibility follows validation; supports `supersedes` linking. | **0 Diff — aligned with [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)** |
+| **Company RAG Corpus** | Knowledge provider; copied chunks forbidden in persistent task outputs; chat retrieval flag-gated | Turbovec hybrid over `data/extracted/*.md`; citations are coordinates. Chat-side read gated by `CHAT_COMPANY_RAG_ENABLED` (default false). Retired `qdrant` degrades to null memory. | **0 Diff — 100% Aligned** |
+| **User Document Security** | Project-scoped documents; classifier is sole route origin; OCR deferred | Project API + classifier + readiness gate. OCR-required PDFs fail `ocr_unavailable`. Store is Postgres chunks + per-project `.tvim` with no company-index fallback. | **Mostly Aligned ([ADR-007](../../../tasks/adr/ADR-007-project-scoped-classifier-gated-user-documents.md))** — live path is `/v1/cowork/chat/projects/{project_id}/documents` |
+| **Turn orchestration** | Small graph `classify → retrieve → assemble → generate → persist` | Same sequence lives in `ChatController.stream_message`. `features/ai_chat/graph/` exists but is not composed in `app.py`. | **Implementation variance — graph unused** |
+| **Persistence Flexibility** | Production Postgres; Redis or in-process short-term | SQLite persists local chat sessions/history/profile/task episodes and project-document metadata/chunks across 8 local `.db` files; short-term remains in-process. Durable cloud Postgres uses migrations 001–016. | **Mostly Aligned** — Redis unused; local and cloud data are separate |
+| **Observability & Tracing** | Standard application logging | Centralized Langfuse tracing provides span-level and generation-level observability across chat controller, LLM provider calls, and memory retrieval without leaking raw email bodies. | **Additive capability — fully instrumented** |
+| **Report Artifacts** | Not specified in TARGET; generated documents are a product surface | `data/reports/` is resolved once (`REPORTS_DIR`), owned by `FileSystemReportArtifactStore`, and reached only through `ReportFilename`. Both writers share that store. Production PDF export uses fpdf2 and bundled Noto Sans through a separate typed port; an injected runtime may omit the capability and receive `501`. | **Additive — no TARGET counterpart; internally aligned by ADR-018** |
+| **Executable chat tools** | §21.5 "There is still no executable in-chat tool"; §21.15 lists one as out of scope | The `TOOL` route runs one server-chosen tool per turn and hands the outcome to the reply as `GenerationContext.tool_result`. `GOOGLE_CALENDAR_ENABLED` and `CHAT_TOOL_AXIS_ENABLED` are false in every deployed environment, so the target statement stays true of the running system but not of the code. With either flag off the reply payload is byte-identical to a tool-free turn. [ADR-004](../../../tasks/adr/ADR-004-chat-native-task-episodes.md)'s Email/Gmail prohibition and the absence of a client `tool_choices` field are untouched. | **Known drift — blocked on a new executable-chat-tool ADR amending §21.5/§21.15** |
+| **Architecture Documentation** | Level 1 docs reflect the running system | All 7 subsystem modules and dashboard were audited; dashboard, 02, 03, and 04 are synchronized through 2026-08-26 for the report store and fpdf2 renderer (ADR-018), typed composition, explicit configuration, mail-scan boundaries, and the flag-off chat tool registry. | **0 Diff — 100% Synced** |
+
+---
+
+## 4. Sub-Module Level 1 Architecture References
+
+For detailed Level 1 component boundaries, sequence flows, and data contracts, refer to the individual module documents:
+
+1. **[01-email-action-plan-and-rag.md](01-email-action-plan-and-rag.md):** Provider-neutral Email Action Plan workflow, Gmail/Outlook adapters, route resolver, and company Turbovec hybrid RAG.
+2. **[02-ai-chat-and-typed-memory.md](02-ai-chat-and-typed-memory.md):** Multi-turn Chat Controller, typed memories, mail-scan turn reconciliation, chat-native task lifecycle, reasoning trace inspector, and classifier-gated project documents.
+3. **[03-control-plane-persistence-and-uis.md](03-control-plane-persistence-and-uis.md):** FastAPI control plane, identity, SQLite versus Supabase Postgres (migrations 001–016), mail worker, and React SPA.
+4. **[04-overall-architecture.md](04-overall-architecture.md):** Overall system architecture, product flows, and state/control ownership.
+5. **[05-rag-architecture.md](05-rag-architecture.md):** Enterprise RAG and vector-memory architecture.
+6. **[06-knowledge-and-document-ingestion-pipeline.md](06-knowledge-and-document-ingestion-pipeline.md):** Document ingestion pipeline.
+7. **[07-docx-document-viewing-and-editing.md](07-docx-document-viewing-and-editing.md):** DOCX viewing and editing subsystem.
+
+> [!NOTE]
+> All architecture modules in `docs/architectures/current-architectures/` are verified against live code and synchronized with [TARGET-ARCHITECTURE.md](../TARGET-ARCHITECTURE.md).
