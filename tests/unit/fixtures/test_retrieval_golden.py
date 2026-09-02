@@ -27,7 +27,7 @@ _spec.loader.exec_module(loader)
 RetrievalFixtureError = loader.RetrievalFixtureError
 
 LEGACY_CASE_SNAPSHOT_SHA256 = (
-    "656ab75870a3f3f9b3de0486debd3e0f835f2a4ef03fa97191e7950df00c1a7f"
+    "3ee3714aff5344e00e69dd111c7abcff5589645d095b2700d15c4e868ad752a1"
 )
 
 
@@ -56,7 +56,7 @@ def _valid_case(**overrides: object) -> dict[str, object]:
         "id": "q-001",
         "query": "Thủ tục cấp lại CCCD gồm những bước nào?",
         "probe": "mixed",
-        "expected_document_ids": ["cap_lai_cccd"],
+        "expected_document_ids": ["cap-lai-cccd"],
         "expected_sections": [],
         "email_body": None,
         "notes": "schema fixture",
@@ -109,7 +109,7 @@ def test_schema_rules_pass_without_a_corpus(tmp_path: Path) -> None:
     cases = loader.load_retrieval_golden(_write(tmp_path, [_valid_case()]))
     assert len(cases) == 1
     assert cases[0].probe is loader.Probe.MIXED
-    assert cases[0].expected_document_ids == ("cap_lai_cccd",)
+    assert cases[0].expected_document_ids == ("cap-lai-cccd",)
     assert cases[0].email_body is None
 
 
@@ -129,7 +129,7 @@ def test_rule_2_rejects_unknown_probe(tmp_path: Path) -> None:
 
 
 def test_rule_3_rejects_unanswerable_with_expected_documents(tmp_path: Path) -> None:
-    case = _valid_case(probe="unanswerable", expected_document_ids=["cap_lai_cccd"])
+    case = _valid_case(probe="unanswerable", expected_document_ids=["cap-lai-cccd"])
     with pytest.raises(RetrievalFixtureError, match="empty if and only if"):
         loader.load_retrieval_golden(_write(tmp_path, [case]))
 
@@ -243,7 +243,7 @@ def test_real_fixture_has_expanded_distribution() -> None:
 
 
 def test_rule_4_rejects_unknown_document_id(tmp_path: Path) -> None:
-    case = _valid_case(expected_document_ids=["dang_ky_tam_tru"])
+    case = _valid_case(expected_document_ids=["nonexistent_document_id"])
     with pytest.raises(RetrievalFixtureError, match="unknown document id"):
         loader.load_retrieval_golden(_write(tmp_path, [case]), corpus_dir=CORPUS_DIR)
 
@@ -257,17 +257,17 @@ def test_rule_5_rejects_section_absent_from_the_corpus(tmp_path: Path) -> None:
 
 def test_rule_5_rejects_a_section_belonging_to_another_document(tmp_path: Path) -> None:
     sections = _corpus_sections()
-    borrowed = sections["dang_ky_xe"][0]
-    assert borrowed not in sections["cap_lai_cccd"]
-    case = _valid_case(expected_document_ids=["cap_lai_cccd"], expected_sections=[borrowed])
+    borrowed = sections["dang-ky-xe"][0]
+    assert borrowed not in sections["cap-lai-cccd"]
+    case = _valid_case(expected_document_ids=["cap-lai-cccd"], expected_sections=[borrowed])
     with pytest.raises(RetrievalFixtureError, match="is not emitted by load_corpus"):
         loader.load_retrieval_golden(_write(tmp_path, [case]), corpus_dir=CORPUS_DIR)
 
 
 def test_rule_5_accepts_a_real_section(tmp_path: Path) -> None:
     cases = _covering_cases()
-    case = next(case for case in cases if case["expected_document_ids"] == ["cap_lai_cccd"])
-    section = _corpus_sections()["cap_lai_cccd"][0]
+    case = next(case for case in cases if case["expected_document_ids"] == ["cap-lai-cccd"])
+    section = _corpus_sections()["cap-lai-cccd"][0]
     case["expected_sections"] = [section]
     loaded = loader.load_retrieval_golden(_write(tmp_path, cases), corpus_dir=CORPUS_DIR)
     assert loaded[cases.index(case)].expected_sections == (section,)
@@ -280,7 +280,7 @@ def test_rule_6_rejects_missing_probe_coverage(tmp_path: Path) -> None:
 
 def test_rule_6_names_the_uncovered_document_and_probe(tmp_path: Path) -> None:
     cases = [case for case in _covering_cases() if case["probe"] != "semantic"]
-    with pytest.raises(RetrievalFixtureError, match="cap_lai_cccd:semantic"):
+    with pytest.raises(RetrievalFixtureError, match="cap-lai-cccd:semantic"):
         loader.load_retrieval_golden(_write(tmp_path, cases), corpus_dir=CORPUS_DIR)
 
 

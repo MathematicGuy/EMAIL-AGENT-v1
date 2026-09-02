@@ -1,0 +1,114 @@
+[
+  {
+    "route": "R1",
+    "description": "tests/unit/domain",
+    "status": "FAIL",
+    "duration_s": 3.05,
+    "summary": "162 passed in 2.36s"
+  },
+  {
+    "route": "R2",
+    "description": "tests/unit/features",
+    "status": "FAIL",
+    "duration_s": 3.55,
+    "summary": "364 passed in 2.71s"
+  },
+  {
+    "route": "R3",
+    "description": "tests/unit/integrations/rag",
+    "status": "FAIL",
+    "duration_s": 7.01,
+    "summary": "46 passed, 16 warnings in 6.10s"
+  },
+  {
+    "route": "R4",
+    "description": "tests/unit/integrations/llm",
+    "status": "FAIL",
+    "duration_s": 4.53,
+    "summary": "43 passed in 3.65s"
+  },
+  {
+    "route": "R5",
+    "description": "tests/unit/integrations/gmail",
+    "status": "FAIL",
+    "duration_s": 2.98,
+    "summary": "19 passed in 2.20s"
+  },
+  {
+    "route": "R6",
+    "description": "tests/unit/integrations",
+    "status": "FAIL",
+    "duration_s": 6.39,
+    "summary": "181 passed, 16 warnings in 5.55s"
+  },
+  {
+    "route": "R7",
+    "description": "tests/unit/persistence",
+    "status": "FAIL",
+    "duration_s": 3.11,
+    "summary": "19 passed in 2.35s"
+  },
+  {
+    "route": "R8",
+    "description": "tests/unit/orchestration",
+    "status": "FAIL",
+    "duration_s": 4.12,
+    "summary": "12 passed in 3.34s"
+  },
+  {
+    "route": "R9",
+    "description": "tests/unit/scripts",
+    "status": "FAIL",
+    "duration_s": 9.87,
+    "summary": "66 passed, 10 warnings in 9.15s"
+  },
+  {
+    "route": "R10",
+    "description": "tests/unit/fixtures",
+    "status": "FAIL",
+    "duration_s": 4.29,
+    "summary": "33 passed in 3.51s"
+  },
+  {
+    "route": "R11",
+    "description": "tests/integration/api",
+    "status": "FAIL",
+    "duration_s": 9.37,
+    "summary": "24 passed in 8.61s"
+  },
+  {
+    "route": "R12",
+    "description": "tests/integration/persistence",
+    "status": "FAIL",
+    "duration_s": 6.83,
+    "summary": "9 skipped in 6.08s"
+  },
+  {
+    "route": "R13",
+    "description": "tests/integration/email_action_plan",
+    "status": "FAIL",
+    "duration_s": 5.54,
+    "summary": "40 passed, 4 xfailed, 1 xpassed, 2 warnings in 4.77s"
+  },
+  {
+    "route": "R14",
+    "description": "tests/integration",
+    "status": "FAIL",
+    "duration_s": 11.88,
+    "summary": "65 passed, 9 skipped, 4 xfailed, 1 xpassed, 2 warnings in 11.09s"
+  },
+  {
+    "route": "R15",
+    "description": "tests/unit",
+    "status": "FAIL",
+    "duration_s": 12.69,
+    "summary": "891 passed, 26 warnings in 11.91s"
+  },
+  {
+    "route": "R16",
+    "description": "tests/unit --ignore=tests/unit/scripts",
+    "status": "FAIL",
+    "duration_s": 9.22,
+    "summary": "825 passed, 16 warnings in 8.43s"
+  }
+]

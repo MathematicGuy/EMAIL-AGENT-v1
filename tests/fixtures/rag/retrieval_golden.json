@@ -4,7 +4,7 @@
     "query": "Tôi cần cấp lại CCCD qua VNeID thì làm các bước nào?",
     "probe": "mixed",
     "expected_document_ids": [
-      "cap_lai_cccd"
+      "cap-lai-cccd"
     ],
     "expected_sections": [
       "Quy trình đăng ký cấp lại CCCD online bằng VNeID"
@@ -17,7 +17,7 @@
     "query": "Nghị quyết 190/2025/QH15 quy định thế nào về giấy tờ đã cấp trước khi sắp xếp bộ máy?",
     "probe": "lexical",
     "expected_document_ids": [
-      "cap_lai_cccd"
+      "cap-lai-cccd"
     ],
     "expected_sections": [
       "Có cần làm lại Căn cước, hộ chiếu khi sáp nhập tỉnh?"
@@ -30,7 +30,7 @@
     "query": "Khi nào thì tôi buộc phải xin đổi giấy tùy thân mới?",
     "probe": "semantic",
     "expected_document_ids": [
-      "cap_lai_cccd"
+      "cap-lai-cccd"
     ],
     "expected_sections": [
       "Các trường hợp cấp đổi, cấp lại thẻ Căn cước"
@@ -43,7 +43,7 @@
     "query": "Thông tin in trên thẻ Căn cước bị sai sót thì có được cấp đổi không?",
     "probe": "mixed",
     "expected_document_ids": [
-      "cap_lai_cccd"
+      "cap-lai-cccd"
     ],
     "expected_sections": [
       "Các trường hợp cấp đổi, cấp lại thẻ Căn cước"
@@ -56,7 +56,7 @@
     "query": "Từ ngày 01/07/2026 làm thẻ Căn cước ở công an xã được không?",
     "probe": "mixed",
     "expected_document_ids": [
-      "cap_lai_cccd"
+      "cap-lai-cccd"
     ],
     "expected_sections": [
       "Làm thẻ Căn cước từ ngày 01/07/2026 ở đâu?"
@@ -69,7 +69,7 @@
     "query": "Nộp tờ khai thuế online trên Cổng Dịch vụ công TTHC thì thao tác thế nào?",
     "probe": "mixed",
     "expected_document_ids": [
-      "thue_dien_tu"
+      "thue-dien-tu"
     ],
     "expected_sections": [
       "Hướng dẫn nộp tờ khai thuế online trên Dịch vụ Công TTHC"
@@ -82,7 +82,7 @@
     "query": "Nghị định 69/2024/NĐ-CP về định danh và xác thực điện tử áp dụng thế nào cho hệ thống thuế?",
     "probe": "lexical",
     "expected_document_ids": [
-      "thue_dien_tu"
+      "thue-dien-tu"
     ],
     "expected_sections": [
       "Thông tin chung"
@@ -95,7 +95,7 @@
     "query": "Trang cũ để nộp báo cáo còn dùng được đến bao giờ?",
     "probe": "semantic",
     "expected_document_ids": [
-      "thue_dien_tu"
+      "thue-dien-tu"
     ],
     "expected_sections": [
       "Thay đổi hệ thống"
@@ -108,7 +108,7 @@
     "query": "Cục Thuế đã triển khai hệ thống giải quyết thủ tục hành chính phiên bản nào?",
     "probe": "mixed",
     "expected_document_ids": [
-      "thue_dien_tu"
+      "thue-dien-tu"
     ],
     "expected_sections": [
       "Thông tin chung"
@@ -121,7 +121,7 @@
     "query": "Mẫu hộ tịch điện tử tương tác là gì và ai phải cung cấp thông tin?",
     "probe": "lexical",
     "expected_document_ids": [
-      "dang_ky_ket_hon"
+      "dang-ky-ket-hon"
     ],
     "expected_sections": [
       "Quy trình đăng ký kết hôn online"
@@ -134,7 +134,7 @@
     "query": "Đăng ký kết hôn trước hay sau đám cưới đều được phải không?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_ket_hon"
+      "dang-ky-ket-hon"
     ],
     "expected_sections": [
       "Điều kiện đăng ký kết hôn"
@@ -147,7 +147,7 @@
     "query": "Hai người Việt Nam cư trú trong nước đăng ký kết hôn có mất lệ phí không?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_ket_hon"
+      "dang-ky-ket-hon"
     ],
     "expected_sections": [
       "Lệ phí đăng ký kết hôn"
@@ -160,7 +160,7 @@
     "query": "Hai vợ chồng sắp cưới muốn hoàn tất giấy tờ chính thức, phải chuẩn bị những gì?",
     "probe": "semantic",
     "expected_document_ids": [
-      "dang_ky_ket_hon"
+      "dang-ky-ket-hon"
     ],
     "expected_sections": [
       "Quy trình đăng ký kết hôn online"
@@ -173,7 +173,7 @@
     "query": "Nộp trực tuyến xong thì tra cứu tình trạng hồ sơ ở đâu?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_ket_hon"
+      "dang-ky-ket-hon"
     ],
     "expected_sections": [
       "Cách tra cứu tình trạng hồ sơ đăng ký kết hôn"
@@ -186,10 +186,10 @@
     "query": "Cổng thisinh.thitotnghiepthpt.edu.vn dùng để làm gì?",
     "probe": "lexical",
     "expected_document_ids": [
-      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      "huong-dan-nop-ho-so-dai-hoc-vinuni"
     ],
     "expected_sections": [
-      "3. Hướng dẫn nộp hồ sơ đại học và quy trình nộp chi tiết"
+      "3.1. Quy trình nộp hồ sơ trực tuyến trên hệ thống của Bộ GD&ĐT"
     ],
     "email_body": null,
     "notes": "Exact portal hostname. Appears in this document only, in section 3 and again in the conclusion — section-level Hit@1 is the tighter check."
@@ -199,7 +199,7 @@
     "query": "Thí sinh tự do đã tốt nghiệp THPT cần chuẩn bị những giấy tờ gì?",
     "probe": "mixed",
     "expected_document_ids": [
-      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      "huong-dan-nop-ho-so-dai-hoc-vinuni"
     ],
     "expected_sections": [
       "2. Chuẩn bị giấy tờ cần thiết trong bộ hồ sơ"
@@ -212,7 +212,7 @@
     "query": "Em sợ trượt hết, có nên rải hồ sơ ở nhiều tầm điểm khác nhau không?",
     "probe": "semantic",
     "expected_document_ids": [
-      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      "huong-dan-nop-ho-so-dai-hoc-vinuni"
     ],
     "expected_sections": [
       "4. Chiến lược chọn nguyện vọng và ngành học thông minh"
@@ -225,7 +225,7 @@
     "query": "Hiện có những phương thức xét tuyển đại học nào?",
     "probe": "mixed",
     "expected_document_ids": [
-      "huong_dan_nop_ho_so_dai_hoc_vinuni"
+      "huong-dan-nop-ho-so-dai-hoc-vinuni"
     ],
     "expected_sections": [
       "1. Tổng quan về các phương thức nộp hồ sơ đại học hiện nay"
@@ -238,10 +238,10 @@
     "query": "Phiếu kiểm tra chất lượng xuất xưởng phải có những gì?",
     "probe": "lexical",
     "expected_document_ids": [
-      "dang_ky_xe"
+      "dang-ky-xe"
     ],
     "expected_sections": [
-      "Hồ sơ bổ sung đối với xe sản xuất, lắp ráp trong nước"
+      "Quy trình thực hiện"
     ],
     "email_body": null,
     "notes": "Exact form name in body text. NOTE: 'Quyết định 1383/QĐ-BCA' cannot be used here — it appears only in the H1 heading, and _split_sections excludes heading lines from chunk text, so no retriever over chunk text can match it."
@@ -251,7 +251,7 @@
     "query": "Cấp lại biển số xe mất bao lâu?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_xe"
+      "dang-ky-xe"
     ],
     "expected_sections": [
       "Thời hạn giải quyết"
@@ -264,10 +264,10 @@
     "query": "Xe nhập khẩu thì cần bổ sung những giấy tờ gì khi đăng ký?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_xe"
+      "dang-ky-xe"
     ],
     "expected_sections": [
-      "Hồ sơ bổ sung đối với xe nhập khẩu"
+      "Quy trình thực hiện"
     ],
     "email_body": null,
     "notes": "Near-duplicate distractor: 'Hồ sơ bổ sung đối với xe sản xuất, lắp ráp trong nước'. Section-level metric is the discriminator here."
@@ -277,7 +277,7 @@
     "query": "Chủ phương tiện phải có tài khoản mức mấy mới tự thao tác trên mạng được?",
     "probe": "semantic",
     "expected_document_ids": [
-      "dang_ky_xe"
+      "dang-ky-xe"
     ],
     "expected_sections": [
       "Điều kiện thực hiện"
@@ -290,7 +290,7 @@
     "query": "Các bước đăng ký xe online lần đầu trên VNeID gồm những gì?",
     "probe": "mixed",
     "expected_document_ids": [
-      "dang_ky_xe"
+      "dang-ky-xe"
     ],
     "expected_sections": [
       "Quy trình thực hiện"
@@ -303,7 +303,7 @@
     "query": "Tờ khai Mẫu TK1-TS dùng cho đối tượng nào?",
     "probe": "lexical",
     "expected_document_ids": [
-      "thu_tuc_dang_ky_bhxh_luatvietnam"
+      "thu-tuc-dang-ky-bhxh-luatvietnam"
     ],
     "expected_sections": [
       "2. Thành phần hồ sơ"
@@ -316,10 +316,10 @@
     "query": "Nộp hồ sơ BHXH bao lâu thì cơ quan trả kết quả?",
     "probe": "mixed",
     "expected_document_ids": [
-      "thu_tuc_dang_ky_bhxh_luatvietnam"
+      "thu-tuc-dang-ky-bhxh-luatvietnam"
     ],
     "expected_sections": [
-      "3. Cách thức và Thời hạn giải quyết"
+      "Cách thức thực hiện:"
     ],
     "email_body": null,
     "notes": "Distractor: dang_ky_xe has its own 'Thời hạn giải quyết' section, an exact section-title collision across documents."
@@ -329,7 +329,7 @@
     "query": "Hợp đồng lao động từ 1 tháng trở lên có phải đóng BHXH bắt buộc không?",
     "probe": "mixed",
     "expected_document_ids": [
-      "thu_tuc_dang_ky_bhxh_luatvietnam"
+      "thu-tuc-dang-ky-bhxh-luatvietnam"
     ],
     "expected_sections": [
       "1. Đối tượng áp dụng"
@@ -342,7 +342,7 @@
     "query": "Doanh nghiệp có bao nhiêu ngày để hoàn tất đăng ký cho nhân viên mới vào làm?",
     "probe": "semantic",
     "expected_document_ids": [
-      "thu_tuc_dang_ky_bhxh_luatvietnam"
+      "thu-tuc-dang-ky-bhxh-luatvietnam"
     ],
     "expected_sections": [
       "4. Yêu cầu, điều kiện thực hiện thủ tục"
@@ -355,7 +355,7 @@
     "query": "Trình tự nộp hồ sơ và nhận sổ bảo hiểm xã hội gồm mấy bước?",
     "probe": "mixed",
     "expected_document_ids": [
-      "thu_tuc_dang_ky_bhxh_luatvietnam"
+      "thu-tuc-dang-ky-bhxh-luatvietnam"
     ],
     "expected_sections": [
       "5. Trình tự thực hiện thủ tục"
@@ -399,72 +399,776 @@
     "email_body": null,
     "notes": "Plausible admin question, entirely outside the corpus domain."
   },
-  {"id":"q-033","query":"Điều 12 Nghị định 01/2021/NĐ-CP quy định việc ủy quyền đăng ký doanh nghiệp thế nào?","probe":"lexical","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương I, Điều 12; mã nghị định là tín hiệu lexical, tránh thủ tục hộ kinh doanh."},
-  {"id":"q-034","query":"Người nộp hồ sơ mở công ty có thể nhờ người khác làm thay không?","probe":"semantic","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương I, Điều 12; diễn đạt không dùng 'ủy quyền', distractor là nộp hồ sơ trực tuyến."},
-  {"id":"q-035","query":"Hồ sơ đăng ký doanh nghiệp phải dùng ngôn ngữ nào?","probe":"mixed","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương I, Điều 10; phân biệt yêu cầu giấy tờ pháp lý ở Điều 11."},
-  {"id":"q-036","query":"Điều 18 về đăng ký tên doanh nghiệp nói gì?","probe":"lexical","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 18; số điều phân biệt tên doanh nghiệp với đổi tên."},
-  {"id":"q-037","query":"Tên dự kiến bị trùng hoặc gây nhầm lẫn thì doanh nghiệp xử lý ra sao?","probe":"semantic","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 18; tránh thuật ngữ 'đăng ký tên', distractor quyền sở hữu công nghiệp."},
-  {"id":"q-038","query":"Thành lập công ty trách nhiệm hữu hạn một thành viên cần hồ sơ gì?","probe":"mixed","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 24; phân biệt công ty một thành viên với hai thành viên."},
-  {"id":"q-039","query":"Điều 33 quy định thời hạn cấp Giấy chứng nhận đăng ký doanh nghiệp bao lâu?","probe":"lexical","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 33; số điều là tín hiệu lexical, distractor thời hạn giải quyết xe."},
-  {"id":"q-040","query":"Sau khi nộp đủ giấy tờ thành lập, bao lâu nhận được giấy chứng nhận?","probe":"semantic","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 33; không dùng 'đăng ký doanh nghiệp', tránh các thủ tục hành chính khác."},
-  {"id":"q-041","query":"Đăng ký doanh nghiệp qua mạng bằng chữ ký số thực hiện theo quy định nào?","probe":"mixed","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 44; distractor là tài khoản đăng ký kinh doanh ở Điều 45."},
-  {"id":"q-042","query":"Doanh nghiệp muốn tạm ngừng kinh doanh phải thông báo như thế nào?","probe":"mixed","expected_document_ids":["01-2021-nd-cp-283247"],"expected_sections":[],"email_body":null,"notes":"Chương VII, Điều 66; phân biệt đình chỉ theo yêu cầu cơ quan ở Điều 67."},
-  {"id":"q-043","query":"Điều 11 Luật Đất đai 2024 liệt kê hành vi nào bị nghiêm cấm?","probe":"lexical","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương I, Điều 11; mã luật và điều khoản là tín hiệu lexical."},
-  {"id":"q-044","query":"Những việc nào không được phép làm với đất theo luật hiện hành?","probe":"semantic","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương I, Điều 11; tránh cụm 'hành vi bị nghiêm cấm', distractor quy định sử dụng đất."},
-  {"id":"q-045","query":"Công dân có quyền tiếp cận thông tin đất đai ra sao?","probe":"mixed","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương II, Điều 24; phân biệt với trách nhiệm cung cấp thông tin của Nhà nước."},
-  {"id":"q-046","query":"Điều 45 nêu điều kiện chuyển nhượng quyền sử dụng đất là gì?","probe":"lexical","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 45; số điều phân biệt quyền chuyển nhượng và điều kiện thực hiện."},
-  {"id":"q-047","query":"Muốn bán hoặc tặng thửa đất thì phải đáp ứng điều kiện gì?","probe":"semantic","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 45; tránh thuật ngữ quyền sử dụng đất, distractor giao dịch nhà ở."},
-  {"id":"q-048","query":"Quy hoạch sử dụng đất cấp huyện được lập theo quy định nào?","probe":"mixed","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 66; phân biệt quy hoạch cấp huyện với kế hoạch hằng năm."},
-  {"id":"q-049","query":"Điều 79 về thu hồi đất để phát triển kinh tế xã hội quy định các trường hợp nào?","probe":"lexical","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương VI, Điều 79; cụm điều khoản dài là tín hiệu lexical."},
-  {"id":"q-050","query":"Dự án vì lợi ích công cộng có thể lấy lại đất của dân trong trường hợp nào?","probe":"semantic","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương VI, Điều 79; tránh 'thu hồi đất', distractor quốc phòng an ninh."},
-  {"id":"q-051","query":"Bồi thường khi Nhà nước thu hồi đất được xác định theo nguyên tắc gì?","probe":"mixed","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương VII; phân biệt bồi thường, hỗ trợ và tái định cư."},
-  {"id":"q-052","query":"Hồ sơ địa chính đang xử lý khi Luật Đất đai mới có hiệu lực được giải quyết ra sao?","probe":"mixed","expected_document_ids":["31-2024-qh15-523642"],"expected_sections":[],"email_body":null,"notes":"Chương XVI, Điều 256; quy định chuyển tiếp, distractor hiệu lực chung Điều 252."},
-  {"id":"q-053","query":"Điều 27 Luật Bảo hiểm xã hội 2024 quy định hồ sơ đăng ký tham gia thế nào?","probe":"lexical","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 27; số điều tách khỏi hướng dẫn BHXH cũ."},
-  {"id":"q-054","query":"Muốn bắt đầu tham gia bảo hiểm xã hội thì cần nộp những giấy tờ nào?","probe":"semantic","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 27; tránh 'hồ sơ đăng ký', distractor thành phần TK1-TS."},
-  {"id":"q-055","query":"Người lao động đóng bảo hiểm xã hội bắt buộc theo mức và thời hạn nào?","probe":"mixed","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 33; phân biệt mức đóng người lao động và người sử dụng lao động."},
-  {"id":"q-056","query":"Điều 42 về chế độ ốm đau áp dụng cho đối tượng nào?","probe":"lexical","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 42; số điều là tín hiệu lexical."},
-  {"id":"q-057","query":"Khi bản thân bị bệnh phải nghỉ làm, ai được hưởng quyền lợi từ quỹ bảo hiểm?","probe":"semantic","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 42; tránh cụm 'chế độ ốm đau', distractor nghỉ thai sản."},
-  {"id":"q-058","query":"Thời gian nghỉ việc hưởng chế độ thai sản khi sinh con là bao lâu?","probe":"mixed","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 53; phân biệt khám thai và sinh con."},
-  {"id":"q-059","query":"Điều 70 quy định hưởng bảo hiểm xã hội một lần trong các trường hợp nào?","probe":"lexical","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 70; số điều phân biệt với BHXH tự nguyện."},
-  {"id":"q-060","query":"Người đã nghỉ việc có thể rút khoản đã đóng thay vì chờ lương hưu không?","probe":"semantic","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 70; không dùng thuật ngữ 'một lần', distractor bảo lưu."},
-  {"id":"q-061","query":"Quỹ bảo hiểm xã hội được hình thành từ những nguồn nào?","probe":"mixed","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương VII, Điều 117; phân biệt nguồn quỹ và cách sử dụng quỹ."},
-  {"id":"q-062","query":"Khiếu nại quyết định về bảo hiểm xã hội được giải quyết theo quy định nào?","probe":"mixed","expected_document_ids":["41-2024-qh15-557190"],"expected_sections":[],"email_body":null,"notes":"Chương IX, Điều 129; distractor tố cáo ở Điều 131."},
-  {"id":"q-063","query":"Điều 15 Luật Xuất cảnh, nhập cảnh của công dân Việt Nam quy định cấp hộ chiếu phổ thông trong nước thế nào?","probe":"lexical","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 15; số điều tách khỏi hộ chiếu ở nước ngoài."},
-  {"id":"q-064","query":"Làm hộ chiếu phổ thông khi đang ở Việt Nam cần thực hiện ra sao?","probe":"semantic","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 15; tránh cụm 'cấp hộ chiếu', distractor gia hạn hộ chiếu."},
-  {"id":"q-065","query":"Ai thuộc đối tượng được cấp hộ chiếu phổ thông?","probe":"mixed","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 14; phân biệt hộ chiếu phổ thông với ngoại giao."},
-  {"id":"q-066","query":"Điều 21 nêu các trường hợp chưa được cấp giấy tờ xuất nhập cảnh?","probe":"lexical","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 21; cụm điều khoản là tín hiệu lexical."},
-  {"id":"q-067","query":"Trong hoàn cảnh nào cơ quan có thể chưa cấp giấy tờ để ra nước ngoài?","probe":"semantic","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương III, Điều 21; tránh thuật ngữ xuất nhập cảnh, distractor tạm hoãn."},
-  {"id":"q-068","query":"Hộ chiếu còn hạn bị mất thì thủ tục hủy giá trị sử dụng như thế nào?","probe":"mixed","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương IV, Điều 28; phân biệt thu hồi hộ chiếu."},
-  {"id":"q-069","query":"Điều 36 quy định những trường hợp bị tạm hoãn xuất cảnh?","probe":"lexical","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 36; số điều là tín hiệu lexical."},
-  {"id":"q-070","query":"Khi nào một người có thể bị ngăn rời khỏi Việt Nam trong thời gian nhất định?","probe":"semantic","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 36; tránh cụm 'tạm hoãn xuất cảnh', distractor chưa cấp giấy tờ."},
-  {"id":"q-071","query":"Điều kiện nhập cảnh của công dân Việt Nam theo luật là gì?","probe":"mixed","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương V, Điều 34; phân biệt điều kiện xuất cảnh."},
-  {"id":"q-072","query":"Cơ sở dữ liệu quốc gia về xuất cảnh, nhập cảnh lưu những thông tin nào?","probe":"mixed","expected_document_ids":["49-2019-qh14-402073"],"expected_sections":[],"email_body":null,"notes":"Chương VI, Điều 41; distractor trách nhiệm xây dựng dữ liệu."},
-  {"id":"q-073","query":"Mẫu CT04 được cấp khi tiếp nhận hồ sơ đăng ký tạm trú là gì?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-1-004194-1786097965866"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; mã mẫu phân biệt với CT01 hồ sơ."},
-  {"id":"q-074","query":"Đến đâu để nộp thủ tục ở nhờ tại nơi ở mới?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-1-004194-1786097965866"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN tạm trú; tránh thuật ngữ cư trú, distractor thường trú."},
-  {"id":"q-075","query":"Đăng ký tạm trú cần chuẩn bị tờ khai thay đổi thông tin cư trú nào?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-1-004194-1786097965866"],"expected_sections":["THÀNH PHẦN HỒ SƠ"],"email_body":null,"notes":"THÀNH PHẦN HỒ SƠ; phân biệt giấy tờ chứng minh chỗ ở hợp pháp."},
-  {"id":"q-076","query":"Nghị quyết 05/2025/NQ-CP liên quan khai thuế tài sản mã hóa thế nào?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-1-115132-1786096253281"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; mã nghị quyết phân biệt luật thuế chung."},
-  {"id":"q-077","query":"Bên cung cấp dịch vụ tiền mã hóa phải nộp tờ khai vào thời điểm nào?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-1-115132-1786096253281"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; tránh tên thủ tục dài, distractor thuế điện tử."},
-  {"id":"q-078","query":"Thủ tục khai thuế thay cho người có thu nhập từ chuyển nhượng tài sản mã hóa nộp ở đâu?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-1-115132-1786096253281"],"expected_sections":["CƠ QUAN THỰC HIỆN"],"email_body":null,"notes":"CƠ QUAN THỰC HIỆN; phân biệt Cục Thuế và cổng nộp tờ khai."},
-  {"id":"q-079","query":"Quyết định 4685/QĐ-BCA-C08 áp dụng cho đăng ký xe nào?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-1-115970-1786097982328"],"expected_sections":["CHI TIẾT THỦ TỤC HÀNH CHÍNH"],"email_body":null,"notes":"CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt hướng dẫn đăng ký xe cũ."},
-  {"id":"q-080","query":"Có thể làm thủ tục cấp lại biển số trực tuyến bằng ứng dụng định danh không?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-1-115970-1786097982328"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; tránh từ 'đăng ký xe', distractor cấp lại căn cước."},
-  {"id":"q-081","query":"Đăng ký sang tên xe cần kê khai và nộp hồ sơ theo trình tự nào?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-1-115970-1786097982328"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; phân biệt đăng ký lần đầu."},
-  {"id":"q-082","query":"Quyết định 4836/QĐ-UBND quy định thủ tục cấp Giấy chứng nhận đất lần đầu nào?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-1-116194-1786096137126"],"expected_sections":["CHI TIẾT THỦ TỤC HÀNH CHÍNH"],"email_body":null,"notes":"CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt Luật Đất đai."},
-  {"id":"q-083","query":"Người đang sử dụng đất chưa có sổ cần nộp hồ sơ ở đâu để được cấp lần đầu?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-1-116194-1786096137126"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; tránh tên Giấy chứng nhận, distractor đăng ký biến động."},
-  {"id":"q-084","query":"Nộp hồ sơ đăng ký đất đai lần đầu trực tuyến qua cổng nào?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-1-116194-1786096137126"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; phân biệt địa điểm nộp trực tiếp."},
-  {"id":"q-085","query":"Quyết định 5710/QĐ-BCA-C06 quy định cấp lại thẻ căn cước ở cấp nào?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-2-001194-1786096928665"],"expected_sections":["CHI TIẾT THỦ TỤC HÀNH CHÍNH"],"email_body":null,"notes":"CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt cấp xã."},
-  {"id":"q-086","query":"Mất thẻ định danh thì có thể làm lại tại nơi khác nơi cư trú không?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-2-001194-1786096928665"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; tránh cụm căn cước, distractor cấp đổi CCCD."},
-  {"id":"q-087","query":"Cấp lại thẻ căn cước cần thu nhận dữ liệu sinh trắc nào?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-2-001194-1786096928665"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; phân biệt trường hợp mất thẻ và trở lại quốc tịch."},
-  {"id":"q-088","query":"Mẫu TK01 dùng để đề nghị cấp tài khoản định danh điện tử mức 2?","probe":"lexical","expected_document_ids":["chi-tiet-thu-tuc-3-000228-1786096860852"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; mã mẫu phân biệt thủ tục VNeID khác."},
-  {"id":"q-089","query":"Người đã có thẻ gắn chip cần làm gì để có danh tính số mức cao?","probe":"semantic","expected_document_ids":["chi-tiet-thu-tuc-3-000228-1786096860852"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; tránh 'định danh điện tử', distractor cấp lại thẻ."},
-  {"id":"q-090","query":"Đăng ký tài khoản định danh điện tử mức 02 tại công an xã cần thông tin nào?","probe":"mixed","expected_document_ids":["chi-tiet-thu-tuc-3-000228-1786096860852"],"expected_sections":["TRÌNH TỰ THỰC HIỆN"],"email_body":null,"notes":"TRÌNH TỰ THỰC HIỆN; phân biệt số thuê bao và thông tin tích hợp."},
-  {"id":"q-091","query":"Mẫu CT01 là giấy tờ nào trong hồ sơ đăng ký tạm trú?","probe":"lexical","expected_document_ids":["dang-ky-tam-tru"],"expected_sections":["2. Thành phần hồ sơ"],"email_body":null,"notes":"2. Thành phần hồ sơ; mã mẫu phân biệt CT04 quy trình."},
-  {"id":"q-092","query":"Làm đăng ký ở nhờ trực tuyến thì thường mất bao lâu và có mất phí không?","probe":"semantic","expected_document_ids":["dang-ky-tam-tru"],"expected_sections":["3. Thời hạn giải quyết & Lệ phí"],"email_body":null,"notes":"3. Thời hạn giải quyết & Lệ phí; hai-case allocation makes mixed probe inapplicable."},
-  {"id":"q-093","query":"Thủ tục xin cấp giấy phép xây dựng nhà ở riêng lẻ cần làm thế nào?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor thủ tục đất đai."},
-  {"id":"q-094","query":"Điều kiện nhận trợ cấp thất nghiệp sau khi nghỉ việc là gì?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor bảo hiểm xã hội."},
-  {"id":"q-095","query":"Đổi giấy phép lái xe trực tuyến cần chuẩn bị hồ sơ nào?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor đăng ký xe."},
-  {"id":"q-096","query":"Muốn đăng ký khai sinh cho trẻ sơ sinh cần đến đâu?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor đăng ký kết hôn."},
-  {"id":"q-097","query":"Thủ tục hưởng trợ cấp bảo hiểm y tế khi khám bệnh như thế nào?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; BHYT không phải BHXH."},
-  {"id":"q-098","query":"Nộp hồ sơ xin visa du lịch nước ngoài cần giấy tờ gì?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor hộ chiếu."},
-  {"id":"q-099","query":"Cách đăng ký bảo hộ sáng chế tại Việt Nam?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor tên doanh nghiệp."},
-  {"id":"q-100","query":"Quy trình xin cấp chứng chỉ hành nghề luật sư gồm những bước nào?","probe":"unanswerable","expected_document_ids":[],"expected_sections":[],"email_body":null,"notes":"Ngoài corpus; distractor văn bản pháp luật."}
+  {
+    "id": "q-033",
+    "query": "Điều 12 Nghị định 01/2021/NĐ-CP quy định việc ủy quyền đăng ký doanh nghiệp thế nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương I, Điều 12; mã nghị định là tín hiệu lexical, tránh thủ tục hộ kinh doanh."
+  },
+  {
+    "id": "q-034",
+    "query": "Người nộp hồ sơ mở công ty có thể nhờ người khác làm thay không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương I, Điều 12; diễn đạt không dùng 'ủy quyền', distractor là nộp hồ sơ trực tuyến."
+  },
+  {
+    "id": "q-035",
+    "query": "Hồ sơ đăng ký doanh nghiệp phải dùng ngôn ngữ nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương I, Điều 10; phân biệt yêu cầu giấy tờ pháp lý ở Điều 11."
+  },
+  {
+    "id": "q-036",
+    "query": "Điều 18 về đăng ký tên doanh nghiệp nói gì?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 18; số điều phân biệt tên doanh nghiệp với đổi tên."
+  },
+  {
+    "id": "q-037",
+    "query": "Tên dự kiến bị trùng hoặc gây nhầm lẫn thì doanh nghiệp xử lý ra sao?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 18; tránh thuật ngữ 'đăng ký tên', distractor quyền sở hữu công nghiệp."
+  },
+  {
+    "id": "q-038",
+    "query": "Thành lập công ty trách nhiệm hữu hạn một thành viên cần hồ sơ gì?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 24; phân biệt công ty một thành viên với hai thành viên."
+  },
+  {
+    "id": "q-039",
+    "query": "Điều 33 quy định thời hạn cấp Giấy chứng nhận đăng ký doanh nghiệp bao lâu?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 33; số điều là tín hiệu lexical, distractor thời hạn giải quyết xe."
+  },
+  {
+    "id": "q-040",
+    "query": "Sau khi nộp đủ giấy tờ thành lập, bao lâu nhận được giấy chứng nhận?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 33; không dùng 'đăng ký doanh nghiệp', tránh các thủ tục hành chính khác."
+  },
+  {
+    "id": "q-041",
+    "query": "Đăng ký doanh nghiệp qua mạng bằng chữ ký số thực hiện theo quy định nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 44; distractor là tài khoản đăng ký kinh doanh ở Điều 45."
+  },
+  {
+    "id": "q-042",
+    "query": "Doanh nghiệp muốn tạm ngừng kinh doanh phải thông báo như thế nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "01-2021-nd-cp-283247"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VII, Điều 66; phân biệt đình chỉ theo yêu cầu cơ quan ở Điều 67."
+  },
+  {
+    "id": "q-043",
+    "query": "Điều 11 Luật Đất đai 2024 liệt kê hành vi nào bị nghiêm cấm?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương I, Điều 11; mã luật và điều khoản là tín hiệu lexical."
+  },
+  {
+    "id": "q-044",
+    "query": "Những việc nào không được phép làm với đất theo luật hiện hành?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương I, Điều 11; tránh cụm 'hành vi bị nghiêm cấm', distractor quy định sử dụng đất."
+  },
+  {
+    "id": "q-045",
+    "query": "Công dân có quyền tiếp cận thông tin đất đai ra sao?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương II, Điều 24; phân biệt với trách nhiệm cung cấp thông tin của Nhà nước."
+  },
+  {
+    "id": "q-046",
+    "query": "Điều 45 nêu điều kiện chuyển nhượng quyền sử dụng đất là gì?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 45; số điều phân biệt quyền chuyển nhượng và điều kiện thực hiện."
+  },
+  {
+    "id": "q-047",
+    "query": "Muốn bán hoặc tặng thửa đất thì phải đáp ứng điều kiện gì?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 45; tránh thuật ngữ quyền sử dụng đất, distractor giao dịch nhà ở."
+  },
+  {
+    "id": "q-048",
+    "query": "Quy hoạch sử dụng đất cấp huyện được lập theo quy định nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 66; phân biệt quy hoạch cấp huyện với kế hoạch hằng năm."
+  },
+  {
+    "id": "q-049",
+    "query": "Điều 79 về thu hồi đất để phát triển kinh tế xã hội quy định các trường hợp nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VI, Điều 79; cụm điều khoản dài là tín hiệu lexical."
+  },
+  {
+    "id": "q-050",
+    "query": "Dự án vì lợi ích công cộng có thể lấy lại đất của dân trong trường hợp nào?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VI, Điều 79; tránh 'thu hồi đất', distractor quốc phòng an ninh."
+  },
+  {
+    "id": "q-051",
+    "query": "Bồi thường khi Nhà nước thu hồi đất được xác định theo nguyên tắc gì?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VII; phân biệt bồi thường, hỗ trợ và tái định cư."
+  },
+  {
+    "id": "q-052",
+    "query": "Hồ sơ địa chính đang xử lý khi Luật Đất đai mới có hiệu lực được giải quyết ra sao?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "31-2024-qh15-523642"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương XVI, Điều 256; quy định chuyển tiếp, distractor hiệu lực chung Điều 252."
+  },
+  {
+    "id": "q-053",
+    "query": "Điều 27 Luật Bảo hiểm xã hội 2024 quy định hồ sơ đăng ký tham gia thế nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 27; số điều tách khỏi hướng dẫn BHXH cũ."
+  },
+  {
+    "id": "q-054",
+    "query": "Muốn bắt đầu tham gia bảo hiểm xã hội thì cần nộp những giấy tờ nào?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 27; tránh 'hồ sơ đăng ký', distractor thành phần TK1-TS."
+  },
+  {
+    "id": "q-055",
+    "query": "Người lao động đóng bảo hiểm xã hội bắt buộc theo mức và thời hạn nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 33; phân biệt mức đóng người lao động và người sử dụng lao động."
+  },
+  {
+    "id": "q-056",
+    "query": "Điều 42 về chế độ ốm đau áp dụng cho đối tượng nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 42; số điều là tín hiệu lexical."
+  },
+  {
+    "id": "q-057",
+    "query": "Khi bản thân bị bệnh phải nghỉ làm, ai được hưởng quyền lợi từ quỹ bảo hiểm?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 42; tránh cụm 'chế độ ốm đau', distractor nghỉ thai sản."
+  },
+  {
+    "id": "q-058",
+    "query": "Thời gian nghỉ việc hưởng chế độ thai sản khi sinh con là bao lâu?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 53; phân biệt khám thai và sinh con."
+  },
+  {
+    "id": "q-059",
+    "query": "Điều 70 quy định hưởng bảo hiểm xã hội một lần trong các trường hợp nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 70; số điều phân biệt với BHXH tự nguyện."
+  },
+  {
+    "id": "q-060",
+    "query": "Người đã nghỉ việc có thể rút khoản đã đóng thay vì chờ lương hưu không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 70; không dùng thuật ngữ 'một lần', distractor bảo lưu."
+  },
+  {
+    "id": "q-061",
+    "query": "Quỹ bảo hiểm xã hội được hình thành từ những nguồn nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VII, Điều 117; phân biệt nguồn quỹ và cách sử dụng quỹ."
+  },
+  {
+    "id": "q-062",
+    "query": "Khiếu nại quyết định về bảo hiểm xã hội được giải quyết theo quy định nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "41-2024-qh15-557190"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IX, Điều 129; distractor tố cáo ở Điều 131."
+  },
+  {
+    "id": "q-063",
+    "query": "Điều 15 Luật Xuất cảnh, nhập cảnh của công dân Việt Nam quy định cấp hộ chiếu phổ thông trong nước thế nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 15; số điều tách khỏi hộ chiếu ở nước ngoài."
+  },
+  {
+    "id": "q-064",
+    "query": "Làm hộ chiếu phổ thông khi đang ở Việt Nam cần thực hiện ra sao?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 15; tránh cụm 'cấp hộ chiếu', distractor gia hạn hộ chiếu."
+  },
+  {
+    "id": "q-065",
+    "query": "Ai thuộc đối tượng được cấp hộ chiếu phổ thông?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 14; phân biệt hộ chiếu phổ thông với ngoại giao."
+  },
+  {
+    "id": "q-066",
+    "query": "Điều 21 nêu các trường hợp chưa được cấp giấy tờ xuất nhập cảnh?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 21; cụm điều khoản là tín hiệu lexical."
+  },
+  {
+    "id": "q-067",
+    "query": "Trong hoàn cảnh nào cơ quan có thể chưa cấp giấy tờ để ra nước ngoài?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương III, Điều 21; tránh thuật ngữ xuất nhập cảnh, distractor tạm hoãn."
+  },
+  {
+    "id": "q-068",
+    "query": "Hộ chiếu còn hạn bị mất thì thủ tục hủy giá trị sử dụng như thế nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương IV, Điều 28; phân biệt thu hồi hộ chiếu."
+  },
+  {
+    "id": "q-069",
+    "query": "Điều 36 quy định những trường hợp bị tạm hoãn xuất cảnh?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 36; số điều là tín hiệu lexical."
+  },
+  {
+    "id": "q-070",
+    "query": "Khi nào một người có thể bị ngăn rời khỏi Việt Nam trong thời gian nhất định?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 36; tránh cụm 'tạm hoãn xuất cảnh', distractor chưa cấp giấy tờ."
+  },
+  {
+    "id": "q-071",
+    "query": "Điều kiện nhập cảnh của công dân Việt Nam theo luật là gì?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương V, Điều 34; phân biệt điều kiện xuất cảnh."
+  },
+  {
+    "id": "q-072",
+    "query": "Cơ sở dữ liệu quốc gia về xuất cảnh, nhập cảnh lưu những thông tin nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "49-2019-qh14-402073"
+    ],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Chương VI, Điều 41; distractor trách nhiệm xây dựng dữ liệu."
+  },
+  {
+    "id": "q-073",
+    "query": "Mẫu CT04 được cấp khi tiếp nhận hồ sơ đăng ký tạm trú là gì?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-004194-1786097965866"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; mã mẫu phân biệt với CT01 hồ sơ."
+  },
+  {
+    "id": "q-074",
+    "query": "Đến đâu để nộp thủ tục ở nhờ tại nơi ở mới?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-004194-1786097965866"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN tạm trú; tránh thuật ngữ cư trú, distractor thường trú."
+  },
+  {
+    "id": "q-075",
+    "query": "Đăng ký tạm trú cần chuẩn bị tờ khai thay đổi thông tin cư trú nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-004194-1786097965866"
+    ],
+    "expected_sections": [
+      "Trường hợp 1: * Hồ sơ đăng ký tạm trú gồm:"
+    ],
+    "email_body": null,
+    "notes": "THÀNH PHẦN HỒ SƠ; phân biệt giấy tờ chứng minh chỗ ở hợp pháp."
+  },
+  {
+    "id": "q-076",
+    "query": "Nghị quyết 05/2025/NQ-CP liên quan khai thuế tài sản mã hóa thế nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115132-1786096253281"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; mã nghị quyết phân biệt luật thuế chung."
+  },
+  {
+    "id": "q-077",
+    "query": "Bên cung cấp dịch vụ tiền mã hóa phải nộp tờ khai vào thời điểm nào?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115132-1786096253281"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; tránh tên thủ tục dài, distractor thuế điện tử."
+  },
+  {
+    "id": "q-078",
+    "query": "Thủ tục khai thuế thay cho người có thu nhập từ chuyển nhượng tài sản mã hóa nộp ở đâu?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115132-1786096253281"
+    ],
+    "expected_sections": [
+      "CƠ QUAN THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "CƠ QUAN THỰC HIỆN; phân biệt Cục Thuế và cổng nộp tờ khai."
+  },
+  {
+    "id": "q-079",
+    "query": "Quyết định 4685/QĐ-BCA-C08 áp dụng cho đăng ký xe nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115970-1786097982328"
+    ],
+    "expected_sections": [
+      "CHI TIẾT THỦ TỤC HÀNH CHÍNH"
+    ],
+    "email_body": null,
+    "notes": "CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt hướng dẫn đăng ký xe cũ."
+  },
+  {
+    "id": "q-080",
+    "query": "Có thể làm thủ tục cấp lại biển số trực tuyến bằng ứng dụng định danh không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115970-1786097982328"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; tránh từ 'đăng ký xe', distractor cấp lại căn cước."
+  },
+  {
+    "id": "q-081",
+    "query": "Đăng ký sang tên xe cần kê khai và nộp hồ sơ theo trình tự nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-115970-1786097982328"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; phân biệt đăng ký lần đầu."
+  },
+  {
+    "id": "q-082",
+    "query": "Quyết định 4836/QĐ-UBND quy định thủ tục cấp Giấy chứng nhận đất lần đầu nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-116194-1786096137126"
+    ],
+    "expected_sections": [
+      "Tên thủ tục"
+    ],
+    "email_body": null,
+    "notes": "CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt Luật Đất đai."
+  },
+  {
+    "id": "q-083",
+    "query": "Người đang sử dụng đất chưa có sổ cần nộp hồ sơ ở đâu để được cấp lần đầu?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-116194-1786096137126"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; tránh tên Giấy chứng nhận, distractor đăng ký biến động."
+  },
+  {
+    "id": "q-084",
+    "query": "Nộp hồ sơ đăng ký đất đai lần đầu trực tuyến qua cổng nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-1-116194-1786096137126"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; phân biệt địa điểm nộp trực tiếp."
+  },
+  {
+    "id": "q-085",
+    "query": "Quyết định 5710/QĐ-BCA-C06 quy định cấp lại thẻ căn cước ở cấp nào?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-2-001194-1786096928665"
+    ],
+    "expected_sections": [
+      "CHI TIẾT THỦ TỤC HÀNH CHÍNH"
+    ],
+    "email_body": null,
+    "notes": "CHI TIẾT THỦ TỤC HÀNH CHÍNH; mã quyết định phân biệt cấp xã."
+  },
+  {
+    "id": "q-086",
+    "query": "Mất thẻ định danh thì có thể làm lại tại nơi khác nơi cư trú không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-2-001194-1786096928665"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; tránh cụm căn cước, distractor cấp đổi CCCD."
+  },
+  {
+    "id": "q-087",
+    "query": "Cấp lại thẻ căn cước cần thu nhận dữ liệu sinh trắc nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-2-001194-1786096928665"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; phân biệt trường hợp mất thẻ và trở lại quốc tịch."
+  },
+  {
+    "id": "q-088",
+    "query": "Mẫu TK01 dùng để đề nghị cấp tài khoản định danh điện tử mức 2?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-3-000228-1786096860852"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; mã mẫu phân biệt thủ tục VNeID khác."
+  },
+  {
+    "id": "q-089",
+    "query": "Người đã có thẻ gắn chip cần làm gì để có danh tính số mức cao?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-3-000228-1786096860852"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; tránh 'định danh điện tử', distractor cấp lại thẻ."
+  },
+  {
+    "id": "q-090",
+    "query": "Đăng ký tài khoản định danh điện tử mức 02 tại công an xã cần thông tin nào?",
+    "probe": "mixed",
+    "expected_document_ids": [
+      "chi-tiet-thu-tuc-3-000228-1786096860852"
+    ],
+    "expected_sections": [
+      "TRÌNH TỰ THỰC HIỆN"
+    ],
+    "email_body": null,
+    "notes": "TRÌNH TỰ THỰC HIỆN; phân biệt số thuê bao và thông tin tích hợp."
+  },
+  {
+    "id": "q-091",
+    "query": "Mẫu CT01 là giấy tờ nào trong hồ sơ đăng ký tạm trú?",
+    "probe": "lexical",
+    "expected_document_ids": [
+      "dang-ky-tam-tru"
+    ],
+    "expected_sections": [
+      "2. Thành phần hồ sơ"
+    ],
+    "email_body": null,
+    "notes": "2. Thành phần hồ sơ; mã mẫu phân biệt CT04 quy trình."
+  },
+  {
+    "id": "q-092",
+    "query": "Làm đăng ký ở nhờ trực tuyến thì thường mất bao lâu và có mất phí không?",
+    "probe": "semantic",
+    "expected_document_ids": [
+      "dang-ky-tam-tru"
+    ],
+    "expected_sections": [
+      "3. Thời hạn giải quyết & Lệ phí"
+    ],
+    "email_body": null,
+    "notes": "3. Thời hạn giải quyết & Lệ phí; hai-case allocation makes mixed probe inapplicable."
+  },
+  {
+    "id": "q-093",
+    "query": "Thủ tục xin cấp giấy phép xây dựng nhà ở riêng lẻ cần làm thế nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor thủ tục đất đai."
+  },
+  {
+    "id": "q-094",
+    "query": "Điều kiện nhận trợ cấp thất nghiệp sau khi nghỉ việc là gì?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor bảo hiểm xã hội."
+  },
+  {
+    "id": "q-095",
+    "query": "Đổi giấy phép lái xe trực tuyến cần chuẩn bị hồ sơ nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor đăng ký xe."
+  },
+  {
+    "id": "q-096",
+    "query": "Muốn đăng ký khai sinh cho trẻ sơ sinh cần đến đâu?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor đăng ký kết hôn."
+  },
+  {
+    "id": "q-097",
+    "query": "Thủ tục hưởng trợ cấp bảo hiểm y tế khi khám bệnh như thế nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; BHYT không phải BHXH."
+  },
+  {
+    "id": "q-098",
+    "query": "Nộp hồ sơ xin visa du lịch nước ngoài cần giấy tờ gì?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor hộ chiếu."
+  },
+  {
+    "id": "q-099",
+    "query": "Cách đăng ký bảo hộ sáng chế tại Việt Nam?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor tên doanh nghiệp."
+  },
+  {
+    "id": "q-100",
+    "query": "Quy trình xin cấp chứng chỉ hành nghề luật sư gồm những bước nào?",
+    "probe": "unanswerable",
+    "expected_document_ids": [],
+    "expected_sections": [],
+    "email_body": null,
+    "notes": "Ngoài corpus; distractor văn bản pháp luật."
+  }
 ]
