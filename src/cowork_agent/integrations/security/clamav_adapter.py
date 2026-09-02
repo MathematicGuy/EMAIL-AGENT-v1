@@ -43,8 +43,16 @@ class ClamAVScanner:
         self,
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """Open a socket connection to clamd (UNIX domain socket or TCP)."""
-        if self._socket_path and Path(self._socket_path).exists():
-            return await asyncio.open_unix_connection(self._socket_path)
+        if (
+            self._socket_path
+            and Path(self._socket_path).exists()
+            and hasattr(asyncio, "open_unix_connection")
+        ):
+            open_unix = getattr(asyncio, "open_unix_connection")  # noqa: B009
+            res: tuple[asyncio.StreamReader, asyncio.StreamWriter] = await open_unix(
+                self._socket_path
+            )
+            return res
         return await asyncio.open_connection(self._host, self._port)
 
     async def ping(self) -> bool:
