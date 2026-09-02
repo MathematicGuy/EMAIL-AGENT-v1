@@ -24,7 +24,7 @@ flowchart TB
     subgraph API_GW["FastAPI Control Plane API (mail-todo-api)"]
         COMP["Typed Composition Root (CoworkRuntime)<br/>Pure Settings Loader (config.py)"]
         AUTH["Identity & Session Security<br/>(Google OAuth / Linked Outlook PKCE / Fernet Cipher)"]
-        
+
         subgraph ROUTERS["Transport Routers (api/*.py)"]
             ROUTER_MAIL["/v1/mail-todo/*"]
             ROUTER_CHAT["/v1/cowork/chat/*"]
@@ -70,7 +70,7 @@ flowchart TB
     CLI --> CORPUS_COMPANY
 
     SUB_EMAIL -.->|Retrieve Hybrid| VEC_COMPANY
-    SUB_CHAT -.->|Company RAG (Gated)| VEC_COMPANY
+    SUB_CHAT -.->|Gated Company RAG| VEC_COMPANY
     SUB_CHAT -.->|Project RAG| VEC_PROJECT
     WORKER_DOC --> VEC_PROJECT
     INGEST --> CORPUS_COMPANY
