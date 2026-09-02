@@ -5,25 +5,39 @@ import type { ChatRagEvidence, ChatRetrievalStatus } from '../types';
 interface RagEvidencePanelProps {
   evidence: ChatRagEvidence[];
   retrievalStatus?: ChatRetrievalStatus;
+  onLoadFullEvidence?: (chunkId: string) => Promise<ChatRagEvidence | null>;
 }
 
 function summaryText(evidence: ChatRagEvidence[], retrievalStatus?: ChatRetrievalStatus): string {
   if (evidence.length > 0) {
-    return `RAG evidence · ${evidence.length} chunk${evidence.length === 1 ? '' : 's'} · ${retrievalStatus ?? 'success'}`;
+    return `Bằng chứng RAG · ${evidence.length} đoạn · ${retrievalStatus === 'success' ? 'thành công' : retrievalStatus ?? 'thành công'}`;
   }
-  return `RAG evidence · ${retrievalStatus === 'no_results' ? 'no results' : retrievalStatus ?? 'unavailable'}`;
+  return `Bằng chứng RAG · ${retrievalStatus === 'no_results' ? 'không có kết quả' : retrievalStatus ?? 'không khả dụng'}`;
 }
 
 function emptyMessage(retrievalStatus?: ChatRetrievalStatus): string {
-  if (retrievalStatus === 'no_results') return 'No matching chunks were retrieved.';
-  if (retrievalStatus === 'timeout') return 'Retrieval timed out before any chunks were returned.';
-  return 'Retrieval was unavailable for this response.';
+  if (retrievalStatus === 'no_results') return 'Không tìm thấy đoạn trích dẫn phù hợp.';
+  if (retrievalStatus === 'timeout') return 'Quá thời gian tìm kiếm trích dẫn.';
+  return 'Tìm kiếm trích dẫn không khả dụng cho phản hồi này.';
 }
 
-export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanelProps) {
+export function RagEvidencePanel({
+  evidence,
+  retrievalStatus,
+  onLoadFullEvidence,
+}: RagEvidencePanelProps) {
   const [selectedEvidence, setSelectedEvidence] = useState<ChatRagEvidence | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  const openFullChunk = async (item: ChatRagEvidence) => {
+    if (item.content) {
+      setSelectedEvidence(item);
+      return;
+    }
+    const full = onLoadFullEvidence ? await onLoadFullEvidence(item.chunkId) : null;
+    setSelectedEvidence(full ?? { ...item, content: item.preview });
+  };
 
   useEffect(() => {
     if (selectedEvidence) closeButtonRef.current?.focus();
@@ -55,16 +69,16 @@ export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanel
                 {item.section && <span className="text-zinc-500">{item.section}</span>}
               </div>
               <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-zinc-400">
-                <span>Relevance {item.relevanceScore.toFixed(3)}</span>
-                {item.rerankScore !== null && <span>Rerank {item.rerankScore.toFixed(3)}</span>}
+                <span>Độ liên quan {item.relevanceScore.toFixed(3)}</span>
+                {item.rerankScore !== null && <span>Điểm xếp hạng {item.rerankScore.toFixed(3)}</span>}
               </div>
               <p className="mt-2 whitespace-pre-wrap text-zinc-300">{item.preview}</p>
               <button
                 type="button"
-                onClick={() => setSelectedEvidence(item)}
+                onClick={() => { void openFullChunk(item); }}
                 className="mt-2 rounded-md border border-[#5a5149] px-2 py-1 text-zinc-200 hover:bg-[#38342f]"
               >
-                View full chunk
+                Xem toàn bộ đoạn
               </button>
             </article>
           ))}
@@ -74,7 +88,7 @@ export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanel
       {selectedEvidence && (
         <dialog
           open
-          aria-label={`Retrieved chunk: ${selectedEvidence.documentTitle}`}
+          aria-label={`Đoạn trích dẫn: ${selectedEvidence.documentTitle}`}
           onCancel={(event) => { event.preventDefault(); setSelectedEvidence(null); }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') setSelectedEvidence(null);
@@ -90,13 +104,13 @@ export function RagEvidencePanel({ evidence, retrievalStatus }: RagEvidencePanel
               ref={closeButtonRef}
               type="button"
               onClick={() => setSelectedEvidence(null)}
-              aria-label="Close full chunk"
+              aria-label="Đóng toàn bộ đoạn"
               className="rounded-md p-1 text-zinc-400 hover:bg-[#38342f] hover:text-zinc-100"
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
-          <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-6">{selectedEvidence.content}</p>
+          <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-6">{selectedEvidence.content || selectedEvidence.preview}</p>
         </dialog>
       )}
     </>

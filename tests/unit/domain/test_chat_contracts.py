@@ -12,7 +12,7 @@ from cowork_agent.domain.chat_contracts import (
     AI_CHAT_FEATURE,
     CHAT_CONTRACTS_VERSION,
     MAX_CHAT_MESSAGE_LENGTH,
-    MAX_CHAT_SUMMARY_LENGTH,
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH,
     MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH,
     MAX_EPISODE_CITATION_SECTION_LENGTH,
@@ -28,6 +28,11 @@ from cowork_agent.domain.chat_contracts import (
     MAX_TASK_RAG_CITATIONS,
     MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
     MAX_TASK_TITLE_LENGTH,
+    ChatActivity,
+    ChatActivityCode,
+    ChatActivityDetail,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
@@ -41,6 +46,7 @@ from cowork_agent.domain.chat_contracts import (
     EpisodeTransition,
     EpisodicMemoryQuery,
     EpisodicMemoryRead,
+    MailScanSummary,
     MemoryCitationType,
     MemoryContextRequest,
     MemoryContextResponse,
@@ -53,15 +59,16 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryRead,
     TaskEpisode,
     stream_event_from_dict,
+    transition_activity_snapshot,
 )
 from cowork_agent.domain.target_contracts import ValidationStatus
+
+ACTIVITY_NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 
 
 def _namespace(*, record_id: str | None = "record-1") -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope(
-            user_id="user@example.com", session_id="session-1"
-        ),
+        scope=ChatMemoryScope(user_id="user@example.com", session_id="session-1"),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
         source_id="gmail-message-1",
@@ -98,6 +105,18 @@ def _episode() -> TaskEpisode:
         prompt_version=None,
         confidence=0.87,
     )
+
+
+def test_task_episode_round_trips_a_supersedes_link_and_rejects_a_self_reference() -> None:
+    """Concern D: the link is what lets retrieval retire a corrected episode."""
+    revision = replace(_episode(), episode_id="episode-2", supersedes="episode-1")
+
+    assert revision.to_dict()["supersedes"] == "episode-1"
+    assert TaskEpisode.from_dict(revision.to_dict()) == revision
+    assert _episode().supersedes is None
+
+    with pytest.raises(ValueError, match="supersedes must not reference the episode itself"):
+        replace(_episode(), supersedes="episode-1")
 
 
 def _task_proposal_payload() -> dict[str, object]:
@@ -138,9 +157,7 @@ def _chat_summary_episode() -> ChatSummaryEpisode:
 def _context_request() -> MemoryContextRequest:
     return MemoryContextRequest(
         session_id="session-1",
-        scope=ChatMemoryScope(
-            user_id="user@example.com", session_id="session-1"
-        ),
+        scope=ChatMemoryScope(user_id="user@example.com", session_id="session-1"),
         reads=MemoryReadOptions(
             short_term=True,
             long_term=True,
@@ -179,6 +196,37 @@ def _chat_turn() -> ChatTurn:
         assistant_message="I can help you prioritize the request.",
         created_at=datetime(2026, 8, 10, 9, 0, tzinfo=UTC),
     )
+
+
+def test_chat_turn_round_trips_durable_generation_lifecycle() -> None:
+    turn = ChatTurn(
+        turn_id="turn-pending",
+        session_id="session-1",
+        user_message="Keep this prompt while the reply is generating.",
+        assistant_message=None,
+        created_at=datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
+        status="generating",
+        idempotency_key="submission-1",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["status"] == "generating"
+    assert turn.to_dict()["idempotency_key"] == "submission-1"
+
+
+def test_chat_turn_round_trips_terminal_failure_code() -> None:
+    turn = ChatTurn(
+        turn_id="turn-failed",
+        session_id="session-1",
+        user_message="Try a provider-limited request.",
+        assistant_message=None,
+        created_at=datetime(2026, 8, 17, 9, 1, tzinfo=UTC),
+        status="rate_limited",
+        idempotency_key="submission-2",
+        error_code="provider_rate_limit",
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
 
 
 def _rag_evidence():
@@ -232,6 +280,32 @@ def test_chat_turn_round_trips_bounded_rag_evidence_with_scores_and_content() ->
     ]
 
 
+def test_chat_turn_round_trips_safe_mail_scan_aggregates() -> None:
+    turn = ChatTurn(
+        turn_id="mail-turn-1",
+        session_id="session-1",
+        user_message="@mail",
+        assistant_message="Đã quét xong: đã quét 10 email và tạo 5 action item.",
+        created_at=datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+        mail_scan=MailScanSummary(
+            status="succeeded",
+            emails_matched=201,
+            emails_processed=10,
+            emails_to_process=10,
+            action_items_count=5,
+        ),
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert turn.to_dict()["mail_scan"] == {
+        "status": "succeeded",
+        "emails_matched": 201,
+        "emails_processed": 10,
+        "emails_to_process": 10,
+        "action_items_count": 5,
+    }
+
+
 def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status() -> None:
     event = ChatMessageStreamEvent.completed(
         event_id="event-4",
@@ -245,9 +319,8 @@ def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status()
     assert event.to_dict()["retrieval_status"] == "success"
 
 
-@pytest.mark.parametrize(
-    "event",
-    [
+def test_non_completed_stream_events_reject_rag_evidence() -> None:
+    events = [
         ChatMessageStreamEvent.delta(
             event_id="event-1", session_id="session-1", turn_id="turn-1", text="Hello"
         ),
@@ -271,21 +344,47 @@ def test_completed_stream_event_round_trips_rag_evidence_with_retrieval_status()
             code="memory_degraded",
             safe_message="Some optional context was unavailable.",
         ),
-    ],
-)
-def test_non_completed_stream_events_reject_rag_evidence(event: ChatMessageStreamEvent) -> None:
-    with pytest.raises(ValueError, match="completed"):
-        replace(event, rag_evidence=(_rag_evidence(),), retrieval_status="success")
+    ]
+    for event in events:
+        with pytest.raises(ValueError, match="completed"):
+            replace(event, rag_evidence=(_rag_evidence(),), retrieval_status="success")
 
 
-def test_rag_evidence_rejects_scores_outside_the_unit_interval() -> None:
+def test_chat_turn_and_stream_event_rag_evidence_bounds() -> None:
     with pytest.raises(ValueError, match="relevance_score"):
         replace(_rag_evidence(), relevance_score=1.001)
 
+    turn = replace(
+        _chat_turn(),
+        rag_evidence=(_rag_evidence(),) * MAX_CHAT_RAG_EVIDENCE_ITEMS,
+        retrieval_status="success",
+    )
+    assert len(turn.rag_evidence) == MAX_CHAT_RAG_EVIDENCE_ITEMS
 
-def test_chat_turn_rejects_more_than_five_rag_evidence_records() -> None:
     with pytest.raises(ValueError, match="rag_evidence"):
-        replace(_chat_turn(), rag_evidence=(_rag_evidence(),) * 6, retrieval_status="success")
+        replace(
+            _chat_turn(),
+            rag_evidence=(_rag_evidence(),) * (MAX_CHAT_RAG_EVIDENCE_ITEMS + 1),
+            retrieval_status="success",
+        )
+
+    event = ChatMessageStreamEvent.completed(
+        event_id="e1",
+        session_id="s1",
+        turn_id="t1",
+        rag_evidence=(_rag_evidence(),) * MAX_CHAT_RAG_EVIDENCE_ITEMS,
+        retrieval_status="success",
+    )
+    assert len(event.rag_evidence) == MAX_CHAT_RAG_EVIDENCE_ITEMS
+
+    with pytest.raises(ValueError, match="rag_evidence"):
+        ChatMessageStreamEvent.completed(
+            event_id="e1",
+            session_id="s1",
+            turn_id="t1",
+            rag_evidence=(_rag_evidence(),) * (MAX_CHAT_RAG_EVIDENCE_ITEMS + 1),
+            retrieval_status="success",
+        )
 
 
 def _profile() -> DeclarativeProfile:
@@ -323,9 +422,8 @@ def _provenance() -> MemoryProvenance:
     )
 
 
-@pytest.mark.parametrize(
-    "build",
-    [
+def test_contracts_round_trip_through_json() -> None:
+    builders = (
         _namespace,
         _episode,
         _context_request,
@@ -334,24 +432,12 @@ def _provenance() -> MemoryProvenance:
         _profile,
         _transition,
         _provenance,
-    ],
-    ids=[
-        "namespace",
-        "episode",
-        "context_request",
-        "context_response",
-        "chat_turn",
-        "profile",
-        "transition",
-        "provenance",
-    ],
-)
-def test_contracts_round_trip_through_json(build) -> None:
-    instance = build()
-    payload = instance.to_dict()
-
-    assert type(instance).from_dict(payload) == instance
-    assert type(instance).from_dict(json.loads(json.dumps(payload))) == instance
+    )
+    for build in builders:
+        instance = build()
+        payload = instance.to_dict()
+        assert type(instance).from_dict(payload) == instance
+        assert type(instance).from_dict(json.loads(json.dumps(payload))) == instance
 
 
 def test_chat_message_request_round_trips_without_a_tool_choice_contract() -> None:
@@ -367,22 +453,37 @@ def test_chat_message_request_round_trips_without_a_tool_choice_contract() -> No
     assert "ChatToolChoice" not in chat_contracts.__all__
 
 
-def test_chat_message_request_accepts_the_exact_message_length_limit() -> None:
+def test_chat_message_request_round_trips_and_bounds() -> None:
     request = ChatMessageRequest(
+        session_id="session-1",
+        user_message="Help me make an action plan.",
+        idempotency_key="idem-1",
+    )
+
+    assert ChatMessageRequest.from_dict(json.loads(json.dumps(request.to_dict()))) == request
+    assert "tool_choices" not in request.to_dict()
+    assert not hasattr(chat_contracts, "ChatToolChoice")
+    assert "ChatToolChoice" not in chat_contracts.__all__
+
+    exact_length_req = ChatMessageRequest(
         session_id="session-1",
         user_message="x" * MAX_CHAT_MESSAGE_LENGTH,
         idempotency_key="idem-1",
     )
+    assert exact_length_req.user_message == "x" * MAX_CHAT_MESSAGE_LENGTH
 
-    assert request.user_message == "x" * MAX_CHAT_MESSAGE_LENGTH
-
-
-def test_chat_message_request_rejects_a_message_above_the_contract_limit() -> None:
     with pytest.raises(ValueError, match="user_message"):
         ChatMessageRequest(
             session_id="session-1",
             user_message="x" * (MAX_CHAT_MESSAGE_LENGTH + 1),
             idempotency_key="idem-1",
+        )
+
+    with pytest.raises(ValueError, match="idempotency_key"):
+        ChatMessageRequest(
+            session_id="session-1",
+            user_message="Help me plan.",
+            idempotency_key="x" * 129,
         )
 
 
@@ -432,13 +533,9 @@ def test_disabled_retrieval_requests_keep_the_legacy_shape_and_round_trip() -> N
     assert MemoryReadOptions.from_dict(reads.to_dict()) == reads
 
 
-@pytest.mark.parametrize(
-    ("build", "match"),
-    [
-        (
-            lambda: EpisodicMemoryQuery(query=" ", max_items=1, min_score=0.0, timeout_ms=1),
-            "query",
-        ),
+def test_enabled_retrieval_requests_reject_untrusted_or_unbounded_values() -> None:
+    cases: list[tuple[object, str]] = [
+        (lambda: EpisodicMemoryQuery(query=" ", max_items=1, min_score=0.0, timeout_ms=1), "query"),
         (
             lambda: SemanticMemoryQuery(
                 query="x" * (MAX_RETRIEVAL_QUERY_LENGTH + 1),
@@ -505,18 +602,14 @@ def test_disabled_retrieval_requests_keep_the_legacy_shape_and_round_trip() -> N
             ),
             "timeout_ms",
         ),
-    ],
-)
-def test_enabled_retrieval_requests_reject_untrusted_or_unbounded_values(
-    build: object, match: str
-) -> None:
-    with pytest.raises((TypeError, ValueError), match=match):
-        build()  # type: ignore[operator]
+    ]
+    for build, match in cases:
+        with pytest.raises((TypeError, ValueError), match=match):
+            build()  # type: ignore[operator]
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
+def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters() -> None:
+    payloads = [
         {
             "enabled": True,
             "query": "approved work",
@@ -533,37 +626,33 @@ def test_enabled_retrieval_requests_reject_untrusted_or_unbounded_values(
             "min_score": 0.0,
             "timeout_ms": 1,
         },
-    ],
-)
-def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters(
-    payload: dict[str, object],
-) -> None:
-    with pytest.raises(ValueError):
-        if "retrieval_eligible_only" in payload:
-            MemoryReadOptions.from_dict(
-                {
-                    "short_term": False,
-                    "long_term": False,
-                    "episodic": payload,
-                    "semantic": SemanticMemoryRead(enabled=False).to_dict(),
-                }
-            )
-        else:
-            MemoryReadOptions.from_dict(
-                {
-                    "short_term": False,
-                    "long_term": False,
-                    "episodic": EpisodicMemoryRead(
-                        enabled=False, retrieval_eligible_only=True, max_items=1
-                    ).to_dict(),
-                    "semantic": payload,
-                }
-            )
+    ]
+    for payload in payloads:
+        with pytest.raises(ValueError):
+            if "retrieval_eligible_only" in payload:
+                MemoryReadOptions.from_dict(
+                    {
+                        "short_term": False,
+                        "long_term": False,
+                        "episodic": payload,
+                        "semantic": SemanticMemoryRead(enabled=False).to_dict(),
+                    }
+                )
+            else:
+                MemoryReadOptions.from_dict(
+                    {
+                        "short_term": False,
+                        "long_term": False,
+                        "episodic": EpisodicMemoryRead(
+                            enabled=False, retrieval_eligible_only=True, max_items=1
+                        ).to_dict(),
+                        "semantic": payload,
+                    }
+                )
 
 
-@pytest.mark.parametrize(
-    "event",
-    [
+def test_typed_stream_event_variants_round_trip() -> None:
+    events = [
         ChatMessageStreamEvent.delta(
             event_id="event-1", session_id="session-1", turn_id="turn-1", text="Hello"
         ),
@@ -590,18 +679,14 @@ def test_enabled_retrieval_deserialization_rejects_non_contract_fixed_filters(
             code="memory_degraded",
             safe_message="Some optional context was unavailable.",
         ),
-    ],
-    ids=["delta", "memory_citation", "task_proposal", "completed", "error"],
-)
-def test_typed_stream_event_variants_round_trip(event: ChatMessageStreamEvent) -> None:
-    payload = event.to_dict()
-
-    assert stream_event_from_dict(json.loads(json.dumps(payload))) == event
+    ]
+    for event in events:
+        payload = event.to_dict()
+        assert stream_event_from_dict(json.loads(json.dumps(payload))) == event
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
+def test_task_proposal_event_rejects_untrusted_or_unbounded_payloads() -> None:
+    changes = [
         {"raw_email": "forbidden"},
         {"tool_payload": {"name": "forbidden"}},
         {"extra": "not in the frontend contract"},
@@ -613,20 +698,16 @@ def test_typed_stream_event_variants_round_trip(event: ChatMessageStreamEvent) -
         {"rag_citations": [{"document_id": "incomplete"}]},
         {"validation_status": "unknown"},
         {"retrieval_eligible": 1},
-    ],
-)
-def test_task_proposal_event_rejects_untrusted_or_unbounded_payloads(
-    change: dict[str, object],
-) -> None:
-    proposal = {**_task_proposal_payload(), **change}
-
-    with pytest.raises((KeyError, TypeError, ValueError)):
-        ChatMessageStreamEvent.task_proposal(
-            event_id="event-1",
-            session_id="session-1",
-            turn_id="turn-1",
-            proposal=proposal,
-        )
+    ]
+    for change in changes:
+        proposal = {**_task_proposal_payload(), **change}
+        with pytest.raises((KeyError, TypeError, ValueError)):
+            ChatMessageStreamEvent.task_proposal(
+                event_id="event-1",
+                session_id="session-1",
+                turn_id="turn-1",
+                proposal=proposal,
+            )
 
 
 def test_task_proposal_event_requires_the_exact_frontend_safe_shape() -> None:
@@ -642,31 +723,26 @@ def test_task_proposal_event_requires_the_exact_frontend_safe_shape() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("status", "retrieval_eligible"),
-    [
+def test_task_proposal_event_rejects_inconsistent_retrieval_eligibility() -> None:
+    cases = [
         (ValidationStatus.SYSTEM_GENERATED.value, True),
         (ValidationStatus.USER_APPROVED.value, False),
         (ValidationStatus.COMPLETED.value, False),
         (ValidationStatus.REJECTED.value, True),
-    ],
-)
-def test_task_proposal_event_rejects_inconsistent_retrieval_eligibility(
-    status: str, retrieval_eligible: bool
-) -> None:
-    proposal = {
-        **_task_proposal_payload(),
-        "validation_status": status,
-        "retrieval_eligible": retrieval_eligible,
-    }
-
-    with pytest.raises(ValueError, match="retrieval_eligible"):
-        ChatMessageStreamEvent.task_proposal(
-            event_id="event-1",
-            session_id="session-1",
-            turn_id="turn-1",
-            proposal=proposal,
-        )
+    ]
+    for status, retrieval_eligible in cases:
+        proposal = {
+            **_task_proposal_payload(),
+            "validation_status": status,
+            "retrieval_eligible": retrieval_eligible,
+        }
+        with pytest.raises(ValueError, match="retrieval_eligible"):
+            ChatMessageStreamEvent.task_proposal(
+                event_id="event-1",
+                session_id="session-1",
+                turn_id="turn-1",
+                proposal=proposal,
+            )
 
 
 def test_stream_contract_has_no_tool_variants() -> None:
@@ -690,28 +766,13 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
     namespace = _namespace()
 
     assert namespace.feature == AI_CHAT_FEATURE
-    assert (
-        namespace.logical_key() == "user@example.com/session-1/ai_chat/episodic/record-1"
-    )
+    assert namespace.logical_key() == "user@example.com/session-1/ai_chat/episodic/record-1"
 
 
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {
-            "scope": {
-                "user_id": "   ",
-                "session_id": "session-1",
-                "feature": "ai_chat",
-            }
-        },
-        {
-            "scope": {
-                "user_id": "user@example.com",
-                "session_id": "",
-                "feature": "ai_chat",
-            }
-        },
+def test_namespace_fails_closed_for_missing_or_inconsistent_scope() -> None:
+    changes = [
+        {"scope": {"user_id": "   ", "session_id": "session-1", "feature": "ai_chat"}},
+        {"scope": {"user_id": "user@example.com", "session_id": "", "feature": "ai_chat"}},
         {
             "scope": {
                 "user_id": "user@example.com",
@@ -719,15 +780,12 @@ def test_namespace_constructs_a_stable_logical_key() -> None:
                 "feature": "email_action_plan",
             }
         },
-    ],
-    ids=["missing_user", "missing_session", "wrong_feature"],
-)
-def test_namespace_fails_closed_for_missing_or_inconsistent_scope(changes: dict[str, str]) -> None:
-    payload = _namespace().to_dict()
-    payload.update(changes)
-
-    with pytest.raises(ValueError):
-        MemoryNamespace.from_dict(payload)
+    ]
+    for change in changes:
+        payload = _namespace().to_dict()
+        payload.update(change)
+        with pytest.raises(ValueError):
+            MemoryNamespace.from_dict(payload)
 
 
 def test_namespace_refuses_to_construct_a_logical_key_without_a_record_id() -> None:
@@ -796,27 +854,22 @@ def test_context_response_rejects_non_json_semantic_context_values() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("status", "eligible"),
-    [
+def test_task_episode_rejects_an_inconsistent_retrieval_eligibility() -> None:
+    cases = [
         (ValidationStatus.SYSTEM_GENERATED, True),
         (ValidationStatus.USER_APPROVED, False),
         (ValidationStatus.COMPLETED, False),
         (ValidationStatus.REJECTED, True),
-    ],
-)
-def test_task_episode_rejects_an_inconsistent_retrieval_eligibility(
-    status: ValidationStatus, eligible: bool
-) -> None:
-    payload = _episode().to_dict()
-    payload["validation_status"] = status.value
-    payload["retrieval_eligible"] = eligible
-
-    with pytest.raises(ValueError, match="retrieval_eligible"):
-        TaskEpisode.from_dict(payload)
+    ]
+    for status, eligible in cases:
+        payload = _episode().to_dict()
+        payload["validation_status"] = status.value
+        payload["retrieval_eligible"] = eligible
+        with pytest.raises(ValueError, match="retrieval_eligible"):
+            TaskEpisode.from_dict(payload)
 
 
-def test_task_episode_has_no_raw_email_body_field() -> None:
+def test_all_contracts_have_no_raw_email_body_or_legacy_fields() -> None:
     forbidden = {
         "body",
         "raw_email",
@@ -827,82 +880,34 @@ def test_task_episode_has_no_raw_email_body_field() -> None:
         "gmail_message_id",
         "gmail_url",
     }
-
     assert not forbidden.intersection(field.name for field in fields(TaskEpisode))
     assert not forbidden.intersection(_episode().to_dict())
-
-
-def test_memory_provenance_has_no_email_or_run_ownership_fields() -> None:
-    forbidden = {"source_tool", "run_id", "gmail_message_id", "gmail_url"}
-
-    assert not forbidden.intersection(field.name for field in fields(MemoryProvenance))
-    assert not forbidden.intersection(_provenance().to_dict())
-
-
-@pytest.mark.parametrize("removed_field", ["source_tool", "run_id"])
-def test_memory_provenance_from_dict_rejects_removed_ownership_fields(
-    removed_field: str,
-) -> None:
-    payload = {**_provenance().to_dict(), removed_field: "legacy-value"}
-
-    with pytest.raises(ValueError, match="unexpected field"):
-        MemoryProvenance.from_dict(payload)
-
-
-def test_chat_summary_episode_round_trips_with_the_bounded_system_contract() -> None:
-    episode = _chat_summary_episode()
-
-    assert ChatSummaryEpisode.from_dict(json.loads(json.dumps(episode.to_dict()))) == episode
-    assert MAX_CHAT_SUMMARY_LENGTH == 500
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"episode_id": ""},
-        {"summary": "x" * (MAX_CHAT_SUMMARY_LENGTH + 1)},
-        {"validation_status": ValidationStatus.USER_APPROVED.value},
-        {"retrieval_eligible": True},
-        {"source_type": EpisodeSourceType.SYSTEM_GENERATED_CHAT_TASK.value},
-        {"updated_at": "2026-08-10T08:59:00+00:00"},
-        {"expires_at": "2026-08-10T09:00:00+00:00"},
-        {"confidence": True},
-    ],
-)
-def test_chat_summary_episode_rejects_invalid_lifecycle_or_untrusted_shape(
-    change: dict[str, object],
-) -> None:
-    payload = {**_chat_summary_episode().to_dict(), **change}
-
-    with pytest.raises((TypeError, ValueError)):
-        ChatSummaryEpisode.from_dict(payload)
-
-
-def test_chat_summary_episode_from_dict_recursively_rejects_raw_email_shaped_keys() -> None:
-    payload = {**_chat_summary_episode().to_dict(), "metadata": {"raw_email": "forbidden"}}
-
-    with pytest.raises(ValueError, match="raw email"):
-        ChatSummaryEpisode.from_dict(payload)
-
-
-def test_chat_summary_episode_has_no_raw_email_or_transcript_fields() -> None:
-    forbidden = {
+    assert not {"source_tool", "run_id", "gmail_message_id", "gmail_url"}.intersection(
+        field.name for field in fields(MemoryProvenance)
+    )
+    assert not {
         "body",
         "raw_email",
         "normalized_body",
         "attachment_content",
         "transcript",
         "tool_payload",
-    }
+    }.intersection(field.name for field in fields(ChatSummaryEpisode))
+    for build in (_episode, _profile, _provenance, _chat_turn):
+        assert not {
+            "body",
+            "raw_email",
+            "normalized_body",
+            "attachment_content",
+            "tool_payload",
+        }.intersection(field.name for field in fields(type(build())))
 
-    assert not forbidden.intersection(field.name for field in fields(ChatSummaryEpisode))
 
-
-@pytest.mark.parametrize("build", [_episode, _profile, _provenance, _chat_turn])
-def test_durable_contracts_have_no_raw_email_shaped_fields(build) -> None:
-    forbidden = {"body", "raw_email", "normalized_body", "attachment_content", "tool_payload"}
-
-    assert not forbidden.intersection(field.name for field in fields(type(build())))
+def test_memory_provenance_from_dict_rejects_removed_ownership_fields() -> None:
+    for removed_field in ["source_tool", "run_id"]:
+        payload = {**_provenance().to_dict(), removed_field: "legacy-value"}
+        with pytest.raises(ValueError, match="unexpected field"):
+            MemoryProvenance.from_dict(payload)
 
 
 def test_task_episode_requires_the_explicit_user_task_request_creation_reason() -> None:
@@ -932,68 +937,45 @@ def test_task_episode_contract_version_and_compact_bounds_are_public() -> None:
     ) == (256, 300, 300, 2_048)
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "match"),
-    [
-        ("task_title", "x" * 201, "task_title"),
-        ("minimal_request_paraphrase", "x" * 1_001, "minimal_request_paraphrase"),
-        ("action_plan", ("x",) * 21, "action_plan"),
-        ("action_plan", ("x" * 501,), "action_plan"),
-        ("missing_information", ("x",) * 21, "missing_information"),
-        ("missing_information", ("x" * 501,), "missing_information"),
-        ("rag_citations", (_episode().rag_citations[0],) * 21, "rag_citations"),
-    ],
-)
-def test_task_episode_direct_construction_enforces_compact_bounds(
-    field: str, value: object, match: str
-) -> None:
-    with pytest.raises(ValueError, match=match):
-        replace(_episode(), **{field: value})
+def test_task_episode_enforces_compact_bounds_direct_and_from_dict() -> None:
+    cases = [
+        ("task_title", "x" * 201, "task_title", "x" * 201),
+        ("minimal_request_paraphrase", "x" * 1_001, "minimal_request_paraphrase", "x" * 1_001),
+        ("action_plan", ("x",) * 21, "action_plan", ["x"] * 21),
+        ("action_plan", ("x" * 501,), "action_plan", ["x" * 501]),
+        ("missing_information", ("x",) * 21, "missing_information", ["x"] * 21),
+        ("missing_information", ("x" * 501,), "missing_information", ["x" * 501]),
+        (
+            "rag_citations",
+            (_episode().rag_citations[0],) * 21,
+            "rag_citations",
+            [_episode().rag_citations[0].to_dict()] * 21,
+        ),
+    ]
+    for field_name, direct_val, match, dict_val in cases:
+        with pytest.raises(ValueError, match=match):
+            replace(_episode(), **{field_name: direct_val})
+        payload = _episode().to_dict()
+        payload[field_name] = dict_val
+        with pytest.raises(ValueError, match=match):
+            TaskEpisode.from_dict(payload)
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "match"),
-    [
-        ("task_title", "x" * 201, "task_title"),
-        ("minimal_request_paraphrase", "x" * 1_001, "minimal_request_paraphrase"),
-        ("action_plan", ["x"] * 21, "action_plan"),
-        ("action_plan", ["x" * 501], "action_plan"),
-        ("missing_information", ["x"] * 21, "missing_information"),
-        ("missing_information", ["x" * 501], "missing_information"),
-        ("rag_citations", [_episode().rag_citations[0].to_dict()] * 21, "rag_citations"),
-    ],
-)
-def test_task_episode_from_dict_enforces_compact_bounds(
-    field: str, value: object, match: str
-) -> None:
-    payload = _episode().to_dict()
-    payload[field] = value
-
-    with pytest.raises(ValueError, match=match):
-        TaskEpisode.from_dict(payload)
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "match"),
-    [
+def test_episode_citation_enforces_compact_bounds_direct_and_from_dict() -> None:
+    cases = [
         ("document_id", "x" * 257, "document_id"),
         ("document_title", "x" * 301, "document_title"),
         ("section", "x" * 301, "section"),
         ("source_url", "x" * 2_049, "source_url"),
-    ],
-)
-def test_episode_citation_enforces_compact_bounds_direct_and_from_dict(
-    field: str, value: str, match: str
-) -> None:
+    ]
     citation = _episode().rag_citations[0]
-
-    with pytest.raises(ValueError, match=match):
-        replace(citation, **{field: value})
-
-    payload = citation.to_dict()
-    payload[field] = value
-    with pytest.raises(ValueError, match=match):
-        EpisodeCitation.from_dict(payload)
+    for field_name, value, match in cases:
+        with pytest.raises(ValueError, match=match):
+            replace(citation, **{field_name: value})
+        payload = citation.to_dict()
+        payload[field_name] = value
+        with pytest.raises(ValueError, match=match):
+            EpisodeCitation.from_dict(payload)
 
 
 def test_task_episode_defensively_freezes_accepted_sequence_inputs() -> None:
@@ -1016,9 +998,8 @@ def test_task_episode_defensively_freezes_accepted_sequence_inputs() -> None:
     assert episode.missing_information == ("The report deadline is not stated.",)
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "match"),
-    [
+def test_task_episode_direct_construction_rejects_untrusted_types() -> None:
+    cases = [
         ("action_plan", "one step", "sequence"),
         ("action_plan", [1], "action_plan item"),
         ("missing_information", "one note", "sequence"),
@@ -1029,21 +1010,16 @@ def test_task_episode_defensively_freezes_accepted_sequence_inputs() -> None:
         ("source_type", "system_generated_chat_task", "EpisodeSourceType"),
         ("created_at", "2026-08-10T09:00:00+00:00", "created_at"),
         ("updated_at", "2026-08-10T09:00:00+00:00", "updated_at"),
-    ],
-)
-def test_task_episode_direct_construction_rejects_untrusted_types(
-    field: str, value: object, match: str
-) -> None:
-    with pytest.raises((TypeError, ValueError), match=match):
-        replace(_episode(), **{field: value})
+    ]
+    for field_name, value, match in cases:
+        with pytest.raises((TypeError, ValueError), match=match):
+            replace(_episode(), **{field_name: value})
 
 
-@pytest.mark.parametrize("nested", [{"raw_email": "copied"}, {"tool_payload": {}}])
-def test_task_episode_direct_construction_rejects_nested_raw_or_tool_payload_shapes(
-    nested: dict[str, object],
-) -> None:
-    with pytest.raises(ValueError, match="raw email|tool payload"):
-        replace(_episode(), rag_citations=[nested])
+def test_task_episode_direct_construction_rejects_nested_raw_or_tool_payload_shapes() -> None:
+    for nested in ({"raw_email": "copied"}, {"tool_payload": {}}):
+        with pytest.raises(ValueError, match="raw email|tool payload"):
+            replace(_episode(), rag_citations=[nested])
 
 
 def test_task_episode_requires_the_system_generated_chat_task_source_type() -> None:
@@ -1054,15 +1030,11 @@ def test_task_episode_requires_the_system_generated_chat_task_source_type() -> N
         TaskEpisode.from_dict(payload)
 
 
-@pytest.mark.parametrize(
-    "removed_field",
-    ["run_id", "source_tool", "gmail_message_id", "gmail_url"],
-)
-def test_task_episode_from_dict_rejects_removed_email_shaped_fields(removed_field: str) -> None:
-    payload = {**_episode().to_dict(), removed_field: "legacy-value"}
-
-    with pytest.raises(ValueError, match="unexpected field"):
-        TaskEpisode.from_dict(payload)
+def test_task_episode_from_dict_rejects_removed_email_shaped_fields() -> None:
+    for removed_field in ["run_id", "source_tool", "gmail_message_id", "gmail_url"]:
+        payload = {**_episode().to_dict(), removed_field: "legacy-value"}
+        with pytest.raises(ValueError, match="unexpected field"):
+            TaskEpisode.from_dict(payload)
 
 
 def test_namespace_rejects_slash_in_logical_key_components() -> None:
@@ -1082,9 +1054,8 @@ def test_namespace_requires_an_explicit_source_id_key_even_when_null() -> None:
     assert MemoryNamespace.from_dict(payload).source_id is None
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
+def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively() -> None:
+    payloads = [
         {**_episode().to_dict(), "raw_email_body": "must never persist"},
         {
             **_episode().to_dict(),
@@ -1092,14 +1063,91 @@ def test_namespace_requires_an_explicit_source_id_key_even_when_null() -> None:
                 {**_episode().to_dict()["rag_citations"][0], "normalized_body": "forbidden"}
             ],
         },
-    ],
-    ids=["top_level", "nested"],
-)
-def test_episode_from_dict_rejects_raw_email_shaped_keys_recursively(
-    payload: dict[str, object],
-) -> None:
-    with pytest.raises(ValueError, match="raw email"):
-        TaskEpisode.from_dict(payload)
+    ]
+    for payload in payloads:
+        with pytest.raises(ValueError, match="raw email"):
+            TaskEpisode.from_dict(payload)
+
+
+def test_chat_activity_snapshot_round_trips_through_turn_and_stream_event() -> None:
+    started = ChatActivity.pending(ChatActivityCode.UNDERSTANDING_REQUEST).transition(
+        ChatActivityStatus.RUNNING, at=ACTIVITY_NOW
+    )
+    activities = transition_activity_snapshot(
+        (started,),
+        ChatActivityCode.UNDERSTANDING_REQUEST,
+        ChatActivityStatus.COMPLETED,
+        at=ACTIVITY_NOW,
+        outcome=ChatActivityOutcome.SUCCESS,
+        detail=ChatActivityDetail(kind="documents_found", current=3),
+    )
+    turn = ChatTurn(
+        turn_id="turn-activity",
+        session_id="session-1",
+        user_message="Find the policy",
+        assistant_message="Here it is",
+        created_at=ACTIVITY_NOW,
+        activities=activities,
+        completed_at=ACTIVITY_NOW,
+    )
+    event = ChatMessageStreamEvent.activity(
+        event_id="event-activity",
+        session_id="session-1",
+        turn_id="turn-activity",
+        activities=activities,
+    )
+
+    assert ChatTurn.from_dict(json.loads(json.dumps(turn.to_dict()))) == turn
+    assert stream_event_from_dict(json.loads(json.dumps(event.to_dict()))) == event
+
+
+def test_chat_activity_detail_rejects_unbounded_or_developer_payloads() -> None:
+    payloads = [
+        {"kind": "provider_name", "current": 1},
+        {"kind": "documents_found", "current": -1},
+        {"kind": "documents_found", "current": 2, "total": 1},
+        {"kind": "documents_found", "current": 1, "label": "Hybrid Retriever"},
+        {"kind": "documents_found", "current": 1, "body": "raw email"},
+    ]
+    for payload in payloads:
+        with pytest.raises((TypeError, ValueError)):
+            ChatActivityDetail.from_dict(payload)
+
+
+def test_chat_activity_enforces_unique_bounded_monotonic_snapshot() -> None:
+    pending = ChatActivity.pending(ChatActivityCode.REVIEWING_CONTEXT)
+    running = pending.transition(ChatActivityStatus.RUNNING, at=ACTIVITY_NOW)
+    completed = running.transition(
+        ChatActivityStatus.COMPLETED,
+        at=ACTIVITY_NOW,
+        outcome=ChatActivityOutcome.DEGRADED,
+    )
+    assert completed.started_at == ACTIVITY_NOW
+    assert completed.completed_at == ACTIVITY_NOW
+
+    with pytest.raises(ValueError, match="invalid activity transition"):
+        completed.transition(ChatActivityStatus.RUNNING, at=ACTIVITY_NOW)
+    with pytest.raises(ValueError, match="unique"):
+        ChatTurn(
+            turn_id="turn-duplicate",
+            session_id="session-1",
+            user_message="Hello",
+            assistant_message=None,
+            created_at=ACTIVITY_NOW,
+            activities=(pending, pending),
+        )
+    with pytest.raises(ValueError, match="8 items"):
+        ChatTurn(
+            turn_id="turn-too-many",
+            session_id="session-1",
+            user_message="Hello",
+            assistant_message=None,
+            created_at=ACTIVITY_NOW,
+            activities=tuple(
+                ChatActivity.pending(code)
+                for code in (*tuple(ChatActivityCode), ChatActivityCode.UNDERSTANDING_REQUEST)
+            ),
+        )
 
 
 def test_contracts_are_frozen() -> None:

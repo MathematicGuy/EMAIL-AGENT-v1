@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOADER_PATH = REPO_ROOT / "tests" / "fixtures" / "routing" / "loader.py"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "docs" / "evaluations" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "EMAIL" / "runs"
 
 #: Route vocabulary shared with the fixture ExpectedRoute labels.
 ROUTE_NAMES: tuple[str, ...] = ("NO_ACTION", "DIRECT_PLAN", "RETRIEVE_RAG")
@@ -106,15 +106,16 @@ def build_envelopes(cases):
 
 def build_live_classifier():
     """Return the configured Route Classifier, or None when keys are missing."""
+    from cowork_agent.config import GeminiSettings, MimoSettings, load_runtime_environment
+
+    load_runtime_environment()
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    from cowork_agent.config import GeminiSettings, GroqSettings
-
     try:
-        if provider == "groq":
-            from cowork_agent.integrations.llm.providers.groq import GroqRouteClassifier
+        if provider == "mimo":
+            from cowork_agent.integrations.llm.providers.mimo import MimoRouteClassifier
 
-            settings = GroqSettings.from_env()
-            return GroqRouteClassifier(settings), provider, settings.model
+            settings = MimoSettings.from_env()
+            return MimoRouteClassifier(settings), provider, settings.model
         from cowork_agent.integrations.llm.providers.gemini import GeminiRouteClassifier
 
         settings = GeminiSettings.from_env()

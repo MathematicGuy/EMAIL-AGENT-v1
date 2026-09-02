@@ -33,12 +33,14 @@ class MockRerankerTransport:
         payload: Mapping[str, object],
         timeout_seconds: float,
     ) -> Mapping[str, object]:
-        self.calls.append({
-            "url": url,
-            "headers": headers,
-            "payload": payload,
-            "timeout_seconds": timeout_seconds,
-        })
+        self.calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "payload": payload,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
         if not self.responses:
             raise RuntimeError("No mock response configured")
         resp = self.responses.pop(0)
@@ -83,7 +85,7 @@ async def test_cohere_payload_formatting() -> None:
     call = transport.calls[0]
     assert call["url"] == COHERE_RERANK_ENDPOINT
     assert call["headers"]["Authorization"] == "Bearer cohere-key-1"
-    
+
     payload = call["payload"]
     assert payload["model"] == "rerank-v3.5"
     assert payload["query"] == "test query"

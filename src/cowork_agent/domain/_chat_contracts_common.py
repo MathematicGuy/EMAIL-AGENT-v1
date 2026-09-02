@@ -22,6 +22,8 @@ MAX_RETRIEVAL_TIMEOUT_MS = 10_000
 class ChatEventType(StrEnum):
     """Discriminant for one server-sent chat event."""
 
+    STARTED = "started"
+    ACTIVITY = "activity"
     DELTA = "delta"
     MEMORY_CITATION = "memory_citation"
     TASK_PROPOSAL = "task_proposal"

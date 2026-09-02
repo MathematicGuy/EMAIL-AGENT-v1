@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import random
+import ssl
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httplib2  # type: ignore[import-untyped]
 import pytest
 from cryptography.fernet import Fernet
 from google.auth.exceptions import TransportError
@@ -43,17 +45,27 @@ def gmail_environment(tmp_path: Path) -> dict[str, str]:
 
 
 def test_gmail_settings_allow_readonly_scope_and_redact_secrets(tmp_path: Path) -> None:
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     assert settings.scopes == (GMAIL_READONLY_SCOPE,)
+    assert settings.fetch_concurrency == 6
     assert "client-secret" not in repr(settings)
     assert settings.redirect_uri.endswith("/oauth/gmail/callback")
     assert settings.frontend_url is None
 
 
+@pytest.mark.parametrize("value", ["0", "9"])
+def test_gmail_settings_reject_out_of_range_fetch_concurrency(tmp_path: Path, value: str) -> None:
+    values = gmail_environment(tmp_path)
+    values["GMAIL_FETCH_CONCURRENCY"] = value
+
+    with pytest.raises(ValueError, match="GMAIL_FETCH_CONCURRENCY"):
+        GmailSettings.from_env(values)
+
+
 def test_gmail_settings_accept_safe_frontend_url(tmp_path: Path) -> None:
     values = gmail_environment(tmp_path)
     values["FRONTEND_URL"] = "http://localhost:5173/"
-    settings = GmailSettings.from_env(values, load_env_file=False)
+    settings = GmailSettings.from_env(values)
     assert settings.frontend_url == "http://localhost:5173"
 
 
@@ -61,18 +73,18 @@ def test_gmail_settings_reject_insecure_remote_frontend_url(tmp_path: Path) -> N
     values = gmail_environment(tmp_path)
     values["FRONTEND_URL"] = "http://example.com"
     with pytest.raises(ValueError, match="FRONTEND_URL"):
-        GmailSettings.from_env(values, load_env_file=False)
+        GmailSettings.from_env(values)
 
 
 def test_gmail_settings_reject_write_scope(tmp_path: Path) -> None:
     values = gmail_environment(tmp_path)
     values["GMAIL_SCOPES"] = "https://www.googleapis.com/auth/gmail.modify"
     with pytest.raises(ValueError, match="gmail.readonly"):
-        GmailSettings.from_env(values, load_env_file=False)
+        GmailSettings.from_env(values)
 
 
 def test_google_oauth_reuses_same_pkce_verifier_for_callback(tmp_path: Path) -> None:
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     driver = GoogleOAuthDriver(settings)
     verifier = "v" * 64
     authorization_url = driver.authorization_url("signed-state", verifier)
@@ -124,7 +136,7 @@ class FakeOAuthDriver:
 
 def test_oauth_completion_encrypts_and_persists_refresh_token(tmp_path: Path) -> None:
     async def scenario() -> None:
-        settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+        settings = GmailSettings.from_env(gmail_environment(tmp_path))
         repository = SQLiteMailboxConnectionRepository(settings.connection_db_path)
         await repository.initialize()
         cipher = TokenCipher(settings.token_encryption_key)
@@ -166,7 +178,7 @@ def test_oauth_completion_persists_the_resolved_internal_principal(tmp_path: Pat
         return VerifiedPrincipal(user_id="internal-user-1")
 
     async def scenario() -> None:
-        settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+        settings = GmailSettings.from_env(gmail_environment(tmp_path))
         repository = RecordingRepository()
         driver = FakeOAuthDriver()
         service = GmailConnectionService(
@@ -255,7 +267,10 @@ def test_gmail_message_parser_preserves_html_action_links() -> None:
     )
 
     assert "Build failed for HR-Chatbot" in message.normalized_body
-    assert "View build logs [https://railway.app/project/build-123]" in message.normalized_body
+    assert "View build logs [link1]" in message.normalized_body
+    assert message.source_links[0].ref == "link1"
+    assert message.source_links[0].label == "View build logs"
+    assert message.source_links[0].url == "https://railway.app/project/build-123"
     assert message.body_format is BodyFormat.TEXT
     assert message.fetch_status is FetchStatus.COMPLETE
 
@@ -283,6 +298,316 @@ def test_gmail_message_parser_marks_html_only_bodies_as_html_converted() -> None
     assert "Thông báo bảo trì hệ thống" in message.normalized_body
     assert message.body_format is BodyFormat.HTML_CONVERTED
     assert message.fetch_status is FetchStatus.COMPLETE
+
+
+def test_gmail_message_parser_preserves_html_block_boundaries() -> None:
+    html_body = (
+        "<p>Overview</p>"
+        "<ul><li>First action</li><li>Second action</li></ul>"
+        '<p><a href="https://example.test/item">Open item</a></p>'
+    )
+    rich = base64.urlsafe_b64encode(html_body.encode()).decode()
+    message = _parse_message(
+        {
+            "id": "msg-blocks",
+            "threadId": "thread-blocks",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Overview",
+        "First action",
+        "Second action",
+        "Open item [link1]",
+    ]
+    assert message.body_format is BodyFormat.HTML_CONVERTED
+
+
+def test_gmail_message_parser_deduplicates_urls_and_keeps_bare_link_label_null() -> None:
+    html_body = (
+        '<p><a href="https://example.test/item">Open item</a></p>'
+        '<p><a href="https://example.test/item">Open again</a></p>'
+        "<p>Fallback https://example.test/bare</p>"
+    )
+    rich = base64.urlsafe_b64encode(html_body.encode()).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-links",
+            "threadId": "thread-links",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/html", "body": {"data": rich}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Open item [link1]",
+        "Open again [link1]",
+        "Fallback [link2]",
+    ]
+    assert [(link.ref, link.label, link.url) for link in message.source_links] == [
+        ("link1", "Open item", "https://example.test/item"),
+        ("link2", None, "https://example.test/bare"),
+    ]
+
+
+def test_gmail_message_parser_normalizes_wrapped_plain_urls_and_appends_each_url_once() -> None:
+    plain = base64.urlsafe_b64encode(b"Reference [https://example.test/plain]").decode()
+    rich = base64.urlsafe_b64encode(
+        b'<a href="https://example.test/extra">First label</a>'
+        b'<a href="https://example.test/extra">Second label</a>'
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-wrapped-links",
+            "threadId": "thread-wrapped-links",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain}},
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.count("[link1]") == 1
+    assert message.normalized_body.count("[link2]") == 1
+    assert [link.url for link in message.source_links] == [
+        "https://example.test/plain",
+        "https://example.test/extra",
+    ]
+
+
+def test_gmail_message_parser_keeps_one_primary_link_per_digest_card() -> None:
+    first_title = "A Practical Guide to Reliable Agent Workflows"
+    second_title = "Understanding Retrieval Quality in Production Systems"
+    plain = base64.urlsafe_b64encode(
+        f"Today's highlights\n{first_title}\n{second_title}".encode()
+    ).decode()
+    rich = base64.urlsafe_b64encode(
+        (
+            '<section class="card">'
+            f'<a href="https://example.test/posts/reliable-agent-workflows">'
+            f'<img alt="{first_title}"></a>'
+            f'<a href="https://example.test/posts/reliable-agent-workflows">'
+            f"{first_title}</a>"
+            '<a href="https://example.test/@author-one">'
+            '<img alt="Author profile"></a>'
+            "</section>"
+            '<section class="card">'
+            f'<a href="https://example.test/posts/retrieval-quality-production">'
+            f'<img alt="{second_title}"></a>'
+            "</section>"
+            '<footer><a href="https://example.test/unsubscribe">Unsubscribe</a>'
+            '<a href="https://example.test/privacy">Privacy Policy</a>'
+            '<a href="https://example.test/tracking"><img></a></footer>'
+        ).encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-digest",
+            "threadId": "thread-digest",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": plain}},
+                    {"mimeType": "text/html", "body": {"data": rich}},
+                ],
+            },
+        }
+    )
+
+    assert message.normalized_body.count("[link1]") == 1
+    assert message.normalized_body.count("[link3]") == 1
+    assert first_title + " [link1]" in message.normalized_body
+    assert second_title + " [link3]" in message.normalized_body
+    assert "Open link" not in message.normalized_body
+    assert "Author profile [link2]" not in message.normalized_body
+    assert "Unsubscribe [link4]" not in message.normalized_body
+    assert "Privacy Policy [link5]" not in message.normalized_body
+    assert "[link6]" not in message.normalized_body
+    assert [(link.ref, link.label) for link in message.source_links] == [
+        ("link1", first_title),
+        ("link2", "Author profile"),
+        ("link3", second_title),
+        ("link4", "Unsubscribe"),
+        ("link5", "Privacy Policy"),
+        ("link6", None),
+    ]
+
+
+def test_gmail_message_parser_hides_url_used_as_anchor_label() -> None:
+    url = "https://example.test/long-tracking-link"
+    rich = base64.urlsafe_b64encode(
+        f'<a href="{url}">https://display.example.test/item</a>'.encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-url-label",
+            "threadId": "thread-url-label",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/html", "body": {"data": rich}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == ""
+    assert message.source_links[0].label is None
+
+
+def test_gmail_message_parser_strips_artifact_controls_but_preserves_emoji_zwj() -> None:
+    plain = base64.urlsafe_b64encode(
+        "A\u200c\u034f\u00adB 👩\u200d💻 می\u200cروم".encode()
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-controls",
+            "threadId": "thread-controls",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "AB 👩‍💻 می‌روم"
+
+
+def test_gmail_message_parser_normalizes_html_embedded_in_plain_mime() -> None:
+    plain_body = (
+        "<!-- rendering metadata -->"
+        "<v:rect><strong>Important</strong></v:rect>"
+        '<br><a href="https://example.test/item">Open item</a>&amp; continue'
+    )
+    plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-plain-html",
+            "threadId": "thread-plain-html",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Important",
+        "Open item [link1] & continue",
+    ]
+
+
+def test_gmail_message_parser_normalizes_markdown_links() -> None:
+    plain = base64.urlsafe_b64encode(
+        b"Review [the document](https://example.test/document)."
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-markdown-link",
+            "threadId": "thread-markdown-link",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "Review the document [link1]."
+    assert message.source_links[0].label == "the document"
+
+
+def test_gmail_message_parser_removes_only_whole_separator_lines() -> None:
+    plain = base64.urlsafe_b64encode(
+        b"Keep this\n----------------\n|-----|\n--\n000\n...\nKeep-this-inline"
+    ).decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-separators",
+            "threadId": "thread-separators",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body.splitlines() == [
+        "Keep this",
+        "000",
+        "...",
+        "Keep-this-inline",
+    ]
+
+
+def test_gmail_message_parser_unescapes_plain_entities() -> None:
+    plain = base64.urlsafe_b64encode(b"Terms &amp; conditions &ndash; review").decode()
+
+    message = _parse_message(
+        {
+            "id": "msg-entities",
+            "threadId": "thread-entities",
+            "internalDate": "1785729600000",
+            "payload": {
+                "headers": [],
+                "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+            },
+        }
+    )
+
+    assert message.normalized_body == "Terms & conditions – review"
+
+
+def test_gmail_message_parser_collapses_only_canonical_ref_wrappers() -> None:
+    cases = [
+        (
+            "Review [item](https://example.test/one https://example.test/two",
+            "Review item [link1] [link2]",
+        ),
+        (
+            "Review [item](https://example.test/item\ntracking metadata)",
+            "Review item [link1]",
+        ),
+    ]
+    for plain_body, expected in cases:
+        plain = base64.urlsafe_b64encode(plain_body.encode()).decode()
+        message = _parse_message(
+            {
+                "id": "msg-ref-wrapper",
+                "threadId": "thread-ref-wrapper",
+                "internalDate": "1785729600000",
+                "payload": {
+                    "headers": [],
+                    "parts": [{"mimeType": "text/plain", "body": {"data": plain}}],
+                },
+            }
+        )
+        assert message.normalized_body == expected
 
 
 def test_gmail_message_parser_marks_partial_fetch_without_usable_body() -> None:
@@ -357,7 +682,7 @@ def test_service_translates_only_stored_token_decryption_errors(tmp_path: Path) 
             assert encrypted_token == "encrypted-token"
             raise ValueError("Stored Gmail token cannot be decrypted")
 
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     adapter = GmailMailboxAdapter(settings, Repository(), FailingCipher())  # type: ignore[arg-type]
 
     with pytest.raises(MailboxReauthRequiredError) as raised:
@@ -386,11 +711,76 @@ def test_service_does_not_translate_unrelated_build_value_errors(
         raise ValueError("Gmail discovery document is invalid")
 
     monkeypatch.setattr(gmail_provider, "build", invalid_build)
-    settings = GmailSettings.from_env(gmail_environment(tmp_path), load_env_file=False)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
     adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="discovery document"):
         asyncio.run(adapter._service("mbx-1"))
+
+
+def test_service_cache_builds_once_and_requests_receive_distinct_transports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class Repository:
+        async def get(self, connection_id: str) -> MailboxConnection:
+            assert connection_id == "mbx-1"
+            return _active_connection()
+
+    class DecryptingCipher:
+        def decrypt(self, encrypted_token: str) -> str:
+            assert encrypted_token == "encrypted-token"
+            return "refresh-token"
+
+    class AuthorizedTransport:
+        def __init__(self, credentials: object, http: object) -> None:
+            self.credentials = credentials
+            self.http = http
+
+    captured: dict[str, object] = {}
+    transports: list[object] = []
+
+    def fake_build(*args: object, **kwargs: object) -> object:
+        captured["calls"] = int(captured.get("calls", 0)) + 1
+        captured["credentials"] = kwargs["credentials"]
+        captured["request_builder"] = kwargs["requestBuilder"]
+        return object()
+
+    def fake_http() -> object:
+        transport = object()
+        transports.append(transport)
+        return transport
+
+    def fake_authorized_http(credentials: object, *, http: object) -> AuthorizedTransport:
+        return AuthorizedTransport(credentials, http)
+
+    def fake_request(http: object, *args: object, **kwargs: object) -> object:
+        return http
+
+    monkeypatch.setattr(gmail_provider, "build", fake_build)
+    monkeypatch.setattr(gmail_provider.httplib2, "Http", fake_http)
+    monkeypatch.setattr(gmail_provider, "AuthorizedHttp", fake_authorized_http)
+    monkeypatch.setattr(gmail_provider, "HttpRequest", fake_request)
+    settings = GmailSettings.from_env(gmail_environment(tmp_path))
+    adapter = GmailMailboxAdapter(settings, Repository(), DecryptingCipher())  # type: ignore[arg-type]
+
+    async def scenario() -> None:
+        first, second = await asyncio.gather(adapter._service("mbx-1"), adapter._service("mbx-1"))
+        assert first is second
+
+    asyncio.run(scenario())
+    assert captured["calls"] == 1
+
+    request_builder = captured["request_builder"]
+    assert callable(request_builder)
+    first_request = request_builder(object(), "postproc", "https://example.test/one")
+    second_request = request_builder(object(), "postproc", "https://example.test/two")
+
+    assert isinstance(first_request, AuthorizedTransport)
+    assert isinstance(second_request, AuthorizedTransport)
+    assert first_request.credentials is captured["credentials"]
+    assert second_request.credentials is captured["credentials"]
+    assert first_request.http is not second_request.http
+    assert transports == [first_request.http, second_request.http]
 
 
 def test_call_retries_transient_errors_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -476,3 +866,57 @@ def test_retry_delay_is_bounded_and_jittered() -> None:
     assert all(delay <= 4.0 for delay in delays)
     # Jitter: 100 samples of attempt 1 cannot all be identical.
     assert len({_retry_delay(1) for _ in range(100)}) > 1
+
+
+def test_call_retries_network_and_ssl_errors_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors = [
+        ssl.SSLEOFError("EOF occurred in violation of protocol"),
+        ssl.SSLError("SSL handshake failed"),
+        ConnectionResetError("Connection reset by peer"),
+        TimeoutError("Connection timed out"),
+        httplib2.error.HttpLib2Error("HttpLib2 transport failed"),
+    ]
+    for transient_error in errors:
+        sleeps: list[float] = []
+
+        def _make_flaky(err: Exception, s_list: list[float]):
+            async def fake_sleep(delay: float) -> None:
+                s_list.append(delay)
+
+            calls = {"count": 0}
+
+            def flaky_network() -> dict[str, object]:
+                calls["count"] += 1
+                if calls["count"] < 3:
+                    raise err
+                return {"ok": True}
+
+            return fake_sleep, calls, flaky_network
+
+        fake_sleep_fn, calls_dict, flaky_fn = _make_flaky(transient_error, sleeps)
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep_fn)
+
+        result = asyncio.run(_adapter()._call(flaky_fn))
+        assert result == {"ok": True}
+        assert calls_dict["count"] == 3
+        assert len(sleeps) == 2
+
+
+def test_call_exhausts_network_error_into_temporary_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    calls = {"count": 0}
+
+    def persistent_ssl_error() -> dict[str, object]:
+        calls["count"] += 1
+        raise ssl.SSLEOFError("EOF occurred in violation of protocol")
+
+    with pytest.raises(MailboxTemporaryError):
+        asyncio.run(_adapter()._call(persistent_ssl_error))
+    assert calls["count"] == 3

@@ -165,7 +165,7 @@ This environment has a full skill lifecycle: interview → spec → plan → imp
 - Layered architecture and fakes
 - Verification rule: smallest pytest, then ruff/mypy on `src/`
 - Handoff before context compaction
-- Authoritative docs: ADRs, target architecture, PRDs
+- Authoritative docs: ADRs, the C4 architecture model (`docs/architectures/`), PRDs
 
 That means work here should behave like someone who already joined the team, not a greenfield vibe coder.
 
@@ -187,8 +187,12 @@ There are also specialized plugin/role agents depending on what’s installed (c
 
 ### When to delegate
 
+After a **written implementation plan** exists, default to subagents for
+implementation. Do not wait to be asked.
+
 Spawn a subagent when:
 
+- A plan task is **file-disjoint** from the other in-flight tasks (TDD slice)
 - The work is **independent** of what the main session is holding
 - Exploration would **blow up** the main conversation with noise
 - A **fresh adversarial view** is needed (review/security)
@@ -199,19 +203,22 @@ Do **not** delegate when:
 - The edit is tiny and local
 - The task needs continuous judgment across the whole design
 - Round-trip cost exceeds the savings
+- The work is planning, spec/map edits, a later capability-map module, or
+  the final suite / Definition of Done (parent keeps those)
 
 ### Operating pattern
 
 ```text
 Main agent (conductor)
   ├─ explore: map codebase / contracts
-  ├─ plan: produce implementation blueprint
-  ├─ implement slices (main or general-purpose)
-  ├─ test engineer / pytest locally
+  ├─ plan: produce implementation blueprint (must finish first)
+  ├─ Wave N: general-purpose implementers, file-disjoint TDD tasks only
+  ├─ next wave only after that wave's dependencies landed
+  ├─ parent: integrate, ruff/mypy, focused then full verify
   └─ reviewer / security auditor before merge
 ```
 
-Parent integrates results, verifies, and owns the final call. Subagents report summaries; they don’t replace integration judgment.
+Parent integrates results, verifies, and owns the final call. Subagents report summaries; they don’t replace integration judgment. One task per implementer, closed file list, focused `uv run pytest`.
 
 Children can be isolated in a **git worktree** so experimental edits don’t dirty the main workspace until merged.
 

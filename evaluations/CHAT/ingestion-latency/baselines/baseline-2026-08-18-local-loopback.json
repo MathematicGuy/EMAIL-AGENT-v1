@@ -1,0 +1,690 @@
+{
+  "schema_version": "chat-ingestion-latency-report.v1",
+  "generated_at": "2026-08-18T04:17:03.619779+00:00",
+  "sample_count": 30,
+  "environment": {
+    "database_host_classes": [
+      "loopback"
+    ],
+    "expectation": "local"
+  },
+  "summary": {
+    "complete_sample_count": 0,
+    "incomplete_sample_count": 30,
+    "failed_sample_count": 0,
+    "retrieval_verified_count": 0,
+    "status_counts": {
+      "ready": 30
+    }
+  },
+  "metrics_ms": {
+    "hash": {
+      "count": 30,
+      "min": 22,
+      "p50": 33,
+      "p95": 74,
+      "max": 151
+    },
+    "initiate": {
+      "count": 30,
+      "min": 411,
+      "p50": 628,
+      "p95": 1961,
+      "max": 2482
+    },
+    "signed_put": {
+      "count": 30,
+      "min": 433,
+      "p50": 939,
+      "p95": 2933,
+      "max": 17636
+    },
+    "complete": {
+      "count": 30,
+      "min": 289,
+      "p50": 494,
+      "p95": 1083,
+      "max": 1301
+    },
+    "attach_to_server_ready": {
+      "count": 30,
+      "min": 4332,
+      "p50": 10972,
+      "p95": 100014,
+      "max": 140769
+    },
+    "server_ready_to_ui_ready": {
+      "count": 30,
+      "min": 62,
+      "p50": 737,
+      "p95": 1329,
+      "max": 1338
+    },
+    "attach_to_ready": {
+      "count": 30,
+      "min": 4815,
+      "p50": 11034,
+      "p95": 100553,
+      "max": 141652
+    },
+    "send_to_first_token": {
+      "count": 0,
+      "min": null,
+      "p50": null,
+      "p95": null,
+      "max": null
+    },
+    "send_to_complete": {
+      "count": 0,
+      "min": null,
+      "p50": null,
+      "p95": null,
+      "max": null
+    },
+    "queue_delay": {
+      "count": 30,
+      "min": 7,
+      "p50": 479,
+      "p95": 42851,
+      "max": 55551
+    },
+    "worker_execution": {
+      "count": 30,
+      "min": 2297,
+      "p50": 5393,
+      "p95": 95670,
+      "max": 136622
+    },
+    "source_download": {
+      "count": 30,
+      "min": 823,
+      "p50": 1332,
+      "p95": 3568,
+      "max": 3878
+    },
+    "extraction_chunking": {
+      "count": 30,
+      "min": 4,
+      "p50": 32,
+      "p95": 476,
+      "max": 528
+    },
+    "chunk_persistence": {
+      "count": 30,
+      "min": 8,
+      "p50": 46,
+      "p95": 781,
+      "max": 824
+    },
+    "embedding": {
+      "count": 30,
+      "min": 958,
+      "p50": 3288,
+      "p95": 84647,
+      "max": 130437
+    },
+    "local_index_update": {
+      "count": 30,
+      "min": 124,
+      "p50": 177,
+      "p95": 231,
+      "max": 237
+    },
+    "snapshot_upload": {
+      "count": 30,
+      "min": 264,
+      "p50": 557,
+      "p95": 5960,
+      "max": 8740
+    },
+    "ready_transition": {
+      "count": 30,
+      "min": 6,
+      "p50": 8,
+      "p95": 12,
+      "max": 32
+    }
+  },
+  "samples": [
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "cold-position-1-small-pdf",
+      "fixture_id": "dang-ky-xe-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 22055,
+      "pages": 1,
+      "chunks": 4,
+      "snapshot_bytes": 10306,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-2-medium-pdf",
+      "fixture_id": "procedure-116194-pdf-v1",
+      "media_type": "application/pdf",
+      "bytes": 101749,
+      "pages": 18,
+      "chunks": 25,
+      "snapshot_bytes": 23406,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    },
+    {
+      "scenario": "warm-position-3-docx",
+      "fixture_id": "law-31-2024-docx-v1",
+      "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "bytes": 170431,
+      "pages": 1,
+      "chunks": 430,
+      "snapshot_bytes": 248726,
+      "database_host_class": "loopback",
+      "storage_provider": "supabase_private_storage",
+      "embedding_provider": "jina_embedding_adapter",
+      "status": "ready",
+      "retrieval_verified": false,
+      "missing_metrics": [
+        "send_to_first_token",
+        "send_to_complete"
+      ]
+    }
+  ]
+}

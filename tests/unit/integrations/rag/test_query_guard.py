@@ -15,10 +15,10 @@ from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.jina_reranker import FakeJinaReranker
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from cowork_agent.integrations.rag.query_guard import is_retrieval_query
+from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 
 
 class DummyEmbedder:
-
     async def embed(
         self, texts: Sequence[str], *, task: str = "retrieval.query"
     ) -> tuple[tuple[float, ...], ...]:
@@ -49,9 +49,19 @@ def test_hybrid_filters_out_greeting_query() -> None:
             source_url="d1.md",
         ),
     )
+    docs = (KnowledgeDocument("k", "K", "k.md", chunks),)
+    embedder = DummyEmbedder()
+    dense = TurbovecSemanticMemory(
+        docs,
+        embedder,
+        bit_width=4,
+        top_k_default=5,
+        min_score_default=0.0,
+    )
     memory = HybridSemanticMemory(
-        documents=(KnowledgeDocument("k", "K", "k.md", chunks),),
-        embedder=DummyEmbedder(),
+        documents=docs,
+        embedder=embedder,
+        dense=dense,
         min_score_default=0.0,
     )
     asyncio.run(memory.build_index())
@@ -83,10 +93,20 @@ def test_hybrid_filters_out_low_rerank_score_chunks() -> None:
     )
     # Low score candidate (0.083 < 0.25 min_rerank_score)
     reranker = FakeJinaReranker(scores={"c1": 0.083})
+    docs = (KnowledgeDocument("k", "K", "k.md", chunks),)
+    embedder = DummyEmbedder()
+    dense = TurbovecSemanticMemory(
+        docs,
+        embedder,
+        bit_width=4,
+        top_k_default=5,
+        min_score_default=0.0,
+    )
 
     memory = HybridSemanticMemory(
-        documents=(KnowledgeDocument("k", "K", "k.md", chunks),),
-        embedder=DummyEmbedder(),
+        documents=docs,
+        embedder=embedder,
+        dense=dense,
         reranker=reranker,
         min_rerank_score=0.25,
         min_score_default=0.0,

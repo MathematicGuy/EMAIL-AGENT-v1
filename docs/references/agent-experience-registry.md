@@ -75,6 +75,23 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 
 ---
 
+#### "Default pytest already fans out to 4 workers"
+- **Version:** v1 (2026-08-18)
+- **Pattern:** Do not pass `-n 0` or `-p no:xdist` on a focused route. Worker flags are injected by the harness; `-n 0` is only for debugging one failure.
+- **Evidence:** A plan copied `-p no:xdist` 18 times; addopts `-n 4 --dist loadgroup` then usage-errored, and every command was rewritten to `-n 0`.
+- **Failure state:** Every agent run is serial, so a 24 s suite and a 2 s route both pay one core.
+- **Deploy when:** Writing pytest commands in a plan, handoff, or TDD loop.
+
+#### "Markexpr turns testmon into a full instrumented suite"
+- **Version:** v1 (2026-08-21)
+- **Pattern:** Do not add pytest-testmon; this suite's `-m 'not live'` disables its selection, so `--testmon` reruns everything under coverage tracing.
+- **Evidence:** pytest-testmon 2.2.0 `_get_noselect_reasons` returns `-m was used` whenever markexpr is set; a no-change `--testmon` still executed 1838 tests in ~41–55 s. `--testmon-forceselect` then INTERNALERRORed `pytest_deselected` via `FakeItemFromTestmon`.
+- **Failure state:** Agents copy `--testmon`, pay a 3x suite, and believe they are running an impacted subset.
+- **Deploy when:** Tempted to add coverage-keyed test selection or to copy `pytest --testmon` from upstream docs.
+- **Not in the harness:** a configure-time refuse was prototyped and dropped; it does not speed the default suite. The seed is "do not add the package", not "keep a refuse hook".
+
+---
+
 ### 2. ArchSeeds (Structural Integrity & System Invariants)
 
 #### "An ignore rule is only real when git confirms it"
@@ -97,4 +114,11 @@ A seed is not permanent; it must continuously earn its place. A seed dies and is
 - **Evidence:** V1-M4 T4.2 review: ordering ties (equal priority+deadline) sorted by random `task_id` uuids, so `nextActions[:3]` membership could flip between reads; fixed with `ORDER BY task_run_links.rowid` and dict insertion order (commit 50d9dfd).
 - **Failure state:** Frozen ordering contracts pass most runs yet intermittently flip on tie cases, producing non-reproducible legacy-shape diffs.
 - **Deploy when:** Relocating serialization/mapping from write to read path, or adding ORDER BY over rows with random producer ids.
+
+#### "Minimal means deleting inactive paths, not documenting their absence"
+- **Version:** v1 (2026-08-19)
+- **Pattern:** Remove obsolete artifacts, commands, validators, tests, and ignore rules when a workflow narrows; document only the active path.
+- **Evidence:** The Email evaluation workspace still described and validated a retired review flow after its private inputs and UI were deleted, obscuring the current candidate-to-route inspection workflow.
+- **Failure state:** Agents recreate retired artifacts, follow dead commands, or spend context distinguishing historical state from the work currently authorized.
+- **Deploy when:** Retiring workflow stages, narrowing evaluation scope, or cleaning generated-artifact contracts.
 

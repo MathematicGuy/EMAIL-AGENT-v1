@@ -1,0 +1,54 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Background Worker</size>\n<size:24>Level 3. Out-of-process pollers, recovery and retention.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+System(MistralOCRAPI, "Mistral OCR API", $descr="Extracts text from scanned PDF and OOXML pages that carry no native text layer.", $tags="", $link="")
+System(GmailAPI, "Gmail API", $descr="Read-only mailbox source (gmail.readonly). Bodies are read transiently and never persisted.", $tags="", $link="")
+System(MicrosoftGraph, "Microsoft Graph", $descr="Read-only Outlook mailbox source (Mail.Read) for mailboxes linked to a Google-owned identity.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+System(EmbeddingRerankingProviders, "Embedding & Reranking Providers", $descr="Jina AI embeddings and cross-encoder reranker, Gemini embeddings, and Cohere reranking.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.BackgroundWorker_boundary", "Background Worker", $tags="") {
+    Component(CoworkAgent.BackgroundWorker.DigestPoller, "Digest Poller", $techn="orchestration/worker.py", $descr="Claims queued mail digest runs and executes the same email workflow out of the request path.", $tags="", $link="")
+    Component(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, "Project Document Worker", $techn="orchestration/project_document_worker.py", $descr="Extraction, OCR, page-aware chunking and per-project index writes with a liveness heartbeat.", $tags="", $link="")
+    Component(CoworkAgent.BackgroundWorker.RunDocumentRecovery, "Run & Document Recovery", $techn="orchestration/recovery.py, document_recovery.py", $descr="Re-queues runs and documents left in-flight by a crashed process.", $tags="", $link="")
+    Component(CoworkAgent.BackgroundWorker.RetentionSweeper, "Retention Sweeper", $techn="features/ai_chat/retention.py", $descr="Purges expired documents, chunks and index ids past the configured retention window.", $tags="", $link="")
+  }
+
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  ContainerDb(CoworkAgent.TurbovecVectorIndex, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+  Container(CoworkAgent.PrivateDocumentStore, "Private Document Store", $techn="Supabase Storage or local filesystem", $descr="User-owned uploaded project documents. Encrypted at rest, access-checked on every read, retention-bounded.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.BackgroundWorker.DigestPoller, CoworkAgent.ControlPlaneDatabase, "Claims queued digest runs from", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.DigestPoller, GmailAPI, "Reads unread mail from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.DigestPoller, MicrosoftGraph, "Reads unread mail from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.DigestPoller, LLMProviders, "Classifies and generates action plans with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, CoworkAgent.ControlPlaneDatabase, "Claims queued documents from and writes chunk rows to", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, CoworkAgent.PrivateDocumentStore, "Reads uploaded bytes from", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, MistralOCRAPI, "Extracts image-only pages with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, EmbeddingRerankingProviders, "Embeds page-bounded chunks with", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.ProjectDocumentWorker, CoworkAgent.TurbovecVectorIndex, "Writes per-project vectors to", $techn="In-process file I/O", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.RunDocumentRecovery, CoworkAgent.ControlPlaneDatabase, "Re-queues in-flight runs and documents in", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.RetentionSweeper, CoworkAgent.ControlPlaneDatabase, "Purges expired rows from", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.RetentionSweeper, CoworkAgent.PrivateDocumentStore, "Purges expired objects from", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker.RetentionSweeper, CoworkAgent.TurbovecVectorIndex, "Purges expired vector ids from", $techn="In-process file I/O", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

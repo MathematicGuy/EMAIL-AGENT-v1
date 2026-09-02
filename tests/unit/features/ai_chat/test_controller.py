@@ -1,13 +1,19 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
 from cowork_agent.domain.chat_contracts import (
+    ChatActivityCode,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatEventType,
     ChatMemoryScope,
     ChatMessageRequest,
+    ChatMessageStreamEvent,
     ChatTurn,
     DeclarativeProfile,
     MemoryNamespace,
@@ -19,6 +25,7 @@ from cowork_agent.domain.target_contracts import ValidationStatus
 from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatReplyUnavailable,
+    ChatResponseInvalid,
     ChatScopeMismatch,
     ChatSessionAccessDenied,
     InMemoryChatSessionRegistry,
@@ -36,6 +43,7 @@ from cowork_agent.features.ai_chat.memory_gateway import (
 from cowork_agent.features.ai_chat.ports import ChatReplyChunk, ChatTaskProposal
 from cowork_agent.features.ai_chat.retrieval_policy import select_memory_reads
 from cowork_agent.features.ai_chat.session_buffer import InMemoryChatSessionBuffer
+from cowork_agent.persistence.report_artifacts import InMemoryReportArtifactStore
 
 NOW = datetime(2026, 8, 10, 12, tzinfo=UTC)
 
@@ -63,10 +71,24 @@ class ProfileReader:
         return existed
 
 
+class ActivityInspectingProfile(ProfileReader):
+    def __init__(self, history: "HistoryWriter") -> None:
+        super().__init__(_profile())
+        self.history = history
+        self.activity_status_during_read: ChatActivityStatus | None = None
+
+    async def read_profile(self, namespace: MemoryNamespace) -> DeclarativeProfile | None:
+        latest = self.history.updates[-1][1]
+        self.activity_status_during_read = next(
+            item.status
+            for item in latest.activities
+            if item.code is ChatActivityCode.REVIEWING_CONTEXT
+        )
+        return await super().read_profile(namespace)
+
+
 class FakeReply:
-    def __init__(
-        self, chunks: tuple[str | ChatReplyChunk, ...] = ("Hello", " there")
-    ) -> None:
+    def __init__(self, chunks: tuple[str | ChatReplyChunk, ...] = ("Hello", " there")) -> None:
         self.chunks = chunks
         self.calls: list[tuple[ChatMessageRequest, GenerationContext]] = []
 
@@ -87,9 +109,24 @@ class BrokenReply:
         yield  # pragma: no cover - keeps this method an async iterator
 
 
+class InvalidResponseReply:
+    async def stream_reply(
+        self, request: ChatMessageRequest, context: GenerationContext
+    ) -> AsyncIterator[str]:
+        del request, context
+        raise ChatResponseInvalid("chat response failed validation")
+        yield  # pragma: no cover - keeps this method an async iterator
+
+
 class EpisodeWriter:
     def __init__(self) -> None:
         self.writes: list[TaskEpisode] = []
+
+    async def read_episodes(self, namespace: object, query: object) -> tuple[TaskEpisode, ...]:
+        # A task-creation turn now reads episodic memory so a revision can name
+        # the episode it replaces; this double has nothing stored to return.
+        del namespace, query
+        return ()
 
     async def write_task_episode(
         self, namespace: object, episode: TaskEpisode, *, expires_at: object
@@ -97,6 +134,22 @@ class EpisodeWriter:
         del namespace, expires_at
         self.writes.append(episode)
         return episode
+
+    async def transition_task_episode(self, transition: object) -> TaskEpisode | None:
+        from dataclasses import replace
+
+        to_status = getattr(transition, "to_status", ValidationStatus.USER_APPROVED)
+        eligible = to_status in (ValidationStatus.USER_APPROVED, ValidationStatus.COMPLETED)
+        for idx, item in enumerate(self.writes):
+            if item.episode_id == getattr(transition, "source_id", None) or len(self.writes) == 1:
+                updated = replace(
+                    item,
+                    validation_status=to_status,
+                    retrieval_eligible=eligible,
+                )
+                self.writes[idx] = updated
+                return updated
+        return None
 
 
 class RetryableEpisodeWriter(EpisodeWriter):
@@ -129,9 +182,83 @@ class SemanticReader:
 class HistoryWriter:
     def __init__(self) -> None:
         self.writes: list[tuple[ChatMemoryScope, ChatTurn, str]] = []
+        self.begins: list[tuple[ChatMemoryScope, ChatTurn, str, str]] = []
+        self.updates: list[tuple[ChatMemoryScope, ChatTurn, str | None]] = []
 
     async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None:
         self.writes.append((scope, turn, title))
+
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn:
+        self.begins.append((scope, turn, idempotency_key, title))
+        return turn
+
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        return turn
+
+
+class CompletedHistory(HistoryWriter):
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn:
+        await super().begin_turn(scope, turn, idempotency_key=idempotency_key, title=title)
+        return replace(
+            turn,
+            assistant_message="Previously completed answer",
+            status="completed",
+        )
+
+
+class FailingCompletionHistory(HistoryWriter):
+    """Fails only the terminal write - the one that stamps ``completed_at``.
+
+    A task turn writes twice: once to store the assistant message while the
+    episode is still being settled, then once to close the turn. Only the
+    second carries ``completed_at``, so this isolates the completion failure
+    that the task path reaches after its proposal card is already out.
+    """
+
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        if turn.completed_at is not None:
+            raise RuntimeError("database unavailable")
+        return turn
+
+
+class FailingUpdateHistory(HistoryWriter):
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn:
+        self.updates.append((scope, turn, title))
+        raise RuntimeError("database unavailable")
 
 
 def _scope(*, session_id: str = "session-1") -> ChatMemoryScope:
@@ -174,6 +301,7 @@ def _controller(
     episodes: EpisodeWriter | None = None,
     semantic: SemanticReader | None = None,
     history: HistoryWriter | None = None,
+    reports: InMemoryReportArtifactStore | None = None,
 ) -> tuple[ChatController, InMemoryChatSessionBuffer]:
     ids = iter(f"id-{number}" for number in range(1, 30))
     buffer = InMemoryChatSessionBuffer(max_turns=4, ttl_seconds=60)
@@ -192,6 +320,10 @@ def _controller(
             new_id=lambda: next(ids),
             clock=lambda: NOW,
             history=history,
+            # Always a store, never the real folder: before this seam existed the
+            # controller wrote generated reports straight into the repository's
+            # tracked ``data/reports`` whenever this suite ran.
+            reports=reports if reports is not None else InMemoryReportArtifactStore(),
         ),
         buffer,
     )
@@ -199,6 +331,16 @@ def _controller(
 
 async def _collect(controller: ChatController, request: ChatMessageRequest):
     return [event async for event in controller.stream_message(request)]
+
+
+def _without_activity(
+    events: list[ChatMessageStreamEvent],
+) -> list[ChatMessageStreamEvent]:
+    return [
+        event
+        for event in events
+        if getattr(event, "event_type", None) is not ChatEventType.ACTIVITY
+    ]
 
 
 def test_controller_streams_deltas_then_completed_and_records_one_complete_turn() -> None:
@@ -209,7 +351,8 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     events = asyncio.run(_collect(controller, _request()))
     context = reply.calls[0][1]
 
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
@@ -232,6 +375,128 @@ def test_controller_streams_deltas_then_completed_and_records_one_complete_turn(
     assert len(profile.reads) == 1
 
 
+def test_controller_emits_user_centric_dynamic_activity_snapshots() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply(("Answer",)), profile=ProfileReader(_profile()), history=history
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+    snapshots = [event.activities for event in events if event.event_type is ChatEventType.ACTIVITY]
+
+    assert [activity.code for activity in snapshots[-1]] == [
+        ChatActivityCode.UNDERSTANDING_REQUEST,
+        ChatActivityCode.REVIEWING_CONTEXT,
+        ChatActivityCode.PREPARING_RESPONSE,
+    ]
+    assert all(activity.status is ChatActivityStatus.COMPLETED for activity in snapshots[-1])
+    assert history.updates[-1][1].activities == snapshots[-1]
+    assert history.updates[-1][1].completed_at == NOW
+
+
+def test_controller_persists_provider_reasoning_and_filename_only_trace() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply(
+            (
+                ChatReplyChunk(
+                    text="Answer",
+                    provider="mimo",
+                    model="mimo-v2.5-pro",
+                    reasoning_mode="fast",
+                    reasoning="Use the supplied context.",
+                ),
+            )
+        ),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    completed = next(
+        event for event in reversed(events) if event.event_type is ChatEventType.COMPLETED
+    )
+    assert completed.execution_trace is not None
+    assert completed.execution_trace.to_dict() == {
+        "provider": "mimo",
+        "model": "mimo-v2.5-pro",
+        "mode": "fast",
+        "reasoning": "Use the supplied context.",
+        "reasoning_truncated": False,
+        "retrieved_filenames": [],
+    }
+    assert history.updates[-1][1].execution_trace == completed.execution_trace
+
+
+def test_controller_marks_context_review_running_before_memory_read() -> None:
+    history = HistoryWriter()
+    profile = ActivityInspectingProfile(history)
+    controller, _ = _controller(reply=FakeReply(("Answer",)), profile=profile, history=history)
+
+    asyncio.run(_collect(controller, _request()))
+
+    assert profile.activity_status_during_read is ChatActivityStatus.RUNNING
+
+
+def test_controller_reports_retrieval_result_as_a_safe_aggregate() -> None:
+    semantic = SemanticReader(
+        {
+            "source_label": "current_company_evidence",
+            "retrieval_status": "no_results",
+            "chunks": (),
+            "citations": (),
+            "scores": (),
+        }
+    )
+    controller, _ = _controller(
+        reply=FakeReply(("Answer",)),
+        profile=ProfileReader(_profile()),
+        semantic=semantic,
+    )
+
+    events = asyncio.run(
+        _collect(controller, _request(user_message="What does company policy say?"))
+    )
+    final_snapshot = next(
+        event.activities for event in reversed(events) if event.event_type is ChatEventType.ACTIVITY
+    )
+    search = next(
+        item
+        for item in final_snapshot
+        if item.code is ChatActivityCode.SEARCHING_RELEVANT_INFORMATION
+    )
+
+    assert search.outcome is ChatActivityOutcome.NO_RESULTS
+    assert search.detail is not None
+    assert search.detail.to_dict() == {
+        "kind": "documents_found",
+        "current": 0,
+        "total": None,
+    }
+    assert "provider" not in str(search.to_dict()).lower()
+
+
+def test_controller_persists_partial_activity_history_when_generation_fails() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=BrokenReply(), profile=ProfileReader(_profile()), history=history
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+    terminal = next(
+        event.activities for event in reversed(events) if event.event_type is ChatEventType.ACTIVITY
+    )
+
+    assert [item.status for item in terminal] == [
+        ChatActivityStatus.COMPLETED,
+        ChatActivityStatus.COMPLETED,
+        ChatActivityStatus.FAILED,
+    ]
+    assert history.updates[-1][1].status.value == "failed"
+    assert history.updates[-1][1].completed_at == NOW
+
+
 def test_controller_persists_completed_turn_with_the_llm_generated_conversation_title() -> None:
     history = HistoryWriter()
     controller, _ = _controller(
@@ -242,11 +507,56 @@ def test_controller_persists_completed_turn_with_the_llm_generated_conversation_
 
     asyncio.run(_collect(controller, _request()))
 
-    assert len(history.writes) == 1
-    scope, turn, title = history.writes[0]
+    assert len(history.begins) == 1
+    begin_scope, pending, idempotency_key, temporary_title = history.begins[0]
+    assert begin_scope == _scope()
+    assert pending.assistant_message is None
+    assert pending.status.value == "generating"
+    assert idempotency_key == "idem-1"
+    assert temporary_title == "Help me plan today."
+    scope, turn, title = history.updates[-1]
     assert scope == _scope()
     assert turn.assistant_message == "Reply"
+    assert turn.turn_id == pending.turn_id
+    assert turn.status.value == "completed"
     assert title == "Quarterly report plan"
+
+
+def test_controller_emits_started_after_the_user_turn_is_durable() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=FakeReply(("Reply",)),
+        profile=None,
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert history.begins
+    assert events[0].event_type is ChatEventType.STARTED
+    assert events[0].turn_id == history.begins[0][1].turn_id
+
+
+def test_controller_marks_the_durable_turn_failed_when_the_provider_is_unavailable() -> None:
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=BrokenReply(),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
+        ChatEventType.ERROR,
+    ]
+    failed = history.updates[-1][1]
+    assert failed.turn_id == history.begins[0][1].turn_id
+    assert failed.user_message == "Help me plan today."
+    assert failed.assistant_message is None
+    assert failed.status.value == "failed"
+    assert failed.error_code == "chat_provider_unavailable"
 
 
 def test_controller_persists_and_completes_with_ranked_company_rag_evidence() -> None:
@@ -297,7 +607,8 @@ def test_controller_persists_and_completes_with_ranked_company_rag_evidence() ->
             scope=_scope(), memory_type=MemoryType.SHORT_TERM, record_id="session-1", source_id=None
         )
     )[0]
-    assert [event.event_type for event in events] == [
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
@@ -395,9 +706,7 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     task_events = asyncio.run(
         _collect(controller, _request(user_message="Please create a task for this."))
     )
-    ordinary_request = _request(
-        idempotency_key="idem-2", user_message="Help me plan today."
-    )
+    ordinary_request = _request(idempotency_key="idem-2", user_message="Help me plan today.")
     asyncio.run(_collect(controller, ordinary_request))
 
     assert len(episodes.writes) == 1
@@ -412,15 +721,30 @@ def test_controller_persists_one_body_free_episode_only_for_an_explicit_task_req
     assert written.action_plan == ("Draft the report", "Send it for review")
     assert written.record_id
     assert "Please create" not in written.record_id
-    assert [event.event_type for event in task_events] == [
+    visible_task_events = _without_activity(task_events)
+    assert [event.event_type for event in visible_task_events] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,
         ChatEventType.COMPLETED,
     ]
-    assert task_events[1].source_id == written.episode_id
-    assert task_events[2].proposal is not None
-    assert task_events[2].proposal["episode_id"] == written.episode_id
+    assert visible_task_events[2].source_id == written.episode_id
+    assert visible_task_events[3].proposal is not None
+    assert visible_task_events[3].proposal["episode_id"] == written.episode_id
+    proposal_index = next(
+        index
+        for index, event in enumerate(task_events)
+        if event.event_type is ChatEventType.TASK_PROPOSAL
+    )
+    completed_activity_index = next(
+        index
+        for index, event in enumerate(task_events)
+        if event.event_type is ChatEventType.ACTIVITY
+        and event.activities[-1].code is ChatActivityCode.PREPARING_ACTION_PLAN
+        and event.activities[-1].status is ChatActivityStatus.COMPLETED
+    )
+    assert completed_activity_index > proposal_index
 
 
 @pytest.mark.parametrize(
@@ -449,13 +773,15 @@ def test_controller_emits_a_safe_degraded_warning_and_continues_without_profile(
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
+        ChatEventType.STARTED,
         ChatEventType.ERROR,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
     ]
-    assert events[0].code == "optional_memory_degraded"
-    assert events[0].safe_message == "Some optional memory was unavailable."
+    assert visible_events[1].code == "optional_memory_degraded"
+    assert visible_events[1].safe_message == "Một phần bộ nhớ tùy chọn hiện không khả dụng."
     assert reply.calls[0][1].stored_preference is None
 
 
@@ -481,40 +807,184 @@ def test_disconnect_after_a_delta_does_not_append_a_partial_turn() -> None:
             return disconnected
 
         stream = controller.stream_message(_request(), is_cancelled=is_cancelled)
+        started = await anext(stream)
+        assert started.event_type is ChatEventType.STARTED
         first = await anext(stream)
+        while first.event_type is ChatEventType.ACTIVITY:
+            first = await anext(stream)
         assert first.event_type is ChatEventType.DELTA
         disconnected = True
         assert [event async for event in stream] == []
-        assert buffer.read(
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
+            )
+            == ()
+        )
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_stops_only_the_named_durable_turn() -> None:
+    async def scenario() -> None:
+        history = HistoryWriter()
+        reply = FakeReply(("must not stream",))
+        controller, buffer = _controller(
+            reply=reply,
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+
+        assert await controller.cancel_turn(started.turn_id) is True
+        assert [event async for event in stream] == []
+        assert reply.calls == []
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert history.updates[-1][1].turn_id == started.turn_id
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
+            )
+            == ()
+        )
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_stops_a_turn_already_streaming_deltas() -> None:
+    """The explicit signal has to be honoured mid-generation, not only between phases."""
+
+    async def scenario() -> None:
+        history = HistoryWriter()
+        reply = FakeReply(("first", "second"))
+        controller, buffer = _controller(
+            reply=reply,
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+        event = await anext(stream)
+        while event.event_type is ChatEventType.ACTIVITY:
+            event = await anext(stream)
+        assert event.event_type is ChatEventType.DELTA
+
+        assert await controller.cancel_turn(started.turn_id) is True
+        assert [remaining async for remaining in stream] == []
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert (
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
+            )
+            == ()
+        )
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_does_not_acknowledge_a_failed_durable_update() -> None:
+    async def scenario() -> None:
+        history = FailingUpdateHistory()
+        controller, _ = _controller(
+            reply=FakeReply(("must not stream",)),
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        started = await anext(stream)
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await controller.cancel_turn(started.turn_id)
+
+    asyncio.run(scenario())
+
+
+def test_cancel_turn_by_idempotency_key_targets_the_pending_turn() -> None:
+    async def scenario() -> None:
+        history = HistoryWriter()
+        controller, _ = _controller(
+            reply=FakeReply(("must not stream",)),
+            profile=ProfileReader(_profile()),
+            history=history,
+        )
+        stream = controller.stream_message(_request())
+        await anext(stream)
+
+        assert await controller.cancel_turn_by_idempotency_key("idem-1") is True
+        assert history.updates[-1][1].status.value == "cancelled"
+        assert [event async for event in stream] == []
+
+    asyncio.run(scenario())
+
+
+def test_completed_event_is_not_emitted_when_durable_completion_fails() -> None:
+    history = FailingUpdateHistory()
+    controller, buffer = _controller(
+        reply=FakeReply(("Generated answer",)),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.ERROR,
+    ]
+    assert events[-1].code == "chat_history_unavailable"
+    assert (
+        buffer.read(
             MemoryNamespace(
                 scope=_scope(),
                 memory_type=MemoryType.SHORT_TERM,
                 record_id="session-1",
                 source_id=None,
             )
-        ) == ()
-
-    asyncio.run(scenario())
+        )
+        == ()
+    )
 
 
 def test_reply_failure_emits_only_a_safe_error_and_does_not_append_the_turn() -> None:
-    controller, buffer = _controller(
-        reply=BrokenReply(), profile=ProfileReader(_profile())
-    )
+    controller, buffer = _controller(reply=BrokenReply(), profile=ProfileReader(_profile()))
 
     events = asyncio.run(_collect(controller, _request()))
 
-    assert [event.event_type for event in events] == [ChatEventType.ERROR]
-    assert events[0].code == "chat_provider_unavailable"
-    assert "sensitive" not in events[0].safe_message
-    assert buffer.read(
-        MemoryNamespace(
-            scope=_scope(),
-            memory_type=MemoryType.SHORT_TERM,
-            record_id="session-1",
-            source_id=None,
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
+        ChatEventType.STARTED,
+        ChatEventType.ERROR,
+    ]
+    assert visible_events[1].code == "chat_provider_unavailable"
+    assert "sensitive" not in visible_events[1].safe_message
+    assert (
+        buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
         )
-    ) == ()
+        == ()
+    )
 
 
 def test_completed_idempotent_request_replays_events_without_a_second_turn() -> None:
@@ -526,20 +996,46 @@ def test_completed_idempotent_request_replays_events_without_a_second_turn() -> 
 
     assert replay == first
     assert len(reply.calls) == 1
-    assert len(
-        buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+    assert (
+        len(
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
         )
-    ) == 1
+        == 1
+    )
 
 
-def test_transient_task_episode_failure_retries_the_same_pending_write_without_a_second_reply(
-) -> None:
+def test_durable_completed_idempotent_request_replays_without_calling_the_provider() -> None:
+    history = CompletedHistory()
+    reply = FakeReply(("must not regenerate",))
+    controller, _ = _controller(
+        reply=reply,
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    visible_events = _without_activity(events)
+    assert [event.event_type for event in visible_events] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.COMPLETED,
+    ]
+    assert visible_events[1].text == "Previously completed answer"
+    assert reply.calls == []
+    assert history.updates == []
+
+
+def test_transient_task_episode_failure_retries_the_same_pending_write_without_a_second_reply() -> (
+    None
+):
     proposal = ChatTaskProposal(
         task_title="Submit report",
         minimal_request_paraphrase="Prepare the report",
@@ -563,12 +1059,23 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     retry = asyncio.run(_collect(controller, request))
     replay = asyncio.run(_collect(controller, request))
 
-    assert [event.event_type for event in first] == [
+    first_terminal_activity = next(
+        event.activities[-1]
+        for event in reversed(first)
+        if event.event_type is ChatEventType.ACTIVITY
+    )
+    assert first_terminal_activity.code is ChatActivityCode.PREPARING_ACTION_PLAN
+    assert first_terminal_activity.status is ChatActivityStatus.COMPLETED
+    assert first_terminal_activity.outcome is ChatActivityOutcome.DEGRADED
+
+    assert [event.event_type for event in _without_activity(first)] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.ERROR,
         ChatEventType.COMPLETED,
     ]
-    assert [event.event_type for event in retry] == [
+    assert [event.event_type for event in _without_activity(retry)] == [
+        ChatEventType.STARTED,
         ChatEventType.DELTA,
         ChatEventType.MEMORY_CITATION,
         ChatEventType.TASK_PROPOSAL,
@@ -584,16 +1091,19 @@ def test_transient_task_episode_failure_retries_the_same_pending_write_without_a
     assert episodes.attempts[0].chat_turn_id == episodes.attempts[1].chat_turn_id
     assert episodes.attempts[0].action_plan == episodes.attempts[1].action_plan
     assert episodes.writes == [episodes.attempts[0]]
-    assert len(
-        buffer.read(
-            MemoryNamespace(
-                scope=_scope(),
-                memory_type=MemoryType.SHORT_TERM,
-                record_id="session-1",
-                source_id=None,
+    assert (
+        len(
+            buffer.read(
+                MemoryNamespace(
+                    scope=_scope(),
+                    memory_type=MemoryType.SHORT_TERM,
+                    record_id="session-1",
+                    source_id=None,
+                )
             )
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
@@ -603,13 +1113,9 @@ def test_session_registry_binds_sessions_to_the_verified_principal() -> None:
     async def scenario() -> None:
         scope = await registry.create(user_id="user@example.com")
 
-        assert await registry.require(
-            scope.session_id, user_id="user@example.com"
-        ) == scope
+        assert await registry.require(scope.session_id, user_id="user@example.com") == scope
         with pytest.raises(ChatSessionAccessDenied):
-            await registry.require(
-                scope.session_id, user_id="other@example.com"
-            )
+            await registry.require(scope.session_id, user_id="other@example.com")
 
     asyncio.run(scenario())
 
@@ -627,3 +1133,242 @@ def test_session_registry_deletes_only_the_verified_principals_session() -> None
             await registry.require(scope.session_id, user_id="user@example.com")
 
     asyncio.run(scenario())
+
+
+def test_explicit_task_request_emits_task_proposal_card_and_supports_approval() -> None:
+    task_proposal = ChatTaskProposal(
+        task_title="Nộp hồ sơ cấp lại CCCD",
+        minimal_request_paraphrase="Các bước nộp hồ sơ xin cấp lại CCCD",
+        action_plan=(
+            "Bước 1: Đăng nhập VNeID",
+            "Bước 2: Chọn Cấp lại CCCD",
+            "Bước 3: Xác nhận thông tin và nộp",
+        ),
+        rag_citations=(),
+        missing_information=(),
+        model_id="gemini-3.5-flash-lite",
+        prompt_version="chat-v2",
+        confidence=0.95,
+    )
+    reply = FakeReply(
+        (
+            ChatReplyChunk(
+                "Dưới đây là kế hoạch các bước nộp hồ sơ cấp lại CCCD.",
+                task_proposal=task_proposal,
+            ),
+        )
+    )
+    episodes = EpisodeWriter()
+    controller, _ = _controller(
+        reply=reply,
+        profile=ProfileReader(_profile()),
+        episodes=episodes,
+    )
+
+    # 1. Câu hỏi thường không có từ khóa tạo task -> KHÔNG sinh event TASK_PROPOSAL
+    normal_request = _request(
+        idempotency_key="req-normal",
+        user_message="Thủ tục cấp lại CCCD gồm giấy tờ gì?",
+    )
+    normal_events = asyncio.run(_collect(controller, normal_request))
+    assert ChatEventType.TASK_PROPOSAL not in [e.event_type for e in normal_events]
+
+    # 2. Câu lệnh có từ khóa "Tạo task" -> SINH event TASK_PROPOSAL (Card HITL)
+    task_request = _request(
+        idempotency_key="req-task",
+        user_message="Tạo task các bước nộp hồ sơ xin cấp lại CCCD",
+    )
+    task_events = asyncio.run(_collect(controller, task_request))
+    assert [e.event_type for e in _without_activity(task_events)] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
+        ChatEventType.COMPLETED,
+    ]
+
+    proposal_event = next(e for e in task_events if e.event_type is ChatEventType.TASK_PROPOSAL)
+    assert proposal_event.proposal is not None
+    assert proposal_event.proposal["task_title"] == "Nộp hồ sơ cấp lại CCCD"
+    assert len(proposal_event.proposal["action_plan"]) == 3
+    assert proposal_event.proposal["validation_status"] == ValidationStatus.SYSTEM_GENERATED
+    assert proposal_event.proposal["retrieval_eligible"] is False
+
+    # 3. Người dùng Approve Card -> Transition sang USER_APPROVED, retrieval_eligible = True
+    episode_id = str(proposal_event.proposal["episode_id"])
+    approved_episode = asyncio.run(controller.approve_task_episode(episode_id))
+    assert approved_episode is not None
+    assert approved_episode.validation_status is ValidationStatus.USER_APPROVED
+    assert approved_episode.retrieval_eligible is True
+
+
+def test_a_task_turn_reports_the_same_failure_as_a_normal_turn_when_completion_fails() -> None:
+    """Both completion paths share one durable write, so they must abort alike."""
+
+    task_proposal = ChatTaskProposal(
+        task_title="Nộp hồ sơ cấp lại CCCD",
+        minimal_request_paraphrase="Các bước nộp hồ sơ xin cấp lại CCCD",
+        action_plan=("Bước 1: Đăng nhập VNeID",),
+        rag_citations=(),
+        missing_information=(),
+        model_id="gemini-3.5-flash-lite",
+        prompt_version="chat-v2",
+        confidence=0.95,
+    )
+    controller, buffer = _controller(
+        reply=FakeReply((ChatReplyChunk("Kế hoạch.", task_proposal=task_proposal),)),
+        profile=ProfileReader(_profile()),
+        episodes=EpisodeWriter(),
+        history=FailingCompletionHistory(),
+    )
+
+    events = asyncio.run(
+        _collect(
+            controller,
+            _request(user_message="Tạo task các bước nộp hồ sơ xin cấp lại CCCD"),
+        )
+    )
+
+    # The proposal card still reaches the client - the episode write succeeded -
+    # and only then does the failed turn write end the stream.
+    assert [event.event_type for event in _without_activity(events)] == [
+        ChatEventType.STARTED,
+        ChatEventType.DELTA,
+        ChatEventType.MEMORY_CITATION,
+        ChatEventType.TASK_PROPOSAL,
+        ChatEventType.ERROR,
+    ]
+    assert events[-1].code == "chat_history_unavailable"
+    assert (
+        buffer.read(
+            MemoryNamespace(
+                scope=_scope(),
+                memory_type=MemoryType.SHORT_TERM,
+                record_id="session-1",
+                source_id=None,
+            )
+        )
+        == ()
+    )
+
+
+def test_a_broken_response_is_not_reported_as_a_provider_outage() -> None:
+    """The memory evaluation counted these as dropouts and aborted runs over them."""
+
+    history = HistoryWriter()
+    controller, _ = _controller(
+        reply=InvalidResponseReply(),
+        profile=ProfileReader(_profile()),
+        history=history,
+    )
+
+    events = asyncio.run(_collect(controller, _request()))
+
+    assert events[-1].code == "chat_response_invalid"
+    assert history.updates[-1][1].error_code == "chat_response_invalid"
+    assert "validation" not in events[-1].safe_message
+
+
+def test_generated_report_artifact_is_saved_and_emitted_in_completed_event() -> None:
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    report = GeneratedReportArtifact(
+        filename="bao-cao-test-cccd.md",
+        title="Báo cáo tổng hợp quy trình CCCD",
+        content="# Báo cáo tổng hợp quy trình CCCD\n\nNội dung chi tiết...",
+    )
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Tôi đã tạo báo cáo thành công.",
+                generated_report=report,
+            ),
+        )
+    )
+    history = HistoryWriter()
+    store = InMemoryReportArtifactStore()
+    controller, _ = _controller(
+        reply=fake_reply,
+        profile=ProfileReader(_profile()),
+        history=history,
+        reports=store,
+    )
+
+    req = _request(user_message="tạo báo cáo từ tài liệu")
+    events = asyncio.run(_collect(controller, req))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    assert len(completed.artifact_refs) == 1
+    assert completed.artifact_refs[0]["ref_id"] == "bao-cao-test-cccd.md"
+    prov = cast(dict[str, object], completed.artifact_refs[0]["provenance"])
+    assert prov["title"] == "Báo cáo tổng hợp quy trình CCCD"
+
+    # The document reached the store, not just the event.
+    stored = asyncio.run(store.list_reports())
+    assert [item.filename.value for item in stored] == ["bao-cao-test-cccd.md"]
+    assert stored[0].content == report.content
+
+    # Also verify turn in history
+    assert len(history.updates) > 0
+    persisted_turn = history.updates[-1][1]
+    assert len(persisted_turn.artifact_refs) == 1
+    assert persisted_turn.artifact_refs[0]["ref_id"] == "bao-cao-test-cccd.md"
+
+
+def test_a_traversing_provider_filename_is_confined_to_the_report_store() -> None:
+    """The model names this file. A hostile name degrades; it does not escape."""
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Đã tạo báo cáo.",
+                generated_report=GeneratedReportArtifact(
+                    filename="../../../../etc/cron.d/pwned",
+                    title="Báo cáo",
+                    content="payload",
+                ),
+            ),
+        )
+    )
+    store = InMemoryReportArtifactStore()
+    controller, _ = _controller(reply=fake_reply, profile=ProfileReader(_profile()), reports=store)
+
+    events = asyncio.run(_collect(controller, _request(user_message="tạo báo cáo")))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    ref_id = cast(str, completed.artifact_refs[0]["ref_id"])
+    assert ref_id == "pwned.md"
+    assert "/" not in ref_id and "\\" not in ref_id
+
+    stored = asyncio.run(store.list_reports())
+    assert [item.filename.value for item in stored] == ["pwned.md"]
+
+
+def test_a_failing_report_store_does_not_fail_the_turn() -> None:
+    """A report that cannot be written must not cost the user their answer."""
+    from cowork_agent.features.ai_chat.ports import GeneratedReportArtifact
+
+    class BrokenStore(InMemoryReportArtifactStore):
+        async def save(self, artifact):  # type: ignore[override]
+            raise OSError("disk full")
+
+    fake_reply = FakeReply(
+        chunks=(
+            ChatReplyChunk(
+                text="Đã tạo báo cáo.",
+                generated_report=GeneratedReportArtifact(
+                    filename="bao-cao.md", title="Báo cáo", content="noi dung"
+                ),
+            ),
+        )
+    )
+    controller, _ = _controller(
+        reply=fake_reply, profile=ProfileReader(_profile()), reports=BrokenStore()
+    )
+
+    events = asyncio.run(_collect(controller, _request(user_message="tạo báo cáo")))
+
+    completed = next(e for e in events if e.event_type is ChatEventType.COMPLETED)
+    assert completed.artifact_refs == ()
+    assert not any(e.event_type is ChatEventType.ERROR for e in events)

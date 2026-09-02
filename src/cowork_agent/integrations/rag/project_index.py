@@ -18,6 +18,7 @@ import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from time import perf_counter
 from typing import Protocol
 
 import numpy as np
@@ -26,6 +27,12 @@ try:
     from turbovec import IdMapIndex  # type: ignore[import-untyped]
 except ImportError:  # pragma: no cover - exercised only where turbovec is absent
     IdMapIndex = None
+
+from cowork_agent.observability import (
+    ProjectDocumentTimingOutcome,
+    log_project_document_timing,
+    safe_provider_label,
+)
 
 from .turbovec_memory import TURBOVEC_AVAILABLE, _pad_vector_dim
 
@@ -91,6 +98,7 @@ class TurbovecProjectIndexStore:
         self,
         *,
         project_id: str,
+        document_id: str | None = None,
         vector_ids: Sequence[int],
         vectors: Sequence[Sequence[float]],
     ) -> None:
@@ -100,9 +108,44 @@ class TurbovecProjectIndexStore:
         matrix = self._normalize(vectors)
         ids = np.asarray(vector_ids, dtype=np.uint64)
         async with self._lock(project_id):
-            index = await asyncio.to_thread(self._open_or_create, project_id)
-            await asyncio.to_thread(self._add_replacing, index, matrix, ids)
-            await self._publish(project_id, index)
+            stage_started = perf_counter()
+            stage_outcome: ProjectDocumentTimingOutcome = "error"
+            snapshot_bytes: int | None = None
+            try:
+                index = await asyncio.to_thread(self._open_or_create, project_id)
+                await asyncio.to_thread(self._add_replacing, index, matrix, ids)
+                target = await self._write_local(project_id, index)
+                snapshot_bytes = target.stat().st_size
+                stage_outcome = "success"
+            finally:
+                log_project_document_timing(
+                    logger,
+                    stage="local_index_update",
+                    started=stage_started,
+                    outcome=stage_outcome,
+                    document_id=document_id,
+                    project_id=project_id,
+                    snapshot_bytes=snapshot_bytes,
+                    provider=safe_provider_label(self),
+                )
+            storage = self._storage
+            if storage is not None:
+                stage_started = perf_counter()
+                stage_outcome = "error"
+                try:
+                    await storage.upload_file(self.snapshot_key(project_id), target)
+                    stage_outcome = "success"
+                finally:
+                    log_project_document_timing(
+                        logger,
+                        stage="snapshot_upload",
+                        started=stage_started,
+                        outcome=stage_outcome,
+                        document_id=document_id,
+                        project_id=project_id,
+                        snapshot_bytes=snapshot_bytes,
+                        provider=safe_provider_label(storage),
+                    )
 
     async def remove(self, *, project_id: str, vector_ids: Sequence[int]) -> None:
         """Drop vectors by external ID; missing IDs are not an error."""
@@ -204,13 +247,17 @@ class TurbovecProjectIndexStore:
             logger.warning("Project index snapshot download failed; project_id=%s", project_id)
 
     async def _publish(self, project_id: str, index: IdMapIndex) -> None:
+        target = await self._write_local(project_id, index)
+        if self._storage is not None:
+            await self._storage.upload_file(self.snapshot_key(project_id), target)
+
+    async def _write_local(self, project_id: str, index: IdMapIndex) -> Path:
         target = self.index_path(project_id)
         target.parent.mkdir(parents=True, exist_ok=True)
         staging = target.with_suffix(".tvim.writing")
         await asyncio.to_thread(index.write, str(staging))
         os.replace(staging, target)
-        if self._storage is not None:
-            await self._storage.upload_file(self.snapshot_key(project_id), target)
+        return target
 
 
 def _remove_all(index: IdMapIndex, vector_ids: Sequence[int]) -> None:
@@ -227,12 +274,9 @@ def _search(
     present = [int(vector_id) for vector_id in allowlist if index.contains(int(vector_id))]
     if not present:
         return ()
-    scores, ids = index.search(
-        query, k=limit, allowlist=np.asarray(present, dtype=np.uint64)
-    )
+    scores, ids = index.search(query, k=limit, allowlist=np.asarray(present, dtype=np.uint64))
     return tuple(
-        (int(vector_id), float(score))
-        for score, vector_id in zip(scores[0], ids[0], strict=True)
+        (int(vector_id), float(score)) for score, vector_id in zip(scores[0], ids[0], strict=True)
     )
 
 

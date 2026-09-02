@@ -92,5 +92,5 @@ request and weakens the system-generated trust boundary.
 - `./ADR-006-user-document-plane-and-classifier-routing.md` (extends this
   decision with the user-document retrieval plane and classifier-gated routing)
 - `../prds/PRD-v2-Memory-Extension.md`
-- `../../docs/architectures/TARGET-ARCHITECTURE.md`
+- `../../docs/architectures/c3-api-ai-chat.md`
 - `../../docs/references/PRD2-chat-memory-orchestration.md`

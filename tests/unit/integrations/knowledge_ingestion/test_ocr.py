@@ -81,10 +81,40 @@ def test_mistral_ocr_extracts_markdown_and_images(tmp_path: Path) -> None:
 
     assert "# Page 1" in markdown
     assert "## Page 2" in markdown
+    assert "<!-- Page 1 -->" in markdown
+    assert "<!-- Page 2 -->" in markdown
     assert "![Figure](images/document-img-1)" in markdown
     saved_img = tmp_path / "images" / "document-img-1"
     assert saved_img.exists()
     assert saved_img.read_bytes() == img_data
+
+
+def test_mistral_ocr_wraps_pages_with_html_comments() -> None:
+    pages = [
+        SimpleNamespace(markdown="Alpha", images=[]),
+        SimpleNamespace(markdown="Beta", images=[]),
+    ]
+    extractor = MistralOcrExtractor(api_key="test-key")
+    extractor._client = _FakeMistralClient(pages)
+
+    markdown = extractor.extract("document.pdf", b"pdf-bytes")
+
+    assert markdown == "<!-- Page 1 -->\nAlpha\n\n<!-- Page 2 -->\nBeta"
+
+
+def test_mistral_ocr_omits_empty_pages_without_markers() -> None:
+    pages = [
+        SimpleNamespace(markdown="Alpha", images=[]),
+        SimpleNamespace(markdown="   \n", images=[]),
+        SimpleNamespace(markdown="Gamma", images=[]),
+    ]
+    extractor = MistralOcrExtractor(api_key="test-key")
+    extractor._client = _FakeMistralClient(pages)
+
+    markdown = extractor.extract("document.pdf", b"pdf-bytes")
+
+    assert markdown == "<!-- Page 1 -->\nAlpha\n\n<!-- Page 3 -->\nGamma"
+    assert "<!-- Page 2 -->" not in markdown
 
 
 def test_mistral_ocr_raises_on_failure() -> None:

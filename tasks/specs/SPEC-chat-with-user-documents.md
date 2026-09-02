@@ -5,7 +5,7 @@
 | Trạng thái | Accepted — implementation-aligned |
 | Ngày | 2026-08-13 |
 | Nguồn yêu cầu | [PRD-v3](../prds/PRD-v3-chat-with-user-documents.md), `docs/references/user_preference.md` |
-| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [ADR-008](../adr/ADR-008-turbovec-project-document-plane.md), [TARGET-ARCHITECTURE §21](../../docs/architectures/TARGET-ARCHITECTURE.md) |
+| Thẩm quyền kiến trúc | [ADR-007](../adr/ADR-007-project-scoped-classifier-gated-user-documents.md), [ADR-008](../adr/ADR-008-turbovec-project-document-plane.md), [Architecture — retrieval](../../docs/architectures/c3-api-retrieval.md) |
 | Thay thế | Baseline user-wide/no-Project của SPEC v3.0 |
 | Baseline kỹ thuật | Python 3.11+, FastAPI, PostgreSQL, Supabase Storage, Turbovec `.tvim`, Gemini embeddings |
 | Feature owner | AI Chat Controller (`feature: ai_chat`) |
@@ -301,7 +301,7 @@ filter riêng:
 
 ```python
 class UserDocumentQuery(_QueryScopedMemoryRead):
-    _max_items = MAX_USER_DOCUMENT_RETRIEVAL_ITEMS   # 8
+    _max_items = MAX_USER_DOCUMENT_RETRIEVAL_ITEMS  # 8
     _fixed_filter_name = "document_scope"
     _fixed_filter_value = "user_document"
 ```

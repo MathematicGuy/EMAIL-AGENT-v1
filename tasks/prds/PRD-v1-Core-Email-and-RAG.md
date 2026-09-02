@@ -713,8 +713,8 @@ PRD-v1 is accepted when:
 5. Attachments are reported but not processed.
 6. Every message receives a valid classifier decision or documented fallback.
 7. Every message resolves to `NO_ACTION`, `DIRECT_PLAN`, or `RETRIEVE_RAG`.
-8. `DIRECT_PLAN` performs no RAG retrieval.
-9. `RETRIEVE_RAG` uses the retrieval-only semantic interface.
+8. Every non-`NO_ACTION` candidate performs exactly one retrieval before its final route is chosen.
+9. `RETRIEVE_RAG` receives only Cohere-gated evidence; weak, unscored, or unavailable retrieval never supplies citations.
 10. Agent Core performs one final generation call per actionable task candidate.
 11. Company-grounded steps require valid current-retrieval citations.
 12. RAG failure produces a partial plan with missing information.

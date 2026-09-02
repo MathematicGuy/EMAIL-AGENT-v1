@@ -36,9 +36,7 @@ def test_sqlite_run_repository_persists_and_preserves_idempotency(
         await first.initialize()
 
         created, was_created = await first.create(_run("run-1", idempotency_key="same"))
-        duplicate, duplicate_created = await first.create(
-            _run("run-2", idempotency_key="same")
-        )
+        duplicate, duplicate_created = await first.create(_run("run-2", idempotency_key="same"))
         assert was_created is True
         assert duplicate_created is False
         assert duplicate.id == created.id == "run-1"
@@ -97,9 +95,7 @@ def test_sqlite_run_repository_lists_recent_runs_for_one_mailbox(
         now = datetime.now(UTC)
         await repository.create(_run("run-old", created_at=now - timedelta(minutes=2)))
         await repository.create(_run("run-new", created_at=now - timedelta(minutes=1)))
-        await repository.create(
-            _run("run-other-user", user_id="user-2", created_at=now)
-        )
+        await repository.create(_run("run-other-user", user_id="user-2", created_at=now))
         await repository.create(
             _run("run-other-mailbox", mailbox_connection_id="mailbox-2", created_at=now)
         )
@@ -127,9 +123,7 @@ def test_sqlite_run_repository_recovers_only_stale_running_runs(tmp_path: Path) 
             queued_before=now - timedelta(hours=1),
         )
         assert [run.id for run in stuck] == ["stale"]
-        assert await repository.reset_stuck_run(
-            "stale", started_before=now - timedelta(hours=1)
-        )
+        assert await repository.reset_stuck_run("stale", started_before=now - timedelta(hours=1))
         reset = await repository.get("stale")
         assert reset is not None
         assert reset.status is RunStatus.QUEUED

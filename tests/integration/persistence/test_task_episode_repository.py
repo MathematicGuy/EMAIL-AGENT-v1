@@ -93,7 +93,6 @@ def _episode(
     *,
     episode_id: str = "episode-1",
     record_id: str = "record-1",
-    tenant_id: str = "tenant-1",
     user_id: str = "user@example.com",
     session_id: str = "session-1",
     turn_id: str = "turn-1",
@@ -170,7 +169,7 @@ def test_write_is_retry_safe_and_rejects_namespace_or_stale_payload_updates() ->
             assert stale.validation_status is ValidationStatus.SYSTEM_GENERATED
             with pytest.raises(ValueError, match="namespace"):
                 await repository.write_task_episode(
-                    _namespace(tenant_id="tenant-2"), _episode(), expires_at=None
+                    _namespace(user_id="other@example.com"), _episode(), expires_at=None
                 )
         finally:
             await pool.close()
@@ -247,7 +246,7 @@ def test_retrieval_is_bounded_cross_session_and_excludes_ineligible_or_expired_r
             assert [episode.episode_id for episode in found] == ["episode-2"]
             assert (
                 await repository.read_episodes(
-                    _namespace(tenant_id="tenant-2", session_id="new-session"), query
+                    _namespace(user_id="other@example.com", session_id="new-session"), query
                 )
                 == ()
             )
@@ -354,9 +353,6 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
             other_user = _namespace(
                 user_id="other@example.com", record_id="other-user", turn_id="other-user"
             )
-            other_tenant = _namespace(
-                tenant_id="tenant-2", record_id="other-tenant", turn_id="other-tenant"
-            )
             await repository.write_task_episode(
                 own, _episode(), expires_at=NOW + timedelta(seconds=1)
             )
@@ -370,16 +366,7 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
                 ),
                 expires_at=None,
             )
-            await repository.write_task_episode(
-                other_tenant,
-                _episode(
-                    episode_id="episode-tenant",
-                    record_id="other-tenant",
-                    tenant_id="tenant-2",
-                    turn_id="other-tenant",
-                ),
-                expires_at=None,
-            )
+
             async with pool.connection() as connection:
                 await connection.execute("CREATE TABLE semantic_rag_sentinel (value text NOT NULL)")
                 await connection.execute("INSERT INTO semantic_rag_sentinel VALUES ('preserve')")
@@ -390,10 +377,7 @@ def test_generated_eligibility_expiry_purge_and_user_deletion_preserve_foreign_r
                     "SELECT tenant_id, user_id, retrieval_eligible FROM task_episodes"
                     " ORDER BY tenant_id, user_id"
                 )
-                assert await cursor.fetchall() == [
-                    ("tenant-1", "other@example.com", False),
-                    ("tenant-2", "user@example.com", False),
-                ]
+                assert await cursor.fetchall() == [("tenant-1", "other@example.com", False)]
                 sentinel = await connection.execute("SELECT value FROM semantic_rag_sentinel")
                 assert await sentinel.fetchall() == [("preserve",)]
         finally:
@@ -406,11 +390,9 @@ def test_malicious_payload_shape_is_rejected_before_persistence_and_identifiers_
     async def scenario() -> None:
         repository, pool = await _repository()
         try:
-            source = _episode(
-                tenant_id="tenant'; DELETE FROM task_episodes; --",
-                user_id="user'; DELETE FROM task_episodes; --",
-            )
-            namespace = _namespace(tenant_id=source.tenant_id, user_id=source.user_id)
+            malicious_tenant = "tenant'; DELETE FROM task_episodes; --"
+            source = _episode(user_id="user'; DELETE FROM task_episodes; --")
+            namespace = _namespace(tenant_id=malicious_tenant, user_id=source.user_id)
             malicious = object.__new__(TaskEpisode)
             for field in fields(TaskEpisode):
                 object.__setattr__(malicious, field.name, getattr(source, field.name))
@@ -512,7 +494,6 @@ def test_transition_and_deletion_are_isolated_by_every_mutation_guard() -> None:
         try:
             await repository.write_task_episode(_namespace(), _episode(), expires_at=None)
             namespaces = (
-                _namespace(tenant_id="other-tenant"),
                 _namespace(user_id="other@example.com"),
                 _namespace(session_id="other-session"),
                 _namespace(record_id="other-record"),
@@ -521,9 +502,12 @@ def test_transition_and_deletion_are_isolated_by_every_mutation_guard() -> None:
             for namespace in namespaces:
                 assert await repository.transition_task_episode(_transition(namespace)) is None
                 assert not await repository.delete_task_episode(namespace, episode_id="episode-1")
-            assert await repository.transition_task_episode(
-                _transition(_namespace(), episode_id="other-episode")
-            ) is None
+            assert (
+                await repository.transition_task_episode(
+                    _transition(_namespace(), episode_id="other-episode")
+                )
+                is None
+            )
             assert not await repository.delete_task_episode(
                 _namespace(), episode_id="other-episode"
             )
@@ -560,8 +544,14 @@ def test_generated_eligibility_tampering_is_refused_and_down_migration_rolls_bac
                     )
             async with pool.connection() as connection:
                 await connection.execute(
-                    (Path(__file__).resolve().parents[3] / "src" / "cowork_agent" / "persistence"
-                     / "migrations" / "004_task_episodes.down.sql").read_text(encoding="utf-8")
+                    (
+                        Path(__file__).resolve().parents[3]
+                        / "src"
+                        / "cowork_agent"
+                        / "persistence"
+                        / "migrations"
+                        / "004_task_episodes.down.sql"
+                    ).read_text(encoding="utf-8")
                 )
                 cursor = await connection.execute("SELECT to_regclass('public.task_episodes')")
                 assert await cursor.fetchone() == (None,)
@@ -660,5 +650,97 @@ def test_list_episodes_returns_every_non_expired_status_newest_first() -> None:
             ValidationStatus.USER_APPROVED,
             ValidationStatus.SYSTEM_GENERATED,
         ]
+
+    _run_scenario(scenario)
+
+
+def test_a_multi_word_search_matches_an_episode_that_holds_only_some_of_the_words() -> None:
+    """The search terms are ORed, and `min_score` is what decides relevance.
+
+    They used to be ANDed by `plainto_tsquery`, so an episode had to contain
+    every term of the search text to be a candidate at all. Nothing reached the
+    score, and episodic retrieval returned nothing to anyone.
+    """
+
+    async def scenario() -> None:
+        repository, pool = await _repository()
+        try:
+            wanted_namespace = _namespace(
+                session_id="session-wanted", record_id="wanted", turn_id="wanted"
+            )
+            wanted = replace(
+                _episode(
+                    episode_id="episode-wanted",
+                    record_id="wanted",
+                    turn_id="wanted",
+                    session_id="session-wanted",
+                ),
+                task_title="Renew the identity card",
+                minimal_request_paraphrase="Renew the identity card for the branch office.",
+                action_plan=("Collect the identity documents.",),
+                missing_information=("The case number is not stated.",),
+            )
+            other_namespace = _namespace(
+                session_id="session-other", record_id="other", turn_id="other"
+            )
+            other = replace(
+                _episode(
+                    episode_id="episode-other",
+                    record_id="other",
+                    turn_id="other",
+                    session_id="session-other",
+                ),
+                task_title="Book the quarterly meeting",
+                minimal_request_paraphrase="Book a quarterly meeting with finance.",
+                action_plan=("Check the shared calendar.",),
+                missing_information=(),
+            )
+            for namespace, episode in ((wanted_namespace, wanted), (other_namespace, other)):
+                await repository.write_task_episode(namespace, episode, expires_at=None)
+                assert (
+                    await repository.transition_task_episode(
+                        _transition(
+                            namespace,
+                            episode_id=episode.episode_id,
+                            to_status=ValidationStatus.USER_APPROVED,
+                        )
+                    )
+                    is not None
+                )
+
+            # "case" and "number" are in the wanted episode; "renew" and
+            # "identity" are too; "passport" is in neither. Under AND this
+            # matched nothing.
+            found = await repository.read_episodes(
+                _namespace(session_id="new-session"),
+                EpisodicMemoryQuery(
+                    query="renew identity card passport case number",
+                    max_items=10,
+                    min_score=0.0,
+                    timeout_ms=500,
+                ),
+            )
+            assert [episode.episode_id for episode in found] == ["episode-wanted"]
+
+            # A search text with no lexemes at all selects nothing rather than
+            # everything: the expansion yields NULL and `@@ NULL` is not true.
+            assert (
+                await repository.read_episodes(
+                    _namespace(session_id="new-session"),
+                    EpisodicMemoryQuery(query="- - -", max_items=10, min_score=0.0, timeout_ms=500),
+                )
+                == ()
+            )
+
+            # A term that is only tsquery punctuation is data, not syntax.
+            escaped = await repository.read_episodes(
+                _namespace(session_id="new-session"),
+                EpisodicMemoryQuery(
+                    query="renew' | 'x", max_items=10, min_score=0.0, timeout_ms=500
+                ),
+            )
+            assert [episode.episode_id for episode in escaped] == ["episode-wanted"]
+        finally:
+            await pool.close()
 
     _run_scenario(scenario)

@@ -21,7 +21,13 @@ const connection = {
 function baseFetch(input: string | URL | Request): Promise<Response> {
   const url = String(input);
   if (url.endsWith('/v1/mail-todo/connections')) {
-    return Promise.resolve(response({ connections: [connection] }));
+    return Promise.resolve(response({
+      connections: [connection],
+      providerAvailability: {
+        gmail: { enabled: true, reason: null },
+        outlook: { enabled: true, reason: null },
+      },
+    }));
   }
   if (url.includes('/v1/mail-todo/runs?')) {
     return Promise.resolve(response({ runs: [] }));
@@ -29,21 +35,31 @@ function baseFetch(input: string | URL | Request): Promise<Response> {
   throw new Error(`Unexpected request: ${url}`);
 }
 
+function calendarAwareFetch(calendar: unknown) {
+  return async (input: string | URL | Request): Promise<Response> => {
+    const url = String(input);
+    if (url.endsWith('/v1/calendar/connection')) return response(calendar);
+    return baseFetch(input);
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
+  window.localStorage.clear();
 });
 
 describe('MailInboxView', () => {
-  it('shows the compact scan controls without the unread-email preview', async () => {
+  it('opens directly to the latest action items without scan controls', async () => {
     const fetchMock = vi.fn(baseFetch);
     vi.stubGlobal('fetch', fetchMock);
     render(<MailInboxView />);
 
-    expect(await screen.findByText('owner@example.com')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Quét mail mới' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Quét mail mới' })).toBeNull();
+    expect(screen.queryByText('Chọn lịch sử quét')).toBeNull();
     expect(screen.getByText('Danh mục hành động (0)')).toBeTruthy();
     expect(screen.queryByText('Báo cáo tháng')).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/unread-preview'))).toBe(false);
@@ -57,28 +73,13 @@ describe('MailInboxView', () => {
     expect(connect.getAttribute('href')).toContain('/v1/mail-todo/oauth/gmail/connect');
   });
 
-  it('shows the selected Action Item plan below and switches it on click', async () => {
+  it('shows the latest Action Item plan and switches it on click', async () => {
     const fetchMock = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      async (input: string | URL | Request): Promise<Response> => {
         const url = String(input);
-        const method = init?.method ?? 'GET';
-        if (method === 'POST' && url.endsWith('/v1/mail-todo/runs')) {
-          return response(
-            { id: 'run-1', status: 'queued', statusUrl: '/v1/mail-todo/runs/run-1' },
-            202
-          );
-        }
-        if (url.endsWith('/v1/mail-todo/runs/run-1')) {
+        if (url.includes('/v1/mail-todo/runs?')) {
           return response({
-            id: 'run-1',
-            status: 'succeeded',
-            progress: {
-              emailsMatched: 2,
-              emailsProcessed: 2,
-              emailsToProcess: 2,
-              maxEmails: 20,
-            },
-            error: null,
+            runs: [{ id: 'run-1', status: 'succeeded', createdAt: '2026-08-10T00:00:00Z' }],
           });
         }
         if (url.endsWith('/v1/mail-todo/runs/run-1/result')) {
@@ -99,6 +100,18 @@ describe('MailInboxView', () => {
                 gmail_message_id: 'message-1',
                 gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-1',
                 source_message_ids: ['message-1'],
+                source_links: [
+                  {
+                    ref: 'link1',
+                    label: 'Review document',
+                    url: 'https://docs.example.com/review',
+                  },
+                  {
+                    ref: 'link2',
+                    label: null,
+                    url: 'https://portal.example.com/open',
+                  },
+                ],
                 incident_key: null,
                 title: 'Gửi báo cáo',
                 request_summary: 'Hoàn thiện báo cáo tháng.',
@@ -122,6 +135,7 @@ describe('MailInboxView', () => {
                 gmail_message_id: 'message-2',
                 gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-2',
                 source_message_ids: ['message-2'],
+                source_links: [],
                 incident_key: null,
                 title: 'Nộp hồ sơ',
                 request_summary: 'Nộp hồ sơ đăng ký đúng hạn.',
@@ -147,9 +161,7 @@ describe('MailInboxView', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     render(<MailInboxView />);
-    await screen.findByText('owner@example.com');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Quét mail mới' }));
+    await screen.findByRole('option', { name: 'Gmail · owner@example.com' });
 
     expect(await screen.findByText('Gửi báo cáo')).toBeTruthy();
     expect(
@@ -157,6 +169,17 @@ describe('MailInboxView', () => {
     ).toBe('true');
     expect(screen.getByText('Kiểm tra số liệu')).toBeTruthy();
     expect(screen.queryByText('Chuẩn bị giấy tờ')).toBeNull();
+
+    const sourceLinks = screen.getByText('Source links (2)').closest('details');
+    expect(sourceLinks).not.toBeNull();
+    fireEvent.click(screen.getByText('Source links (2)'));
+    expect(sourceLinks?.hasAttribute('open')).toBe(true);
+    expect(screen.getByRole('link', { name: 'Review document' }).getAttribute('href')).toBe(
+      'https://docs.example.com/review'
+    );
+    expect(
+      screen.getByRole('link', { name: 'Open link — portal.example.com' }).getAttribute('href')
+    ).toBe('https://portal.example.com/open');
 
     fireEvent.click(screen.getByRole('button', { name: /Nộp hồ sơ/ }));
 
@@ -167,12 +190,6 @@ describe('MailInboxView', () => {
     expect(screen.queryByText('Kiểm tra số liệu')).toBeNull();
     expect(screen.getByText('Quy trình nội bộ')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Hoàn thành' })).toBeNull();
-    const postCall = fetchMock.mock.calls.find(
-      ([url, init]) => String(url).endsWith('/v1/mail-todo/runs') && init?.method === 'POST'
-    );
-    expect(postCall?.[1]?.headers).toMatchObject({
-      'Idempotency-Key': expect.stringMatching(/^mail_/),
-    });
   });
 
   it('shows OAuth outcome and removes the transient marker from the URL', async () => {
@@ -186,5 +203,196 @@ describe('MailInboxView', () => {
 
     expect(await screen.findByText('Đã kết nối Gmail thành công.')).toBeTruthy();
     await waitFor(() => expect(window.location.search).not.toContain('gmail='));
+  });
+
+  it('restores the provider selection and builds Outlook owner-bound connect URL', async () => {
+    window.localStorage.setItem('cowork.mail.selected.outlook', 'outlook-1');
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v1/mail-todo/connections')) return Promise.resolve(response({
+        connections: [
+          connection,
+          { ...connection, id: 'outlook-1', provider: 'outlook', emailAddress: 'owner@outlook.com' },
+        ],
+        providerAvailability: {
+          gmail: { enabled: true, reason: null },
+          outlook: { enabled: true, reason: null },
+        },
+      }));
+      if (url.includes('/v1/mail-todo/runs?')) return Promise.resolve(response({ runs: [] }));
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<MailInboxView />);
+
+    const account = await screen.findByLabelText('Tài khoản email') as HTMLSelectElement;
+    expect(account.value).toBe('outlook-1');
+    expect(screen.getByRole('link', { name: 'Kết nối Outlook' }).getAttribute('href')).toContain(
+      'ownerConnectionId=mbx-1'
+    );
+  });
+
+  it('renders the three connect states: connected, mail-only, and neither', async () => {
+    // Connected. The account is named so the user can tell which Google
+    // account the events will land on.
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({
+      connected: true,
+      connection: {
+        id: 'cal-1',
+        provider: 'google_calendar',
+        account: 'owner@example.com',
+        calendar_id: 'primary',
+        timezone: 'Asia/Ho_Chi_Minh',
+        status: 'active',
+        connected_at: '2026-08-26T00:00:00Z',
+      },
+    })));
+    render(<MailInboxView />);
+    expect(await screen.findByText(/Google Calendar · owner@example.com/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Kết nối Google Calendar/ })).toBeNull();
+    cleanup();
+
+    // Mail connected, calendar not: the offer is still there, and the mail
+    // view is unaffected.
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({ connected: false, connection: null })));
+    render(<MailInboxView />);
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
+    const offer = await screen.findByRole('link', { name: 'Kết nối Google Calendar' });
+    expect(offer.getAttribute('href')).toContain('/v1/calendar/oauth/google/connect');
+    cleanup();
+
+    // Neither. The calendar offer says a sign-in is needed first.
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = String(input);
+      if (url.endsWith('/v1/calendar/connection')) {
+        return response({ detail: 'Authentication required' }, 401);
+      }
+      return response({ connections: [] });
+    }));
+    render(<MailInboxView />);
+    expect(
+      await screen.findByRole('link', { name: 'Kết nối Google Calendar (cần đăng nhập)' })
+    ).toBeTruthy();
+  });
+
+  it('reports both consents when the chained journey lands back here', async () => {
+    window.history.replaceState(null, '', '/?view=mail&gmail=connected&calendar=denied');
+    vi.stubGlobal('fetch', vi.fn(calendarAwareFetch({ connected: false, connection: null })));
+    render(<MailInboxView />);
+
+    // The whole point of saying both: a declined calendar consent must not
+    // read as a failed mail connection.
+    expect(await screen.findByText(/Đã kết nối Gmail thành công\./)).toBeTruthy();
+    expect(screen.getByText(/từ chối quyền kết nối Google Calendar/)).toBeTruthy();
+    await waitFor(() => expect(window.location.search).not.toContain('calendar='));
+  });
+
+  it('keeps the mail view working when the calendar status cannot be read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const url = String(input);
+      if (url.endsWith('/v1/calendar/connection')) throw new Error('network down');
+      return baseFetch(input);
+    }));
+    render(<MailInboxView />);
+
+    expect(await screen.findByRole('option', { name: 'Gmail · owner@example.com' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows and clears an Outlook OAuth outcome marker', async () => {
+    window.history.replaceState(null, '', '/?view=mail&outlook=connected');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ connections: [] })));
+    render(<MailInboxView />);
+
+    expect(await screen.findByText('Đã kết nối Outlook thành công.')).toBeTruthy();
+    await waitFor(() => expect(window.location.search).not.toContain('outlook='));
+  });
+
+  it('renders quarantine security badge and opens warning modal on suspicious link click', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v1/mail-todo/runs?')) {
+        return Promise.resolve(
+          response({
+            runs: [{ id: 'run-1', status: 'succeeded', createdAt: '2026-08-10T00:00:00Z' }],
+          })
+        );
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1/result')) {
+        return Promise.resolve(
+          response({
+            run: {},
+            actionItems: [{}],
+            nextActions: [{}],
+            attachmentWarnings: [],
+            message: null,
+          })
+        );
+      }
+      if (url.endsWith('/v1/mail-todo/runs/run-1/tasks')) {
+        return Promise.resolve(
+          response({
+            tasks: [
+              {
+                task_id: 'task-sec-1',
+                run_id: 'run-1',
+                gmail_message_id: 'message-phish',
+                gmail_url: 'https://mail.google.com/mail/u/0/#inbox/message-phish',
+                source_message_ids: ['message-phish'],
+                source_links: [
+                  {
+                    ref: 'link-bad',
+                    label: 'Fake Banking Login',
+                    url: 'https://bank-login-fake.example.com/signin',
+                    threat_level: 'malicious',
+                  },
+                ],
+                incident_key: null,
+                title: '[CẢNH BÁO BẢO MẬT] Phát hiện Email Phishing',
+                request_summary: 'Email này đã bị cách ly.',
+                actionability: 'actionable',
+                route: 'no_action',
+                priority: 'urgent',
+                deadline: null,
+                action_plan: [
+                  { step: 1, instruction: 'Tuyệt đối không bấm link', supporting_citation_ids: [] },
+                ],
+                supporting_documents: [],
+                missing_information: [],
+                classifier_confidence: 1.0,
+                generation_confidence: 1.0,
+                validation_status: 'system_generated',
+                created_at: '2026-08-10T00:00:00Z',
+                quarantined: true,
+                security_threat_level: 'malicious',
+              },
+            ],
+          })
+        );
+      }
+      return baseFetch(input);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<MailInboxView />);
+
+    // Check quarantine badge is rendered
+    expect(await screen.findByText(/Đã cách ly \(Mã độc \/ Phishing\)/)).toBeTruthy();
+    expect(screen.getByText('[CẢNH BÁO BẢO MẬT] Phát hiện Email Phishing')).toBeTruthy();
+
+    // Expand source links and click the malicious link
+    fireEvent.click(screen.getByText('Source links (1)'));
+    const badLinkBtn = screen.getByText('Fake Banking Login');
+    expect(screen.getByText('NGUY HIỂM')).toBeTruthy();
+
+    // Click link -> Should trigger warning modal instead of directly navigating
+    fireEvent.click(badLinkBtn);
+
+    expect(await screen.findByText('CẢNH BÁO BẢO MẬT: LIÊN KẾT NGUY HIỂM')).toBeTruthy();
+    expect(screen.getByText('https://bank-login-fake.example.com/signin')).toBeTruthy();
+    expect(screen.getByText('Quay lại an toàn')).toBeTruthy();
+
+    // Dismiss modal
+    fireEvent.click(screen.getByText('Quay lại an toàn'));
+    expect(screen.queryByText('CẢNH BÁO BẢO MẬT: LIÊN KẾT NGUY HIỂM')).toBeNull();
   });
 });

@@ -1,0 +1,357 @@
+{
+  "evaluated_at": "2026-08-25T12:00:00+00:00",
+  "total_cases": 25,
+  "passed_cases": 25,
+  "pass_rate_percent": 100.0,
+  "duration_seconds": 0.00947938100034662,
+  "results": [
+    {
+      "case_id": "email_01",
+      "category": "legal_rag",
+      "subject": "Yêu cầu tư vấn thủ tục cấp Giấy chứng nhận quyền sử dụng đất theo Luật Đất đai 2024",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/31-2024-qh15-523642.md"
+      ]
+    },
+    {
+      "case_id": "email_02",
+      "category": "admin_rag",
+      "subject": "Hỏi thủ tục đăng ký tạm trú theo Thông tư 53/2025/TT-BCA cho nhân sự mới",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/dang-ky-tam-tru.md"
+      ]
+    },
+    {
+      "case_id": "email_03",
+      "category": "citizen_rag",
+      "subject": "Hỏi quy trình đăng ký cấp lại CCCD qua VNeID và địa điểm làm thẻ từ 01/07/2026",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/cap-lai-cccd.md"
+      ]
+    },
+    {
+      "case_id": "email_04",
+      "category": "education_rag",
+      "subject": "Hỏi hướng dẫn nộp hồ sơ đại học năm 2026 cho học sinh lớp 12",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/huong-dan-nop-ho-so-dai-hoc-vinuni.md"
+      ]
+    },
+    {
+      "case_id": "email_05",
+      "category": "citizen_rag",
+      "subject": "Tư vấn quy trình đăng ký kết hôn online trên Cổng Dịch vụ công Quốc gia và lệ phí",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/dang-ky-ket-hon.md"
+      ]
+    },
+    {
+      "case_id": "email_06",
+      "category": "tax_insurance_rag",
+      "subject": "Kiểm tra thủ tục đăng ký BHXH bắt buộc theo QĐ 863/QĐ-BNV và nộp tờ khai thuế qua cổng DVC TTHC",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/thu-tuc-dang-ky-bhxh-luatvietnam.md",
+        "data/extracted/thue-dien-tu.md"
+      ]
+    },
+    {
+      "case_id": "email_07",
+      "category": "vehicle_rag",
+      "subject": "Thủ tục đăng ký xe online lần đầu theo Quyết định 1383/QĐ-BCA và thời hạn giải quyết",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/dang-ky-xe.md"
+      ]
+    },
+    {
+      "case_id": "email_08",
+      "category": "internal_task",
+      "subject": "Lịch họp bàn giao kết quả Sprint 5 và chuẩn bị Release",
+      "expected_intent": "DIRECT_PLAN",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_09",
+      "category": "informational",
+      "subject": "[Báo cáo hệ thống] Báo cáo sao lưu dữ liệu tự động tuần 34 hoàn tất",
+      "expected_intent": "NO_ACTION",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_10",
+      "category": "marketing_spam",
+      "subject": "[Ưu đãi 40%] Trọn gói phòng hội nghị và tiệc tri ân khách hàng tháng 9",
+      "expected_intent": "NO_ACTION",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_11",
+      "category": "security_phishing",
+      "subject": "[CẢNH BÁO BẢO MẬT] Tài khoản Google Workspace của bạn bị khóa trong 24h",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "malicious",
+      "actual_threat": "malicious",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_12",
+      "category": "security_malware_attachment",
+      "subject": "Thông báo phát hành Hóa đơn điện tử GTGT tháng 08/2026 - Công ty Điện lực",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "malicious",
+      "actual_threat": "malicious",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 1,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_13",
+      "category": "security_eicar_test",
+      "subject": "Security Audit Certification Report Q3/2026 - Threat Signature Test",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "malicious",
+      "actual_threat": "malicious",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 1,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_14",
+      "category": "security_prompt_injection",
+      "subject": "Ứng tuyển vị trí Senior AI Engineer - Nguyễn Văn An (Kèm CV)",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "suspicious",
+      "actual_threat": "suspicious",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 1,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_15",
+      "category": "security_ssrf_shortener",
+      "subject": "[Chúc mừng] Nhận Voucher mua sắm 5.000.000 VNĐ tri ân thành viên",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "blocked",
+      "actual_threat": "blocked",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_16",
+      "category": "traffic_law_rag",
+      "subject": "Hỏi quy định trừ điểm Giấy phép lái xe theo Luật Trật tự, ATGT Đường bộ 2024",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/41-2024-qh15-557190.md"
+      ]
+    },
+    {
+      "case_id": "email_17",
+      "category": "labor_law_rag",
+      "subject": "Tư vấn chế độ trợ cấp thôi việc và thời hạn thanh toán khi chấm dứt HĐLĐ",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/49-2019-qh14-402073.md"
+      ]
+    },
+    {
+      "case_id": "email_18",
+      "category": "corporate_law_rag",
+      "subject": "Thủ tục thay đổi người đại diện theo pháp luật theo Nghị định 01/2021/NĐ-CP",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/01-2021-nd-cp-283247.md"
+      ]
+    },
+    {
+      "case_id": "email_19",
+      "category": "technical_ml_rag",
+      "subject": "Tư vấn Trade-off Latency vs Throughput và Batching khi triển khai ML Model Production",
+      "expected_intent": "RETRIEVE_RAG",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": [
+        "data/extracted/design-machine-learning-systems.md"
+      ]
+    },
+    {
+      "case_id": "email_20",
+      "category": "internal_task_attachment",
+      "subject": "Rà soát Open Bugs và biên bản Sprint 5 trước khi Release v1.2",
+      "expected_intent": "DIRECT_PLAN",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 1,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_21",
+      "category": "internal_task",
+      "subject": "Chuẩn bị hậu cần và gửi thư mời Hội thảo khách hàng Quý 3",
+      "expected_intent": "DIRECT_PLAN",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_22",
+      "category": "security_otp",
+      "subject": "Mã xác thực đăng nhập 2 bước (2FA OTP) của bạn là: 839201",
+      "expected_intent": "NO_ACTION",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_23",
+      "category": "newsletter",
+      "subject": "[AI Weekly #142] Xu hướng Agentic AI và kiến trúc Hybrid Retrieval trong doanh nghiệp",
+      "expected_intent": "NO_ACTION",
+      "expected_threat": "clean",
+      "actual_threat": "clean",
+      "expected_quarantine": false,
+      "actual_quarantine": false,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_24",
+      "category": "security_macro_excel",
+      "subject": "Danh sách phê duyệt thưởng nóng Quý 3/2026 - Phòng Tài chính",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "malicious",
+      "actual_threat": "malicious",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 1,
+      "target_documents": []
+    },
+    {
+      "case_id": "email_25",
+      "category": "security_xss_scheme",
+      "subject": "Yêu cầu đồng bộ lại hồ sơ nhân sự trên hệ thống nội bộ Portal HR",
+      "expected_intent": "QUARANTINE",
+      "expected_threat": "blocked",
+      "actual_threat": "blocked",
+      "expected_quarantine": true,
+      "actual_quarantine": true,
+      "passed": true,
+      "attachments_count": 0,
+      "target_documents": []
+    }
+  ]
+}

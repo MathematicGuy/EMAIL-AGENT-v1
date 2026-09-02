@@ -1,5 +1,7 @@
 """Project/document metadata repositories; bytes never pass through this layer."""
 
+import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -8,9 +10,15 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from psycopg_pool import AsyncConnectionPool
 
 from cowork_agent.identity import VerifiedPrincipal
+from cowork_agent.observability import (
+    database_host_class,
+    log_project_document_timing,
+    safe_provider_label,
+)
 
 _JOB_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-job")
 _CLEANUP_NAMESPACE = uuid5(NAMESPACE_URL, "cowork-agent/project-document-cleanup")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +78,7 @@ class PostgresProjectRepository:
                 await connection.execute(
                     """
                     INSERT INTO projects (id, workspace_id, owner_user_id, name, is_default)
-                    SELECT %s, workspace_id, user_id, 'Default project', true
+                    SELECT %s, workspace_id, user_id, 'Default Project', true
                     FROM workspace_members
                     WHERE workspace_id = %s AND user_id = %s
                     ON CONFLICT (workspace_id, owner_user_id)
@@ -217,7 +225,7 @@ class PostgresProjectRepository:
                 if quota is not None and int(cast(int, quota[1])) + byte_size > max_project_bytes:
                     raise ValueError("project_storage_quota_exceeded")
                 cursor = await connection.execute(
-                """
+                    """
                 INSERT INTO project_documents (
                     id, workspace_id, user_id, project_id, filename, media_type, byte_size,
                     content_sha256, storage_key, status, expires_at
@@ -227,31 +235,31 @@ class PostgresProjectRepository:
                     content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
                     chunk_count, error_code, deleted_at, created_at, updated_at
                 """,
-                (
-                    document_id,
-                    project.workspace_id,
-                    principal.user_id,
-                    project_id,
-                    filename.strip(),
-                    media_type,
-                    byte_size,
-                    content_sha256,
-                    storage_key,
-                    datetime.now(UTC) + timedelta(seconds=expires_in_seconds),
-                ),
+                    (
+                        document_id,
+                        project.workspace_id,
+                        principal.user_id,
+                        project_id,
+                        filename.strip(),
+                        media_type,
+                        byte_size,
+                        content_sha256,
+                        storage_key,
+                        datetime.now(UTC) + timedelta(seconds=expires_in_seconds),
+                    ),
                 )
                 row = await cursor.fetchone()
                 if row is not None:
                     return _document(row), True
                 cursor = await connection.execute(
-                """
+                    """
                 SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
                     content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
                     chunk_count, error_code, deleted_at, created_at, updated_at
                 FROM project_documents
                 WHERE project_id = %s AND content_sha256 = %s AND status <> 'deleted'
                 """,
-                (project_id, content_sha256),
+                    (project_id, content_sha256),
                 )
                 existing = await cursor.fetchone()
                 if existing is not None and str(existing[9]) == "failed":
@@ -290,6 +298,26 @@ class PostgresProjectRepository:
             )
             row = await cursor.fetchone()
         return None if row is None else _document(row)
+
+    async def require_documents(
+        self, principal: VerifiedPrincipal, project_id: str, document_ids: Sequence[str]
+    ) -> Mapping[str, ProjectDocument]:
+        if not document_ids:
+            return {}
+        unique_ids = list(dict.fromkeys(document_ids))
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, project_id, workspace_id, user_id, filename, media_type, byte_size,
+                    content_sha256, storage_key, status, expires_at, page_count, ocr_page_count,
+                    chunk_count, error_code, deleted_at, created_at, updated_at
+                FROM project_documents
+                WHERE id = ANY(%s) AND project_id = %s AND workspace_id = %s AND user_id = %s
+                """,
+                (unique_ids, project_id, principal.workspace_id, principal.user_id),
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]): _document(row) for row in rows}
 
     async def list_documents(
         self, principal: VerifiedPrincipal, project_id: str
@@ -359,7 +387,8 @@ class PostgresProjectRepository:
                         documents.byte_size, documents.content_sha256, documents.storage_key,
                         documents.status, documents.expires_at, documents.page_count,
                         documents.ocr_page_count, documents.chunk_count, documents.error_code,
-                        documents.deleted_at, documents.created_at, documents.updated_at
+                        documents.deleted_at, documents.created_at, documents.updated_at,
+                        jobs.created_at, jobs.claimed_at
                     """,
                     (document_id,),
                 )
@@ -377,7 +406,23 @@ class PostgresProjectRepository:
                 )
                 if await cursor.fetchone() is None:
                     raise RuntimeError("document state changed while claiming ingestion job")
-        return _document(row[:9] + ("extracting",) + row[10:])
+                job_created_at = _optional_datetime(row[18])
+                claimed_at = _optional_datetime(row[19])
+                if job_created_at is None or claimed_at is None:
+                    raise RuntimeError("claimed ingestion job is missing queue timestamps")
+                host_class = database_host_class(connection)
+                provider = safe_provider_label(connection)
+        log_project_document_timing(
+            logger,
+            stage="queue_delay",
+            duration_ms=max(0, int((claimed_at - job_created_at).total_seconds() * 1000)),
+            outcome="success",
+            document_id=document_id,
+            timestamp=claimed_at,
+            database_host_class=host_class,
+            provider=provider,
+        )
+        return _document(row[:9] + ("extracting",) + row[10:18])
 
     async def next_claimable_job(self) -> str | None:
         """Return one opaque queued job ID; `claim_job` remains the CAS authority."""
@@ -662,7 +707,7 @@ class PostgresProjectRepository:
                         """
                         INSERT INTO projects (
                             id, workspace_id, owner_user_id, name, is_default
-                        ) VALUES (%s, %s, %s, 'Default project', true)
+                        ) VALUES (%s, %s, %s, 'Default Project', true)
                         RETURNING id, workspace_id, owner_user_id, name, is_default,
                             deleted_at, created_at
                         """,
@@ -864,14 +909,10 @@ def _document(row: tuple[object, ...]) -> ProjectDocument:
         storage_key=str(row[8]),
         status=str(row[9]),
         expires_at=(
-            row[10]
-            if isinstance(row[10], datetime)
-            else datetime.fromisoformat(str(row[10]))
+            row[10] if isinstance(row[10], datetime) else datetime.fromisoformat(str(row[10]))
         ),
         page_count=int(cast(int, row[11])) if len(row) > 11 and row[11] is not None else None,
-        ocr_page_count=(
-            int(cast(int, row[12])) if len(row) > 12 and row[12] is not None else None
-        ),
+        ocr_page_count=(int(cast(int, row[12])) if len(row) > 12 and row[12] is not None else None),
         chunk_count=int(cast(int, row[13])) if len(row) > 13 and row[13] is not None else None,
         error_code=str(row[14]) if len(row) > 14 and row[14] is not None else None,
         deleted_at=_optional_datetime(row[15]) if len(row) > 15 else None,

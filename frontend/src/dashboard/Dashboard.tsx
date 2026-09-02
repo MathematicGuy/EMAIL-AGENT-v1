@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import type { SidebarState, ModelOption, RecentChat } from './types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { SidebarState, ModelOption, RecentChat, ActiveDashboardView, ChatMessage, ReasoningMode } from './types';
+import type { Project } from './types/projectTypes';
 import { AVAILABLE_MODELS } from './data/mockData';
 import { useStreamingChat } from './hooks/useStreamingChat';
 import { Taskbar } from './components/Taskbar';
@@ -7,15 +8,12 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { ChatStreamView } from './components/ChatStreamView';
 
-import { AutomationsView } from './components/AutomationsView';
 import { MailInboxView } from './components/MailInboxView';
 import { ArtifactsView } from './components/ArtifactsView';
+import { RawDocumentsView } from './components/RawDocumentsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
-import { UpgradeModal } from './components/UpgradeModal';
+import { ExecutionTraceDrawer } from './components/ExecutionTraceDrawer';
 import { VoiceModal } from './components/VoiceModal';
-import { CustomizeModal } from './components/CustomizeModal';
-import { MemoryPanel } from '../modules/memory/MemoryPanel';
-import { WorkIntakePanel } from '../modules/work-intake/WorkIntakePanel';
 import { useProjects } from './hooks/useProjects';
 import { NewProjectModal } from './components/NewProjectModal';
 import { ProjectDocumentPanel } from '../modules/project-documents/ProjectDocumentPanel';
@@ -27,31 +25,66 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
 
-  const [activeView, setActiveView] = useState<'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts'>(() =>
-    new URLSearchParams(window.location.search).get('view') === 'mail' ? 'mail' : 'chat'
+  const [activeView, setActiveView] = useState<ActiveDashboardView>(() => {
+    const viewParam = new URLSearchParams(window.location.search).get('view');
+    if (viewParam === 'mail') return 'mail';
+    if (viewParam === 'artifacts') return 'artifacts';
+    if (viewParam === 'raw-documents' || viewParam === 'procedures') return 'raw-documents';
+    return 'chat';
+  });
+  const [sidebarState, setSidebarState] = useState<SidebarState>('expanded');
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(
+    () => AVAILABLE_MODELS.find((model) => model.id === 'mimo-v2.5-pro') ?? AVAILABLE_MODELS[0],
   );
-  const [sidebarState, setSidebarState] = useState<SidebarState>('collapsed');
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(AVAILABLE_MODELS[0]);
+  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>('fast');
+  const [selectedTraceMessage, setSelectedTraceMessage] = useState<ChatMessage | null>(null);
   const [modelAnchor, setModelAnchor] = useState<Pick<
     DOMRect,
     'left' | 'right' | 'top' | 'bottom'
   > | null>(null);
 
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
-  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
-  const [isMemoryPanelOpen, setIsMemoryPanelOpen] = useState(false);
-  const [isWorkIntakePanelOpen, setIsWorkIntakePanelOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isProjectDocumentsOpen, setIsProjectDocumentsOpen] = useState(false);
   const [projectDocumentsEnabled, setProjectDocumentsEnabled] = useState(false);
-  const [selectedThemeId, setSelectedThemeId] = useState('warm-charcoal');
-  const { projects, activeProjectId, setActiveProjectId, createProject } = useProjects();
+  const [backgroundCompletion, setBackgroundCompletion] = useState<string | null>(null);
+  const {
+    projects,
+    activeProjectId,
+    setActiveProjectId,
+    createProject,
+    deleteProject,
+    ensureDefaultProject,
+  } = useProjects();
   const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId),
     [projects, activeProjectId]
   );
+
+  useEffect(() => {
+    const handleOpenProjectDocs = () => {
+      setIsProjectDocumentsOpen(true);
+    };
+    window.addEventListener('open-project-documents', handleOpenProjectDocs);
+    return () => window.removeEventListener('open-project-documents', handleOpenProjectDocs);
+  }, []);
+
+  useEffect(() => {
+    let dismissTimer: number | undefined;
+    const handleBackgroundCompletion = (event: Event) => {
+      const detail = (event as CustomEvent<{ title?: string }>).detail;
+      setBackgroundCompletion(`${detail?.title || 'A chat'} finished generating.`);
+      if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
+      dismissTimer = window.setTimeout(() => setBackgroundCompletion(null), 5_000);
+    };
+    window.addEventListener('chat-background-completed', handleBackgroundCompletion);
+    return () => {
+      window.removeEventListener('chat-background-completed', handleBackgroundCompletion);
+      if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -68,15 +101,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     };
   }, []);
 
+  const handleChangeView = (view: ActiveDashboardView) => {
+    setActiveView(view);
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
+  };
+
   const handleSelectProject = (projectId: string) => {
     setActiveProjectId(projectId);
     resetChat();
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
   };
 
   useEffect(() => {
     const handleNavigate = () => {
-      setActiveView('artifacts');
+      handleChangeView('artifacts');
     };
     window.addEventListener('navigate-to-artifacts', handleNavigate);
     return () => window.removeEventListener('navigate-to-artifacts', handleNavigate);
@@ -96,16 +137,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     resetChat,
     deleteChat,
     loadExistingChat,
+    loadFullEvidence,
+    prefetchChat,
     apiStatus,
     recentChats,
     isHistoryLoading,
+    isTranscriptLoading,
     activeConversationId,
     workflows,
     approveWorkflowPlan,
     reviseWorkflowPlan,
     retryWorkflowStep,
     retryTurn,
-  } = useStreamingChat(selectedModel.id, activeProjectId, projectIds);
+  } = useStreamingChat(selectedModel.id, activeProjectId, projectIds, reasoningMode);
+
+  const [cachedTraceMessage, setCachedTraceMessage] = useState<ChatMessage | null>(null);
+  const activeTraceMessage = selectedTraceMessage
+    ? (messages.find((m) => m.id === selectedTraceMessage.id) ?? selectedTraceMessage)
+    : null;
+
+  if (activeTraceMessage && activeTraceMessage !== cachedTraceMessage) {
+    setCachedTraceMessage(activeTraceMessage);
+  }
+
+  const displayedTraceMessage = activeTraceMessage ?? cachedTraceMessage;
+
+  const handleToggleExecutionTrace = useCallback((msg: ChatMessage) => {
+    setSelectedTraceMessage((prev) => (prev?.id === msg.id ? null : msg));
+  }, []);
 
   const handleToggleSidebar = () => {
     setSidebarState((prev) => (prev === 'collapsed' ? 'expanded' : 'collapsed'));
@@ -121,21 +180,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
     setIsModelModalOpen(true);
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    if (!activeProjectId) await ensureDefaultProject();
     resetChat();
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
+  };
+
+  const handleSendMessage = async (text?: string) => {
+    const project = activeProject ?? await ensureDefaultProject();
+    await sendMessage(text, project.id);
   };
 
   const handleSelectRecent = (chat: RecentChat) => {
     if (chat.projectId) setActiveProjectId(chat.projectId);
     void loadExistingChat(chat.id, chat.projectId);
     setActiveView('chat');
+    setIsProjectDocumentsOpen(false);
+    setSelectedTraceMessage(null);
   };
 
   const handleDeleteChat = (chat: RecentChat) => {
     if (!window.confirm(`Delete “${chat.title}”? This cannot be undone.`)) return;
     void deleteChat(chat.id).catch(() => {
       window.alert('Could not delete this chat. Please try again.');
+    });
+  };
+
+  const handleDeleteProject = (project: Project) => {
+    if (project.isDefault) return;
+    if (!window.confirm(`Delete project “${project.name}”? All associated chats and documents will be removed.`)) return;
+    void deleteProject(project.id).catch(() => {
+      window.alert('Could not delete this project. Please try again.');
     });
   };
 
@@ -150,85 +227,130 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         projects={projects}
         activeProjectId={activeProjectId}
         onSelectProject={handleSelectProject}
+        onDeleteProject={handleDeleteProject}
         onSelectRecent={handleSelectRecent}
+        onPrefetchChat={(chat) => { void prefetchChat(chat.id); }}
         onDeleteChat={handleDeleteChat}
         recentChats={recentChats}
         isHistoryLoading={isHistoryLoading}
         activeChatId={activeConversationId ?? undefined}
-        onOpenUpgradeModal={() => setIsUpgradeModalOpen(true)}
-        onOpenCustomizeModal={() => setIsCustomizeModalOpen(true)}
         onNavigateHome={onNavigateHome}
         activeView={activeView}
-        onChangeView={setActiveView}
+        onChangeView={handleChangeView}
+        initialExpandedProjectIds={projects.map((p) => p.id)}
         isGenerating={isGenerating}
       />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <Header
           apiStatus={apiStatus}
-          onOpenMemory={() => setIsMemoryPanelOpen(true)}
-          onOpenWorkIntake={() => setIsWorkIntakePanelOpen(true)}
           projects={projects}
           activeProject={activeProject}
           onSelectProject={handleSelectProject}
+          showProjectDocuments={projectDocumentsEnabled && activeView === 'chat'}
+          onOpenProjectDocuments={() => setIsProjectDocumentsOpen(true)}
         />
 
-        {activeView === 'mail' && (
-          <MailInboxView />
-        )}
+        <div className="flex-1 flex min-h-0 relative overflow-hidden">
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+            {activeView === 'mail' && (
+              <MailInboxView />
+            )}
 
-        {(activeView === 'schedules' || activeView === 'dispatch') && (
-          <AutomationsView />
-        )}
+            {activeView === 'artifacts' && (
+              <ArtifactsView />
+            )}
 
-        {activeView === 'artifacts' && (
-          <ArtifactsView />
-        )}
+            {activeView === 'raw-documents' && (
+              <RawDocumentsView />
+            )}
 
-        <div className={`flex-1 flex flex-col min-h-0 ${activeView === 'chat' ? '' : 'hidden'}`}>
-          {messages.length === 0 ? (
-            <HeroSection
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={sendMessage}
-              isGenerating={isGenerating}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
-            />
-          ) : (
-            <ChatStreamView
-              messages={messages}
-              inputText={inputText}
-              onChangeText={setInputText}
-              onSend={sendMessage}
-              isGenerating={isGenerating}
-              onStopGeneration={stopGeneration}
-              selectedModel={selectedModel}
-              onOpenModelModal={openModelSelector}
-              onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
-              attachments={selectedAttachments}
-              attachmentError={attachmentError}
-              onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
-              onRemoveAttachment={removeAttachment}
-              workflows={workflows}
-              onApproveWorkflowPlan={approveWorkflowPlan}
-              onReviseWorkflowPlan={reviseWorkflowPlan}
-              onRetryWorkflowStep={(taskId, stepId) =>
-                void retryWorkflowStep(taskId, stepId)
-              }
-              onRetryTurn={retryTurn}
-              activeProject={activeProject}
-              projects={projects}
-              onSelectProject={handleSelectProject}
-              onOpenMailInbox={() => setActiveView('mail')}
+            <div className={`flex-1 flex min-h-0 relative overflow-hidden ${activeView === 'chat' ? '' : 'hidden'}`}>
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+              {isTranscriptLoading || messages.length > 0 ? (
+                <ChatStreamView
+                  messages={messages}
+                  isTranscriptLoading={isTranscriptLoading}
+                  inputText={inputText}
+                  onChangeText={setInputText}
+                  onSend={handleSendMessage}
+                  isGenerating={isGenerating}
+                  onStopGeneration={stopGeneration}
+                  selectedModel={selectedModel}
+                  onOpenModelModal={openModelSelector}
+                  onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+                  attachments={selectedAttachments}
+                  attachmentError={attachmentError}
+                  onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+                  onRemoveAttachment={removeAttachment}
+                  workflows={workflows}
+                  onApproveWorkflowPlan={approveWorkflowPlan}
+                  onReviseWorkflowPlan={reviseWorkflowPlan}
+                  onRetryWorkflowStep={(taskId, stepId) =>
+                    void retryWorkflowStep(taskId, stepId)
+                  }
+                  onRetryTurn={retryTurn}
+                  onLoadFullEvidence={loadFullEvidence}
+                  activeProject={activeProject}
+                  projects={projects}
+                  onSelectProject={handleSelectProject}
+                  onOpenMailInbox={() => handleChangeView('mail')}
+                  selectedTraceMessageId={selectedTraceMessage?.id}
+                  onOpenExecutionTrace={handleToggleExecutionTrace}
+                />
+              ) : (
+                <HeroSection
+                  inputText={inputText}
+                  onChangeText={setInputText}
+                  onSend={handleSendMessage}
+                  isGenerating={isGenerating}
+                  selectedModel={selectedModel}
+                  onOpenModelModal={openModelSelector}
+                  onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+                  attachments={selectedAttachments}
+                  attachmentError={attachmentError}
+                  onSelectFiles={projectDocumentsEnabled ? selectAttachments : undefined}
+                  onRemoveAttachment={removeAttachment}
+                  activeProject={activeProject}
+                  projects={projects}
+                  onSelectProject={handleSelectProject}
+                />
+              )}
+              </div>
+
+              {/* Smooth Slide-in / Slide-out Execution Trace Drawer */}
+              <div
+                className={`min-h-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden z-20 shrink-0 border-[#413b34] bg-[#201e1b] ${
+                  selectedTraceMessage
+                    ? 'w-[360px] sm:w-[420px] max-w-[90vw] border-l opacity-100'
+                    : 'w-0 border-l-0 opacity-0 pointer-events-none'
+                }`}
+              >
+                {displayedTraceMessage && (
+                  <div className="w-[360px] sm:w-[420px] max-w-[90vw] h-full flex flex-col min-h-0 overflow-hidden">
+                    <ExecutionTraceDrawer
+                      trace={displayedTraceMessage.executionTrace}
+                      activities={displayedTraceMessage.activities}
+                      generationStatus={displayedTraceMessage.generationStatus}
+                      message={displayedTraceMessage}
+                      activeProjectName={activeProject?.name}
+                      sessionTurnCount={messages.length}
+                      onClose={() => setSelectedTraceMessage(null)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Smooth Slide-in / Slide-out Project Document Panel (pushes page left) */}
+          {projectDocumentsEnabled && (
+            <ProjectDocumentPanel
+              projectId={activeProjectId}
+              projectName={activeProject?.name}
+              isOpen={isProjectDocumentsOpen}
+              onClose={() => setIsProjectDocumentsOpen(false)}
+              hideTrigger
             />
           )}
         </div>
@@ -239,25 +361,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         onClose={() => setIsModelModalOpen(false)}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
+        reasoningMode={reasoningMode}
+        onSelectReasoningMode={setReasoningMode}
         anchor={modelAnchor}
-      />
-
-      <UpgradeModal
-        isOpen={isUpgradeModalOpen}
-        onClose={() => setIsUpgradeModalOpen(false)}
       />
 
       <VoiceModal
         isOpen={isVoiceModalOpen}
         onClose={() => setIsVoiceModalOpen(false)}
-        onSendTranscript={(text) => sendMessage(text)}
-      />
-
-      <CustomizeModal
-        isOpen={isCustomizeModalOpen}
-        onClose={() => setIsCustomizeModalOpen(false)}
-        selectedThemeId={selectedThemeId}
-        onSelectTheme={setSelectedThemeId}
+        onSendTranscript={handleSendMessage}
       />
 
       <NewProjectModal
@@ -270,24 +382,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateHome }) => {
         }}
       />
 
-      {isMemoryPanelOpen && (
-        <MemoryPanel
-          isOpen
-          onClose={() => setIsMemoryPanelOpen(false)}
-        />
-      )}
-
-      {isWorkIntakePanelOpen && (
-        <WorkIntakePanel
-          isOpen
-          onClose={() => setIsWorkIntakePanelOpen(false)}
-        />
-      )}
-      {projectDocumentsEnabled && (
-        <ProjectDocumentPanel
-          projectId={activeProjectId}
-          projectName={activeProject?.name}
-        />
+      {backgroundCompletion && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-50 max-w-sm rounded-xl border border-[#4a4842] bg-[#272622] px-4 py-3 text-sm text-[#f3f2ef] shadow-xl"
+        >
+          {backgroundCompletion}
+        </div>
       )}
     </div>
   );

@@ -150,9 +150,7 @@ def _profile_namespace(
     *, tenant_id: str = "tenant-bak", user_id: str = "bak-user@example.com"
 ) -> MemoryNamespace:
     return MemoryNamespace(
-        scope=ChatMemoryScope(
-            tenant_id=tenant_id, user_id=user_id, session_id="session-bak"
-        ),
+        scope=ChatMemoryScope(tenant_id=tenant_id, user_id=user_id, session_id="session-bak"),
         memory_type=MemoryType.LONG_TERM,
         record_id=None,
         source_id=None,
@@ -162,7 +160,6 @@ def _profile_namespace(
 def _profile(*, expires_at: datetime | None = None) -> DeclarativeProfile:
     return DeclarativeProfile(
         profile_id="profile-bak",
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         language="vi",
         timezone="Asia/Bangkok",
@@ -200,7 +197,6 @@ def _task_episode(
     return TaskEpisode(
         episode_id=episode_id,
         record_id=record_id,
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         chat_session_id="session-bak",
         chat_turn_id=turn_id,
@@ -233,7 +229,6 @@ def _chat_summary_episode() -> ChatSummaryEpisode:
     return ChatSummaryEpisode(
         episode_id="ep-summary-bak",
         record_id="rec-summary-bak",
-        tenant_id="tenant-bak",
         user_id="bak-user@example.com",
         chat_session_id="session-bak",
         chat_turn_id="turn-summary-bak",
@@ -281,9 +276,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                 record_id="rec-bak-approved",
                 turn_id="turn-bak-approved",
             )
-            await episodes_repo.write_task_episode(
-                approved_ns, approved_ep, expires_at=None
-            )
+            await episodes_repo.write_task_episode(approved_ns, approved_ep, expires_at=None)
             # Transition to USER_APPROVED for retrieval eligibility.
             transition = EpisodeTransition(
                 episode_id="ep-bak-approved",
@@ -304,9 +297,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                 record_id="rec-bak-ineligible",
                 turn_id="turn-bak-ineligible",
             )
-            await episodes_repo.write_task_episode(
-                ineligible_ns, ineligible_ep, expires_at=None
-            )
+            await episodes_repo.write_task_episode(ineligible_ns, ineligible_ep, expires_at=None)
 
             # 4. Chat summary episode.
             summary_ns = MemoryNamespace(
@@ -319,9 +310,7 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
                 record_id="rec-summary-bak",
                 source_id="turn-summary-bak",
             )
-            await summaries_repo.write_chat_summary(
-                summary_ns, _chat_summary_episode()
-            )
+            await summaries_repo.write_chat_summary(summary_ns, _chat_summary_episode())
 
             # ---- Backup ----
             archive_path = tmp_dir / "chat_memory_backup.dump"
@@ -363,19 +352,13 @@ def test_backup_restore_preserves_chat_memory_metadata() -> None:
             assert restored_profile.response_tone == "direct"
             assert restored_profile.expires_at is not None
             # Compare timestamps to second precision (PG microsecond rounding).
-            assert abs(
-                (restored_profile.expires_at - future_expiry).total_seconds()
-            ) < 2
+            assert abs((restored_profile.expires_at - future_expiry).total_seconds()) < 2
             assert restored_profile.created_at is not None
             assert restored_profile.updated_at is not None
 
             # ---- Assert: eligible task episode returned by retrieval ----
-            query = EpisodicMemoryQuery(
-                query="report", max_items=10, min_score=0.0, timeout_ms=500
-            )
-            read_ns = _episode_namespace(
-                record_id="rec-bak-any", turn_id="turn-bak-any"
-            )
+            query = EpisodicMemoryQuery(query="report", max_items=10, min_score=0.0, timeout_ms=500)
+            read_ns = _episode_namespace(record_id="rec-bak-any", turn_id="turn-bak-any")
             found = await episodes_repo.read_episodes(read_ns, query)
             found_ids = {ep.episode_id for ep in found}
             assert "ep-bak-approved" in found_ids
@@ -474,16 +457,14 @@ def test_backup_restore_preserves_expired_row_exclusion() -> None:
             # But the row physically exists in the table.
             async with pool.connection() as connection:
                 cursor = await connection.execute(
-                    "SELECT count(*) FROM chat_profiles"
-                    " WHERE tenant_id = %s",
+                    "SELECT count(*) FROM chat_profiles WHERE tenant_id = %s",
                     ("tenant-bak",),
                 )
                 row = await cursor.fetchone()
                 assert row is not None
                 assert row[0] == 1  # type: ignore[index]
                 cursor = await connection.execute(
-                    "SELECT expires_at FROM chat_profiles"
-                    " WHERE tenant_id = %s",
+                    "SELECT expires_at FROM chat_profiles WHERE tenant_id = %s",
                     ("tenant-bak",),
                 )
                 row = await cursor.fetchone()

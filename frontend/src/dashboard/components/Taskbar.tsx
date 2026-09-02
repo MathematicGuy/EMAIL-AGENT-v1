@@ -2,25 +2,72 @@ import React, { useState } from 'react';
 import {
   Plus,
   MessageSquare,
-  FolderKanban,
   GitBranch,
-  Code2,
-  Palette,
   Search,
-  SlidersHorizontal,
-  Download,
-  Home,
-  Clock,
-  Briefcase,
-  FlaskConical,
-  LayoutGrid,
   Mail,
   LoaderCircle,
-  Trash2
+  Trash2,
+  BookOpen
 } from 'lucide-react';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
-import type { SidebarState, RecentChat } from '../types';
+import type { ChatGenerationStatus, SidebarState, RecentChat, ActiveDashboardView } from '../types';
 import type { Project } from '../types/projectTypes';
+
+const terminalLifecycleLabels: Partial<Record<ChatGenerationStatus, string>> = {
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+  cancelled: 'Cancelled',
+  usage_limit_reached: 'Usage limit reached',
+  temporarily_rate_limited: 'Temporarily rate-limited',
+};
+
+const ChatLifecycleIndicator = ({
+  chat,
+  isActive,
+  legacyGenerating,
+}: {
+  chat: RecentChat;
+  isActive: boolean;
+  legacyGenerating: boolean;
+}) => {
+  const isChatGenerating = chat.generationStatus === 'generating' || (!chat.generationStatus && legacyGenerating);
+  const terminalLabel = chat.generationStatus
+    ? terminalLifecycleLabels[chat.generationStatus]
+    : undefined;
+
+  if (isChatGenerating) {
+    return (
+      <span className="flex shrink-0 items-center" title="Generating">
+        <LoaderCircle aria-hidden="true" className="h-3 w-3 animate-spin text-[#d97757]" />
+        <span className="sr-only">Generating</span>
+      </span>
+    );
+  }
+
+  if (terminalLabel) {
+    return (
+      <span
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-zinc-600 text-[9px] font-bold leading-none text-zinc-400"
+        title={terminalLabel}
+      >
+        <span aria-hidden="true">!</span>
+        <span className="sr-only">{terminalLabel}</span>
+      </span>
+    );
+  }
+
+  if (chat.unread && !isActive) {
+    return (
+      <span
+        aria-label="Unread"
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d97757] ring-2 ring-[#1b1a18]"
+        title="Unread"
+      />
+    );
+  }
+
+  return <MessageSquare aria-hidden="true" className="h-3 w-3 shrink-0 text-[#d97757]" />;
+};
 
 interface TaskbarProps {
   sidebarState: SidebarState;
@@ -31,17 +78,18 @@ interface TaskbarProps {
   projects: Project[];
   activeProjectId: string;
   onSelectProject: (projectId: string) => void;
+  onDeleteProject?: (project: Project) => void;
   onSelectRecent: (chat: RecentChat) => void;
+  onPrefetchChat?: (chat: RecentChat) => void;
   onDeleteChat: (chat: RecentChat) => void;
   recentChats: RecentChat[];
   isHistoryLoading?: boolean;
   activeChatId?: string;
-  onOpenUpgradeModal: () => void;
-  onOpenCustomizeModal: () => void;
   onNavigateHome?: () => void;
-  activeView?: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts';
-  onChangeView?: (view: 'chat' | 'mail' | 'schedules' | 'dispatch' | 'artifacts') => void;
+  activeView?: ActiveDashboardView;
+  onChangeView?: (view: ActiveDashboardView) => void;
   isGenerating?: boolean;
+  initialExpandedProjectIds?: string[];
 }
 
 const SidebarToggleIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -68,21 +116,23 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   projects,
   activeProjectId,
   onSelectProject,
+  onDeleteProject,
   onSelectRecent,
+  onPrefetchChat,
   onDeleteChat,
   recentChats,
   isHistoryLoading = false,
   activeChatId,
-  onOpenUpgradeModal,
-  onOpenCustomizeModal,
   onNavigateHome,
   activeView = 'chat',
   onChangeView,
-  isGenerating = false
+  isGenerating = false,
+  initialExpandedProjectIds,
 }) => {
-  const [topTab, setTopTab] = useState<'home' | 'code'>('home');
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
-    () => new Set(projects.map((project) => project.id))
+  void isHistoryLoading;
+  void onSelectProject;
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    () => new Set(initialExpandedProjectIds ?? [])
   );
   const isExpanded = sidebarState === 'expanded';
 
@@ -92,7 +142,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
         <div className="flex flex-col items-center gap-3 w-full">
           <button
             onClick={onToggleSidebar}
-            title="Show sidebar (Click to expand)"
+            title="Hiện thanh bên"
+            aria-label="Show sidebar"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
             <SidebarToggleIcon className="w-4 h-4" />
@@ -101,7 +152,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <button
             onClick={onNavigateHome}
             className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center bg-[#282623] border border-zinc-700/50 shadow-md hover:scale-105 transition-transform cursor-pointer"
-            title="Go to Landing Page"
+            title="Về trang chủ"
           >
             <img src="/images/f-cowork-icon.svg" alt="F-Cowork Icon" className="w-7 h-7 object-contain" />
           </button>
@@ -110,14 +161,14 @@ export const Taskbar: React.FC<TaskbarProps> = ({
 
           <button
             onClick={onNewChat}
-            title="New chat"
+            title="Đoạn chat mới"
             className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
           >
             <Plus className="w-4.5 h-4.5" />
           </button>
 
           <button
-            title="Chats"
+            title="Đoạn chat"
             onClick={() => onChangeView?.('chat')}
             className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
               activeView === 'chat' ? 'bg-[#2c2a26] text-white' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
@@ -127,40 +178,13 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Scheduled Automations"
-            onClick={() => onChangeView?.('schedules')}
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Mail Inbox"
+            title="Hộp thư"
             onClick={() => onChangeView?.('mail')}
             className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
               activeView === 'mail' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
             }`}
           >
             <Mail className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Dispatch Operations"
-            onClick={() => onChangeView?.('dispatch')}
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
-              activeView === 'dispatch' ? 'bg-[#2c2a26] text-[#d97757]' : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
-            }`}
-          >
-            <Briefcase className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Projects"
-            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
-          >
-            <FolderKanban className="w-4 h-4" />
           </button>
 
           <button
@@ -176,33 +200,21 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </button>
 
           <button
-            title="Code & Plan Upgrade"
-            onClick={onOpenUpgradeModal}
-            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
+            title="Tài liệu quy trình"
+            onClick={() => onChangeView?.('raw-documents')}
+            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${
+              activeView === 'raw-documents'
+                ? 'bg-[#2c2a26] text-[#d97757]'
+                : 'text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26]'
+            }`}
           >
-            <Code2 className="w-4 h-4" />
-          </button>
-
-          <button
-            title="Customize"
-            onClick={onOpenCustomizeModal}
-            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
-          >
-            <Palette className="w-4 h-4" />
+            <BookOpen className="w-4 h-4" />
           </button>
         </div>
 
         <div className="flex flex-col items-center gap-3 w-full">
           <button
-            title="Download app"
-            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors relative cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 rounded-full ring-2 ring-[#1c1b18]" />
-          </button>
-
-          <button
-            title="steven (Pro plan)"
+            title="steven (Gói Pro)"
             className="w-8 h-8 rounded-full bg-[#35332f] hover:bg-[#423f3a] text-zinc-200 text-xs font-semibold flex items-center justify-center border border-zinc-700/40 transition-colors cursor-pointer"
           >
             s
@@ -219,7 +231,7 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <button
             onClick={onNavigateHome}
             className="flex items-center hover:opacity-80 transition-opacity cursor-pointer"
-            title="Go to Landing Page"
+            title="Về trang chủ"
           >
             <img
               src="/images/f-cowork-logo-no-tagline.svg"
@@ -231,13 +243,14 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           <div className="flex items-center gap-1 text-zinc-400">
             <button
               onClick={onToggleSidebar}
-              title="Hide sidebar (Click to collapse)"
+              title="Thu gọn thanh bên"
+              aria-label="Hide sidebar"
               className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
             >
               <SidebarToggleIcon className="w-4 h-4" />
             </button>
             <button
-              title="Search chats"
+              title="Tìm kiếm đoạn chat"
               className="p-1 hover:text-zinc-100 hover:bg-[#2c2a26] rounded-md transition-colors cursor-pointer"
             >
               <Search className="w-4 h-4" />
@@ -245,108 +258,82 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 p-0.5 bg-[#252320] rounded-xl border border-[#33312d] text-xs font-medium">
-          <button
-            onClick={() => setTopTab('home')}
-            className={`flex items-center justify-center gap-1.5 py-1 rounded-lg transition-colors cursor-pointer ${
-              topTab === 'home'
-                ? 'bg-[#383531] text-zinc-100 font-semibold shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>Home</span>
-          </button>
-          <button
-            onClick={() => setTopTab('code')}
-            className={`flex items-center justify-center gap-1.5 py-1 rounded-lg transition-colors cursor-pointer ${
-              topTab === 'code'
-                ? 'bg-[#383531] text-zinc-100 font-semibold shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>Code</span>
-          </button>
-        </div>
-
         <button
           onClick={onNewChat}
-          className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2926] hover:bg-[#34322e] text-zinc-200 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-zinc-700/40 cursor-pointer shadow-sm"
+          className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-[#272522] hover:bg-[#302d29] text-zinc-100 text-xs font-medium border border-zinc-700/50 shadow-xs transition-colors cursor-pointer"
         >
-          <Plus className="w-4 h-4 text-zinc-400" />
-          <span>New</span>
+          <Plus className="w-4 h-4 text-zinc-300" />
+          <span>Tạo cuộc trò chuyện mới</span>
         </button>
 
-        <div className="flex flex-col gap-0.5 text-xs">
+        <div className="space-y-0.5 mt-1">
           <button
-            onClick={() => onChangeView?.('artifacts')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'artifacts'
-                ? 'bg-[#272522] text-[#d97757] font-semibold'
-                : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            title="Đoạn chat"
+            onClick={() => onChangeView?.('chat')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'chat'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
             }`}
           >
-            <GitBranch className={`w-3.5 h-3.5 ${activeView === 'artifacts' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
+            <MessageSquare className={`w-3.5 h-3.5 ${activeView === 'chat' ? 'text-white' : 'text-zinc-400'}`} />
+            <span>Đoạn chat</span>
+          </button>
+
+          <button
+            title="Hộp thư"
+            onClick={() => onChangeView?.('mail')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'mail'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
+            }`}
+          >
+            <Mail className={`w-3.5 h-3.5 ${activeView === 'mail' ? 'text-white' : 'text-zinc-400'}`} />
+            <span>Hộp thư</span>
+          </button>
+
+          <button
+            title="Artifacts"
+            onClick={() => onChangeView?.('artifacts')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'artifacts'
+                ? 'bg-[#2a2824] text-white border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
+            }`}
+          >
+            <GitBranch className={`w-3.5 h-3.5 ${activeView === 'artifacts' ? 'text-white' : 'text-zinc-400'}`} />
             <span>Artifacts</span>
           </button>
 
           <button
-            onClick={() => onChangeView?.('schedules')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'schedules' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
+            title="Tài liệu quy trình"
+            onClick={() => onChangeView?.('raw-documents')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'raw-documents'
+                ? 'bg-[#2a2824] text-[#d97757] border border-zinc-700/40 shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-[#24221f]'
             }`}
           >
-            <Clock className="w-3.5 h-3.5 text-[#d97757]" />
-            <span>Scheduled</span>
-          </button>
-
-          <button
-            onClick={() => onChangeView?.('mail')}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'mail' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
-            }`}
-          >
-            <Mail className="w-3.5 h-3.5 text-[#d97757]" />
-            <span>Mail Inbox</span>
-          </button>
-
-          <button
-            onClick={() => onChangeView?.('dispatch')}
-            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors font-medium cursor-pointer ${
-              activeView === 'dispatch' ? 'bg-[#272522] text-[#d97757] font-semibold' : 'text-zinc-300 hover:text-white hover:bg-[#272522]'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
-              <span>Dispatch</span>
-            </div>
-            <span className="text-[9px] font-semibold text-zinc-400 bg-zinc-800/90 px-1.5 py-0.2 rounded border border-zinc-700/50">
-              Beta
-            </span>
-          </button>
-
-          <button
-            onClick={onOpenCustomizeModal}
-            className="flex items-center gap-2.5 px-2.5 py-1.5 text-zinc-300 hover:text-white hover:bg-[#272522] rounded-lg text-left transition-colors font-medium cursor-pointer"
-          >
-            <Palette className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Customize</span>
+            <BookOpen className={`w-3.5 h-3.5 ${activeView === 'raw-documents' ? 'text-[#d97757]' : 'text-zinc-400'}`} />
+            <span>Tài liệu quy trình</span>
           </button>
         </div>
 
-        <div className="mt-2 flex flex-col text-xs">
-          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
-            <span>PROJECTS</span>
-            <button onClick={onCreateProject} title="Create project" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100">
+        <div className="mt-2 flex flex-col text-xs flex-1 min-h-0">
+          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500 shrink-0">
+            <span>DỰ ÁN</span>
+            <button onClick={onCreateProject} title="Tạo dự án" className="rounded p-0.5 text-zinc-400 hover:bg-[#2c2a26] hover:text-zinc-100 cursor-pointer">
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="space-y-0.5">
+          <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar min-h-0">
             {projects.map((project) => {
-              const isCollapsed = collapsedProjects.has(project.id);
+              const isProjectExpanded = expandedProjects.has(project.id);
               const isActive = activeProjectId === project.id;
-              const chats = recentChats.filter((chat) => chat.projectId === project.id);
+              const chats = recentChats.filter(
+                (chat) => chat.projectId === project.id || (!chat.projectId && project.isDefault)
+              );
               return (
                 <div key={project.id}>
                   <div
@@ -356,45 +343,48 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   >
                     <button
                       onClick={() =>
-                        setCollapsedProjects((current) => {
+                        setExpandedProjects((current) => {
                           const next = new Set(current);
-                          if (isCollapsed) next.delete(project.id);
+                          if (isProjectExpanded) next.delete(project.id);
                           else next.add(project.id);
                           return next;
                         })
                       }
-                      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${project.name}`}
-                      className="p-1.5 text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                      aria-label={`${isProjectExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
+                      className="p-1.5 text-zinc-500 hover:text-zinc-200 cursor-pointer shrink-0"
                     >
-                      {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      {isProjectExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                     </button>
                     <button
-                      onClick={() => onSelectProject(project.id)}
+                      onClick={() => onNewChatInProject(project.id)}
                       className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-xs font-medium cursor-pointer"
                     >
                       <Folder className="h-3.5 w-3.5 shrink-0" style={{ color: project.color || '#d97757' }} fill="currentColor" />
                       <span className="truncate">{project.icon && project.icon !== '📁' ? `${project.icon} ` : ''}{project.name}</span>
                     </button>
-                    <button
-                      onClick={() => {
-                        setCollapsedProjects((current) => {
-                          const next = new Set(current);
-                          next.delete(project.id);
-                          return next;
-                        });
-                        onNewChatInProject(project.id);
-                      }}
-                      title={`New chat in ${project.name}`}
-                      className="invisible rounded p-1 text-zinc-400 hover:bg-zinc-700/50 hover:text-white group-hover:visible cursor-pointer"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </button>
+                    {!project.isDefault && onDeleteProject && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteProject(project);
+                        }}
+                        className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 shrink-0 cursor-pointer"
+                        title={`Xóa ${project.name}`}
+                        aria-label={`Xóa ${project.name}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
-                  {!isCollapsed && (
-                    <div className="ml-5 border-l border-zinc-700/50 pl-1.5 mt-0.5 space-y-0.5">
+                  {isProjectExpanded && (
+                    <div className="ml-5 border-l border-zinc-700/50 pl-1.5 mt-0.5 space-y-0.5 max-h-52 overflow-y-auto overflow-x-hidden custom-scrollbar pr-0.5">
                       {chats.map((chat) => (
-                        <div key={chat.id} className="group flex items-center gap-1">
+                        <div key={chat.id} className="group flex items-center gap-1 min-w-0">
                           <button
+                            data-testid="recent-chat"
+                            data-chat-id={chat.id}
+                            onMouseEnter={() => onPrefetchChat?.(chat)}
+                            onFocus={() => onPrefetchChat?.(chat)}
                             onClick={() => {
                               onChangeView?.('chat');
                               onSelectRecent(chat);
@@ -406,26 +396,29 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                             }`}
                             title={chat.title}
                           >
-                            {isGenerating && activeChatId === chat.id ? (
-                              <LoaderCircle className="h-3 w-3 shrink-0 text-[#d97757] animate-spin" />
-                            ) : (
-                              <MessageSquare className="h-3 w-3 shrink-0 text-[#d97757]" />
-                            )}
-                            <span className="truncate">{chat.title}</span>
+                            <ChatLifecycleIndicator
+                              chat={chat}
+                              isActive={activeChatId === chat.id}
+                              legacyGenerating={isGenerating && activeChatId === chat.id}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
                           </button>
                           <button
                             onClick={() => onDeleteChat(chat)}
-                            disabled={isGenerating && activeChatId === chat.id}
-                            className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                            title={`Delete ${chat.title}`}
-                            aria-label={`Delete ${chat.title}`}
+                            disabled={
+                              chat.generationStatus === 'generating'
+                              || (!chat.generationStatus && isGenerating && activeChatId === chat.id)
+                            }
+                            className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 shrink-0"
+                            title={`Xóa ${chat.title}`}
+                            aria-label={`Xóa ${chat.title}`}
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
                         </div>
                       ))}
                       {chats.length === 0 && (
-                        <p className="px-2 py-1 text-[11px] text-zinc-500 italic">No chats yet</p>
+                        <p className="px-2 py-1 text-[11px] text-zinc-500 italic">Chưa có cuộc trò chuyện nào</p>
                       )}
                     </div>
                   )}
@@ -434,78 +427,9 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             })}
           </div>
         </div>
-
-        <div className="mt-3 flex-1 flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-2.5 mb-1 text-[11px] font-semibold tracking-wider text-zinc-500">
-            <span>Recents</span>
-            <button className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer">
-              <SlidersHorizontal className="w-3 h-3" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto pr-1 space-y-0.5 custom-scrollbar text-xs">
-            {isHistoryLoading && (
-              <div className="px-2.5 py-2 text-[11px] text-zinc-500">
-                Đang tải lịch sử…
-              </div>
-            )}
-            {!isHistoryLoading && recentChats.length === 0 && (
-              <div className="px-2.5 py-2 text-[11px] text-zinc-500">
-                Chưa có cuộc trò chuyện
-              </div>
-            )}
-            {recentChats.slice(0, 10).map((chat) => {
-              const isActive = activeChatId === chat.id;
-              return (
-                <div key={chat.id} className="group flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      onChangeView?.('chat');
-                      onSelectRecent(chat);
-                    }}
-                    className={`min-w-0 flex-1 text-left px-2.5 py-1.5 rounded-md truncate transition-colors flex items-center gap-2 cursor-pointer ${
-                      isActive
-                        ? 'bg-[#2a2825] text-white font-medium'
-                        : 'text-[#949089] hover:text-zinc-200 hover:bg-[#24221f]'
-                    }`}
-                    title={chat.title}
-                  >
-                    {isGenerating && isActive ? (
-                      <LoaderCircle className="w-3 h-3 text-[#d97757] shrink-0 animate-spin" />
-                    ) : (
-                      <MessageSquare className="w-3 h-3 text-[#d97757] shrink-0" />
-                    )}
-                    <span className="truncate">{chat.title}</span>
-                  </button>
-                  <button
-                    onClick={() => onDeleteChat(chat)}
-                    disabled={isGenerating && isActive}
-                    className="rounded p-1 text-zinc-500 opacity-0 hover:bg-red-950/40 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                    title={`Delete ${chat.title}`}
-                    aria-label={`Delete ${chat.title}`}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       <div className="pt-2 border-t border-[#2b2926] mt-2 space-y-2">
-        <div className="flex items-center gap-2 px-1 text-[11px] text-zinc-400">
-          <button className="flex items-center gap-1 hover:text-zinc-200 cursor-pointer">
-            <LayoutGrid className="w-3 h-3" />
-            <span>Design</span>
-          </button>
-          <span className="text-zinc-600">|</span>
-          <button className="flex items-center gap-1 hover:text-zinc-200 cursor-pointer">
-            <FlaskConical className="w-3 h-3" />
-            <span>Labs</span>
-          </button>
-        </div>
-
         <div className="flex items-center justify-between p-1.5 rounded-lg hover:bg-[#272522] transition-colors cursor-pointer group">
           <div className="flex items-center gap-2.5">
             <div className="w-6 h-6 rounded-full bg-[#35332f] text-zinc-200 text-[11px] font-semibold flex items-center justify-center border border-zinc-700/40">
@@ -516,15 +440,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-1 text-zinc-400">
-            <button
-              title="Download app"
-              className="p-1 hover:text-zinc-200 relative cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />
-            </button>
-          </div>
         </div>
       </div>
     </aside>

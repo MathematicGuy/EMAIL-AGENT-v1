@@ -97,7 +97,7 @@ describe('Assistant Runtime local API client', () => {
     await sendConversationMessage({
       conversationId: 'conv-local',
       text: 'Tóm tắt file này',
-      modelId: 'deepseek-openrouter',
+      modelId: 'openai/gpt-oss-120b',
       attachmentRefs: [
         {
           ref_id: 'source-chat-1',
@@ -111,7 +111,7 @@ describe('Assistant Runtime local API client', () => {
 
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     const body = JSON.parse(String(request.body));
-    expect(body.model_id).toBe('deepseek-openrouter');
+    expect(body.model_id).toBe('openai/gpt-oss-120b');
     expect(body.content.attachment_refs).toEqual([
       expect.objectContaining({
         ref_id: 'source-chat-1',
@@ -143,7 +143,7 @@ describe('Assistant Runtime local API client', () => {
     await sendConversationMessage({
       conversationId: 'conv-local',
       text: 'Quý 2',
-      modelId: 'gemini-3.6-flash',
+      modelId: 'mistral-medium-3-5',
       replyToTurnId: 'turn-1',
       scope: LOCAL_ASSISTANT_SCOPE,
     });

@@ -1,14 +1,14 @@
 """Versioned target contracts for the Email Action Plan workflow.
 
-Pure-stdlib domain contracts implementing Step 6 of
-``docs/architectures/TARGET-ARCHITECTURE.md``:
+Pure-stdlib domain contracts for the email pipeline described in
+``docs/architectures/c3-api-email-action-plan.md``:
 
-- §6.1 ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
-- §6.2 ``EmailRouteDecision`` — the Classifier's Route Decision
-- §6.4/§6.5 ``SemanticRetrievalRequest``/``SemanticRetrievalResponse`` —
+- ``EphemeralEmailEnvelope`` — the Ephemeral Envelope
+- ``EmailRouteDecision`` — the Classifier's Route Decision
+- ``SemanticRetrievalRequest``/``SemanticRetrievalResponse`` —
   the retrieval-only Semantic Memory boundary
-- §6.6 ``ActionPlanOutput``, ``Task``, ``PlanStep``, ``SupportingDocument``
-- §6.8 ``TraceEvent`` with ``TraceLatency``
+- ``ActionPlanOutput``, ``Task``, ``PlanStep``, ``SupportingDocument``
+- ``TraceEvent`` with ``TraceLatency``
 
 :data:`TARGET_CONTRACTS_VERSION` versions this contract set; the dataclasses
 carry no per-instance version fields. Contracts assigned to later milestones
@@ -20,20 +20,20 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Literal, Self, TypeVar
 
 from .models import Priority
 
-TARGET_CONTRACTS_VERSION = "1.1.0"
+TARGET_CONTRACTS_VERSION = "1.4.0"
 
 #: Pipeline version — fourth component of the idempotent task persistence key
 #: ``tenant_id:user_id:gmail_message_id:pipeline_version`` (V1-M4 T4.1).
 #: Bump whenever persisted Task semantics change so replays never collide
-#: with rows written by an older pipeline. "2": rows may now carry the
-#: system-injected FR-11 missing-context note (§15 gate remediation).
-TASK_PIPELINE_VERSION = "2"
+#: with rows written by an older pipeline. "3": tasks may now carry the
+#: deterministic source-link inventory extracted from their source emails.
+TASK_PIPELINE_VERSION = "4"
 
 
 class Actionability(StrEnum):
@@ -117,6 +117,29 @@ class RetrievalStatus(StrEnum):
     TIMEOUT = "timeout"
     AUTHORIZATION_DENIED = "authorization_denied"
     PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
+class ThreatLevel(StrEnum):
+    """Security threat level assigned to links, attachments, or overall emails."""
+
+    CLEAN = "clean"
+    SUSPICIOUS = "suspicious"
+    MALICIOUS = "malicious"
+    BLOCKED = "blocked"
+
+
+class ThreatCategory(StrEnum):
+    """Categorization of detected security threats."""
+
+    NONE = "none"
+    PHISHING = "phishing"
+    MALWARE = "malware"
+    MACRO_SCRIPT = "macro_script"
+    PARSER_EXPLOIT = "parser_exploit"
+    PROMPT_INJECTION = "prompt_injection"
+    HOMOGRAPH_SPOOF = "homograph_spoof"
+    ZIP_BOMB = "zip_bomb"
 
 
 _T = TypeVar("_T")
@@ -127,6 +150,9 @@ def _jsonable(value: object) -> object:
     """Convert one contract field value to its JSON-safe representation."""
     if isinstance(value, Enum):
         return value.value
+    # datetime is a date subclass; date-only values must stay YYYY-MM-DD.
+    if type(value) is date:
+        return value.isoformat()
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, tuple | list):
@@ -175,6 +201,18 @@ def _as_datetime(value: object) -> datetime:
     raise TypeError(f"Expected datetime or ISO-8601 string, got {type(value).__name__}")
 
 
+def _as_date(value: object) -> date:
+    if type(value) is date:
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise TypeError(f"Expected date or ISO-8601 date string, got {type(value).__name__}")
+
+
+def _as_int_tuple(value: object) -> tuple[int, ...]:
+    return tuple(_as_int(item) for item in _as_sequence(value))
+
+
 def _as_mapping(value: object) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise TypeError(f"Expected mapping, got {type(value).__name__}")
@@ -210,6 +248,118 @@ def _optional(value: object, parse: Callable[[object], _T]) -> _T | None:
 
 
 @dataclass(frozen=True, slots=True)
+class EmailSourceLink:
+    """One deterministic HTTP(S) link extracted from an email body."""
+
+    ref: str
+    label: str | None
+    url: str
+    threat_level: ThreatLevel = ThreatLevel.CLEAN
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            ref=_as_str(data["ref"]),
+            label=_optional(data.get("label"), _as_str),
+            url=_as_str(data["url"]),
+            threat_level=_as_enum(
+                data.get("threat_level", ThreatLevel.CLEAN.value), ThreatLevel
+            )
+            if "threat_level" in data
+            else ThreatLevel.CLEAN,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LinkSafetyReport:
+    """Security analysis report for one extracted link."""
+
+    original_url: str
+    resolved_url: str
+    threat_level: ThreatLevel
+    threat_category: ThreatCategory
+    details: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            original_url=_as_str(data["original_url"]),
+            resolved_url=_as_str(data["resolved_url"]),
+            threat_level=_as_enum(data["threat_level"], ThreatLevel),
+            threat_category=_as_enum(data["threat_category"], ThreatCategory),
+            details=_optional(data.get("details"), _as_str),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentSafetyReport:
+    """Security analysis report for one email attachment."""
+
+    filename: str
+    sha256: str
+    detected_mime_type: str
+    threat_level: ThreatLevel
+    threat_category: ThreatCategory
+    is_safe_to_extract: bool
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            filename=_as_str(data["filename"]),
+            sha256=_as_str(data["sha256"]),
+            detected_mime_type=_as_str(data["detected_mime_type"]),
+            threat_level=_as_enum(data["threat_level"], ThreatLevel),
+            threat_category=_as_enum(data["threat_category"], ThreatCategory),
+            is_safe_to_extract=_as_bool(data["is_safe_to_extract"]),
+            reason=_optional(data.get("reason"), _as_str),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SecurityScanResult:
+    """Composite security scan result for an email."""
+
+    email_id: str
+    overall_threat_level: ThreatLevel
+    scanned_at: datetime
+    links: tuple[LinkSafetyReport, ...] = ()
+    attachments: tuple[AttachmentSafetyReport, ...] = ()
+    quarantined: bool = False
+    recommended_action: str = "allow"  # allow | warn | quarantine | drop
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            email_id=_as_str(data["email_id"]),
+            overall_threat_level=_as_enum(data["overall_threat_level"], ThreatLevel),
+            scanned_at=_as_datetime(data["scanned_at"]),
+            links=tuple(
+                LinkSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("links", ()))
+            ),
+            attachments=tuple(
+                AttachmentSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("attachments", ()))
+            ),
+            quarantined=_as_bool(data.get("quarantined", False)),
+            recommended_action=_as_str(data.get("recommended_action", "allow")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class EphemeralEmailEnvelope:
     """Ephemeral Envelope (§6.1): one normalized Gmail message.
 
@@ -233,8 +383,9 @@ class EphemeralEmailEnvelope:
     body_format: BodyFormat
     attachments_present: bool
     fetch_status: FetchStatus
+    source_links: tuple[EmailSourceLink, ...] = ()
     # Always False: attachment processing is out of scope (ADR-003); presence
-    # is recorded only. Kept last because it is the only defaulted field.
+    # is recorded only. Kept after the other defaulted field for compatibility.
     attachments_processed: Literal[False] = False
 
     def to_dict(self) -> dict[str, object]:
@@ -262,6 +413,10 @@ class EphemeralEmailEnvelope:
             body_format=_as_enum(data["body_format"], BodyFormat),
             attachments_present=_as_bool(data["attachments_present"]),
             fetch_status=_as_enum(data["fetch_status"], FetchStatus),
+            source_links=tuple(
+                EmailSourceLink.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("source_links", ()))
+            ),
         )
 
 
@@ -357,8 +512,8 @@ class SupportingDocument:
 class Task:
     """Task (§6.6): the minimal durable artifact per actionable result.
 
-    Carries the Gmail pointer, Action Plan, Citations, missing information,
-    and the qualified ``classifier_confidence`` / ``generation_confidence``.
+    Carries the Gmail pointer, extracted source links, Action Plan, Citations,
+    missing information, and the qualified confidence values.
     """
 
     task_id: str
@@ -380,6 +535,10 @@ class Task:
     generation_confidence: float | None
     validation_status: ValidationStatus
     created_at: datetime
+    source_links: tuple[EmailSourceLink, ...] = ()
+    security_threat_level: ThreatLevel = ThreatLevel.CLEAN
+    quarantined: bool = False
+    security_reports: tuple[LinkSafetyReport, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -411,6 +570,20 @@ class Task:
             generation_confidence=_optional(data["generation_confidence"], _as_float),
             validation_status=_as_enum(data["validation_status"], ValidationStatus),
             created_at=_as_datetime(data["created_at"]),
+            source_links=tuple(
+                EmailSourceLink.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("source_links", ()))
+            ),
+            security_threat_level=_as_enum(
+                data.get("security_threat_level", ThreatLevel.CLEAN.value), ThreatLevel
+            )
+            if "security_threat_level" in data
+            else ThreatLevel.CLEAN,
+            quarantined=_as_bool(data.get("quarantined", False)),
+            security_reports=tuple(
+                LinkSafetyReport.from_dict(_as_mapping(item))
+                for item in _as_sequence(data.get("security_reports", ()))
+            ),
         )
 
 
@@ -479,6 +652,10 @@ class TraceEvent:
     generation_status: str | None
     validation_status: str | None
     latency_ms: TraceLatency
+    evidence_status: str | None = None
+    top_rerank_score: float | None = None
+    query_rewrite_status: str | None = None
+    gate_version: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -499,6 +676,10 @@ class TraceEvent:
             generation_status=_optional(data["generation_status"], _as_str),
             validation_status=_optional(data["validation_status"], _as_str),
             latency_ms=TraceLatency.from_dict(_as_mapping(data["latency_ms"])),
+            evidence_status=_optional(data.get("evidence_status"), _as_str),
+            top_rerank_score=_optional(data.get("top_rerank_score"), _as_float),
+            query_rewrite_status=_optional(data.get("query_rewrite_status"), _as_str),
+            gate_version=_optional(data.get("gate_version"), _as_str),
         )
 
 
@@ -515,6 +696,9 @@ class SemanticChunk:
     document_version: str | None
     relevance_score: float
     rerank_score: float | None
+    page_start: int | None = None
+    page_end: int | None = None
+    document_date: date | None = None
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -531,6 +715,9 @@ class SemanticChunk:
             document_version=_optional(data["document_version"], _as_str),
             relevance_score=_as_float(data["relevance_score"]),
             rerank_score=_optional(data["rerank_score"], _as_float),
+            page_start=_optional(data.get("page_start"), _as_int),
+            page_end=_optional(data.get("page_end"), _as_int),
+            document_date=_optional(data.get("document_date"), _as_date),
         )
 
 
@@ -539,6 +726,9 @@ class RetrievalFilters:
     """Status filters applied to a semantic retrieval (§6.4)."""
 
     document_status: tuple[str, ...] = ("ready",)
+    document_ids: tuple[str, ...] = ()
+    years: tuple[int, ...] = ()
+    months: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -547,6 +737,9 @@ class RetrievalFilters:
     def from_dict(cls, data: Mapping[str, object]) -> Self:
         return cls(
             document_status=_as_str_tuple(data.get("document_status", ("ready",))),
+            document_ids=_as_str_tuple(data.get("document_ids", ())),
+            years=_as_int_tuple(data.get("years", ())),
+            months=_as_int_tuple(data.get("months", ())),
         )
 
 

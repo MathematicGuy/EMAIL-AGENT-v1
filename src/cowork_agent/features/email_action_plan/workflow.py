@@ -1,15 +1,17 @@
 """Run creation, execution and result use cases."""
 
+import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar, cast
 from uuid import uuid4
 
 from langfuse import observe
 
+from cowork_agent.config import EmailRagQualitySettings
 from cowork_agent.domain import (
     DigestCompletedEvent,
     DigestRun,
@@ -24,10 +26,10 @@ from cowork_agent.domain.target_contracts import (
     RetrievalFilters,
     RetrievalLimits,
     RetrievalStatus,
-    Route,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     Task,
+    ThreatLevel,
     TraceEvent,
     TraceLatency,
     TraceStatus,
@@ -39,15 +41,18 @@ from cowork_agent.features.email_action_plan.policies import (
 )
 from cowork_agent.features.email_action_plan.short_term import ShortTermStore
 from cowork_agent.identity import LOCAL_TENANT_ID
+from cowork_agent.integrations.llm.providers.tracing import _update_current_trace
 
 from .compat_mapper import legacy_result_shape
 from .correlation import TaskCandidate, correlate_candidates
-from .observability import EncryptedDevTraceSink, TraceSink
+from .evidence import GATE_VERSION, EvidenceAssessment, EvidenceStatus, assess_retrieval_evidence
+from .observability import EncryptedDevTraceSink, TraceSink, emit_security_scan_trace
 from .ports import (
     TERMINAL_STATUSES,
     ActionPlanGeneratorPort,
     AttachmentExtractorPort,
     CompletionOutboxPort,
+    EmailSecurityScannerPort,
     MailboxPort,
     MailboxTemporaryError,
     PersistedTask,
@@ -58,18 +63,95 @@ from .ports import (
     TaskPointer,
     TaskRepository,
 )
-from .routing import RouteResolution, resolve_candidate_route
+from .query_rewrite import (
+    RetrievalQueryRewriterPort,
+    build_query_rewrite_input,
+    deterministic_query,
+)
+from .routing import (
+    RouteResolution,
+    candidate_requires_processing,
+    resolve_candidate_after_retrieval,
+)
 from .schemas import ExtractionLimits, GenerationContext, MessageRef
+from .security_policy import create_quarantined_task
 from .validation import validate_action_plan
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+_UNSET = object()
+
+
+async def _bounded_gather(
+    items: Sequence[_T],
+    *,
+    limit: int,
+    operation: Callable[[_T], Awaitable[_R]],
+) -> list[_R]:
+    """Run independent I/O with a bounded fan-out and input-order results."""
+    semaphore = asyncio.Semaphore(limit)
+
+    async def run_item(item: _T) -> _R:
+        async with semaphore:
+            return await operation(item)
+
+    return list(await asyncio.gather(*(run_item(item) for item in items)))
+
+
+async def _bounded_fail_fast(
+    items: Sequence[_T],
+    *,
+    limit: int,
+    operation: Callable[[_T], Awaitable[_R]],
+) -> list[_R]:
+    """Run at most ``limit`` operations, stopping queued work after a failure.
+
+    Results remain aligned to the input sequence. When simultaneous work
+    fails, raise the exception belonging to the earliest input item so a run's
+    safe error is deterministic.
+    """
+    results: list[_R | object] = [_UNSET] * len(items)
+    active: dict[asyncio.Task[_R], int] = {}
+    next_index = 0
+
+    async def run_item(item: _T) -> _R:
+        return await operation(item)
+
+    def start_next() -> None:
+        nonlocal next_index
+        task: asyncio.Task[_R] = asyncio.create_task(run_item(items[next_index]))
+        active[task] = next_index
+        next_index += 1
+
+    while next_index < len(items) and len(active) < limit:
+        start_next()
+    while active:
+        done, _pending = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+        failures: list[tuple[int, BaseException]] = []
+        for task in done:
+            index = active.pop(task)
+            try:
+                results[index] = task.result()
+            except BaseException as exc:
+                failures.append((index, exc))
+        if failures:
+            for task in active:
+                task.cancel()
+            await asyncio.gather(*active, return_exceptions=True)
+            _index, error = min(failures, key=lambda failure: failure[0])
+            raise error
+        while next_index < len(items) and len(active) < limit:
+            start_next()
+    return [cast(_R, result) for result in results]
 
 
 class _RetrievalOutcome(NamedTuple):
     """§12.3 outcome of the zero-or-one retrieval for one candidate."""
 
     response: SemanticRetrievalResponse
-    skipped: bool  # nothing queryable (no query/knowledge gaps)
+    query_rewrite_status: str
     degraded: bool  # structured empty after the bounded retry ladder failed
 
 
@@ -79,7 +161,8 @@ class _GeneratedCandidate(NamedTuple):
 
     candidate: TaskCandidate
     resolution: RouteResolution
-    retrieval: _RetrievalOutcome | None
+    retrieval: _RetrievalOutcome
+    evidence: EvidenceAssessment
     envelopes: tuple[EphemeralEmailEnvelope, ...]
     output: ActionPlanOutput
     retrieval_ms: int | None
@@ -110,7 +193,7 @@ class CreateDigestRun:
         mailbox_connection_id: str,
         idempotency_key: str,
         query: str | None = None,
-        max_emails: int = 200,
+        max_emails: int = 10,
         trigger: RunTrigger = RunTrigger.ON_DEMAND,
         now: datetime | None = None,
     ) -> DigestRun:
@@ -144,10 +227,15 @@ class DigestWorker:
         task_repository: TaskRepository,
         *,
         semantic_memory: SemanticMemoryPort | None = None,
+        query_rewriter: RetrievalQueryRewriterPort | None = None,
+        quality_settings: EmailRagQualitySettings | None = None,
         trace_sink: TraceSink | None = None,
         dev_trace: EncryptedDevTraceSink | None = None,
         extraction_limits: ExtractionLimits | None = None,
         completion_outbox: CompletionOutboxPort | None = None,
+        security_scanner: EmailSecurityScannerPort | None = None,
+        mailbox_fetch_concurrency: int = 6,
+        generation_concurrency: int = 1,
     ) -> None:
         # ADR-003 retains this injection surface temporarily for callers/tests, but the
         # production baseline must not download or extract attachment content.
@@ -155,15 +243,24 @@ class DigestWorker:
         self._runs, self._results, self._mailbox = runs, results, mailbox
         self._classifier, self._generator = classifier, generator
         self._semantic_memory = semantic_memory
+        self._query_rewriter = query_rewriter
+        self._quality_settings = quality_settings or EmailRagQualitySettings()
         self._task_repository = task_repository
         self._short_term = short_term
         self._trace_sink = trace_sink
         self._dev_trace = dev_trace
         self._completion_outbox = completion_outbox
+        self._security_scanner = security_scanner
+        if mailbox_fetch_concurrency < 1:
+            raise ValueError("mailbox_fetch_concurrency must be positive")
+        if generation_concurrency < 1:
+            raise ValueError("generation_concurrency must be positive")
+        self._mailbox_fetch_concurrency = mailbox_fetch_concurrency
+        self._generation_concurrency = generation_concurrency
 
     @observe(name="execute_digest_run")
     async def execute(
-        self, run_id: str, *, user_timezone: str = "UTC", now: datetime | None = None
+        self, run_id: str, *, user_timezone: str = "Asia/Ho_Chi_Minh", now: datetime | None = None
     ) -> DigestRun | None:
         clock = now or datetime.now(UTC)
         run = await self._runs.claim(run_id, clock)
@@ -215,7 +312,79 @@ class DigestWorker:
                 email_ms,
             )
 
-            self._short_term.put(run.id, envelopes)
+            quarantined_records: list[PersistedTask] = []
+            safe_envelopes: list[EphemeralEmailEnvelope] = []
+            if self._security_scanner is not None:
+                scan_started = time.monotonic()
+                scan_results = await self._security_scanner.scan_envelopes(envelopes)
+                scan_latency_ms = int((time.monotonic() - scan_started) * 1000)
+                scan_map = {res.email_id: res for res in scan_results}
+
+                total_urls = 0
+                total_threats = 0
+                highest_threat = ThreatLevel.CLEAN
+
+                for envelope in envelopes:
+                    scan = scan_map.get(envelope.gmail_message_id)
+                    if scan:
+                        total_urls += len(scan.links)
+                        if scan.overall_threat_level != ThreatLevel.CLEAN:
+                            total_threats += 1
+                            if scan.overall_threat_level == ThreatLevel.BLOCKED:
+                                highest_threat = ThreatLevel.BLOCKED
+                            elif (
+                                scan.overall_threat_level == ThreatLevel.MALICIOUS
+                                and highest_threat != ThreatLevel.BLOCKED
+                            ):
+                                highest_threat = ThreatLevel.MALICIOUS
+                            elif (
+                                scan.overall_threat_level == ThreatLevel.SUSPICIOUS
+                                and highest_threat == ThreatLevel.CLEAN
+                            ):
+                                highest_threat = ThreatLevel.SUSPICIOUS
+
+                    if scan and scan.quarantined:
+                        logger.warning(
+                            "🛡️ [SECURITY] Quarantining email %s (Threat: %s)",
+                            envelope.gmail_message_id,
+                            scan.overall_threat_level.value,
+                        )
+                        q_task = create_quarantined_task(
+                            envelope,
+                            scan,
+                            run.id,
+                            run.mailbox_connection_id,
+                            clock,
+                        )
+                        quarantined_records.append(q_task)
+                    else:
+                        safe_envelopes.append(envelope)
+
+                emit_security_scan_trace(
+                    self._trace_sink,
+                    run_id=run.id,
+                    user_id=run.user_id,
+                    urls_scanned_count=total_urls,
+                    attachments_scanned_count=sum(len(s.attachments) for s in scan_results),
+                    threats_detected_count=total_threats,
+                    quarantined_count=len(quarantined_records),
+                    highest_threat_level=highest_threat.value,
+                    latency_ms=scan_latency_ms,
+                )
+
+                if quarantined_records:
+                    _update_current_trace(
+                        tags=["security_quarantine"],
+                        metadata={
+                            "security_quarantine": True,
+                            "quarantined_count": len(quarantined_records),
+                            "highest_threat_level": highest_threat.value,
+                        },
+                    )
+            else:
+                safe_envelopes = list(envelopes)
+
+            self._short_term.put(run.id, safe_envelopes)
             stored_envelopes = self._short_term.get(run.id)
             if stored_envelopes is None:  # defensive only: put() above guarantees presence
                 stored_envelopes = ()
@@ -232,73 +401,50 @@ class DigestWorker:
             )
             classification = await self._classifier.classify(user_timezone, clock, stored_envelopes)
             classifier_ms = int((time.monotonic() - classify_started) * 1000)
+            run.filtered_summary = classification.filtered_summary
             decisions = {
                 classified.gmail_message_id: classified.decision
                 for classified in classification.decisions
             }
-            candidates = correlate_candidates(decisions, messages)
+            safe_messages = {msg.gmail_message_id: msg for msg in stored_envelopes}
+            candidates = correlate_candidates(decisions, safe_messages)
             logger.info(
                 "⚡ [RUN %s] Correlated into %d Task Candidate(s) (Classifier took %d ms)",
                 run.id,
                 len(candidates),
                 classifier_ms,
             )
-            run_context = GenerationContext(
-                run_id=run.id, user_id=run.user_id
-            )
-            outputs: list[_GeneratedCandidate] = []
+            run_context = GenerationContext(run_id=run.id, user_id=run.user_id)
+            actionable_candidates: list[TaskCandidate] = []
             for task_candidate in candidates:
-                resolution = resolve_candidate_route(task_candidate)
                 logger.info(
                     "  ├─ Candidate '%s' -> Route: %s",
                     task_candidate.candidate_key,
-                    resolution.route.value.upper(),
+                    "PENDING_RETRIEVAL",
                 )
-                if resolution.route is Route.NO_ACTION:
+                if not candidate_requires_processing(task_candidate):
                     continue
-                candidate_envelopes = tuple(
-                    messages[message_id] for message_id in task_candidate.source_message_ids
-                )
-                retrieval: _RetrievalOutcome | None = None
-                retrieval_ms: int | None = None
-                if resolution.route is Route.RETRIEVE_RAG:
-                    logger.info("  ├─ 🔍 Querying internal RAG knowledge base...")
-                    retrieval_started = time.monotonic()
-                    retrieval = await self._retrieve_for_candidate(run, task_candidate)
-                    retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
-                    chunks_count = (
-                        len(retrieval.response.chunks) if retrieval and retrieval.response else 0
-                    )
-                    logger.info(
-                        "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
-                        chunks_count,
-                        retrieval_ms,
-                    )
-
-                generation_started = time.monotonic()
-                logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
-                output = await self._generator.generate(
-                    user_timezone=user_timezone,
-                    current_time=clock,
-                    run_context=run_context,
-                    candidate=task_candidate,
-                    envelopes=candidate_envelopes,
-                    resolution=resolution,
-                    retrieval=retrieval.response if retrieval is not None else None,
-                )
-                gen_ms = int((time.monotonic() - generation_started) * 1000)
-                logger.info("  └─ ✍️ Action Plan generated (%d ms)", gen_ms)
-                outputs.append(
-                    _GeneratedCandidate(
-                        task_candidate,
-                        resolution,
-                        retrieval,
-                        candidate_envelopes,
-                        output,
-                        retrieval_ms,
-                        gen_ms,
-                    )
-                )
+                actionable_candidates.append(task_candidate)
+            generation_started = time.monotonic()
+            outputs = await _bounded_fail_fast(
+                actionable_candidates,
+                limit=self._generation_concurrency,
+                operation=lambda item: self._generate_candidate(
+                    run,
+                    item,
+                    messages,
+                    run_context,
+                    user_timezone,
+                    clock,
+                ),
+            )
+            logger.info(
+                "Run %s generated %d action plan(s) with concurrency %d in %d ms",
+                run.id,
+                len(outputs),
+                self._generation_concurrency,
+                int((time.monotonic() - generation_started) * 1000),
+            )
             logger.info(
                 "Run %s routed %d candidate(s): %d classifier batch(es), %d generation call(s)",
                 run.id,
@@ -311,9 +457,9 @@ class DigestWorker:
             # it duplicates a fingerprint already produced in this run. The
             # legacy Action Item surface is derived from the persisted Tasks
             # by the compatibility mapper at read time (T4.2).
-            records: list[PersistedTask] = []
-            actionable: set[str] = set()
-            fingerprints: set[str] = set()
+            records: list[PersistedTask] = list(quarantined_records)
+            actionable: set[str] = {r.task.gmail_message_id for r in quarantined_records}
+            fingerprints: set[str] = {r.fingerprint for r in quarantined_records}
             for generated in outputs:
                 validation = validate_action_plan(
                     generated.output,
@@ -335,7 +481,10 @@ class DigestWorker:
                     )
                     continue
                 task = validation.task
-                if generated.retrieval is not None and not generated.retrieval.response.chunks:
+                if (
+                    generated.resolution.mode == "partial"
+                    and generated.evidence.status is not EvidenceStatus.SUPPORTED
+                ):
                     task = replace(
                         task,
                         missing_information=task.missing_information + (_NO_COMPANY_CONTEXT_NOTE,),
@@ -450,11 +599,13 @@ class DigestWorker:
         refs: list[MessageRef] = []
         seen_message_ids: set[str] = set()
         cursor: str | None = None
+        max_candidate_refs = max(run.max_emails, int(run.max_emails * 1.5))
         while True:
+            page_size = min(max(max_candidate_refs - len(refs), 1), 100)
             page = await self._mailbox.search_unread(
                 run.mailbox_connection_id,
                 run.query,
-                100,
+                page_size,
                 cursor,
             )
             run.emails_matched = max(run.emails_matched, page.estimated_total or 0)
@@ -463,61 +614,82 @@ class DigestWorker:
                     continue
                 seen_message_ids.add(ref.message_id)
                 refs.append(ref)
+                if len(refs) >= max_candidate_refs:
+                    break
             cursor = page.next_cursor
-            if cursor is None:
+            if cursor is None or len(refs) >= max_candidate_refs:
                 break
 
-        received_at_by_id: dict[str, datetime] = {}
-        for ref in refs:
-            try:
-                received_at_by_id[ref.message_id] = await self._mailbox.get_message_received_at(
-                    run.mailbox_connection_id, ref.message_id
-                )
-            except MailboxTemporaryError:
-                skipped_threads += 1
-                logger.warning(
-                    "Run %s skipping message %s after transient timestamp fetch failure",
-                    run.id,
-                    ref.message_id,
-                )
-
-        selected_refs = sorted(
-            (ref for ref in refs if ref.message_id in received_at_by_id),
-            key=lambda ref: received_at_by_id[ref.message_id],
-            reverse=True,
-        )[: run.max_emails]
         messages_by_thread: dict[str, list[str]] = {}
-        for ref in selected_refs:
+        for ref in refs:
             messages_by_thread.setdefault(ref.thread_id, []).append(ref.message_id)
 
-        for thread_id, selected_ids in messages_by_thread.items():
+        thread_items = tuple(messages_by_thread.items())
+
+        async def fetch_thread(
+            item: tuple[str, list[str]],
+        ) -> Sequence[EphemeralEmailEnvelope] | None:
+            thread_id, _selected_ids = item
             try:
-                thread = await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
+                return await self._mailbox.get_thread(run.mailbox_connection_id, thread_id)
             except MailboxTemporaryError:
                 # T5.4 partial-batch continuation: one thread's transient
                 # failure must not abort the run; the adapter already
                 # exhausted its retry budget, so skip and continue.
-                skipped_threads += 1
                 logger.warning(
                     "Run %s skipping thread %s after transient mailbox failure",
                     run.id,
                     thread_id,
                 )
+                return None
+
+        thread_started = time.monotonic()
+        thread_results = await _bounded_gather(
+            thread_items,
+            limit=self._mailbox_fetch_concurrency,
+            operation=fetch_thread,
+        )
+        logger.info(
+            "Run %s fetched %d Gmail threads with concurrency %d in %d ms",
+            run.id,
+            len(thread_items),
+            self._mailbox_fetch_concurrency,
+            int((time.monotonic() - thread_started) * 1000),
+        )
+
+        all_envelopes: list[EphemeralEmailEnvelope] = []
+        for (_thread_id, selected_ids), thread in zip(thread_items, thread_results, strict=True):
+            if thread is None or not thread:
+                skipped_threads += 1
                 continue
-            selected_id_set = set(selected_ids)
-            # Mailbox adapters leave run identity empty; the workflow stamps it once, here.
-            selected = tuple(
-                replace(
-                    message,
-                    run_id=run.id,
-                    user_id=run.user_id,
+            # Sắp xếp toàn bộ email trong thread theo thời gian tăng dần (cũ -> mới)
+            sorted_thread = sorted(thread, key=lambda m: m.received_at)
+            latest_message = sorted_thread[-1]
+
+            # Chỉ thực hiện quét khi email mới nhất trong luồng là email chưa đọc
+            if latest_message.gmail_message_id not in set(selected_ids):
+                continue
+
+            # ADR-011: Lấy tối đa 5 email gần nhất trong chuỗi reply
+            bounded_thread = sorted_thread[-5:]
+            for message in bounded_thread:
+                all_envelopes.append(
+                    replace(
+                        message,
+                        run_id=run.id,
+                        user_id=run.user_id,
+                    )
                 )
-                for message in thread
-                if message.gmail_message_id in selected_id_set
-            )
-            run.emails_processed += len(selected)
-            if selected:
-                threads.append(selected)
+            if len(all_envelopes) >= run.max_emails:
+                break
+
+        # Regroup into threads preserving order
+        grouped_by_thread: dict[str, list[EphemeralEmailEnvelope]] = {}
+        for env in all_envelopes:
+            grouped_by_thread.setdefault(env.gmail_thread_id, []).append(env)
+
+        threads = [tuple(thread_envs) for thread_envs in grouped_by_thread.values()]
+        run.emails_processed = len(all_envelopes)
 
         run.next_cursor = cursor
         run.truncated = cursor is not None or run.emails_matched > run.emails_processed
@@ -525,8 +697,61 @@ class DigestWorker:
             run.emails_matched = run.emails_processed
         return threads, skipped_threads
 
+    async def _generate_candidate(
+        self,
+        run: DigestRun,
+        task_candidate: TaskCandidate,
+        messages: dict[str, EphemeralEmailEnvelope],
+        run_context: GenerationContext,
+        user_timezone: str,
+        clock: datetime,
+    ) -> _GeneratedCandidate:
+        """Retrieve exactly once, gate evidence, then generate one candidate."""
+        candidate_envelopes = tuple(
+            messages[message_id] for message_id in task_candidate.source_message_ids
+        )
+        retrieval_ms: int | None = None
+        if True:
+            logger.info("  ├─ 🔍 Querying internal RAG knowledge base...")
+            retrieval_started = time.monotonic()
+            retrieval = await self._retrieve_for_candidate(run, task_candidate, candidate_envelopes)
+            retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
+            logger.info(
+                "  ├─ 🔍 RAG returned %d document chunk(s) (%d ms)",
+                len(retrieval.response.chunks),
+                retrieval_ms,
+            )
+        evidence = assess_retrieval_evidence(retrieval.response, self._quality_settings)
+        resolution = resolve_candidate_after_retrieval(task_candidate, evidence.status)
+        generation_started = time.monotonic()
+        logger.info("  ├─ ✍️ Generating Action Plan via Gemini LLM...")
+        output = await self._generator.generate(
+            user_timezone=user_timezone,
+            current_time=clock,
+            run_context=run_context,
+            candidate=task_candidate,
+            envelopes=candidate_envelopes,
+            resolution=resolution,
+            retrieval=evidence.response if evidence.status is EvidenceStatus.SUPPORTED else None,
+        )
+        generation_ms = int((time.monotonic() - generation_started) * 1000)
+        logger.info("  └─ ✍️ Action Plan generated (%d ms)", generation_ms)
+        return _GeneratedCandidate(
+            task_candidate,
+            resolution,
+            retrieval,
+            evidence,
+            candidate_envelopes,
+            output,
+            retrieval_ms,
+            generation_ms,
+        )
+
     async def _retrieve_for_candidate(
-        self, run: DigestRun, candidate: TaskCandidate
+        self,
+        run: DigestRun,
+        candidate: TaskCandidate,
+        envelopes: Sequence[EphemeralEmailEnvelope],
     ) -> _RetrievalOutcome:
         """Zero-or-one semantic retrieval per RETRIEVE_RAG candidate (§12.3).
 
@@ -540,7 +765,7 @@ class DigestWorker:
                 gap for _, decision in candidate.decisions for gap in decision.knowledge_gaps
             )
         )
-        query = next(
+        classifier_query = next(
             (
                 decision.retrieval_query
                 for _, decision in candidate.decisions
@@ -548,15 +773,33 @@ class DigestWorker:
             ),
             None,
         )
+        rewrite_payload = build_query_rewrite_input(
+            candidate_action_items=tuple(
+                decision.candidate_action_item for _message_id, decision in candidate.decisions
+            ),
+            knowledge_gaps=gaps,
+            messages=tuple((envelope.subject, envelope.normalized_body) for envelope in envelopes),
+        )
+        query = classifier_query
+        rewrite_status = "classifier_query" if query else "fallback"
+        if query is None and self._query_rewriter is not None:
+            try:
+                query = await self._query_rewriter.rewrite(rewrite_payload)
+                rewrite_status = "rewritten" if query else "fallback"
+            except Exception as exc:
+                logger.warning("Run %s query rewrite failed: %s", run.id, type(exc).__name__)
+        if not query:
+            query = deterministic_query(rewrite_payload)
+            rewrite_status = "fallback"
         if self._semantic_memory is None:
             # §12.3 module failure: no semantic adapter is wired.
-            return _RetrievalOutcome(_empty_retrieval(), skipped=False, degraded=True)
-        if query is None and not gaps:
-            return _RetrievalOutcome(_empty_retrieval(), skipped=True, degraded=False)
+            return _RetrievalOutcome(
+                _empty_retrieval(RetrievalStatus.UNAVAILABLE), rewrite_status, degraded=True
+            )
         request = SemanticRetrievalRequest(
             run_id=run.id,
             user_id=run.user_id,
-            query=query or "; ".join(gaps),
+            query=query,
             knowledge_gaps=gaps,
             filters=RetrievalFilters(document_status=("ready",)),
             limits=RetrievalLimits(top_k=5, min_score=-1.0, timeout_ms=8_000),
@@ -564,7 +807,7 @@ class DigestWorker:
         for attempt in (1, 2):
             try:
                 response = await self._semantic_memory.retrieve(request)
-                return _RetrievalOutcome(response, skipped=False, degraded=False)
+                return _RetrievalOutcome(response, rewrite_status, degraded=False)
             except Exception as exc:
                 # §12.3: metadata only, never email content.
                 logger.warning(
@@ -573,7 +816,9 @@ class DigestWorker:
                     attempt,
                     type(exc).__name__,
                 )
-        return _RetrievalOutcome(_empty_retrieval(), skipped=False, degraded=True)
+        return _RetrievalOutcome(
+            _empty_retrieval(RetrievalStatus.UNAVAILABLE), rewrite_status, degraded=True
+        )
 
     def _emit_candidate_trace(
         self,
@@ -586,7 +831,7 @@ class DigestWorker:
         """FR-16: one metadata-only §6.8 event per generated candidate."""
         if self._trace_sink is None:
             return
-        retrieval = generated.retrieval.response if generated.retrieval is not None else None
+        retrieval = generated.retrieval.response
         decisions = tuple(decision for _, decision in generated.candidate.decisions)
         reason_codes = tuple(
             dict.fromkeys(code.value for decision in decisions for code in decision.reason_codes)
@@ -598,14 +843,14 @@ class DigestWorker:
         )
         # FR-16 fallback marker: §12.3 degraded retrieval (empty result after
         # the retry ladder) must be distinguishable from a genuine no_results.
-        degraded = generated.retrieval is not None and generated.retrieval.degraded
-        if generated.retrieval is None:
+        degraded = generated.retrieval.degraded
+        if False:
             retrieval_status: str | None = None
-        elif generated.retrieval.skipped:
+        elif False:
             # §14: keep skipped retrievals out of the no-result rate.
             retrieval_status = "skipped"
         else:
-            retrieval_status = retrieval.retrieval_status.value if retrieval else None
+            retrieval_status = retrieval.retrieval_status.value
         validation_status = (
             task.validation_status.value if task is not None else ";".join(violation_codes)
         )
@@ -619,13 +864,17 @@ class DigestWorker:
                 route=generated.resolution.route,
                 reason_codes=reason_codes,
                 classifier_confidence=classifier_confidence,
-                rag_result_count=len(retrieval.chunks) if retrieval is not None else None,
+                rag_result_count=len(retrieval.chunks),
                 retrieval_status=retrieval_status,
                 generation_status="RETRIEVAL_DEGRADED" if degraded else None,
                 validation_status=validation_status,
                 latency_ms=TraceLatency(
                     rag=generated.retrieval_ms, generation=generated.generation_ms
                 ),
+                evidence_status=generated.evidence.status.value,
+                top_rerank_score=generated.evidence.top_rerank_score,
+                query_rewrite_status=generated.retrieval.query_rewrite_status,
+                gate_version=GATE_VERSION,
             )
         )
 
@@ -676,12 +925,14 @@ class DigestWorker:
             logger.warning("Development trace write failed for run %s (%s)", run_id, kind)
 
 
-def _empty_retrieval() -> SemanticRetrievalResponse:
+def _empty_retrieval(
+    status: RetrievalStatus = RetrievalStatus.NO_RESULTS,
+) -> SemanticRetrievalResponse:
     """Structured empty retrieval result (§12.3 degraded path)."""
     return SemanticRetrievalResponse(
         query_id=f"q_{uuid4().hex}",
         chunks=(),
-        retrieval_status=RetrievalStatus.NO_RESULTS,
+        retrieval_status=status,
         latency_ms=0,
     )
 

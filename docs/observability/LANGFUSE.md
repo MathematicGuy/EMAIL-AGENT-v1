@@ -18,7 +18,7 @@ Langfuse chịu trách nhiệm thu thập dữ liệu giám sát tự động (a
 - **Token & Cost Telemetry:** Đếm chính xác số lượng Tokens (Prompt / Completion) và tính toán chi phí gọi LLM API.
 
 ### In-Scope (Bắt buộc dùng Langfuse Tracing)
-- **LLM Providers:** Tất cả các provider Gemini (`gemini.py`), Groq (`groq.py`), Faucet (`faucet.py`).
+- **LLM Providers:** Email Action Plan spans on `ConfiguredRouteClassifier` / `ConfiguredActionPlanGenerator` (`base.py`) and Langfuse helpers in `tracing.py`; Gemini (`gemini.py`), Vyce (`vyce.py`), Mistral (`mistral.py`), OpenRouter (`openrouter.py`) supply transport.
 - **Workflow Controllers:** Các luồng xử lý chính `execute()` trong `workflow.py` và `stream_message()` trong `controller.py`.
 - **RAG Retrievers:** Các hàm truy vấn tri thức `retrieve()` trong `qdrant.py` và `chat_memory.py`.
 - **API Routers:** Các endpoint API chính trong `api/chat.py`.
@@ -57,6 +57,7 @@ Langfuse chịu trách nhiệm thu thập dữ liệu giám sát tự động (a
 ```python
 from langfuse import observe
 
+
 @observe(name="execute_digest_run")
 async def execute(self, run_id: str) -> RunExecutionResult:
     # Tự động ghi vết span, latency và status
@@ -67,6 +68,7 @@ async def execute(self, run_id: str) -> RunExecutionResult:
 ```python
 from langfuse import observe
 
+
 @observe(as_type="generation", name="gemini_route_classifier")
 async def classify(self, messages: Sequence[EphemeralEmailEnvelope]) -> ClassificationResult:
     # Tự động ghi vết LLM Generation, prompt/completion payload
@@ -76,6 +78,7 @@ async def classify(self, messages: Sequence[EphemeralEmailEnvelope]) -> Classifi
 ### Pattern 3: Decorate RAG Retriever Step
 ```python
 from langfuse import observe
+
 
 @observe(as_type="retriever", name="qdrant_semantic_retriever")
 async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:

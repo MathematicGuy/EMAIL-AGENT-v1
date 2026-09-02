@@ -24,7 +24,7 @@ from statistics import mean
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "docs" / "evaluations" / "CHAT-RAG" / "baselines"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "evaluations" / "CHAT-RAGAS" / "baselines"
 SCHEMA_VERSION = "chat-rag-eval.v1"
 
 
@@ -283,39 +283,166 @@ def _metadata_string(value: object) -> str | None:
     return value
 
 
-def run_ragas(cases: Sequence[ChatRagCase]) -> dict[str, object]:
+def resolve_evaluator_models(
+    provider: str = "google",
+    model_override: str | None = None,
+    embedding_override: str | None = None,
+) -> tuple[str, str]:
+    """Resolve evaluator LLM and embedding model IDs according to project config."""
+    from cowork_agent.config import load_runtime_environment
+
+    load_runtime_environment()
+    if provider == "mistral":
+        try:
+            from cowork_agent.config import MistralSettings
+
+            mistral_cfg = MistralSettings.from_env()
+            llm_model = model_override or mistral_cfg.model
+        except Exception:
+            llm_model = model_override or "mistral-large-latest"
+        emb_model = embedding_override or "mistral-embed"
+        return llm_model, emb_model
+
+    if provider == "openrouter":
+        try:
+            from cowork_agent.config import OpenRouterSettings
+
+            openrouter_cfg = OpenRouterSettings.from_env()
+            llm_model = model_override or openrouter_cfg.allowed_models[0]
+        except Exception:
+            llm_model = model_override or "deepseek/deepseek-r1-0528"
+        emb_model = embedding_override or "gemini-embedding-2"
+        return llm_model, emb_model
+
+    # Default provider: Google
+    try:
+        from cowork_agent.config import GeminiEmbeddingSettings, GeminiSettings
+
+        gemini_cfg = GeminiSettings.from_env()
+        emb_cfg = GeminiEmbeddingSettings.from_env()
+        # Prohibit throughput model gemini-3.5-flash-lite as evaluator LLM default
+        default_judge = (
+            "gemini-2.0-flash" if gemini_cfg.model == "gemini-3.5-flash-lite" else gemini_cfg.model
+        )
+        llm_model = model_override or default_judge
+        emb_model = embedding_override or emb_cfg.model
+    except Exception:
+        llm_model = model_override or "gemini-2.0-flash"
+        emb_model = embedding_override or "gemini-embedding-2"
+    return llm_model, emb_model
+
+
+def validate_evaluator_pairing(
+    generator_model: str | None,
+    evaluator_model: str | None,
+    *,
+    allow_same_model: bool = False,
+) -> None:
+    """Validate that the evaluator model is distinct from the generator model."""
+    if allow_same_model or not generator_model or not evaluator_model:
+        return
+    if generator_model.strip().lower() == evaluator_model.strip().lower():
+        msg = (
+            f"Self-preference bias violation: evaluator model '{evaluator_model}' cannot be "
+            f"the same as generator model '{generator_model}'. See docs/evaluations/RAGAS.md § 2.1."
+        )
+        raise ValueError(msg)
+
+
+def init_evaluator(
+    provider: str = "google",
+    model: str | None = None,
+    embedding_model: str | None = None,
+) -> tuple[Any, Any]:
+    """Initialize Ragas LLM and Embeddings wrappers, avoiding OpenAI defaults."""
+    llm_id, emb_id = resolve_evaluator_models(provider, model, embedding_model)
+    try:
+        from ragas.embeddings import embedding_factory  # type: ignore[import-not-found]
+        from ragas.llms import llm_factory  # type: ignore[import-not-found]
+
+        evaluator_llm = llm_factory(llm_id, provider=provider)
+        evaluator_embeddings = embedding_factory(provider=provider, model=emb_id)
+        return evaluator_llm, evaluator_embeddings
+    except (ImportError, AttributeError, TypeError):
+        pass
+
+    try:
+        from ragas.embeddings import LangchainEmbeddingsWrapper
+        from ragas.llms import LangchainLLMWrapper
+    except ImportError as exc:
+        raise RuntimeError(
+            "--ragas requires the optional ragas and datasets packages in the active environment"
+        ) from exc
+
+    if provider == "mistral":
+        from langchain_mistralai import (  # type: ignore[import-not-found]
+            ChatMistralAI,
+            MistralAIEmbeddings,
+        )
+
+        chat_llm = ChatMistralAI(model=llm_id, temperature=0)
+        embedder = MistralAIEmbeddings(model=emb_id)
+        return LangchainLLMWrapper(chat_llm), LangchainEmbeddingsWrapper(embedder)
+
+    from langchain_google_genai import (  # type: ignore[import-not-found]
+        ChatGoogleGenerativeAI,
+        GoogleGenerativeAIEmbeddings,
+    )
+
+    chat_llm = ChatGoogleGenerativeAI(model=llm_id, temperature=0)
+    embedder = GoogleGenerativeAIEmbeddings(model=emb_id)
+    return LangchainLLMWrapper(chat_llm), LangchainEmbeddingsWrapper(embedder)
+
+
+def get_langfuse_callback() -> list[Any]:
+    """Return Langfuse callback handler if configured, else empty list."""
+    try:
+        from langfuse.callback import CallbackHandler  # type: ignore[import-not-found]
+
+        return [CallbackHandler()]
+    except (ImportError, Exception):
+        return []
+
+
+def run_ragas(
+    cases: Sequence[ChatRagCase],
+    evaluator_llm: Any = None,
+    evaluator_embeddings: Any = None,
+    callbacks: list[Any] | None = None,
+) -> dict[str, object]:
+    """Run generation-focused RAGAS metrics (faithfulness, answer_relevancy)."""
     records = [case.raw_ragas_record for case in cases if case.raw_ragas_record is not None]
     if len(records) != len(cases):
         raise ValueError(
             "--ragas requires question, answer, contexts, and reference_answer in every case"
         )
     try:
-        from datasets import Dataset  # type: ignore[import-untyped]
+        from datasets import Dataset  # type: ignore[import-not-found]
         from ragas import evaluate  # type: ignore[import-not-found]
         from ragas.metrics import (  # type: ignore[import-not-found]
             answer_relevancy,
-            context_precision,
-            context_recall,
             faithfulness,
         )
     except ImportError as error:
         raise RuntimeError(
             "--ragas requires the optional ragas and datasets packages in the active environment"
         ) from error
+
     result = evaluate(
         dataset=Dataset.from_list(records),
-        metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+        metrics=[faithfulness, answer_relevancy],
+        llm=evaluator_llm,
+        embeddings=evaluator_embeddings,
+        callbacks=callbacks or [],
+        raise_exceptions=False,
     )
-    scores = result.scores
+    scores = getattr(result, "scores", [])
     aggregates: dict[str, float] = {}
-    for metric_name in (
-        "faithfulness",
-        "answer_relevancy",
-        "context_precision",
-        "context_recall",
-    ):
+    for metric_name in ("faithfulness", "answer_relevancy"):
         values = [
-            float(score[metric_name]) for score in scores if score.get(metric_name) is not None
+            float(score[metric_name])
+            for score in scores
+            if isinstance(score, dict) and score.get(metric_name) is not None
         ]
         if values:
             aggregates[metric_name] = round(mean(values), 4)
@@ -327,6 +454,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--input", required=True, type=Path, help="Local-only JSON dataset")
     parser.add_argument("--output", type=Path, help="Metadata-only report path")
     parser.add_argument("--ragas", action="store_true", help="Run optional RAGAS judge metrics")
+    parser.add_argument(
+        "--evaluator-provider",
+        choices=["google", "mistral", "openrouter"],
+        default="google",
+        help="Evaluator LLM provider",
+    )
+    parser.add_argument("--evaluator-model", type=str, help="Override evaluator LLM model ID")
+    parser.add_argument(
+        "--evaluator-embedding-model", type=str, help="Override evaluator embedding model ID"
+    )
+    parser.add_argument(
+        "--allow-same-model",
+        action="store_true",
+        help="Allow evaluator model to be identical to generator model",
+    )
     args = parser.parse_args(argv)
     try:
         payload = json.loads(args.input.read_text(encoding="utf-8"))
@@ -335,7 +477,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         cases = parse_cases(payload)
         report = compute_report(payload, cases)
         if args.ragas:
-            report["ragas"] = run_ragas(cases)
+            generator_model = _metadata_string(payload.get("model"))
+            llm_model, emb_model = resolve_evaluator_models(
+                provider=args.evaluator_provider,
+                model_override=args.evaluator_model,
+                embedding_override=args.evaluator_embedding_model,
+            )
+            validate_evaluator_pairing(
+                generator_model=generator_model,
+                evaluator_model=llm_model,
+                allow_same_model=args.allow_same_model,
+            )
+            evaluator_llm, evaluator_embeddings = init_evaluator(
+                provider=args.evaluator_provider,
+                model=llm_model,
+                embedding_model=emb_model,
+            )
+            callbacks = get_langfuse_callback()
+            report["evaluator_provider"] = args.evaluator_provider
+            report["evaluator_model"] = llm_model
+            report["ragas"] = run_ragas(
+                cases,
+                evaluator_llm=evaluator_llm,
+                evaluator_embeddings=evaluator_embeddings,
+                callbacks=callbacks,
+            )
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         parser.error(str(error))
     target = args.output or DEFAULT_OUTPUT_DIR / (

@@ -1,0 +1,44 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Knowledge Ingestion CLI</size>\n<size:24>Level 3. Offline conversion of administrator documents into the committed corpus.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+Person(CorpusAdministrator, "Corpus Administrator", $descr="Curates the committed company knowledge corpus by running the offline ingestion CLI.", $tags="", $link="")
+
+System(MistralOCRAPI, "Mistral OCR API", $descr="Extracts text from scanned PDF and OOXML pages that carry no native text layer.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.KnowledgeIngestionCLI_boundary", "Knowledge Ingestion CLI", $tags="") {
+    Component(CoworkAgent.KnowledgeIngestionCLI.IngestionService, "Ingestion Service", $techn="integrations/knowledge_ingestion/service.py", $descr="Discovers files, enforces symlink and directory isolation, resolves slug collisions and gates on content hash.", $tags="", $link="")
+    Component(CoworkAgent.KnowledgeIngestionCLI.DocumentExtractors, "Document Extractors", $techn="integrations/knowledge_ingestion (docx_extractor, pdf_inspector, text_extractor)", $descr="DOCX, PDF and plain-text extraction with page inspection and binary date harvesting.", $tags="", $link="")
+    Component(CoworkAgent.KnowledgeIngestionCLI.SanitizerFrontmatterWriter, "Sanitizer & Frontmatter Writer", $techn="integrations/knowledge_ingestion/text_sanitizer.py", $descr="Strips unsafe constructs and writes closed six-field YAML frontmatter atomically.", $tags="", $link="")
+    Component(CoworkAgent.KnowledgeIngestionCLI.SHA256Manifest, "SHA-256 Manifest", $techn="integrations/knowledge_ingestion/manifest.py", $descr="Tracks per-source content hashes so unchanged documents are skipped.", $tags="", $link="")
+  }
+
+  Container(CoworkAgent.CompanyKnowledgeCorpus, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+}
+
+Rel(CorpusAdministrator, CoworkAgent.KnowledgeIngestionCLI.IngestionService, "Runs mail-todo-ingest-knowledge against", $techn="CLI", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.IngestionService, CoworkAgent.KnowledgeIngestionCLI.SHA256Manifest, "Gates unchanged sources on content hash through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.IngestionService, CoworkAgent.KnowledgeIngestionCLI.DocumentExtractors, "Converts source documents through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.DocumentExtractors, MistralOCRAPI, "Extracts image-only pages with, in advanced mode", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.IngestionService, CoworkAgent.KnowledgeIngestionCLI.SanitizerFrontmatterWriter, "Sanitizes and stamps frontmatter through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.SanitizerFrontmatterWriter, CoworkAgent.CompanyKnowledgeCorpus, "Atomically writes Markdown to", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.KnowledgeIngestionCLI.SHA256Manifest, CoworkAgent.CompanyKnowledgeCorpus, "Records per-source hashes alongside", $techn="File I/O", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

@@ -57,6 +57,29 @@ class MailboxConnection:
 
 
 @dataclass(frozen=True, slots=True)
+class CalendarConnection:
+    """One user's Google Calendar grant.
+
+    A sibling of `MailboxConnection` rather than a variant of it. Mail routing
+    iterates mailbox connections, so a calendar row living in that table becomes
+    a mail-routing bug the first time someone adds a provider branch
+    (SPEC-per-user-google-calendar-oauth J7).
+    """
+
+    id: str
+    user_id: str
+    provider: str
+    external_account_id: str
+    calendar_id: str
+    encrypted_refresh_token: str
+    scopes: tuple[str, ...]
+    timezone: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessedEmail:
     provider_message_id: str
     provider_thread_id: str
@@ -145,6 +168,7 @@ class DigestRun:
     emails_actionable: int = 0
     action_items_count: int = 0
     ignored_emails_count: int = 0
+    filtered_summary: str | None = None
     attachments_found: int = 0
     attachments_extracted: int = 0
     attachment_warnings_count: int = 0

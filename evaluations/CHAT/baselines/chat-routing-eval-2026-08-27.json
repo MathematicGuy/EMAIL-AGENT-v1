@@ -1,0 +1,1004 @@
+{
+  "date": "2026-08-27",
+  "model": "mimo-v2.5-pro",
+  "case_count": 64,
+  "prompt_version": "chat-intent-v4",
+  "metrics": {
+    "retrieval_recall": 1.0,
+    "retrieval_precision": 1.0,
+    "missed_rag_rate": 0.0,
+    "classifier_p95_ms": 8506,
+    "missed_case_ids": [],
+    "tool_recall": 1.0,
+    "tool_precision": 1.0,
+    "missed_tool_case_ids": [],
+    "false_tool_case_ids": [],
+    "rag_tool_downgraded_case_ids": [
+      "cr-063"
+    ]
+  },
+  "passed": false,
+  "per_case": [
+    {
+      "case_id": "cr-001",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2606,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-002",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2410,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-003",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 3194,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-004",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2671,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-005",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2933,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-006",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 3207,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-007",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 5284,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-008",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2601,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-009",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 5193,
+      "reason_codes": [
+        "explicit_document_reference",
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-010",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2806,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-011",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2799,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-012",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2378,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-013",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2266,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-014",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 4120,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-015",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2649,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-016",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2194,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-017",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2361,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-018",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2117,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-019",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2220,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-020",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2345,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-021",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2248,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-022",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2353,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-023",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2298,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-024",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2666,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-025",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 8192,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-026",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 7025,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-027",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 13203,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": true,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-028",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 3458,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-029",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2521,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-030",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2089,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-031",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 6136,
+      "reason_codes": [
+        "classifier_unavailable"
+      ],
+      "classifier_retried": true,
+      "fallback_used": true
+    },
+    {
+      "case_id": "cr-032",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2382,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-033",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2327,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-034",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2589,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-035",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 6623,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-036",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 6596,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": true,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-037",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 13062,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": true,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-038",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 7628,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-039",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 7276,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": true,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-040",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2331,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-041",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 3036,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-042",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 5767,
+      "reason_codes": [
+        "classifier_unavailable"
+      ],
+      "classifier_retried": true,
+      "fallback_used": true
+    },
+    {
+      "case_id": "cr-043",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 3375,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-044",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 8506,
+      "reason_codes": [
+        "user_document_required"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-045",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 3406,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-046",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 13512,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": true,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-047",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2224,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-048",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2118,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-049",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2301,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-050",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 8392,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-051",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2084,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-052",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2620,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-053",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 3304,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-054",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2173,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-055",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2329,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-056",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2795,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-057",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 3596,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-058",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 2225,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-059",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 3377,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-060",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "chat",
+      "latency_ms": 4825,
+      "reason_codes": [
+        "general_chat"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-061",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": true,
+      "predicted_needs_tool": true,
+      "expected_route": "tool",
+      "predicted_route": "tool",
+      "latency_ms": 2657,
+      "reason_codes": [
+        "external_action_requested"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-062",
+      "expected_needs_rag": false,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "chat",
+      "predicted_route": "clarify",
+      "latency_ms": 2984,
+      "reason_codes": [
+        "missing_information"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-063",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": false,
+      "expected_needs_tool": true,
+      "predicted_needs_tool": true,
+      "expected_route": "tool",
+      "predicted_route": "tool",
+      "latency_ms": 3119,
+      "reason_codes": [
+        "explicit_document_reference",
+        "external_action_requested"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    },
+    {
+      "case_id": "cr-064",
+      "expected_needs_rag": true,
+      "predicted_needs_rag": true,
+      "expected_needs_tool": false,
+      "predicted_needs_tool": false,
+      "expected_route": "rag",
+      "predicted_route": "rag",
+      "latency_ms": 2504,
+      "reason_codes": [
+        "user_document_required",
+        "explicit_document_reference"
+      ],
+      "classifier_retried": false,
+      "fallback_used": false
+    }
+  ]
+}

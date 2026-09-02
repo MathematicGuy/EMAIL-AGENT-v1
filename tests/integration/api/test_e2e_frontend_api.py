@@ -130,14 +130,22 @@ def api_server(pytestconfig: pytest.Config) -> Generator[subprocess.Popen[bytes]
 
     env = {**os.environ, "APP_PORT": str(_PORT), "APP_HOST": "127.0.0.1"}
 
-    # Load .env manually so we can pass it into the subprocess without
-    # importing python-dotenv (it is already a project dependency).
+    # Load .env and config manually so we can pass them into the subprocess
+    _config_file = _REPO_ROOT / "config"
+    if _config_file.exists():
+        for raw_line in _config_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env.setdefault(key.strip(), value.strip())
+
     for raw_line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        env.setdefault(key.strip(), value.strip())
+        env[key.strip()] = value.strip()
 
     # Override port so we don't clash with a manually-running dev server
     env["APP_PORT"] = str(_PORT)
@@ -201,6 +209,12 @@ def first_connection_id(client: httpx.Client, pytestconfig: pytest.Config) -> st
     before running tests that depend on a real mailbox connection.
     """
     resp = client.get("/v1/mail-todo/connections")
+    if resp.status_code == 401:
+        _skip_loudly(
+            pytestconfig,
+            "the live server requires an authenticated session - "
+            "complete the OAuth flow in the GUI first, then re-run",
+        )
     assert resp.status_code == 200, f"Unexpected {resp.status_code}: {resp.text}"
     connections = resp.json().get("connections", [])
     active = [c for c in connections if c.get("status") == "active"]
@@ -229,12 +243,13 @@ class TestErrorStates:
         assert resp.json() == {"status": "ok"}
 
     def test_connections_list_shape(self, client: httpx.Client) -> None:
-        """GET /connections always returns a JSON object with a 'connections' list."""
+        """GET /connections returns a JSON object with 'connections' or 401 if unauthenticated."""
         resp = client.get("/v1/mail-todo/connections")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "connections" in body
-        assert isinstance(body["connections"], list)
+        assert resp.status_code in {200, 401}
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "connections" in body
+            assert isinstance(body["connections"], list)
 
     def test_oauth_redirect_starts_google_flow(self, client: httpx.Client) -> None:
         """GET /oauth/gmail/connect redirects to accounts.google.com with
@@ -242,9 +257,7 @@ class TestErrorStates:
         resp = client.get("/v1/mail-todo/oauth/gmail/connect", follow_redirects=False)
         assert resp.status_code == 302
         location = resp.headers["location"]
-        assert "accounts.google.com" in location, (
-            f"Expected Google OAuth redirect, got: {location}"
-        )
+        assert "accounts.google.com" in location, f"Expected Google OAuth redirect, got: {location}"
         assert "gmail.readonly" in location, (
             f"gmail.readonly scope missing from OAuth URL: {location}"
         )
@@ -303,6 +316,7 @@ class TestErrorStates:
         secret-shaped strings (long hex/base64 runs).
         """
         import re
+
         resp = client.get("/v1/mail-todo/runs/definitely-not-real")
         assert resp.status_code == 404
         # A raw Fernet key or API key would be 44+ chars of base64/hex
@@ -381,8 +395,7 @@ class TestWithRealConnection:
         # 503 means LLM not configured — still validates the HTTP contract
         if resp.status_code == 503:
             pytest.skip(
-                "LLM provider returned 503 (not configured). "
-                "Check LLM_PROVIDER / API key in .env."
+                "LLM provider returned 503 (not configured). Check LLM_PROVIDER / API key in .env."
             )
         assert resp.status_code == 202, f"Expected 202, got {resp.status_code}: {resp.text}"
         body = resp.json()
@@ -390,9 +403,7 @@ class TestWithRealConnection:
         assert "statusUrl" in body
         assert body["statusUrl"].startswith("/v1/mail-todo/runs/")
 
-    def test_idempotent_run_creation(
-        self, client: httpx.Client, first_connection_id: str
-    ) -> None:
+    def test_idempotent_run_creation(self, client: httpx.Client, first_connection_id: str) -> None:
         """SPEC §8.5: two POSTs with the same Idempotency-Key must return the same run id."""
         key = "e2e-idempotency-test-key-001"
         payload = {"mailboxConnectionId": first_connection_id, "maxEmails": 2}
@@ -408,9 +419,7 @@ class TestWithRealConnection:
         assert r2.status_code == 202, f"Second POST failed: {r2.status_code} {r2.text}"
         run_id_2 = r2.json()["id"]
 
-        assert run_id_1 == run_id_2, (
-            f"Idempotency violated: first={run_id_1}, second={run_id_2}"
-        )
+        assert run_id_1 == run_id_2, f"Idempotency violated: first={run_id_1}, second={run_id_2}"
 
     def test_run_status_has_progress_fields(
         self, client: httpx.Client, first_connection_id: str
@@ -502,6 +511,7 @@ class TestWithRealConnection:
         """SPEC §8.1 + §8.7: poll until completion, then assert result shape and
         no raw email body at any path in the JSON response."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -559,6 +569,7 @@ class TestWithRealConnection:
         """SPEC §8.2: every task card exposes title, route, actionability,
         source_message_ids.  Steps and citations present when non-empty plan."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -613,6 +624,7 @@ class TestWithRealConnection:
         when partial tasks are actually returned by the LLM.
         """
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 5},
@@ -650,6 +662,7 @@ class TestWithRealConnection:
     ) -> None:
         """SPEC §8.4: tasks with source_message_ids expose a gmail_url / deep_link."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},
@@ -692,6 +705,7 @@ class TestWithRealConnection:
     ) -> None:
         """SPEC §8.7 invariant: tasks endpoint must never return raw email body content."""
         import time as _time
+
         r = client.post(
             "/v1/mail-todo/runs",
             json={"mailboxConnectionId": first_connection_id, "maxEmails": 3},

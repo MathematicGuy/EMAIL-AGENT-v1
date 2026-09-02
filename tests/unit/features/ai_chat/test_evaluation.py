@@ -37,9 +37,7 @@ def test_paired_report_is_stable_and_gate_accepts_improvement() -> None:
 
 
 def test_gate_rejects_regression_and_hard_safety_incidents() -> None:
-    report = PairedEvaluationReport.from_cases(
-        (_case("a", 0.8, 0.6),), unvalidated_retrievals=1
-    )
+    report = PairedEvaluationReport.from_cases((_case("a", 0.8, 0.6),), unvalidated_retrievals=1)
     result = evaluate_launch_gate(report, _thresholds())
 
     assert result.passed is False
@@ -50,14 +48,21 @@ def test_gate_rejects_regression_and_hard_safety_incidents() -> None:
 def test_grounding_regression_and_every_hard_safety_counter_fail_closed() -> None:
     case = PairedEvaluationCase("a", 0.5, 0.7, 0.8, 0.6, 0.5, 0.7)
     report = PairedEvaluationReport.from_cases(
-        (case,), unvalidated_retrievals=1, rejected_retrievals=1,
-        cross_tenant_incidents=1, raw_email_memory_violations=1, expired_record_retrievals=1,
+        (case,),
+        unvalidated_retrievals=1,
+        rejected_retrievals=1,
+        cross_tenant_incidents=1,
+        raw_email_memory_violations=1,
+        expired_record_retrievals=1,
     )
     result = evaluate_launch_gate(report, _thresholds())
     assert report.degradation_rate == 1
     assert set(result.reason_codes) >= {
-        "hard_safety_unvalidated_retrieval", "hard_safety_rejected_retrieval",
-        "hard_safety_cross_tenant", "hard_safety_raw_email", "hard_safety_expired_record",
+        "hard_safety_unvalidated_retrieval",
+        "hard_safety_rejected_retrieval",
+        "hard_safety_cross_tenant",
+        "hard_safety_raw_email",
+        "hard_safety_expired_record",
     }
 
 

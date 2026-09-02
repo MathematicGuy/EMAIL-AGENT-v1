@@ -59,6 +59,7 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
 
             default = await projects.default_project(owner)
             assert default.is_default is True
+            assert default.name == "Default Project"
             assert await projects.list_for(owner) == (default,)
 
             document, created = await projects.create_or_get_document(
@@ -112,9 +113,12 @@ def test_project_document_repository_isolates_owners_and_deduplicates_content_di
                 await connection.execute(
                     "UPDATE document_ingestion_jobs SET claimed_at = now() - interval '16 minutes'"
                 )
-            assert await projects.reset_stale_jobs(
-                claimed_before=datetime.now(UTC) - timedelta(minutes=15)
-            ) == 1
+            assert (
+                await projects.reset_stale_jobs(
+                    claimed_before=datetime.now(UTC) - timedelta(minutes=15)
+                )
+                == 1
+            )
             assert await projects.next_claimable_job() == document.id
             claimed = await projects.claim_job(document.id)
             assert claimed is not None

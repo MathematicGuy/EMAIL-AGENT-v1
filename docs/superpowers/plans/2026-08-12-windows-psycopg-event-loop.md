@@ -54,6 +54,7 @@ Expected: FAIL because `main()` reads `DATABASE_URL` before loading `.env` and p
 ```python
 from dotenv import load_dotenv
 
+
 def main() -> None:
     load_dotenv(override=False)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())

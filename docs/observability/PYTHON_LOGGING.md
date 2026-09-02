@@ -57,6 +57,7 @@ Python Standard `logging` chịu trách nhiệm ghi nhận các sự kiện hạ
 import logging
 from pathlib import Path
 
+
 def setup_logging(log_file: str | None = None) -> None:
     handlers: list[logging.Handler] = [logging.StreamHandler()]
     if log_file:
@@ -80,7 +81,9 @@ logger = logging.getLogger(__name__)
 try:
     response = await self._call_gmail_api()
 except HttpError as exc:
-    logger.warning("Gmail API HttpError (status=%s, attempt=%d/3): %s", exc.resp.status, attempt, exc)
+    logger.warning(
+        "Gmail API HttpError (status=%s, attempt=%d/3): %s", exc.resp.status, attempt, exc
+    )
 ```
 
 ### Pattern 3: Uncaught Crash Exception Logging (`workflow.py` / `worker.py`)

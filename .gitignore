@@ -15,6 +15,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.testmondata
+.testmondata-*
 .mypy_cache/
 .ruff_cache/
 build/
@@ -33,11 +35,13 @@ htmlcov/
 tmp_pytest/
 *tmp_pytest*
 **/tmp_pytest/**
+.pnpm-store
 
 .runlogs/
 .cowork/evaluations/
 .playwright-cli/
 node_modules/
+memeval-chat.db
 
 # Frontend dependencies, build output, and local environment
 frontend/node_modules/
@@ -49,6 +53,76 @@ frontend/.env
 *corpus2skill*
 **/update_corpus2skill.py
 .superpowers
+.worktrees/
+worktrees/
+.playwright-mcp
+.playwright
+.pnpm-store
+.ruff_cache
+.runlogs
+.serena
+.mypy_cache
+.grok
+scratch
 
-# Agent session artifacts (tracked skills under .claude/ stay tracked)
+# Agent session artifacts, communications, and subagent workspaces
 .claude/.headroom_wrap_marker.json
+.claude/conversations/
+.claude/chats/
+.agents/*
+!.agents/skills/
+!.agents/seeds/
+!.agents/qa-project-context.md
+
+# Common agent communication & handoff artifacts. Anchored to the repo root on
+# purpose: an unanchored `*handoff*.md` matches at every depth and would silently
+# swallow real documents such as docs/deployment/oncall-handoff.md.
+/BRIEFING.md
+/DISPATCH.md
+/ORIGINAL_REQUEST.md
+/HANDOFF.md
+/handoff-*.md
+.handoff/
+.subagents/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+evaluations/CHAT/latency/runs/*.json
+evaluations/CHAT/ingestion-latency/runs/*.json
+evaluations/MEMORIES/runs/memeval-chat.db
+evaluations/MEMORIES/runs/
+evaluations/MEMORIES/reports/*.md
+!evaluations/MEMORIES/reports/REPORT_FORMAT.md
+
+# Runtime vector-index snapshots (USER_DOCUMENTS_INDEX_ROOT, default var/project-indexes).
+var/
+.mypy-cache-email-eval/
+.venv-codex/
+.uv-cache/
+.uv-cache-codex/
+
+# Memory evaluation detail files carry full probe questions and model replies.
+# The runs/ and reports/ rules live above -- deliberately `reports/*.md` and not
+# `reports/`, because excluding the directory itself would defeat the
+# `!evaluations/MEMORIES/reports/REPORT_FORMAT.md` negation (git cannot re-include
+# a file inside an excluded directory).
+
+/evaluations/EMAIL/gmail_candidates.json
+/evaluations/EMAIL/.gmail_candidates.json.tmp
+/evaluations/EMAIL/reviewed_annotations.json
+/evaluations/EMAIL/email-routes/
+
+# Agent skills bundle (Addy Osmani SDLC suite + Skillrecordings ADR)
+.agents/skills/using-agent-skills/
+.agents/skills/grill-me/
+.agents/skills/grill-with-docs/
+.agents/skills/grilling/
+.agents/skills/domain-modeling/
+
+.codex/
+.agents/
+

@@ -72,13 +72,19 @@ async def backup_tables(
 
     if docker_container:
         cmd: list[str] = [
-            "docker", "exec", "-i",
-            "-e", f"PGPASSWORD={urlparse(database_url).password or ''}",
+            "docker",
+            "exec",
+            "-i",
+            "-e",
+            f"PGPASSWORD={urlparse(database_url).password or ''}",
             docker_container,
             "pg_dump",
-            "-U", user,
-            "--host", "127.0.0.1",
-            "--port", port,
+            "-U",
+            user,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port,
             "--format=custom",
             "--no-password",
             *table_flags,
@@ -88,9 +94,12 @@ async def backup_tables(
     else:
         cmd = [
             "pg_dump",
-            "--host", host,
-            "--port", port,
-            "--username", user,
+            "--host",
+            host,
+            "--port",
+            port,
+            "--username",
+            user,
             "--format=custom",
             "--no-password",
             *table_flags,
@@ -100,15 +109,17 @@ async def backup_tables(
 
     def _run() -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            cmd, capture_output=True, env=env, check=False,
+            cmd,
+            capture_output=True,
+            env=env,
+            check=False,
         )
 
     result = await asyncio.to_thread(_run)
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"pg_dump exited with code {result.returncode};"
-            f" tables={list(CHAT_MEMORY_TABLES)}"
+            f"pg_dump exited with code {result.returncode}; tables={list(CHAT_MEMORY_TABLES)}"
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,43 +148,57 @@ async def restore_tables(
 
     if docker_container:
         cmd: list[str] = [
-            "docker", "exec", "-i",
-            "-e", f"PGPASSWORD={urlparse(database_url).password or ''}",
+            "docker",
+            "exec",
+            "-i",
+            "-e",
+            f"PGPASSWORD={urlparse(database_url).password or ''}",
             docker_container,
             "pg_restore",
-            "-U", user,
-            "--host", "127.0.0.1",
-            "--port", port,
+            "-U",
+            user,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port,
             "--clean",
             "--if-exists",
             "--no-password",
-            "--dbname", dbname,
+            "--dbname",
+            dbname,
         ]
         env = None
     else:
         cmd = [
             "pg_restore",
-            "--host", host,
-            "--port", port,
-            "--username", user,
+            "--host",
+            host,
+            "--port",
+            port,
+            "--username",
+            user,
             "--clean",
             "--if-exists",
             "--no-password",
-            "--dbname", dbname,
+            "--dbname",
+            dbname,
         ]
         env = _build_env(database_url)
 
     def _run() -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            cmd, input=archive_data, capture_output=True, env=env, check=False,
+            cmd,
+            input=archive_data,
+            capture_output=True,
+            env=env,
+            check=False,
         )
 
     result = await asyncio.to_thread(_run)
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"pg_restore exited with code {result.returncode};"
-            f" tables={list(CHAT_MEMORY_TABLES)}"
+            f"pg_restore exited with code {result.returncode}; tables={list(CHAT_MEMORY_TABLES)}"
         )
 
     print(
@@ -192,7 +217,8 @@ def _build_parser() -> argparse.ArgumentParser:
     backup_parser.add_argument("--database-url", required=True, help="PostgreSQL connection URL.")
     backup_parser.add_argument("--output", required=True, help="Output archive path.")
     backup_parser.add_argument(
-        "--docker-container", default=None,
+        "--docker-container",
+        default=None,
         help="Run pg_dump inside this Docker container via docker exec.",
     )
 
@@ -200,7 +226,8 @@ def _build_parser() -> argparse.ArgumentParser:
     restore_parser.add_argument("--database-url", required=True, help="PostgreSQL connection URL.")
     restore_parser.add_argument("--archive", required=True, help="Archive path to restore from.")
     restore_parser.add_argument(
-        "--docker-container", default=None,
+        "--docker-container",
+        default=None,
         help="Run pg_restore inside this Docker container via docker exec.",
     )
 

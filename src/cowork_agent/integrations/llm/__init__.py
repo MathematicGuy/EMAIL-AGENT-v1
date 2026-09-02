@@ -1,13 +1,23 @@
 """LLM contracts and provider adapters."""
 
 from .chat_intent import (
-    FaucetIntentClassifier,
     GeminiIntentClassifier,
-    GroqIntentClassifier,
+    MimoIntentClassifier,
+    MistralIntentClassifier,
+)
+from .provider_factory import (
+    ChatProviderBundle,
+    EmailProviderBundle,
+    resolve_chat_providers,
+    resolve_email_providers,
 )
 
 __all__ = [
-    "FaucetIntentClassifier",
+    "ChatProviderBundle",
+    "EmailProviderBundle",
     "GeminiIntentClassifier",
-    "GroqIntentClassifier",
+    "MimoIntentClassifier",
+    "MistralIntentClassifier",
+    "resolve_chat_providers",
+    "resolve_email_providers",
 ]

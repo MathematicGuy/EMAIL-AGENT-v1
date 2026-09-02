@@ -1,8 +1,142 @@
-# Non-secret feature flags. Copy this file to `config` for a local setup.
-# Keep credentials and connection strings in .env, never in this file.
-CHAT_INTENT_CLASSIFIER_ENABLED=true
-CHAT_COMPANY_RAG_ENABLED=false
-KNOWLEDGE_INGEST_OCR_ENABLED=false
+# Non-secret shared configuration and feature flags for EMAIL-AGENT-v1.
+# This file is tracked in git so all team members have consistent configuration.
+# Keep credentials, secrets, passwords, and private tokens in .env, never in this file.
+
+# Application & Server
+APP_ENV=development
+APP_LOG_LEVEL=INFO
+APP_API_WORKERS=1
+APP_HOST=127.0.0.1
+APP_PORT=8000
+APP_HOST_URL=http://localhost:8000
+FRONTEND_URL=http://localhost:5173
+MAIL_TODO_DEFAULT_TIMEZONE=Asia/Ho_Chi_Minh
+
+# Gmail OAuth & Local Transport Flags
+GMAIL_REDIRECT_URI=http://localhost:8000/v1/mail-todo/oauth/gmail/callback
+GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.readonly
+GMAIL_CONNECTION_DB_PATH=.data/mail_todo.db
+OAUTH_STATE_TTL_SECONDS=600
+OAUTHLIB_INSECURE_TRANSPORT=1
+
+# LLM Provider Selection (openrouter | gemini | mimo | mistral)
+# mistral: mistral-medium-3-5 | glm-5-2
+# mimo: mimo-v2.5-pro | mimo-v2.5
+# gemini: gemini-3.5-flash-lite | gemma-4-31b (fast and reliable)
+LLM_PROVIDER=mimo
+
+# Gemini Action Extractor & Key Rotation Settings
+# Active Candidate Models for Memory Evaluation:
+# - gemini-3.5-flash-lite (Evaluated: 80% Pass, 45% Earned-It, 4.6s)
+# - gemma-4-26b-a4b-it (Gemma 4 26B A4B IT - Latency Gate: ~6.73s, Passed < 9s)
+# - gemini-3.6-flash (Gemini 3.6 Flash - Pending Latency Gate check)
+# (Note: antigravity-preview-05-2026 is dedicated to agentic coding/websearch tasks)
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_KEY_ROTATION_STRATEGY=round_robin
+GEMINI_ROTATE_ON_RATE_LIMIT=true
+GEMINI_MAX_ATTEMPTS_PER_REQUEST=3
+GEMINI_MAX_EMAILS_PER_BATCH=5
+GEMINI_MAX_INPUT_TOKENS=40000
+GEMINI_TIMEOUT_SECONDS=60
+
+# Document Embeddings & Reranker Settings
+DOCUMENT_EMBEDDING_PROVIDER=gemini
+EMBEDDING_MODEL=jina-embeddings-v3
+EMBEDDING_DIMENSIONS=1024
+
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+GEMINI_EMBEDDING_DIMENSIONS=3,072
+
+GEMINI_EMBEDDING_TIMEOUT_SECONDS=30
+GEMINI_EMBEDDING_BATCH_SIZE=100
+
+JINA_EMBEDDING_MODEL=jina-embeddings-v3
+JINA_EMBEDDING_DIMENSIONS=1024
+JINA_EMBEDDING_TIMEOUT_SECONDS=30
+JINA_EMBEDDING_ROTATE_ON_RATE_LIMIT=true
+
+RERANKER_MODEL=rerank-v4.0-fast
+RERANKER_ROTATE_ON_RATE_LIMIT=true
+RERANKER_TIMEOUT_SECONDS=10
+
+# Email RAG evidence gate (moved here from .env.example: not secrets).
+EMAIL_RAG_MIN_RERANK_SCORE=0.30
+EMAIL_RAG_RELATIVE_CUTOFF_RATIO=0.85
+
+# OpenRouter Configuration (LLM & AI Judge)
+OPENROUTER_MODEL=openai/gpt-oss-120b
+OPENROUTER_ALLOWED_MODELS=["openai/gpt-oss-120b", "deepseek/deepseek-v4-flash-0731"]
+OPENROUTER_MAX_EMAILS_PER_BATCH=5
+OPENROUTER_MAX_OUTPUT_TOKENS=2048
+OPENROUTER_TIMEOUT_SECONDS=60
+
+# Xiaomi Mimo Configuration
+MIMO_MODEL=mimo-v2.5-pro
+MIMO_BASE_URL=https://token-plan-ams.xiaomimimo.com/v1
+MIMO_MAX_EMAILS_PER_BATCH=5
+MIMO_MAX_OUTPUT_TOKENS=4096
+MIMO_TIMEOUT_SECONDS=60
+MIMO_ROTATE_ON_RATE_LIMIT=true
+
+# Mistral Configuration: glm-5-2 | mistral-medium-3-5
+MISTRAL_MODEL=mistral-medium-3-5
+MISTRAL_MAX_EMAILS_PER_BATCH=5
+MISTRAL_MAX_OUTPUT_TOKENS=2048
+MISTRAL_TIMEOUT_SECONDS=60
+
+# Company RAG & Vector Store (turbovec is default; Qdrant is remote/retired)
+RAG_STORE_PROVIDER=turbovec
 QDRANT_ENABLED=true
+QDRANT_URL=https://6e4af1c4-c453-4a43-b9e5-3580ab09f892.eu-west-1-0.aws.cloud.qdrant.io
+QDRANT_COLLECTION=company_knowledge
+QDRANT_ENDPOINT=https://6e4af1c4-c453-4a43-b9e5-3580ab09f892.eu-west-1-0.aws.cloud.qdrant.io
+USER_DOCUMENTS_QDRANT_COLLECTION=project_documents
+
+# Supabase & Database Mode
+POSTGRES_MODE=local
+SUPABASE_URL=https://seozkaeerwdysxoaftya.supabase.co
+SUPABASE_JWKS_URL=https://seozkaeerwdysxoaftya.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_STORAGE_BUCKET=documents
+
+# Session & Chat Memory (V2)
+APP_SESSION_COOKIE_NAME=cowork_session
+APP_SESSION_TTL_SECONDS=2592000
+CHAT_MEMORY_MAX_TURNS=20
+CHAT_MEMORY_TTL_SECONDS=1800
+CHAT_PROFILE_RETENTION_SECONDS=7776000
+CHAT_EPISODE_RETENTION_SECONDS=7776000
+
+# AI Chat Intent Routing & Feature Flags
+CHAT_INTENT_CLASSIFIER_ENABLED=true
+CHAT_INTENT_CLASSIFIER_TIMEOUT_MS=10000 # 10s
+CHAT_COMPANY_RAG_ENABLED=false
 USER_DOCUMENTS_ENABLED=true
 USER_DOCUMENTS_TOOL_AXIS_ENABLED=false
+
+# User Project Documents Plane
+USER_DOCUMENTS_INDEX_ROOT=var/project-indexes
+USER_DOCUMENTS_MAX_FILE_BYTES=26214400
+USER_DOCUMENTS_MAX_PAGES=100
+USER_DOCUMENTS_MAX_DOCUMENTS_PER_PROJECT=50
+USER_DOCUMENTS_MAX_PROJECT_BYTES=524288000
+USER_DOCUMENTS_RETENTION_DAYS=30
+USER_DOCUMENTS_TOP_K=8
+USER_DOCUMENTS_MIN_SCORE=0.6
+USER_DOCUMENTS_RETRIEVAL_TIMEOUT_MS=10000
+
+# Streamlit GUI Settings
+STREAMLIT_POLL_INTERVAL_SECONDS=1.5
+STREAMLIT_POLL_BUFFER_SECONDS=30
+
+# Observability & Tracing (Langfuse)
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_DEBUG=false
+LANGFUSE_TRACING_ENABLED=true
+LANGFUSE_TRACING_ENVIRONMENT=development
+LANGFUSE_OBSERVE_DECORATOR_IO_CAPTURE_ENABLED=false
+
+# OCR & Document Extraction (Mistral)
+EXTRACTION_MODE=advance
+OCR_MODEL_ID=mistral-ocr-latest
+KNOWLEDGE_INGEST_OCR_ENABLED=true
+MISTRAL_MODEL=mistral-medium-3-5

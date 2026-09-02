@@ -29,10 +29,13 @@ class FakeMailbox:
     ) -> SearchPage:
         del connection_id, query
         start = int(cursor or 0)
-        page = self.messages[start : start + page_size]
-        next_cursor = str(start + page_size) if start + page_size < len(self.messages) else None
+        sorted_messages = tuple(
+            sorted(self.messages, key=lambda item: item.received_at, reverse=True)
+        )
+        page = sorted_messages[start : start + page_size]
+        next_cursor = str(start + page_size) if start + page_size < len(sorted_messages) else None
         refs = tuple(MessageRef(item.gmail_message_id, item.gmail_thread_id) for item in page)
-        return SearchPage(refs, next_cursor, len(self.messages))
+        return SearchPage(refs, next_cursor, len(sorted_messages))
 
     async def get_thread(
         self, connection_id: str, thread_id: str

@@ -1,15 +1,16 @@
 # Coding Agent Guidelines
 
-Operating guide for EMAIL-AGENT-v1. Keep this file under ~80 lines; anything
+Operating guide for EMAIL-AGENT-v1. Keep this file under ~100 lines; anything
 that is not an always-needed constraint belongs in a linked doc. Always
 install Python dependencies into a virtual environment (venv).
 
 ## Project
 
 Cowork Agent (Email-to-Action-Plan): FastAPI service that turns unread Gmail
-into structured action plans, plus multi-turn AI Chat. Without `DATABASE_URL`
-the local fallback is SQLite + in-memory stores. With `DATABASE_URL` the
-control plane is Supabase Postgres (runs, tasks, chat memory, identity).
+into structured action plans, plus multi-turn AI Chat. `POSTGRES_MODE=local`
+uses Docker Postgres; `cloud` uses hosted Supabase Postgres; `off` (or no
+`DATABASE_URL`) is SQLite + in-memory. Flip the flag in `.env`; local and
+cloud are separate databases.
 
 Two decoupled workflows — do not merge them:
 - **Email RAG** (single-turn): classify → `NO_ACTION` | `DIRECT_PLAN` |
@@ -27,12 +28,13 @@ Two decoupled workflows — do not merge them:
 ```text
 src/cowork_agent/
 ├── app.py                       # FastAPI composition root; entry point `mail-todo-api`
-├── config.py                    # env settings loaders (Gmail, Gemini, Groq)
+├── config.py                    # env settings loaders (Gmail, Gemini, Mimo)
+├── prompting.py                 # shared untrusted/retrieved block delimiters for prompts
 ├── api/                         # HTTP handlers / response serialization
 ├── domain/models.py             # pure domain models (no framework imports)
 ├── features/email_action_plan/  # workflow, policies, ports, schemas
 ├── integrations/gmail/          # OAuth, Gmail adapter, deterministic fakes
-├── integrations/llm/            # Gemini/Groq providers, fakes
+├── integrations/llm/            # providers, shared prompts/parsers/base, provider_factory
 ├── integrations/rag/            # local hybrid semantic retrieval (V1-M3)
 ├── orchestration/local.py       # in-process local orchestration
 └── persistence/                 # SQLite mailbox-connection repo; migrations/
@@ -49,7 +51,7 @@ machine and fails with unrelated `ssl` errors.
 
 - Install: `uv sync --extra dev --extra postgres` (drop `postgres` and the
   `tests/integration/persistence` route skips)
-- Test: `uv run pytest -q` (~19 s, 977 tests; defaults in `pyproject.toml`)
+- Test: `uv run pytest -q` (~18 s, 1596 passed; defaults in `pyproject.toml`)
 - Lint: `uv run ruff check .`
 - Types: `uv run mypy src` (strict)
 - Run API: `mail-todo-api` (host/port via `APP_HOST` / `APP_PORT`)
@@ -64,9 +66,21 @@ Frontend (`frontend/`): `pnpm install` · `pnpm dev` · `pnpm test` ·
 - Gmail is `gmail.readonly`. Raw email/attachments are transient; never
   persist them and never ingest them into company RAG or long-term memory.
 - Ask before changing SQL migrations or RAG bootstrap fallbacks.
-- System architecture: Level 1 system architecture is documented in `docs/architectures/current-architectures/`.
 
-## Verification
+## Architecture
+
+`docs/architectures/workspace.dsl` is the C4 model and the only place an element or a
+relationship is defined. `docs/architectures/diagrams/` is generated output: edit the
+DSL and regenerate — a hand-edited `.puml` or `.png` dies at the next regeneration.
+
+`docs/architectures/README.md` is the harness, not prose. Read it before writing or
+reviewing in that directory: **§3** is the frontmatter contract every document carries,
+**§4** the three Docker regeneration commands, **§6** the five changes that oblige an
+architecture edit in the same PR — a container, a Level 3 component, who-talks-to-whom,
+an external dependency, or a trust boundary. When a PR touches that directory, run and
+pass `uv run python docs/architectures/check_docs.py`.
+
+## Verification & Pre-PR Gate
 
 `tests/README.md` is the harness, not prose. Read it before running or writing
 any test: **§1** maps each `src/` path to the narrowest route (R1–R16) with its
@@ -80,33 +94,36 @@ the end, or immediately when a shared contract (ports, schemas, migrations)
 changed. When `src/` changes, also run `ruff` and `mypy`. When `frontend/`
 changes, run `pnpm test` and `pnpm check-types` there.
 
+**Pre-PR Gate (Mandatory before opening a PR to `main`):**
+Before creating any PR to `main` when requested by the user, ALWAYS run and pass
+all CI quality gates and Playwright E2E tests:
+1. Python: `uv run ruff check .` && `uv run mypy src` && `uv run pytest -q`
+2. Frontend: `cd frontend && pnpm lint && pnpm check-types && pnpm test && pnpm build`
+3. E2E: `pnpm run test:e2e` (Playwright)
+Block PR creation immediately if any check or test fails.
+
 A yellow `DESELECTED - NOT VERIFIED BY THIS RUN` banner ends every run, naming
 what `-m 'not live'` dropped. Green above that banner is not a verified suite.
 
 Read [experience registry](docs/references/agent-experience-registry.md)
-before review-heavy work.
+before review-heavy work or multi-file implementation. After a written
+plan exists, fan out file-disjoint implementer subagents; the parent
+keeps spec, scope, and the Definition of Done.
 
 **Context compaction:** before compacting conversation context, invoke the
 `handoff` skill and save the handoff document to the OS temp directory.
 
 ## Authoritative docs
 
-- ADRs: `tasks/adr/`
-- Target architecture: `docs/architectures/TARGET-ARCHITECTURE.md`
-- Email RAG runtime: `docs/evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
+- Evaluation harness: `evaluations/README.md`, `evaluations/HARNESS-GUIDE.md`
+- RAGAS & Grounding: `docs/evaluations/RAGAS.md`, `tasks/specs/SPEC-chat-ragas-evaluation.md`
+- ADRs: `tasks/adr/` (local control-plane runtime: ADR-010)
+- Architecture: `docs/architectures/README.md` (index + harness)
+- Chat tools registry (guide): `docs/guides/tool-registry-from-first-principles.md`
+- Email RAG runtime: `evaluations/RETRIEVAL/EMAIL-RAG-STATUS.md`
 - PRDs: `tasks/prds/PRD-v1-Core-Email-and-RAG.md`, `PRD-v2-Memory-Extension.md`
-- Frontend: `frontend/README.md`, `docs/SPEC-Demo-Frontend.md`
 
 ## Agent skills
-
-### Issue tracker
-
-Linear team Heval1st (`HEV-` issues), via the Linear MCP tools. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default five roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
 ### Domain docs
 
 Single-context: root `CONTEXT.md` plus ADRs in `tasks/adr/`. See `docs/agents/domain.md`.

@@ -57,7 +57,7 @@ from cowork_agent.features.email_action_plan.ports import PersistedTask, TaskPoi
 _RUN_COLUMNS = (
     'id, user_id, mailbox_connection_id, "trigger", status, query,'
     " idempotency_key, max_emails, emails_matched, emails_processed,"
-    " emails_actionable, action_items_count, ignored_emails_count,"
+    " emails_actionable, action_items_count, ignored_emails_count, filtered_summary,"
     " attachments_found, attachments_extracted, attachment_warnings_count,"
     " truncated, next_cursor, error_code, error_message_safe,"
     " started_at, completed_at, created_at"
@@ -73,7 +73,7 @@ class PostgresRunRepository:
         # the statement return exactly one row in both outcomes (a true
         # INSERT, or the conflicting row locked and re-read), and
         # ``xmax = 0`` distinguishes the fresh insert from the conflict path.
-        placeholders = ", ".join(["%s"] * 22 + ["COALESCE(%s, now())"])
+        placeholders = ", ".join(["%s"] * 23 + ["COALESCE(%s, now())"])
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 f"""
@@ -152,7 +152,7 @@ class PostgresRunRepository:
                     query = %s, idempotency_key = %s, max_emails = %s,
                     emails_matched = %s, emails_processed = %s,
                     emails_actionable = %s, action_items_count = %s,
-                    ignored_emails_count = %s, attachments_found = %s,
+                    ignored_emails_count = %s, filtered_summary = %s, attachments_found = %s,
                     attachments_extracted = %s, attachment_warnings_count = %s,
                     truncated = %s, next_cursor = %s, error_code = %s,
                     error_message_safe = %s, started_at = %s, completed_at = %s
@@ -170,6 +170,7 @@ class PostgresRunRepository:
                     run.emails_actionable,
                     run.action_items_count,
                     run.ignored_emails_count,
+                    run.filtered_summary,
                     run.attachments_found,
                     run.attachments_extracted,
                     run.attachment_warnings_count,
@@ -395,7 +396,7 @@ class PostgresChatProfileRepository:
                 (
                     _profile_key(namespace),
                     profile.profile_id,
-                    "local",
+                    namespace.scope.tenant_id,
                     profile.user_id,
                     namespace.feature,
                     profile.language,
@@ -486,7 +487,7 @@ class PostgresChatSummaryEpisodeRepository:
                     _chat_summary_key(namespace),
                     episode.episode_id,
                     episode.record_id,
-                    "local",
+                    namespace.scope.tenant_id,
                     episode.user_id,
                     namespace.feature,
                     episode.chat_session_id,
@@ -526,8 +527,8 @@ class PostgresChatSummaryEpisodeRepository:
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 "DELETE FROM chat_summary_episodes"
-                " WHERE user_id = %s AND feature = %s",
-                (namespace.user_id, namespace.feature),
+                " WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.scope.tenant_id, namespace.user_id, namespace.feature),
             )
             return cursor.rowcount
 
@@ -567,7 +568,7 @@ class PostgresTaskEpisodeRepository:
                 INSERT INTO task_episodes ({_TASK_EPISODE_WRITE_COLUMNS})
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (tenant_id, user_id, feature, chat_session_id, record_id)
                 DO UPDATE SET
@@ -593,6 +594,9 @@ class PostgresTaskEpisodeRepository:
                     project_id = CASE WHEN task_episodes.validation_status = 'system_generated'
                         AND excluded.updated_at >= task_episodes.updated_at
                         THEN excluded.project_id ELSE task_episodes.project_id END,
+                    supersedes = CASE WHEN task_episodes.validation_status = 'system_generated'
+                        AND excluded.updated_at >= task_episodes.updated_at
+                        THEN excluded.supersedes ELSE task_episodes.supersedes END,
                     expires_at = CASE
                     WHEN task_episodes.validation_status = 'system_generated'
                     AND excluded.updated_at >= task_episodes.updated_at
@@ -645,7 +649,7 @@ class PostgresTaskEpisodeRepository:
                 (
                     transition.to_status.value,
                     transition.transitioned_at,
-                    "local",
+                    namespace.scope.tenant_id,
                     namespace.user_id,
                     namespace.feature,
                     namespace.session_id,
@@ -676,7 +680,7 @@ class PostgresTaskEpisodeRepository:
                         AND (expires_at IS NULL OR expires_at > now())
                     """,
                     (
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         namespace.session_id,
@@ -699,7 +703,7 @@ class PostgresTaskEpisodeRepository:
                     AND episode_id = %s
                 """,
                 (
-                    "local",
+                    namespace.scope.tenant_id,
                     namespace.user_id,
                     namespace.feature,
                     namespace.session_id,
@@ -728,7 +732,28 @@ class PostgresTaskEpisodeRepository:
                             ts_rank_cd(search_vector, terms.tsquery, 32) AS relevance_score
                         FROM task_episodes
                         CROSS JOIN LATERAL (
-                            SELECT plainto_tsquery('simple', %s) AS tsquery
+                            -- Every term ORed, not ANDed. `plainto_tsquery`
+                            -- joins its terms with `&`, so a search for three
+                            -- words matched only an episode containing all
+                            -- three - and since 'simple' has no stopword
+                            -- dictionary, a search built from a sentence never
+                            -- matched anything at all. Recall belongs to the
+                            -- index and precision to `min_score`; ANDing put
+                            -- both in the index and left the score unreachable.
+                            --
+                            -- Expanded through `to_tsvector` rather than by
+                            -- editing tsquery text: the lexemes come back
+                            -- already normalised, and `quote_literal` escapes
+                            -- them, so no part of the user's message is ever
+                            -- parsed as tsquery syntax. No lexemes (empty or
+                            -- punctuation-only text) yields NULL, and
+                            -- `search_vector @@ NULL` selects nothing.
+                            SELECT (
+                                SELECT string_agg(quote_literal(lexeme), ' | ')::tsquery
+                                FROM unnest(
+                                    tsvector_to_array(to_tsvector('simple', %s))
+                                ) AS lexeme
+                            ) AS tsquery
                         ) AS terms
                         WHERE tenant_id = %s AND user_id = %s AND feature = %s
                             AND validation_status IN ('user_approved', 'completed')
@@ -743,7 +768,7 @@ class PostgresTaskEpisodeRepository:
                     """,
                     (
                         query.query,
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         query.min_score,
@@ -773,7 +798,7 @@ class PostgresTaskEpisodeRepository:
                     LIMIT %s
                     """,
                     (
-                        "local",
+                        namespace.scope.tenant_id,
                         namespace.user_id,
                         namespace.feature,
                         max(1, min(limit, MAX_EPISODIC_RETRIEVAL_ITEMS)),
@@ -788,8 +813,8 @@ class PostgresTaskEpisodeRepository:
         _task_episode_read_namespace(namespace)
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
-                "DELETE FROM task_episodes WHERE user_id = %s AND feature = %s",
-                (namespace.user_id, namespace.feature),
+                "DELETE FROM task_episodes WHERE tenant_id = %s AND user_id = %s AND feature = %s",
+                (namespace.scope.tenant_id, namespace.user_id, namespace.feature),
             )
             return cursor.rowcount
 
@@ -818,13 +843,14 @@ _TASK_EPISODE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, retrieval_eligible, source_type, created_at,"
-    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence, project_id"
+    " updated_at, expires_at, pipeline_version, model_id, prompt_version, confidence, project_id,"
+    " supersedes"
 )
 _TASK_EPISODE_WRITE_COLUMNS = (
     "tenant_id, user_id, feature, chat_session_id, record_id, episode_id, chat_turn_id,"
     " creation_reason, task_title, minimal_request_paraphrase, action_plan, rag_citations,"
     " missing_information, validation_status, source_type, created_at, updated_at, expires_at,"
-    " pipeline_version, model_id, prompt_version, confidence, project_id"
+    " pipeline_version, model_id, prompt_version, confidence, project_id, supersedes"
 )
 
 
@@ -834,19 +860,19 @@ def _profile_key(namespace: MemoryNamespace) -> str:
     # not used here.
     if namespace.memory_type is not MemoryType.LONG_TERM:
         raise ValueError("chat profiles require a long-term namespace")
-    return "/".join((namespace.user_id, namespace.feature, "long_term"))
+    return "/".join((namespace.scope.tenant_id, namespace.user_id, namespace.feature, "long_term"))
 
 
 def _chat_summary_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is None:
         raise ValueError("chat summary writes require an episodic turn namespace")
-    return namespace.logical_key()
+    return "/".join((namespace.scope.tenant_id, namespace.logical_key()))
 
 
 def _chat_summary_deletion_key(namespace: MemoryNamespace) -> str:
     if namespace.memory_type is not MemoryType.EPISODIC or namespace.source_id is not None:
         raise ValueError("chat summary deletion requires an episodic record namespace")
-    return namespace.logical_key()
+    return "/".join((namespace.scope.tenant_id, namespace.logical_key()))
 
 
 def _validate_task_episode_write(
@@ -892,7 +918,7 @@ def _task_episode_params(
     namespace: MemoryNamespace, episode: TaskEpisode, expires_at: datetime | None
 ) -> tuple[object, ...]:
     return (
-        "local",
+        namespace.scope.tenant_id,
         namespace.user_id,
         namespace.feature,
         namespace.session_id,
@@ -915,6 +941,7 @@ def _task_episode_params(
         episode.prompt_version,
         episode.confidence,
         episode.project_id,
+        episode.supersedes,
     )
 
 
@@ -944,6 +971,7 @@ def _task_episode_from_row(row: Sequence[object]) -> TaskEpisode:
         prompt_version=None if row[21] is None else str(row[21]),
         confidence=None if row[22] is None else float(cast(float, row[22])),
         project_id=None if row[23] is None else str(row[23]),
+        supersedes=None if row[24] is None else str(row[24]),
     )
 
 
@@ -1004,6 +1032,7 @@ def _run_params(run: DigestRun) -> tuple[object, ...]:
         run.emails_actionable,
         run.action_items_count,
         run.ignored_emails_count,
+        run.filtered_summary,
         run.attachments_found,
         run.attachments_extracted,
         run.attachment_warnings_count,
@@ -1035,16 +1064,17 @@ def _run_from_row(row: Sequence[object]) -> DigestRun:
         emails_actionable=integer(10),
         action_items_count=integer(11),
         ignored_emails_count=integer(12),
-        attachments_found=integer(13),
-        attachments_extracted=integer(14),
-        attachment_warnings_count=integer(15),
-        truncated=bool(row[16]),
-        next_cursor=None if row[17] is None else str(row[17]),
-        error_code=None if row[18] is None else str(row[18]),
-        error_message_safe=None if row[19] is None else str(row[19]),
-        started_at=_as_datetime(row[20]),
-        completed_at=_as_datetime(row[21]),
-        created_at=_as_datetime(row[22]),
+        filtered_summary=None if row[13] is None else str(row[13]),
+        attachments_found=integer(14),
+        attachments_extracted=integer(15),
+        attachment_warnings_count=integer(16),
+        truncated=bool(row[17]),
+        next_cursor=None if row[18] is None else str(row[18]),
+        error_code=None if row[19] is None else str(row[19]),
+        error_message_safe=None if row[20] is None else str(row[20]),
+        started_at=_as_datetime(row[21]),
+        completed_at=_as_datetime(row[22]),
+        created_at=_as_datetime(row[23]),
     )
 
 

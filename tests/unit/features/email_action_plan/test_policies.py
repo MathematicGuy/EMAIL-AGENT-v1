@@ -15,10 +15,13 @@ def test_query_is_always_read_only_unread_inbox_scope() -> None:
     query = normalize_query("from:boss@example.com")
     assert "is:unread" in query
     assert "in:inbox" in query
+    assert "category:primary" in query
 
 
 def test_query_does_not_duplicate_required_terms() -> None:
-    assert normalize_query("is:unread in:inbox") == "is:unread in:inbox"
+    assert normalize_query("is:unread in:inbox") == "is:unread in:inbox category:primary"
+    expected = "is:unread in:inbox category:social"
+    assert normalize_query("is:unread in:inbox category:social") == expected
 
 
 @pytest.mark.parametrize("value", [0, 501])

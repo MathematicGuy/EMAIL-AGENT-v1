@@ -72,11 +72,14 @@ async def _repository() -> tuple[PostgresChatSummaryEpisodeRepository, AsyncConn
 
 
 def _namespace(
-    *, record_id: str = "record-1", chat_turn_id: str | None = "turn-1"
+    *,
+    tenant_id: str = "tenant-1",
+    record_id: str = "record-1",
+    chat_turn_id: str | None = "turn-1",
 ) -> MemoryNamespace:
     return MemoryNamespace(
         scope=ChatMemoryScope(
-            tenant_id="tenant-1", user_id="user@example.com", session_id="session-1"
+            tenant_id=tenant_id, user_id="user@example.com", session_id="session-1"
         ),
         memory_type=MemoryType.EPISODIC,
         record_id=record_id,
@@ -95,7 +98,6 @@ def _episode(
     return ChatSummaryEpisode(
         episode_id=episode_id,
         record_id=record_id,
-        tenant_id="tenant-1",
         user_id="user@example.com",
         chat_session_id="session-1",
         chat_turn_id="turn-1",
@@ -166,6 +168,39 @@ def test_delete_uses_the_exact_persisted_summary_namespace_key() -> None:
     _run_scenario(scenario)
 
 
+def test_same_summary_identity_in_two_tenants_persists_and_deletes_independently() -> None:
+    async def scenario() -> None:
+        repository, pool = await _repository()
+        try:
+            first_tenant = _namespace(tenant_id="tenant-1")
+            second_tenant = _namespace(tenant_id="tenant-2")
+
+            await repository.write_chat_summary(first_tenant, _episode())
+            await repository.write_chat_summary(second_tenant, _episode())
+
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT tenant_id FROM chat_summary_episodes ORDER BY tenant_id"
+                )
+                assert await cursor.fetchall() == [("tenant-1",), ("tenant-2",)]
+
+            assert (
+                await repository.delete_chat_summary(
+                    _namespace(tenant_id="tenant-1", chat_turn_id=None)
+                )
+                is True
+            )
+            async with pool.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT tenant_id FROM chat_summary_episodes ORDER BY tenant_id"
+                )
+                assert await cursor.fetchall() == [("tenant-2",)]
+        finally:
+            await pool.close()
+
+    _run_scenario(scenario)
+
+
 def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
     def scoped_namespace(tenant_id: str, user_id: str, turn_id: str) -> MemoryNamespace:
         return MemoryNamespace(
@@ -179,12 +214,7 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
         repository, pool = await _repository()
         try:
             exact_namespace = scoped_namespace("tenant-1", "user@example.com", "turn-exact")
-            foreign_user_namespace = scoped_namespace(
-                "tenant-1", "other@example.com", "turn-user"
-            )
-            foreign_tenant_namespace = scoped_namespace(
-                "tenant-2", "user@example.com", "turn-tenant"
-            )
+            foreign_user_namespace = scoped_namespace("tenant-1", "other@example.com", "turn-user")
             await repository.write_chat_summary(
                 exact_namespace,
                 replace(_episode(), record_id="record-turn-exact", chat_turn_id="turn-exact"),
@@ -192,15 +222,11 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
             await repository.write_chat_summary(
                 foreign_user_namespace,
                 replace(
-                    _episode(), episode_id="episode-user", record_id="record-turn-user",
-                    tenant_id="tenant-1", user_id="other@example.com", chat_turn_id="turn-user",
-                ),
-            )
-            await repository.write_chat_summary(
-                foreign_tenant_namespace,
-                replace(
-                    _episode(), episode_id="episode-tenant", record_id="record-turn-tenant",
-                    tenant_id="tenant-2", chat_turn_id="turn-tenant",
+                    _episode(),
+                    episode_id="episode-user",
+                    record_id="record-turn-user",
+                    user_id="other@example.com",
+                    chat_turn_id="turn-user",
                 ),
             )
 
@@ -212,10 +238,7 @@ def test_delete_all_for_user_is_exact_scope_and_retryable() -> None:
                     "SELECT tenant_id, user_id FROM chat_summary_episodes"
                     " ORDER BY tenant_id, user_id"
                 )
-                assert await cursor.fetchall() == [
-                    ("tenant-1", "other@example.com"),
-                    ("tenant-2", "user@example.com"),
-                ]
+                assert await cursor.fetchall() == [("tenant-1", "other@example.com")]
         finally:
             await pool.close()
 
@@ -227,9 +250,7 @@ def test_expiry_purge_and_schema_stay_compact_and_body_free() -> None:
         repository, pool = await _repository()
         try:
             expires_at = NOW + timedelta(minutes=1)
-            await repository.write_chat_summary(
-                _namespace(), _episode(expires_at=expires_at)
-            )
+            await repository.write_chat_summary(_namespace(), _episode(expires_at=expires_at))
 
             assert await repository.purge_expired(expires_at) == 1
             assert await repository.purge_expired(expires_at) == 0

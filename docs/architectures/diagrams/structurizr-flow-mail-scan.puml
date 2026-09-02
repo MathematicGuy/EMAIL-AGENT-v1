@@ -1,0 +1,42 @@
+@startuml
+title <size:24>Dynamic View: Cowork Agent</size>\n<size:24>A mail scan: the client drives the run and submits one body-free summary card into chat.</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container(CoworkAgent.WebApplication, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  Container(CoworkAgent.ControlPlaneAPI, "Control Plane API", $techn="Python 3 / FastAPI (mail-todo-api)", $descr="Composition root and HTTP/SSE surface. Owns identity, routing, both product workflows, retrieval and persistence access.", $tags="", $link="")
+  Container(CoworkAgent.BackgroundWorker, "Background Worker", $techn="Python 3 asyncio (mail-todo-worker)", $descr="Out-of-process poller that claims queued digest and document jobs, sweeps retention, and recovers interrupted runs.", $tags="", $link="")
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+}
+
+Person(KnowledgeWorker, "Knowledge Worker", $descr="Signs in with Google, scans unread mail into body-free action plans, chats with the assistant, and uploads project documents.", $tags="", $link="")
+System(GmailAPI, "Gmail API", $descr="Read-only mailbox source (gmail.readonly). Bodies are read transiently and never persisted.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+
+Rel(KnowledgeWorker, CoworkAgent.WebApplication, "1: Starts a mail scan", $techn="HTTPS", $tags="", $link="")
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI, "2: Creates a digest run", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ControlPlaneDatabase, "3: Queues the run", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, CoworkAgent.ControlPlaneDatabase, "4: Claims the queued run", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, GmailAPI, "5: Reads unread mail and threads", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, LLMProviders, "6: Classifies and generates the action plan", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.BackgroundWorker, CoworkAgent.ControlPlaneDatabase, "7: Writes body-free tasks and the run result", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI, "8: Polls the run until it settles", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI, "9: Submits one aggregate MailScanSummary to the chat session", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ControlPlaneDatabase, "10: Reconciles the summary into durable turn history", $techn="asyncpg / sqlite3", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

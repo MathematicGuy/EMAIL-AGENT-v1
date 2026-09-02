@@ -1,0 +1,60 @@
+@startuml
+title <size:24>Deployment View: Cowork Agent - Local</size>\n<size:24>Local development: Docker Postgres or SQLite, everything on one workstation.</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Deployment>
+
+Deployment_Node(Local.DeveloperWorkstation, "Developer Workstation", $type="OS", $descr="Windows or Linux development machine", $tags="", $link="") {
+  Deployment_Node(Local.DeveloperWorkstation.Browser, "Browser", $type="Chromium / Firefox", $descr="", $tags="", $link="") {
+    Container(Local.DeveloperWorkstation.Browser.WebApplication_1, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  }
+
+  Deployment_Node(Local.DeveloperWorkstation.PythonVirtualEnvironment, "Python Virtual Environment", $type="CPython 3", $descr="Managed by uv", $tags="", $link="") {
+    Container(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, "Control Plane API", $techn="Python 3 / FastAPI (mail-todo-api)", $descr="Composition root and HTTP/SSE surface. Owns identity, routing, both product workflows, retrieval and persistence access.", $tags="", $link="")
+    Container(Local.DeveloperWorkstation.PythonVirtualEnvironment.BackgroundWorker_1, "Background Worker", $techn="Python 3 asyncio (mail-todo-worker)", $descr="Out-of-process poller that claims queued digest and document jobs, sweeps retention, and recovers interrupted runs.", $tags="", $link="")
+    Container(Local.DeveloperWorkstation.PythonVirtualEnvironment.KnowledgeIngestionCLI_1, "Knowledge Ingestion CLI", $techn="Python 3 CLI (mail-todo-ingest-knowledge)", $descr="Offline batch tool that converts administrator-supplied documents into the committed Markdown corpus.", $tags="", $link="")
+  }
+
+  Deployment_Node(Local.DeveloperWorkstation.RepositoryWorkingTree, "Repository Working Tree", $type="Local filesystem", $descr="", $tags="", $link="") {
+    Container(Local.DeveloperWorkstation.RepositoryWorkingTree.CompanyKnowledgeCorpus_1, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+    Container(Local.DeveloperWorkstation.RepositoryWorkingTree.ReportArtifactStore_1, "Report Artifact Store", $techn="Local filesystem (data/reports/)", $descr="Generated report artifacts reached only through the ReportFilename rule.", $tags="", $link="")
+    Container(Local.DeveloperWorkstation.RepositoryWorkingTree.PrivateDocumentStore_1, "Private Document Store", $techn="Supabase Storage or local filesystem", $descr="User-owned uploaded project documents. Encrypted at rest, access-checked on every read, retention-bounded.", $tags="", $link="")
+    ContainerDb(Local.DeveloperWorkstation.RepositoryWorkingTree.TurbovecVectorIndex_1, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+  }
+
+  Deployment_Node(Local.DeveloperWorkstation.DockerEngine, "Docker Engine", $type="Docker Compose", $descr="POSTGRES_MODE=local", $tags="", $link="") {
+    Deployment_Node(Local.DeveloperWorkstation.DockerEngine.coworkpg, "cowork-pg", $type="postgres:16-alpine", $descr="", $tags="", $link="") {
+      ContainerDb(Local.DeveloperWorkstation.DockerEngine.coworkpg.ControlPlaneDatabase_1, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+    }
+
+    Deployment_Node(Local.DeveloperWorkstation.DockerEngine.coworkclamav, "cowork-clamav", $type="clamav/clamav", $descr="Attachment signature scanning", $tags="", $link="")
+  }
+
+}
+
+Rel(Local.DeveloperWorkstation.Browser.WebApplication_1, Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, "Calls REST endpoints and consumes the chat stream", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, Local.DeveloperWorkstation.RepositoryWorkingTree.CompanyKnowledgeCorpus_1, "Chunks and indexes the committed corpus at bootstrap", $techn="File I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.KnowledgeIngestionCLI_1, Local.DeveloperWorkstation.RepositoryWorkingTree.CompanyKnowledgeCorpus_1, "Writes sanitized Markdown and a SHA-256 manifest to", $techn="File I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, Local.DeveloperWorkstation.RepositoryWorkingTree.ReportArtifactStore_1, "Writes and serves generated report artifacts", $techn="File I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, Local.DeveloperWorkstation.RepositoryWorkingTree.PrivateDocumentStore_1, "Registers, stores and serves uploaded project documents", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.BackgroundWorker_1, Local.DeveloperWorkstation.RepositoryWorkingTree.PrivateDocumentStore_1, "Reads uploaded documents for extraction from", $techn="Storage SDK / File I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, Local.DeveloperWorkstation.RepositoryWorkingTree.TurbovecVectorIndex_1, "Loads and queries the company and per-project indexes", $techn="In-process file I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.BackgroundWorker_1, Local.DeveloperWorkstation.RepositoryWorkingTree.TurbovecVectorIndex_1, "Writes page-bounded project chunk vectors to", $techn="In-process file I/O", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.ControlPlaneAPI_1, Local.DeveloperWorkstation.DockerEngine.coworkpg.ControlPlaneDatabase_1, "Reads and writes identity, connections, runs, turns, episodes and chunk rows", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(Local.DeveloperWorkstation.PythonVirtualEnvironment.BackgroundWorker_1, Local.DeveloperWorkstation.DockerEngine.coworkpg.ControlPlaneDatabase_1, "Claims queued jobs from and writes results back to", $techn="asyncpg / sqlite3", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

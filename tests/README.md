@@ -1,43 +1,42 @@
 # Test Routing Index
 
 A map for picking the **smallest** test route that covers a change, and a
-registry of which file owns which invariant so no one writes a test that
-already exists.
+registry of which file owns which invariant so no duplicate tests are written.
 
-Always `uv run pytest`. Plain `python -m pytest` picks up the Anaconda
-interpreter on this machine and fails with unrelated `ssl` errors.
+Always `uv run pytest`. Avoid passing `--dist loadfile` explicitly so pytest uses the repository's optimized `--dist loadgroup` scheduler.
 
-**Whole suite: `uv run pytest -q` -> ~19 s, 977 passed.** Defaults live in
-`pyproject.toml`: `-n 4 --dist loadfile -m 'not live' --strict-markers`.
+**Whole suite: `uv run pytest -q` -> approximately 15–18 s; the count varies with optional integrations.** Defaults: 4 xdist
+workers (`--dist loadgroup`), `-m 'not live'`, `--strict-markers`.
+Detailed optimization notes: [`docs/references/test-optimization/`](../docs/references/test-optimization/test-optimization.md).
 
 ---
 
 ## 1. Route Index
 
-Pick the narrowest row that contains your change. Times are **serial** (`-n0`),
-which is what one route costs; the full suite is parallel.
+Pick the narrowest row containing your change. Times are serial (`-p no:xdist`) --
+what one route costs alone; the whole-suite row is parallel.
 
 | # | Route | Tests | Serial | Covers |
 |---|---|---|---|---|
-| R1 | `tests/unit/domain` | 162 | 1.0 s | Frozen contracts, enums, validation rules. No I/O. |
-| R2 | `tests/unit/features` | 362 | 2.3 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
-| R3 | `tests/unit/integrations/rag` | 45 | 4.6 s | BM25, RRF fusion, reranker, query guard, in-repo memory. |
-| R4 | `tests/unit/integrations/llm` | 43 | 2.8 s | Prompt assembly, parsing, key rotation, classifiers. |
-| R5 | `tests/unit/integrations/gmail` | 19 | 0.9 s | OAuth/PKCE, token cipher, mailbox adapter. |
-| R6 | `tests/unit/integrations` | 189 | 17.0 s | R3+R4+R5 plus bootstrap, Supabase. |
-| R7 | `tests/unit/persistence` | 17 | 1.2 s | Repository logic against fakes. |
-| R8 | `tests/unit/orchestration` | 12 | 2.7 s | Workers, pollers, recovery. |
-| R9 | `tests/unit/scripts` | 69 | 13.3 s | `scripts/*.py` eval CLIs. **Slowest unit route.** |
-| R10 | `tests/unit/fixtures` | 33 | 3.5 s | Golden-fixture schema and corpus-label validation. |
-| R11 | `tests/integration/api` | 22 | 7.1 s | FastAPI via in-process ASGI transport. |
-| R12 | `tests/integration/persistence` | 9 | 4.2 s | Real PostgreSQL. **Skips wholesale without a server.** |
-| R13 | `tests/integration/email_action_plan` | 45 | 4.3 s | Gmail -> classify -> plan -> persist, end to end on fakes. |
-| R14 | `tests/integration` | 82 | 15.6 s | R11+R12+R13 plus corpus-backed workflow. |
-| R15 | `tests/unit` | 904 | 27.4 s | Everything above the integration line. |
-| R16 | `tests/unit --ignore=tests/unit/scripts` | 835 | 20.2 s | R15 minus the eval CLIs. Good default when `scripts/` is untouched. |
-| — | *(everything)* | 977 | **19 s parallel** | `uv run pytest -q` |
+| R1 | `tests/unit/domain` | 76 | 0.7 s | Frozen contracts, enums, validation rules. No I/O. |
+| R2 | `tests/unit/features` | 563 | 2.1 s | Chat controller/memory/intent + email action-plan mapping. Fakes only. |
+| R3 | `tests/unit/integrations/rag` | 83 | 3.5 s | BM25, RRF fusion, reranker, query guard, embedding key rotation, in-repo memory. |
+| R4 | `tests/unit/integrations/llm` | 103 | 1.4 s | Prompt assembly, parsing, key rotation, classifiers, OpenRouter last-resort. |
+| R5 | `tests/unit/integrations/gmail tests/unit/integrations/mailbox tests/unit/integrations/outlook` | 49 | 0.7 s | Gmail/Microsoft OAuth, PKCE, token cipher, provider router, mailbox adapters. |
+| R6 | `tests/unit/integrations` | 366 | 5.2 s | R3+R4+R5 plus bootstrap, Supabase. |
+| R7 | `tests/unit/persistence` | 80 | 1.8 s | Repository logic against fakes. |
+| R8 | `tests/unit/orchestration` | 19 | 1.7 s | Workers, pollers, recovery. |
+| R9 | `tests/unit/scripts` | 100 | 4.2 s | `scripts/*.py` eval CLIs. |
+| R10 | `tests/unit/fixtures` | 23 | 1.1 s | Golden-fixture schema and corpus-label validation. |
+| R11 | `tests/integration/api` | 78 | 6.4 s | FastAPI via in-process ASGI transport. |
+| R12 | `tests/integration/persistence` | 9 | 1.0 s | Real PostgreSQL (skips without server; `pg-control-plane` xdist group). |
+| R13 | `tests/integration/email_action_plan` | 38 | 2.8 s | Provider-neutral mailbox -> classify -> plan -> persist, end to end on fakes. |
+| R14 | `tests/integration` | 117 | 7.8 s | R11+R12+R13 plus corpus-backed workflow. |
+| R15 | `tests/unit` | 1369 | 9.8 s | Everything above the integration line. |
+| R16 | `tests/unit --ignore=tests/unit/scripts` | 1269 | 6.8 s | R15 minus eval CLIs (default during regular development). |
+| — | *(everything)* | 1486 | **12 s parallel** | `uv run pytest -q` |
 
-### Source -> route
+### Source -> Route Mapping
 
 | Edited under `src/cowork_agent/` | Run |
 |---|---|
@@ -45,11 +44,14 @@ which is what one route costs; the full suite is parallel.
 | `features/ai_chat/` | R2 |
 | `features/email_action_plan/` | R2 + R13 |
 | `integrations/rag/` | R3 (+ R6 if `bootstrap.py` or `project_documents.py`) |
+| `integrations/knowledge_ingestion/` | `tests/unit/integrations/knowledge_ingestion`, then `test_rag.py` |
 | `integrations/llm/` | R4 |
 | `integrations/gmail/` | R5 + R13 |
+| `integrations/google_calendar/` | `tests/unit/integrations/google_calendar` + `tests/unit/api` + `tests/unit/features/ai_chat/test_calendar_binder.py` + `tests/unit/features/ai_chat/test_agenda_tool.py` |
+| `integrations/mailbox/`, `integrations/outlook/` | R5 + R11 + R13 |
 | `persistence/` | R7 + R12 |
 | `orchestration/` | R8 |
-| `app.py`, API routes | R11 |
+| `app.py`, API routes | R11 (+ `tests/unit/api` for router-level invariants) |
 | `identity.py`, session/cookie | R11 + `tests/unit/test_identity.py` |
 | `scripts/*.py` | R9 |
 | `data/extracted/*.md` (corpus) | R10 + R3 |
@@ -58,148 +60,89 @@ which is what one route costs; the full suite is parallel.
 
 ## 2. Markers
 
-Registered in `pyproject.toml`; `--strict-markers` rejects anything else.
-
 | Marker | Meaning | Default |
 |---|---|---|
-| `live` | Needs a real external process or credentials. | **Deselected.** `-m live` to opt in. |
-| `slow` | >1 s of wall clock on its own. | Selected (nothing relies on it yet). |
-| `serial` | Must not run under xdist — spawns processes or binds a fixed port. | Selected; keep it on one worker. |
-
-Every run ends with a yellow **`DESELECTED - NOT VERIFIED BY THIS RUN`** banner
-naming what the filter dropped. A green summary with that banner above it is
-*not* a fully verified suite.
-
-`tests/integration/api/test_e2e_frontend_api.py` is the only `live` module (24
-tests). It needs a real `mail-todo-api` subprocess plus completed Gmail OAuth.
-When the server will not boot it **skips behind a wall of `!!!!` explaining why**
-— it never errors, so it can never mask a real failure.
+| `live` | Needs real external service/credentials (e.g. `test_e2e_frontend_api.py`). | **Deselected.** `-m live` to opt in. |
+| `slow` | >1 s wall clock on its own. | Selected. |
+| `serial` | Must run serially (auto-assigned to `xdist_group("serial")`). | Selected. |
+| `xdist_group` | Pin tests sharing destructive state (e.g. `pg-control-plane`) to one worker. | Selected. |
 
 ---
 
 ## 3. Invariant Ownership
 
-**Before writing a test, find its invariant here.** If a row already exists, add
-a case to the owning file instead of starting a new one. If the invariant is
-absent, add the row when you add the test.
+Before writing a test, check if its invariant is already owned.
 
 | Invariant | Owned by | Do not re-assert in |
 |---|---|---|
-| Legacy `/result` JSON key set, `nextActions` slice, empty-state message, item ordering | `unit/features/email_action_plan/test_compat_mapper.py` | any API-level test |
+| Legacy `/result` JSON schema, `nextActions` slice, empty-state message | `unit/features/email_action_plan/test_compat_mapper.py` | API-level tests |
 | `processedEmails` is development-only | `integration/api/test_principal_boundary.py` | — |
-| Run creation is idempotent per `(user, Idempotency-Key)` | `integration/email_action_plan/test_workflow.py` | API tests (they get it transitively) |
-| Persisted tasks survive a replayed run without duplicating | `integration/email_action_plan/test_workflow.py` | — |
-| Postgres migrations apply once and are idempotent | `integration/persistence/test_postgres_repositories.py` | — |
-| No raw email body reaches any API response | `integration/api/test_principal_boundary.py` | workflow/repository tests |
+| Run creation idempotency `(user, Idempotency-Key)` | `integration/email_action_plan/test_workflow.py` | API tests |
+| Persisted tasks survive replayed run | `integration/email_action_plan/test_workflow.py` | — |
+| Postgres migrations idempotent | `integration/persistence/test_postgres_repositories.py` | — |
+| No raw email body reaches API responses | `integration/api/test_principal_boundary.py` | workflow/repository tests |
 | No raw email body reaches chat memory | `unit/domain/test_chat_contracts.py` | gateway tests |
-| Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` (in-repo) + `unit/integrations/rag/test_turbovec_memory.py` | integration tests |
-| Retrieval over the *committed corpus* + degrade-to-null path | `unit/integrations/test_bootstrap.py` | — |
-| Project-document ACL (six SQL conditions before embed) + cross-project isolation + empty-allowlist short-circuit | `unit/integrations/test_project_documents_hybrid.py` | orchestration/API tests |
-| Eval report is metadata-only (no query/answer/chunk text) | one test per script in `unit/scripts/` | — |
-| OAuth grant identity binding (resolver decides `user_id`) | `unit/integrations/gmail/test_provider.py` | — |
-| Broken `SSL_CERT_FILE` cannot poison a run | `tests/conftest.py` | — |
+| Retrieval ordering, `top_k`, `min_score`, timeout status | `unit/integrations/rag/test_rag.py` + `test_turbovec_memory.py` | integration tests |
+| Binary `document_date` harvest (PDF/DOCX metadata) | `unit/integrations/knowledge_ingestion/test_date_harvest.py` | service tests |
+| Company RAG pre-filter (`document_ids`/`years`/`months`) | `unit/integrations/rag/test_rag.py` | hybrid/turbovec |
+| Retrieval over committed corpus + degrade-to-null | `unit/integrations/test_bootstrap.py` | — |
+| Jina embed key rotation (429/403) | `unit/integrations/rag/test_embeddings.py` | bootstrap / hybrid |
+| Project-document ACL & cross-project isolation | `unit/integrations/test_project_documents_hybrid.py` | orchestration/API tests |
+| Eval report is metadata-only (no query/chunk text) | `unit/scripts/` | — |
+| OAuth grant identity binding | `unit/integrations/gmail/test_provider.py` + `unit/integrations/outlook/test_outlook_provider.py` | — |
+| Broken `SSL_CERT_FILE` isolation | `tests/conftest.py` | — |
+| GET `/sessions/{id}/messages` content redaction | `integration/api/test_chat_api.py` | frontend mapper |
+| Chat lifecycle idempotency | `unit/features/ai_chat/test_controller.py` + `unit/persistence/test_chat_history_migration.py` | frontend tests |
+| Outbound non-loopback socket guard | `tests/unit/test_network_guard.py` | — |
+| Offline RAG pinning on app boot | `tests/conftest.py` | API/workflow tests |
+| Source tree resolution for `cowork_agent` | `unit/test_xdist_harness.py` | — |
+| Postgres pre-flight safe fallback | `unit/test_pg_probe.py` | persistence modules |
+| Embedding key rotation pacing | `unit/integrations/rag/test_embeddings.py` | — |
+| OpenRouter fallback to Google Gemini | `unit/integrations/llm/test_last_resort.py` + `test_openrouter.py` | chat controllers |
+| Evaluation API recursive error/content redaction | `integration/api/test_evaluation_jobs_api.py` | job service, plug-ins, frontend |
+| Evaluation credential alias secrecy and exclusive lease lifecycle | `unit/features/batch_evaluation/test_credentials.py` + `unit/integrations/llm/test_evaluation_mistral.py` | API, runner, smoke CLI |
+| Evaluation SQLite shard isolation | `unit/features/batch_evaluation/plugins/test_memory_eval.py` | runner, API, scripts |
+| Memory baseline metadata privacy | `unit/scripts/test_evaluate_memory.py` | report builders and API |
+| Mistral key-independence smoke metadata and 429 gate | `unit/scripts/test_smoke_test_mistral_evaluation_keys.py` | provider/lease unit tests |
+| Report filename rule (traversal, reserved names, slug fallback) | `unit/domain/test_report_artifacts.py` | store, route and chat-controller tests |
+| Report store stays inside its injected root | `unit/persistence/test_report_artifact_store.py` | API tests |
+| `runtime(request)` returns the composed `CoworkRuntime` value | `unit/test_composition.py` | API tests |
+| Per-user calendar grant: whose token a turn resolves, and the refusal when there is none (J1, J2) | `unit/features/ai_chat/test_calendar_binder.py` | controller and tool tests |
+| A chained calendar consent never costs the mail connection or mints a session (J4, J5) | `unit/api/test_calendar_router.py` | mailbox API tests |
+| Calendar grant storage, scope guard, and revocation (J1, J3, J6, J7) | `unit/integrations/google_calendar/test_calendar_oauth.py` | repository and composition tests |
+| Which messages determine an hour and which do not (PROGRESS.md F5/F7) | `unit/features/ai_chat/test_ambiguous_hour.py` | calendar tool and QA tier tests, which assert only that the guard is *reached* |
+| What the routing launch gate measures, tool axis included | `unit/scripts/test_evaluate_chat_routing.py` | fixture and resolver tests, which own the labels and the narrowing |
+| Reading a calendar window is not writing one: the past is allowed, and a day is a day in the calendar's zone (PROGRESS.md F9) | `unit/features/ai_chat/test_agenda_tool.py` | `test_calendar_tool.py`, which owns the write-side bounds |
+| Settings parsing never reads dotenv; executable boundaries own loading | `unit/test_config.py` | provider, adapter and route tests |
 
-### Two facts that break tests if you forget them
-
-- **`HashingEmbedder` carries no semantics.** It buckets tokens by hash. Never
-  assert *which* document ranks first under it — only counts, ordering by score,
-  thresholds, and status codes.
-- **`tenant_id` is gone from the retrieval/email contracts** (single-user app).
-  It still exists on `VerifiedPrincipal` and the chat-memory schema. Do not add
-  it to `KnowledgeChunk`, `SemanticRetrievalRequest/Response`,
-  `EphemeralEmailEnvelope`, `GenerationContext`, or `load_corpus`.
-
----
-
-## 4. Rules for Adding Tests
-
-1. **One invariant, one owner.** Check §3 first. A second assertion of the same
-   fact at a different layer is a deletion candidate, not coverage.
-2. **Test at the lowest layer that can observe the behaviour.** The retired
-   `tests/compatibility/` suite booted a FastAPI app across 627 lines to exercise
-   three pure functions; `test_compat_mapper.py` does it in 15 tests and 0.8 s.
-3. **No subprocess for CLI assertions.** Use
-   `tests/unit/scripts/cli_harness.py::run_cli`, which calls `main(argv)`
-   in-process with stdio captured. Keep exactly **one** subprocess test per
-   script (`test_help_runs_without_provider_keys`) to prove the entry point is
-   executable. This alone took `unit/scripts` from 40 s to 13 s.
-4. **Probe an external service once.** See
-   `tests/integration/persistence/pg_probe.py`. Nine modules each opening their
-   own 3 s connection cost 19 s per run to learn the same thing.
-5. **A missing dependency skips loudly; it never errors.** Errors are for
-   regressions. Print a banner that says what did not run and how to run it.
-6. **Name the behaviour, not the mechanism.**
-   `test_min_score_excludes_everything_below_the_threshold`, not
-   `test_min_score_2`.
-7. **New external dependency? Mark it `live` and `serial`.**
-
-### Pruning checklist
-
-Delete a test when any of these holds:
-
-- Its invariant already has an owner in §3 and this is not the owner.
-- It asserts a field that no longer exists on the contract (grep `src/` first —
-  a stale *kwarg* means fix the call, a stale *purpose* means delete the test).
-- It re-tests framework behaviour (pydantic validation, FastAPI routing).
-- It only passes because a broad `except Exception` swallowed the real error.
+### Critical Invariants
+- **`HashingEmbedder` carries no semantics**: Assert counts/scores/thresholds, never semantic rank.
+- **`tenant_id` removed**: Do not reintroduce to single-user domain/email/retrieval contracts.
 
 ---
 
-## 5. Route Optimization
+## 4. Rules for Adding & Pruning Tests
 
-Do **not** open with the full suite. The sequence:
+1. **One invariant, one owner**: Add cases to existing owning files rather than creating redundant layer tests.
+2. **Lowest layer possible**: Prefer pure unit tests over ASGI app-boot integration tests.
+3. **No subprocesses for CLIs**: Use `tests/unit/scripts/cli_harness.py::run_cli` (in-process `main(argv)`).
+4. **Offline by default**: Non-loopback sockets raise `RuntimeError`. Mock external services at the seam.
+5. **No real sleeps**: Fake delays with fixtures (e.g. `slept` in `test_embeddings.py`).
+6. **Missing dependency skips loudly**: Print instructions instead of erroring.
+
+---
+
+## 5. Verification & Pre-PR Gates
+
+Before submitting changes or opening a PR to `main`, run and pass the full CI + E2E gate suite:
 
 ```bash
-# 1. Narrowest route from §1 (seconds).
-uv run pytest tests/unit/integrations/rag -q
+# 1. Backend CI checks
+uv run ruff check . && uv run mypy src && uv run pytest -q
 
-# 2. Widen one level only if step 1 passes.
-uv run pytest tests/unit/integrations -q
+# 2. Frontend CI checks
+cd frontend && pnpm lint && pnpm check-types && pnpm test && pnpm build
 
-# 3. Full suite once, at the end.
-uv run pytest -q
-```
-
-### Avoiding repeated work
-
-| Goal | Flag |
-|---|---|
-| Re-run only what failed last time | `--lf` |
-| Failed first, then the rest | `--ff` |
-| See what a route *would* run, without running it | `--collect-only -q` |
-| Count only | `--collect-only -q \| tail -1` |
-| Find the next thing worth optimizing | `--durations=15` |
-| Stop at the first failure | `-x` |
-| Keep tracebacks cheap in context | `--tb=line` or `--tb=short` |
-
-`--lf` and `--ff` read `.pytest_cache`. If you see
-`PytestCacheWarning: cache could not write path`, the cache is stale-locked and
-those flags silently degrade to running everything — clear `.pytest_cache/` or
-add `-p no:cacheprovider` and select explicitly instead.
-
-### Token-cheap defaults
-
-`-q --tb=line --no-header`. A green route prints one line. Add `-x` when you
-expect a failure so only the first traceback lands in context.
-
----
-
-## 6. Layout
-
-```
-tests/
-  conftest.py                       suite guards: broken SSL_CERT_FILE, deselect banner
-  fixtures/                         shared builders and golden-fixture loaders
-  unit/                             no I/O, no app boot, fakes only
-    scripts/cli_harness.py          in-process runner for scripts/*.py
-  integration/
-    api/                            FastAPI over in-process ASGI transport
-    api/test_e2e_frontend_api.py    the only `live` module (real subprocess)
-    persistence/pg_probe.py         one cached Postgres reachability check
-```
-
-Gate before handing work back:
-
-```bash
-uv run pytest -q && uv run ruff check . && uv run mypy src
+# 3. Playwright E2E tests
+pnpm run test:e2e
 ```

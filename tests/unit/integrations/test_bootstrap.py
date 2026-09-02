@@ -21,15 +21,18 @@ from cowork_agent.domain.target_contracts import (
 from cowork_agent.integrations.rag import bootstrap
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
+from cowork_agent.integrations.rag.jina_reranker import FakeJinaReranker
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeChunk, KnowledgeDocument
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.rag.reranker import RerankerAdapter
 from cowork_agent.integrations.rag.turbovec_memory import TURBOVEC_AVAILABLE, TurbovecSemanticMemory
+
+_BUILD_RERANKER = bootstrap._build_reranker
 
 
 def _jina_settings() -> JinaEmbeddingSettings:
     return JinaEmbeddingSettings.from_env(
         {"JINA_API_KEY": "key-1", "JINA_EMBEDDING_MODEL": "jina-embeddings-v5-omni-small"},
-        load_env_file=False,
     )
 
 
@@ -71,6 +74,12 @@ def _stub_turbovec_factory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     monkeypatch.setattr(bootstrap, "TURBOVEC_SNAPSHOT_PATH", tmp_path / "index.tvim")
 
 
+@pytest.fixture(autouse=True)
+def _disable_optional_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep bootstrap tests offline even when a developer has a Cohere key."""
+    monkeypatch.setattr(bootstrap, "_build_reranker", lambda: None)
+
+
 def test_turbovec_provider_builds_turbovec_memory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -82,6 +91,33 @@ def test_turbovec_provider_builds_turbovec_memory(
 
     assert isinstance(memory, HybridSemanticMemory)
     assert isinstance(memory.dense, TurbovecSemanticMemory)
+
+
+def test_configured_reranker_is_wired_into_hybrid_memory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if not TURBOVEC_AVAILABLE:
+        pytest.skip("turbovec package not installed")
+    _stub_turbovec_factory(monkeypatch, tmp_path)
+    reranker = FakeJinaReranker(scores={"doc#0": 0.91})
+    monkeypatch.setattr(bootstrap, "_build_reranker", lambda: reranker)
+
+    memory = asyncio.run(bootstrap.build_semantic_memory(_jina_settings()))
+    response = asyncio.run(memory.retrieve(_retrieval_request()))
+
+    assert isinstance(memory, HybridSemanticMemory)
+    assert response.chunks[0].rerank_score == 0.91
+
+
+def test_cohere_reranker_factory_uses_default_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COHERE_API_KEY", "cohere-test-key")
+    monkeypatch.setattr(bootstrap, "_build_reranker", _BUILD_RERANKER)
+
+    reranker = bootstrap._build_reranker()
+
+    assert isinstance(reranker, RerankerAdapter)
 
 
 def test_unset_provider_defaults_to_turbovec(
@@ -137,7 +173,7 @@ def test_null_factory_retrieve_is_structured_no_results(
     response = asyncio.run(memory.retrieve(_retrieval_request()))
 
     assert isinstance(memory, NullSemanticMemory)
-    assert response.retrieval_status is RetrievalStatus.NO_RESULTS
+    assert response.retrieval_status is RetrievalStatus.UNAVAILABLE
     assert response.chunks == ()
 
 

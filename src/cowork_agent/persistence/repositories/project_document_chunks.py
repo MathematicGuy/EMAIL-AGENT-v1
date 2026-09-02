@@ -9,6 +9,12 @@ The lexical ranking is deliberately returned as an ordered list of vector IDs
 with no scores attached. RRF consumes ranks only, so ``ts_rank_cd`` not being
 true BM25 never propagates -- and a caller cannot accidentally fuse its raw
 values.
+
+``'simple'`` is the text search configuration on both sides of the match:
+the corpus is Vietnamese, so an English dictionary would stem nothing and
+would drop query terms that happen to be English stopwords. Migration 014
+defines the generated ``fts`` column the same way -- the two must never
+diverge, or the tsquery matches nothing at all.
 """
 
 from dataclasses import dataclass
@@ -135,7 +141,7 @@ class PostgresProjectDocumentChunkRepository:
             cursor = await connection.execute(
                 """
                 SELECT chunks.vector_id,
-                    ts_rank_cd(chunks.fts, websearch_to_tsquery('english', %s)) AS rank
+                    ts_rank_cd(chunks.fts, websearch_to_tsquery('simple', %s)) AS rank
                 FROM project_document_chunks AS chunks
                 JOIN project_documents AS documents ON documents.id = chunks.document_id
                 WHERE documents.workspace_id = %s
@@ -160,6 +166,42 @@ class PostgresProjectDocumentChunkRepository:
         allowlist = tuple(int(row[0]) for row in rows)
         lexical = tuple(int(row[0]) for row in rows if float(row[1]) > 0.0)
         return EligibleChunks(allowlist, lexical[:lexical_limit])
+
+    async def list_section_siblings(
+        self, *, vector_ids: tuple[int, ...], allowlist: tuple[int, ...]
+    ) -> tuple[tuple[int, int], ...]:
+        """Pair each seed with every chunk of its section, in reading order.
+
+        A long article is cut into several chunks, so a question about the
+        article as a whole ("Điều 4 gồm những gì") is answered by a ranking
+        that returns one of them and hides the rest. This is the query that
+        puts the article back together.
+
+        Authorization is not re-derived: ``allowlist`` is the set
+        ``list_eligible`` already cleared under the six ADR-007 conditions, and
+        a sibling outside it is not returned. Chunks with no section are never
+        grouped -- a NULL section is the absence of a heading, not a heading
+        shared by every unstructured chunk in the document.
+        """
+        if not vector_ids or not allowlist:
+            return ()
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT seeds.vector_id, siblings.vector_id
+                FROM project_document_chunks AS seeds
+                JOIN project_document_chunks AS siblings
+                    ON siblings.document_id = seeds.document_id
+                   AND siblings.section = seeds.section
+                WHERE seeds.vector_id = ANY(%s::bigint[])
+                  AND seeds.section IS NOT NULL
+                  AND siblings.vector_id = ANY(%s::bigint[])
+                ORDER BY seeds.vector_id, siblings.chunk_index
+                """,
+                (list(vector_ids), list(allowlist)),
+            )
+            rows = await cursor.fetchall()
+        return tuple((int(row[0]), int(row[1])) for row in rows)
 
     async def hydrate(self, vector_ids: tuple[int, ...]) -> tuple[StoredChunk, ...]:
         """Fetch text and citation coordinates for already-authorized chunks."""

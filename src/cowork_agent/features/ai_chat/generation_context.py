@@ -67,6 +67,11 @@ class GenerationContext:
     conflict_precedence: tuple[ContextSource, ...]
     current_project_evidence: LabeledSection[tuple[ProjectDocumentEvidence, ...]] | None = None
     response_mode: ChatResponseMode = ChatResponseMode.NORMAL
+    # What a tool did this turn, already rendered for the model. Failures
+    # arrive in this same field so the reply says the event was not created
+    # rather than claiming it was. No ContextSource member and no
+    # precedence rank: one tool does not justify reworking that table.
+    tool_result: str | None = None
 
 
 _CONFLICT_PRECEDENCE = (
@@ -91,6 +96,7 @@ def assemble_generation_context(
     *,
     response_mode: ChatResponseMode = ChatResponseMode.NORMAL,
     project_documents: ProjectDocumentResponse | None = None,
+    tool_result: str | None = None,
 ) -> GenerationContext:
     """Assemble only present, typed memory into explicitly-labeled reply context."""
 
@@ -139,6 +145,7 @@ def assemble_generation_context(
             else None
         ),
         response_mode=response_mode,
+        tool_result=tool_result,
     )
 
 

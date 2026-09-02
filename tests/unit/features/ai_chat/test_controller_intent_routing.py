@@ -82,7 +82,7 @@ def _controller(route: ChatRoute, chunks: tuple[str, ...] = ("Could you clarify?
         memory=MemoryGateway(scope=scope, session_buffer=buffer),
         reply=reply,
         routing=routing,  # type: ignore[arg-type]
-        new_id=iter(f"id-{index}" for index in range(20)).__next__,
+        new_id=iter(f"id-{index}" for index in range(50)).__next__,
         clock=lambda: datetime(2026, 8, 12, tzinfo=UTC),
     )
     return controller, routing, reply
@@ -99,7 +99,10 @@ def test_clarify_uses_non_retrieval_reply_mode_and_no_task_proposal() -> None:
 
     assert routing.calls == 1
     assert reply.contexts[0].response_mode is ChatResponseMode.CLARIFY
-    assert [event.event_type for event in events] == [
+    assert [
+        event.event_type for event in events if event.event_type is not ChatEventType.ACTIVITY
+    ] == [
+        ChatEventType.STARTED,
         ChatEventType.ERROR,
         ChatEventType.DELTA,
         ChatEventType.COMPLETED,
@@ -118,9 +121,15 @@ def test_cancelled_retry_reuses_the_same_routing_outcome() -> None:
 
         stream = controller.stream_message(_request(), is_cancelled=is_cancelled)
         first = await anext(stream)
-        assert first.event_type is ChatEventType.ERROR  # missing optional profile
+        assert first.event_type is ChatEventType.STARTED
         second = await anext(stream)
-        assert second.event_type is ChatEventType.DELTA
+        while second.event_type is ChatEventType.ACTIVITY:
+            second = await anext(stream)
+        assert second.event_type is ChatEventType.ERROR  # missing optional profile
+        third = await anext(stream)
+        while third.event_type is ChatEventType.ACTIVITY:
+            third = await anext(stream)
+        assert third.event_type is ChatEventType.DELTA
         cancelled = True
         assert [event async for event in stream] == []
         await _collect(controller)
@@ -129,5 +138,44 @@ def test_cancelled_retry_reuses_the_same_routing_outcome() -> None:
     assert routing.calls == 1
 
 
-async def _collect(controller: ChatController):
-    return [event async for event in controller.stream_message(_request())]
+async def _collect(controller: ChatController, request: ChatMessageRequest | None = None):
+    return [event async for event in controller.stream_message(request or _request())]
+
+
+def test_rag_empty_evidence_without_document_ids_falls_back_to_clarify() -> None:
+    from cowork_agent.domain.project_documents import ProjectDocumentResponse
+
+    class FakeProjectDocs:
+        async def retrieve(self, query: object) -> ProjectDocumentResponse:
+            del query
+            return ProjectDocumentResponse((), degraded=False)
+
+    scope = ChatMemoryScope(user_id="user-1", session_id="session-1")
+    buffer = InMemoryChatSessionBuffer(max_turns=8, ttl_seconds=60)
+    reply = Reply(("Could you clarify?",))
+    routing = Routing(_outcome(ChatRoute.RAG))
+    controller = ChatController(
+        scope=scope,
+        memory=MemoryGateway(
+            scope=scope,
+            session_buffer=buffer,
+            project_documents=FakeProjectDocs(),  # type: ignore[arg-type]
+        ),
+        reply=reply,
+        routing=routing,  # type: ignore[arg-type]
+        new_id=iter(f"id-{index}" for index in range(50)).__next__,
+        clock=lambda: datetime(2026, 8, 12, tzinfo=UTC),
+    )
+
+    events = asyncio.run(_collect(controller))
+
+    assert routing.calls == 1
+    assert reply.contexts[0].response_mode is ChatResponseMode.CLARIFY
+    assert [
+        event.event_type for event in events if event.event_type is not ChatEventType.ACTIVITY
+    ] == [
+        ChatEventType.STARTED,
+        ChatEventType.ERROR,
+        ChatEventType.DELTA,
+        ChatEventType.COMPLETED,
+    ]

@@ -6,9 +6,11 @@ email stored on the Mailbox Connection; the tenant is the fixed local tenant.
 Caller-provided identifiers are never used for authorization decisions.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
+from uuid import uuid4
 
 from cowork_agent.domain import MailboxConnection
 
@@ -20,14 +22,12 @@ class ConnectionNotOwnedError(LookupError):
 
 
 class OpaqueSessionResolver(Protocol):
-    async def resolve(
-        self, token: str, *, now: datetime
-    ) -> "VerifiedPrincipal | None": ...
+    async def resolve(self, token: str, *, now: datetime) -> "VerifiedPrincipal | None": ...
 
 
 @dataclass(frozen=True, slots=True)
 class VerifiedPrincipal:
-    """Authenticated user identity scoping every operation."""
+    """Server-resolved user identity scoping every operation."""
 
     tenant_id: str = LOCAL_TENANT_ID
     user_id: str = "default_user"
@@ -37,6 +37,43 @@ class VerifiedPrincipal:
         """Postgres control-plane name for the verified tenant scope."""
 
         return self.tenant_id
+
+
+class PrincipalRepository(Protocol):
+    async def resolve_or_create_principal(self, identifier: str) -> VerifiedPrincipal: ...
+
+
+class OpaqueSessionIssuer(Protocol):
+    async def create(
+        self,
+        principal: VerifiedPrincipal,
+        *,
+        now: datetime,
+        ttl_seconds: int,
+    ) -> tuple[str, datetime]: ...
+
+
+def _new_guest_id() -> str:
+    return uuid4().hex
+
+
+async def create_guest_session(
+    identities: PrincipalRepository,
+    sessions: OpaqueSessionIssuer,
+    *,
+    ttl_seconds: int,
+    now: datetime | None = None,
+    guest_id_factory: Callable[[], str] = _new_guest_id,
+) -> tuple[VerifiedPrincipal, str]:
+    """Create a browser-isolated guest principal and opaque session token."""
+    guest_identifier = f"guest-{guest_id_factory()}@guest.invalid"
+    principal = await identities.resolve_or_create_principal(guest_identifier)
+    token, _ = await sessions.create(
+        principal,
+        now=now or datetime.now(UTC),
+        ttl_seconds=ttl_seconds,
+    )
+    return principal, token
 
 
 def principal_for_connection(connection: MailboxConnection) -> VerifiedPrincipal:

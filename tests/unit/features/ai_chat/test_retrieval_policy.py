@@ -1,7 +1,5 @@
 """Deterministic retrieval-policy tests."""
 
-import pytest
-
 from cowork_agent.domain.chat_contracts import (
     MAX_CHAT_MESSAGE_LENGTH,
     MAX_EPISODIC_RETRIEVAL_ITEMS,
@@ -80,7 +78,11 @@ def test_cue_matching_is_case_insensitive_and_whitespace_normalized() -> None:
 
     assert isinstance(reads.episodic, EpisodicMemoryQuery)
     assert isinstance(reads.semantic, SemanticMemoryQuery)
-    assert reads.episodic.query == "PREVIOUS TASK and COMPANY HANDBOOK"
+    # The cue matched through the capitals and the runs of spaces, which is what
+    # this asserts. The cue words themselves are not search terms - see
+    # test_episodic_search_text.py - so what is left is the rest, single-spaced.
+    assert reads.episodic.query == "COMPANY HANDBOOK"
+    assert reads.semantic.query == "PREVIOUS TASK and COMPANY HANDBOOK"
 
 
 def test_substrings_are_not_retrieval_intent_cues() -> None:
@@ -97,7 +99,10 @@ def test_enabled_query_is_capped_from_the_normalized_validated_message() -> None
     reads = select_memory_reads(_request(message))
 
     assert isinstance(reads.episodic, EpisodicMemoryQuery)
-    assert reads.episodic.query == message[:MAX_RETRIEVAL_QUERY_LENGTH]
+    # The cap is applied to the message before the cue words are dropped, so a
+    # long message cannot smuggle a long search string through the narrowing.
+    assert reads.episodic.query == message[:MAX_RETRIEVAL_QUERY_LENGTH].removeprefix(prefix)
+    assert len(reads.episodic.query) <= MAX_RETRIEVAL_QUERY_LENGTH
 
 
 def test_policy_limits_are_code_owned_and_within_contract_bounds() -> None:
@@ -119,34 +124,30 @@ def test_policy_limits_are_code_owned_and_within_contract_bounds() -> None:
     assert 1 <= reads.semantic.timeout_ms <= MAX_RETRIEVAL_TIMEOUT_MS
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_explicit_task_policy_accepts_common_unambiguous_requests() -> None:
+    cases = [
         "add a task",
         "draft a task",
         "draft an action plan",
         "add an action plan",
         "turn this into a task",
         "turn this into an action plan",
-    ],
-)
-def test_explicit_task_policy_accepts_common_unambiguous_requests(user_message: str) -> None:
-    assert is_explicit_task_request(_request(user_message)) is True
+    ]
+    for user_message in cases:
+        assert is_explicit_task_request(_request(user_message)) is True
 
 
-@pytest.mark.parametrize(
-    "user_message",
-    [
+def test_explicit_task_policy_rejects_negated_requests() -> None:
+    cases = [
         "do not create a task",
         "don't add a task",
         "never turn this into a task",
         "I don't want you to create a task",
         "never ask me to turn this into a task",
         "Create a task? No, do not.",
-    ],
-)
-def test_explicit_task_policy_rejects_negated_requests(user_message: str) -> None:
-    assert is_explicit_task_request(_request(user_message)) is False
+    ]
+    for user_message in cases:
+        assert is_explicit_task_request(_request(user_message)) is False
 
 
 def test_explicit_task_policy_checks_for_retractions_beyond_the_retrieval_cutoff() -> None:

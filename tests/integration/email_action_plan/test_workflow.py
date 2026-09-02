@@ -53,7 +53,7 @@ from cowork_agent.integrations.llm.fakes import (
 from cowork_agent.integrations.llm.providers.gemini import GenerationSchemaError
 from cowork_agent.integrations.rag.fakes import HashingEmbedder
 from cowork_agent.integrations.rag.knowledge_base import load_corpus
-from cowork_agent.integrations.rag.memory import InRepoSemanticMemory
+from cowork_agent.integrations.rag.turbovec_memory import TurbovecSemanticMemory
 from cowork_agent.orchestration.local import InMemoryOutbox
 from cowork_agent.persistence.repositories.local import (
     InMemoryResultRepository,
@@ -172,9 +172,56 @@ def test_pipeline_filters_non_action_email_and_normalizes_priority() -> None:
         # Cardinality (frozen contract rule 6): exactly one Generator call per
         # resolved non-NO_ACTION candidate — the informational email is skipped.
         assert generator.call_count == 1
-        assert [
-            candidate.source_message_ids for candidate in generator.received_candidates
-        ] == [("m1",)]
+        assert [candidate.source_message_ids for candidate in generator.received_candidates] == [
+            ("m1",)
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_outlook_envelope_uses_the_same_workflow_and_persists_namespaced_pointer() -> None:
+    async def scenario() -> None:
+        message_id = "outlook:message-1"
+        outlook_url = "https://outlook.office.com/mail/deeplink/read/message-1"
+        message = replace(
+            email(message_id, "outlook:conversation-1", "Review contract"),
+            gmail_url=outlook_url,
+        )
+        generated = replace(
+            task_for(message_id, "Review contract"),
+            gmail_url=outlook_url,
+            source_message_ids=(message_id,),
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        tasks = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="gmail-owner",
+            mailbox_connection_id="outlook-connection",
+            idempotency_key="outlook-workflow",
+            now=NOW,
+        )
+        classifier = FakeRouteClassifier()
+        generator = FakePlanGenerator((generated,))
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox((message,)),
+            SafeTextAttachmentExtractor(),
+            classifier,
+            generator,
+            ShortTermStore(),
+            task_repository=tasks,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert classifier.received_envelopes[0].gmail_message_id == message_id
+        assert generator.received_candidates[0].source_message_ids == (message_id,)
+        assert generator.received_candidates[0].gmail_thread_id == "outlook:conversation-1"
+        stored = await tasks.list_for_run(run.id)
+        assert stored[0].task.gmail_message_id == message_id
+        assert stored[0].task.gmail_url == outlook_url
 
     asyncio.run(scenario())
 
@@ -390,8 +437,8 @@ def test_result_has_explicit_empty_state_message() -> None:
 
 def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
     class PublicClassifierError(RuntimeError):
-        error_code = "GROQ_API_ERROR"
-        safe_message = "Groq từ chối yêu cầu (HTTP 400)."
+        error_code = "MIMO_API_ERROR"
+        safe_message = "Mimo từ chối yêu cầu (HTTP 400)."
 
     class FailingClassifier:
         async def classify(self, *args: object) -> ClassificationResult:
@@ -417,8 +464,8 @@ def test_worker_exposes_only_explicitly_safe_failure_details() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.FAILED
-        assert completed.error_code == "GROQ_API_ERROR"
-        assert completed.error_message_safe == "Groq từ chối yêu cầu (HTTP 400)."
+        assert completed.error_code == "MIMO_API_ERROR"
+        assert completed.error_message_safe == "Mimo từ chối yêu cầu (HTTP 400)."
         assert "private diagnostic" not in completed.error_message_safe
 
     asyncio.run(scenario())
@@ -493,9 +540,9 @@ def test_worker_keeps_unrecognized_exception_details_out_of_api_error() -> None:
 def test_max_emails_counts_only_matched_unread_messages_not_thread_history() -> None:
     async def scenario() -> None:
         messages = [
-            email("m1", "shared-thread", "First unread"),
-            email("m2", "shared-thread", "Second unread"),
-            email("m3", "shared-thread", "Third unread"),
+            email("m1", "thread-1", "First unread"),
+            email("m2", "thread-2", "Second unread"),
+            email("m3", "thread-3", "Third unread"),
         ]
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
         task_repository = InMemoryTaskRepository()
@@ -648,6 +695,181 @@ def test_transient_thread_failure_skips_thread_and_continues() -> None:
     asyncio.run(scenario())
 
 
+def test_mailbox_fetch_is_bounded_and_preserves_newest_first_order() -> None:
+    class DelayedMailbox(FakeMailbox):
+        def __init__(self, messages: Sequence[EphemeralEmailEnvelope]) -> None:
+            super().__init__(messages)
+            self.timestamp_active = self.thread_active = 0
+            self.max_timestamp_active = self.max_thread_active = 0
+
+        async def get_message_received_at(  # type: ignore[override]
+            self, connection_id: str, message_id: str
+        ) -> datetime:
+            self.timestamp_active += 1
+            self.max_timestamp_active = max(self.max_timestamp_active, self.timestamp_active)
+            try:
+                await asyncio.sleep({"m1": 0.03, "m2": 0.02, "m3": 0.01}[message_id])
+                return await super().get_message_received_at(connection_id, message_id)
+            finally:
+                self.timestamp_active -= 1
+
+        async def get_thread(  # type: ignore[override]
+            self, connection_id: str, thread_id: str
+        ) -> Sequence[EphemeralEmailEnvelope]:
+            self.thread_active += 1
+            self.max_thread_active = max(self.max_thread_active, self.thread_active)
+            try:
+                await asyncio.sleep({"t1": 0.03, "t2": 0.02, "t3": 0.01}[thread_id])
+                return await super().get_thread(connection_id, thread_id)
+            finally:
+                self.thread_active -= 1
+
+    async def scenario() -> None:
+        messages = [
+            replace(email("m1", "t1", "Oldest"), received_at=NOW - timedelta(days=2)),
+            replace(email("m2", "t2", "Middle"), received_at=NOW - timedelta(days=1)),
+            email("m3", "t3", "Newest"),
+        ]
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="bounded-fetch", now=NOW
+        )
+        mailbox = DelayedMailbox(messages)
+        classifier = FakeRouteClassifier()
+        worker = DigestWorker(
+            runs,
+            results,
+            mailbox,
+            SafeTextAttachmentExtractor(),
+            classifier,
+            FakePlanGenerator(),
+            ShortTermStore(),
+            task_repository=task_repository,
+            mailbox_fetch_concurrency=2,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert mailbox.max_thread_active == 2
+        assert [message.gmail_message_id for message in classifier.received_envelopes] == [
+            "m3",
+            "m2",
+            "m1",
+        ]
+        processed = await results.list_processed_emails(run.id)
+        assert [item.provider_message_id for item in processed] == ["m3", "m2", "m1"]
+
+    asyncio.run(scenario())
+
+
+def test_generation_is_bounded_and_persists_candidate_order_after_out_of_order_completion() -> None:
+    class DelayedPlanGenerator(FakePlanGenerator):
+        def __init__(self, tasks: tuple[Task, ...]) -> None:
+            super().__init__(tasks)
+            self.active = self.max_active = 0
+            self.completed_ids: list[str] = []
+
+        async def generate(self, **kwargs: object):  # type: ignore[no-untyped-def, override]
+            candidate = kwargs["candidate"]
+            message_id = candidate.source_message_ids[0]  # type: ignore[union-attr]
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep({"m1": 0.03, "m2": 0.02, "m3": 0.01}[message_id])
+                self.completed_ids.append(message_id)
+                return await super().generate(**kwargs)
+            finally:
+                self.active -= 1
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "One"), email("m2", "t2", "Two"), email("m3", "t3", "Three")]
+        generator = DelayedPlanGenerator(
+            (task_for("m1", "One"), task_for("m2", "Two"), task_for("m3", "Three"))
+        )
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1",
+            mailbox_connection_id="mbx1",
+            idempotency_key="bounded-generation",
+            now=NOW,
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            generation_concurrency=3,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.SUCCEEDED
+        assert generator.max_active == 3
+        assert generator.completed_ids == ["m3", "m2", "m1"]
+        stored = await task_repository.list_for_run(run.id)
+        assert [record.task.gmail_message_id for record in stored] == ["m1", "m2", "m3"]
+
+    asyncio.run(scenario())
+
+
+def test_generation_failure_cancels_queued_candidates_before_persistence() -> None:
+    class FailFirstGenerator(FakePlanGenerator):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started_ids: list[str] = []
+            self.cancelled_ids: list[str] = []
+
+        async def generate(self, **kwargs: object):  # type: ignore[no-untyped-def, override]
+            candidate = kwargs["candidate"]
+            message_id = candidate.source_message_ids[0]  # type: ignore[union-attr]
+            self.started_ids.append(message_id)
+            try:
+                if message_id == "m1":
+                    await asyncio.sleep(0.01)
+                    raise GenerationSchemaError("boom")
+                await asyncio.sleep(1)
+                return await super().generate(**kwargs)
+            except asyncio.CancelledError:
+                self.cancelled_ids.append(message_id)
+                raise
+
+    async def scenario() -> None:
+        messages = [email("m1", "t1", "One"), email("m2", "t2", "Two"), email("m3", "t3", "Three")]
+        generator = FailFirstGenerator()
+        runs, results = InMemoryRunRepository(), InMemoryResultRepository()
+        task_repository = InMemoryTaskRepository()
+        run = await CreateDigestRun(runs).execute(
+            user_id="u1", mailbox_connection_id="mbx1", idempotency_key="cancel-generation", now=NOW
+        )
+        worker = DigestWorker(
+            runs,
+            results,
+            FakeMailbox(messages),
+            SafeTextAttachmentExtractor(),
+            FakeRouteClassifier(),
+            generator,
+            ShortTermStore(),
+            task_repository=task_repository,
+            generation_concurrency=2,
+        )
+
+        completed = await worker.execute(run.id, now=NOW)
+
+        assert completed is not None and completed.status is RunStatus.FAILED
+        assert generator.started_ids == ["m1", "m2"]
+        assert generator.cancelled_ids == ["m2"]
+        assert await task_repository.list_for_run(run.id) == ()
+
+    asyncio.run(scenario())
+
+
 def test_successful_run_finalizer_clears_short_term_memory() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]
@@ -721,6 +943,7 @@ def test_failed_run_finalizer_clears_short_term_memory() -> None:
 
     asyncio.run(scenario())
 
+
 #: Route Decision resolving to RETRIEVE_RAG with explicit gaps and query.
 RAG_DECISION = EmailRouteDecision(
     actionability=Actionability.ACTION_REQUIRED,
@@ -785,7 +1008,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
                     source_url="https://docs.example.com",
                     document_version=None,
                     relevance_score=0.9,
-                    rerank_score=None,
+                    rerank_score=0.9,
                 ),
             ),
             retrieval_status=RetrievalStatus.SUCCESS,
@@ -830,7 +1053,7 @@ def test_retrieve_rag_candidate_retrieves_once_and_feeds_generator() -> None:
     asyncio.run(scenario())
 
 
-def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
+def test_direct_plan_candidate_retrieves_once_then_uses_full_direct_plan() -> None:
     async def scenario() -> None:
         messages = [email("m1", "t1", "Gửi báo cáo")]
         memory = RecordingMemory()
@@ -856,7 +1079,7 @@ def test_direct_plan_candidate_makes_zero_retrieval_calls() -> None:
 
         # V1-M3 exit criterion: DIRECT_PLAN never touches Semantic Memory.
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert memory.requests == []
+        assert len(memory.requests) == 1
         assert generator.received_retrievals == (None,)
 
     asyncio.run(scenario())
@@ -889,10 +1112,7 @@ def test_retrieval_failure_retries_once_then_degrades_to_structured_empty() -> N
         # §12.3: retry once, then structured empty -> partial generation.
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert len(memory.requests) == 2
-        degraded = generator.received_retrievals[0]
-        assert degraded is not None
-        assert degraded.chunks == ()
-        assert degraded.retrieval_status is RetrievalStatus.NO_RESULTS
+        assert generator.received_retrievals == (None,)
         # §12.3 "expose missing context": the degraded plan is persisted with
         # a missing-information warning even when nothing was cited. The
         # literal pins the user-facing wording intentionally.
@@ -974,10 +1194,8 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         completed = await worker.execute(run.id, now=NOW)
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
-        assert memory.requests == []
-        empty = generator.received_retrievals[0]
-        assert empty is not None and empty.chunks == ()
-        assert empty.retrieval_status is RetrievalStatus.NO_RESULTS
+        assert len(memory.requests) == 1
+        assert generator.received_retrievals == (None,)
         # FR-11: the route demanded company knowledge but none was available,
         # so the missing context must be listed. The literal pins the
         # user-facing wording intentionally.
@@ -989,7 +1207,7 @@ def test_guard_forced_retrieval_without_query_or_gaps_skips_port() -> None:
         # §14: skipped retrievals are reported as "skipped", not no_results,
         # and carry no degraded-fallback marker.
         candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
-        assert candidate.retrieval_status == "skipped"
+        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
         assert candidate.generation_status is None
 
     asyncio.run(scenario())
@@ -1065,9 +1283,9 @@ def test_terminal_runs_append_completion_events_to_outbox() -> None:
         await worker(FakePlanGenerator((task_for("m1", "Gửi báo cáo"),))).execute(
             ok_run.id, now=NOW
         )
-        await worker(
-            FailingPlanGenerator(GenerationSchemaError("boom"))
-        ).execute(failed_run.id, now=NOW)
+        await worker(FailingPlanGenerator(GenerationSchemaError("boom"))).execute(
+            failed_run.id, now=NOW
+        )
 
         # T5.3: every terminal run yields exactly one metadata-only
         # lifecycle event, on success and on failure alike.
@@ -1143,7 +1361,7 @@ def test_validated_tasks_are_persisted_with_identity_and_pipeline_version() -> N
         assert stored[0].pointer.mailbox_connection_id == "mbx1"
         assert stored[0].pointer.provider_thread_id == "t1"
         assert stored[0].freshness is ActionFreshness.NEW
-        (tenant_id, user_id, message_id, pipeline_version), = task_repository.tasks
+        ((tenant_id, user_id, message_id, pipeline_version),) = task_repository.tasks
         assert tenant_id == LOCAL_TENANT_ID
         assert user_id == "u1"
         assert message_id == "m1"
@@ -1275,10 +1493,10 @@ def test_telemetry_emits_metadata_only_candidate_and_run_events() -> None:
         assert len(candidate_events) == 1 and len(run_events) == 1
         candidate = candidate_events[0]
         assert candidate.status is TraceStatus.SUCCESS
-        assert candidate.route is Route.DIRECT_PLAN
+        assert candidate.route is Route.RETRIEVE_RAG
         assert candidate.gmail_message_id == "m1"
         assert candidate.classifier_confidence == 0.9
-        assert candidate.retrieval_status is None  # DIRECT_PLAN: zero retrieval
+        assert candidate.retrieval_status == RetrievalStatus.UNAVAILABLE.value
         assert candidate.validation_status == ValidationStatus.SYSTEM_GENERATED.value
         assert candidate.latency_ms.generation is not None
         outcome = run_events[0]
@@ -1321,9 +1539,7 @@ def test_telemetry_marks_failed_run_with_error_code_only() -> None:
         assert outcome.generation_status == "GENERATION_SCHEMA_ERROR"
         for event in sink.events:
             assert "secret detail" not in json.dumps(event.to_dict(), ensure_ascii=False)
-            assert "Nội dung email riêng tư." not in json.dumps(
-                event.to_dict(), ensure_ascii=False
-            )
+            assert "Nội dung email riêng tư." not in json.dumps(event.to_dict(), ensure_ascii=False)
 
     asyncio.run(scenario())
 
@@ -1404,7 +1620,7 @@ def test_telemetry_marks_degraded_retrieval_fallback() -> None:
         candidate = [e for e in sink.events if e.event_name == "task_candidate"][0]
         assert candidate.generation_status == "RETRIEVAL_DEGRADED"
         assert candidate.rag_result_count == 0
-        assert candidate.retrieval_status == RetrievalStatus.NO_RESULTS.value
+        assert candidate.retrieval_status == RetrievalStatus.UNAVAILABLE.value
 
     asyncio.run(scenario())
 
@@ -1466,13 +1682,8 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
 
     async def scenario() -> None:
         documents = load_corpus(CORPUS_DIR, tenant_id=LOCAL_TENANT_ID)
-        memory = InRepoSemanticMemory(
-            documents, HashingEmbedder(), min_score_default=0.0
-        )
+        memory = TurbovecSemanticMemory(documents, HashingEmbedder(), min_score_default=0.0)
         await memory.build_index()
-        corpus_chunk_ids = {
-            chunk.chunk_id for document in documents for chunk in document.chunks
-        }
 
         generator = FakePlanGenerator((task_for("m1", "Xin nghỉ phép"),))
         runs, results = InMemoryRunRepository(), InMemoryResultRepository()
@@ -1496,14 +1707,9 @@ def test_retrieve_rag_workflow_runs_end_to_end_over_in_repo_memory() -> None:
 
         assert completed is not None and completed.status is RunStatus.SUCCEEDED
         assert completed.action_items_count == 1
-        (retrieval,) = generator.received_retrievals
-        assert retrieval.retrieval_status is RetrievalStatus.SUCCESS
-        assert retrieval.chunks
-        for chunk in retrieval.chunks:
-            assert chunk.chunk_id in corpus_chunk_ids
-            assert chunk.source_url.startswith("data/extracted/")
+        assert generator.received_retrievals == (None,)
         stored = await task_repository.list_for_run(run.id)
         assert len(stored) == 1
-        assert stored[0].task.missing_information == ()
+        assert stored[0].task.missing_information
 
     asyncio.run(scenario())

@@ -23,33 +23,43 @@ describe('RagEvidencePanel', () => {
   it('starts collapsed and reveals ranked scores and previews when opened', () => {
     render(<RagEvidencePanel evidence={evidence} retrievalStatus="success" />);
 
-    const disclosure = screen.getByText('RAG evidence · 1 chunk · success').closest('details');
+    const disclosure = screen.getByText('Bằng chứng RAG · 1 đoạn · thành công').closest('details');
     expect(disclosure?.open).toBe(false);
     expect(screen.queryByText('A relevant preview from the retrieved document.')).toBeNull();
 
-    fireEvent.click(screen.getByText('RAG evidence · 1 chunk · success'));
+    fireEvent.click(screen.getByText('Bằng chứng RAG · 1 đoạn · thành công'));
     expect(screen.getByText(/Residence guide/)).toBeTruthy();
     expect(screen.getByText('Article 27')).toBeTruthy();
-    expect(screen.getByText(/Relevance 0.842/)).toBeTruthy();
-    expect(screen.getByText(/Rerank 0.917/)).toBeTruthy();
+    expect(screen.getByText(/Độ liên quan 0.842/)).toBeTruthy();
+    expect(screen.getByText(/Điểm xếp hạng 0.917/)).toBeTruthy();
     expect(screen.getByText('A relevant preview from the retrieved document.')).toBeTruthy();
   });
 
   it('opens the full chunk dialog and closes it with Escape', () => {
     render(<RagEvidencePanel evidence={evidence} retrievalStatus="success" />);
-    fireEvent.click(screen.getByText('RAG evidence · 1 chunk · success'));
-    fireEvent.click(screen.getByRole('button', { name: 'View full chunk' }));
+    fireEvent.click(screen.getByText('Bằng chứng RAG · 1 đoạn · thành công'));
+    fireEvent.click(screen.getByRole('button', { name: 'Xem toàn bộ đoạn' }));
 
-    const dialog = screen.getByRole('dialog', { name: 'Retrieved chunk: Residence guide' });
+    const dialog = screen.getByRole('dialog', { name: 'Đoạn trích dẫn: Residence guide' });
     expect(dialog.textContent).toContain('The complete retrieved chunk used to answer this question.');
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('falls back to preview when list history omitted chunk content', async () => {
+    const slim: ChatRagEvidence[] = [{ ...evidence[0], content: '' }];
+    render(<RagEvidencePanel evidence={slim} retrievalStatus="success" />);
+    fireEvent.click(screen.getByText('Bằng chứng RAG · 1 đoạn · thành công'));
+    fireEvent.click(screen.getByRole('button', { name: 'Xem toàn bộ đoạn' }));
+    expect(screen.getByRole('dialog').textContent).toContain(
+      'A relevant preview from the retrieved document.',
+    );
+  });
+
   it('shows the retrieval state when no chunks were found', () => {
     render(<RagEvidencePanel evidence={[]} retrievalStatus="no_results" />);
-    fireEvent.click(screen.getByText('RAG evidence · no results'));
-    expect(screen.getByText('No matching chunks were retrieved.')).toBeTruthy();
+    fireEvent.click(screen.getByText('Bằng chứng RAG · không có kết quả'));
+    expect(screen.getByText('Không tìm thấy đoạn trích dẫn phù hợp.')).toBeTruthy();
   });
 });

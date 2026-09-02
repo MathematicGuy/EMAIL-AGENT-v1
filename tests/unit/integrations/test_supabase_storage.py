@@ -25,7 +25,10 @@ def test_signed_urls_use_server_secret_and_canonical_private_object_path() -> No
         )
         await client.aclose()
 
-        assert url == "https://project.supabase.co/storage/v1/object/upload/sign/project-documents/key?token=x"
+        assert (
+            url
+            == "https://project.supabase.co/storage/v1/object/upload/sign/project-documents/key?token=x"
+        )
 
     asyncio.run(scenario())
     request = calls[0]

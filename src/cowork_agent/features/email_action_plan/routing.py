@@ -22,6 +22,7 @@ from cowork_agent.domain.target_contracts import (
 )
 
 from .correlation import TaskCandidate
+from .evidence import EvidenceStatus
 
 #: Policy Guard table (PRD-v1 FR-07): each Expected Document Type maps to the
 #: reason code that forces retrieval. Cross-checked against
@@ -204,4 +205,74 @@ def resolve_candidate_route(
         ),
         forced_by_guard=any(resolution.forced_by_guard for resolution in winners),
         mode="partial" if any(resolution.mode == "partial" for resolution in winners) else "full",
+    )
+
+
+def candidate_requires_processing(candidate: TaskCandidate) -> bool:
+    """Return whether a candidate has any non-informational decision.
+
+    This deliberately ignores the classifier's provisional route: retrieve-first
+    routing evaluates evidence only after this inexpensive NO_ACTION filter.
+    """
+    return any(
+        decision.actionability not in _NO_ACTION_ACTIONABILITY
+        for _message_id, decision in candidate.decisions
+    )
+
+
+def resolve_candidate_after_retrieval(
+    candidate: TaskCandidate,
+    evidence_status: EvidenceStatus,
+    *,
+    confidence_floor: float = 0.5,
+) -> RouteResolution:
+    """Resolve the final route after the evidence gate has run.
+
+    A healthy retrieval with no acceptable Cohere evidence may use a full
+    direct plan only when every actionable member is self-sufficient and has
+    confidence strictly above the configured floor.  Policy guards remain
+    visible, but become partial direct plans when retrieval cannot support
+    them; weak chunks are never passed to generation.
+    """
+    actionable = tuple(
+        decision
+        for _message_id, decision in candidate.decisions
+        if decision.actionability not in _NO_ACTION_ACTIONABILITY
+    )
+    if not actionable:
+        return RouteResolution(
+            route=Route.NO_ACTION,
+            reason_codes=(ReasonCode.NO_ACTION,),
+            forced_by_guard=False,
+            mode="full",
+        )
+
+    guard_results = tuple(apply_policy_guards(decision) for decision in actionable)
+    guard_fired = any(fired for fired, _codes in guard_results)
+    reason_codes = tuple(
+        dict.fromkeys(
+            code
+            for decision, (_fired, guard_codes) in zip(actionable, guard_results, strict=True)
+            for code in (*decision.reason_codes, *guard_codes)
+        )
+    )
+    if evidence_status is EvidenceStatus.SUPPORTED:
+        return RouteResolution(Route.RETRIEVE_RAG, reason_codes, guard_fired, "full")
+    if evidence_status is EvidenceStatus.UNAVAILABLE:
+        return RouteResolution(Route.RETRIEVE_RAG, reason_codes, guard_fired, "partial")
+
+    all_sufficient = all(
+        decision.email_is_sufficient and decision.confidence > confidence_floor
+        for decision in actionable
+    )
+    allows_full_direct = (
+        all_sufficient
+        and not guard_fired
+        and all(decision.actionability is not Actionability.UNCLEAR for decision in actionable)
+    )
+    return RouteResolution(
+        route=Route.DIRECT_PLAN,
+        reason_codes=reason_codes,
+        forced_by_guard=guard_fired,
+        mode="full" if allows_full_direct else "partial",
     )

@@ -108,6 +108,8 @@ class JinaEmbeddingAdapter:
         for start in range(0, len(texts), batch_size):
             batch_texts = list(texts[start : start + batch_size])
             keys = await self._settings.rotator.candidates(self._settings.max_attempts)
+            if not keys:
+                raise ValueError("All Jina API keys are exhausted or unavailable")
             response: Mapping[str, object] | None = None
             last_error: Exception | None = None
             for key in keys:
@@ -131,10 +133,15 @@ class JinaEmbeddingAdapter:
                     break
                 except Exception as exc:
                     last_error = exc
-                    if (
-                        _is_rate_limit_error(exc)
-                        and self._settings.rotate_on_rate_limit
-                    ):
+                    if _is_insufficient_balance_error(exc) or _is_unrecoverable_auth_error(exc):
+                        logger.warning(
+                            "Jina embedding out of tokens / invalid key for key %s; "
+                            "permanently evicting from key pool",
+                            mask_api_key(key),
+                        )
+                        await self._settings.rotator.mark_exhausted(key)
+                        continue
+                    if _is_rate_limit_error(exc) and self._settings.rotate_on_rate_limit:
                         logger.warning(
                             "Jina embedding rate limit for key %s; rotating key",
                             mask_api_key(key),
@@ -161,6 +168,30 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "429" in message or "rate limit" in message or "too many requests" in message
 
 
+def _is_insufficient_balance_error(exc: Exception) -> bool:
+    """True only for Jina's empty-wallet 403, not Cloudflare or other forbids."""
+    if not isinstance(exc, HTTPError) or exc.code != 403:
+        return False
+    payload = _http_error_body(exc).lower()
+    return "authz_insufficient_balance" in payload or "insufficient account balance" in payload
+
+
+def _is_unrecoverable_auth_error(exc: Exception) -> bool:
+    """True for 401 Unauthorized or 402 Payment Required indicating key is dead/invalid."""
+    code = getattr(exc, "code", getattr(exc, "status_code", getattr(exc, "status", None)))
+    return code in {401, 402}
+
+
+def _http_error_body(exc: HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except Exception:
+        return str(exc)
+    if not raw:
+        return str(exc)
+    return raw.decode("utf-8", errors="replace")
+
+
 class GeminiEmbeddingAdapter:
     """Production embeddings via the Gemini API with model-safe batching."""
 
@@ -181,7 +212,7 @@ class GeminiEmbeddingAdapter:
             self._dimensions: int | None = settings.dimensions
             self._batch_size = settings.batch_size
             self._timeout_seconds: float | None = float(settings.timeout_seconds)
-            self._max_attempts = min(settings.max_attempts, 2)
+            self._max_attempts = settings.max_attempts
         else:
             self._dimensions = None
             self._batch_size = _MAX_BATCH_CONTENTS
@@ -205,12 +236,21 @@ class GeminiEmbeddingAdapter:
             # text separately so every project-document chunk receives its own
             # embedding. Earlier text models retain their supported batching.
             requests = (
-                ([text] for text in batch)
-                if "gemini-embedding-2" in self._model
-                else (batch,)
+                [[text] for text in batch] if "gemini-embedding-2" in self._model else [batch]
             )
-            for contents in requests:
-                response = await self._embed_content(contents, task=task)
+            sem = asyncio.Semaphore(4)
+
+            async def _embed_with_semaphore(
+                contents: list[str],
+                semaphore: asyncio.Semaphore = sem,
+            ) -> types.EmbedContentResponse:
+                async with semaphore:
+                    return await self._embed_content(contents, task=task)
+
+            responses = await asyncio.gather(
+                *(_embed_with_semaphore(contents) for contents in requests)
+            )
+            for response in responses:
                 for item in response.embeddings or ():
                     if item.values is None:
                         raise ValueError("Embedding response contained an empty vector")
@@ -234,9 +274,7 @@ class GeminiEmbeddingAdapter:
         config = (
             types.EmbedContentConfig(
                 task_type=(
-                    "RETRIEVAL_DOCUMENT"
-                    if task == "retrieval.passage"
-                    else "RETRIEVAL_QUERY"
+                    "RETRIEVAL_DOCUMENT" if task == "retrieval.passage" else "RETRIEVAL_QUERY"
                 ),
                 output_dimensionality=self._dimensions,
             )
@@ -270,6 +308,7 @@ class GeminiEmbeddingAdapter:
                 last_error.__cause__ = exc
                 if not self._settings.rotate_on_rate_limit:
                     raise last_error from exc
+                await asyncio.sleep(2.0)
         raise last_error or RuntimeError("No Gemini API key was attempted")
 
 

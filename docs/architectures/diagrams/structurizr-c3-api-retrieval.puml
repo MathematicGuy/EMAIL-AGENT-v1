@@ -1,0 +1,79 @@
+@startuml
+title <size:24>Component View: Cowork Agent - Control Plane API</size>\n<size:24>Level 3. Hybrid retrieval over the company corpus and per-project document indexes.</size>
+
+set separator none
+left to right direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+!include <C4/C4_Component>
+
+System(EmbeddingRerankingProviders, "Embedding & Reranking Providers", $descr="Jina AI embeddings and cross-encoder reranker, Gemini embeddings, and Cohere reranking.", $tags="", $link="")
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container_Boundary("CoworkAgent.ControlPlaneAPI_boundary", "Control Plane API", $tags="") {
+    AddBoundaryTag("AI Chat", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_1, "AI Chat", $tags="AI Chat") {
+      Component(CoworkAgent.ControlPlaneAPI.ChatController, "Chat Controller", $techn="features/ai_chat/controller.py", $descr="Owns the turn: classify, retrieve, assemble context, generate, persist, and emit the bounded execution trace.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Email Action Plan", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_2, "Email Action Plan", $tags="Email Action Plan") {
+      Component(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, "Email Action Plan Workflow", $techn="features/email_action_plan/workflow.py", $descr="Single-turn, memory-free pipeline: classify, route, retrieve, generate, validate, persist.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Platform", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_3, "Platform", $tags="Platform") {
+      Component(CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "LLM Provider Factory", $techn="integrations/llm", $descr="Selects and orders chat-completion providers, shares prompts and parsers, and degrades on provider failure.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persistence Repositories", $techn="persistence/repositories", $descr="Postgres and SQLite implementations behind one repository port set, plus migrations.", $tags="", $link="")
+    }
+
+    AddBoundaryTag("Retrieval", $borderColor="#cccccc", $fontColor="#cccccc", $borderStyle="dashed")
+    Boundary(group_4, "Retrieval", $tags="Retrieval") {
+      Component(CoworkAgent.ControlPlaneAPI.HybridRetriever, "Hybrid Retriever", $techn="integrations/rag/hybrid.py, bm25.py, rrf.py", $descr="Dense cosine search fused with Okapi BM25 through Reciprocal Rank Fusion (k=60).", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.QueryTransformDiversification, "Query Transform & Diversification", $techn="integrations/rag/query_transform.py, mmr.py", $descr="Query guard, domain prefix expansion, HyDE hypothetical documents and MMR diversification.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.CrossEncoderReranker, "Cross-Encoder Reranker", $techn="integrations/rag/jina_reranker.py, reranker.py", $descr="Precision reranking of retrieval candidates before the evidence gate.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.EmbeddingAdapter, "Embedding Adapter", $techn="integrations/rag/embeddings.py", $descr="Provider-neutral embedding calls with dimension and model configuration.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.StructureAwareChunker, "Structure-Aware Chunker", $techn="integrations/rag/markdown_chunking.py", $descr="Heading-promoting hierarchical chunking with atomic tables and page coordinates carried through.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.TurbovecStoreAdapter, "Turbovec Store Adapter", $techn="integrations/rag/turbovec_memory.py", $descr="In-process 4-bit TurboQuant index load, query and persistence.", $tags="", $link="")
+      Component(CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, "Project Document Retriever", $techn="integrations/rag/project_documents.py", $descr="Workspace/user/project-isolated retrieval over per-project indexes. Never falls back to the company index.", $tags="", $link="")
+    }
+
+  }
+
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  ContainerDb(CoworkAgent.TurbovecVectorIndex, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+  Container(CoworkAgent.CompanyKnowledgeCorpus, "Company Knowledge Corpus", $techn="Committed Markdown (data/extracted/*.md)", $descr="The authoritative ground-truth knowledge base. Committed to the repository; email content never enters it.", $tags="", $link="")
+}
+
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.HybridRetriever, "Retrieves company evidence on the RETRIEVE_RAG route through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "Classifies and generates action plans through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmailActionPlanWorkflow, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Persists runs, tasks and plan outcomes through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.HybridRetriever, "Retrieves company evidence through, when the flag is on", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, "Retrieves project document evidence through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ChatController, CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "Streams reasoning and reply tokens through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.QueryTransformDiversification, CoworkAgent.ControlPlaneAPI.LLMProviderFactory, "Generates HyDE hypothetical documents through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.HybridRetriever, CoworkAgent.ControlPlaneAPI.QueryTransformDiversification, "Expands and diversifies the query with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.HybridRetriever, CoworkAgent.ControlPlaneAPI.EmbeddingAdapter, "Embeds the query with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.HybridRetriever, CoworkAgent.ControlPlaneAPI.CrossEncoderReranker, "Reranks fused candidates with", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.HybridRetriever, CoworkAgent.ControlPlaneAPI.TurbovecStoreAdapter, "Searches dense vectors through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, CoworkAgent.ControlPlaneAPI.TurbovecStoreAdapter, "Searches the per-project index through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.ProjectDocumentRetriever, CoworkAgent.ControlPlaneAPI.PersistenceRepositories, "Reads ACL-filtered chunk rows through", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.EmbeddingAdapter, EmbeddingRerankingProviders, "Requests embeddings from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.CrossEncoderReranker, EmbeddingRerankingProviders, "Requests cross-encoder scores from", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.TurbovecStoreAdapter, CoworkAgent.TurbovecVectorIndex, "Loads and persists", $techn="In-process file I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.StructureAwareChunker, CoworkAgent.CompanyKnowledgeCorpus, "Chunks the committed corpus at bootstrap from", $techn="File I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.StructureAwareChunker, CoworkAgent.ControlPlaneAPI.TurbovecStoreAdapter, "Feeds chunks and coordinates to", $techn="", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI.PersistenceRepositories, CoworkAgent.ControlPlaneDatabase, "Reads from and writes to", $techn="asyncpg / sqlite3", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

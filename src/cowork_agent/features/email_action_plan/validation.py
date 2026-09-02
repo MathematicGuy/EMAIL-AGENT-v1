@@ -239,7 +239,10 @@ def validate_action_plan(
                 SEVERITY_FATAL,
             )
         )
-    if task.actionability not in _PLAN_ACTIONABILITY:
+    allows_unclear_partial = (
+        task.actionability is Actionability.UNCLEAR and resolution.mode == "partial"
+    )
+    if task.actionability not in _PLAN_ACTIONABILITY and not allows_unclear_partial:
         violations.append(
             _violation(
                 ACTIONABILITY_NOT_ALLOWED,

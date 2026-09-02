@@ -23,6 +23,7 @@ from cowork_agent.domain.chat_contracts import (
     SemanticMemoryQuery,
     TaskEpisode,
 )
+from cowork_agent.domain.models import CalendarConnection
 
 if TYPE_CHECKING:
     from .generation_context import GenerationContext
@@ -40,6 +41,19 @@ class ChatTaskProposal:
     model_id: str | None
     prompt_version: str | None
     confidence: float | None
+    # Server-resolved, not provider-supplied: the provider names an ordinal into
+    # the advisory episodes it was shown, and the reply adapter turns that into
+    # the id of the episode this task replaces.
+    supersedes: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedReportArtifact:
+    """Artifact document generated during chat to be saved as report."""
+
+    filename: str
+    title: str
+    content: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +64,11 @@ class ChatReplyChunk:
     task_proposal: ChatTaskProposal | None = None
     citation_ids: tuple[str, ...] = ()
     conversation_title: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    reasoning_mode: str | None = None
+    reasoning: str | None = None
+    generated_report: GeneratedReportArtifact | None = None
 
 
 class ChatReplyPort(Protocol):
@@ -83,17 +102,40 @@ class ChatSessionBufferPort(Protocol):
 
 
 class ChatHistoryPort(Protocol):
-    """Durable, UI-facing record of completed chat turns."""
+    """Durable, UI-facing lifecycle record for chat turns."""
 
-    async def write_turn(
-        self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str
-    ) -> None: ...
+    async def begin_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        idempotency_key: str,
+        title: str,
+    ) -> ChatTurn: ...
 
-    async def list_turns(self, scope: ChatMemoryScope) -> tuple[ChatTurn, ...]: ...
+    async def update_turn(
+        self,
+        scope: ChatMemoryScope,
+        turn: ChatTurn,
+        *,
+        title: str | None = None,
+    ) -> ChatTurn: ...
 
-    async def titles_for(
+    async def write_turn(self, scope: ChatMemoryScope, turn: ChatTurn, *, title: str) -> None: ...
+
+    async def list_turns(
+        self, scope: ChatMemoryScope, *, connection: object | None = None
+    ) -> tuple[ChatTurn, ...]: ...
+
+    async def list_owned_turns(
+        self, *, session_id: str, tenant_id: str, user_id: str
+    ) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]] | None: ...
+
+    async def titles_for(self, scopes: Sequence[ChatMemoryScope]) -> Mapping[str, str]: ...
+
+    async def latest_turns_for(
         self, scopes: Sequence[ChatMemoryScope]
-    ) -> Mapping[str, str]: ...
+    ) -> Mapping[str, ChatTurn]: ...
 
 
 class DeclarativeMemoryPort(Protocol):
@@ -146,3 +188,17 @@ class SemanticChatMemoryPort(Protocol):
     async def read_semantic_context(
         self, namespace: MemoryNamespace, query: SemanticMemoryQuery
     ) -> Mapping[str, object] | None: ...
+
+
+class CalendarConnectionRepository(Protocol):
+    """Per-user Google Calendar grants.
+
+    `get_for_user` rather than `list_for_user`: one active grant per user, so a
+    second connect replaces the first. The mailbox repository lists because a
+    person legitimately has several mailboxes; nobody needs two grants against
+    the same calendar account.
+    """
+
+    async def upsert(self, connection: CalendarConnection) -> CalendarConnection: ...
+    async def get_for_user(self, user_id: str) -> CalendarConnection | None: ...
+    async def delete_for_user(self, user_id: str) -> bool: ...

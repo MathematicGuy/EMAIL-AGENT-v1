@@ -1,11 +1,21 @@
 # RAG Evaluation — Status Report
 
-> **Document status:** current snapshot as of 2026-08-13, revised after the golden-set
-> and evaluation-harness work landed (C4, C5, C6 are implemented — see
+> **Document status:** re-verified claim by claim against the checkout on branch `main`
+> (commit `9ed895c`) on **2026-08-18**. Statements that no longer matched the code are
+> corrected in place and tagged **[re-verified 2026-08-18]**; the previous snapshot was
+> 2026-08-17, revised after the golden-set and evaluation-harness work landed (C4, C5, C6
+> are implemented — see
 > [SPEC](../../../tasks/specs/SPEC-rag-golden-set-and-eval.md) / [PLAN](../../../tasks/plans/PLAN-rag-golden-set-and-eval.md)).  
 > Earlier revisions of this file described a **3-document** corpus including
 > `dang_ky_tam_tru.md`, and chunking by **H2 only**. Both are stale: the committed corpus is
-> **17 documents / 1,066 chunks** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
+> **17 documents** (with legacy E2E test scoped to 6 documents) and chunking splits on **H1 and H2**. Corrected throughout.
+>
+> **[re-verified 2026-08-18] The chunk count in every 2026-08-17 figure below is stale.**
+> `load_corpus(data/extracted)` now yields **949 chunks**, not 1,069. The structure-aware
+> chunking fixes (`f480906`, `0d06d4d`, both 2026-08-17) landed *after* the saved reports
+> were generated at 08:42 and 08:58 UTC, so both committed baselines score an index that no
+> longer exists. Treat every current-corpus number here as un-reproducible until the harness
+> is re-run.
 > Purpose: map what is already tested vs. what is missing for the full Email-RAG quality evaluation story.  
 > The evaluation pipeline covers three conceptually distinct layers:  
 > **Routing** (does the classifier decide that RAG is needed?) →  
@@ -26,13 +36,14 @@ flowchart TD
     B1 --> C["Layer 2 · Semantic Retrieval"]
     B2 --> C
 
-    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nchunk by H1/H2 sections, source_url shape"]
-    C --> C2["✅ test_rag.py · ACL filtering\nTenant scope applied before scoring;\nforeign chunks excluded"]
+    C --> C1["✅ test_rag.py · corpus loading\ntests/unit/integrations/rag/test_rag.py\nLoad 17 committed .md docs,\nstructure-aware chunking + breadcrumb, source_url shape"]
+    C --> C2["⚠️ test_rag.py · scope filtering\nRE-VERIFIED 2026-08-18: no tenant test\nremains after f2d20e0; coverage is now\ndocument_id / year / month allowlist"]
     C --> C3["✅ test_rag.py · index mechanics\nScore ordering, top_k truncation,\ntimeout status, null memory fallback"]
-    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2375"]
-    C --> C5["✅ test_rag_retrieval_golden.py\n8 legacy email-body cases scoped to 6 docs;\nreal InRepoSemanticMemory in the\nDigestWorker graph, 3 xfail under fake"]
+    C --> C4["✅ evaluate_retrieval.py · Hit@K / MRR\n100-case golden set (32 legacy baseline),\nmetrics and score-evidence sweeps by probe\nFresh hashing smoke: section MRR 0.2272"]
+    C --> C5["⚠️ test_rag_retrieval_golden.py\n8 legacy email-body cases scoped to 6 docs;\nreal (but DEPRECATED) InRepoSemanticMemory;\n5 xfail markers: 3 fail, 2 XPASS = rotten"]
     C --> C6["✅ Historical 4-way live comparison\ndense / bm25 / hybrid / hybrid+rerank\n32-case, 6-document baseline only;\nnot current-corpus acceptance evidence"]
     C --> C7["❌ OPEN: abstention\nFresh hashing-dense run returns chunks\nfor all 12 unanswerable queries;\nrate 0.0 at min_score=0.2"]
+    C --> C8["❌ RE-VERIFIED 2026-08-18\nReranker is NOT in the runtime path.\nbootstrap.py builds hybrid with reranker=None;\nJina exists only inside evaluate_retrieval.py"]
 
     C1 --> D["Layer 3 · Grounded Generation"]
     C2 --> D
@@ -41,23 +52,24 @@ flowchart TD
     D --> D1["✅ test_workflow.py · wiring\ntests/integration/email_action_plan/test_workflow.py\nretrieve_once_and_feeds_generator;\nRetrieval request shape, knowledge_gaps,\ntenant scope forwarded correctly"]
     D --> D2["✅ test_workflow.py · degradation\nRetry-once then structured empty;\nmissing_information field populated;\npartial run on retrieval failure"]
     D --> D3["✅ test_workflow.py · bogus citations\nvalidation_strips_bogus_citations;\ncitations not returned by retrieval\nare stripped before persistence"]
-    D --> D4["❌ MISSING: Citation accuracy eval\nNo test verifies plan steps cite\nchunks that were actually retrieved\nfrom a real corpus query"]
+    D --> D4["⚠️ PARTIAL (re-verified 2026-08-18)\ncitation_accuracy.py + 10 unit tests exist\n(Jaccard overlap step-vs-chunk);\nno corpus-level eval or committed report"]
     D --> D5["❌ MISSING: Plan faithfulness eval\nNo grounding check — plan may contain\nclaims not supported by retrieved chunks;\nRAGAS / custom faithfulness metric absent"]
     D --> D6["❌ MISSING: Context relevance score\nNo measure of retrieved-chunk relevance\nto the email's stated need before\nthe plan is generated"]
 
     style B1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style B2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style D1 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style D2 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style D3 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C4 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
-    style C5 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
     style C6 fill:#2d6a2d,color:#fff,stroke:#2d6a2d
+    style C2 fill:#8a5a00,color:#fff,stroke:#8a5a00
+    style C5 fill:#8a5a00,color:#fff,stroke:#8a5a00
     style C7 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
-    style D4 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
+    style C8 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
+    style D4 fill:#8a5a00,color:#fff,stroke:#8a5a00
     style D5 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
     style D6 fill:#8b1a1a,color:#fff,stroke:#8b1a1a
 ```
@@ -70,19 +82,20 @@ flowchart TD
 - ❌ **Corpus-Matched Routing Fixtures**: Missing test emails that explicitly ask about ingested procedures (like CCCD renewal) to prove routing works on real domain content.
 
 **Layer 2 · Retrieval (The Librarian)**
-- ✅ **Corpus Loader & Chunking (`test_rag.py`)**: Tests that markdown guidebooks load cleanly and split into H1/H2 section chunks (ensures data ingest reliability).
-- ✅ **Tenant ACL Filtering (`test_rag.py`)**: Tests that private company guidebooks are never leaked to unauthorized users/tenants (ensures data privacy).
+- ✅ **Corpus Loader & Chunking (`test_rag.py`, `test_markdown_chunking.py`, `test_structure_normalizer.py`)**: Tests that markdown guidebooks load cleanly and split along the recovered heading hierarchy, that each chunk carries its breadcrumb, and that tables, fenced code and list items are never cut mid-block.
+- ⚠️ **Scope Filtering (`test_rag.py`)** *[re-verified 2026-08-18]*: The tenant-ACL tests this line claimed no longer exist — `f2d20e0` (2026-08-13) removed multi-tenancy, and `test_rag.py` now tests the `document_ids` / `years` / `months` allowlist instead. Cross-tenant leakage is untested across all three files (`test_rag.py`, `test_bm25.py`, `test_hybrid.py`) because the concept was retired; per-user and per-document ACL remain unimplemented on this plane.
 - ✅ **Search Index Mechanics (`test_rag.py`)**: Tests score sorting, top-k limits, timeouts, and fallback handling when search fails (ensures basic system stability).
 - ✅ **Retrieval Metrics Harness (Hit@K / MRR)**: 100 labeled questions (32 in the legacy baseline) measure document and section retrieval; fresh hashing runs prove harness mechanics, while fresh real-embedding evidence is still needed for semantic acceptance.
-- ✅ **End-to-End Retrieval Fixtures**: 8 legacy email-body cases over six documents go through the real pipeline and must land on the correct document.
+- ⚠️ **End-to-End Retrieval Fixtures** *[re-verified 2026-08-18]*: 8 legacy email-body cases over six documents go through the real graph, but on the **deprecated** `InRepoSemanticMemory` — the production store (`TurbovecSemanticMemory` + hybrid) is never exercised end to end. Two xfail markers (`q-006`, `q-014`) now XPASS and must be removed.
 - ✅ **Historical Hybrid Search Benchmark**: Keyword, AI vector, fused, and reranked search were measured on the legacy 32-case / six-document corpus. The retained comparison is not current-corpus acceptance evidence.
-- ❌ **Abstention on Unanswerable Questions**: The system never says "I don't know" — every retriever returns confident-looking chunks for questions the guidebooks cannot answer.
+- ❌ **Abstention on Unanswerable Questions**: The system never says "I don't know" — every retriever returns confident-looking chunks for questions the guidebooks cannot answer. *[re-verified 2026-08-18: still true; `abstention_rate: 0.0` with 12 false answers in both committed 2026-08-17 reports. The harness itself does measure it — `abstention_stats()` also reports `false_abstention_rate` — so this is a product gap, not a missing metric.]*
+- ❌ **Reranking Is Measured But Never Shipped** *[new, 2026-08-18]*: `bootstrap.py:97` builds `HybridSemanticMemory(documents, embedder, dense=dense)` with no reranker. `JinaRerankerAdapter` is imported only by `scripts/evaluate_retrieval.py`. The best baseline on record (hybrid + rerank, section MRR 0.955) therefore describes a configuration production does not run.
 
 **Layer 3 · Generation (The Plan Writer)**
 - ✅ **Pipeline Integration Wiring (`test_workflow.py`)**: Tests that retrieved guidebook chunks are correctly passed to the AI plan writer (ensures plumbing works).
 - ✅ **Graceful Error Degradation (`test_workflow.py`)**: Tests that if search fails, the system warns the user instead of breaking or crashing (ensures high reliability).
 - ✅ **Fake Citation Stripping (`test_workflow.py`)**: Tests that citations to non-existent document chunks are automatically removed before saving (prevents broken links).
-- ❌ **Citation Accuracy Verification**: Missing automated check verifying that plan steps accurately cite retrieved chunk content (bogus citation ID stripping tested in `test_workflow.py`).
+- ⚠️ **Citation Accuracy Verification** *[re-verified 2026-08-18]*: No longer missing at unit level — `features/email_action_plan/citation_accuracy.py` computes per-step Jaccard overlap between instruction text and the cited chunk, covered by 10 cases in `tests/unit/features/test_citation_accuracy.py`. What is still missing is a corpus-level run: nothing calls `inspect_citation_accuracy()` outside its own test, so no report exists.
 - ❌ **Plan Faithfulness / Hallucination Check**: Missing automated checks (e.g. RAGAS) to ensure generated action plans don't fabricate steps absent from the guidebooks.
 - ❌ **Context Relevance Scoring**: Missing evaluation measuring if retrieved chunks are actually relevant to the email's request before generating the plan.
 
@@ -99,7 +112,7 @@ flowchart TD
 | **Scope** | All labeled fixture cases under `tests/fixtures/routing/` |
 | **Mode** | `--dry-run` (deterministic fake, perfect by construction) or live LLM provider |
 | **Metrics** | Actionability accuracy, per-Route precision & recall, **False-Negative Retrieval Rate** |
-| **Output** | JSON report written to `docs/evaluations/baselines/routing-eval-<date>.json` |
+| **Output** | JSON report written to `evaluations/baselines/routing-eval-<date>.json` |
 | **PRD ref** | PRD-v1 §16 Milestone 2 exit obligation (task T2.6) |
 
 The **False-Negative Retrieval Rate** (`false_negative_retrieval.rate`) is the primary quality gate: it tracks how often emails labeled `RETRIEVE_RAG` were incorrectly routed to `DIRECT_PLAN` or `NO_ACTION`. This is PRD-v1 §14's highest-risk error class.
@@ -122,10 +135,10 @@ Covers the resolve-route ladder (actionability → sufficiency → guard → rou
 
 | Test File | What it checks |
 |---|---|
-| `test_rag.py` | Corpus loading (17 `.md` docs), H1/H2 chunking, ACL filtering before embedding, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism |
-| `test_bm25.py` | Tenant-scoped BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization, ACL filtering before scoring |
+| `test_rag.py` | Corpus loading (17 `.md` docs), structure-aware chunking with breadcrumbs, score ordering/top_k, timeout status, `NullSemanticMemory`, `HashingEmbedder` determinism, and the `document_ids` / `years` / `months` allowlist. **[re-verified 2026-08-18] It contains no tenant/ACL test** — the word `tenant` does not appear in the file. |
+| `test_bm25.py` | BM25 lexical ranking, exact term match, Markdown/case/punctuation normalization. **[re-verified 2026-08-18] No tenant/ACL coverage** — the word `tenant` does not appear in this file either, although `bm25.py` still accepts a `tenant_id` argument. |
 | `test_rrf.py` | Reciprocal Rank Fusion, 1-based position rank scoring (`RRF_K=60`), duplicate handling, score fusion |
-| `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, tenant ACL gate, Jina reranker integration |
+| `test_hybrid.py` | `HybridSemanticMemory` composition of dense + BM25 + RRF, candidate pool limits, query assembly, and Jina reranker integration (12 rerank assertions). **[re-verified 2026-08-18] No tenant ACL gate is tested.** The reranker path is well covered here yet never constructed by `bootstrap.py`, so these assertions guard code the runtime does not reach. |
 | `test_jina_reranker.py` | `JinaRerankerAdapter` cross-encoder reranker boundary, HTTP transport, custom User-Agent, exception fallback to original candidate order, `FakeJinaReranker` |
 
 > **Important caveat:** every test using `HashingEmbedder` — a deterministic fake that converts text to a numeric hash vector — validates *mechanics* (index building, scoring pipeline, ACL logic, chunk filtering), but **not semantic similarity**. Ranking order under it is arbitrary, which is why no test there asserts *which* document wins; an earlier `cap_lai_cccd` assertion was removed once H1 chunking exposed it as a chunk-boundary coincidence. Semantic quality is measured by the golden set below, under a real embedder.
@@ -141,17 +154,19 @@ Two design constraints make the numbers meaningful and must not be simplified aw
 
 The loader validates every label against live `load_corpus` output, so a re-chunk fails loudly instead of silently scoring 0.0.
 
-**Fresh offline harness run (2026-08-13):** `python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,066 chunks** with the deterministic `HashingEmbedder`. It reported document MRR **0.5809**, section MRR **0.2375**, section Recall@5 **0.3333**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
+**Fresh offline harness run (2026-08-17) — superseded:** `uv run python scripts/evaluate_retrieval.py --dry-run` evaluated 100 cases over **17 documents / 1,069 chunks** with the deterministic `HashingEmbedder`. *[re-verified 2026-08-18: the same call now loads **949 chunks**; the chunker changed after this run, so these figures cannot be reproduced and must be regenerated before use.]* It reported document MRR **0.5576**, section MRR **0.2272**, section Recall@5 **0.3913**, and abstention **0.000** across 12 unanswerable cases. These numbers validate the current corpus/fixture/harness path only; hashing vectors do not measure semantic retrieval quality.
 
 ### ✅ C5 — End-to-end email → retrieval fixture (closed 2026-08-09)
 
 `tests/integration/email_action_plan/test_rag_retrieval_golden.py` replays the **8 legacy golden cases carrying an `email_body`** through the real `DigestWorker` graph: `FakeMailbox` → `FakeRouteClassifier` → **real `InRepoSemanticMemory`** over the six legacy corpus documents → generator. The assertion is on the chunk the generator actually received, so nothing between routing and generation can drop or reorder retrieval and still pass.
 
-Offline it runs on `HashingEmbedder`; 3 cases (`q-001`, `q-006`, `q-026`) cannot rank correctly under a non-semantic embedder and are `xfail` with the measured reason. **All 7 answerable cases pass under `--embedder gemini`.** The assertion was deliberately not weakened to "appears somewhere in the top 5", which would rebuild the blind spot this work exists to remove.
+Offline it runs on `HashingEmbedder`; cases that cannot rank correctly under a non-semantic embedder are `xfail` with the measured reason. **All 7 answerable cases pass under `--embedder gemini`.**
+
+> **[re-verified 2026-08-18] The xfail inventory in the previous revision was wrong on every count.** The file marks **5** cases, not 3, and they are `q-001`, `q-006`, `q-014`, `q-016` (hashing) plus `q-029` (abstention) — `q-026` is not among them. A live run reports `3 xfailed, 2 xpassed`: **`q-006` and `q-014` now pass under `HashingEmbedder`** after the structure-aware chunking work, so their markers are rotten and should be deleted (`strict=False` is why they do not fail the suite). The retriever is also the **deprecated** `InRepoSemanticMemory` (`DeprecationWarning: use TurbovecSemanticMemory`), so this fixture does not cover the store the API and worker actually build. The assertion was deliberately not weakened to "appears somewhere in the top 5", which would rebuild the blind spot this work exists to remove.
 
 ### ✅ C6 — Historical Hybrid Comparative Benchmark (retained)
 
-Four variants, same 32 legacy cases and six-document corpus, reports in `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
+Four variants, same 32 legacy cases and six-document corpus, reports in `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json`. The table below is historical context only: it predates the 100-case / 17-document corpus and must not be used as the current benchmark or acceptance gate.
 
 **Section-level MRR — the discriminating metric:**
 
@@ -178,6 +193,15 @@ Four findings, in order of importance:
 4. **`hybrid + rerank` is the best configuration measured**, and is the only one that clears dense on the aggregate. It still trails dense on `semantic` (0.792 vs 0.917), which at n=6 is roughly 1.5 rank-slips — worth re-measuring on a larger semantic slice before treating it as settled. It also costs ~2.3× dense's p50 latency.
 
 > **Reranker defect found and fixed during this measurement.** The first `--rerank` run returned metrics byte-identical to plain hybrid. The cause was not agreement: Cloudflare fronts `api.jina.ai` and rejects `urllib`'s default User-Agent with `HTTP 403 error code: 1010`, and `JinaRerankerAdapter.rerank` catches every exception and returns the untouched candidate order. **The reranker had never executed a single successful call**, while the report still recorded `reranker: jina`. Fixed by sending an explicit `User-Agent` (`jina_reranker.py`). The silent-fallback behaviour is correct for production — retrieval must not fail because reranking is down — but it is undetectable from the outside, and every number in the table above depends on a fallback that reports nothing. Surfacing whether the reranker actually ran is tracked as an open observability gap.
+>
+> **[re-verified 2026-08-18] The gap is larger than "observability".** `bootstrap.py::_wrap_hybrid`
+> constructs `HybridSemanticMemory(documents, embedder, dense=dense)` and passes **no** reranker,
+> so the company-RAG runtime never reranks at all; `JinaRerankerAdapter` is referenced only by
+> `scripts/evaluate_retrieval.py`. `SemanticRetrievalResponse` also has just four fields
+> (`query_id`, `chunks`, `retrieval_status`, `latency_ms`) with nowhere to publish a rerank
+> signal. The unified `rag/reranker.py` (Cohere-default, with key rotation) has **no caller in
+> `src/` at all**. Consequence for decision-making: the strongest row in the table above
+> measures a stack that is not shipped.
 
 ### ❌ C7 — Abstention on unanswerable queries (open)
 
@@ -213,15 +237,24 @@ All of the above use `RecordingMemory` (a canned fake) or `FakePlanGenerator`. T
 
 ### ❌ Missing
 
-#### D4 — Citation Accuracy Evaluation
+#### D4 — Citation Accuracy Evaluation *(downgraded from Missing to Partial, 2026-08-18)*
 
-No test verifies that a plan step referencing `cit_X` is actually discussing the content of the chunk with `chunk_id == cit_X`. A model could hallucinate content while correctly placing a valid citation ID.
+The claim "no test verifies that a plan step referencing `cit_X` is actually discussing the
+content of the chunk with `chunk_id == cit_X`" is **no longer true**.
+`src/cowork_agent/features/email_action_plan/citation_accuracy.py` provides
+`inspect_citation_accuracy(task, retrieval_response)`, returning a `CitationAccuracyReport`
+with `found_count`, `missing_count`, `mean_overlap`, and a per-citation `CitationOverlap`
+(Jaccard word overlap between the step instruction and the cited chunk).
+`tests/unit/features/test_citation_accuracy.py` covers it with 10 cases.
 
-**What is needed:** a golden (email, retrieved_chunks, expected_plan) triple where the plan text is independently verified to reflect the chunk content.
+**What is still needed:** the function has no caller outside its own test. Nothing runs it over
+a real corpus query, and no report is committed — so there is still no *evidence*, only a
+measurement primitive. Wiring it into `evaluate_retrieval.py` (or a Layer-3 harness) is now a
+small job rather than a from-scratch one.
 
 #### D5 — Plan Faithfulness / Grounding Score
 
-No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The target architecture references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet for email action plans. The Chat-RAG area has an opt-in `--ragas` path (see [CHAT-RAG](../CHAT-RAG/README.md)) that has never been run.
+No automated check that the generated action plan's procedure steps are *grounded* in the retrieved chunks and do not introduce unsupported claims. The reference design references RAGAS as an option (see [EMAIL-RAG-ARCHITECHTURE.md](../../references/understand/EMAIL-RAG-ARCHITECHTURE.md) §11), but no RAGAS harness exists yet for email action plans. The Chat-RAG area has an opt-in `--ragas` path (see [CHAT-RAG](../CHAT-RAG/README.md)) that has never been run.
 
 **Metrics to add:** RAGAS Faithfulness, RAGAS Answer Relevance, or a custom LLM-as-judge check.
 
@@ -241,10 +274,10 @@ implemented evaluation mechanics from runtime guarantees.
 | Evaluation area | Current status | Evidence boundary |
 |---|---|---|
 | C7 abstention | Runtime missing; evaluation-only support available | The fresh hashing dense run returned chunks for all 12 current unanswerable cases (`abstention_rate = 0.000`). `evaluate_retrieval.py` emits score evidence and absolute-score/margin sweeps, but it does not select or apply a runtime gate. |
-| Citation accuracy | Missing | No automated claim-to-chunk lexical or semantic citation accuracy test exists (`test_workflow.py` validates bogus citation ID stripping). |
+| Citation accuracy | Partial *(2026-08-18)* | `citation_accuracy.py` + `test_citation_accuracy.py` measure step-to-chunk Jaccard overlap at unit level. No caller outside the test, no corpus-level run, no committed report. |
 | Plan faithfulness | Missing | No automated claim-to-evidence or generated-plan faithfulness evaluation exists. |
-| Context relevance | Partial labels | The 32-case golden set supports document/section Hit@K, MRR, and Recall@5. It does not provide exhaustive semantic relevance judgments for every returned chunk against the email need. |
-| Reranker evidence | Partial | Retained Jina baseline results are useful only when reranking actually ran. Runtime fallback preserves candidate order but does not publish an applied/fallback signal. |
+| Context relevance | Partial labels | The 100-case golden set (32 legacy) supports document/section Hit@K, MRR, and Recall@5. It does not provide exhaustive semantic relevance judgments for every returned chunk against the email need. |
+| Reranker evidence | Evaluation-only *(2026-08-18)* | Reranking exists in `scripts/evaluate_retrieval.py` only. `bootstrap.py` wires the runtime hybrid with `reranker=None`, so no production request is ever reranked and there is no applied/fallback signal to publish. Retained Jina baselines describe an unshipped configuration. |
 
 ### Interpretation rule
 
@@ -262,21 +295,22 @@ context-relevance judgments.
 | Routing | Route resolver unit tests | ✅ Available | `tests/unit/features/test_routing.py` |
 | Routing | Fixtures grounded in corpus content | ❌ Missing | — |
 | Retrieval | Corpus loading & chunking | ✅ Available | `tests/unit/integrations/rag/test_rag.py` |
-| Retrieval | ACL / tenant filtering | ✅ Available | `tests/unit/integrations/rag/test_rag.py`, `test_bm25.py`, `test_hybrid.py` |
+| Retrieval | ACL / tenant filtering | ⚠️ Retired *(2026-08-18)* | Multi-tenancy removed in `f2d20e0`. None of `test_rag.py`, `test_bm25.py`, `test_hybrid.py` contains the string `tenant`; only the source modules still take the argument. |
 | Retrieval | Score ordering, top_k, timeout | ✅ Available | `tests/unit/integrations/rag/test_rag.py` |
 | Retrieval | BM25, RRF & Hybrid unit tests | ✅ Available | `tests/unit/integrations/rag/` (`test_bm25.py`, `test_rrf.py`, `test_hybrid.py`, `test_jina_reranker.py`) |
 | Retrieval | Real-embedding Hit@K / MRR | ✅ Available | `scripts/evaluate_retrieval.py`, `tests/fixtures/rag/` |
 | Retrieval | Email → corpus retrieval fixture | ✅ Available | `tests/integration/email_action_plan/test_rag_retrieval_golden.py` |
-| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `docs/evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
+| Retrieval | Hybrid retrieval benchmark (BM25 + dense + RRF) | ✅ Historical baseline | `evaluations/baselines/retrieval-eval-2026-08-08-gemini-*.json` (32 cases / 6 documents) |
 | Retrieval | Abstention on unanswerable queries | ❌ Missing | measured at 0.000 for every retriever |
+| Retrieval | Reranking in the runtime path | ❌ Missing *(2026-08-18)* | `bootstrap.py:97` passes no reranker; Jina lives only in `scripts/evaluate_retrieval.py` |
 | Generation | Retrieval wiring (request shape, feed to generator) | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
 | Generation | Degradation on retrieval failure | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
 | Generation | Bogus citation stripping | ✅ Available | `tests/integration/email_action_plan/test_workflow.py` |
-| Generation | Citation accuracy (plan ↔ chunk content) | ❌ Missing | — |
+| Generation | Citation accuracy (plan ↔ chunk content) | ⚠️ Partial *(2026-08-18)* | `citation_accuracy.py`, `tests/unit/features/test_citation_accuracy.py` — primitive only, never run over a corpus |
 | Generation | Plan faithfulness / grounding (RAGAS or judge) | ❌ Missing | — |
 | Generation | Context relevance before generation | ❌ Missing | — |
 
-**12 of 19 evaluation items are covered. The current 100-case / 17-document retrieval harness is implemented and has fresh offline mechanics evidence. Current-corpus semantic acceptance across dense, BM25, RRF, and Jina reranking remains unverified pending fresh live-provider runs; abstention (C7) also remains open.
+**[re-verified 2026-08-18] 12 of 20 evaluation items are covered; 2 previously-green items (tenant ACL, end-to-end fixture) were downgraded and 1 new gap (reranking absent from the runtime) was added. The current 100-case / 17-document retrieval harness is implemented and has fresh offline mechanics evidence. Current-corpus semantic acceptance across dense, BM25, RRF, and Jina reranking remains unverified pending fresh live-provider runs; abstention (C7) also remains open.
 Layer 3 (generation fidelity) still lacks citation accuracy, faithfulness, and context-relevance measurement.**
 
 ---
@@ -289,13 +323,17 @@ Items 1 and 2 of the previous revision (golden set, end-to-end fixture) are **do
 
 2. **Fix abstention (C7).** A cosine floor of 0.2 does not separate "relevant" from "same language, unrelated topic" for Vietnamese administrative text. Calibrate the threshold against the 12 unanswerable cases and 88 answerable cases jointly — the golden set already contains everything needed to pick a number — or add a margin rule (top score must exceed the runner-up by some delta). Re-measure `abstention_rate` afterwards; it is currently 0.000 and any real value is an improvement.
 
-3. **Make silent reranker failure visible.** `JinaRerankerAdapter` swallowed a total outage for an entire evaluation run and still reported `reranker: jina`. The fallback should stay, but the harness report and the runtime path both need to record whether reranking actually happened.
+3. **Decide whether the reranker ships at all, before making it observable.** *[revised 2026-08-18]* The original wording assumed the runtime reranks and merely fails to say so. It does not rerank: `bootstrap.py::_wrap_hybrid` passes no reranker. Either wire `JinaRerankerAdapter` (or the unused Cohere-default `rag/reranker.py`) into the runtime and then add the applied/fallback signal, or delete the adapters and stop publishing rerank baselines as product evidence. Keeping the current split — best-measured stack absent from production — is the worst of the three.
 
-4. **Add a faithfulness smoke test** using an LLM-as-judge or deterministic keyword check: given a known chunk text and a generated plan step, assert the step text is a paraphrase of the chunk rather than a fabrication. This is the biggest remaining hole — Layer 3 has no quality measurement at all.
+4. **Regenerate the current-corpus baselines.** Both committed 2026-08-17 reports score a 1,069-chunk index; the corpus now chunks to 949. Re-run before any number in this file is quoted.
 
-5. **Grow the `semantic` slice beyond n=6** before treating the dense-vs-rerank gap on that slice as settled; one rank slip currently moves it by 0.08.
+5. **Delete the two rotten xfail markers.** `q-006` and `q-014` XPASS in `test_rag_retrieval_golden.py`, and migrate that fixture off the deprecated `InRepoSemanticMemory` so the end-to-end path covers the store production builds.
 
-6. **Wire RAGAS** (optional, production milestone) when `data/extracted/` grows well beyond six documents and real-world query hit-rate needs tracking across versions.
+6. **Add a faithfulness smoke test** using an LLM-as-judge or deterministic keyword check: given a known chunk text and a generated plan step, assert the step text is a paraphrase of the chunk rather than a fabrication. This is the biggest remaining hole — Layer 3 has no quality measurement at all.
+
+7. **Grow the `semantic` slice beyond n=6** before treating the dense-vs-rerank gap on that slice as settled; one rank slip currently moves it by 0.08.
+
+8. **Wire RAGAS** (optional, production milestone) when `data/extracted/` grows well beyond six documents and real-world query hit-rate needs tracking across versions.
 
 ---
 
@@ -322,4 +360,27 @@ Scan, image-based, and mixed PDFs currently return
 `mistral_not_configured`; no Mistral request is made until OCR is enabled and
 an API key is provided. There is no Gmail-attachment ingestion or upload API,
 and this ingestion capability is not yet included in the retrieval-quality
-golden set or live-Qdrant benchmark.
+golden set or the live-provider benchmark. *[re-verified 2026-08-18: "live-Qdrant benchmark" was stale — Qdrant was deleted in `c441822` / `5a2c87d` (2026-08-14/15); `RAG_STORE_PROVIDER=qdrant` now degrades to `NullSemanticMemory`.]*
+
+
+---
+
+## Structure-Aware Chunking Run (2026-08-17)
+
+`scripts/evaluate_retrieval.py --embedder hashing --retriever hybrid`, before/after on the same
+corpus and harness (baseline measured in a detached `HEAD` worktree). No slice regressed.
+
+| | doc hit@1 | doc hit@3 | doc mrr | doc recall@5 | sec hit@1 | sec mrr | sec recall@5 |
+|---|---|---|---|---|---|---|---|
+| before | 0.6818 | 0.7955 | 0.7409 | 0.8295 | 0.3261 | 0.4362 | 0.6087 |
+| after | 0.7045 | 0.8636 | 0.7862 | 0.9091 | 0.3478 | 0.4467 | 0.6304 |
+
+Both rows score the 46 section labels that existed at the time. The saved baseline
+[`retrieval-eval-2026-08-17-hashing-hybrid.json`](../baselines/retrieval-eval-2026-08-17-hashing-hybrid.json)
+was produced after labelling 40 statute cases, so it scores **86** labels and its section-level
+figures (hit@1 0.3256, mrr 0.4273) are not comparable with the table above - the metric now
+covers the hardest documents in the corpus instead of skipping them.
+
+Still open: `excluded_case_count` is 2, not 0 - q-019 and q-021 (`dang-ky-xe`) carry no section
+label. Both sit inside the locked 32-case legacy block. q-019's note is stale: it records that
+heading lines are excluded from chunk text, which is no longer true.

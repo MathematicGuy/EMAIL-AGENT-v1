@@ -12,26 +12,37 @@ dependencies = [
   "aiohttp>=3.12,<4",
   "cryptography>=44,<51",
   "fastapi>=0.115,<1",
+  "fpdf2>=2.8,<3",
   "google-api-python-client>=2.160,<3",
+  "google-auth-httplib2>=0.2,<1",
   "google-auth-oauthlib>=1.2,<2",
   "google-genai>=1.0,<2",
+  "httplib2>=0.22,<1",
   "langfuse>=3,<4",
   "langgraph>=0.6,<2",
   "httpx>=0.27,<1",
   "mistralai>=1,<2",
   "pdf-inspector>=1.14,<2",
+  "pdfplumber>=0.11,<1",
+  "Levenshtein>=0.26,<1",
   "python-docx>=1,<2",
   "python-dotenv>=1.0,<2",
   "python-multipart>=0.0.20,<1",
   "turbovec>=0.8.0",
+  # Windows ships no IANA tz database; zoneinfo needs this to resolve
+  # timezone keys such as Asia/Ho_Chi_Minh.
+  "tzdata>=2025.1; sys_platform == 'win32'",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "coverage>=7",
   "mypy>=1.14",
+  "pypdf>=6,<7",
   "pytest>=8",
   "pytest-asyncio>=0.24",
+  "pytest-cov>=6",
   "pytest-xdist>=3.5",
   "ruff>=0.9",
 ]
@@ -51,31 +62,43 @@ mail-todo-ingest-knowledge = "cowork_agent.ingestion_cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"cowork_agent.integrations.report_pdf" = ["fonts/*.ttf", "fonts/OFL.txt", "fonts/SOURCE.md"]
+
 [tool.pytest.ini_options]
 # "." because test modules import shared helpers as `tests.fixtures.*`; without
 # it collection only works under `python -m pytest`, which happens to add the CWD.
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 norecursedirs = [".git", ".venv", "docs", ".cowork", "build", "dist"]
-# -n 4 --dist loadfile: measured 34 s vs 56 s serial. 6 and 8 workers are no
-#   faster -- the floor is each worker's ~5 s `cowork_agent` import. `loadfile`
-#   keeps a file on one worker so module-scoped fixtures are built once and
-#   port-binding tests never race.
+# Worker count is NOT in addopts. `-n 4 --dist loadgroup` used to live here,
+# which made `-p no:xdist` a usage error (those flags need the plugin) and
+# pushed every agent onto `-n 0`. Defaults are applied by tests/xdist_plugin.py
+# (loaded first via -p) and again in tests/conftest.py if the plugin is loaded.
+# Persistence stays one xdist_group so DROP SCHEMA public CASCADE never runs
+# on two workers.
 # -m "not live": the live E2E module needs a real server plus Gmail OAuth and
 #   costs 20 s of boot before it can even skip. tests/conftest.py prints a
 #   yellow banner naming whatever was deselected, so this cannot rot silently.
 # --strict-markers: an unregistered marker is a typo that would otherwise make a
 #   test silently vanish from every `-m` selection.
-addopts = "-n 4 --dist loadfile -m 'not live' --strict-markers"
+# There is deliberately no `extended` tier. Splitting the suite deselected 382
+#   tests to save 1.5 s on the default run (15.9 s -> 14.4 s) while making the two
+#   halves cost 25.3 s together, so a regression in anything it hid could merge
+#   green. The Postgres modules it was meant to defer already skip in ~1 s without
+#   a server. Keep one suite; if something is genuinely too slow, make it faster.
+addopts = "-p tests.xdist_plugin -m 'not live' --strict-markers"
 markers = [
     "slow: >1s of wall clock on its own. Run with `-m slow`.",
     "live: needs a real external process/service. Deselected by default; skips loudly when absent.",
     "serial: must not run under xdist (spawns subprocesses or binds a fixed port).",
+    "xdist_group(name): pin tests that share a destructive resource to one xdist worker.",
 ]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+exclude = ["scratch", "scratchpad", ".venv", ".git", "var"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

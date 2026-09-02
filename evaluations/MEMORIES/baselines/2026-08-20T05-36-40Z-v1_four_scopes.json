@@ -1,0 +1,161 @@
+{
+  "schema_version": "2.1.0",
+  "probe_set_id": "v1_four_scopes",
+  "probe_count": 8,
+  "provider": "dry-run",
+  "model": "scripted",
+  "ran_at": "2026-08-20T05:36:40.442567+00:00",
+  "run_key": "31200adfcfea",
+  "nonce": "",
+  "per_scope": {
+    "short_term": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 0,
+      "earned_it": 2
+    },
+    "long_term": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    },
+    "episodic": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    },
+    "semantic": {
+      "probes": 2,
+      "pass": 2,
+      "stale": 0,
+      "invented": 0,
+      "miss": 0,
+      "no_answer": 0,
+      "unreadable": 0,
+      "dangerous": 0,
+      "broken": 0,
+      "leaked": 0,
+      "did_nothing": 1,
+      "earned_it": 1
+    }
+  },
+  "verdicts": [
+    {
+      "probe": "ep_restraint_01",
+      "targets": "episodic",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 0
+    },
+    {
+      "probe": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 0
+    },
+    {
+      "probe": "sem_restraint_01",
+      "targets": "semantic",
+      "test": "restraint",
+      "full": "pass",
+      "ablated": "pass",
+      "control": "pass",
+      "verdict": "scope_did_nothing",
+      "certain": false,
+      "latency_ms": 0
+    },
+    {
+      "probe": "ep_recall_01",
+      "targets": "episodic",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 0
+    },
+    {
+      "probe": "lt_recall_01",
+      "targets": "long_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 0
+    },
+    {
+      "probe": "sem_recall_01",
+      "targets": "semantic",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 0
+    },
+    {
+      "probe": "st_recall_01",
+      "targets": "short_term",
+      "test": "recall",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 0
+    },
+    {
+      "probe": "st_update_01",
+      "targets": "short_term",
+      "test": "update",
+      "full": "pass",
+      "ablated": "miss",
+      "control": "miss",
+      "verdict": "scope_earned_it",
+      "certain": true,
+      "latency_ms": 0
+    }
+  ],
+  "leaked_probes": [],
+  "needs_reading": 3,
+  "seed_failures": []
+}

@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-08-17T08:29:57.162Z",
+  "git_sha": null,
+  "mode": "mocked",
+  "browser": "chromium",
+  "samples": [
+    {
+      "scenario": "mocked-instant-cold-switch",
+      "mode": "mocked",
+      "from_chat_id": null,
+      "to_chat_id": "session-latency-a",
+      "click_to_first_message_visible_ms": 342,
+      "click_to_response_ms": 304,
+      "response_to_first_message_visible_ms": 38,
+      "request_duration_ms": 18,
+      "payload_bytes": 300,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": null,
+      "messages_fetch_count_after": 1
+    },
+    {
+      "scenario": "mocked-2500ms-user-report",
+      "mode": "mocked",
+      "from_chat_id": null,
+      "to_chat_id": "session-latency-b",
+      "click_to_first_message_visible_ms": 3143,
+      "click_to_response_ms": 2783,
+      "response_to_first_message_visible_ms": 360,
+      "request_duration_ms": 2525,
+      "payload_bytes": 300,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": null,
+      "messages_fetch_count_after": 1
+    },
+    {
+      "scenario": "mocked-repeat-first-a",
+      "mode": "mocked",
+      "from_chat_id": null,
+      "to_chat_id": "session-latency-a",
+      "click_to_first_message_visible_ms": 1110,
+      "click_to_response_ms": 688,
+      "response_to_first_message_visible_ms": 422,
+      "request_duration_ms": 420,
+      "payload_bytes": 300,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": null,
+      "messages_fetch_count_after": 1
+    },
+    {
+      "scenario": "mocked-repeat-a-to-b",
+      "mode": "mocked",
+      "from_chat_id": "session-latency-a",
+      "to_chat_id": "session-latency-b",
+      "click_to_first_message_visible_ms": 877,
+      "click_to_response_ms": 475,
+      "response_to_first_message_visible_ms": 402,
+      "request_duration_ms": 425,
+      "payload_bytes": 300,
+      "turn_count": 1,
+      "loading_indicator_observed": true,
+      "stale_content_visible_ms": 0,
+      "messages_fetch_count_after": 2
+    },
+    {
+      "scenario": "mocked-repeat-b-to-a",
+      "mode": "mocked",
+      "from_chat_id": "session-latency-b",
+      "to_chat_id": "session-latency-a",
+      "click_to_first_message_visible_ms": 66,
+      "click_to_response_ms": 475,
+      "response_to_first_message_visible_ms": 0,
+      "request_duration_ms": 427,
+      "payload_bytes": 300,
+      "turn_count": 1,
+      "loading_indicator_observed": false,
+      "stale_content_visible_ms": 0,
+      "messages_fetch_count_after": 3
+    },
+    {
+      "scenario": "mocked-heavy-payload",
+      "mode": "mocked",
+      "from_chat_id": null,
+      "to_chat_id": "session-latency-heavy",
+      "click_to_first_message_visible_ms": 363,
+      "click_to_response_ms": 290,
+      "response_to_first_message_visible_ms": 73,
+      "request_duration_ms": 18,
+      "payload_bytes": 31633,
+      "turn_count": 16,
+      "loading_indicator_observed": false,
+      "stale_content_visible_ms": null,
+      "messages_fetch_count_after": 1
+    }
+  ],
+  "summary": [
+    {
+      "scenario": "mocked-instant-cold-switch",
+      "n": 1,
+      "p50_click_to_visible_ms": 342,
+      "p95_click_to_visible_ms": 342,
+      "max_click_to_visible_ms": 342,
+      "p50_request_duration_ms": 18,
+      "p50_frontend_after_response_ms": 38
+    },
+    {
+      "scenario": "mocked-2500ms-user-report",
+      "n": 1,
+      "p50_click_to_visible_ms": 3143,
+      "p95_click_to_visible_ms": 3143,
+      "max_click_to_visible_ms": 3143,
+      "p50_request_duration_ms": 2525,
+      "p50_frontend_after_response_ms": 360
+    },
+    {
+      "scenario": "mocked-repeat-first-a",
+      "n": 1,
+      "p50_click_to_visible_ms": 1110,
+      "p95_click_to_visible_ms": 1110,
+      "max_click_to_visible_ms": 1110,
+      "p50_request_duration_ms": 420,
+      "p50_frontend_after_response_ms": 422
+    },
+    {
+      "scenario": "mocked-repeat-a-to-b",
+      "n": 1,
+      "p50_click_to_visible_ms": 877,
+      "p95_click_to_visible_ms": 877,
+      "max_click_to_visible_ms": 877,
+      "p50_request_duration_ms": 425,
+      "p50_frontend_after_response_ms": 402
+    },
+    {
+      "scenario": "mocked-repeat-b-to-a",
+      "n": 1,
+      "p50_click_to_visible_ms": 66,
+      "p95_click_to_visible_ms": 66,
+      "max_click_to_visible_ms": 66,
+      "p50_request_duration_ms": 427,
+      "p50_frontend_after_response_ms": 0
+    },
+    {
+      "scenario": "mocked-heavy-payload",
+      "n": 1,
+      "p50_click_to_visible_ms": 363,
+      "p95_click_to_visible_ms": 363,
+      "max_click_to_visible_ms": 363,
+      "p50_request_duration_ms": 18,
+      "p50_frontend_after_response_ms": 73
+    }
+  ]
+}

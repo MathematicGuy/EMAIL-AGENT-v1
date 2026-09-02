@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Protocol
@@ -101,6 +101,7 @@ class ChatRoutingService:
         timeout_ms: int = 10_000,
         max_attempts: int = 2,
         tool_axis_enabled: bool = False,
+        available_tools: Collection[str] = (),
         prompt_version: str = INTENT_PROMPT_VERSION,
         sink: IntentRoutingSink | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -114,6 +115,7 @@ class ChatRoutingService:
         self._timeout_seconds = timeout_ms / 1000
         self._max_attempts = max_attempts
         self._tool_axis_enabled = tool_axis_enabled
+        self._available_tools = frozenset(available_tools)
         self._prompt_version = prompt_version
         self._sink = sink or NullIntentRoutingSink()
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -158,12 +160,15 @@ class ChatRoutingService:
             decision,
             has_ready_documents=bool(ready_documents),
             tool_axis_enabled=self._tool_axis_enabled,
+            available_tools=self._available_tools,
             classifier_retried=retried,
             fallback_used=fallback_used,
             prompt_version=self._prompt_version,
         )
         if IntentReasonCode.TOOL_REQUESTED_BUT_DISABLED in outcome.reason_codes:
             self._emit("chat.intent.tool_downgraded", scope, outcome, started)
+        if IntentReasonCode.TOOL_NOT_AVAILABLE in outcome.reason_codes:
+            self._emit("chat.intent.tool_unknown", scope, outcome, started)
         if IntentReasonCode.NO_READY_DOCUMENTS in outcome.reason_codes:
             self._emit("chat.intent.precondition_downgraded", scope, outcome, started)
         self._emit("chat.intent.classified", scope, outcome, started)

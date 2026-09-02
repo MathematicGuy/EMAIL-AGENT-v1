@@ -1,160 +1,109 @@
-"""Runnable FastAPI entry point for Gmail OAuth connection management."""
+"""Runnable FastAPI entry point for mailbox and Cowork workflows."""
 
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from typing import cast
+from zoneinfo import ZoneInfo
 
-import httpx
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, Field
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+)
 
+import cowork_agent.integrations.llm.langfuse_bootstrap as _langfuse_bootstrap  # noqa: F401
+from cowork_agent.composition import (
+    CalendarRuntime,
+    CoworkRuntime,
+    build_calendar,
+    build_chat,
+    build_control_plane,
+    build_email_rag,
+    build_evaluation,
+    build_mailbox,
+    degrade_email_rag,
+    runtime,
+    upgrade_email_rag_providers,
+)
 from cowork_agent.config import (
     ChatIntentSettings,
-    ChatMemorySettings,
-    FaucetSettings,
-    GeminiEmbeddingSettings,
-    GeminiSettings,
+    EvaluationSettings,
     GmailSettings,
-    GroqSettings,
-    JinaEmbeddingSettings,
-    SessionSettings,
-    SupabaseStorageSettings,
+    OutlookSettings,
     UserDocumentsSettings,
     database_url,
     load_runtime_environment,
 )
-from cowork_agent.domain import DigestRun, MailboxConnection
 from cowork_agent.domain.chat_contracts import ChatMemoryScope
-from cowork_agent.domain.target_contracts import (
-    RetrievalFilters,
-    RetrievalLimits,
-    SemanticRetrievalRequest,
-)
-from cowork_agent.features.ai_chat.controller import (
-    ChatController,
-    ChatSessionRegistryPort,
-    InMemoryChatSessionRegistry,
-    UnavailableChatReply,
-)
+from cowork_agent.features.ai_chat.controller import ChatController
 from cowork_agent.features.ai_chat.intent.observability import LoggingIntentRoutingSink
-from cowork_agent.features.ai_chat.intent.service import (
-    CanonicalReadyDocumentCatalog,
-    ChatRoutingService,
-)
+from cowork_agent.features.ai_chat.intent.service import ChatRoutingService
 from cowork_agent.features.ai_chat.memory_gateway import MemoryGateway
-from cowork_agent.features.ai_chat.memory_observability import (
-    LoggingMemoryOperationSink,
-    MemoryOperationMetrics,
+from cowork_agent.features.ai_chat.ports import EpisodicMemoryPort
+from cowork_agent.features.ai_chat.tools import (
+    AGENDA_TOOL_DESCRIPTION,
+    AGENDA_TOOL_NAME,
+    AGENDA_TOOL_SCHEMA,
+    CALENDAR_TOOL_DESCRIPTION,
+    CALENDAR_TOOL_NAME,
+    CALENDAR_TOOL_SCHEMA,
+    Tool,
+    ToolResult,
+    build_agenda_tool,
+    build_calendar_tool,
 )
-from cowork_agent.features.ai_chat.ports import (
-    ChatHistoryPort,
-    ChatReplyPort,
-    DeclarativeMemoryPort,
-    EpisodicMemoryPort,
-    IntentClassifierPort,
-)
-from cowork_agent.features.ai_chat.session_buffer import (
-    InMemoryChatSessionBuffer,
-)
-from cowork_agent.features.email_action_plan.observability import (
-    LoggingTraceSink,
-    dev_trace_sink_from_env,
-)
-from cowork_agent.features.email_action_plan.policies import DEFAULT_QUERY
-from cowork_agent.features.email_action_plan.ports import (
-    ActionPlanGeneratorPort,
-    MailboxConnectionRepository,
-    MailboxTemporaryError,
-    RouteClassifierPort,
-    RunRepository,
-    SemanticMemoryPort,
-    TaskRepository,
-)
-from cowork_agent.features.email_action_plan.short_term import ShortTermStore
-from cowork_agent.features.email_action_plan.workflow import (
-    CreateDigestRun,
-    DigestWorker,
-    GetDigestResult,
-)
+from cowork_agent.features.ai_chat.tools.runner import ChatToolRunner, ToolTurnContext
+from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import (
-    LOCAL_TENANT_ID,
-    ConnectionNotOwnedError,
     VerifiedPrincipal,
-    ensure_principal_owns_connection,
     principal_for_connection,
-    principal_from_opaque_session,
 )
-from cowork_agent.integrations.gmail.auth import OAuthStateManager, TokenCipher
-from cowork_agent.integrations.gmail.fakes import SafeTextAttachmentExtractor
-from cowork_agent.integrations.gmail.provider import (
-    GmailConnectionService,
-    GmailMailboxAdapter,
-    MailboxNotConnectedError,
-    MailboxReauthRequiredError,
+from cowork_agent.integrations.google_calendar import (
+    GoogleCalendar,
+    GoogleCalendarSettings,
+    calendar_settings_for,
 )
-from cowork_agent.integrations.llm.chat_intent import (
-    FaucetIntentClassifier,
-    GeminiIntentClassifier,
-    GroqIntentClassifier,
-)
-from cowork_agent.integrations.llm.chat_reply import (
-    FaucetChatReply,
-    GeminiChatReply,
-    GroqChatReply,
-)
-from cowork_agent.integrations.llm.providers.faucet import (
-    FaucetActionPlanGenerator,
-    FaucetRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.gemini import (
-    GeminiActionPlanGenerator,
-    GeminiRouteClassifier,
-)
-from cowork_agent.integrations.llm.providers.groq import (
-    GroqActionPlanGenerator,
-    GroqRouteClassifier,
-)
-from cowork_agent.integrations.rag.bootstrap import (
-    RAG_CORPUS_PATH,
-    build_semantic_memory,
+from cowork_agent.integrations.llm.provider_factory import (
+    ChatProviderBundle,
+    resolve_chat_providers,
+    resolve_email_providers,
 )
 from cowork_agent.integrations.rag.chat_memory import SemanticChatMemoryAdapter
-from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
-from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
-from cowork_agent.integrations.rag.project_documents import (
-    CanonicalProjectDocumentRetriever,
-    HybridProjectDocumentStore,
-)
-from cowork_agent.integrations.rag.project_index import TurbovecProjectIndexStore
-from cowork_agent.integrations.storage.supabase import SupabasePrivateStorage
-from cowork_agent.orchestration.local import InMemoryOutbox
-from cowork_agent.persistence.repositories.local import InMemoryResultRepository
+from cowork_agent.integrations.report_pdf import Fpdf2ReportPdfRenderer
+from cowork_agent.persistence.report_artifacts import FileSystemReportArtifactStore
 from cowork_agent.persistence.repositories.mailbox_connections import (
     SQLiteMailboxConnectionRepository,
 )
-from cowork_agent.persistence.repositories.project_document_chunks import (
-    PostgresProjectDocumentChunkRepository,
+from cowork_agent.runtime import (
+    configure_windows_event_loop_policy,
+    configure_windows_reload,
 )
-from cowork_agent.persistence.repositories.runs import SQLiteRunRepository
-from cowork_agent.persistence.repositories.tasks import SQLiteTaskRepository
-from cowork_agent.runtime import configure_windows_event_loop_policy
 
+from .api.calendars import create_calendar_router
 from .api.chat import create_chat_router
-from .api.handlers import _jsonable
+from .api.dependencies import (
+    authenticated_chat_principal,
+    issue_chat_guest_session,
+)
+from .api.digest_runs import create_digest_router
+from .api.evaluation_jobs import create_evaluation_router
+from .api.knowledge import create_knowledge_router
+from .api.mailboxes import create_mailbox_router
 from .api.projects import create_project_router
+from .api.reports import create_report_router
 
 # ``uvicorn cowork_agent.app:create_app --factory`` bypasses ``main()``. Set
 # the policy during module import as well, before Uvicorn creates its loop.
 configure_windows_event_loop_policy()
+configure_windows_reload()
 
 logger = logging.getLogger(__name__)
 
@@ -162,98 +111,262 @@ logger = logging.getLogger(__name__)
 async def _resolve_chat_principal(request: Request) -> VerifiedPrincipal:
     """Resolve chat identity from a session, with the local MVP fallback."""
 
-    if getattr(request.app.state, "session_repository", None) is not None:
-        principal = await _authenticated_principal(request)
+    # Both identity paths read the control-plane group through the typed
+    # runtime seam (ADR-013); an uncomposed group fails as loudly as the old
+    # missing-key reads did.
+    control_plane = runtime(request).control_plane
+    if control_plane is None:
+        raise RuntimeError("the control-plane group is not composed")
+    if control_plane.chat_opaque_session_repository is not None:
+        principal = await authenticated_chat_principal(request)
         assert principal is not None
         return principal
 
-    repository: SQLiteMailboxConnectionRepository = request.app.state.connection_repository
+    repository: SQLiteMailboxConnectionRepository = cast(
+        SQLiteMailboxConnectionRepository, control_plane.connection_repository
+    )
     candidates = tuple(
-        connection for connection in await repository.list_all() if connection.status == "active"
+        connection
+        for connection in await repository.list_all()
+        if connection.status == "active" and connection.provider == "gmail"
     )
     if len(candidates) != 1:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
     return principal_for_connection(candidates[0])
 
 
-class CreateRunRequest(BaseModel):
-    mailbox_connection_id: str = Field(alias="mailboxConnectionId")
-    query: str = DEFAULT_QUERY
-    max_emails: int = Field(default=200, alias="maxEmails", ge=1, le=500)
+#: Default report folder. The store is constructed from this once in ``lifespan``
+#: and injected from there; nothing downstream resolves the location again.
+REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
 
 
-class KnowledgeChatRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=500)
-    top_k: int = Field(default=5, ge=1, le=20)
+#: Shown when the turn belongs to a user with no calendar grant. A refusal the
+#: user can act on beats a successful write to somebody else's calendar, which
+#: is what any fallback credential would produce (ADR-019 §2).
+CALENDAR_NOT_CONNECTED = (
+    "Your Google Calendar is not connected yet, so I could not create the event. "
+    "Connect it from the dashboard and ask me again."
+)
+#: The same refusal for a turn that only wanted to read. Saying "I could not
+#: create the event" to someone who asked what was on Friday is a wrong answer
+#: about what the system tried to do.
+CALENDAR_NOT_CONNECTED_READ = (
+    "Your Google Calendar is not connected yet, so I could not look anything up. "
+    "Connect it from the dashboard and ask me again."
+)
 
 
-class SaveReportRequest(BaseModel):
-    filename: str
-    content: str
+def _not_connected_tool(
+    name: str,
+    description: str,
+    parameters: Mapping[str, object],
+    message: str,
+) -> Tool:
+    """A tool that refuses instead of reaching the calendar.
+
+    Returned rather than binding no tool at all, so the turn degrades into a
+    reply that says what did not happen -- the same shape every other tool
+    failure takes -- instead of the router and the runner disagreeing about
+    whether the tool exists.
+
+    Parameterized once the second tool arrived. It had been written around the
+    one tool that existed, so a `list_calendar_events` turn with no grant would
+    have been refused under the writing tool's name and schema (PROGRESS.md F9).
+    """
+
+    async def handler(arguments: Mapping[str, object]) -> ToolResult:
+        del arguments
+        return ToolResult(ok=False, text=message)
+
+    return Tool(name=name, description=description, parameters=parameters, handler=handler)
+
+
+def _calendar_not_connected() -> Tool:
+    return _not_connected_tool(
+        CALENDAR_TOOL_NAME,
+        CALENDAR_TOOL_DESCRIPTION,
+        CALENDAR_TOOL_SCHEMA,
+        CALENDAR_NOT_CONNECTED,
+    )
+
+
+def _agenda_not_connected() -> Tool:
+    return _not_connected_tool(
+        AGENDA_TOOL_NAME,
+        AGENDA_TOOL_DESCRIPTION,
+        AGENDA_TOOL_SCHEMA,
+        CALENDAR_NOT_CONNECTED_READ,
+    )
+
+
+def _calendar_classifier_tools(
+    settings: GoogleCalendarSettings | None,
+) -> tuple[Tool, ...]:
+    """Tool descriptions the intent classifier may select at this boot.
+
+    The handler is never dispatched from this tuple; `ChatToolRunner` binds a
+    fresh tool to the real turn. Keeping the same `Tool` value for both paths
+    makes the classifier name, description, and schema impossible to drift
+    from the executable definition.
+
+    The `GoogleCalendar` built here from environment settings is inert: only
+    the name, description, and schema are read off the value, and the handler
+    is dropped. ADR-019's per-user rule governs dispatch, which happens in
+    `_chat_tool_runner`, and is not weakened by a description built once.
+    """
+
+    if settings is None or not settings.enabled:
+        return ()
+    timezone = ZoneInfo(settings.timezone)
+    calendar = GoogleCalendar(settings)
+    return (
+        build_calendar_tool(
+            calendar,
+            idempotency_key="classifier-tool-spec",
+            timezone=settings.timezone,
+            now=datetime.now(timezone),
+            # No turn, so no message and nothing for the ambiguous-hour guard
+            # to read. Harmless here: this value's handler is never called.
+            user_message="",
+        ),
+        build_agenda_tool(calendar, timezone=settings.timezone),
+    )
+
+
+def _chat_tool_runner(
+    chat_providers: ChatProviderBundle,
+    settings: GoogleCalendarSettings | None,
+    calendar_plane: CalendarRuntime | None = None,
+) -> ChatToolRunner | None:
+    """Compose the calendar tool, or ``None`` when unconfigured or not enabled.
+
+    Both gates matter: absent credentials is the usual case, and
+    ``GOOGLE_CALENDAR_ENABLED`` is what keeps a developer's working
+    credentials from turning the tool on everywhere else. The settings arrive
+    as an explicit capture resolved once in ``create_app`` (ADR-013) rather
+    than a per-turn ``from_env()`` re-read of the process environment.
+
+    The credential does *not* arrive that way, and cannot: ADR-019 requires the
+    grant to belong to the turn's own user, so the binder resolves it per turn
+    from ``calendar_plane``. ``settings`` keeps only what is genuinely
+    process-wide -- the flag, and the local-development fallback token used when
+    there is no principal at all.
+    """
+
+    if settings is None or not settings.enabled:
+        return None
+
+    async def resolve(context: ToolTurnContext) -> GoogleCalendarSettings | None:
+        """The grant this turn may use, or None when there is none.
+
+        Extracted when the second tool arrived: both binders need the same
+        answer, and the two must never disagree about whose calendar a turn
+        touches. Returning `None` rather than raising keeps each binder free to
+        pick its own refusal, which reads differently for a read and a write.
+        """
+
+        if context.user_id and calendar_plane is not None:
+            connection = await calendar_plane.repository.get_for_user(context.user_id)
+            if connection is None:
+                # No silent fallback to `settings`. A signed-in user without a
+                # grant is told so; substituting the environment token here is
+                # how one person's event lands on another person's calendar.
+                return None
+            return calendar_settings_for(
+                connection, calendar_plane.oauth_settings, calendar_plane.cipher
+            )
+        if context.user_id and calendar_plane is None:
+            return None
+        return settings
+
+    async def bind_create(context: ToolTurnContext) -> Tool:
+        resolved = await resolve(context)
+        if resolved is None:
+            return _calendar_not_connected()
+        return build_calendar_tool(
+            GoogleCalendar(resolved),
+            idempotency_key=context.idempotency_key,
+            timezone=resolved.timezone,
+            now=context.now.astimezone(ZoneInfo(resolved.timezone)),
+            user_message=context.user_message,
+        )
+
+    async def bind_agenda(context: ToolTurnContext) -> Tool:
+        resolved = await resolve(context)
+        if resolved is None:
+            return _agenda_not_connected()
+        # Reads nothing else off the context. The agenda tool is bound to a
+        # grant, not to a turn -- see `build_agenda_tool`.
+        return build_agenda_tool(GoogleCalendar(resolved), timezone=resolved.timezone)
+
+    return ChatToolRunner(
+        {CALENDAR_TOOL_NAME: bind_create, AGENDA_TOOL_NAME: bind_agenda},
+        complete=chat_providers.tool_arguments,
+    )
 
 
 def _chat_controller_factory(
     app: FastAPI,
 ) -> Callable[[ChatMemoryScope], ChatController]:
-    """Compose each scoped controller from runtime state at creation time."""
+    """Compose each scoped controller from the assembled typed runtime.
+
+    One typed read of the composed ``CoworkRuntime`` per controller creation
+    (ADR-013): the old version re-read a dozen untyped ``app.state`` keys and
+    leaned on the placeholder-then-upgrade dance to see final values. The
+    single assembly in ``lifespan`` means this read returns those same final
+    values, and because the read happens at creation time — not at publish
+    time — a ``dataclasses.replace`` override of the runtime stays visible.
+    """
 
     def factory(scope: ChatMemoryScope) -> ChatController:
-        semantic_memory = cast(
-            SemanticMemoryPort,
-            getattr(app.state, "semantic_memory", NullSemanticMemory()),
+        composed = cast(CoworkRuntime, app.state.runtime)
+        chat = composed.chat
+        if chat is None:
+            raise RuntimeError("the chat group is not composed")
+        control_plane = composed.control_plane
+        email_rag = composed.email_rag
+        semantic_memory: SemanticMemoryPort = (
+            email_rag.semantic_memory if email_rag is not None else NullSemanticMemory()
         )
+        intent_settings = chat.chat_intent_settings
         return ChatController(
             scope=scope,
             memory=MemoryGateway(
                 scope=scope,
-                session_buffer=app.state.chat_session_buffer,
-                declarative_memory=cast(
-                    DeclarativeMemoryPort | None,
-                    app.state.chat_profile_repository,
+                session_buffer=chat.chat_session_buffer,
+                declarative_memory=(
+                    control_plane.chat_profile_repository if control_plane is not None else None
                 ),
                 episodic_memory=cast(
                     EpisodicMemoryPort | None,
-                    app.state.chat_task_episode_repository,
+                    (
+                        control_plane.chat_task_episode_repository
+                        if control_plane is not None
+                        else None
+                    ),
                 ),
                 semantic_memory=SemanticChatMemoryAdapter(semantic_memory),
-                project_documents=getattr(app.state, "project_document_vectors", None),
-                memory_operation_sink=getattr(app.state, "memory_operation_sink", None),
+                project_documents=(
+                    email_rag.project_document_vectors if email_rag is not None else None
+                ),
+                memory_operation_sink=chat.memory_operation_sink,
             ),
-            reply=cast(ChatReplyPort, app.state.chat_reply),
-            history=cast(
-                ChatHistoryPort | None,
-                getattr(app.state, "chat_history_repository", None),
+            reply=chat.chat_reply,
+            reports=composed.reports,
+            history=control_plane.chat_history_repository if control_plane is not None else None,
+            routing=chat.chat_routing_service,
+            company_rag_enabled=(
+                intent_settings.company_rag_enabled if intent_settings is not None else True
             ),
-            routing=cast(
-                ChatRoutingService | None,
-                getattr(app.state, "chat_routing_service", None),
-            ),
-            company_rag_enabled=getattr(
-                getattr(app.state, "chat_intent_settings", None),
-                "company_rag_enabled",
-                True,
-            ),
-            episode_retention_seconds=getattr(
-                getattr(app.state, "chat_memory_settings", None),
-                "episode_retention_seconds",
-                None,
-            ),
+            episode_retention_seconds=chat.chat_memory_settings.episode_retention_seconds,
+            tools=chat.chat_tool_runner,
         )
 
     return factory
 
 
-def create_chat_session_buffer(
-    settings: ChatMemorySettings, *, durable: bool
-) -> InMemoryChatSessionBuffer:
-    """Keep bounded working turns local; durability belongs to Postgres metadata."""
-    del durable
-    return InMemoryChatSessionBuffer(
-        max_turns=settings.max_turns,
-        ttl_seconds=settings.ttl_seconds,
-    )
-
 def create_app() -> FastAPI:
+    load_runtime_environment()
     log_level = (os.getenv("LOG_LEVEL") or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
     log_file = os.getenv("LOG_FILE", ".data/app.log")
     handlers: list[logging.Handler] = [logging.StreamHandler()]
@@ -269,6 +382,16 @@ def create_app() -> FastAPI:
     )
     logging.getLogger("cowork_agent").setLevel(logging.INFO)
 
+    # The evaluation settings resolve once here and flow into ``lifespan`` as
+    # an explicit closure capture (ADR-013, slice 02-6): the old code wrote
+    # them onto ``app.state`` after this closure was defined and read them
+    # back inside it, a cross-phase round-trip the typed assembly deletes.
+    evaluation_settings = EvaluationSettings.from_env()
+    # Same explicit-capture rule for the calendar tool: one ``.env`` read at
+    # startup, carried into ``lifespan`` as a closure capture instead of a
+    # per-turn re-read of the process environment.
+    calendar_settings = GoogleCalendarSettings.from_env()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
@@ -276,9 +399,7 @@ def create_app() -> FastAPI:
                 import importlib.util
 
                 script_path = (
-                    Path(__file__).resolve().parents[2]
-                    / "scripts"
-                    / "update_corpus2skill.py"
+                    Path(__file__).resolve().parents[2] / "scripts" / "update_corpus2skill.py"
                 )
                 if script_path.exists():
                     spec = importlib.util.spec_from_file_location(
@@ -292,894 +413,261 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 logger.warning("Corpus skill tree auto-update skipped: %s", exc)
 
+            # One report folder, resolved once. Both writers — the artifacts
+            # view and the AI Chat turn that generates a report — go through
+            # this store, so the filename rule cannot diverge between them.
+            # Composed before any credentialed settings are read: reports need
+            # no provider, so a missing Gmail key must not take them offline.
+            # The store is the first field of the typed runtime (ADR-013); its
+            # consumers read it through ``runtime(request).reports``.
+            report_store = FileSystemReportArtifactStore(REPORTS_DIR)
+            report_pdf_renderer = Fpdf2ReportPdfRenderer()
             settings = GmailSettings.from_env()
-            session_settings = SessionSettings.from_env()
-            repository: MailboxConnectionRepository = SQLiteMailboxConnectionRepository(
-                settings.connection_db_path
+            control_plane_url = database_url()
+            outlook_settings: OutlookSettings | None = None
+            outlook_configuration_error: str | None = None
+            microsoft_credentials_present = bool(
+                os.getenv("MICROSOFT_CLIENT_ID", "").strip()
+                or os.getenv("MICROSOFT_CLIENT_SECRET", "").strip()
             )
-            local_repository = cast(SQLiteMailboxConnectionRepository, repository)
-            await local_repository.initialize()
-            app.state.gmail_settings = settings
-            app.state.session_settings = session_settings
-            app.state.identity_repository = None
-            app.state.session_repository = None
-            run_repository: RunRepository
-            task_repository: TaskRepository
-            chat_session_registry: ChatSessionRegistryPort
-            result_repository = InMemoryResultRepository()
-            if database_url():
-                # V1-H T5.1 durable control plane: PostgreSQL is the source
-                # of truth for runs, tasks, and outbox events. Imports stay
-                # lazy so the app boots without the optional postgres extra.
-                from psycopg_pool import AsyncConnectionPool
-
-                from cowork_agent.persistence.migrate import apply_migrations
-                from cowork_agent.persistence.repositories.chat_history import (
-                    PostgresChatHistoryRepository,
-                )
-                from cowork_agent.persistence.repositories.chat_sessions import (
-                    PostgresChatSessionRegistry,
-                )
-                from cowork_agent.persistence.repositories.identity import (
-                    PostgresIdentityRepository,
-                    PostgresMailboxConnectionRepository,
-                    PostgresSessionRepository,
-                )
-                from cowork_agent.persistence.repositories.postgres import (
-                    PostgresChatProfileRepository,
-                    PostgresOutboxRepository,
-                    PostgresRunRepository,
-                    PostgresTaskEpisodeRepository,
-                    PostgresTaskRepository,
-                )
-                from cowork_agent.persistence.repositories.projects import (
-                    PostgresProjectRepository,
-                )
-
-                pool = AsyncConnectionPool(
-                    database_url(),
-                    min_size=1,
-                    max_size=8,
-                    open=False,
-                    kwargs={"prepare_threshold": None},
-                )
-                await pool.open(wait=True)
-                await apply_migrations(pool)
-                run_repository = PostgresRunRepository(pool)
-                task_repository = PostgresTaskRepository(pool)
-                app.state.outbox_repository = PostgresOutboxRepository(pool)
-                app.state.chat_profile_repository = PostgresChatProfileRepository(pool)
-                app.state.chat_task_episode_repository = PostgresTaskEpisodeRepository(pool)
-                app.state.project_repository = PostgresProjectRepository(pool)
-                chat_session_registry = PostgresChatSessionRegistry(pool)
-                app.state.chat_history_repository = PostgresChatHistoryRepository(pool)
-                app.state.chat_session_repository = chat_session_registry
-                app.state.pg_pool = pool
-                app.state.identity_repository = PostgresIdentityRepository(pool)
-                app.state.session_repository = PostgresSessionRepository(pool)
-                repository = PostgresMailboxConnectionRepository(pool)
-            else:
-                task_repository = SQLiteTaskRepository(
-                    settings.connection_db_path.parent / "tasks.db"
-                )
-                await task_repository.initialize()
-                sqlite_run_repository = SQLiteRunRepository(
-                    settings.connection_db_path.parent / "runs.db"
-                )
-                await sqlite_run_repository.initialize()
-                run_repository = sqlite_run_repository
-                app.state.outbox_repository = InMemoryOutbox()
-                app.state.chat_profile_repository = None
-                app.state.chat_task_episode_repository = None
-                app.state.chat_session_repository = None
-                app.state.chat_history_repository = None
-                app.state.pg_pool = None
-                app.state.project_repository = None
-                chat_session_registry = InMemoryChatSessionRegistry()
-            app.state.connection_repository = repository
-            app.state.gmail_connections = GmailConnectionService(
-                settings,
-                repository,
-                TokenCipher(settings.token_encryption_key),
-                OAuthStateManager(
-                    settings.oauth_state_secret,
-                    settings.oauth_state_ttl_seconds,
-                ),
-                principal_resolver=(
-                    app.state.identity_repository.resolve_or_create_principal
-                    if app.state.identity_repository is not None
-                    else None
-                ),
-            )
-            app.state.gmail_mailbox = GmailMailboxAdapter(
-                settings,
-                repository,
-                TokenCipher(settings.token_encryption_key),
-            )
-            user_documents_settings = UserDocumentsSettings.from_env()
-            app.state.document_embeddings_configured = False
-            if user_documents_settings.enabled or os.getenv("SUPABASE_URL", "").strip():
+            if microsoft_credentials_present:
                 try:
-                    storage_settings = SupabaseStorageSettings.from_env()
-                    storage_client = httpx.AsyncClient(timeout=30.0)
-                    app.state.private_storage_client = storage_client
-                    app.state.private_storage = SupabasePrivateStorage(
-                        storage_settings.url,
-                        storage_settings.secret_key,
-                        storage_settings.bucket,
-                        storage_client,
-                    )
-                except ValueError:
-                    logger.warning("Project document storage is unavailable")
-                    app.state.private_storage_client = None
-                    app.state.private_storage = None
+                    outlook_settings = OutlookSettings.from_env()
+                except ValueError as exc:
+                    # Outlook is optional and must never prevent the Gmail/chat
+                    # application from booting. Keep only the safe validation
+                    # diagnostic server-side; the public capability uses a
+                    # stable reason code.
+                    outlook_configuration_error = str(exc)
+                    logger.warning("Outlook connector is unavailable: %s", exc)
             else:
-                app.state.private_storage_client = None
-                app.state.private_storage = None
-            chat_memory_settings = ChatMemorySettings.from_env()
-            app.state.chat_memory_settings = chat_memory_settings
-            app.state.chat_sessions = chat_session_registry
-            app.state.chat_session_buffer = create_chat_session_buffer(
-                chat_memory_settings, durable=app.state.pg_pool is not None
+                outlook_configuration_error = "Microsoft OAuth is not configured"
+            # Control-plane group (ADR-013, slice 02-2): the Postgres/SQLite
+            # repository decision, the pool and its migrations, and the
+            # run/task/result bookkeeping compose as one typed value in
+            # ``composition.build_control_plane``. Every consumer reads the
+            # group through ``runtime(request)`` — slice 02-8 deleted the
+            # legacy ``app.state.<key>`` forwards the cutover proved dead.
+            control_plane = await build_control_plane(settings, control_plane_url)
+            repository = control_plane.connection_repository
+            chat_session_registry = control_plane.chat_session_registry
+            run_repository = control_plane.run_repository
+            task_repository = control_plane.task_repository
+            result_repository = control_plane.result_repository
+            # Mailbox group (ADR-013, slice 02-3): the provider connection
+            # and read adapters, the Outlook sqlite-only gate, the routing
+            # adapter, and the private document storage compose as one typed
+            # value in ``composition.build_mailbox``. The outlook settings
+            # stay computed here because env validation runs before the
+            # control plane; the identity repository is passed in explicitly
+            # so the principal wiring moves with the group.
+            mailbox_runtime = await build_mailbox(
+                settings,
+                outlook_settings,
+                outlook_configuration_error,
+                control_plane_url,
+                repository,
+                control_plane.identity_repository,
+                UserDocumentsSettings.from_env(),
             )
-            app.state.memory_metrics = MemoryOperationMetrics()
-            app.state.memory_operation_sink = LoggingMemoryOperationSink(
-                metrics=app.state.memory_metrics
+            user_documents_settings = mailbox_runtime.user_documents_settings
+            # Calendar group (SPEC-per-user-google-calendar-oauth P4/P5): the
+            # per-user grant plane. Composed right after the mailbox because it
+            # shares that group's cipher and OAuth state secret, and because the
+            # Gmail callback chains into its connect route.
+            calendar_runtime = await build_calendar(settings, control_plane.pg_pool)
+            # Chat group (ADR-013, slice 02-4): the memory settings, session
+            # buffer, observability sink, ready-document catalog, and identity
+            # callables compose as one typed value in
+            # ``composition.build_chat``. ``chat_reply`` /
+            # ``chat_routing_service`` boot as placeholders and the LLM
+            # provider block below upgrades them into the group through the
+            # local upgrade sequence — no ``app.state`` round-trip.
+            chat_runtime = await build_chat(
+                pg_pool=control_plane.pg_pool,
+                project_repository=control_plane.project_repository,
+                chat_session_registry=chat_session_registry,
+                user_documents_settings=user_documents_settings,
+                principal_resolver=_resolve_chat_principal,
+                guest_session_issuer=issue_chat_guest_session,
             )
-            app.state.chat_reply = UnavailableChatReply()
-            app.state.chat_routing_service = None
-            app.state.user_documents_settings = user_documents_settings
-            app.state.ready_document_catalog = (
-                CanonicalReadyDocumentCatalog(app.state.project_repository)
-                if app.state.project_repository is not None
-                else None
-            )
-            app.state.project_document_store = None
-            app.state.project_document_vectors = None
-            app.state.project_document_index = None
-            app.state.chat_principal_resolver = _resolve_chat_principal
 
-            app.state.chat_controller_factory = _chat_controller_factory(app)
-            app.state.run_repository = run_repository
-            app.state.create_run = CreateDigestRun(run_repository)
-            app.state.get_result = GetDigestResult(
-                run_repository, result_repository, task_repository
+            # Email-RAG group (ADR-013, slice 02-5): the project-document
+            # vector plane composes as one typed value in
+            # ``composition.build_email_rag``, moved verbatim including its
+            # swallow-and-log degrade. The provider half (semantic store,
+            # corpus, digest worker) boots as placeholders here and is
+            # upgraded by the LLM provider block below — the same
+            # placeholder-then-upgrade sequence the chat group uses.
+            email_rag_runtime = await build_email_rag(
+                settings=settings,
+                control_plane_url=control_plane_url,
+                project_repository=control_plane.project_repository,
+                pg_pool=control_plane.pg_pool,
+                private_storage=mailbox_runtime.private_storage,
+                user_documents_settings=user_documents_settings,
             )
-            app.state.result_repository = result_repository
-            app.state.task_repository = task_repository
-            app.state.redis_client = None
-            app.state.run_queue = None
-
-            if user_documents_settings.enabled and app.state.project_repository is not None:
-                try:
-                    document_embedding_settings = GeminiEmbeddingSettings.from_env()
-                    app.state.document_embeddings_configured = True
-                    # The API only reads .tvim snapshots; mail-todo-worker owns
-                    # writing them. Both sides exchange them through Supabase
-                    # Storage, so a missing local file is pulled on demand.
-                    index_store = TurbovecProjectIndexStore(
-                        user_documents_settings.index_root,
-                        storage=app.state.private_storage,
-                        vector_size=document_embedding_settings.dimensions,
-                    )
-                    vector_store = HybridProjectDocumentStore(
-                        PostgresProjectDocumentChunkRepository(app.state.pg_pool),
-                        index_store,
-                        GeminiEmbeddingAdapter(document_embedding_settings),
-                        vector_size=document_embedding_settings.dimensions,
-                    )
-                    app.state.project_document_index = index_store
-                    app.state.project_document_vectors = CanonicalProjectDocumentRetriever(
-                        app.state.project_repository,
-                        vector_store,
-                        top_k=user_documents_settings.top_k,
-                        min_score=user_documents_settings.min_score,
-                        timeout_ms=user_documents_settings.retrieval_timeout_ms,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Project document vector store is unavailable; API remains online"
-                    )
-            app.state.project_document_queue = None
+            # The provider block's chat-half upgrades flow through these
+            # locals into the chat group below: on success the real adapters,
+            # on degrade whatever resolved before the failure — exactly the
+            # contract the old ``app.state`` publication provided, minus the
+            # round-trip through untyped keys.
+            chat_reply = chat_runtime.chat_reply
+            chat_intent_settings: ChatIntentSettings | None = None
+            chat_routing_service = chat_runtime.chat_routing_service
+            chat_tool_runner = chat_runtime.chat_tool_runner
             try:
                 provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
                 provider_label = {
                     "gemini": "Gemini",
-                    "groq": "Groq",
-                    "faucet": "Faucet",
+                    "mistral": "Mistral",
+                    "openrouter": "OpenRouter",
+                    "mimo": "Mimo",
                 }.get(provider, "LLM provider")
-                classifier: RouteClassifierPort
-                generator: ActionPlanGeneratorPort
-                intent_classifier: IntentClassifierPort
-                if provider == "gemini":
-                    gemini_settings = GeminiSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(
-                        default_model=gemini_settings.model
-                    )
-                    intent_classifier = GeminiIntentClassifier.from_settings(
-                        gemini_settings, intent_settings
-                    )
-                    classifier = GeminiRouteClassifier(gemini_settings)
-                    generator = GeminiActionPlanGenerator(gemini_settings)
-                    semantic_memory = await build_semantic_memory(
-                        JinaEmbeddingSettings.from_env()
-                    )
-                    app.state.chat_reply = GeminiChatReply.from_settings(gemini_settings)
-                elif provider == "groq":
-                    groq_settings = GroqSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(default_model=groq_settings.model)
-                    intent_classifier = GroqIntentClassifier.from_settings(
-                        groq_settings, intent_settings
-                    )
-                    classifier = GroqRouteClassifier(groq_settings)
-                    generator = GroqActionPlanGenerator(groq_settings)
-                    semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = GroqChatReply.from_settings(groq_settings)
-                elif provider == "faucet":
-                    faucet_settings = FaucetSettings.from_env()
-                    intent_settings = ChatIntentSettings.from_env(
-                        default_model=faucet_settings.model
-                    )
-                    intent_classifier = FaucetIntentClassifier.from_settings(
-                        faucet_settings, intent_settings
-                    )
-                    classifier = FaucetRouteClassifier(faucet_settings)
-                    generator = FaucetActionPlanGenerator(faucet_settings)
-                    semantic_memory = NullSemanticMemory()
-                    app.state.chat_reply = FaucetChatReply.from_settings(faucet_settings)
-                else:
-                    raise ValueError("LLM_PROVIDER must be 'gemini', 'groq', or 'faucet'")
-                app.state.chat_intent_settings = intent_settings
-                app.state.chat_routing_service = (
+                email_providers = await resolve_email_providers(provider)
+                chat_providers = resolve_chat_providers(
+                    provider, tools=_calendar_classifier_tools(calendar_settings)
+                )
+                intent_classifier = chat_providers.intent_classifier
+                intent_settings = chat_providers.intent_settings
+                chat_reply = chat_providers.chat_reply
+                chat_intent_settings = intent_settings
+                ready_document_catalog = chat_runtime.ready_document_catalog
+                chat_tool_runner = _chat_tool_runner(
+                    chat_providers, calendar_settings, calendar_runtime
+                )
+                chat_routing_service = (
                     ChatRoutingService(
                         classifier=intent_classifier,
-                        catalog=app.state.ready_document_catalog,
+                        catalog=ready_document_catalog,
                         model_id=intent_settings.model,
                         timeout_ms=intent_settings.timeout_ms,
                         max_attempts=intent_settings.max_attempts,
                         tool_axis_enabled=intent_settings.tool_axis_enabled,
+                        available_tools=(
+                            chat_tool_runner.names if chat_tool_runner is not None else ()
+                        ),
                         sink=LoggingIntentRoutingSink(),
                     )
                     if (
                         intent_settings.enabled
                         and user_documents_settings.enabled
-                        and app.state.ready_document_catalog is not None
+                        and ready_document_catalog is not None
                     )
                     else None
                 )
-                app.state.semantic_memory = semantic_memory
-                try:
-                    app.state.knowledge_documents = load_corpus(
-                        RAG_CORPUS_PATH, tenant_id=LOCAL_TENANT_ID
-                    )
-                except Exception:
-                    app.state.knowledge_documents = ()
-                app.state.digest_worker = DigestWorker(
-                    run_repository,
-                    result_repository,
-                    app.state.gmail_mailbox,
-                    SafeTextAttachmentExtractor(),
-                    classifier,
-                    generator,
-                    ShortTermStore(),
-                    task_repository,
-                    semantic_memory=semantic_memory,
-                    trace_sink=LoggingTraceSink(),
-                    dev_trace=dev_trace_sink_from_env(
-                        settings.connection_db_path.parent, settings.token_encryption_key
-                    ),
-                    completion_outbox=app.state.outbox_repository,
+                # Email half of this block (ADR-013, slice 02-5): the semantic
+                # store, the corpus, and the digest worker now compose in
+                # ``composition.upgrade_email_rag_providers``, called here in
+                # the same statement order as before so a ``ValueError`` from
+                # either half still reaches the one coupled except below.
+                email_rag_runtime = upgrade_email_rag_providers(
+                    email_rag_runtime,
+                    email_providers=email_providers,
+                    provider_label=provider_label,
+                    settings=settings,
+                    run_repository=run_repository,
+                    result_repository=result_repository,
+                    task_repository=task_repository,
+                    mailbox=mailbox_runtime.mailbox,
+                    outbox_repository=control_plane.outbox_repository,
                 )
-                app.state.llm_configuration_error = None
-                app.state.llm_provider_label = provider_label
             except ValueError as exc:
-                app.state.digest_worker = None
-                app.state.semantic_memory = NullSemanticMemory()
-                app.state.knowledge_documents = ()
-                app.state.llm_configuration_error = str(exc)
-                app.state.llm_provider_label = provider_label
+                # The coupled degrade contract (ADR-013, slice 02-5): a
+                # ``ValueError`` from either half of this block degrades the
+                # email-RAG provider half; the chat half keeps whatever the
+                # block resolved before the failure, exactly as before the
+                # group existed. The document plane is untouched.
+                email_rag_runtime = degrade_email_rag(
+                    email_rag_runtime,
+                    configuration_error=str(exc),
+                    provider_label=provider_label,
+                )
+            # Chat group upgrade (ADR-013, slice 02-4): the locals above carry
+            # the provider block's outcome into the typed chat group so the
+            # full runtime assembled below holds the final values. On success
+            # the real ``chat_reply`` / ``chat_intent_settings`` /
+            # ``chat_routing_service``, on degrade whatever resolved before
+            # the failure (``chat_intent_settings`` stays ``None`` unless the
+            # failure came after it). The email-RAG group (slice 02-5) was
+            # upgraded or degraded in the same block and joins the same
+            # assembly.
+            chat_runtime = replace(
+                chat_runtime,
+                chat_reply=chat_reply,
+                chat_intent_settings=chat_intent_settings,
+                chat_routing_service=chat_routing_service,
+                chat_tool_runner=chat_tool_runner,
+            )
+            # Evaluation group (ADR-013, slice 02-6): the internal evaluation
+            # control plane composes in ``composition.build_evaluation``,
+            # moved verbatim including the close-before-re-raise recovery
+            # contract. The settings arrive as an explicit capture from
+            # ``create_app`` — no ``app.state`` round-trip — and the group
+            # composes only when they are present and enabled, exactly the
+            # old gate.
+            evaluation_bundle = await build_evaluation(evaluation_settings)
+            # Single assembly point (ADR-013): every group is built, so the
+            # full ``CoworkRuntime`` publishes here once. Slice 02-8 deleted
+            # the legacy ``app.state.<key>`` forwards the cutover proved
+            # dead; the survivors beside this assignment are the documented
+            # exceptions in ADR-013.
+            app.state.runtime = CoworkRuntime(
+                reports=report_store,
+                report_pdf_renderer=report_pdf_renderer,
+                control_plane=control_plane,
+                mailbox=mailbox_runtime,
+                chat=chat_runtime,
+                email_rag=email_rag_runtime,
+                evaluation=evaluation_bundle,
+                calendar=calendar_runtime,
+            )
+            # The controller factory reads the composed runtime at controller
+            # creation time (ADR-013, slice 02-7): publish it after the single
+            # assembly, never before the upgrade sequence completes. It stays
+            # on ``app.state`` because the chat router's request-time cache
+            # reads it there (ADR-013's documented survivor).
+            app.state.chat_controller_factory = _chat_controller_factory(app)
         except ValueError as exc:
             raise RuntimeError(f"Invalid application configuration: {exc}") from exc
         yield
-        # The project index holds no network handle of its own: it reads local
-        # .tvim files and borrows private_storage, which is closed below.
-        pg_pool = getattr(app.state, "pg_pool", None)
-        if pg_pool is not None:
-            await pg_pool.close()
-        private_storage_client = getattr(app.state, "private_storage_client", None)
-        if private_storage_client is not None:
-            await private_storage_client.aclose()
+        # Teardown reads its handles back from the assembled typed runtime —
+        # the forwards it used to read are gone (ADR-013, slice 02-8). The
+        # order is the old order exactly: evaluation first, then the
+        # control-plane pool, then the storage client.
+        state_runtime = cast(CoworkRuntime | None, getattr(app.state, "runtime", None))
+        if state_runtime is not None:
+            evaluation = state_runtime.evaluation
+            if evaluation is not None:
+                await evaluation.runtime.close()
+            teardown_control_plane = state_runtime.control_plane
+            # The project index holds no network handle of its own: it reads
+            # local .tvim files and borrows private_storage, closed below.
+            if teardown_control_plane is not None and teardown_control_plane.pg_pool is not None:
+                await teardown_control_plane.pg_pool.close()
+            teardown_mailbox = state_runtime.mailbox
+            if teardown_mailbox is not None and teardown_mailbox.private_storage_client is not None:
+                await teardown_mailbox.private_storage_client.aclose()
 
     app = FastAPI(title="Module Mail", version="0.1.0", lifespan=lifespan)
     app.include_router(create_chat_router())
     app.include_router(create_project_router())
+    app.include_router(create_report_router())
+    app.include_router(create_knowledge_router())
+    app.include_router(create_digest_router())
+    app.include_router(create_mailbox_router())
+    app.include_router(create_calendar_router())
+    # The evaluation API is internal-only and disabled by default; its routes
+    # are mounted exclusively when explicitly enabled with a bearer token.
+    if evaluation_settings.enabled:
+        app.include_router(create_evaluation_router())
 
     @app.get("/health")
     @app.get("/api/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/v1/cowork/chat/document-health", response_model=None)
-    async def document_health() -> JSONResponse:
-        settings = app.state.user_documents_settings
-        checks: dict[str, str] = {
-            "feature": "enabled" if settings.enabled else "disabled",
-            "postgresql": "disabled",
-            "supabase_storage": "disabled",
-            "redis": "disabled",
-            "redis_mode": "redis" if app.state.redis_client is not None else "local",
-            "project_index": "disabled",
-            "gemini_embeddings": "disabled",
-            "ocr": "optional_unavailable",
-            "classifier": "disabled",
-            "worker_queue": "unavailable",
-        }
-        if not settings.enabled:
-            return JSONResponse({"status": "disabled", "checks": checks})
-        if app.state.document_embeddings_configured:
-            checks["gemini_embeddings"] = "configured"
-        checks["classifier"] = (
-            "ready" if app.state.chat_routing_service is not None else "unavailable"
-        )
-        pool = app.state.pg_pool
-        if pool is not None:
-            try:
-                async with pool.connection() as connection:
-                    await connection.execute("SELECT 1")
-                checks["postgresql"] = "ready"
-            except Exception:
-                checks["postgresql"] = "unavailable"
-        checks["supabase_storage"] = (
-            "configured" if app.state.private_storage is not None else "unavailable"
-        )
-        redis_client = app.state.redis_client
-        if redis_client is not None:
-            try:
-                await redis_client.ping()
-                checks["redis"] = "ready"
-            except Exception:
-                checks["redis"] = "unavailable"
-        else:
-            checks["redis"] = "local_fallback"
-        index_store = app.state.project_document_index
-        if index_store is not None:
-            # A .tvim is pulled per project on demand, so the only thing that
-            # can be checked without a project in hand is that the API can
-            # actually write the root it will cache snapshots into.
-            try:
-                index_store.root.mkdir(parents=True, exist_ok=True)
-                checks["project_index"] = "ready" if os.access(index_store.root, os.W_OK) else (
-                    "unavailable"
-                )
-            except OSError:
-                checks["project_index"] = "unavailable"
-        project_repository = app.state.project_repository
-        if project_repository is not None:
-            try:
-                if await project_repository.worker_heartbeat_is_fresh(
-                    max_age_seconds=120
-                ):
-                    checks["worker_queue"] = "ready"
-            except Exception:
-                checks["worker_queue"] = "unavailable"
-        required = [
-            "supabase_storage",
-            "project_index",
-            "gemini_embeddings",
-            "classifier",
-            "worker_queue",
-        ]
-        if pool is not None:
-            required.append("postgresql")
-        ready = all(checks[name] in {"ready", "configured"} for name in required)
-        return JSONResponse(
-            {"status": "ready" if ready else "degraded", "checks": checks},
-            status_code=200 if ready else 503,
-        )
-
-    @app.get("/v1/conversations")
-    async def legacy_list_conversations() -> dict[str, list[object]]:
-        return {"items": []}
-
-    @app.get("/v1/mail-todo/oauth/gmail/connect")
-    async def connect_gmail(request: Request) -> RedirectResponse:
-        service = _connection_service(request)
-        return RedirectResponse(service.begin(), status_code=302)
-
-    @app.get("/v1/mail-todo/oauth/gmail/callback", response_model=None)
-    async def gmail_callback(
-        request: Request,
-        state: str,
-        code: str | None = None,
-        error: str | None = None,
-    ) -> dict[str, Any] | Response:
-        settings = _gmail_settings(request)
-        if error:
-            if settings.frontend_url:
-                return _frontend_mail_redirect(settings.frontend_url, "denied")
-            raise HTTPException(status_code=400, detail=f"Google OAuth was denied: {error}")
-        if not code:
-            if settings.frontend_url:
-                return _frontend_mail_redirect(settings.frontend_url, "error")
-            raise HTTPException(status_code=400, detail="Missing OAuth authorization code")
-        authorization_response = f"{settings.redirect_uri}?{request.url.query}"
-        try:
-            connection = await _connection_service(request).complete(state, authorization_response)
-        except ValueError as exc:
-            if settings.frontend_url:
-                return _frontend_mail_redirect(settings.frontend_url, "error")
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if settings.frontend_url:
-            response: Response = _frontend_mail_redirect(settings.frontend_url, "connected")
-        else:
-            response = JSONResponse(
-                {
-                    "status": "connected",
-                    "connection": _public_connection(connection),
-                    "next": "Create a digest run with this mailbox connection ID.",
-                }
-            )
-        identity_repository = getattr(request.app.state, "identity_repository", None)
-        session_repository = getattr(request.app.state, "session_repository", None)
-        if identity_repository is not None and session_repository is not None:
-            principal = await identity_repository.resolve_or_create_principal(
-                connection.email_address
-            )
-            token, _ = await session_repository.create(
-                principal,
-                now=datetime.now(UTC),
-                ttl_seconds=_session_settings(request).session_ttl_seconds,
-            )
-            _set_session_cookie(response, _session_settings(request), token)
-        return response
-
-    @app.get("/v1/mail-todo/connections")
-    async def list_connections(request: Request) -> dict[str, Any]:
-        repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
-        principal = await _authenticated_principal(
-            request, required=getattr(request.app.state, "session_repository", None) is not None
-        )
-        connections = (
-            await repository.list_for_user(principal.user_id)
-            if principal is not None
-            else await cast(Any, repository).list_all()
-        )
-        return {"connections": [_public_connection(item) for item in connections]}
-
-    @app.delete("/v1/mail-todo/connections/{connection_id}")
-    async def disconnect_gmail(connection_id: str, request: Request) -> dict[str, bool]:
-        connection = await _owned_connection(request, connection_id, "Gmail connection not found")
-        principal = await _connection_principal(request, connection)
-        deleted = await _connection_service(request).disconnect(connection_id, principal.user_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Gmail connection not found")
-        return {"disconnected": True}
-
-    @app.get("/v1/mail-todo/connections/{connection_id}/unread-preview")
-    async def unread_preview(
-        connection_id: str,
-        request: Request,
-        limit: int = Query(default=10, ge=1, le=20),
-    ) -> dict[str, Any]:
-        await _owned_connection(request, connection_id, "Gmail connection not found")
-        try:
-            page = await _gmail_mailbox(request).search_unread(connection_id, DEFAULT_QUERY, limit)
-            messages = []
-            seen_threads: set[str] = set()
-            for reference in page.messages:
-                if reference.thread_id in seen_threads:
-                    continue
-                seen_threads.add(reference.thread_id)
-                thread = await _gmail_mailbox(request).get_thread(
-                    connection_id, reference.thread_id
-                )
-                if not thread:
-                    continue
-                message = thread[-1]
-                messages.append(
-                    {
-                        "messageId": message.gmail_message_id,
-                        "threadId": message.gmail_thread_id,
-                        "subject": message.subject,
-                        "sender": message.sender_email,
-                        "receivedAt": message.received_at.isoformat(),
-                        # ADR-003: presence only — attachment content is never processed.
-                        "attachmentsPresent": message.attachments_present,
-                        "deepLink": message.gmail_url,
-                    }
-                )
-            return {
-                "emailsMatched": page.estimated_total,
-                "messages": messages,
-                "nextCursor": page.next_cursor,
-            }
-        except MailboxNotConnectedError as exc:
-            raise HTTPException(status_code=404, detail="Gmail connection not found") from exc
-        except MailboxReauthRequiredError as exc:
-            raise HTTPException(status_code=409, detail="Gmail reauthorization required") from exc
-        except MailboxTemporaryError as exc:
-            raise HTTPException(status_code=503, detail="Gmail is temporarily unavailable") from exc
-
-    @app.get("/v1/mail-todo/runs")
-    async def list_digest_runs(
-        request: Request,
-        mailbox_connection_id: str = Query(alias="mailboxConnectionId", min_length=1),
-        limit: int = Query(default=20, ge=1, le=100),
-    ) -> dict[str, Any]:
-        connection = await _owned_connection(
-            request, mailbox_connection_id, "Gmail connection not found"
-        )
-        principal = await _connection_principal(request, connection)
-        repository = cast(RunRepository, request.app.state.run_repository)
-        runs = await repository.list_recent(
-            user_id=principal.user_id,
-            mailbox_connection_id=mailbox_connection_id,
-            limit=limit,
-        )
-        return {"runs": [_run_history_item(run) for run in runs]}
-
-    @app.post("/v1/mail-todo/runs", status_code=202)
-    async def create_digest_run(
-        payload: CreateRunRequest,
-        request: Request,
-        background_tasks: BackgroundTasks,
-        idempotency_key: str = Header(alias="Idempotency-Key", min_length=1),
-    ) -> dict[str, str]:
-        connection = await _owned_connection(
-            request, payload.mailbox_connection_id, "Gmail connection not found"
-        )
-        principal = await _connection_principal(request, connection)
-        worker = _digest_worker(request)
-        if worker is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"{request.app.state.llm_provider_label} is not configured: "
-                    f"{request.app.state.llm_configuration_error}"
-                ),
-            )
-        creator = cast(CreateDigestRun, request.app.state.create_run)
-        run = await creator.execute(
-            user_id=principal.user_id,
-            mailbox_connection_id=payload.mailbox_connection_id,
-            idempotency_key=idempotency_key,
-            query=payload.query,
-            max_emails=payload.max_emails,
-        )
-        run_queue = getattr(request.app.state, "run_queue", None)
-        if run_queue is not None:
-            await run_queue.enqueue_digest_run(
-                run.id, user_id=principal.user_id
-            )
-        else:
-            background_tasks.add_task(worker.execute, run.id)
-        return {
-            "id": run.id,
-            "status": run.status.value,
-            "statusUrl": f"/v1/mail-todo/runs/{run.id}",
-        }
-
-    @app.get("/v1/mail-todo/runs/{run_id}")
-    async def get_digest_run(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(RunRepository, request.app.state.run_repository)
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        response: dict[str, Any] = {
-            "id": run.id,
-            "status": run.status.value,
-            "progress": {
-                "emailsMatched": run.emails_matched,
-                "emailsProcessed": run.emails_processed,
-                "emailsToProcess": min(run.emails_matched, run.max_emails),
-                "maxEmails": run.max_emails,
-            },
-            "error": (
-                {"code": run.error_code, "message": run.error_message_safe}
-                if run.error_code
-                else None
-            ),
-        }
-        if _is_development():
-            results = cast(InMemoryResultRepository, request.app.state.result_repository)
-            processed = await results.list_processed_emails(run_id)
-            response["processedEmails"] = [
-                {
-                    "messageId": item.provider_message_id,
-                    "threadId": item.provider_thread_id,
-                    "subject": item.subject,
-                    "sender": item.sender_address,
-                    "receivedAt": item.received_at.isoformat(),
-                }
-                for item in processed
-            ]
-        return response
-
-    @app.get("/v1/mail-todo/runs/{run_id}/result")
-    async def get_digest_result(run_id: str, request: Request) -> dict[str, Any]:
-        repository = cast(RunRepository, request.app.state.run_repository)
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        if run.status.value in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        result_service = cast(GetDigestResult, request.app.state.get_result)
-        payload = cast(dict[str, Any], _jsonable(await result_service.execute(run_id)))
-        if not _is_development():
-            payload.pop("processedEmails", None)
-        return payload
-
-    @app.get("/v1/mail-todo/runs/{run_id}/tasks")
-    async def get_digest_tasks(run_id: str, request: Request) -> dict[str, Any]:
-        """Persisted §6.6 Tasks for presentation (T4.3): citations, missing
-        information, and confidences that the legacy result shape drops."""
-        repository = cast(RunRepository, request.app.state.run_repository)
-        run = await repository.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Digest run not found")
-        await _ensure_run_connection_owned(request, run, detail="Digest run not found")
-        if run.status.value in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail="RUN_NOT_COMPLETE")
-        task_repository = cast(TaskRepository, request.app.state.task_repository)
-        records = await task_repository.list_for_run(run_id)
-        return {"tasks": [record.task.to_dict() for record in records]}
-
-    # ── Knowledge endpoints (V1-M3): corpus inspection + ad-hoc retrieval ──
-
-    @app.get("/v1/mail-todo/knowledge/ready")
-    async def knowledge_ready(request: Request) -> dict[str, Any]:
-        documents: tuple[KnowledgeDocument, ...] = cast(
-            tuple[KnowledgeDocument, ...],
-            getattr(request.app.state, "knowledge_documents", ()),
-        )
-        memory = cast(
-            SemanticMemoryPort,
-            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
-        )
-        chunk_count = sum(len(doc.chunks) for doc in documents)
-        is_null = type(memory).__name__ == "NullSemanticMemory"
-        if not documents:
-            status = "unavailable"
-        elif is_null:
-            status = "degraded"
-        else:
-            status = "ready"
-        return {
-            "status": status,
-            "document_count": len(documents),
-            "chunk_count": chunk_count,
-        }
-
-    @app.get("/v1/mail-todo/knowledge/documents")
-    async def knowledge_documents(request: Request) -> dict[str, Any]:
-        documents: tuple[KnowledgeDocument, ...] = cast(
-            tuple[KnowledgeDocument, ...],
-            getattr(request.app.state, "knowledge_documents", ()),
-        )
-        items = [
-            {
-                "document_id": doc.document_id,
-                "title": doc.title,
-                "section_count": len(doc.chunks),
-                "source_url": doc.source_url,
-            }
-            for doc in documents
-        ]
-        return {"documents": items}
-
-    @app.post("/v1/mail-todo/knowledge/chat")
-    async def knowledge_chat(body: KnowledgeChatRequest, request: Request) -> dict[str, Any]:
-        memory = cast(
-            SemanticMemoryPort,
-            getattr(request.app.state, "semantic_memory", NullSemanticMemory()),
-        )
-        retrieval_request = SemanticRetrievalRequest(
-            run_id="knowledge-adhoc",
-            user_id="demo-gui",
-            query=body.query,
-            knowledge_gaps=(),
-            filters=RetrievalFilters(document_status=("ready",)),
-            limits=RetrievalLimits(top_k=body.top_k, min_score=-1.0, timeout_ms=8_000),
-        )
-        response = await memory.retrieve(retrieval_request)
-        return response.to_dict()
-
-    # ── Artifacts / Reports endpoints for chat-generated document display ──
-
-    REPORTS_DIR = Path(__file__).resolve().parents[2] / "data" / "reports"
-    EXTRACTED_DIR = Path(__file__).resolve().parents[2] / "data" / "extracted"
-
-    @app.get("/api/v1/reports")
-    async def list_reports() -> list[dict[str, Any]]:
-        reports: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        dirs_to_scan = [d for d in (REPORTS_DIR, EXTRACTED_DIR) if d.exists()]
-        for folder in dirs_to_scan:
-            for item in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if (
-                    item.is_file()
-                    and item.name != "ingestion-manifest.json"
-                    and item.name not in seen
-                ):
-                    try:
-                        seen.add(item.name)
-                        stat = item.stat()
-                        content = item.read_text(encoding="utf-8", errors="replace")
-                        mtime = datetime.fromtimestamp(stat.st_mtime, UTC).isoformat()
-                        reports.append(
-                            {
-                                "filename": item.name,
-                                "content": content,
-                                "size": stat.st_size,
-                                "updated_at": mtime,
-                            }
-                        )
-                    except Exception as exc:
-                        logger.warning("Failed to read report file %s: %s", item.name, exc)
-        return reports
-
-    @app.post("/api/v1/reports")
-    async def save_report(body: SaveReportRequest) -> dict[str, Any]:
-        safe_name = Path(body.filename).name
-        if not safe_name or safe_name in (".", ".."):
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        target_path = REPORTS_DIR / safe_name
-        target_path.write_text(body.content, encoding="utf-8")
-        stat = target_path.stat()
-        return {
-            "filename": safe_name,
-            "content": body.content,
-            "size": stat.st_size,
-            "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
-        }
-
-    @app.delete("/api/v1/reports/{filename}")
-    async def delete_report(filename: str) -> dict[str, str]:
-        safe_name = Path(filename).name
-        target_path = REPORTS_DIR / safe_name
-        if target_path.is_file():
-            target_path.unlink()
-        return {"status": "success", "message": f"Deleted {safe_name}"}
-
     return app
-
-
-def _connection_service(request: Request) -> GmailConnectionService:
-    return cast(GmailConnectionService, request.app.state.gmail_connections)
-
-
-async def _authenticated_principal(
-    request: Request, *, required: bool = True
-) -> VerifiedPrincipal | None:
-    """Resolve the opaque session only in the PostgreSQL multi-user runtime."""
-    sessions = getattr(request.app.state, "session_repository", None)
-    if sessions is None:
-        return None
-    principal = await principal_from_opaque_session(
-        request.cookies.get(_session_settings(request).cookie_name), sessions
-    )
-    if principal is None and required:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    return principal
-
-
-async def _connection_principal(
-    request: Request, connection: MailboxConnection
-) -> VerifiedPrincipal:
-    """Use the opaque session in Postgres mode and legacy identity locally."""
-    if getattr(request.app.state, "session_repository", None) is not None:
-        principal = await _authenticated_principal(request)
-        assert principal is not None
-        return principal
-    return principal_for_connection(connection)
-
-
-async def _owned_connection(
-    request: Request, connection_id: str, detail: str
-) -> MailboxConnection:
-    repository = cast(MailboxConnectionRepository, request.app.state.connection_repository)
-    connection = await repository.get(connection_id)
-    if connection is None:
-        raise HTTPException(status_code=404, detail=detail)
-    principal = await _connection_principal(request, connection)
-    _require_owned_connection(principal, connection, detail=detail)
-    return connection
-
-
-def _set_session_cookie(response: Response, settings: SessionSettings, token: str) -> None:
-    """Set the one HttpOnly cookie that carries the opaque session token."""
-    response.set_cookie(
-        key=settings.cookie_name,
-        value=token,
-        max_age=settings.session_ttl_seconds,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="lax",
-        path="/",
-    )
-
-
-def _require_owned_connection(
-    principal: VerifiedPrincipal, connection: MailboxConnection, *, detail: str
-) -> None:
-    """Translate the centralized ownership guard into the HTTP 404 contract."""
-    try:
-        ensure_principal_owns_connection(principal, connection)
-    except ConnectionNotOwnedError as exc:
-        raise HTTPException(status_code=404, detail=detail) from exc
-
-
-async def _ensure_run_connection_owned(request: Request, run: DigestRun, *, detail: str) -> None:
-    """Verify Run → Mailbox Connection ownership integrity; 404 on any mismatch."""
-    connection = await _owned_connection(request, run.mailbox_connection_id, detail)
-    principal = await _connection_principal(request, connection)
-    if principal.user_id != run.user_id:
-        raise HTTPException(status_code=404, detail=detail)
-    _require_owned_connection(principal, connection, detail=detail)
-
-
-def _gmail_settings(request: Request) -> GmailSettings:
-    return cast(GmailSettings, request.app.state.gmail_settings)
-
-
-def _session_settings(request: Request) -> SessionSettings:
-    return cast(SessionSettings, request.app.state.session_settings)
-
-
-def _gmail_mailbox(request: Request) -> GmailMailboxAdapter:
-    return cast(GmailMailboxAdapter, request.app.state.gmail_mailbox)
-
-
-def _digest_worker(request: Request) -> DigestWorker | None:
-    return cast(DigestWorker | None, request.app.state.digest_worker)
-
-
-def _is_development() -> bool:
-    return os.getenv("APP_ENV", "development").lower() in {"development", "dev", "local"}
-
-
-def _public_connection(connection: Any) -> dict[str, Any]:
-    return {
-        "id": connection.id,
-        "provider": connection.provider,
-        "emailAddress": connection.email_address,
-        "scopes": list(connection.scopes),
-        "status": connection.status,
-        "createdAt": connection.created_at.isoformat(),
-    }
-
-
-def _run_history_item(run: DigestRun) -> dict[str, Any]:
-    return {
-        "id": run.id,
-        "mailboxConnectionId": run.mailbox_connection_id,
-        "status": run.status.value,
-        "createdAt": run.created_at.isoformat() if run.created_at else None,
-        "completedAt": run.completed_at.isoformat() if run.completed_at else None,
-        "progress": {
-            "emailsMatched": run.emails_matched,
-            "emailsProcessed": run.emails_processed,
-            "emailsToProcess": min(run.emails_matched, run.max_emails),
-            "maxEmails": run.max_emails,
-            "actionItemsCount": run.action_items_count,
-        },
-        "error": (
-            {"code": run.error_code, "message": run.error_message_safe} if run.error_code else None
-        ),
-    }
-
-
-def _frontend_mail_redirect(frontend_url: str, outcome: str) -> RedirectResponse:
-    parts = urlsplit(frontend_url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query.update({"page": "dashboard", "view": "mail", "gmail": outcome})
-    location = urlunsplit(
-        (parts.scheme, parts.netloc, parts.path or "/", urlencode(query), "dashboard")
-    )
-    return RedirectResponse(location, status_code=302)
 
 
 def main() -> None:
@@ -1204,6 +692,12 @@ def main() -> None:
         # the loop from its own loop_factory, so setting the event loop *policy*
         # here has no effect — the loop has to be named in the config instead.
         loop = "asyncio:SelectorEventLoop"
+    if sys.platform == "win32":
+        configure_windows_reload()
+
+    src_dir = Path(__file__).resolve().parent.parent
+    reload_dirs = [str(src_dir)] if reload else None
+
     uvicorn.run(
         "cowork_agent.app:create_app",
         factory=True,
@@ -1212,7 +706,7 @@ def main() -> None:
         loop=loop,
         workers=api_workers,
         reload=reload,
-        reload_dirs=["src"] if reload else None,
+        reload_dirs=reload_dirs,
     )
 
 

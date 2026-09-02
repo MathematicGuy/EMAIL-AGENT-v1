@@ -9,6 +9,7 @@ from enum import StrEnum
 from math import isfinite
 from typing import ClassVar, Literal, Self, cast
 
+from ._chat_activity_contracts import ChatActivity, validate_chat_activities
 from ._chat_contracts_common import (
     AI_CHAT_FEATURE,
     MAX_CHAT_SUMMARY_LENGTH,
@@ -43,7 +44,14 @@ MAX_EPISODE_CITATION_DOCUMENT_ID_LENGTH = 256
 MAX_EPISODE_CITATION_DOCUMENT_TITLE_LENGTH = 300
 MAX_EPISODE_CITATION_SECTION_LENGTH = 300
 MAX_EPISODE_CITATION_SOURCE_URL_LENGTH = 2_048
-MAX_CHAT_RAG_EVIDENCE_ITEMS = 5
+MAX_EXECUTION_REASONING_LENGTH = 12_000
+MAX_EXECUTION_TRACE_FILENAMES = 20
+MAX_EXECUTION_TRACE_FILENAME_LENGTH = 300
+#: Retrieval widens a fused ranking to whole sections, so one article cut
+#: into several chunks arrives as several evidence items. The cap follows
+#: that ceiling (``top_k`` 8 x ``_SECTION_HEADROOM`` 2) rather than the
+#: number of results a ranking alone would have produced.
+MAX_CHAT_RAG_EVIDENCE_ITEMS = 16
 MAX_CHAT_RAG_CHUNK_ID_LENGTH = 256
 MAX_CHAT_RAG_DOCUMENT_ID_LENGTH = 256
 MAX_CHAT_RAG_DOCUMENT_TITLE_LENGTH = 300
@@ -54,6 +62,7 @@ MAX_CHAT_RAG_CONTENT_LENGTH = 16_000
 
 ChatRagSource = Literal["company_knowledge", "project_document"]
 ChatRetrievalStatus = Literal["success", "no_results", "timeout", "unavailable"]
+MailScanStatus = Literal["connecting", "queued", "running", "succeeded", "partial", "failed"]
 
 
 def _require_rag_score(value: object, name: str) -> float:
@@ -68,6 +77,18 @@ def _require_rag_score(value: object, name: str) -> float:
 def _require_retrieval_status(value: object, name: str) -> ChatRetrievalStatus:
     if value not in {"success", "no_results", "timeout", "unavailable"}:
         raise ValueError(f"{name} must be a supported retrieval status")
+    return value
+
+
+def _require_mail_scan_status(value: object, name: str) -> MailScanStatus:
+    if value not in {"connecting", "queued", "running", "succeeded", "partial", "failed"}:
+        raise ValueError(f"{name} must be a supported mail scan status")
+    return value
+
+
+def _require_nonnegative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
     return value
 
 
@@ -632,6 +653,7 @@ class TaskEpisode:
     prompt_version: str | None
     confidence: float | None
     project_id: str | None = None
+    supersedes: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -723,6 +745,10 @@ class TaskEpisode:
             raise TypeError("confidence must be a number or None")
         if self.project_id is not None:
             _require_string(self.project_id, "project_id")
+        if self.supersedes is not None:
+            _require_string(self.supersedes, "supersedes")
+            if self.supersedes == self.episode_id:
+                raise ValueError("supersedes must not reference the episode itself")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -752,6 +778,7 @@ class TaskEpisode:
             "prompt_version",
             "confidence",
             "project_id",
+            "supersedes",
         }
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
@@ -817,6 +844,11 @@ class TaskEpisode:
             project_id=(
                 _require_string(data["project_id"], "project_id")
                 if data.get("project_id") is not None
+                else None
+            ),
+            supersedes=(
+                _require_string(data["supersedes"], "supersedes")
+                if data.get("supersedes") is not None
                 else None
             ),
         )
@@ -924,6 +956,118 @@ class ChatSummaryEpisode:
 
 
 @dataclass(frozen=True, slots=True)
+class MailScanSummary:
+    """Safe aggregate metrics for an @mail chat turn; never email content."""
+
+    status: MailScanStatus
+    emails_matched: int
+    emails_processed: int
+    emails_to_process: int
+    action_items_count: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "status", _require_mail_scan_status(self.status, "status"))
+        for name in ("emails_matched", "emails_processed", "emails_to_process"):
+            object.__setattr__(self, name, _require_nonnegative_int(getattr(self, name), name))
+        if self.action_items_count is not None:
+            object.__setattr__(
+                self,
+                "action_items_count",
+                _require_nonnegative_int(self.action_items_count, "action_items_count"),
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        return cls(
+            status=_require_mail_scan_status(data["status"], "status"),
+            emails_matched=_require_nonnegative_int(data["emails_matched"], "emails_matched"),
+            emails_processed=_require_nonnegative_int(data["emails_processed"], "emails_processed"),
+            emails_to_process=_require_nonnegative_int(
+                data["emails_to_process"], "emails_to_process"
+            ),
+            action_items_count=(
+                _require_nonnegative_int(data["action_items_count"], "action_items_count")
+                if data.get("action_items_count") is not None
+                else None
+            ),
+        )
+
+
+class ChatTurnStatus(StrEnum):
+    """Durable lifecycle state for one user submission and its assistant reply."""
+
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    USAGE_LIMITED = "usage_limited"
+    RATE_LIMITED = "rate_limited"
+
+
+@dataclass(frozen=True, slots=True)
+class ChatExecutionTrace:
+    """Bounded, user-readable provider execution details for one completed turn."""
+
+    provider: str
+    model: str
+    mode: Literal["fast", "reasoning"]
+    reasoning: str | None = None
+    reasoning_truncated: bool = False
+    retrieved_filenames: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_bounded_string(self.provider, "provider", 100)
+        _require_bounded_string(self.model, "model", 200)
+        if self.mode not in {"fast", "reasoning"}:
+            raise ValueError("mode must be fast or reasoning")
+        if self.reasoning is not None:
+            _require_bounded_string(self.reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH)
+        filenames = _as_sequence(self.retrieved_filenames, "retrieved_filenames")
+        if len(filenames) > MAX_EXECUTION_TRACE_FILENAMES:
+            raise ValueError(
+                f"retrieved_filenames must not exceed {MAX_EXECUTION_TRACE_FILENAMES} items"
+            )
+        normalized = tuple(
+            _require_bounded_string(
+                item, "retrieved_filenames item", MAX_EXECUTION_TRACE_FILENAME_LENGTH
+            )
+            for item in filenames
+        )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("retrieved_filenames must be unique")
+        object.__setattr__(self, "retrieved_filenames", normalized)
+
+    def to_dict(self) -> dict[str, object]:
+        return _to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Self:
+        reasoning = data.get("reasoning")
+        return cls(
+            provider=_require_bounded_string(data["provider"], "provider", 100),
+            model=_require_bounded_string(data["model"], "model", 200),
+            mode=cast(Literal["fast", "reasoning"], data["mode"]),
+            reasoning=(
+                _require_bounded_string(reasoning, "reasoning", MAX_EXECUTION_REASONING_LENGTH)
+                if reasoning is not None
+                else None
+            ),
+            reasoning_truncated=bool(data.get("reasoning_truncated", False)),
+            retrieved_filenames=tuple(
+                _require_bounded_string(
+                    item,
+                    "retrieved_filenames item",
+                    MAX_EXECUTION_TRACE_FILENAME_LENGTH,
+                )
+                for item in _as_sequence(data.get("retrieved_filenames", ()), "retrieved_filenames")
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ChatTurn:
     """Transient, bounded session-turn value for the later working-memory buffer."""
 
@@ -935,6 +1079,14 @@ class ChatTurn:
     citation_coordinates: tuple[Mapping[str, object], ...] = ()
     rag_evidence: tuple[ChatRagEvidence, ...] = ()
     retrieval_status: ChatRetrievalStatus | None = None
+    mail_scan: MailScanSummary | None = None
+    status: ChatTurnStatus = ChatTurnStatus.COMPLETED
+    idempotency_key: str | None = None
+    error_code: str | None = None
+    activities: tuple[ChatActivity, ...] = ()
+    completed_at: datetime | None = None
+    execution_trace: ChatExecutionTrace | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.turn_id, "turn_id")
@@ -954,7 +1106,7 @@ class ChatTurn:
         )
         evidence = tuple(self.rag_evidence)
         if len(evidence) > MAX_CHAT_RAG_EVIDENCE_ITEMS:
-            raise ValueError("rag_evidence must not exceed 5 items")
+            raise ValueError(f"rag_evidence must not exceed {MAX_CHAT_RAG_EVIDENCE_ITEMS} items")
         if not all(isinstance(item, ChatRagEvidence) for item in evidence):
             raise TypeError("rag_evidence items must be ChatRagEvidence")
         if self.retrieval_status is not None:
@@ -966,6 +1118,29 @@ class ChatTurn:
         if evidence and self.retrieval_status != "success":
             raise ValueError("rag_evidence requires a successful retrieval_status")
         object.__setattr__(self, "rag_evidence", evidence)
+        if self.mail_scan is not None and not isinstance(self.mail_scan, MailScanSummary):
+            raise TypeError("mail_scan must be a MailScanSummary")
+        object.__setattr__(self, "status", _as_enum(self.status, ChatTurnStatus, "status"))
+        if self.idempotency_key is not None:
+            _require_string(self.idempotency_key, "idempotency_key")
+        if self.error_code is not None:
+            _require_string(self.error_code, "error_code")
+        object.__setattr__(self, "activities", validate_chat_activities(self.activities))
+        if self.execution_trace is not None and not isinstance(
+            self.execution_trace, ChatExecutionTrace
+        ):
+            raise TypeError("execution_trace must be a ChatExecutionTrace")
+        artifacts = _as_sequence(self.artifact_refs, "artifact_refs")
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_frozen_mapping(item, "artifact ref") for item in artifacts),
+        )
+        if self.completed_at is not None:
+            if self.completed_at.utcoffset() is None:
+                raise ValueError("completed_at must be timezone-aware")
+            if self.completed_at < self.created_at:
+                raise ValueError("completed_at must not precede created_at")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
@@ -997,6 +1172,42 @@ class ChatTurn:
                 _require_retrieval_status(data["retrieval_status"], "retrieval_status")
                 if data.get("retrieval_status") is not None
                 else None
+            ),
+            mail_scan=(
+                MailScanSummary.from_dict(_as_mapping(data["mail_scan"], "mail_scan"))
+                if data.get("mail_scan") is not None
+                else None
+            ),
+            status=_as_enum(data.get("status", ChatTurnStatus.COMPLETED), ChatTurnStatus, "status"),
+            idempotency_key=(
+                _require_string(data["idempotency_key"], "idempotency_key")
+                if data.get("idempotency_key") is not None
+                else None
+            ),
+            error_code=(
+                _require_string(data["error_code"], "error_code")
+                if data.get("error_code") is not None
+                else None
+            ),
+            activities=tuple(
+                ChatActivity.from_dict(_as_mapping(item, "activity"))
+                for item in _as_sequence(data.get("activities", ()), "activities")
+            ),
+            completed_at=(
+                _as_datetime(data["completed_at"], "completed_at")
+                if data.get("completed_at") is not None
+                else None
+            ),
+            execution_trace=(
+                ChatExecutionTrace.from_dict(
+                    _as_mapping(data["execution_trace"], "execution_trace")
+                )
+                if data.get("execution_trace") is not None
+                else None
+            ),
+            artifact_refs=tuple(
+                _as_mapping(item, "artifact ref")
+                for item in _as_sequence(data.get("artifact_refs", ()), "artifact_refs")
             ),
         )
 

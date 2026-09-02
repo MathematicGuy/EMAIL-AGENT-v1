@@ -18,50 +18,40 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash Lite',
     version: '3.5',
-    description: 'Google Gemini 3.5 Flash Lite.',
-    badge: 'Default'
+    description: 'Google Gemini 3.5 Flash Lite — Tốc độ phản hồi cực nhanh, độ trễ thấp.',
+    badge: 'Gemini',
+    speedLabel: 'Nhanh'
   },
   {
-    id: 'gemini-3.6-flash-lite',
-    name: 'Gemini 3.6 Flash Lite',
-    version: '3.6',
-    description: 'Google Gemini 3.6 Flash Lite.',
-    badge: 'Gemini'
+    id: 'mimo-v2.5-pro',
+    name: 'MiMo v2.5 Pro',
+    version: '2.5',
+    description: 'Xiaomi MiMo v2.5 Pro — Mô hình khuyên dùng hàng đầu, suy luận mạnh mẽ và chính xác cao.',
+    badge: 'Default',
+    speedLabel: 'Suy luận'
   },
   {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
+    id: 'openai/gpt-oss-120b',
+    name: 'GPT OSS 120B',
+    version: '120B',
+    description: 'OpenAI GPT OSS 120B qua OpenRouter — Khả năng suy luận và lý luận mở rộng.',
+    badge: 'OpenRouter',
+    speedLabel: 'Suy luận'
+  },
+  {
+    id: 'mistral-medium-3-5',
+    name: 'Mistral Medium 3.5',
     version: '3.5',
-    description: 'Google Gemini 3.5 Flash.',
-    badge: 'Gemini'
-  },
-  {
-    id: 'gemini-3.6-flash',
-    name: 'Gemini 3.6 Flash',
-    version: '3.6',
-    description: 'Google Gemini 3.6 Flash.',
-    badge: 'Gemini'
-  },
-  {
-    id: 'deepseek-openrouter',
-    name: 'DeepSeek · OpenRouter',
-    version: 'OpenRouter',
-    description: 'DeepSeek qua OpenRouter, sử dụng OPENROUTER_MODEL trên backend.',
-    badge: 'OpenRouter'
-  },
-  {
-    id: 'deepseek-nvidia',
-    name: 'DeepSeek · NVIDIA',
-    version: 'NVIDIA',
-    description: 'DeepSeek qua NVIDIA NIM, sử dụng NVIDIA_MODEL trên backend.',
-    badge: 'NVIDIA'
+    description: 'Mistral AI Medium 3.5 — Cân bằng lý tưởng giữa tốc độ xử lý và độ tin cậy.',
+    badge: 'Mistral',
+    speedLabel: 'Nhanh'
   }
 ];
 
 export const IDEAS_FOR_YOU = [
   { id: 'idea-1', icon: '🌤', title: 'Tạo tài liệu', prompt: 'Tạo một tài liệu kế hoạch dự án rõ ràng, bao gồm mục tiêu, phạm vi, các bước thực hiện và tiêu chí hoàn thành.' },
   { id: 'idea-2', icon: '💬', title: 'Tạo báo cáo', prompt: 'Tạo một báo cáo tiến độ dự án ngắn gọn, bao gồm tóm tắt, kết quả, rủi ro và đề xuất tiếp theo.' },
-  { id: 'idea-3', icon: '📝', title: 'Customize Cowork for me', prompt: 'Guide me through tailoring Claude Cowork workflows for my specific team needs.' }
+  { id: 'idea-3', icon: '📝', title: 'Tối ưu hóa quy trình', prompt: 'Hướng dẫn tối ưu hóa các quy trình làm việc theo nhu cầu của nhóm.' }
 ];
 
 export const COWORK_SAMPLE_TASKS: CoworkTask[] = [
@@ -130,7 +120,7 @@ export const DEMO_STREAMING_RESPONSES = [
 
 1. **Thanh Taskbar / Sidebar**:
    - Chế độ Thu gọn (v1.png): Rộng 52px, chứa icon thu gọn ở nút đầu tiên. Click nút này để mở rộng.
-   - Chế độ Mở rộng (v2.png): Rộng 260px, hiển thị đầy đủ danh sách Chats, Projects, Artifacts, Code, Customize và danh sách Recents.
+   - Chế độ Mở rộng (v2.png): Rộng 260px, hiển thị đầy đủ danh sách Chats, Projects, Artifacts, Code và danh sách Recents.
 
 2. **Khung Chat & Streaming Animation**:
    - Phản hồi dạng real-time token streaming với hiệu ứng con trỏ nhấp nháy ▌.

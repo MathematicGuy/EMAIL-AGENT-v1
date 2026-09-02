@@ -43,9 +43,7 @@ class MistralOcrExtractor:
     def extract(self, filename: str, content: bytes) -> str:
         client = self.client()
         images = (
-            {"include_image_base64": True}
-            if self.image_dir is not None
-            else {"image_limit": 0}
+            {"include_image_base64": True} if self.image_dir is not None else {"image_limit": 0}
         )
         try:
             uploaded = client.files.upload(
@@ -64,7 +62,9 @@ class MistralOcrExtractor:
         except Exception as exc:
             raise RuntimeError(f"Mistral OCR failed for {filename}: {exc}") from exc
         pages = [self._page_markdown(filename, page) for page in response.pages]
-        return "\n\n".join(page for page in pages if page)
+        return "\n\n".join(
+            f"<!-- Page {n} -->\n{page}" for n, page in enumerate(pages, start=1) if page
+        )
 
     def _page_markdown(self, filename: str, page: Any) -> str:
         markdown = (getattr(page, "markdown", "") or "").strip()

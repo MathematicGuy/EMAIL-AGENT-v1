@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (ruff, mypy, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cowork
+          POSTGRES_PASSWORD: cowork_dev_only
+          POSTGRES_DB: cowork_mail_todo
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U cowork -d cowork_mail_todo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Matches the default the persistence modules already look for, so the tier
+      # stops skipping. The tests apply their own migrations via
+      # apply_migrations(pool) -- no separate migrate step is needed.
+      PG_TEST_URL: postgresql://cowork:cowork_dev_only@127.0.0.1:5432/cowork_mail_todo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv python install 3.13
+
+      # test_chat_memory_backup_restore.py needs pg_dump on PATH, and a v16 client
+      # against the v16 server (a mismatched client refuses to dump). Without this
+      # the backup/restore cases skip and we are back to unverified.
+      - name: Install postgresql-client 16
+        run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+
+      - run: uv sync --extra dev --extra postgres
+
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      # Persistence tests reset database schemas and therefore cannot share the
+      # xdist workers used by the fast offline suite. The next step owns that
+      # tier and runs it once, serially, against the service container.
+      - run: uv run pytest -q --ignore=tests/integration/persistence
+
+      # A green suite that skipped the whole Postgres tier looks identical to one
+      # that ran it. Make the difference fatal.
+      - name: Prove the persistence tier actually ran
+        run: |
+          set -o pipefail
+          uv run pytest tests/integration/persistence -q -n 0 --no-header \
+            -p no:cacheprovider | tee pg.log
+          if grep -qE "[0-9]+ skipped" pg.log; then
+            echo "::error::Postgres tier skipped - the service container was unreachable."
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend (eslint, tsc, vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm must exist before setup-node, or `cache: pnpm` has nothing to call.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm check-types
+      - run: pnpm test
+      - run: pnpm build

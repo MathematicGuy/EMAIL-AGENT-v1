@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Self
+from typing import Literal, Self, cast
 
+from ._chat_activity_contracts import ChatActivity, validate_chat_activities
 from ._chat_contracts_common import (
     MAX_CHAT_MESSAGE_LENGTH,
     ChatEventType,
@@ -20,6 +21,7 @@ from ._chat_contracts_common import (
     _to_dict,
 )
 from ._chat_contracts_memory import (
+    MAX_CHAT_RAG_EVIDENCE_ITEMS,
     MAX_TASK_ACTION_PLAN_ITEM_LENGTH,
     MAX_TASK_ACTION_PLAN_ITEMS,
     MAX_TASK_MISSING_INFORMATION_ITEM_LENGTH,
@@ -27,6 +29,7 @@ from ._chat_contracts_memory import (
     MAX_TASK_RAG_CITATIONS,
     MAX_TASK_REQUEST_PARAPHRASE_LENGTH,
     MAX_TASK_TITLE_LENGTH,
+    ChatExecutionTrace,
     ChatRagEvidence,
     EpisodeCitation,
 )
@@ -44,6 +47,8 @@ _TASK_PROPOSAL_FIELDS = frozenset(
         "retrieval_eligible",
     }
 )
+
+MAX_IDEMPOTENCY_KEY_LENGTH = 128
 
 
 def _validated_task_proposal(value: object) -> Mapping[str, object]:
@@ -111,22 +116,31 @@ class ChatMessageRequest:
     user_message: str
     idempotency_key: str
     document_ids: tuple[str, ...] = ()
+    reasoning_mode: Literal["fast", "reasoning"] = "fast"
 
     def __post_init__(self) -> None:
         _require_string(self.session_id, "session_id")
         _require_bounded_string(self.user_message, "user_message", MAX_CHAT_MESSAGE_LENGTH)
-        _require_string(self.idempotency_key, "idempotency_key")
+        _require_bounded_string(self.idempotency_key, "idempotency_key", MAX_IDEMPOTENCY_KEY_LENGTH)
         if len(self.document_ids) > 50 or len(set(self.document_ids)) != len(self.document_ids):
             raise ValueError("document_ids must contain at most 50 unique identifiers")
         for document_id in self.document_ids:
             _require_string(document_id, "document_ids item")
+        if self.reasoning_mode not in {"fast", "reasoning"}:
+            raise ValueError("reasoning_mode must be fast or reasoning")
 
     def to_dict(self) -> dict[str, object]:
         return _to_dict(self)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> Self:
-        expected_fields = {"session_id", "user_message", "idempotency_key", "document_ids"}
+        expected_fields = {
+            "session_id",
+            "user_message",
+            "idempotency_key",
+            "document_ids",
+            "reasoning_mode",
+        }
         unexpected_fields = set(data).difference(expected_fields)
         if unexpected_fields:
             raise ValueError(
@@ -137,11 +151,16 @@ class ChatMessageRequest:
             user_message=_require_bounded_string(
                 data["user_message"], "user_message", MAX_CHAT_MESSAGE_LENGTH
             ),
-            idempotency_key=_require_string(data["idempotency_key"], "idempotency_key"),
+            idempotency_key=_require_bounded_string(
+                data["idempotency_key"],
+                "idempotency_key",
+                MAX_IDEMPOTENCY_KEY_LENGTH,
+            ),
             document_ids=tuple(
                 _require_string(item, "document_ids item")
                 for item in _as_sequence(data.get("document_ids", ()), "document_ids")
             ),
+            reasoning_mode=cast(Literal["fast", "reasoning"], data.get("reasoning_mode", "fast")),
         )
 
 
@@ -168,6 +187,9 @@ class ChatMessageStreamEvent:
     page_end: int | None = None
     rag_evidence: tuple[ChatRagEvidence, ...] = ()
     retrieval_status: str | None = None
+    activities: tuple[ChatActivity, ...] = ()
+    execution_trace: ChatExecutionTrace | None = None
+    artifact_refs: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _require_string(self.event_id, "event_id")
@@ -175,10 +197,20 @@ class ChatMessageStreamEvent:
         _require_string(self.turn_id, "turn_id")
         if self.proposal is not None:
             object.__setattr__(self, "proposal", _validated_task_proposal(self.proposal))
-        if len(self.rag_evidence) > 5 or not all(
+        if len(self.rag_evidence) > MAX_CHAT_RAG_EVIDENCE_ITEMS or not all(
             isinstance(item, ChatRagEvidence) for item in self.rag_evidence
         ):
-            raise ValueError("rag_evidence must contain at most five ChatRagEvidence items")
+            raise ValueError(
+                f"rag_evidence must contain at most {MAX_CHAT_RAG_EVIDENCE_ITEMS} "
+                "ChatRagEvidence items"
+            )
+        object.__setattr__(self, "activities", validate_chat_activities(self.activities))
+        artifacts = _as_sequence(self.artifact_refs, "artifact_refs")
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_frozen_mapping(item, "artifact ref") for item in artifacts),
+        )
         self._validate_variant()
 
     def _validate_variant(self) -> None:
@@ -198,8 +230,13 @@ class ChatMessageStreamEvent:
             "page_end": self.page_end,
             "rag_evidence": self.rag_evidence or None,
             "retrieval_status": self.retrieval_status,
+            "activities": self.activities or None,
+            "execution_trace": self.execution_trace.to_dict() if self.execution_trace else None,
+            "artifact_refs": self.artifact_refs or None,
         }
         required: dict[ChatEventType, tuple[str, ...]] = {
+            ChatEventType.STARTED: (),
+            ChatEventType.ACTIVITY: ("activities",),
             ChatEventType.DELTA: ("text",),
             ChatEventType.MEMORY_CITATION: ("memory_type", "source_id"),
             ChatEventType.TASK_PROPOSAL: ("proposal",),
@@ -208,7 +245,10 @@ class ChatMessageStreamEvent:
         }
         expected = required[self.event_type]
         if self.event_type is not ChatEventType.COMPLETED and (
-            self.rag_evidence or self.retrieval_status is not None
+            self.rag_evidence
+            or self.retrieval_status is not None
+            or self.execution_trace is not None
+            or self.artifact_refs
         ):
             raise ValueError("rag_evidence is supported only on completed events")
         citation_fields = {
@@ -222,7 +262,7 @@ class ChatMessageStreamEvent:
         }
         for name, value in payloads.items():
             if (
-                name in {"rag_evidence", "retrieval_status"}
+                name in {"rag_evidence", "retrieval_status", "execution_trace", "artifact_refs"}
                 and self.event_type is ChatEventType.COMPLETED
             ):
                 continue
@@ -259,8 +299,29 @@ class ChatMessageStreamEvent:
                 raise ValueError("project citation page range is invalid")
 
     @classmethod
+    def started(cls, *, event_id: str, session_id: str, turn_id: str) -> Self:
+        return cls(event_id, session_id, turn_id, ChatEventType.STARTED)
+
+    @classmethod
     def delta(cls, *, event_id: str, session_id: str, turn_id: str, text: str) -> Self:
         return cls(event_id, session_id, turn_id, ChatEventType.DELTA, text=text)
+
+    @classmethod
+    def activity(
+        cls,
+        *,
+        event_id: str,
+        session_id: str,
+        turn_id: str,
+        activities: tuple[ChatActivity, ...],
+    ) -> Self:
+        return cls(
+            event_id,
+            session_id,
+            turn_id,
+            ChatEventType.ACTIVITY,
+            activities=activities,
+        )
 
     @classmethod
     def memory_citation(
@@ -297,11 +358,26 @@ class ChatMessageStreamEvent:
 
     @classmethod
     def completed(
-        cls, *, event_id: str, session_id: str, turn_id: str,
-        rag_evidence: tuple[ChatRagEvidence, ...] = (), retrieval_status: str | None = None,
+        cls,
+        *,
+        event_id: str,
+        session_id: str,
+        turn_id: str,
+        rag_evidence: tuple[ChatRagEvidence, ...] = (),
+        retrieval_status: str | None = None,
+        execution_trace: ChatExecutionTrace | None = None,
+        artifact_refs: tuple[Mapping[str, object], ...] = (),
     ) -> Self:
-        return cls(event_id, session_id, turn_id, ChatEventType.COMPLETED,
-                   rag_evidence=rag_evidence, retrieval_status=retrieval_status)
+        return cls(
+            event_id,
+            session_id,
+            turn_id,
+            ChatEventType.COMPLETED,
+            rag_evidence=rag_evidence,
+            retrieval_status=retrieval_status,
+            execution_trace=execution_trace,
+            artifact_refs=artifact_refs,
+        )
 
     @classmethod
     def task_proposal(
@@ -366,6 +442,9 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
         "page_end",
         "rag_evidence",
         "retrieval_status",
+        "activities",
+        "execution_trace",
+        "artifact_refs",
     }
     unexpected_fields = set(data).difference(expected_fields)
     if unexpected_fields:
@@ -409,9 +488,20 @@ def stream_event_from_dict(data: Mapping[str, object]) -> ChatMessageStreamEvent
             for item in _as_sequence(data.get("rag_evidence", ()), "rag_evidence")
         ),
         retrieval_status=(
-            str(data["retrieval_status"])
-            if data.get("retrieval_status") is not None
+            str(data["retrieval_status"]) if data.get("retrieval_status") is not None else None
+        ),
+        activities=tuple(
+            ChatActivity.from_dict(_as_mapping(item, "activity"))
+            for item in _as_sequence(data.get("activities", ()), "activities")
+        ),
+        execution_trace=(
+            ChatExecutionTrace.from_dict(_as_mapping(data["execution_trace"], "execution_trace"))
+            if data.get("execution_trace") is not None
             else None
+        ),
+        artifact_refs=tuple(
+            _as_mapping(item, "artifact ref")
+            for item in _as_sequence(data.get("artifact_refs", ()), "artifact_refs")
         ),
     )
 

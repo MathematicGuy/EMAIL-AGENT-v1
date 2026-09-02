@@ -1,0 +1,42 @@
+@startuml
+title <size:24>Dynamic View: Cowork Agent</size>\n<size:24>A grounded chat turn: classify, retrieve, assemble, generate, persist.</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Container>
+
+System_Boundary("CoworkAgent_boundary", "Cowork Agent", $tags="") {
+  Container(CoworkAgent.WebApplication, "Web Application", $techn="React 19 / TypeScript / Vite / Tailwind 4", $descr="Single-page client: dashboard, mail scan protocol, chat with live reasoning and execution-trace drawer, project documents, DOCX/PDF viewer.", $tags="", $link="")
+  Container(CoworkAgent.ControlPlaneAPI, "Control Plane API", $techn="Python 3 / FastAPI (mail-todo-api)", $descr="Composition root and HTTP/SSE surface. Owns identity, routing, both product workflows, retrieval and persistence access.", $tags="", $link="")
+  ContainerDb(CoworkAgent.ControlPlaneDatabase, "Control-Plane Database", $techn="PostgreSQL 16 (local Docker or hosted Supabase) or SQLite", $descr="Identity, mailbox and calendar connections, digest runs, tasks, chat sessions, turns, task episodes, projects and document chunks.", $tags="", $link="")
+  ContainerDb(CoworkAgent.TurbovecVectorIndex, "Turbovec Vector Index", $techn="TurboQuant .tvim files", $descr="In-process 4-bit TurboQuant indexes: one company index plus one index per project.", $tags="", $link="")
+}
+
+Person(KnowledgeWorker, "Knowledge Worker", $descr="Signs in with Google, scans unread mail into body-free action plans, chats with the assistant, and uploads project documents.", $tags="", $link="")
+System(LLMProviders, "LLM Providers", $descr="Gemini, OpenRouter, Mimo and Mistral chat-completion endpoints reached through one provider factory with fallback ordering.", $tags="", $link="")
+System(EmbeddingRerankingProviders, "Embedding & Reranking Providers", $descr="Jina AI embeddings and cross-encoder reranker, Gemini embeddings, and Cohere reranking.", $tags="", $link="")
+System(Langfuse, "Langfuse", $descr="Receives span and generation traces. Raw email bodies, chunk text and prompts are prohibited fields.", $tags="", $link="")
+
+Rel(KnowledgeWorker, CoworkAgent.WebApplication, "1: Sends a message", $techn="HTTPS", $tags="", $link="")
+Rel(CoworkAgent.WebApplication, CoworkAgent.ControlPlaneAPI, "2: Opens the SSE turn", $techn="HTTPS / REST / SSE", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, LLMProviders, "3: Classifies the turn intent", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ControlPlaneDatabase, "4: Reads the session buffer and eligible memory", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.TurbovecVectorIndex, "5: Retrieves evidence from the company or project index", $techn="In-process file I/O", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, EmbeddingRerankingProviders, "6: Embeds the query and reranks candidates", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, LLMProviders, "7: Streams reasoning and reply tokens", $techn="HTTPS / REST", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, CoworkAgent.ControlPlaneDatabase, "8: Persists the turn, execution trace and any TaskEpisode", $techn="asyncpg / sqlite3", $tags="", $link="")
+Rel(CoworkAgent.ControlPlaneAPI, Langfuse, "9: Emits metadata-only spans", $techn="HTTPS", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml

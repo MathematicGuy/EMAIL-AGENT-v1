@@ -36,4 +36,12 @@ pnpm test
 pnpm build
 ```
 
+Chat-switch latency is measured from the repository root, not this package:
+
+```powershell
+npx playwright test --project=chat-latency
+```
+
+See `evaluations/CHAT/latency/README.md`.
+
 Build production được tạo trong `dist/`.

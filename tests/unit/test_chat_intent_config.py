@@ -4,7 +4,7 @@ from cowork_agent.config import ChatIntentSettings
 
 
 def test_chat_intent_settings_use_safe_document_routing_defaults() -> None:
-    settings = ChatIntentSettings.from_env({}, default_model="provider-model", load_env_file=False)
+    settings = ChatIntentSettings.from_env({}, default_model="provider-model")
 
     assert settings.enabled is True
     assert settings.model == "provider-model"
@@ -24,7 +24,6 @@ def test_chat_intent_settings_allow_kill_switch_and_model_override() -> None:
             "CHAT_COMPANY_RAG_ENABLED": "true",
         },
         default_model="provider-model",
-        load_env_file=False,
     )
 
     assert settings.enabled is False
@@ -39,5 +38,4 @@ def test_chat_intent_settings_reject_invalid_timeout() -> None:
         ChatIntentSettings.from_env(
             {"CHAT_INTENT_CLASSIFIER_TIMEOUT_MS": "120001"},
             default_model="provider-model",
-            load_env_file=False,
         )

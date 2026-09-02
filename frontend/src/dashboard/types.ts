@@ -20,6 +20,7 @@ export interface TaskWorkflow {
 }
 
 export type SidebarState = 'collapsed' | 'expanded';
+export type ActiveDashboardView = 'chat' | 'mail' | 'artifacts' | 'raw-documents';
 
 export interface ModelOption {
   id: AssistantModelId;
@@ -28,6 +29,18 @@ export interface ModelOption {
   description: string;
   badge?: string;
   icon?: string;
+  speedLabel?: string;
+}
+
+export type ReasoningMode = 'fast' | 'reasoning';
+
+export interface ChatExecutionTrace {
+  provider: string;
+  model: string;
+  mode: ReasoningMode;
+  reasoning?: string;
+  reasoningTruncated: boolean;
+  retrievedFilenames: string[];
 }
 
 export interface ChatMessage {
@@ -50,7 +63,61 @@ export interface ChatMessage {
   ragEvidence?: ChatRagEvidence[];
   retrievalStatus?: ChatRetrievalStatus;
   mailScan?: MailScanProgress;
+  /** Client-visible lifecycle for an assistant turn. */
+  generationStatus?: ChatGenerationStatus;
+  errorCode?: string;
+  /** Reused when retrying the same logical turn. */
+  idempotencyKey?: string;
+  turnId?: string;
+  activities?: ChatActivity[];
+  completedAt?: string;
+  executionTrace?: ChatExecutionTrace;
 }
+
+export type ChatActivityCode =
+  | 'understanding_request'
+  | 'searching_relevant_information'
+  | 'reviewing_context'
+  | 'preparing_response'
+  | 'preparing_action_plan'
+  | 'checking_mail'
+  | 'processing_email'
+  | 'preparing_mail_results';
+
+export type ChatActivityStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped';
+
+export type ChatActivityOutcome = 'success' | 'no_results' | 'partial' | 'degraded';
+
+export interface ChatActivityDetail {
+  kind: 'documents_found' | 'emails_processed' | 'action_items_prepared';
+  current: number;
+  total?: number;
+}
+
+export interface ChatActivity {
+  code: ChatActivityCode;
+  status: ChatActivityStatus;
+  outcome?: ChatActivityOutcome;
+  startedAt?: string;
+  completedAt?: string;
+  detail?: ChatActivityDetail;
+}
+
+export type ChatGenerationStatus =
+  | 'idle'
+  | 'generating'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'cancelled'
+  | 'usage_limit_reached'
+  | 'temporarily_rate_limited';
 
 export interface MailScanProgress {
   status: 'connecting' | 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
@@ -104,6 +171,7 @@ export interface RecentChat {
   date?: string;
   unread?: boolean;
   category?: 'recent' | 'product' | 'project';
+  generationStatus?: ChatGenerationStatus;
 }
 
 export interface ThemeOption {

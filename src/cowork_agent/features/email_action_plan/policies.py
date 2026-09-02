@@ -7,21 +7,19 @@ from datetime import datetime, timedelta
 
 from cowork_agent.domain import Priority
 
-DEFAULT_QUERY = "is:unread in:inbox category:primary"
+DEFAULT_QUERY = "is:unread in:inbox"
 
 
 def normalize_query(query: str | None) -> str:
-    """Ensure v1 can only inspect unread messages in the inbox.
-
-    The default narrows scans to Gmail's Primary tab; callers may explicitly
-    supply another Gmail category for a deliberate non-default scan.
-    """
+    """Ensure v1 can only inspect unread messages in the inbox."""
     terms = (query or DEFAULT_QUERY).strip().split()
     lowered = {term.lower() for term in terms}
     if "is:unread" not in lowered:
         terms.append("is:unread")
     if "in:inbox" not in lowered:
         terms.append("in:inbox")
+    if not any(term.startswith("category:") for term in lowered):
+        terms.append("category:primary")
     return " ".join(terms)
 
 

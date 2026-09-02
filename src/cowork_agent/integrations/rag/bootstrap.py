@@ -17,13 +17,14 @@ import logging
 import os
 from pathlib import Path
 
-from cowork_agent.config import JinaEmbeddingSettings
+from cowork_agent.config import JinaEmbeddingSettings, RerankerSettings
 from cowork_agent.features.email_action_plan.ports import SemanticMemoryPort
 from cowork_agent.identity import LOCAL_TENANT_ID
 from cowork_agent.integrations.rag.embeddings import EmbeddingPort, JinaEmbeddingAdapter
 from cowork_agent.integrations.rag.hybrid import HybridSemanticMemory
 from cowork_agent.integrations.rag.knowledge_base import KnowledgeDocument, load_corpus
 from cowork_agent.integrations.rag.null_memory import NullSemanticMemory
+from cowork_agent.integrations.rag.reranker import RerankerAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,43 @@ async def _wrap_hybrid(
     embedder: EmbeddingPort,
     dense: SemanticMemoryPort,
 ) -> SemanticMemoryPort:
-    hybrid = HybridSemanticMemory(documents, embedder, dense=dense)
+    reranker = _build_reranker()
+    hybrid = HybridSemanticMemory(documents, embedder, dense=dense, reranker=reranker)
     await hybrid.build_index()
-    logger.info("Dense store wrapped with BM25 + RRF hybrid retrieval")
+    logger.info(
+        "Dense store wrapped with BM25 + RRF hybrid retrieval%s",
+        " + reranker" if reranker is not None else "",
+    )
     return hybrid
+
+
+def _build_reranker() -> RerankerAdapter | None:
+    """Build the optional Cohere/Jina reranker without degrading company RAG.
+
+    ``RerankerSettings`` defaults to Cohere. The reranker is an enhancement to
+    retrieval ranking, so a missing key or invalid reranker-only setting must
+    preserve the established dense + BM25 + RRF path rather than replacing the
+    entire company store with null memory.
+    """
+    try:
+        settings = RerankerSettings.from_env()
+    except ValueError as exc:
+        logger.info("Company RAG reranker is not configured (%s)", exc)
+        return None
+    return RerankerAdapter(settings)
+
+
+def build_document_embedder() -> tuple[EmbeddingPort, int]:
+    """Resolve active document embedding provider ('gemini' | 'jina') and vector dimension."""
+    from cowork_agent.config import (
+        GeminiEmbeddingSettings,
+        document_embedding_provider,
+    )
+    from cowork_agent.integrations.rag.embeddings import GeminiEmbeddingAdapter
+
+    provider = document_embedding_provider()
+    if provider == "jina":
+        settings = JinaEmbeddingSettings.from_env()
+        return JinaEmbeddingAdapter(settings), settings.dimensions
+    gemini_settings = GeminiEmbeddingSettings.from_env()
+    return GeminiEmbeddingAdapter(gemini_settings), gemini_settings.dimensions

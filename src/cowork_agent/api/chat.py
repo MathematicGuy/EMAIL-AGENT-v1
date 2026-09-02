@@ -2,20 +2,29 @@
 
 import json
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from langfuse import observe
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from cowork_agent.composition import ChatRuntime, ControlPlane, runtime
 from cowork_agent.domain.chat_contracts import (
+    MAX_CHAT_ACTIVITIES,
+    ChatActivityCode,
+    ChatActivityDetail,
+    ChatActivityOutcome,
+    ChatActivityStatus,
     ChatMemoryScope,
     ChatMessageRequest,
     ChatMessageStreamEvent,
+    ChatTurn,
+    ChatTurnStatus,
     DeclarativeProfile,
+    MailScanSummary,
     MemoryNamespace,
     MemoryProvenance,
     MemoryProvenanceSource,
@@ -26,6 +35,13 @@ from cowork_agent.features.ai_chat.controller import (
     ChatController,
     ChatSessionAccessDenied,
     ChatSessionRegistryPort,
+)
+from cowork_agent.features.ai_chat.mail_scan_reconciliation import (
+    DesiredMailActivity,
+    reconcile_mail_activities,
+    reconcile_mail_turn,
+    upsert_buffer_mail_turn,
+    validate_mail_turn_scan_status,
 )
 from cowork_agent.features.ai_chat.memory_gateway import MemorySourceUnavailableError
 from cowork_agent.features.ai_chat.ports import (
@@ -41,8 +57,64 @@ from cowork_agent.features.ai_chat.profile_policy import (
 from cowork_agent.identity import VerifiedPrincipal
 from cowork_agent.persistence.repositories.projects import Project, ProjectDocument
 
-PrincipalResolver = Callable[[Request], Awaitable[VerifiedPrincipal]]
 ControllerFactory = Callable[[ChatMemoryScope], ChatController]
+
+
+def slim_listed_turn(payload: dict[str, object], *, include_content: bool) -> dict[str, object]:
+    """Drop ``rag_evidence.content`` from GET /messages unless the client asks."""
+    if include_content:
+        return payload
+    evidence = payload.get("rag_evidence")
+    if not isinstance(evidence, list):
+        return payload
+    slimmed: list[object] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            slimmed.append(item)
+            continue
+        next_item = dict(item)
+        next_item.pop("content", None)
+        slimmed.append(next_item)
+    return {**payload, "rag_evidence": slimmed}
+
+
+async def load_owned_history(
+    *,
+    sessions: ChatSessionRegistryPort,
+    history: ChatHistoryPort | None,
+    buffer: ChatSessionBufferPort | None,
+    principal: VerifiedPrincipal,
+    session_id: str,
+) -> tuple[ChatMemoryScope, tuple[ChatTurn, ...]]:
+    """Load owned turns. Shared Postgres pools use one checkout for require + list."""
+    session_pool = getattr(sessions, "_pool", None)
+    history_pool = getattr(history, "_pool", None) if history is not None else None
+    if session_pool is not None and session_pool is history_pool:
+        async with cast(Any, session_pool).connection() as connection:
+            scope = await sessions.require(
+                session_id,
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+                connection=connection,
+            )
+            if history is None:
+                return scope, ()
+            turns = await history.list_turns(scope, connection=connection)
+            return scope, turns
+    scope = await sessions.require(
+        session_id, tenant_id=principal.tenant_id, user_id=principal.user_id
+    )
+    namespace = MemoryNamespace(
+        scope=scope,
+        memory_type=MemoryType.SHORT_TERM,
+        record_id=session_id,
+        source_id=None,
+    )
+    if history is not None:
+        return scope, await history.list_turns(scope)
+    if buffer is None:
+        return scope, ()
+    return scope, buffer.read(namespace)
 
 
 class _ChatMessagePayload(BaseModel):
@@ -52,14 +124,86 @@ class _ChatMessagePayload(BaseModel):
 
     session_id: str
     user_message: str
-    idempotency_key: str
+    idempotency_key: str = Field(min_length=1, max_length=128)
     document_ids: list[str] = []
+    reasoning_mode: Literal["fast", "reasoning"] = "fast"
 
 
 class _CreateSessionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str | None = None
+
+
+class _CancelTurnPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class _MailScanPayload(BaseModel):
+    """Aggregate-only @mail result; it deliberately accepts no email content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["connecting", "queued", "running", "succeeded", "partial", "failed"]
+    emails_matched: int = Field(ge=0)
+    emails_processed: int = Field(ge=0)
+    emails_to_process: int = Field(ge=0)
+    action_items_count: int | None = Field(default=None, ge=0)
+
+
+class _ActivityDetailPayload(BaseModel):
+    """One aggregate-only UI detail; arbitrary labels are deliberately forbidden."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["documents_found", "emails_processed", "action_items_prepared"]
+    current: int = Field(ge=0, le=100_000)
+    total: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class _ActivitySnapshotPayload(BaseModel):
+    """Desired lifecycle snapshot; the server owns all timestamps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: ChatActivityCode
+    status: ChatActivityStatus
+    outcome: ChatActivityOutcome | None = None
+    detail: _ActivityDetailPayload | None = None
+
+
+class _PersistMailScanPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str
+    user_message: str
+    assistant_message: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    turn_status: Literal["generating", "completed", "failed", "cancelled"] = "completed"
+    mail_scan: _MailScanPayload
+    activities: list[_ActivitySnapshotPayload] = Field(
+        default_factory=list, max_length=MAX_CHAT_ACTIVITIES
+    )
+
+
+def _desired_mail_activity(payload: _ActivitySnapshotPayload) -> DesiredMailActivity:
+    detail = payload.detail
+    return DesiredMailActivity(
+        code=payload.code,
+        status=payload.status,
+        outcome=payload.outcome,
+        detail=(
+            ChatActivityDetail(
+                kind=detail.kind,
+                current=detail.current,
+                total=detail.total,
+            )
+            if detail is not None
+            else None
+        ),
+    )
 
 
 class CanonicalProjectRepository(Protocol):
@@ -86,9 +230,17 @@ class _ChatProfilePayload(BaseModel):
 
 
 def create_chat_router() -> APIRouter:
-    """Create the transport-only router; runtime dependencies live on app.state."""
+    """Create the transport-only router; runtime dependencies live on the composed runtime."""
 
     router = APIRouter(prefix="/v1/cowork/chat", tags=["chat"])
+
+    @router.post("/guest-session", status_code=204, response_model=None)
+    async def create_guest_session(request: Request, response: Response) -> None:
+        chat = runtime(request).chat
+        issuer = chat.chat_guest_session_issuer if chat is not None else None
+        if issuer is None:
+            raise HTTPException(status_code=503, detail="Guest chat is unavailable")
+        await issuer(request, response)
 
     @router.post("/sessions", status_code=201)
     async def create_session(
@@ -96,7 +248,8 @@ def create_chat_router() -> APIRouter:
     ) -> dict[str, str]:
         principal = await _verified_principal(request)
         requested_project_id = payload.project_id if payload else None
-        project_repository = getattr(request.app.state, "project_repository", None)
+        control_plane = runtime(request).control_plane
+        project_repository = control_plane.project_repository if control_plane is not None else None
         if project_repository is None and requested_project_id is None:
             project_id = "default-project"
         elif project_repository is None:
@@ -157,27 +310,33 @@ def create_chat_router() -> APIRouter:
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
         if message.document_ids:
-            settings = getattr(request.app.state, "user_documents_settings", None)
+            # The document gate spans three groups: the settings and routing
+            # provider (chat) plus the vector plane (email-rag). An uncomposed
+            # group degrades to the same 503 the old missing keys produced.
+            chat = runtime(request).chat
+            settings = chat.user_documents_settings if chat is not None else None
             if settings is None or not bool(getattr(settings, "enabled", False)):
                 raise HTTPException(status_code=503, detail="User documents are disabled")
-            if getattr(request.app.state, "project_document_vectors", None) is None:
+            email_rag = runtime(request).email_rag
+            if email_rag is None or email_rag.project_document_vectors is None:
                 raise HTTPException(
                     status_code=503,
                     detail="Project document retrieval unavailable",
                 )
-            if getattr(request.app.state, "chat_routing_service", None) is None:
+            if chat is None or chat.chat_routing_service is None:
                 raise HTTPException(
                     status_code=503,
                     detail="Project document routing unavailable",
                 )
-            repository = getattr(request.app.state, "project_repository", None)
+            control_plane = runtime(request).control_plane
+            repository = control_plane.project_repository if control_plane is not None else None
             if repository is None:
                 raise HTTPException(status_code=404, detail="Document not found")
             for document_id in message.document_ids:
                 if (
-                    document := await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
+                    document := await cast(CanonicalProjectRepository, repository).require_document(
+                        principal, scope.project_id, document_id
+                    )
                 ) is None:
                     raise HTTPException(status_code=404, detail="Document not found")
                 if document.status != "ready":
@@ -194,6 +353,67 @@ def create_chat_router() -> APIRouter:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @router.post("/sessions/{session_id}/mail-scans", status_code=201)
+    async def persist_mail_scan(
+        session_id: str, payload: _PersistMailScanPayload, request: Request
+    ) -> dict[str, object]:
+        """Upsert one aggregate-only @mail lifecycle without invoking AI Chat."""
+
+        principal = await _verified_principal(request)
+        try:
+            scope = await _require_session(request, principal, session_id)
+        except ChatSessionAccessDenied as exc:
+            raise HTTPException(status_code=404, detail="Chat session not found") from exc
+        now = datetime.now(UTC)
+        idempotency_key = payload.idempotency_key or payload.turn_id
+        turn_status = ChatTurnStatus(payload.turn_status)
+        try:
+            mail_scan = MailScanSummary.from_dict(payload.mail_scan.model_dump())
+            validate_mail_turn_scan_status(turn_status, mail_scan)
+            desired_activities = tuple(
+                _desired_mail_activity(activity) for activity in payload.activities
+            )
+            activities = reconcile_mail_activities((), desired_activities, turn_status, at=now)
+            turn = ChatTurn(
+                turn_id=payload.turn_id,
+                session_id=session_id,
+                user_message=payload.user_message,
+                assistant_message=payload.assistant_message,
+                created_at=now,
+                mail_scan=mail_scan,
+                status=turn_status,
+                idempotency_key=idempotency_key,
+                activities=activities,
+                completed_at=(now if turn_status is not ChatTurnStatus.GENERATING else None),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid mail scan result") from exc
+        history = _history_repository(request)
+        if history is not None:
+            try:
+                existing = await history.begin_turn(
+                    scope,
+                    turn,
+                    idempotency_key=idempotency_key,
+                    title="@mail",
+                )
+                turn = reconcile_mail_turn(existing, turn, desired_activities, at=now)
+                turn = await history.update_turn(scope, turn, title="@mail")
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409, detail="Invalid mail activity transition"
+                ) from exc
+        else:
+            try:
+                turn = upsert_buffer_mail_turn(
+                    _buffer(request), scope, turn, desired_activities, at=now
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409, detail="Invalid mail activity transition"
+                ) from exc
+        return turn.to_dict()
 
     @router.get("/sessions")
     async def list_sessions(
@@ -213,49 +433,64 @@ def create_chat_router() -> APIRouter:
             )
         history = _history_repository(request)
         titles = await history.titles_for(scopes) if history is not None else {}
+        latest_turns = await history.latest_turns_for(scopes) if history is not None else {}
         return {
             "sessions": [
-                _session_response(scope, title=titles.get(scope.session_id)) for scope in scopes
+                _session_response(
+                    scope,
+                    title=titles.get(scope.session_id),
+                    latest_turn=latest_turns.get(scope.session_id),
+                )
+                for scope in scopes
             ]
         }
 
     @router.get("/sessions/{session_id}/messages")
-    async def list_messages(session_id: str, request: Request) -> dict[str, object]:
+    async def list_messages(
+        session_id: str,
+        request: Request,
+        include_content: bool = Query(False),
+    ) -> dict[str, object]:
         principal = await _verified_principal(request)
+        history = _history_repository(request)
         try:
-            scope = await _require_session(request, principal, session_id)
+            _scope, turns = await load_owned_history(
+                sessions=_sessions(request),
+                history=history,
+                buffer=_buffer(request),
+                principal=principal,
+                session_id=session_id,
+            )
         except ChatSessionAccessDenied as exc:
             raise HTTPException(status_code=404, detail="Chat session not found") from exc
-        namespace = MemoryNamespace(
-            scope=scope,
-            memory_type=MemoryType.SHORT_TERM,
-            record_id=session_id,
-            source_id=None,
-        )
-        history = _history_repository(request)
-        turns = (
-            await history.list_turns(scope)
-            if history is not None
-            else _buffer(request).read(namespace)
-        )
-        serialized: list[dict[str, object]] = []
-        repository = getattr(request.app.state, "project_repository", None)
-        for turn in turns:
-            payload = turn.to_dict()
-            coordinates = payload.get("citation_coordinates")
-            if isinstance(coordinates, list) and repository is not None:
-                for coordinate in coordinates:
-                    if not isinstance(coordinate, dict):
-                        continue
-                    document_id = coordinate.get("document_id")
-                    if not isinstance(document_id, str):
-                        continue
-                    document = await cast(
-                        CanonicalProjectRepository, repository
-                    ).require_document(principal, scope.project_id, document_id)
-                    coordinate["unavailable"] = document is None or document.status != "ready"
-            serialized.append(payload)
+        serialized = [
+            slim_listed_turn(turn.to_dict(), include_content=include_content) for turn in turns
+        ]
         return {"session_id": session_id, "turns": serialized}
+
+    @router.post(
+        "/sessions/{session_id}/turns/{turn_id}/cancel",
+        status_code=204,
+        response_model=None,
+    )
+    async def cancel_turn(session_id: str, turn_id: str, request: Request) -> None:
+        controller = await _owned_controller(request, session_id)
+        if not await controller.cancel_turn(turn_id):
+            raise HTTPException(status_code=404, detail="Active chat turn not found")
+
+    @router.post(
+        "/sessions/{session_id}/turns/cancel",
+        status_code=204,
+        response_model=None,
+    )
+    async def cancel_turn_by_idempotency_key(
+        session_id: str,
+        payload: _CancelTurnPayload,
+        request: Request,
+    ) -> None:
+        controller = await _owned_controller(request, session_id)
+        if not await controller.cancel_turn_by_idempotency_key(payload.idempotency_key):
+            raise HTTPException(status_code=404, detail="Active chat turn not found")
 
     @router.delete("/sessions/{session_id}", status_code=204, response_model=None)
     async def delete_session(session_id: str, request: Request) -> None:
@@ -375,10 +610,8 @@ def _serialize_sse(event: ChatMessageStreamEvent) -> str:
 
 
 async def _verified_principal(request: Request) -> VerifiedPrincipal:
-    resolver = cast(
-        PrincipalResolver | None,
-        getattr(request.app.state, "chat_principal_resolver", None),
-    )
+    chat = runtime(request).chat
+    resolver = chat.chat_principal_resolver if chat is not None else None
     if resolver is None:
         raise HTTPException(status_code=503, detail="Chat identity is unavailable")
     principal = await resolver(request)
@@ -476,22 +709,37 @@ def _user_namespace(principal: VerifiedPrincipal, memory_type: MemoryType) -> Me
     )
 
 
+def _chat_group(request: Request) -> ChatRuntime:
+    # Typed read through the runtime seam (ADR-013). The old direct attribute
+    # reads crashed on a missing key; an uncomposed group fails just as loudly.
+    chat = runtime(request).chat
+    if chat is None:
+        raise RuntimeError("the chat group is not composed")
+    return chat
+
+
+def _control_plane(request: Request) -> ControlPlane | None:
+    return runtime(request).control_plane
+
+
 def _buffer(request: Request) -> ChatSessionBufferPort:
-    return cast(ChatSessionBufferPort, request.app.state.chat_session_buffer)
+    return _chat_group(request).chat_session_buffer
 
 
 def _profile_repository(request: Request) -> DeclarativeMemoryPort:
-    repository = getattr(request.app.state, "chat_profile_repository", None)
+    control_plane = _control_plane(request)
+    repository = control_plane.chat_profile_repository if control_plane is not None else None
     if repository is None:
         raise HTTPException(status_code=503, detail="Chat memory store unavailable")
-    return cast(DeclarativeMemoryPort, repository)
+    return repository
 
 
 def _episodic_repository(request: Request) -> EpisodicMemoryPort:
-    repository = getattr(request.app.state, "chat_task_episode_repository", None)
+    control_plane = _control_plane(request)
+    repository = control_plane.chat_task_episode_repository if control_plane is not None else None
     if repository is None:
         raise HTTPException(status_code=503, detail="Chat memory store unavailable")
-    return cast(EpisodicMemoryPort, repository)
+    return repository  # type: ignore[return-value]
 
 
 async def _require_session(
@@ -503,6 +751,9 @@ async def _require_session(
 
 
 def _controllers(request: Request) -> dict[str, ChatController]:
+    # Request-time memoization cache. Deliberately NOT on the frozen runtime:
+    # a frozen dataclass cannot hold a mutable per-request cache (ADR-013),
+    # so this one write stays on ``app.state`` until a proper seam exists.
     controllers = getattr(request.app.state, "chat_controllers", None)
     if controllers is None:
         controllers = {}
@@ -511,24 +762,41 @@ def _controllers(request: Request) -> dict[str, ChatController]:
 
 
 def _sessions(request: Request) -> ChatSessionRegistryPort:
-    return cast(ChatSessionRegistryPort, request.app.state.chat_sessions)
+    return _chat_group(request).chat_sessions
 
 
 def _controller_factory(request: Request) -> ControllerFactory:
+    # A documented ``app.state`` survivor (ADR-013, slice 02-8): the factory
+    # is published once after the single runtime assembly and reads the
+    # composed runtime at controller-creation time, so it is not a group
+    # field — this cache's request-time readers reach it here.
     return cast(ControllerFactory, request.app.state.chat_controller_factory)
 
 
-def _session_response(scope: ChatMemoryScope, *, title: str | None = None) -> dict[str, str]:
-    payload = {"session_id": scope.session_id, "feature": scope.feature}
+def _session_response(
+    scope: ChatMemoryScope,
+    *,
+    title: str | None = None,
+    latest_turn: ChatTurn | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"session_id": scope.session_id, "feature": scope.feature}
     if scope.project_id != "default-project":
         payload["project_id"] = scope.project_id
     if title is not None:
         payload["title"] = title
+    if latest_turn is not None:
+        payload["latest_turn_status"] = latest_turn.status.value
+        payload["latest_turn_id"] = latest_turn.turn_id
+        if latest_turn.idempotency_key is not None:
+            payload["latest_turn_idempotency_key"] = latest_turn.idempotency_key
+        if latest_turn.error_code is not None:
+            payload["latest_turn_error_code"] = latest_turn.error_code
     return payload
 
 
 def _history_repository(request: Request) -> ChatHistoryPort | None:
-    repository = getattr(request.app.state, "chat_history_repository", None)
+    control_plane = _control_plane(request)
+    repository = control_plane.chat_history_repository if control_plane is not None else None
     return cast(ChatHistoryPort | None, repository)
 
 

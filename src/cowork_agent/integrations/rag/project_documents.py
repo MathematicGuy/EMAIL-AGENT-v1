@@ -14,8 +14,11 @@ Three stores cooperate, and each owns exactly one thing:
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Protocol
 
 from cowork_agent.domain.project_documents import (
@@ -25,6 +28,11 @@ from cowork_agent.domain.project_documents import (
     ProjectDocumentQuery,
     ProjectDocumentResponse,
 )
+from cowork_agent.observability import (
+    ProjectDocumentTimingOutcome,
+    log_project_document_timing,
+    safe_provider_label,
+)
 from cowork_agent.persistence.repositories.project_document_chunks import (
     ChunkInput,
     EligibleChunks,
@@ -33,13 +41,27 @@ from cowork_agent.persistence.repositories.project_document_chunks import (
 from cowork_agent.persistence.repositories.projects import ProjectDocument
 
 from .embeddings import EmbeddingPort
-from .markdown_chunking import DEFAULT_MAX_CHARS
 from .project_index import ProjectIndexUnavailable, TurbovecProjectIndexStore
 from .rrf import ReciprocalRankFusion
 
 #: How many candidates each leg contributes per requested result. Fusion needs
 #: more input than output or the two rankings barely overlap.
 _CANDIDATE_MULTIPLIER = 4
+
+#: Headroom over ``limit`` for chunks pulled in by section, on top of the ones
+#: that earned their place by rank. An article cut into several chunks is worth
+#: reassembling; an entire chapter arriving because one chunk of it ranked is
+#: not. A section that will not fit inside the headroom is left unexpanded and
+#: its ranked chunk stands alone, so expansion can never evict a result that
+#: retrieval actually chose.
+_SECTION_HEADROOM = 2
+
+logger = logging.getLogger(__name__)
+
+#: Longest chunk text the embedding request may carry. Stated here rather than
+#: borrowed from the chunker's default, so retuning chunk size cannot silently
+#: move a persistence-facing safety limit.
+MAX_EMBEDDABLE_CHUNK_CHARS = 2_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +77,7 @@ class ProjectDocumentChunk:
     def __post_init__(self) -> None:
         if not self.chunk_id.strip() or not self.text.strip():
             raise ValueError("project chunks require a non-empty identifier and text")
-        if len(self.text) > DEFAULT_MAX_CHARS:
+        if len(self.text) > MAX_EMBEDDABLE_CHUNK_CHARS:
             raise ValueError("project chunks must satisfy the embedding input safety limit")
         if self.page_start < 1 or self.page_end < self.page_start:
             raise ValueError("project chunk page range is invalid")
@@ -98,6 +120,10 @@ class ProjectDocumentChunkRepository(Protocol):
         query: str,
         lexical_limit: int,
     ) -> EligibleChunks: ...
+
+    async def list_section_siblings(
+        self, *, vector_ids: tuple[int, ...], allowlist: tuple[int, ...]
+    ) -> tuple[tuple[int, int], ...]: ...
 
     async def hydrate(self, vector_ids: tuple[int, ...]) -> tuple[StoredChunk, ...]: ...
 
@@ -151,32 +177,58 @@ class HybridProjectDocumentStore:
         if expires_at.astimezone(UTC) <= datetime.now(UTC):
             raise ValueError("expired documents must not be indexed")
 
-        assigned = await self._chunks.replace_document_chunks(
-            document_id=document_id,
-            project_id=project_id,
-            chunks=tuple(
-                ChunkInput(
-                    chunk_id=chunk.chunk_id,
-                    chunk_index=index,
-                    text=chunk.text,
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    section=chunk.section,
-                )
-                for index, chunk in enumerate(chunks)
-            ),
-        )
-        vectors = await self._embedder.embed(
-            tuple(chunk.text for chunk in chunks), task="retrieval.passage"
-        )
-        if len(vectors) != len(chunks) or not vectors or not vectors[0]:
-            raise ValueError("embedding response does not match project chunks")
-        if any(len(vector) != self._vector_size for vector in vectors):
-            raise ValueError("project embedding dimension does not match index configuration")
-
+        stage_started = perf_counter()
+        stage_outcome: ProjectDocumentTimingOutcome = "error"
+        try:
+            assigned = await self._chunks.replace_document_chunks(
+                document_id=document_id,
+                project_id=project_id,
+                chunks=tuple(
+                    ChunkInput(
+                        chunk_id=chunk.chunk_id,
+                        chunk_index=index,
+                        text=chunk.text,
+                        page_start=chunk.page_start,
+                        page_end=chunk.page_end,
+                        section=chunk.section,
+                    )
+                    for index, chunk in enumerate(chunks)
+                ),
+            )
+            stage_outcome = "success"
+        finally:
+            log_project_document_timing(
+                logger,
+                stage="chunk_persistence",
+                started=stage_started,
+                outcome=stage_outcome,
+                document_id=document_id,
+                provider=safe_provider_label(self._chunks),
+            )
+        stage_started = perf_counter()
+        stage_outcome = "error"
+        try:
+            vectors = await self._embedder.embed(
+                tuple(chunk.text for chunk in chunks), task="retrieval.passage"
+            )
+            if len(vectors) != len(chunks) or not vectors or not vectors[0]:
+                raise ValueError("embedding response does not match project chunks")
+            if any(len(vector) != self._vector_size for vector in vectors):
+                raise ValueError("project embedding dimension does not match index configuration")
+            stage_outcome = "success"
+        finally:
+            log_project_document_timing(
+                logger,
+                stage="embedding",
+                started=stage_started,
+                outcome=stage_outcome,
+                document_id=document_id,
+                provider=safe_provider_label(self._embedder),
+            )
         by_chunk_id = dict(assigned)
         await self._indexes.add(
             project_id=project_id,
+            document_id=document_id,
             vector_ids=[by_chunk_id[chunk.chunk_id] for chunk in chunks],
             vectors=vectors,
         )
@@ -332,7 +384,14 @@ class HybridProjectDocumentStore:
         ranked = fused[:limit]
         if not ranked:
             return ()
-        scores = {int(candidate.chunk_id): candidate.score for candidate in ranked}
+        seeds = {int(candidate.chunk_id): candidate.score for candidate in ranked}
+        scores = _with_section_siblings(
+            seeds,
+            await self._chunks.list_section_siblings(
+                vector_ids=tuple(seeds), allowlist=eligible.allowlist
+            ),
+            limit * _SECTION_HEADROOM,
+        )
         stored = await self._chunks.hydrate(tuple(scores))
         by_vector_id = {chunk.vector_id: chunk for chunk in stored}
         return tuple(
@@ -347,11 +406,37 @@ class HybridProjectDocumentStore:
                 score=scores[chunk.vector_id],
             )
             for chunk in (
-                by_vector_id[int(candidate.chunk_id)]
-                for candidate in ranked
-                if int(candidate.chunk_id) in by_vector_id
+                by_vector_id[vector_id] for vector_id in scores if vector_id in by_vector_id
             )
         )
+
+
+def _with_section_siblings(
+    seeds: dict[int, float],
+    siblings: Sequence[tuple[int, int]],
+    ceiling: int,
+) -> dict[int, float]:
+    """Widen a fused ranking to whole sections, best-ranked section first.
+
+    Returned in reading order within each section, so an article arrives at the
+    model as an article rather than as two disconnected fragments. A sibling
+    inherits the fused score of the chunk that pulled it in: it was not ranked
+    on its own merit, and ``score`` is already documented as an ordering rather
+    than a confidence.
+    """
+    by_seed: dict[int, list[int]] = {}
+    for seed, sibling in siblings:
+        by_seed.setdefault(seed, []).append(sibling)
+
+    widened: dict[int, float] = {}
+    for seed, score in seeds.items():
+        section = by_seed.get(seed) or [seed]
+        if len(widened) + sum(1 for item in section if item not in widened) > ceiling:
+            widened.setdefault(seed, score)
+            continue
+        for vector_id in section:
+            widened.setdefault(vector_id, score)
+    return widened
 
 
 class ReadyProjectDocumentRepository(Protocol):
@@ -390,20 +475,14 @@ class CanonicalProjectDocumentRetriever:
                 timeout=self._timeout_seconds,
             )
         except TimeoutError:
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="retrieval_timeout"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="retrieval_timeout")
         except ProjectIndexUnavailable:
             # The project's .tvim is missing or unreadable. Fail closed rather
             # than rebuild: reconstruction means re-embedding every chunk, which
             # does not belong behind a user's query.
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="index_unavailable"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="index_unavailable")
         except Exception:
-            return ProjectDocumentResponse(
-                (), degraded=True, reason_code="retrieval_unavailable"
-            )
+            return ProjectDocumentResponse((), degraded=True, reason_code="retrieval_unavailable")
 
     async def _retrieve_with_retries(
         self, request: ProjectDocumentQuery

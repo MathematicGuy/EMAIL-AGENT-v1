@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from datetime import date
 
 import pytest
 
@@ -104,3 +105,64 @@ def test_turbovec_snapshot_persistence(tmp_path_factory) -> None:
     response = asyncio.run(mem2.retrieve(request))
     assert response.retrieval_status == RetrievalStatus.SUCCESS
     assert response.chunks[0].chunk_id == "doc1#1"
+
+
+class CountingDummyEmbedder(DummyEmbedder):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        self.calls += 1
+        return await super().embed(texts)
+
+
+def test_turbovec_retrieve_with_years_on_undated_corpus_returns_no_results_without_embed() -> None:
+    doc = _make_document("doc1", ["alpha project guidelines"])
+    embedder = CountingDummyEmbedder()
+    memory = TurbovecSemanticMemory([doc], embedder, bit_width=4)
+    asyncio.run(memory.build_index())
+    embeds_after_build = embedder.calls
+
+    request = SemanticRetrievalRequest(
+        run_id="run_5",
+        user_id="user_1",
+        query="alpha project",
+        knowledge_gaps=(),
+        filters=RetrievalFilters(years=(1999,)),
+        limits=RetrievalLimits(top_k=2, min_score=0.1, timeout_ms=5000),
+    )
+
+    response = asyncio.run(memory.retrieve(request))
+
+    assert response.retrieval_status == RetrievalStatus.NO_RESULTS
+    assert response.chunks == ()
+    assert embedder.calls == embeds_after_build
+
+
+def test_turbovec_retrieve_copies_document_date_onto_semantic_chunk() -> None:
+    dated = date(2026, 8, 7)
+    chunk = KnowledgeChunk(
+        chunk_id="doc1#0",
+        document_id="doc1",
+        document_title="DOC1",
+        section=None,
+        text="alpha project guidelines",
+        source_url="doc1.md",
+        document_date=dated,
+    )
+    doc = KnowledgeDocument("doc1", "DOC1", "doc1.md", (chunk,))
+    memory = TurbovecSemanticMemory([doc], DummyEmbedder(), bit_width=4)
+    asyncio.run(memory.build_index())
+
+    request = SemanticRetrievalRequest(
+        run_id="run_6",
+        user_id="user_1",
+        query="alpha project",
+        knowledge_gaps=(),
+        filters=RetrievalFilters(document_status=()),
+        limits=RetrievalLimits(top_k=1, min_score=0.1, timeout_ms=5000),
+    )
+
+    response = asyncio.run(memory.retrieve(request))
+    assert response.chunks
+    assert response.chunks[0].document_date == dated

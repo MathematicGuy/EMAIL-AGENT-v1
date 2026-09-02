@@ -23,7 +23,7 @@ from cowork_agent.domain.target_contracts import (
 )
 
 from .embeddings import EmbeddingPort
-from .knowledge_base import KnowledgeChunk, KnowledgeDocument
+from .knowledge_base import KnowledgeChunk, KnowledgeDocument, allowed_chunk_indices
 
 
 class InRepoSemanticMemory:
@@ -57,7 +57,28 @@ class InRepoSemanticMemory:
         self._min_score_default = min_score_default
         self._matrix: np.ndarray | None = None
 
-    async def build_index(self) -> None:
+    @classmethod
+    def from_precomputed_matrix(
+        cls,
+        documents: Sequence[KnowledgeDocument],
+        embedder: EmbeddingPort,
+        matrix: np.ndarray,
+    ) -> InRepoSemanticMemory:
+        """Build an index from a validated passage-vector matrix (eval cache)."""
+        memory = cls(documents, embedder)
+        validated = np.array(matrix, copy=True)
+        if validated.ndim != 2:
+            raise ValueError("precomputed matrix must be 2-dimensional")
+        if validated.dtype != np.float32:
+            raise ValueError("precomputed matrix must be float32")
+        if not np.isfinite(validated).all():
+            raise ValueError("precomputed matrix must contain only finite values")
+        if validated.shape[0] != len(memory._chunks):
+            raise ValueError("precomputed matrix row count must match the number of chunks")
+        memory._matrix = validated
+        return memory
+
+    async def build_index(self) -> np.ndarray:
         """Embed every chunk once and unit-normalize the matrix."""
         vectors = await self._embedder.embed(
             tuple(chunk.text for chunk in self._chunks), task="retrieval.passage"
@@ -66,19 +87,21 @@ class InRepoSemanticMemory:
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         self._matrix = matrix / norms
+        return self._matrix
 
     async def retrieve(self, request: SemanticRetrievalRequest) -> SemanticRetrievalResponse:
         if self._matrix is None:
             raise RuntimeError("build_index() must be called before retrieve()")
         started = time.monotonic()
-        allowed = list(enumerate(self._chunks))
+        allowed = [
+            (index, self._chunks[index])
+            for index in allowed_chunk_indices(self._chunks, request.filters)
+        ]
         if not allowed:
             return _response(request, (), RetrievalStatus.NO_RESULTS, started)
         query_text = _query_text(request)
         try:
-            (query_vector,) = await self._embedder.embed(
-                (query_text,), task="retrieval.query"
-            )
+            (query_vector,) = await self._embedder.embed((query_text,), task="retrieval.query")
         except Exception:
             return _response(request, (), RetrievalStatus.TIMEOUT, started)
 
@@ -113,6 +136,9 @@ class InRepoSemanticMemory:
                 document_version=None,
                 relevance_score=score,
                 rerank_score=None,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                document_date=chunk.document_date,
             )
             for score, chunk in ranked
         )

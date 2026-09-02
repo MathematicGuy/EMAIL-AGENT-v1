@@ -17,6 +17,7 @@ from cowork_agent.features.email_action_plan.observability import (
     LifecycleEventPublisher,
     ProductionTraceForbiddenError,
     dev_trace_sink_from_env,
+    emit_security_scan_trace,
     is_production_env,
 )
 from cowork_agent.orchestration.local import InMemoryOutbox
@@ -160,3 +161,56 @@ def test_lifecycle_publisher_without_sink_still_drains_outbox() -> None:
         assert await outbox.pending() == ()
 
     asyncio.run(scenario())
+
+
+def test_emit_security_scan_trace_clean() -> None:
+    sink = InMemoryTraceSink()
+    emit_security_scan_trace(
+        sink,
+        run_id="run-sec-1",
+        user_id="user-1",
+        urls_scanned_count=5,
+        attachments_scanned_count=2,
+        threats_detected_count=0,
+        quarantined_count=0,
+        highest_threat_level="clean",
+        latency_ms=45,
+    )
+
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.event_name == "email_security_scan"
+    assert event.status == TraceStatus.SUCCESS
+    assert event.validation_status == "SECURITY_CLEAN"
+    assert event.generation_status is None
+    assert "URLS:5" in event.reason_codes
+    assert "ATTACHMENTS:2" in event.reason_codes
+    assert "QUARANTINED:0" in event.reason_codes
+    assert event.latency_ms.email == 45
+
+
+def test_emit_security_scan_trace_quarantined_and_degraded() -> None:
+    sink = InMemoryTraceSink()
+    emit_security_scan_trace(
+        sink,
+        run_id="run-sec-2",
+        user_id="user-2",
+        urls_scanned_count=3,
+        attachments_scanned_count=1,
+        threats_detected_count=2,
+        quarantined_count=1,
+        highest_threat_level="malicious",
+        latency_ms=120,
+        degraded=True,
+    )
+
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.event_name == "email_security_scan"
+    assert event.status == TraceStatus.PARTIAL
+    assert event.validation_status == "SECURITY_QUARANTINE"
+    assert event.generation_status == "SECURITY_SCAN_DEGRADED"
+    assert "THREATS:2" in event.reason_codes
+    assert "QUARANTINED:1" in event.reason_codes
+    assert "HIGHEST:malicious" in event.reason_codes
+

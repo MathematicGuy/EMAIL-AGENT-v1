@@ -99,9 +99,7 @@ def test_scorer_mismatched_case_set_raises() -> None:
     class _WrongIdScorer:
         """Scorer that only knows about 'real_case' — raises for others."""
 
-        def score(
-            self, case_id: str, *, memory_enabled: bool
-        ) -> PairedCaseScores:
+        def score(self, case_id: str, *, memory_enabled: bool) -> PairedCaseScores:
             if case_id != "real_case":
                 raise ValueError(f"unknown case_id: {case_id}")
             return PairedCaseScores(0.5, 0.5, 0.5)
@@ -120,13 +118,9 @@ def test_scorer_mismatched_case_set_raises() -> None:
         ("rejected_retrievals", "hard_safety_rejected_retrieval"),
     ],
 )
-def test_hard_safety_counters_fail_closed(
-    safety_kwarg: str, expected_code: str
-) -> None:
+def test_hard_safety_counters_fail_closed(safety_kwarg: str, expected_code: str) -> None:
     scorer = _DeterministicScorer()
-    report = run_paired_evaluation(
-        ("alpha", "beta"), scorer, **{safety_kwarg: 1}
-    )
+    report = run_paired_evaluation(("alpha", "beta"), scorer, **{safety_kwarg: 1})
     result = evaluate_launch_gate(report, _PLACEHOLDER_THRESHOLDS)
     assert result.passed is False
     assert expected_code in result.reason_codes

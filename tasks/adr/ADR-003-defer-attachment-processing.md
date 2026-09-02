@@ -72,4 +72,4 @@ PostgreSQL, idempotency, worker claim hoặc ports/adapters.
 - `ADR-001-async-pipeline-and-adapters.md`
 - `ADR-002-sandboxed-attachment-extraction.md`
 - `../prds/PRD-v1-Core-Email-and-RAG.md`
-- `../../docs/architectures/TARGET-ARCHITECTURE.md`
+- `../../docs/architectures/c3-api-email-action-plan.md`

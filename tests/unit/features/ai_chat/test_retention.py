@@ -31,9 +31,11 @@ def test_purge_uses_one_utc_boundary_and_is_retryable() -> None:
 def test_purge_rejects_naive_datetime_and_propagates_store_failure() -> None:
     with pytest.raises(ValueError):
         asyncio.run(MemoryPurgeCoordinator(Store([0]), Store([0])).purge_expired(datetime.now()))
+
     class Failing(Store):
         async def purge_expired(self, now: datetime) -> int:
             raise RuntimeError("failure")
+
     with pytest.raises(RuntimeError):
         coordinator = MemoryPurgeCoordinator(Failing([]), Store([0]))
         asyncio.run(coordinator.purge_expired(datetime.now(UTC)))
@@ -43,8 +45,10 @@ def test_purge_accepts_any_zero_offset_timezone_and_report_is_strict_metadata() 
     class ZeroOffset(tzinfo):
         def utcoffset(self, dt: datetime | None) -> timedelta:
             return timedelta(0)
+
         def dst(self, dt: datetime | None) -> timedelta:
             return timedelta(0)
+
     result = asyncio.run(
         MemoryPurgeCoordinator(Store([0]), Store([0])).purge_expired(
             datetime(2026, 8, 10, tzinfo=ZeroOffset())

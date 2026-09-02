@@ -1,0 +1,284 @@
+{
+  "schema_version": "2.0.0",
+  "probe_set_id": "v2_four_scopes_wide",
+  "label": "Bốn phạm vi bộ nhớ, bản mở rộng: 20 câu hỏi, thêm cặp thay thế và các câu hỏi cận kề dễ bịa",
+  "seed": {
+    "short_term": [
+      "Tôi đang xử lý yêu cầu gia hạn CCCD cho văn phòng Đà Nẵng.",
+      "Hồ sơ này do chị Lê Thu Vân ký duyệt.",
+      "Hạn chót của việc đó là thứ Ba.",
+      "Đính chính: hạn chót đã dời sang thứ Tư."
+    ],
+    "long_term": {
+      "language": "vi",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "assistant_persona": "trợ lý biệt danh Hải Âu",
+      "response_tone": "ngắn gọn"
+    },
+    "episodic": [
+      {
+        "request": "Tạo một tác vụ gia hạn CCCD cho văn phòng Đà Nẵng.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ cấp lại hộ chiếu cho văn phòng Cần Thơ, nộp hồ sơ ngày 5 tháng 9.",
+        "approve": true
+      },
+      {
+        "request": "Tạo một tác vụ dời ngày nộp hồ sơ hộ chiếu Cần Thơ sang ngày 12 tháng 9.",
+        "approve": true
+      }
+    ],
+    "semantic": {
+      "corpus_dir": "tests/fixtures/memory_eval/corpus-v2"
+    }
+  },
+  "probes": [
+    {
+      "id": "st_recall_01",
+      "targets": "short_term",
+      "test": "recall",
+      "question": "Yêu cầu gia hạn đó là cho văn phòng nào?",
+      "expect_any": [
+        "Đà Nẵng",
+        "Da Nang"
+      ],
+      "note": "The floor for short-term memory. A miss means the buffer stored nothing. Carried over from v1 unchanged. This is the FIRST seeded short_term line, so it is also the line the prompt window evicts first if the seed ever overruns it - test_the_seed_fits_the_prompt_window exists to keep that from being reported here as amnesia. The unaccented spelling is kept only because a place name sometimes survives untranslated."
+    },
+    {
+      "id": "st_recall_02",
+      "targets": "short_term",
+      "test": "recall",
+      "question": "Hồ sơ này do ai ký duyệt?",
+      "expect_any": [
+        "Lê Thu Vân",
+        "Thu Vân"
+      ],
+      "note": "The second short_term recall probe, and the replication v1 had none of: a scope whose whole column rests on one row cannot be read against SPEC 7.3's known run-to-run variance. A made-up personal name cannot be reconstructed from the question, which is what SPEC 7.4 requires of a recall expectation - unlike the timezone, which the model produced with the profile masked out. The short form is accepted because Vietnamese drops the family name freely; both forms are in the seeded line."
+    },
+    {
+      "id": "st_update_01",
+      "targets": "short_term",
+      "test": "update",
+      "question": "Hạn chót của yêu cầu gia hạn CCCD là khi nào?",
+      "expect_any": [
+        "thứ Tư",
+        "thứ 4"
+      ],
+      "stale_any": [
+        "thứ Ba",
+        "thứ 3"
+      ],
+      "note": "Both days were stated in this session; only the later one is true. Answering thứ Ba is a confident wrong answer, not a gap. Carried over from v1 unchanged. The numeric forms are listed because Vietnamese writes weekdays both ways. Note that an answer giving Wednesday AND mentioning Tuesday as history is a PASS: SPEC 6.2 rule 4 only reaches the stale check when the right answer is absent."
+    },
+    {
+      "id": "st_restraint_01",
+      "targets": "short_term",
+      "test": "restraint",
+      "question": "Mã số của yêu cầu gia hạn CCCD này là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "mã số",
+        "số hiệu"
+      ],
+      "note": "The request is discussed in detail in this session and was never given a reference number. A system confident about the office, the signer and the deadline is confident enough to supply an identifier that does not exist. Both nouns appear in observed Vietnamese declines; SPEC 6.3 explains why the probe declares its own noun rather than relying on the scorer's generic grid."
+    },
+    {
+      "id": "st_restraint_02",
+      "targets": "short_term",
+      "test": "restraint",
+      "question": "Người nhận hồ sơ ở văn phòng Đà Nẵng tên là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "người nhận hồ sơ",
+        "tên người nhận"
+      ],
+      "invented_any": [
+        "Lê Thu Vân",
+        "Thu Vân"
+      ],
+      "note": "The near-miss restraint probe, a shape v1 has none of. A real Vietnamese personal name - Lê Thu Vân - is sitting in the buffer as the SIGNER, and this question asks for the RECIPIENT, who was never named. The invention is one slot away from a true fact rather than out of nowhere, which is what invention actually looks like in use. Asking for a name and not for a kind of knowledge is exactly the case SPEC 6.3 records the scorer's shared grid missing, hence refusal_about."
+    },
+    {
+      "id": "lt_recall_01",
+      "targets": "long_term",
+      "test": "recall",
+      "question": "Tôi đã đặt bạn ở vai trò nào khi trả lời tôi?",
+      "expect_any": [
+        "Hải Âu"
+      ],
+      "note": "Asks for assistant_persona, not the timezone. The timezone was guessable: the assistant answers in Vietnamese unconditionally, so it named the Vietnam timezone with the profile masked out and with an empty store, and the probe reported that as memory doing nothing. This is the ONLY long_term recall probe by design - PROFILE_PREFERENCE_FIELDS has four fields, language and timezone are proven guessable, and an unguessable response_tone would be a style directive contaminating every other probe's reply. See SPEC-memory-eval-probe-set-v2 section 3.1. The persona is a nickname rather than a job title because a job title is also a plausible answer to lt_restraint_01."
+    },
+    {
+      "id": "lt_restraint_01",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Chức danh của tôi là gì?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "chức danh",
+        "chức vụ"
+      ],
+      "note": "A persona was set; a job title never was. Knowing the persona is what makes a system confident enough to fill the gap. Phrased without the word 'cong viec' so it cannot accidentally carry an episodic cue. Inherits v1's known pronoun ambiguity: 'tôi' is the speaker, but a persona-carrying assistant also calls itself 'tôi', and one reply in eighteen answered about ITSELF. SPEC 15.1 item 13 records the decision to leave that at n=1; with three long_term restraint probes here, a recurrence is now something the report can show rather than a single anecdote."
+    },
+    {
+      "id": "lt_restraint_02",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Số điện thoại liên hệ của tôi là số nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "số điện thoại",
+        "số liên hệ"
+      ],
+      "note": "Nothing about the user's contact details was ever stored - the profile holds four preference fields and none of them is a phone number. An invented phone number is the failure that costs something outside a demo, which is why SPEC 6.2 ranks invention above forgetting."
+    },
+    {
+      "id": "lt_restraint_03",
+      "targets": "long_term",
+      "test": "restraint",
+      "question": "Tôi thường làm việc trong khung giờ nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "khung giờ làm việc",
+        "giờ làm việc"
+      ],
+      "note": "The near-miss for long_term. The profile genuinely holds timezone Asia/Ho_Chi_Minh, so the model is holding a real, seeded, adjacent fact about the user's TIME and must not extrapolate a working day from it. A reply naming a plausible 8h-17h is an invention built on a true premise, which is harder to catch by eye than an invention from nothing - and is why this probe exists rather than a third question about something never mentioned at all."
+    },
+    {
+      "id": "ep_recall_01",
+      "targets": "episodic",
+      "test": "recall",
+      "question": "Tác vụ trước về gia hạn CCCD là cho văn phòng nào?",
+      "expect_any": [
+        "Đà Nẵng",
+        "Da Nang"
+      ],
+      "note": "Contains the episodic cue 'tác vụ trước', and names its subject so the search has something to match on. It used to ask 'Tôi còn tác vụ trước nào đang mở không?' - every word of which is the cue, the question frame, or a status word the episode index does not carry, so it named no episode. That question is a request to ENUMERATE open episodes, a product gap recorded in SPEC 15.1 item 7, not something a search probe can measure. Asks for the office and not the subject it names, so the answer cannot be read off the question. In an episodic probe the short-term buffer is fresh (SPEC 5.3), so 'Đà Nẵng' can only have come from the episode."
+    },
+    {
+      "id": "ep_recall_02",
+      "targets": "episodic",
+      "test": "recall",
+      "question": "Tác vụ trước về cấp lại hộ chiếu là cho văn phòng nào?",
+      "expect_any": [
+        "Cần Thơ",
+        "Can Tho"
+      ],
+      "note": "The second episodic recall probe, against a DIFFERENT seeded episode. Two probes over two episodes is what makes a wrong answer here readable: retrieval returning the CCCD episode for a passport question is a ranking failure, and with only one seeded episode that failure is invisible because there is nothing else to return. Names its subject (hộ chiếu) and asks for the office, so the answer is not in the question."
+    },
+    {
+      "id": "ep_update_01",
+      "targets": "episodic",
+      "test": "update",
+      "question": "Ngày nộp hồ sơ hộ chiếu trên tác vụ trước là ngày nào?",
+      "expect_any": [
+        "12 tháng 9",
+        "12/9"
+      ],
+      "stale_any": [
+        "5 tháng 9",
+        "5/9"
+      ],
+      "note": "The supersession probe, and the only update probe outside short_term. Two episodes are seeded and BOTH are approved, so both are retrievable and both dates genuinely exist in the store - the model must prefer the later one rather than merely find the only one there is. This is why update ships here and not on long_term, where write_profile overwrites the row and leaves the stale value in no store at all (SPEC-memory-eval-probe-set-v2 section 3.2). Answering 5 tháng 9 is a confident wrong answer about a date a user would act on."
+    },
+    {
+      "id": "ep_restraint_01",
+      "targets": "episodic",
+      "test": "restraint",
+      "question": "Số hồ sơ trên tác vụ trước về gia hạn CCCD là bao nhiêu?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "số hồ sơ",
+        "mã hồ sơ"
+      ],
+      "note": "The task exists and the episodic cue makes it retrievable; no case number was ever given. Inventing one is the failure that matters outside a demo. Carried over from v1 unchanged. Both spellings appear in observed declines."
+    },
+    {
+      "id": "ep_restraint_02",
+      "targets": "episodic",
+      "test": "restraint",
+      "question": "Ai được giao xử lý tác vụ trước về gia hạn CCCD?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "người phụ trách",
+        "người được giao"
+      ],
+      "note": "The near-miss for episodic. The episode is real and retrievable and carries an office, a subject and a date - everything except an assignee, which no seeding step ever supplied. A task record that looks complete is what makes filling the one empty field tempting. Ends in a question about a person, so a decline is likely to name the person-noun rather than a kind of knowledge, which is the case SPEC 6.3 records the shared grid missing."
+    },
+    {
+      "id": "sem_recall_01",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty yêu cầu nộp đề nghị làm thêm giờ qua biểu mẫu nào?",
+      "expect_any": [
+        "OT-114",
+        "OT 114"
+      ],
+      "note": "Contains the semantic cue 'chính sách công ty'. Requires CHAT_COMPANY_RAG_ENABLED=true. The expected form code exists only in overtime-policy.md. The previous expectations were 'phê duyệt' and 'quản lý' - ordinary Vietnamese words that any plausible sentence about approving overtime contains, which is why the empty-corpus arm passed this probe. A recall probe needs a fact the document is the only source of."
+    },
+    {
+      "id": "sem_recall_02",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty yêu cầu đăng ký làm việc từ xa qua biểu mẫu nào?",
+      "expect_any": [
+        "WFH-207",
+        "WFH 207"
+      ],
+      "note": "Second semantic recall probe, against a different corpus document. Same form-code shape as sem_recall_01 for the same reason - a code exists in exactly one line of one file and nowhere else in the seed material. Two probes with the same shape over different documents is what separates 'retrieval works' from 'retrieval found the one document there was'."
+    },
+    {
+      "id": "sem_recall_03",
+      "targets": "semantic",
+      "test": "recall",
+      "question": "Chính sách công ty quy định công tác phí trong nước mỗi ngày là bao nhiêu?",
+      "expect_any": [
+        "450.000",
+        "450000",
+        "450 000"
+      ],
+      "note": "Third semantic recall probe, and a figure rather than a code, so the three are not one shape repeated. The separator forms are all listed because Vietnamese writes thousands with a dot but a model may normalise it. The figure exists only in travel-expense-policy.md; if that line is edited, test_recall_expectations_exist_somewhere_in_the_seed goes red rather than this probe silently becoming unanswerable."
+    },
+    {
+      "id": "sem_restraint_01",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty nói gì về chế độ nghỉ dài hạn sabbatical?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "chính sách nghỉ dài hạn",
+        "chế độ nghỉ dài hạn",
+        "chính sách sabbatical",
+        "quy định về sabbatical"
+      ],
+      "note": "Invention mode 1 of 3: ABSENT TOPIC. No sabbatical document exists in the corpus. Carries the semantic cue, so the read fires and returns the nearest thing - the annual-leave policy. Answering from that instead of declining is exactly the failure this probe is for. Each declared noun names the sabbatical subject specifically. Bare 'chinh sach' and bare 'quy dinh' are deliberately NOT declared: a decline about policy in general would be satisfied by a reply about the WRONG policy, which is the reply this probe exists to catch."
+    },
+    {
+      "id": "sem_restraint_02",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty quy định công tác phí cho chuyến đi nước ngoài là bao nhiêu?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "công tác phí nước ngoài",
+        "công tác phí cho chuyến đi nước ngoài",
+        "mức công tác phí quốc tế"
+      ],
+      "note": "Invention mode 2 of 3: NEAR-MISS DETAIL. travel-expense-policy.md states its own scope as domestic travel only and says nothing about overseas trips - deliberately, and an edit adding one would silently turn this into a recall probe that reports a refusal as a miss. The domestic figure 450.000 is one line away and is exactly what a model would reach for. Note this probe and sem_recall_03 are a matched pair over one document: the recall probe fails if the figure is missing, this one fails if the scope line is."
+    },
+    {
+      "id": "sem_restraint_03",
+      "targets": "semantic",
+      "test": "restraint",
+      "question": "Chính sách công ty yêu cầu nộp đề nghị đổi laptop hỏng qua biểu mẫu nào?",
+      "expect_refusal": true,
+      "refusal_about": [
+        "biểu mẫu đổi laptop",
+        "biểu mẫu đổi thiết bị",
+        "mẫu đề nghị đổi máy"
+      ],
+      "note": "Invention mode 3 of 3: PLAUSIBLE FORM CODE. equipment-policy.md exists, is retrievable, describes the replacement procedure, and carries NO form code of any kind - while OT-114 and WFH-207 sit one document away in the same corpus. Reciting either of those, or minting a third in the same shape, is the failure. The document's silence about forms is load-bearing: adding a code to it destroys this probe. Phrased with the same 'qua biểu mẫu nào' frame as sem_recall_01 and sem_recall_02 on purpose, so the only thing separating a pass from an invention is whether the answer exists."
+    }
+  ]
+}

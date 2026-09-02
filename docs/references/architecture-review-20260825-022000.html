@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture Review — EMAIL-AGENT-v1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink:   '#0b0f14',
+        panel: '#131a22',
+        panel2:'#19222c',
+        line:  '#243040',
+        muted: '#8aa0b8',
+        cream: '#e9eef5',
+        rust:  '#e2724a',
+        amber: '#e8b04b',
+        teal:  '#4ec9b0',
+        violet:'#a98bdc',
+      },
+      fontFamily: {
+        sans: ['ui-sans-serif','Inter','Segoe UI','system-ui','sans-serif'],
+        mono: ['ui-monospace','JetBrains Mono','Consolas','monospace'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { background:
+      radial-gradient(1200px 600px at 15% -10%, #1a2532 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #1b2029 0%, transparent 55%),
+      #0b0f14; }
+  .card-glow { box-shadow: 0 0 0 1px #243040, 0 24px 60px -30px rgba(0,0,0,.9); }
+  .hatch {
+    background-image: repeating-linear-gradient(45deg, rgba(226,114,74,.20) 0 6px, transparent 6px 12px);
+  }
+  .mermaid { background: transparent; }
+  .mermaid svg { max-width: 100%; height: auto; }
+  .stripe { transition: transform .18s ease; }
+  .stripe:hover { transform: translateX(4px); }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+</style>
+</head>
+<body class="font-sans text-cream antialiased">
+
+<!-- ══════════════════════ HEADER ══════════════════════ -->
+<header class="max-w-6xl mx-auto px-6 pt-16 pb-10">
+  <div class="flex items-center gap-3 text-xs font-mono uppercase tracking-[0.2em] text-muted mb-6">
+    <span class="w-8 h-px bg-rust"></span>
+    <span>Deepening review</span>
+    <span class="text-line">/</span>
+    <span>2026-08-25</span>
+  </div>
+  <h1 class="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.05]">
+    Where <span class="text-rust">EMAIL-AGENT-v1</span><br/>
+    is shallow.
+  </h1>
+  <p class="mt-6 max-w-2xl text-lg text-muted leading-relaxed">
+    Six deepening opportunities, scoped to the parts of the tree that keep changing.
+    Each one asks the same question: <em class="text-cream not-italic">would deleting this module
+    concentrate complexity, or just move it around?</em>
+  </p>
+
+  <div class="mt-10 grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-panel border border-line rounded-lg p-4">
+      <div class="text-3xl font-mono text-rust">1,815</div>
+      <div class="text-xs text-muted mt-1">lines in <code>app.py</code></div>
+    </div>
+    <div class="bg-panel border border-line rounded-lg p-4">
+      <div class="text-3xl font-mono text-amber">60</div>
+      <div class="text-xs text-muted mt-1">untyped <code>app.state</code> keys</div>
+    </div>
+    <div class="bg-panel border border-line rounded-lg p-4">
+      <div class="text-3xl font-mono text-violet">617</div>
+      <div class="text-xs text-muted mt-1">lines in one method</div>
+    </div>
+    <div class="bg-panel border border-line rounded-lg p-4">
+      <div class="text-3xl font-mono text-teal">3</div>
+      <div class="text-xs text-muted mt-1">paths to <code>data/reports</code></div>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════ SCOPE ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-8">
+  <h2 class="text-sm font-mono uppercase tracking-[0.2em] text-muted mb-5">How this was scoped</h2>
+  <div class="grid md:grid-cols-[1.1fr,1fr] gap-8 items-start">
+    <div>
+      <p class="text-muted leading-relaxed mb-4">
+        No direction was given, so scope came from the commit history: files touched most often
+        over the last four months. Deepening pays off where change actually lands, so these
+        hot spots pulled attention first.
+      </p>
+      <div class="space-y-1.5 font-mono text-xs">
+        <!-- hand-built hot-spot bars -->
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">src/cowork_agent/app.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-rust" style="width:100%"></div></div>
+          <span class="w-8 text-right text-rust">83</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">src/cowork_agent/config.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-amber" style="width:55%"></div></div>
+          <span class="w-8 text-right text-muted">46</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">orchestration/worker.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-line" style="width:41%"></div></div>
+          <span class="w-8 text-right text-muted">34</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">features/email_action_plan/workflow.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-line" style="width:39%"></div></div>
+          <span class="w-8 text-right text-muted">32</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">frontend/…/hooks/useStreamingChat.ts</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-violet" style="width:31%"></div></div>
+          <span class="w-8 text-right text-muted">26</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">features/ai_chat/controller.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-violet" style="width:30%"></div></div>
+          <span class="w-8 text-right text-muted">25</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">frontend/…/Dashboard.tsx</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-line" style="width:30%"></div></div>
+          <span class="w-8 text-right text-muted">25</span>
+        </div>
+        <div class="flex items-center gap-3 stripe">
+          <span class="w-72 truncate text-cream">api/chat.py</span>
+          <div class="flex-1 h-4 bg-panel rounded-sm overflow-hidden"><div class="h-full bg-line" style="width:29%"></div></div>
+          <span class="w-8 text-right text-muted">24</span>
+        </div>
+      </div>
+      <p class="text-xs text-muted mt-3 font-mono">commits touching each path, <code>git log --since="4 months ago"</code></p>
+    </div>
+
+    <div class="bg-panel border border-line rounded-xl p-6">
+      <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-4">Vocabulary</h3>
+      <dl class="space-y-3 text-sm">
+        <div><dt class="text-cream font-medium inline">Module</dt><dd class="text-muted inline"> — a unit with an interface and an implementation behind it.</dd></div>
+        <div><dt class="text-cream font-medium inline">Depth</dt><dd class="text-muted inline"> — how much implementation a small interface hides. Deep is good.</dd></div>
+        <div><dt class="text-cream font-medium inline">Shallow</dt><dd class="text-muted inline"> — interface nearly as complex as what it hides.</dd></div>
+        <div><dt class="text-cream font-medium inline">Seam</dt><dd class="text-muted inline"> — the line you can substitute across in a test.</dd></div>
+        <div><dt class="text-cream font-medium inline">Locality</dt><dd class="text-muted inline"> — one concept, one place to change it.</dd></div>
+        <div><dt class="text-cream font-medium inline">Leverage</dt><dd class="text-muted inline"> — how many future changes one deepening makes cheaper.</dd></div>
+      </dl>
+      <div class="mt-5 pt-5 border-t border-line">
+        <p class="text-xs text-muted leading-relaxed">
+          <span class="text-amber">Note —</span> this repo has no <code class="text-cream">CONTEXT.md</code>,
+          though <code>AGENTS.md</code> and <code>docs/agents/domain.md</code> both point at one.
+          Domain terms below (<em>Email RAG</em>, <em>AI Chat</em>, <em>digest run</em>,
+          <em>chat turn</em>, <em>memory scope</em>, <em>control plane</em>, <em>report artifact</em>)
+          are taken from <code>AGENTS.md</code> and the ADRs in <code>tasks/adr/</code>.
+          Per <code>docs/agents/domain.md</code> the glossary gets created lazily — a
+          good moment is when one of these candidates is picked up.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="max-w-6xl mx-auto px-6"><hr class="border-line my-8"/></div>
+
+<!-- ══════════════════════ CANDIDATE 1 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 01</div>
+          <h2 class="text-3xl font-semibold tracking-tight">The report artifact has no module</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-rust/15 text-rust border border-rust/40">Strong</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>src/cowork_agent/app.py <span class="text-muted">:1213–1293</span></li>
+            <li>src/cowork_agent/features/ai_chat/controller.py <span class="text-muted">:892–909, 1336–1370</span></li>
+            <li>frontend/src/dashboard/components/ArtifactsView.tsx</li>
+            <li>frontend/src/dashboard/components/ChatStreamView.tsx <span class="text-muted">:555</span></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            Three independent pieces of code resolve <code class="text-cream">data/reports</code> for themselves,
+            with three different <code>parents[n]</code> walks, and each re-decides what a safe filename is.
+            There is no module — only a folder that four call sites agree about by coincidence.
+          </p>
+          <div class="mt-4 space-y-2 font-mono text-xs">
+            <div class="bg-ink border border-line rounded p-3">
+              <div class="text-muted mb-1">app.py:1213 <span class="text-amber">— inside create_app(), unreachable from tests</span></div>
+              <code class="text-cream">REPORTS_DIR = Path(__file__).resolve().parents[<span class="text-rust">2</span>] / "data" / "reports"</code>
+            </div>
+            <div class="bg-ink border border-line rounded p-3">
+              <div class="text-muted mb-1">controller.py:895 <span class="text-amber">— local import, inside a try/except that swallows</span></div>
+              <code class="text-cream">reports_dir = Path(__file__).resolve().parents[<span class="text-rust">4</span>] / "data" / "reports"</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-rust/10 border border-rust/30 rounded-lg p-4">
+          <h4 class="text-rust font-medium text-sm mb-2">Two live defects fall out of the missing module</h4>
+          <ol class="text-sm text-muted space-y-2 list-decimal list-inside leading-relaxed">
+            <li>
+              <span class="text-cream">The AI Chat write path does not sanitize.</span>
+              The three HTTP routes each guard with <code class="text-xs">Path(name).name</code> and reject
+              <code class="text-xs">"."</code>/<code class="text-xs">".."</code>. The controller writes
+              <code class="text-xs">reports_dir / generated_report.filename</code> where
+              <code class="text-xs">filename</code> arrives verbatim from the model's JSON
+              (<code class="text-xs">ports.py:50</code> declares it as a bare <code>str</code>).
+              A traversing filename escapes the folder, and the surrounding
+              <code class="text-xs">except Exception</code> logs it at WARNING and moves on.
+            </li>
+            <li>
+              <span class="text-cream">The frontend calls two routes that do not exist.</span>
+              <code class="text-xs">ArtifactsView.tsx</code> builds
+              <code class="text-xs">/api/v1/reports/{f}/download</code> and
+              <code class="text-xs">/api/v1/reports/{f}/pdf</code>. Neither is registered anywhere in
+              <code>app.py</code> or <code>api/</code>. Nothing catches this because no single module owns
+              the report artifact's surface on either side of the wire.
+            </li>
+          </ol>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            One <span class="text-cream">Report Artifact store</span> module. It owns the folder location
+            (injected once at the composition root, not derived from <code>__file__</code>), owns the
+            filename rule, and exposes a narrow interface:
+            <code class="text-cream">save(artifact)</code>, <code class="text-cream">list()</code>,
+            <code class="text-cream">read(name)</code>, <code class="text-cream">delete(name)</code>,
+            <code class="text-cream">reveal()</code>. Sanitization becomes a
+            <code class="text-cream">ReportFilename</code> value object that cannot be constructed from an
+            unsafe string, so the AI Chat path gets the same guard as the HTTP path by construction rather
+            than by remembering. The routes and the controller both become callers.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Locality —</span> "where do report artifacts live and what may they be named" becomes one answer instead of four.</li>
+            <li><span class="text-teal">Leverage —</span> the missing <code>/download</code> and <code>/pdf</code> routes become two small additions on a store that already exists, rather than a fourth path walk.</li>
+            <li><span class="text-teal">Test surface —</span> today the only way to test report saving from AI Chat is to drive a 617-line streaming method with a fake LLM and then look at the real repo's <code>data/</code> folder. With the store injected, a traversal attempt is a three-line unit test, and the chat path can assert against an in-memory store.</li>
+            <li><span class="text-teal">Deletion test —</span> passes. Deleting the store forces the sanitization rule back into four call sites — it concentrates complexity, it doesn't just relocate it.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-rust mb-2">BEFORE — four callers, no module</div>
+          <pre class="mermaid">
+flowchart TD
+  A["ArtifactsView.tsx"] -->|GET /api/v1/reports| R1["route: list_reports<br/><i>REPORTS_DIR parents[2]</i>"]
+  A -->|POST /api/v1/reports| R2["route: save_report<br/><i>sanitize #1</i>"]
+  A -->|DELETE| R3["route: delete_report<br/><i>sanitize #2</i>"]
+  A -.->|GET /download| X1["404 — no route"]
+  A -.->|GET /pdf| X2["404 — no route"]
+  C["ChatController.stream_message"] -->|write_text| R4["<i>reports_dir parents[4]</i><br/><b>no sanitize</b>"]
+  R1 --> D[("data/reports")]
+  R2 --> D
+  R3 --> D
+  R4 --> D
+  classDef bad fill:#2a1512,stroke:#e2724a,color:#e9eef5
+  classDef gone fill:#1a1110,stroke:#7a3a28,color:#8aa0b8,stroke-dasharray:4
+  classDef fs fill:#16202a,stroke:#243040,color:#e9eef5
+  class R4 bad
+  class X1,X2 gone
+  class D fs
+          </pre>
+        </div>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-teal mb-2">AFTER — one store, one filename rule</div>
+          <pre class="mermaid">
+flowchart TD
+  A["ArtifactsView.tsx"] --> RT["report router<br/><i>list · save · read · delete<br/>download · pdf · reveal</i>"]
+  C["ChatController.stream_message"] --> S
+  RT --> S["<b>ReportArtifactStore</b><br/><i>root injected at composition</i>"]
+  S --> F["ReportFilename<br/><i>unsafe → cannot construct</i>"]
+  F --> D[("data/reports")]
+  T["unit test"] -.->|InMemoryReportStore| S
+  classDef good fill:#12251f,stroke:#4ec9b0,color:#e9eef5
+  classDef fs fill:#16202a,stroke:#243040,color:#e9eef5
+  class S,F good
+  class D fs
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CANDIDATE 2 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 02</div>
+          <h2 class="text-3xl font-semibold tracking-tight">The runtime is a 440-line closure and a bag of 60 attributes</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-rust/15 text-rust border border-rust/40">Strong</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>src/cowork_agent/app.py <span class="text-muted">:295–733 (lifespan)</span></li>
+            <li>src/cowork_agent/api/chat.py <span class="text-muted">— 11 getattr(state) reads</span></li>
+            <li>src/cowork_agent/api/projects.py <span class="text-muted">— 8 getattr(state) reads</span></li>
+            <li>tests/conftest.py, tests/unit/test_chat_runtime_composition.py</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            Everything the application is made of — the Postgres pool, migrations, every repository,
+            the mailbox adapters, the Email RAG providers, the AI Chat reply provider, the digest worker,
+            the evaluation runtime — is constructed inside one <code class="text-cream">lifespan</code>
+            closure nested in <code>create_app()</code>, and published by assigning
+            <code class="text-cream">app.state.&lt;something&gt;</code>. There are 60 such keys.
+            <code>app.state</code> is <code>SimpleNamespace</code>: no type, no schema, no failure when
+            a key is missing.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            The result is that every consumer defends itself.
+            <code class="text-cream">getattr(request.app.state, "x", None)</code> appears
+            <span class="text-amber">28×</span> in <code>app.py</code>,
+            <span class="text-amber">11×</span> in <code>api/chat.py</code>,
+            <span class="text-amber">8×</span> in <code>api/projects.py</code>, alongside
+            <code class="text-xs">cast(Any, ...)</code> to get mypy past the untyped edge.
+            That is a shallow interface in the strict sense: the interface (a name and a hope) carries
+            almost none of the meaning, so the meaning has to be re-stated by every caller.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            Move construction out of the closure into a <span class="text-cream">Runtime</span> module —
+            <code class="text-cream">build_runtime(settings) -&gt; CoworkRuntime</code>, a frozen dataclass
+            with typed fields and explicit <code>| None</code> where a capability is genuinely optional.
+            <code>create_app()</code> keeps one line of state
+            (<code class="text-xs">app.state.runtime = await build_runtime(...)</code>) and a
+            <code class="text-cream">runtime(request)</code> accessor replaces every
+            <code>getattr</code>/<code>cast</code> pair.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            The existing branch structure survives intact — <code>build_runtime</code> still picks
+            Postgres or SQLite off <code>database_url()</code>, and the lazy <code>psycopg</code> imports
+            stay lazy. This is not a rewrite of what gets built; it is giving the thing that gets built
+            a name and a type.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Test surface —</span> the seam moves from "boot a FastAPI app and hope the right attributes appeared" to "construct a <code>CoworkRuntime</code> with the fakes you want". Seven test files currently reach for <code>create_app()</code> to get at composed objects; most of them want a runtime, not an HTTP server.</li>
+            <li><span class="text-teal">Leverage —</span> a missing or renamed dependency becomes a mypy error at the composition root instead of a <code>None</code> that travels three layers and surfaces as a 500 in production.</li>
+            <li><span class="text-teal">AI-navigability —</span> "what does this app consist of" becomes one dataclass to read, instead of grepping <code>app.state</code> across four files.</li>
+            <li><span class="text-teal">Deletion test —</span> passes. Deleting <code>CoworkRuntime</code> pushes 60 optional-attribute contracts back out to every caller.</li>
+          </ul>
+        </div>
+
+        <div class="bg-panel2 border border-line rounded-lg p-4">
+          <p class="text-sm text-muted leading-relaxed">
+            <span class="text-teal font-medium">Reinforces ADR-001</span> — which mandates ports/adapters
+            with substitutable fakes. A typed runtime is where that ADR's intent actually gets enforced;
+            today the adapter boundary is real but the composition edge above it is untyped.
+          </p>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+
+        <!-- hand-built mass diagram -->
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-rust mb-3">BEFORE — 60 keys, no type, every read defensive</div>
+          <div class="flex flex-wrap gap-1">
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">connection_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">run_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">project_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_session_buffer</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_history_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">private_storage</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_task_episode_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_reply</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_profile_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">session_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">outlook_connections</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">identity_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_controller_factory</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">user_documents_settings</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">session_settings</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">semantic_memory</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">pg_pool</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_sessions</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_principal_resolver</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_controllers</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">provider_availability</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">project_document_vectors</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">project_document_index</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">mailbox</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">gmail_settings</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">gmail_connections</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">evaluation_service</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">digest_worker</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_test_reply</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_routing_service</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">task_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">result_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">redis_client</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">ready_document_catalog</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">raw_document_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">private_storage_client</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">outlook_mailbox</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">outbox_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">llm_provider_label</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">llm_configuration_error</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">knowledge_documents</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">document_embeddings_configured</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_opaque_session_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_memory_settings</span>
+            <span class="px-1.5 py-0.5 rounded bg-panel2 border border-line font-mono text-[10px] text-muted">chat_identity_repository</span>
+            <span class="px-1.5 py-0.5 rounded bg-line/50 border border-line font-mono text-[10px] text-muted">… 15 more</span>
+          </div>
+          <div class="mt-4 pt-4 border-t border-line font-mono text-[11px] space-y-1">
+            <div class="text-muted">every consumer restates the contract:</div>
+            <div class="text-rust">getattr(request.app.state, "session_repository", None) is not None</div>
+            <div class="text-rust">cast(MailboxConnectionRepository, request.app.state.connection_repository)</div>
+            <div class="text-rust">await cast(Any, repository).list_all()</div>
+          </div>
+        </div>
+
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-teal mb-3">AFTER — one typed value, one accessor</div>
+          <div class="font-mono text-[11px] leading-relaxed">
+            <div class="text-violet">@dataclass(frozen=True, slots=True)</div>
+            <div class="text-cream">class <span class="text-teal">CoworkRuntime</span>:</div>
+            <div class="text-muted ml-4">control_plane: ControlPlane  <span class="text-line"># pool + repos, or SQLite</span></div>
+            <div class="text-muted ml-4">mailbox: ProviderRoutingMailboxAdapter</div>
+            <div class="text-muted ml-4">chat: ChatRuntime            <span class="text-line"># reply, routing, memory, buffer</span></div>
+            <div class="text-muted ml-4">email_rag: EmailRagRuntime   <span class="text-line"># semantic memory, rewriter, worker</span></div>
+            <div class="text-muted ml-4">reports: ReportArtifactStore <span class="text-line"># ← candidate 01</span></div>
+            <div class="text-muted ml-4">evaluation: EvaluationRuntime | None</div>
+            <div class="mt-3 text-cream">async def <span class="text-teal">build_runtime</span>(settings) -&gt; CoworkRuntime: ...</div>
+            <div class="text-cream">def <span class="text-teal">runtime</span>(request: Request) -&gt; CoworkRuntime: ...</div>
+            <div class="mt-3 pt-3 border-t border-line text-teal">runtime(request).control_plane.connections</div>
+            <div class="text-teal">runtime(request).chat.reply</div>
+            <div class="text-muted mt-2">no getattr. no cast. mypy sees the whole graph.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CANDIDATE 3 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 03</div>
+          <h2 class="text-3xl font-semibold tracking-tight">Half the HTTP surface never moved to a router</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-amber/15 text-amber border border-amber/40">Worth exploring</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>src/cowork_agent/app.py <span class="text-muted">:743–1560 (~30 inline routes)</span></li>
+            <li>src/cowork_agent/api/chat.py, projects.py, evaluation_jobs.py <span class="text-muted">— the pattern that works</span></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            The repo already has a router convention and three modules that follow it. Everything else —
+            Gmail and Outlook OAuth, mailbox connections, digest runs, the company knowledge endpoints,
+            reports, and raw process documents — is defined as decorated closures inside
+            <code>create_app()</code>, together with 16 module-level <code>_helper(request)</code>
+            functions that exist only to serve them.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            The cost is concrete, not stylistic. A closure route cannot be imported, so it cannot be
+            unit-tested — testing any of these means constructing the whole app. And the file's own
+            comments record the friction: <code>RAW_DOCS_DIR</code> carries
+            <em class="text-cream">"module-level so tests and handlers agree on one location; do not shadow
+            them with a local copy here"</em>, while <code>REPORTS_DIR</code> — 30 lines later — is
+            exactly the local copy that warning is about.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            Four routers matching the boundaries that already exist in the domain:
+            <code class="text-cream">create_mailbox_router()</code> (OAuth + connections + unread preview),
+            <code class="text-cream">create_digest_router()</code> (runs, results, tasks),
+            <code class="text-cream">create_knowledge_router()</code> (ready, documents, chat),
+            <code class="text-cream">create_report_router()</code> (reports + raw documents, on the
+            store from candidate 01). The 16 <code>_helper(request)</code> functions become FastAPI
+            dependencies typed against the runtime from candidate 02.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            Best done <em class="text-cream">after</em> 01 and 02: with a typed runtime, moving a route
+            out of the closure is mechanical. Without it, each moved route drags its
+            <code>getattr</code> defence along.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Locality —</span> "how does a mailbox connection work end to end" stops being a scroll through a 1,286-line function.</li>
+            <li><span class="text-teal">Test surface —</span> routers can be mounted on a bare <code>FastAPI()</code> with a fake runtime; the current tests that reach for <code>create_app()</code> mostly do so to get at three routes.</li>
+            <li><span class="text-teal">Leverage —</span> <code>app.py</code> is the single most-changed file in the repo (83 commits). Splitting it turns most of those future commits into small-file diffs and kills a standing merge-conflict hotspot across branches.</li>
+            <li><span class="text-amber">Caveat —</span> this is the lowest-insight candidate: it's mostly code movement, and it earns its place through 01 and 02 rather than on its own.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+
+        <!-- hand-built cross-section -->
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-rust mb-3">BEFORE — a cross-section of app.py</div>
+          <div class="flex gap-4">
+            <div class="w-16 shrink-0 font-mono text-[10px] text-muted text-right space-y-0 pt-0">
+              <div style="height:26px">1</div>
+              <div style="height:22px">160</div>
+              <div style="height:110px">277</div>
+              <div style="height:200px">743</div>
+              <div style="height:60px">1563</div>
+            </div>
+            <div class="flex-1 space-y-0.5">
+              <div class="rounded-sm bg-panel2 border border-line px-3 flex items-center text-[11px] font-mono text-muted" style="height:24px">imports · module constants</div>
+              <div class="rounded-sm bg-panel2 border border-line px-3 flex items-center text-[11px] font-mono text-muted" style="height:20px">request models · factories</div>
+              <div class="rounded-sm hatch bg-amber/10 border border-amber/40 px-3 flex items-center text-[11px] font-mono text-amber" style="height:108px">
+                <span>lifespan() — 440 lines of composition <span class="text-muted">→ candidate 02</span></span>
+              </div>
+              <div class="rounded-sm bg-rust/15 border border-rust/50 px-3 flex flex-col justify-center text-[11px] font-mono text-rust" style="height:198px">
+                <span>~30 route closures — 820 lines</span>
+                <span class="text-muted mt-1 leading-snug">oauth/gmail · oauth/outlook · connections ·<br/>unread-preview · runs · results · tasks ·<br/>knowledge · reports · raw-documents</span>
+                <span class="text-muted mt-1">not importable → not unit-testable</span>
+              </div>
+              <div class="rounded-sm bg-panel2 border border-line px-3 flex items-center text-[11px] font-mono text-muted" style="height:58px">16 <code class="mx-1">_helper(request)</code> functions</div>
+            </div>
+          </div>
+          <div class="mt-4 flex items-center gap-2 text-[11px] font-mono">
+            <span class="px-2 py-0.5 rounded bg-teal/15 text-teal border border-teal/40">already routers</span>
+            <span class="text-muted">chat.py · projects.py · evaluation_jobs.py</span>
+          </div>
+        </div>
+
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-teal mb-3">AFTER — app.py as composition root only</div>
+          <pre class="mermaid">
+flowchart LR
+  APP["create_app()<br/><i>~80 lines</i>"] --> RT["build_runtime()"]
+  APP --> R1["mailbox router"]
+  APP --> R2["digest router"]
+  APP --> R3["knowledge router"]
+  APP --> R4["report router"]
+  APP --> R5["chat router<br/><i>exists</i>"]
+  APP --> R6["project router<br/><i>exists</i>"]
+  APP --> R7["evaluation router<br/><i>exists</i>"]
+  RT --> RTC[("CoworkRuntime")]
+  R1 -.-> RTC
+  R2 -.-> RTC
+  R3 -.-> RTC
+  R4 -.-> RTC
+  classDef good fill:#12251f,stroke:#4ec9b0,color:#e9eef5
+  classDef have fill:#16202a,stroke:#243040,color:#8aa0b8
+  class R1,R2,R3,R4 good
+  class R5,R6,R7 have
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CANDIDATE 4 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 04</div>
+          <h2 class="text-3xl font-semibold tracking-tight">One chat turn is one 617-line generator</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-rust/15 text-rust border border-rust/40">Strong</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>src/cowork_agent/features/ai_chat/controller.py <span class="text-muted">:536–1153</span></li>
+            <li>src/cowork_agent/features/ai_chat/memory_gateway.py <span class="text-muted">— private methods reached into</span></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            <code class="text-cream">ChatController.stream_message</code> is a single async generator that
+            interleaves eight concerns line by line: idempotency and replay, cancellation, durable turn
+            persistence, progress-activity emission, intent routing, memory and RAG context assembly,
+            the LLM stream with its citation / title / task-proposal / report extraction, and error-code
+            mapping. None of them is separable — they are woven, not stacked.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            Two symptoms make the interleaving measurable. The cancellation check
+            <code class="text-xs">turn_id in self._cancelled_turn_ids or await is_cancelled()</code>
+            is written out <span class="text-amber">8 times</span>; the pair
+            <code class="text-xs">_set_activity(...)</code> then <code class="text-xs">yield activity_event</code>
+            appears <span class="text-amber">7 times</span>. Each repetition is a place a future
+            contributor can forget one half.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            The <span class="text-cream">Memory gateway</span> seam leaks too. The controller calls three
+            underscore-private methods across the boundary —
+            <code class="text-xs">_read_project_documents</code>, <code class="text-xs">_read_active_turns</code>,
+            <code class="text-xs">_read_task_episode</code>. The gateway's real interface is wider than its
+            public interface admits, which is exactly the shape that makes a fake gateway in a test diverge
+            from the real one.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            Model the turn as what it already is: a <span class="text-cream">chat turn pipeline</span> of
+            ordered stages over one <code class="text-cream">TurnState</code> — <em>admit</em> (scope check,
+            idempotency, replay) → <em>route</em> → <em>assemble context</em> → <em>generate</em> →
+            <em>extract artifacts</em> → <em>settle</em>. The two cross-cutting concerns become the
+            pipeline's job rather than each stage's: a <code class="text-cream">TurnJournal</code> that
+            owns "set activity, persist it, emit the event" as one call, and a cancellation guard the
+            driver checks between stages instead of eight inline conditions.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            Then promote the three private gateway methods to the public interface — or fold their
+            callers into <code class="text-cream">read_context</code>, which is what
+            <code>_read_project_documents</code> looks like it wants. Either way the gateway stops having
+            a second, undeclared interface.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Test surface —</span> today "does a degraded RAG read still emit the right warning" needs a full fake reply provider, a fake gateway, an idempotency key and a cancellation callback. Per-stage, it's one function and one input.</li>
+            <li><span class="text-teal">Locality —</span> the cancellation contract and the activity contract each get one home instead of eight and seven.</li>
+            <li><span class="text-teal">Leverage —</span> this is where AI Chat features land. Every future route, memory type, or artifact kind currently means another branch woven into the same 617 lines.</li>
+            <li><span class="text-teal">Deletion test —</span> passes for <code>TurnJournal</code> and the cancellation guard. It's <em>borderline</em> for the stages themselves: split badly, they become six shallow modules passing a fat <code>TurnState</code> around. That risk is the main thing to grill.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+
+        <!-- interleave stripes -->
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-rust mb-3">BEFORE — eight concerns, woven</div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">idempotency</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative"><div class="absolute h-full bg-violet rounded-sm" style="left:0%;width:14%"></div></div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">cancellation</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative">
+              <div class="absolute h-full bg-rust rounded-sm" style="left:6%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:17%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:22%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:45%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:52%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:61%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:74%;width:2%"></div>
+              <div class="absolute h-full bg-rust rounded-sm" style="left:81%;width:2%"></div>
+            </div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">durable turn</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative">
+              <div class="absolute h-full bg-amber rounded-sm" style="left:10%;width:3%"></div>
+              <div class="absolute h-full bg-amber rounded-sm" style="left:15%;width:3%"></div>
+              <div class="absolute h-full bg-amber rounded-sm" style="left:88%;width:5%"></div>
+            </div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">activity emit</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative">
+              <div class="absolute h-full bg-teal rounded-sm" style="left:18%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:26%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:29%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:31%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:36%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:39%;width:2%"></div>
+              <div class="absolute h-full bg-teal rounded-sm" style="left:45%;width:2%"></div>
+            </div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">routing</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative"><div class="absolute h-full bg-violet rounded-sm" style="left:23%;width:6%"></div></div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">context / RAG</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative"><div class="absolute h-full bg-violet rounded-sm" style="left:30%;width:14%"></div></div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">LLM stream</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative"><div class="absolute h-full bg-violet rounded-sm" style="left:45%;width:22%"></div></div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">artifacts</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative"><div class="absolute h-full bg-violet rounded-sm" style="left:56%;width:12%"></div></div></div>
+            <div class="flex items-center gap-2"><span class="w-24 shrink-0 text-[10px] font-mono text-muted text-right">error mapping</span><div class="flex-1 h-3 bg-panel2 rounded-sm relative">
+              <div class="absolute h-full bg-rust/60 rounded-sm" style="left:12%;width:3%"></div>
+              <div class="absolute h-full bg-rust/60 rounded-sm" style="left:50%;width:4%"></div>
+              <div class="absolute h-full bg-rust/60 rounded-sm" style="left:55%;width:3%"></div>
+            </div></div>
+          </div>
+          <div class="mt-3 flex justify-between text-[10px] font-mono text-muted"><span>line 536</span><span>line 1153</span></div>
+          <div class="mt-4 pt-4 border-t border-line font-mono text-[11px] space-y-1">
+            <div class="text-rust">await self._memory._read_project_documents(...)   <span class="text-muted"># :725</span></div>
+            <div class="text-rust">self._memory._read_active_turns()                <span class="text-muted"># :1240</span></div>
+            <div class="text-rust">await self._memory._read_task_episode(id)        <span class="text-muted"># :1315</span></div>
+            <div class="text-muted mt-1">three reach-throughs past the Memory gateway's public interface</div>
+          </div>
+        </div>
+
+        <div class="bg-ink border border-line rounded-xl p-5">
+          <div class="text-xs font-mono text-teal mb-3">AFTER — stages stacked, cross-cutting owned</div>
+          <pre class="mermaid">
+flowchart TD
+  D["TurnPipeline.run()<br/><i>drives · checks cancellation between stages</i>"]
+  D --> S1["admit<br/><i>scope · idempotency · replay</i>"]
+  S1 --> S2["route"]
+  S2 --> S3["assemble context<br/><i>memory + project documents</i>"]
+  S3 --> S4["generate<br/><i>LLM stream</i>"]
+  S4 --> S5["extract artifacts<br/><i>report · task · title · citations</i>"]
+  S5 --> S6["settle<br/><i>persist terminal turn</i>"]
+  D -.-> J["<b>TurnJournal</b><br/><i>set activity + persist + emit<br/>one call, was 7 pairs</i>"]
+  D -.-> G["<b>CancellationGuard</b><br/><i>one contract, was 8 inline checks</i>"]
+  S3 --> MG["MemoryGateway<br/><i>read_context() only —<br/>no private reach-through</i>"]
+  classDef good fill:#12251f,stroke:#4ec9b0,color:#e9eef5
+  classDef cross fill:#251f12,stroke:#e8b04b,color:#e9eef5
+  class J,G cross
+  class MG good
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CANDIDATE 5 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 05</div>
+          <h2 class="text-3xl font-semibold tracking-tight">Settings read the filesystem behind the caller's back</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-amber/15 text-amber border border-amber/40">Worth exploring</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>src/cowork_agent/config.py <span class="text-muted">— 20 Settings classes, 37 load_env_file sites</span></li>
+            <li>integrations/llm/langfuse_bootstrap.py, last_resort.py</li>
+            <li>orchestration/worker.py</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            Every settings class exposes the same signature —
+            <code class="text-cream">from_env(environ=None, *, load_env_file=True)</code> — and the default
+            means that calling it with no arguments reads <code>.env</code> and <code>config</code> off
+            disk, then falls back to <code>os.environ</code>. The interface looks pure; the implementation
+            touches the filesystem. That's a hidden dependency repeated 37 times, once per class, so the
+            escape hatch has to be remembered at every call site rather than being structural.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            The failure this produces is already known in this project: a test that deletes a provider API
+            key from the environment does not actually delete it, because the next
+            <code>from_env()</code> reloads it from <code>.env</code> — and the test then makes a real,
+            billed provider call instead of exercising the missing-key path. The mitigation lives in
+            <code>tests/conftest.py</code>, which has to neutralize the developer's ambient
+            <code>POSTGRES_MODE</code>, <code>DATABASE_URL</code>, cert bundle and RAG provider before
+            anything else can run.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            <code>load_dotenv(..., override=False)</code> is a sound choice and the comment explaining it is
+            good. The problem isn't the policy — it's that the policy is applied lazily, 37 times, from
+            wherever the first caller happens to be, with <code>Path.cwd()</code> as its root.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            Resolve the environment <em>once</em>, at the composition root, into a frozen
+            <code class="text-cream">Environment</code> mapping, and make every
+            <code>from_env</code> take it as a required argument —
+            <code class="text-cream">GmailSettings.load(env)</code>. <code>load_runtime_environment()</code>
+            becomes the one function that touches disk, called from <code>main()</code> /
+            <code>build_runtime()</code> and from the eval CLIs. The <code>load_env_file</code> keyword
+            disappears from 37 signatures, because there is nothing left for it to switch off.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            A test then constructs an <code>Environment</code> literal. Deleting a key stays deleted.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Test surface —</span> the seam becomes an argument instead of a monkeypatch of process-global state. Several conftest guards become unnecessary rather than load-bearing.</li>
+            <li><span class="text-teal">Locality —</span> one place decides what "the environment" is, including which directory <code>.env</code> is read from — currently <code>Path.cwd()</code>, which differs between the API, the worker, and an eval CLI.</li>
+            <li><span class="text-teal">Leverage —</span> config.py is the second most-changed file (46 commits); each new provider currently copies the same hidden-dependency shape.</li>
+            <li><span class="text-amber">Cost —</span> this is the widest-blast-radius candidate: 37 signatures and their callers. Mechanical, but not small.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-rust mb-2">BEFORE — the hidden disk read</div>
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as test / worker / CLI
+  participant S as GmailSettings.from_env()
+  participant FS as .env + config on disk
+  participant OS as os.environ
+  T->>OS: monkeypatch.delenv("GEMINI_API_KEY")
+  T->>S: from_env()
+  Note over S,FS: load_env_file=True (default)
+  S->>FS: load_dotenv(cwd/".env")
+  FS-->>OS: GEMINI_API_KEY restored
+  S->>OS: read
+  OS-->>S: key is present again
+  S-->>T: configured settings
+  Note over T: missing-key path never runs;<br/>a real billed call goes out
+          </pre>
+        </div>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-teal mb-2">AFTER — one resolution, passed down</div>
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant M as main() / build_runtime()
+  participant E as load_runtime_environment()
+  participant FS as .env + config on disk
+  participant S as GmailSettings.load(env)
+  M->>E: resolve once
+  E->>FS: load_dotenv (only place on disk)
+  E-->>M: Environment (frozen mapping)
+  M->>S: load(env)
+  S-->>M: settings
+  Note over S: no filesystem, no os.environ
+          </pre>
+          <div class="mt-3 font-mono text-[11px] text-muted">
+            a test now writes: <span class="text-teal">GmailSettings.load(Environment({...}))</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ CANDIDATE 6 ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <div class="bg-panel border border-line rounded-2xl card-glow overflow-hidden">
+    <div class="p-8 border-b border-line">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div class="text-xs font-mono text-muted mb-2">CANDIDATE 06</div>
+          <h2 class="text-3xl font-semibold tracking-tight">One hook runs two different protocols</h2>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-mono uppercase tracking-wider bg-amber/15 text-amber border border-amber/40">Worth exploring</span>
+      </div>
+    </div>
+
+    <div class="p-8 grid lg:grid-cols-2 gap-8">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Files</h3>
+          <ul class="font-mono text-sm space-y-1 text-cream">
+            <li>frontend/src/dashboard/hooks/useStreamingChat.ts <span class="text-muted">— 1,822 lines</span></li>
+            <li>frontend/src/dashboard/hooks/useStreamingChat.test.tsx <span class="text-muted">— 1,090 lines</span></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Problem</h3>
+          <p class="text-muted leading-relaxed">
+            The largest file in the repository. The hook body alone runs from line 575 to 1,822 and holds
+            8 <code>useState</code>, 12 <code>useRef</code> and 26 <code>useCallback</code>, returning a
+            27-member object.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            Two unrelated protocols live inside it. One is the AI Chat SSE stream. The other is the
+            <span class="text-cream">digest run</span> mail scan: when the user types
+            <code class="text-xs">@mail</code>, the hook posts a run, then polls
+            <code class="text-xs">/v1/mail-todo/runs/{id}</code> every 1.5s until a terminal status,
+            aggregating progress into a synthetic assistant message. That is the Email RAG workflow —
+            request/response polling with its own state machine — driven from inside the chat streaming
+            hook. <code>AGENTS.md</code> is explicit that these are
+            <em class="text-cream">"two decoupled workflows — do not merge them"</em>; on the client they
+            share one hook and one message list.
+          </p>
+          <p class="text-muted leading-relaxed mt-3">
+            Note what is <em>already</em> right: roughly 440 lines above the hook
+            (<code>citationFromEvent</code>, <code>activitiesFromPayload</code>,
+            <code>messagesFromTurns</code>, <code>workflowFromTaskProposal</code>, …) are pure wire
+            decoders. They are good — they just aren't a module, so they're only reachable by importing
+            the hook's file.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Solution</h3>
+          <p class="text-muted leading-relaxed">
+            Three modules where there is one file. <code class="text-cream">chatWire.ts</code> — the pure
+            decoders, lifted as-is, with their own tests. <code class="text-cream">useMailScan.ts</code> —
+            the digest-run poller, owning its interval, abort and terminal statuses, exposing
+            <code class="text-xs">startScan(providers) → MailScanProgress</code>.
+            <code class="text-cream">useStreamingChat.ts</code> — session, transcript, draft and SSE only,
+            consuming <code>useMailScan</code> as a collaborator.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-2">Benefits</h3>
+          <ul class="text-muted space-y-2 text-sm leading-relaxed">
+            <li><span class="text-teal">Test surface —</span> the 1,090-line test file currently drives everything through one hook with mocked <code>fetch</code>. Decoder tests become plain function tests; mail-scan tests stop needing an SSE stream to exist.</li>
+            <li><span class="text-teal">Locality —</span> the decoupling <code>AGENTS.md</code> asserts for the backend becomes visible on the client too.</li>
+            <li><span class="text-teal">Leverage —</span> 26 commits in four months, and it's the file most likely to conflict when two branches touch chat.</li>
+            <li><span class="text-teal">Deletion test —</span> passes for <code>useMailScan</code> (deleting it puts a polling state machine back into the SSE hook) and for <code>chatWire</code> (deleting it scatters wire-shape knowledge into components).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono uppercase tracking-[0.2em] text-muted">Before / After</h3>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-rust mb-2">BEFORE — two protocols, one hook</div>
+          <pre class="mermaid">
+flowchart TD
+  UI["ChatStreamView · ChatInputBox · Dashboard"] --> H
+  subgraph H["useStreamingChat.ts — 1,822 lines"]
+    direction TB
+    W["~440 lines of pure decoders<br/><i>not importable on their own</i>"]
+    A["session · transcript · draft · attachments"]
+    B["SSE stream<br/><i>AI Chat</i>"]
+    C["poll /v1/mail-todo/runs every 1.5s<br/><i>Email RAG digest run</i>"]
+  end
+  B --> API1["POST /v1/cowork/chat/messages"]
+  C --> API2["POST /v1/mail-todo/runs<br/>GET /v1/mail-todo/runs/{id}"]
+  H --> R["27-member return object"]
+  classDef bad fill:#2a1512,stroke:#e2724a,color:#e9eef5
+  class C bad
+          </pre>
+        </div>
+        <div class="bg-ink border border-line rounded-xl p-4">
+          <div class="text-xs font-mono text-teal mb-2">AFTER — one module per protocol</div>
+          <pre class="mermaid">
+flowchart TD
+  UI["ChatStreamView · ChatInputBox · Dashboard"] --> H["useStreamingChat<br/><i>session · transcript · SSE</i>"]
+  H --> MS["<b>useMailScan</b><br/><i>digest run polling</i>"]
+  H --> WD["<b>chatWire</b><br/><i>pure decoders · own tests</i>"]
+  MS --> WD
+  H --> API1["chat SSE"]
+  MS --> API2["mail-todo runs"]
+  classDef good fill:#12251f,stroke:#4ec9b0,color:#e9eef5
+  class MS,WD good
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ NOT PROPOSED ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-10">
+  <details class="bg-panel border border-line rounded-xl p-6">
+    <summary class="flex items-center justify-between">
+      <span class="text-sm font-mono uppercase tracking-[0.2em] text-muted">Considered and deliberately not proposed</span>
+      <span class="text-muted text-xs font-mono">expand</span>
+    </summary>
+    <div class="mt-6 space-y-5 text-sm">
+      <div>
+        <div class="text-cream font-medium mb-1">Unifying the SQLite and Postgres repository pairs</div>
+        <p class="text-muted leading-relaxed">
+          <code>postgres.py</code> / <code>sqlite_chat.py</code>, <code>projects.py</code> /
+          <code>sqlite_projects.py</code> and friends are ~3,000 lines of near-parallel implementation, which
+          looks like a duplication finding. It isn't one to act on.
+          <span class="text-amber">ADR-010</span> decides explicitly that Postgres is the control plane and
+          that chat memory must <em>not</em> be ported to SQLite to chase latency; SQLite is the
+          absent-<code>DATABASE_URL</code> fallback only. Extracting a shared abstraction here would invest
+          in parity the project has decided not to want.
+        </p>
+      </div>
+      <div>
+        <div class="text-cream font-medium mb-1">Splitting <code>domain/_chat_contracts_memory.py</code> (1,480 lines)</div>
+        <p class="text-muted leading-relaxed">
+          Large, but it is a contracts file — mostly frozen dataclasses re-exported through
+          <code>chat_contracts.py</code>. Size here isn't depth debt; splitting it would add navigation cost
+          for no change in interface complexity.
+        </p>
+      </div>
+      <div>
+        <div class="text-cream font-medium mb-1"><code>features/batch_evaluation/</code> (runner 1,186 · contracts 575 · jobs repo 1,260)</div>
+        <p class="text-muted leading-relaxed">
+          Big and recently very active, but the activity is a long series of <em>hardening</em> commits —
+          lease ownership, cancellation cleanup, replay bounds, watchdog progress. That reads as a module
+          converging, not one fighting its own shape. Worth re-reviewing once it stops changing weekly.
+        </p>
+      </div>
+    </div>
+  </details>
+</section>
+
+<!-- ══════════════════════ TOP RECOMMENDATION ══════════════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-12">
+  <div class="rounded-2xl border border-teal/40 bg-gradient-to-br from-teal/10 to-transparent p-8 card-glow">
+    <div class="text-xs font-mono uppercase tracking-[0.2em] text-teal mb-3">Top recommendation</div>
+    <h2 class="text-4xl font-semibold tracking-tight mb-4">Start with 01 — the report artifact store.</h2>
+    <div class="grid lg:grid-cols-[1.3fr,1fr] gap-8 items-start">
+      <div class="space-y-4 text-muted leading-relaxed">
+        <p>
+          It is the smallest of the six and the only one that closes live defects rather than only reducing
+          future cost. An unsanitized, model-supplied filename is written to disk today, and the artifacts
+          UI calls two endpoints that were never built. Both are direct consequences of the same missing
+          module, which is the cleanest possible demonstration that the module is load-bearing.
+        </p>
+        <p>
+          It is also the right first move <em>strategically</em>. Candidates 02 and 03 are the large,
+          valuable ones — but 03 is mostly code movement that only pays off once 02 exists, and 02 is a
+          60-key refactor that is much easier to justify and to review once one concrete dependency has
+          already been threaded through a typed constructor. The report store is that first dependency:
+          small enough to land in one pass, and it becomes the first typed field on
+          <code class="text-cream">CoworkRuntime</code>.
+        </p>
+        <p>
+          <span class="text-cream">Then 02, then 04.</span> Candidate 02 unblocks 03 and makes 04's stage
+          extraction testable. Candidate 05 is real and memory-confirmed but has the widest blast radius —
+          worth doing deliberately, not first. Candidate 06 is independent of all of them and can run in
+          parallel on the frontend.
+        </p>
+      </div>
+      <div class="bg-ink/60 border border-line rounded-xl p-5">
+        <div class="text-xs font-mono uppercase tracking-[0.2em] text-muted mb-4">Suggested order</div>
+        <ol class="space-y-3 text-sm">
+          <li class="flex gap-3"><span class="font-mono text-teal shrink-0">01</span><span class="text-cream">Report artifact store<span class="block text-muted text-xs mt-0.5">closes 2 defects · small · seeds the runtime</span></span></li>
+          <li class="flex gap-3"><span class="font-mono text-teal shrink-0">02</span><span class="text-cream">Typed runtime<span class="block text-muted text-xs mt-0.5">unblocks 03, makes 04 testable</span></span></li>
+          <li class="flex gap-3"><span class="font-mono text-muted shrink-0">04</span><span class="text-cream">Chat turn pipeline<span class="block text-muted text-xs mt-0.5">highest leverage, needs the most design</span></span></li>
+          <li class="flex gap-3"><span class="font-mono text-muted shrink-0">03</span><span class="text-cream">Routers out of app.py<span class="block text-muted text-xs mt-0.5">mechanical once 02 lands</span></span></li>
+          <li class="flex gap-3"><span class="font-mono text-muted shrink-0">05</span><span class="text-cream">Environment as a value<span class="block text-muted text-xs mt-0.5">widest blast radius</span></span></li>
+          <li class="flex gap-3"><span class="font-mono text-muted shrink-0">06</span><span class="text-cream">Split the chat hook<span class="block text-muted text-xs mt-0.5">independent · frontend only</span></span></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="max-w-6xl mx-auto px-6 py-12 border-t border-line">
+  <p class="text-xs font-mono text-muted">
+    Generated 2026-08-25 · worktree <code>cranky-jemison-21c7a0</code> · branch <code>claude/cranky-jemison-21c7a0</code><br/>
+    Line numbers refer to the working tree at commit <code>9bf4239</code>.
+  </p>
+</footer>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      background: 'transparent',
+      primaryColor: '#19222c',
+      primaryTextColor: '#e9eef5',
+      primaryBorderColor: '#243040',
+      lineColor: '#4a5b70',
+      secondaryColor: '#131a22',
+      tertiaryColor: '#131a22',
+      fontFamily: 'ui-monospace, JetBrains Mono, Consolas, monospace',
+      fontSize: '13px',
+      actorBkg: '#19222c',
+      actorBorder: '#243040',
+      actorTextColor: '#e9eef5',
+      signalColor: '#8aa0b8',
+      signalTextColor: '#e9eef5',
+      noteBkgColor: '#251f12',
+      noteTextColor: '#e9eef5',
+      noteBorderColor: '#e8b04b',
+      labelBoxBkgColor: '#19222c',
+      sequenceNumberColor: '#0b0f14'
+    }
+  });
+</script>
+</body>
+</html>

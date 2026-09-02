@@ -21,6 +21,21 @@ SEMANTIC_RETRIEVAL_MAX_ITEMS = 5
 SEMANTIC_RETRIEVAL_MIN_SCORE = 0.6
 SEMANTIC_RETRIEVAL_TIMEOUT_MS = 500
 
+# Retrieval cues are matched as exact token sequences, so each natural phrasing
+# has to be listed rather than inferred.
+#
+# Vietnamese is not an extra here - it is the language the assistant answers in
+# unconditionally. An English-only cue list meant a Vietnamese user could create
+# episodes (`_TASK_DIRECTIVE_VERBS` has carried `tạo`/`lập`/`lên` all along) but
+# could never read one back, so a healthy store reported itself as amnesia.
+#
+# The cues stay accented: `_contains_cue` casefolds, and casefold does not strip
+# diacritics, so an unaccented entry would match nothing an accented question
+# writes. Unaccented input is a separate question about real user behaviour, and
+# is deliberately not answered here.
+#
+# Keep both entries when one phrasing is not a token subsequence of the other -
+# "chính sách của công ty" does not contain "chính sách công ty".
 _EPISODIC_CUES = frozenset(
     {
         "previous task",
@@ -28,6 +43,15 @@ _EPISODIC_CUES = frozenset(
         "past task",
         "related work",
         "earlier task",
+        # `trước` is also the preposition "before", so a cue ending in it is
+        # ambiguous: "bàn giao công việc trước khi nghỉ phép" is "hand over work
+        # BEFORE taking leave", not a request for a previous task. The bare
+        # "công việc trước" was tried and fired on exactly that sentence, so the
+        # general noun requires the trailing `đó` that pins it to the past.
+        "tác vụ trước",
+        "nhiệm vụ trước",
+        "việc trước đó",
+        "công việc liên quan",
     }
 )
 _SEMANTIC_CUES = frozenset(
@@ -38,12 +62,148 @@ _SEMANTIC_CUES = frozenset(
         "employee handbook",
         "our policy",
         "our procedure",
+        "chính sách công ty",
+        "chính sách của công ty",
+        "quy định công ty",
+        "quy định của công ty",
+        "quy trình công ty",
+        "quy trình của công ty",
+        "sổ tay nhân viên",
     }
 )
-_TASK_DIRECTIVE_VERBS = frozenset({"create", "make", "add", "draft", "prepare", "build"})
-_TASK_FILLERS = frozenset({"a", "an", "the", "new"})
-_TASK_ARTICLES = frozenset({"a", "an", "the"})
-_TASK_NEGATION_MARKERS = (("do", "not"), ("don't",), ("dont",), ("never",), ("no",))
+# Words an episodic question contains because it is a QUESTION, not because of
+# which episode is wanted. Three groups, and each is here for its own reason:
+#
+#   - the interrogative frame ("tôi", "là", "bao nhiêu", "gì") - grammar;
+#   - the cue phrases themselves ("tác vụ", "trước", "previous", "task") - a cue
+#     is in EVERY episodic question by construction, so it distinguishes none of
+#     them from each other;
+#   - status words ("mở", "xong") - an episode's indexed text is its title,
+#     paraphrase, plan and missing information. None of that says whether the
+#     task is open. Status lives in `validation_status`, a column, so a status
+#     word can only ever match one by accident.
+#
+# This is an explicit list for the same reason the cue lists are (see above):
+# the 'simple' text-search configuration has no stopword dictionary for any
+# language, and Postgres ships no Vietnamese one to install instead.
+_EPISODIC_QUERY_FRAME = frozenset(
+    {
+        # interrogative frame
+        "tôi",
+        "bạn",
+        "của",
+        "là",
+        "gì",
+        "nào",
+        "không",
+        "có",
+        "còn",
+        "đang",
+        "được",
+        "cho",
+        "về",
+        "trên",
+        "trong",
+        "với",
+        "và",
+        "hay",
+        "thì",
+        "mà",
+        "này",
+        "đó",
+        "bao",
+        "nhiêu",
+        "khi",
+        "sao",
+        "ai",
+        "đâu",
+        "một",
+        "các",
+        "những",
+        "đã",
+        "sẽ",
+        "chưa",
+        "hãy",
+        "xin",
+        "vẫn",
+        "i",
+        "my",
+        "me",
+        "you",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "do",
+        "did",
+        "does",
+        "have",
+        "has",
+        "any",
+        "still",
+        "what",
+        "which",
+        "who",
+        "when",
+        "where",
+        "about",
+        "on",
+        "of",
+        "for",
+        "to",
+        "in",
+        "with",
+        "and",
+        "or",
+        "please",
+        "show",
+        # the cue phrases themselves
+        "tác",
+        "vụ",
+        "nhiệm",
+        "công",
+        "việc",
+        "trước",
+        "liên",
+        "quan",
+        "previous",
+        "prior",
+        "past",
+        "earlier",
+        "task",
+        "tasks",
+        "related",
+        "work",
+        # status, which the index does not carry
+        "mở",
+        "đóng",
+        "xong",
+        "rồi",
+        "dở",
+        "open",
+        "closed",
+        "done",
+        "finished",
+    }
+)
+_TASK_DIRECTIVE_VERBS = frozenset(
+    {"create", "make", "add", "draft", "prepare", "build", "tạo", "lập", "lên"}
+)
+_TASK_FILLERS = frozenset({"a", "an", "the", "new", "một", "cho"})
+_TASK_ARTICLES = frozenset({"a", "an", "the", "một"})
+_TASK_NEGATION_MARKERS = (
+    ("do", "not"),
+    ("don't",),
+    ("dont",),
+    ("never",),
+    ("no",),
+    ("không", "cần"),
+    ("đừng",),
+    ("không",),
+)
 _TURN_TARGETS = frozenset({"this", "that", "it"})
 _MAX_TASK_FILLERS = 2
 
@@ -63,20 +223,43 @@ def _contains_cue(normalized_message: str, cues: frozenset[str]) -> bool:
     )
 
 
+def episodic_search_text(user_message: str) -> str:
+    """The part of `user_message` that says WHICH episode is wanted.
+
+    Empty when the question names no episode. "Tôi còn tác vụ trước nào đang mở
+    không?" is every one of the three frame groups and nothing else: it is not
+    asking for a particular episode, it is asking to be shown the open ones.
+    Answering it means enumerating (`MemoryGateway.list_task_episodes`), not
+    searching, and the caller declines to search rather than searching on
+    whatever filler word happens to survive.
+    """
+
+    words = (word.strip(punctuation) for word in _normalized_query(user_message).split())
+    return " ".join(word for word in words if word and word.casefold() not in _EPISODIC_QUERY_FRAME)
+
+
 def select_memory_reads(
     request: ChatMessageRequest, *, company_rag_enabled: bool = True
 ) -> MemoryReadOptions:
     """Select optional retrieval only for deterministic, explicit user intent."""
 
     query = _normalized_query(request.user_message)
+    # The cue decides WHETHER to search; the content words decide FOR WHAT. The
+    # whole message used to be both, and since the store ANDs every term of it,
+    # no natural question could match anything at any threshold.
+    # A task-creation request carries no episodic cue, and Concern D needs one:
+    # a revision can only declare which episode it replaces if the write turn is
+    # shown the episodes it might be replacing.
+    episodic_wanted = _contains_cue(query, _EPISODIC_CUES) or is_explicit_task_request(request)
+    episodic_terms = episodic_search_text(query) if episodic_wanted else ""
     episodic = (
         EpisodicMemoryQuery(
-            query=query,
+            query=episodic_terms,
             max_items=EPISODIC_RETRIEVAL_MAX_ITEMS,
             min_score=EPISODIC_RETRIEVAL_MIN_SCORE,
             timeout_ms=EPISODIC_RETRIEVAL_TIMEOUT_MS,
         )
-        if _contains_cue(query, _EPISODIC_CUES)
+        if episodic_terms
         else EpisodicMemoryRead(enabled=False, retrieval_eligible_only=True, max_items=1)
     )
     semantic = (
@@ -159,7 +342,20 @@ def _is_task_target(
     while index < len(tokens) and max_fillers and tokens[index] in fillers:
         index += 1
         max_fillers -= 1
-    return tokens[index : index + 1] == ("task",) or tokens[index : index + 2] == (
-        "action",
-        "plan",
+    # The Vietnamese entries are two tokens each. Without them a directive verb
+    # like `tạo` had almost nothing to point at - only "kế hoạch" - so
+    # "tạo một tác vụ" was rejected while "create a task" was accepted. A verb
+    # list without a matching noun list authorizes nothing.
+    return tokens[index : index + 1] in (
+        ("task",),
+        ("tasks",),
+        ("todo",),
+        ("to-do",),
+    ) or tokens[index : index + 2] in (
+        ("action", "plan"),
+        ("kế", "hoạch"),
+        ("to", "do"),
+        ("tác", "vụ"),
+        ("nhiệm", "vụ"),
+        ("công", "việc"),
     )

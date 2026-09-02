@@ -1,6 +1,8 @@
 # Email RAG — Architecture Implementation Status
-> **Document status:** current snapshot as of 2026-08-14. This report describes
-> the code in this checkout, not a target architecture.
+> **Document status:** re-verified against branch `main` (commit `9ed895c`) on
+> **2026-08-18**; previous snapshot 2026-08-14. This report describes the code in
+> this checkout, not a target architecture. Corrections from the re-verification
+> are tagged **[2026-08-18]**.
 
 ## Executive summary
 
@@ -50,22 +52,29 @@ flowchart LR
 - Gmail access remains read-only.
 - Raw email bodies and attachment content are transient; the RAG corpus comes
   only from repository Markdown files.
-- Tenant scope is filtered in the in-process retrievers before scoring.
+- *[2026-08-18]* `f2d20e0` (2026-08-13) removed multi-tenancy from this plane.
+  `tenant_id` still threads through `load_corpus()` and the BM25 ranker, but it is
+  always `LOCAL_TENANT_ID`, so the filter is structurally present and semantically
+  inert. `tests/unit/integrations/rag/test_rag.py` no longer contains a tenant test;
+  its scope coverage is the `document_ids` / `years` / `months` allowlist.
 - Per-user, group, document-status, and document-level ACL policies are not
-  implemented. The current corpus is effectively company-wide within its
-  tenant scope.
+  implemented. The current corpus is company-wide.
+- *[2026-08-18]* `POST /v1/mail-todo/knowledge/chat` calls retrieval with
+  `RetrievalLimits(min_score=-1.0)` (`app.py:1043`), which disables the relevance
+  floor for that endpoint. Combined with the open abstention gap, this endpoint
+  cannot return `no_results` on relevance grounds — only on an empty index.
 
 ## Known gaps and limits
 
 | Gap | Status | Why it matters |
 |---|---|---|
-| Live embedding quality vs hashing | Partial | `scripts/evaluate_retrieval.py` measures dense / turbovec / hybrid stacks; there is no Qdrant control group. |
+| Live embedding quality vs hashing | Partial | `scripts/evaluate_retrieval.py` measures dense / turbovec / hybrid stacks. *[2026-08-18: the "no Qdrant control group" caveat is obsolete — Qdrant was deleted in `c441822` / `5a2c87d`. The live gap is that no run on the current corpus uses a real embedder; both committed reports are `hashing`, and they score a 1,069-chunk index the chunker no longer produces (now 949).]* |
 | Calibrated abstention | Missing | `no_results` is structurally supported, but no validated runtime score or margin policy separates unrelated Vietnamese queries from relevant corpus content. |
 | Active end-to-end deadline | Partial | Embedding/reranker transports have their own timeouts, but `RetrievalLimits.timeout_ms` is not enforced as one deadline across every remote step. |
-| Reranker observability | Missing | Jina safely falls back, but the runtime response does not report whether reranking was applied or bypassed. |
-| Semantic grounding | Missing | Citation IDs are constrained to retrieved chunks; no evaluation proves generated plan claims are entailed by those chunks. |
-| Binary ingestion | Partial | The administrator CLI converts local DOCX and native-text PDF files into Markdown. Scan, image-based, and mixed PDFs fail safely with `mistral_not_configured` until Mistral OCR is configured; XLSX/PPTX, upload, and Gmail-attachment ingestion do not exist. |
-| Corpus administration | Missing | No persistent document registry, version history, incremental update, or asynchronous ingestion pipeline exists. |
+| Reranking in the runtime | **Absent** *[2026-08-18]* | `bootstrap.py::_wrap_hybrid` builds `HybridSemanticMemory(documents, embedder, dense=dense)` — no reranker argument. `JinaRerankerAdapter` is imported only by `scripts/evaluate_retrieval.py`, and the unified `rag/reranker.py` (Cohere default) has no caller in `src/`. Company retrieval therefore ends at RRF fusion. The earlier "observability" framing understated this: there is no rerank step to observe, and `SemanticRetrievalResponse` (`query_id`, `chunks`, `retrieval_status`, `latency_ms`) has no field to report one. |
+| Semantic grounding | Partial *[2026-08-18]* | Citation IDs are constrained to retrieved chunks, and `features/email_action_plan/citation_accuracy.py` now measures step-to-chunk Jaccard overlap (10 unit tests). It has no caller outside its test, so entailment of generated plan claims is still unproven in any committed report. |
+| Binary ingestion | Partial | The administrator CLI converts local DOCX and native-text PDF files into Markdown. Scan, image-based, and mixed PDFs fail safely with `mistral_not_configured` until Mistral OCR is configured; XLSX/PPTX and Gmail-attachment ingestion do not exist. *[2026-08-18: "upload ... do not exist" is scoped to this company-CLI plane only. A separate project-document upload plane does exist — `api/projects.py`, `orchestration/project_document_worker.py`, `rag/project_index.py` — with its own async ingestion and per-project index. It is out of scope for this document; see the CHAT-RAG area.]* |
+| Corpus administration | Missing | No persistent document registry, version history, incremental update, or asynchronous ingestion pipeline exists **for the company corpus**. *[2026-08-18: the project-document plane does have a registry and an async worker; this row is about `data/extracted/` only.]* |
 
 ## Operational checks
 
@@ -85,7 +94,6 @@ flowchart LR
 - `src/cowork_agent/ingestion_cli.py`
 - `src/cowork_agent/app.py`
 - `src/cowork_agent/features/email_action_plan/workflow.py`
-- `src/cowork_agent/gui/app.py`
 
 ## Local knowledge ingestion
 
@@ -101,4 +109,4 @@ downloads Gmail attachments, has no upload API, and does not write the
 Turbovec snapshot; after a successful ingestion, restart the API/worker so
 `.data/turbovec_index.tvim` is rebuilt.
 - [RETRIEVAL-EVALUATION-STATUS.md](./RETRIEVAL-EVALUATION-STATUS.md) — evaluation & test coverage map
-- [TARGET-ARCHITECTURE.md](../../architectures/TARGET-ARCHITECTURE.md) — target design and milestone gap analysis
+- [Architecture harness](../../docs/architectures/README.md) — the C4 model of the system as implemented

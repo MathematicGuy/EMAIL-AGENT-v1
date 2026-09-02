@@ -24,6 +24,8 @@ def _module():
     return load_script("evaluate_chat_rag")
 
 
+def test_default_output_directory_uses_the_evaluation_workspace() -> None:
+    assert _module().DEFAULT_OUTPUT_DIR == REPO_ROOT / "evaluations" / "CHAT-RAGAS" / "baselines"
 
 
 def test_metadata_only_report_calculates_retrieval_linkage_abstention_and_latency() -> None:
@@ -150,6 +152,49 @@ def test_ragas_fails_clearly_when_the_optional_dependency_is_absent(tmp_path: Pa
         "--ragas",
     )
 
-    if result.returncode == 0:
+    try:
+        import ragas  # noqa: F401
+
         pytest.skip("ragas is installed in this environment; the missing-dependency path is moot")
+    except ImportError:
+        pass
+
     assert "requires the optional ragas and datasets packages" in result.stderr
+
+
+def test_resolve_evaluator_models_defaults_and_overrides() -> None:
+    module = _module()
+    google_llm, google_emb = module.resolve_evaluator_models("google")
+    assert "gemini" in google_llm
+    assert "gemini-embedding" in google_emb
+
+    mistral_llm, mistral_emb = module.resolve_evaluator_models("mistral")
+    assert "mistral" in mistral_llm
+    assert "mistral-embed" in mistral_emb
+
+    custom_llm, custom_emb = module.resolve_evaluator_models(
+        "google", model_override="custom-judge", embedding_override="custom-emb"
+    )
+    assert custom_llm == "custom-judge"
+    assert custom_emb == "custom-emb"
+
+
+def test_validate_evaluator_pairing_guards_against_self_preference_bias() -> None:
+    module = _module()
+    # Matching generator and judge models raises ValueError
+    with pytest.raises(ValueError, match="Self-preference bias violation"):
+        module.validate_evaluator_pairing(
+            generator_model="gemini-2.0-flash", evaluator_model="gemini-2.0-flash"
+        )
+
+    # Distinct models pass
+    module.validate_evaluator_pairing(
+        generator_model="gemini-2.0-flash", evaluator_model="mistral-large-latest"
+    )
+
+    # Allow same model flag bypasses check
+    module.validate_evaluator_pairing(
+        generator_model="gemini-2.0-flash",
+        evaluator_model="gemini-2.0-flash",
+        allow_same_model=True,
+    )

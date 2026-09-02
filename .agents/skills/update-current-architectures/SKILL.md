@@ -5,7 +5,7 @@ description: Audits and updates Level 1 system architecture documentation in doc
 
 # Update Current Architectures
 
-Audit live codebase modules against [docs/architectures/current-architectures/](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/current-architectures) and track architecture drift compared to [TARGET-ARCHITECTURE.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md).
+Audit live codebase modules against [docs/architectures/current-architectures/](../../docs/architectures/current-architectures/) and track architecture drift compared to [TARGET-ARCHITECTURE.md](../../docs/architectures/TARGET-ARCHITECTURE.md).
 
 ## Usage & Scope Modes
 
@@ -19,7 +19,7 @@ Parse the invocation or request target:
 2. **Stream Isolation (Token Efficiency):**
    - For single-file updates, inspect **only** the mapped source folders. Do not load the entire codebase into context.
    - For `"all"` updates, dispatch 3 research/writer subagents (one per stream), then execute a final consolidator pass to update the `README.md` Dashboard.
-3. **Audit Drift against Target Architecture:** Compare live code capabilities against [TARGET-ARCHITECTURE.md](file:///e:/VIN-INTERNSHIP/EMAIL-AGENT-v1/docs/architectures/TARGET-ARCHITECTURE.md) to detect implementation drift, gaps, or new features.
+3. **Audit Drift against Target Architecture:** Compare live code capabilities against [TARGET-ARCHITECTURE.md](../../docs/architectures/TARGET-ARCHITECTURE.md) to detect implementation drift, gaps, or new features.
 4. **Apply Format Guardrails:** Enforce formatting templates and rules defined in [references/FORMAT_GUARDRAIL.md](references/FORMAT_GUARDRAIL.md).
 5. **Targeted Edits:** Use line-targeted edits (`replace_file_content`) to update status matrices, mermaid diagrams, and drift sections rather than full-file overwrites.
 
@@ -27,6 +27,6 @@ Parse the invocation or request target:
 
 - [ ] **Metadata Block:** Includes `Architecture level`, `Status`, `Primary Owner`, and `Target Alignment`.
 - [ ] **Mermaid Diagram:** Valid Level 1 Mermaid syntax (`flowchart TB` or `flowchart LR`) with quoted labels.
-- [ ] **Clickable Links:** All file paths use `file:///` scheme (e.g., `[file.py](file:///path/to/file.py)`).
+- [ ] **Relative Links:** All file and directory paths use clean standard relative paths (e.g., `[file.py](../../../src/cowork_agent/path/to/file.py)`).
 - [ ] **Status Matrix:** Standardized columns (`Module / Component`, `Implemented Scope`, `Status`, `Target Alignment`, `Authoritative Code Location`).
-- [ ] **Decoupling Rule:** No references to retired `@Email` in-chat tools (adheres to ADR-004).
+- [ ] **Decoupling Rule:** Standalone Email Agent with decoupled in-chat email scan cards (`MailScanSummary`).

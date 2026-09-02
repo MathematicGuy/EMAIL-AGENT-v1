@@ -228,3 +228,55 @@ def dev_trace_sink_from_env(
     except (ProductionTraceForbiddenError, ValueError) as exc:
         logger.warning("Development trace disabled: %s", exc)
         return None
+
+
+def emit_security_scan_trace(
+    trace_sink: TraceSink | None,
+    *,
+    run_id: str,
+    user_id: str,
+    urls_scanned_count: int,
+    attachments_scanned_count: int,
+    threats_detected_count: int,
+    quarantined_count: int,
+    highest_threat_level: str,
+    latency_ms: int = 0,
+    degraded: bool = False,
+) -> None:
+    """Emit metadata-only trace event for email security scanning (§6.8 / Task 3.4)."""
+    if trace_sink is None:
+        return
+
+    reason_codes = (
+        f"URLS:{urls_scanned_count}",
+        f"ATTACHMENTS:{attachments_scanned_count}",
+        f"THREATS:{threats_detected_count}",
+        f"QUARANTINED:{quarantined_count}",
+        f"HIGHEST:{highest_threat_level}",
+    )
+    status = (
+        TraceStatus.SUCCESS
+        if quarantined_count == 0 and not degraded
+        else TraceStatus.PARTIAL
+    )
+    validation_status = "SECURITY_QUARANTINE" if quarantined_count > 0 else "SECURITY_CLEAN"
+    generation_status = "SECURITY_SCAN_DEGRADED" if degraded else None
+
+    trace_sink.record(
+        TraceEvent(
+            run_id=run_id,
+            user_id=user_id,
+            gmail_message_id=None,
+            event_name="email_security_scan",
+            status=status,
+            route=None,
+            reason_codes=reason_codes,
+            classifier_confidence=None,
+            rag_result_count=None,
+            retrieval_status=None,
+            generation_status=generation_status,
+            validation_status=validation_status,
+            latency_ms=TraceLatency(email=latency_ms),
+        )
+    )
+

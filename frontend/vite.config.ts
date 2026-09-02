@@ -1,23 +1,38 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'node:path'
+import { fileURLToPath, URL } from 'node:url'
 
 // https://vite.dev/config/
+const backendOrigin = process.env.BACKEND_ORIGIN ?? 'http://127.0.0.1:8000'
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Default unchanged; BACKEND_ORIGIN lets the e2e harness point the same dev
+  // server at a throwaway API without taking port 8000 from a running backend.
   server: {
+    hmr: {
+      overlay: true,
+    },
+    watch: {
+      usePolling: true,
+      interval: 250,
+    },
     proxy: {
       '/backend': {
-        target: 'http://127.0.0.1:8000',
+        target: backendOrigin,
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/backend/, ''),
+      },
+      '/v1': {
+        target: backendOrigin,
+        changeOrigin: true,
       },
     },
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
   build: {

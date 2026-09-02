@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -14,22 +14,28 @@ from cowork_agent.domain.target_contracts import (
     TRACE_DEVELOPMENT_MARKER,
     Actionability,
     ActionPlanOutput,
+    AttachmentSafetyReport,
     BodyFormat,
     EmailRouteDecision,
+    EmailSourceLink,
     EphemeralEmailEnvelope,
     ExpectedDocumentType,
     FetchStatus,
+    LinkSafetyReport,
     PlanStep,
     ReasonCode,
     RetrievalFilters,
     RetrievalLimits,
     RetrievalStatus,
     Route,
+    SecurityScanResult,
     SemanticChunk,
     SemanticRetrievalRequest,
     SemanticRetrievalResponse,
     SupportingDocument,
     Task,
+    ThreatCategory,
+    ThreatLevel,
     TraceEvent,
     TraceLatency,
     TraceStatus,
@@ -54,6 +60,9 @@ def _envelope() -> EphemeralEmailEnvelope:
         body_format=BodyFormat.TEXT,
         attachments_present=True,
         fetch_status=FetchStatus.COMPLETE,
+        source_links=(
+            EmailSourceLink("link1", "Open report", "https://portal.example.com/report"),
+        ),
     )
 
 
@@ -118,6 +127,7 @@ def _task() -> Task:
         generation_confidence=0.81,
         validation_status=ValidationStatus.SYSTEM_GENERATED,
         created_at=datetime(2026, 8, 7, 9, 35, tzinfo=UTC),
+        source_links=(EmailSourceLink("link1", None, "https://portal.example.com/report"),),
     )
 
 
@@ -158,17 +168,13 @@ _ROUND_TRIP_CASES = {
 }
 
 
-@pytest.mark.parametrize("build", list(_ROUND_TRIP_CASES.values()), ids=_ROUND_TRIP_CASES)
-def test_round_trip_dict_and_json(build):
-    instance = build()
-    payload = instance.to_dict()
-
-    # Round-trip through the plain dict.
-    assert type(instance).from_dict(payload) == instance
-
-    # The payload must be JSON-safe and survive an actual JSON round-trip.
-    text = json.dumps(payload)
-    assert type(instance).from_dict(json.loads(text)) == instance
+def test_round_trip_dict_and_json():
+    for name, build in _ROUND_TRIP_CASES.items():
+        instance = build()
+        payload = instance.to_dict()
+        assert type(instance).from_dict(payload) == instance, f"Failed for {name}"
+        text = json.dumps(payload)
+        assert type(instance).from_dict(json.loads(text)) == instance, f"Failed JSON for {name}"
 
 
 def test_to_dict_is_json_safe():
@@ -185,19 +191,25 @@ def test_to_dict_is_json_safe():
     assert task_payload["task"]["action_plan"][0]["supporting_citation_ids"] == ["cit-1"]
 
 
-def test_attachments_processed_defaults_to_false():
+def test_attachments_processed_and_source_links_defaults():
     assert _envelope().attachments_processed is False
     assert EphemeralEmailEnvelope.from_dict(_envelope().to_dict()).attachments_processed is False
 
-
-def test_attachments_processed_rejects_true():
     payload = _envelope().to_dict()
     payload["attachments_processed"] = True
     with pytest.raises(ValueError, match="attachments_processed"):
         EphemeralEmailEnvelope.from_dict(payload)
 
+    envelope_payload = _envelope().to_dict()
+    envelope_payload.pop("source_links")
+    assert EphemeralEmailEnvelope.from_dict(envelope_payload).source_links == ()
 
-def test_actionability_values():
+    task_payload = _task().to_dict()
+    task_payload.pop("source_links")
+    assert Task.from_dict(task_payload).source_links == ()
+
+
+def test_domain_enum_values_and_constants():
     assert {member.value for member in Actionability} == {
         "action_required",
         "action_suggested",
@@ -205,13 +217,7 @@ def test_actionability_values():
         "unclear",
         "irrelevant",
     }
-
-
-def test_route_values():
     assert {member.value for member in Route} == {"no_action", "direct_plan", "retrieve_rag"}
-
-
-def test_reason_code_values():
     assert {member.value for member in ReasonCode} == {
         "no_action",
         "email_self_contained",
@@ -222,9 +228,6 @@ def test_reason_code_values():
         "internal_term_unresolved",
         "domain_knowledge_required",
     }
-
-
-def test_expected_document_type_values():
     assert {member.value for member in ExpectedDocumentType} == {
         "company_policy",
         "governance_document",
@@ -233,9 +236,6 @@ def test_expected_document_type_values():
         "template",
         "product_documentation",
     }
-
-
-def test_supporting_enum_values():
     assert {member.value for member in BodyFormat} == {"text", "html_converted"}
     assert {member.value for member in FetchStatus} == {"complete", "partial"}
     assert {member.value for member in ValidationStatus} == {
@@ -245,15 +245,19 @@ def test_supporting_enum_values():
         "rejected",
     }
     assert {member.value for member in TraceStatus} == {"success", "partial", "failed"}
+    # 1.4.0 added the security contracts (threat levels, link/attachment safety
+    # reports, scan results). Bumped on `main`; asserted here so the constant and
+    # the contracts it versions cannot drift apart.
+    assert TARGET_CONTRACTS_VERSION == "1.4.0"
+    assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
+    assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
+    assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
 
 
-def test_task_priority_supports_urgent():
+def test_task_priority_and_trace_latency():
     assert _task().priority is Priority.URGENT
     restored = ActionPlanOutput.from_dict(_action_plan_output().to_dict()).task
     assert restored.priority is Priority.URGENT
-
-
-def test_trace_latency_defaults_to_all_none():
     assert TraceLatency() == TraceLatency(
         email=None,
         memory=None,
@@ -264,30 +268,17 @@ def test_trace_latency_defaults_to_all_none():
     )
 
 
-@pytest.mark.parametrize(
-    ("build", "field"),
-    [
+def test_frozen_rejects_mutation():
+    cases = [
         (_envelope, "subject"),
         (_route_decision, "confidence"),
         (_action_plan_output, "task"),
         (_trace_event, "event_name"),
-    ],
-    ids=list(_ROUND_TRIP_CASES),
-)
-def test_frozen_rejects_mutation(build, field):
-    instance = build()
-    with pytest.raises(FrozenInstanceError):
-        setattr(instance, field, "mutated")
-
-
-def test_target_contracts_version():
-    assert TARGET_CONTRACTS_VERSION == "1.1.0"
-
-
-def test_trace_content_policy_constants():
-    assert TRACE_CONTENT_POLICY_PRODUCTION == "metadata_only"
-    assert TRACE_CONTENT_POLICY_DEVELOPMENT == "full_content_allowed"
-    assert TRACE_DEVELOPMENT_MARKER == "ALLOW ONLY FOR CURRENT DEVELOPMENT STAGE"
+    ]
+    for build, field in cases:
+        instance = build()
+        with pytest.raises(FrozenInstanceError):
+            setattr(instance, field, "mutated")
 
 
 def _retrieval_request() -> SemanticRetrievalRequest:
@@ -322,22 +313,281 @@ def _retrieval_response() -> SemanticRetrievalResponse:
     )
 
 
-@pytest.mark.parametrize(
-    "build", [_retrieval_request, _retrieval_response], ids=["request", "response"]
-)
-def test_retrieval_contract_round_trip(build):
-    instance = build()
-    payload = instance.to_dict()
-    assert type(instance).from_dict(payload) == instance
-    text = json.dumps(payload)
-    assert type(instance).from_dict(json.loads(text)) == instance
+def test_retrieval_contract_round_trip():
+    for instance in (_retrieval_request(), _retrieval_response()):
+        payload = instance.to_dict()
+        assert type(instance).from_dict(payload) == instance
+        text = json.dumps(payload)
+        assert type(instance).from_dict(json.loads(text)) == instance
 
-
-def test_retrieval_status_values():
     assert {member.value for member in RetrievalStatus} == {
         "success",
         "no_results",
         "timeout",
         "authorization_denied",
         "partial",
+        "unavailable",
     }
+
+
+def test_semantic_chunk_coordinates_and_document_date():
+    chunk = _retrieval_response().chunks[0]
+    assert chunk.page_start is None
+    assert chunk.page_end is None
+    assert chunk.document_date is None
+
+    payload = _retrieval_response().to_dict()["chunks"][0]
+    payload.pop("page_start", None)
+    payload.pop("page_end", None)
+    payload.pop("document_date", None)
+    restored_default = SemanticChunk.from_dict(payload)
+    assert restored_default.page_start is None
+    assert restored_default.page_end is None
+    assert restored_default.document_date is None
+
+    chunk_with_coords = SemanticChunk(
+        chunk_id="doc#0",
+        document_id="doc",
+        document_title="Quarterly Report Template",
+        section="Usage",
+        text="Use the shared template.",
+        source_url="data/extracted/doc.md",
+        document_version=None,
+        relevance_score=0.91,
+        rerank_score=None,
+        page_start=1,
+        page_end=2,
+        document_date=date(2026, 8, 7),
+    )
+    payload_coords = chunk_with_coords.to_dict()
+    assert payload_coords["page_start"] == 1
+    assert payload_coords["page_end"] == 2
+    assert payload_coords["document_date"] == "2026-08-07"
+    restored_coords = SemanticChunk.from_dict(payload_coords)
+    assert restored_coords == chunk_with_coords
+    assert restored_coords.document_date == date(2026, 8, 7)
+
+
+def test_retrieval_filters_options_and_round_trip():
+    filters = RetrievalFilters()
+    assert filters.document_status == ("ready",)
+    assert filters.document_ids == ()
+    assert filters.years == ()
+    assert filters.months == ()
+
+    from_dict_sparse = RetrievalFilters.from_dict({"document_status": ["ready"]})
+    assert from_dict_sparse == filters
+
+    from_dict_extra = RetrievalFilters.from_dict(
+        {"document_status": ["ready"], "category": "policy", "unexpected": True}
+    )
+    assert from_dict_extra == filters
+
+    filters_rich = RetrievalFilters(
+        document_status=("ready",),
+        document_ids=("doc-1", "doc-2"),
+        years=(2025, 2026),
+        months=(1, 8, 12),
+    )
+    payload = filters_rich.to_dict()
+    assert payload["document_ids"] == ["doc-1", "doc-2"]
+    assert payload["years"] == [2025, 2026]
+    assert payload["months"] == [1, 8, 12]
+    restored = RetrievalFilters.from_dict(payload)
+    assert restored == filters_rich
+    text = json.dumps(payload)
+    assert RetrievalFilters.from_dict(json.loads(text)) == filters_rich
+
+
+# --- security contracts (added on `main` with TARGET_CONTRACTS_VERSION 1.4.0) ---
+# Kept verbatim through the merge: the consolidation on `dev` predates these
+# contracts, so dropping them would have shipped the security types untested.
+
+
+def test_threat_level_enum_values():
+    assert [level.value for level in ThreatLevel] == [
+        "clean",
+        "suspicious",
+        "malicious",
+        "blocked",
+    ]
+    assert ThreatLevel.CLEAN == "clean"
+    assert ThreatLevel.MALICIOUS == "malicious"
+
+
+def test_threat_category_enum_values():
+    assert [cat.value for cat in ThreatCategory] == [
+        "none",
+        "phishing",
+        "malware",
+        "macro_script",
+        "parser_exploit",
+        "prompt_injection",
+        "homograph_spoof",
+        "zip_bomb",
+    ]
+
+
+def test_link_safety_report_round_trip():
+    report = LinkSafetyReport(
+        original_url="http://xn--gogle-pra.com",
+        resolved_url="http://gооgle.com",
+        threat_level=ThreatLevel.SUSPICIOUS,
+        threat_category=ThreatCategory.HOMOGRAPH_SPOOF,
+        details="IDN Homograph attack detected",
+    )
+    payload = report.to_dict()
+    assert payload["threat_level"] == "suspicious"
+    assert payload["threat_category"] == "homograph_spoof"
+    restored = LinkSafetyReport.from_dict(payload)
+    assert restored == report
+
+    with pytest.raises(FrozenInstanceError):
+        report.threat_level = ThreatLevel.CLEAN  # type: ignore[misc]
+
+
+def test_attachment_safety_report_round_trip():
+    report = AttachmentSafetyReport(
+        filename="invoice.exe",
+        sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        detected_mime_type="application/x-dosexec",
+        threat_level=ThreatLevel.BLOCKED,
+        threat_category=ThreatCategory.MALWARE,
+        is_safe_to_extract=False,
+        reason="Executable file disguised as document",
+    )
+    payload = report.to_dict()
+    assert payload["threat_level"] == "blocked"
+    assert payload["is_safe_to_extract"] is False
+    restored = AttachmentSafetyReport.from_dict(payload)
+    assert restored == report
+
+    with pytest.raises(FrozenInstanceError):
+        report.is_safe_to_extract = True  # type: ignore[misc]
+
+
+def test_security_scan_result_round_trip():
+    scanned_at = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    link_report = LinkSafetyReport(
+        original_url="https://phish.example.com",
+        resolved_url="https://phish.example.com/login",
+        threat_level=ThreatLevel.MALICIOUS,
+        threat_category=ThreatCategory.PHISHING,
+        details="Known credential harvesting endpoint",
+    )
+    att_report = AttachmentSafetyReport(
+        filename="doc.pdf",
+        sha256="abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+        detected_mime_type="application/pdf",
+        threat_level=ThreatLevel.CLEAN,
+        threat_category=ThreatCategory.NONE,
+        is_safe_to_extract=True,
+    )
+    scan_result = SecurityScanResult(
+        email_id="msg-101",
+        overall_threat_level=ThreatLevel.MALICIOUS,
+        scanned_at=scanned_at,
+        links=(link_report,),
+        attachments=(att_report,),
+        quarantined=True,
+        recommended_action="quarantine",
+    )
+    payload = scan_result.to_dict()
+    assert payload["overall_threat_level"] == "malicious"
+    assert payload["quarantined"] is True
+    assert payload["recommended_action"] == "quarantine"
+    assert len(payload["links"]) == 1  # type: ignore[arg-type]
+    assert len(payload["attachments"]) == 1  # type: ignore[arg-type]
+
+    restored = SecurityScanResult.from_dict(payload)
+    assert restored == scan_result
+    text = json.dumps(payload)
+    assert SecurityScanResult.from_dict(json.loads(text)) == scan_result
+
+
+def test_email_source_link_threat_level_defaults_and_round_trip():
+    default_link = EmailSourceLink(ref="link1", label="Portal", url="https://portal.example.com")
+    assert default_link.threat_level == ThreatLevel.CLEAN
+    payload = default_link.to_dict()
+    assert payload["threat_level"] == "clean"
+    assert EmailSourceLink.from_dict(payload) == default_link
+
+    # Test backward compatibility when threat_level is absent in payload
+    legacy_payload = {"ref": "link1", "label": "Portal", "url": "https://portal.example.com"}
+    restored_legacy = EmailSourceLink.from_dict(legacy_payload)
+    assert restored_legacy.threat_level == ThreatLevel.CLEAN
+
+    # Custom threat level
+    suspicious_link = EmailSourceLink(
+        ref="link2",
+        label="Phishing Link",
+        url="http://evil.com",
+        threat_level=ThreatLevel.SUSPICIOUS,
+    )
+    assert suspicious_link.threat_level == ThreatLevel.SUSPICIOUS
+    payload_suspicious = suspicious_link.to_dict()
+    assert payload_suspicious["threat_level"] == "suspicious"
+    assert EmailSourceLink.from_dict(payload_suspicious) == suspicious_link
+
+
+def test_task_security_fields_defaults_and_round_trip():
+    task = _task()
+    assert task.security_threat_level == ThreatLevel.CLEAN
+    assert task.quarantined is False
+    assert task.security_reports == ()
+
+    payload = task.to_dict()
+    assert payload["security_threat_level"] == "clean"
+    assert payload["quarantined"] is False
+    assert payload["security_reports"] == []
+    assert Task.from_dict(payload) == task
+
+    # Backward compatibility with payload lacking security fields
+    legacy_task_payload = dict(payload)
+    legacy_task_payload.pop("security_threat_level", None)
+    legacy_task_payload.pop("quarantined", None)
+    legacy_task_payload.pop("security_reports", None)
+    restored_legacy = Task.from_dict(legacy_task_payload)
+    assert restored_legacy == task
+
+    # Task with security threat information
+    report = LinkSafetyReport(
+        original_url="http://bad.com",
+        resolved_url="http://bad.com/payload",
+        threat_level=ThreatLevel.MALICIOUS,
+        threat_category=ThreatCategory.MALWARE,
+    )
+    quarantined_task = Task(
+        task_id="task-quarantine-1",
+        run_id="run-1",
+        gmail_message_id="msg-1",
+        gmail_url="https://mail.google.com/mail/u/0#all/msg-1",
+        source_message_ids=("msg-1",),
+        incident_key=None,
+        title="[CẢNH BÁO BẢO MẬT] Phát hiện Email chứa mã độc",
+        request_summary="Email chứa URL độc hại đã bị cách ly.",
+        actionability=Actionability.ACTION_REQUIRED,
+        route=Route.NO_ACTION,
+        priority=Priority.URGENT,
+        deadline=None,
+        action_plan=(),
+        supporting_documents=(),
+        missing_information=(),
+        classifier_confidence=1.0,
+        generation_confidence=1.0,
+        validation_status=ValidationStatus.SYSTEM_GENERATED,
+        created_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        source_links=(),
+        security_threat_level=ThreatLevel.MALICIOUS,
+        quarantined=True,
+        security_reports=(report,),
+    )
+    q_payload = quarantined_task.to_dict()
+    assert q_payload["security_threat_level"] == "malicious"
+    assert q_payload["quarantined"] is True
+    assert len(q_payload["security_reports"]) == 1  # type: ignore[arg-type]
+
+    restored_q = Task.from_dict(q_payload)
+    assert restored_q == quarantined_task
+    text_q = json.dumps(q_payload)
+    assert Task.from_dict(json.loads(text_q)) == quarantined_task

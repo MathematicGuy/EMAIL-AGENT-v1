@@ -6,7 +6,7 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from cowork_agent.config import KnowledgeIngestionSettings
+from cowork_agent.config import KnowledgeIngestionSettings, load_runtime_environment
 from cowork_agent.integrations.knowledge_ingestion.service import KnowledgeIngestionService
 
 
@@ -17,6 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as error:
         return error.code if isinstance(error.code, int) else 2
     try:
+        load_runtime_environment()
         settings = KnowledgeIngestionSettings.from_env()
         outcomes = KnowledgeIngestionService(settings).ingest(
             arguments.source, arguments.output, arguments.force, dry_run=arguments.dry_run
@@ -31,7 +32,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ingest local PDF/DOCX files into Markdown.")
+    parser = argparse.ArgumentParser(
+        description="Ingest local PDF, DOCX, TXT, and MD files into Markdown."
+    )
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--force", action="store_true")

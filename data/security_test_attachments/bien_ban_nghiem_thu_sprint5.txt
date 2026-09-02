@@ -1,0 +1,10 @@
+BIÊN BẢN NGHIỆM THU KẾT QUẢ SPRINT 5 & CHỐT KẾ HOẠCH RELEASE V1.2
+Thời gian: 14:00 - 15:30 ngày 25/08/2026
+Địa điểm: Phòng Lotus (Tầng 3) & Google Meet: meet.google.com/abc-xyz-123
+Chủ trì: Tech Lead & Product Owner
+
+Nội dung nghiệm thu:
+1. Hoàn thành tích hợp Hybrid Semantic Retrieval (Turbovec BM25 + Dense RRF).
+2. Hoàn thành Email Security Gate: IDN Homograph detector, SSRF redirect resolver, Google Web Risk.
+3. Độ trễ trung bình: 180ms/request; Tỷ lệ phân loại chính xác: 96.5%.
+4. Thống nhất kế hoạch Release v1.2 lên môi trường Production vào ngày 28/08/2026.
