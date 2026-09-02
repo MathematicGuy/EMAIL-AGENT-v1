@@ -36,7 +36,7 @@ class ThreatCache:
         if entry is None:
             return None
         expires_at, report = entry
-        if now > expires_at:
+        if now >= expires_at:
             self._url_cache.pop(url, None)
             return None
         return report
@@ -55,7 +55,7 @@ class ThreatCache:
         if entry is None:
             return None
         expires_at, report = entry
-        if now > expires_at:
+        if now >= expires_at:
             self._hash_cache.pop(sha256, None)
             return None
         return report
